@@ -1,0 +1,73 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Flutter
+market_forge_app/.dart_tool/
+market_forge_app/.flutter-plugins
+market_forge_app/.flutter-plugins-dependencies
+market_forge_app/.packages
+market_forge_app/build/
+market_forge_app/.pub-cache/
+market_forge_app/.pub/
+market_forge_app/ios/Pods/
+market_forge_app/ios/.symlinks/
+market_forge_app/ios/Flutter/Flutter.framework
+market_forge_app/ios/Flutter/Flutter.podspec
+market_forge_app/android/.gradle/
+market_forge_app/android/captures/
+market_forge_app/android/gradle.properties
+market_forge_app/android/local.properties
+market_forge_app/android/app/debug
+market_forge_app/android/app/profile
+market_forge_app/android/app/release
+
+# Uploads
+uploads/
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Microsoft Word files
+*.docx
+*.pdf

@@ -1,20 +1,47 @@
 name: market_forge_app
+description: Photo-to-sale marketplace listing application
 
-description: A new Flutter project.
-
-publish_to: 'none' # The URL to publish the package.
+publish_to: 'none'
 
 version: 1.0.0+1
 
 environment:
-  sdk: ">=2.12.0 <3.0.0"
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  cupertino_icons: ^1.0.2
-  http: ^0.13.3
-  provider: ^5.0.0
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  
+  # State Management
+  provider: ^6.1.1
+  
+  # Network
+  http: ^1.1.0
+  dio: ^5.4.0
+  
+  # Storage
+  shared_preferences: ^2.2.2
+  
+  # Camera & Image
+  image_picker: ^1.0.5
+  camera: ^0.10.5+7
+  
+  # Forms
+  flutter_form_builder: ^9.1.1
+  
+  # Authentication
+  flutter_secure_storage: ^9.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
 
 flutter:
   uses-material-design: true
+  
+  assets:
+    - assets/images/
