@@ -99,6 +99,10 @@ class ApiService {
     required String photoPath,
   }) async {
     final token = await getToken();
+    if (token == null) {
+      throw Exception('Not authenticated. Please log in again.');
+    }
+    
     final request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl/listings/'),
