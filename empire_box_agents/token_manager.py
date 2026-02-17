@@ -7,7 +7,7 @@ and provides thread-safe operations for concurrent agent access.
 
 import time
 import threading
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from .config import (
     SUBSCRIPTION_TIERS,
@@ -120,7 +120,7 @@ class TokenManager:
                 self.send_usage_warning(usage_percentage)
                 self.warning_sent = True
     
-    def get_usage_stats(self) -> Dict[str, any]:
+    def get_usage_stats(self) -> Dict[str, Any]:
         """
         Get current usage statistics for the user.
         
