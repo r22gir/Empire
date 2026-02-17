@@ -35,7 +35,7 @@ export default function HomePage() {
             </h1>
             <p className="text-xl mb-8">
               Built-in shipping via ShipForge. Secure escrow payments. 
-              Save 4.9% vs eBay on every sale.
+              Save $4.90 per $100 sale vs eBay.
             </p>
             <div className="flex gap-4">
               <Link href="/search" className="btn btn-secondary">
