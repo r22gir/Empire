@@ -4,13 +4,14 @@ Modern, responsive marketing website for EmpireBox built with Next.js 14, TypeSc
 
 ## Features
 
-- ⚡️ Next.js 14 with App Router
+- ⚡️ Next.js 15 with App Router (Security Patched)
 - 🎨 Tailwind CSS for styling
 - 🎭 Framer Motion for animations
 - 📱 Fully responsive design
 - ♿️ SEO optimized
 - 🚀 Fast page loads
 - 🎯 TypeScript for type safety
+- 🔒 Security vulnerabilities addressed
 
 ## Getting Started
 
