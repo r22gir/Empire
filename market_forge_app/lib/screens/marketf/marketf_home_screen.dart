@@ -91,7 +91,7 @@ class _MarketFHomeScreenState extends State<MarketFHomeScreen> {
                           ),
                           SizedBox(height: 8),
                           Text(
-                            'Save 4.9% vs eBay on every sale',
+                            'Save $4.90 per $100 sale vs eBay',
                             style: TextStyle(color: Colors.white70, fontSize: 16),
                           ),
                           SizedBox(height: 16),

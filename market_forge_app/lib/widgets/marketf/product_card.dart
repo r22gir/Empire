@@ -82,6 +82,7 @@ class ProductCard extends StatelessWidget {
                     children: [
                       Icon(Icons.star, size: 14, color: Colors.amber),
                       SizedBox(width: 4),
+                      // TODO: Replace with actual seller rating from product data
                       Text(
                         '4.9',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),

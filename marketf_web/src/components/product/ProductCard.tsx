@@ -29,6 +29,7 @@ export default function ProductCard({ product }: ProductCardProps) {
       </p>
       <p className="text-xl font-bold text-primary">{formatPrice(product.price)}</p>
       <div className="flex items-center gap-1 mt-2 text-sm text-gray-600">
+        {/* TODO: Replace with actual seller rating from API */}
         <span>⭐ 4.9</span>
         <span className="text-gray-400">•</span>
         <span>Fast shipping</span>

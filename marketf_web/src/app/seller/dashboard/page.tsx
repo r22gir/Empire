@@ -15,7 +15,7 @@ export default function SellerDashboard() {
       try {
         const ordersData = await sellerAPI.orders({ status: 'paid' });
         setOrders(ordersData.orders || []);
-        // In real app, fetch stats from API
+        // TODO: Fetch actual stats from API instead of using hardcoded values
         setStats({ revenue: 1247.50, activeListings: 23, rating: 4.9 });
       } catch (error) {
         console.error('Failed to load dashboard:', error);
