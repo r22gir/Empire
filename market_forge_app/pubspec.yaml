@@ -1,8 +1,8 @@
 name: market_forge_app
 
-description: A new Flutter project.
+description: MarketForge - AI-powered reselling platform with shipping integration
 
-publish_to: 'none' # The URL to publish the package.
+publish_to: 'none'
 
 version: 1.0.0+1
 
@@ -15,6 +15,16 @@ dependencies:
   cupertino_icons: ^1.0.2
   http: ^0.13.3
   provider: ^5.0.0
+  printing: ^5.11.0
+  image_gallery_saver: ^2.0.3
+  uni_links: ^0.5.1
+  share_plus: ^7.2.0
+  qr_flutter: ^4.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
 
 flutter:
   uses-material-design: true
