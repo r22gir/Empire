@@ -444,7 +444,7 @@ class _MessageDetailScreenState extends State<MessageDetailScreen> {
     } else if (difference.inDays < 7) {
       return '${difference.inDays} days ago';
     } else {
-      return '${timestamp.month}/${timestamp.day}/${timestamp.year} at ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}';
+      return '${timestamp.month}/${timestamp.day}/${timestamp.year} at ${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
     }
   }
 }
