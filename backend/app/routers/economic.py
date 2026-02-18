@@ -1,17 +1,25 @@
 """
 Economic Intelligence API routes.
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, Dict, Any
 import uuid
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models import User
 from app.services.economic_service import EconomicService
+from app.services.quality_evaluator import QualityEvaluator
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1/economic", tags=["economic"])
+
+
+class QualityEvaluationRequest(BaseModel):
+    """Request for quality evaluation."""
+    listing_data: Dict[str, Any]
+    category: Optional[str] = None
 
 
 @router.get("/ledger/{entity_type}/{entity_id}")
@@ -192,4 +200,93 @@ async def get_project_efficiency(
         "cost_per_transaction": round(cost_per_transaction, 2),
         "transaction_count": int(ledger.transaction_count),
         "status": ledger.status,
+    }
+
+
+@router.post("/quality/evaluate")
+async def evaluate_quality(
+    request: QualityEvaluationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Evaluate quality of a listing or content.
+    
+    Args:
+        request: Quality evaluation request with listing data
+    
+    Returns:
+        Quality scores and feedback
+    """
+    # Ensure user_id is set in listing_data
+    if "user_id" not in request.listing_data:
+        request.listing_data["user_id"] = current_user.id
+    
+    quality_evaluator = QualityEvaluator(db)
+    evaluation = await quality_evaluator.evaluate_listing(
+        listing_data=request.listing_data,
+        category=request.category
+    )
+    
+    return evaluation
+
+
+@router.post("/quality/evaluate-batch")
+async def evaluate_quality_batch(
+    listings: list[Dict[str, Any]] = Body(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Evaluate quality of multiple listings in batch.
+    
+    Args:
+        listings: List of listing data dictionaries
+    
+    Returns:
+        List of evaluations
+    """
+    # Ensure user_id is set for all listings
+    for listing in listings:
+        if "user_id" not in listing:
+            listing["user_id"] = current_user.id
+    
+    quality_evaluator = QualityEvaluator(db)
+    evaluations = await quality_evaluator.batch_evaluate_listings(listings)
+    
+    return {"evaluations": evaluations}
+
+
+@router.get("/quality/prompt-example")
+async def get_evaluation_prompt_example(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get an example LLM evaluation prompt.
+    
+    Useful for understanding how the quality evaluation works.
+    
+    Returns:
+        Example prompt that would be sent to LLM
+    """
+    # Create sample listing data
+    sample_listing = {
+        "title": "Vintage Leather Jacket - Size M",
+        "description": "Classic brown leather jacket in excellent condition. Made from genuine leather with full zip closure and side pockets. Perfect for casual wear.",
+        "price": 79.99,
+        "photos": ["photo1.jpg", "photo2.jpg", "photo3.jpg"],
+        "condition": "like_new",
+        "category": "clothing"
+    }
+    
+    quality_evaluator = QualityEvaluator(db)
+    prompt = await quality_evaluator.generate_llm_evaluation_prompt(
+        listing_data=sample_listing,
+        category="clothing"
+    )
+    
+    return {
+        "sample_listing": sample_listing,
+        "llm_prompt": prompt
     }
