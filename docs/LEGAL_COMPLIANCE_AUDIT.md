@@ -336,7 +336,7 @@ The online resale market continues to grow significantly:
 
 The AI agent market is experiencing rapid expansion:
 
-- **Market size**: Projected from ~$8 billion (2025) to ~$52 billion (2030), CAGR ~46%
+- **Market size**: Projected from ~$8 billion (2025) to ~$52 billion (2030), compound annual growth rate (CAGR) ~46%
 - **Gartner prediction**: By 2028, AI agents will outnumber human sellers by 10x
 - **Key trend**: Shift from simple automation to agentic AI capable of autonomous decision-making
 - **Multi-agent systems**: Platforms enabling agent-to-agent communication (A2A protocols)
