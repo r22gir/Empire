@@ -107,6 +107,18 @@ try:
 except ImportError:
     pass
 
+try:
+    from app.routers import supportforge_kb
+    app.include_router(supportforge_kb.router, prefix="/api/v1/kb", tags=["supportforge-kb"])
+except (ImportError, AttributeError):
+    pass
+
+try:
+    from app.routers import supportforge_ai
+    app.include_router(supportforge_ai.router, prefix="/api/v1/ai", tags=["supportforge-ai"])
+except (ImportError, AttributeError):
+    pass
+
 
 @app.get("/")
 async def root():
@@ -127,7 +139,9 @@ async def root():
             "webhooks": "/webhooks",
             "ai": "/ai",
             "supportforge_tickets": "/api/v1/tickets",
-            "supportforge_customers": "/api/v1/customers"
+            "supportforge_customers": "/api/v1/customers",
+            "supportforge_kb": "/api/v1/kb",
+            "supportforge_ai": "/api/v1/ai"
         }
     }
 

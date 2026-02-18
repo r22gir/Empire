@@ -16,6 +16,7 @@ This repository contains the complete EmpireBox ecosystem:
 4. **Hardware Bundles** - Pre-order system for Solana Seeker phones + subscriptions
 5. **Agent Safeguards** - Production-ready safety system for autonomous agents
 6. **Mobile App** - Flutter app with shipping integration and deep linking
+7. **SupportForge** - Enterprise customer support platform (NEW!)
 
 ## 📁 Repository Structure
 
@@ -76,6 +77,17 @@ Empire/
 │   ├── test_safeguards.py     # Unit tests
 │   ├── README.md              # Agent system documentation
 │   └── CAPABILITIES.md        # Detailed capabilities guide
+│
+├── supportforge/              # SupportForge Customer Support (NEW!)
+│   ├── backend/app/
+│   │   ├── models/            # Database models (tickets, customers, KB)
+│   │   ├── schemas/           # Pydantic validation schemas
+│   │   ├── services/          # Business logic (AI, tickets, KB)
+│   │   ├── routers/           # API endpoints
+│   │   └── main.py            # FastAPI app
+│   ├── demo_supportforge.py   # Demo script
+│   ├── SUPPORTFORGE_README.md # Full documentation
+│   └── SUPPORTFORGE_QUICKSTART.md # Quick start guide
 │
 ├── docs/                      # Comprehensive Documentation
 │   ├── HARDWARE_BUNDLES.md    # Bundle specifications, pricing, sourcing
@@ -162,6 +174,38 @@ Empire/
 - State preservation during shutdown
 - Administrator alerting
 - Thread-safe operations
+
+### SupportForge Customer Support (NEW!)
+
+✅ **Multi-Tenant Support Platform**
+- Ticket management (create, assign, track, resolve)
+- Customer profiles with Empire product integration
+- Message threading with attachments
+- Knowledge base (articles, categories, search, voting)
+- AI-powered features (response suggestions, categorization, sentiment analysis)
+- RESTful API with FastAPI
+- Multi-channel support ready (email, chat, SMS, phone, portal)
+- SLA tracking and automation rules (Phase 3)
+- Real-time updates via WebSocket (Phase 3)
+
+**Quick Example:**
+```python
+# Create a support ticket
+POST /api/v1/tickets
+{
+  "customer_email": "user@example.com",
+  "subject": "Need help with billing",
+  "content": "I have a question about my invoice",
+  "priority": "normal",
+  "channel": "email"
+}
+
+# Get AI response suggestion
+POST /api/v1/ai/suggest-response
+{
+  "ticket_id": "..."
+}
+```
 
 **Quick Example:**
 ```python
