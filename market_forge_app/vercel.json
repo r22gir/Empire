@@ -1,0 +1,9 @@
+{
+  "buildCommand": "flutter build web",
+  "outputDirectory": "build/web",
+  "installCommand": "git clone https://github.com/aspect-build/aspect-workflows.git && ./aspect-workflows/flutter/setup.sh",
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
