@@ -87,6 +87,25 @@ try:
 except ImportError:
     pass
 
+# SupportForge routers
+try:
+    from app.routers import supportforge_tickets
+    app.include_router(supportforge_tickets.router, prefix="/api/v1/supportforge/tickets", tags=["supportforge-tickets"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import supportforge_ai
+    app.include_router(supportforge_ai.router, prefix="/api/v1/supportforge/ai", tags=["supportforge-ai"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import supportforge_customers
+    app.include_router(supportforge_customers.router, prefix="/api/v1/supportforge/customers", tags=["supportforge-customers"])
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -105,7 +124,8 @@ async def root():
             "messages": "/messages",
             "marketplaces": "/marketplaces",
             "webhooks": "/webhooks",
-            "ai": "/ai"
+            "ai": "/ai",
+            "supportforge": "/api/v1/supportforge"
         }
     }
 
