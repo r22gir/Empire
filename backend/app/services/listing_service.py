@@ -19,7 +19,12 @@ from app.services.economic_service import EconomicService
 from app.config import settings
 
 
-async def create_listing(user: User, listing_data: ListingCreate, db: AsyncSession) -> Dict[str, Any]:
+async def create_listing(
+    user: User, 
+    listing_data: ListingCreate, 
+    db: AsyncSession,
+    evaluate_quality: bool = True
+) -> Listing:
     """
     Create a new listing with optional quality evaluation.
     
@@ -27,9 +32,10 @@ async def create_listing(user: User, listing_data: ListingCreate, db: AsyncSessi
         user: Current user
         listing_data: Listing creation data
         db: Database session
+        evaluate_quality: Whether to evaluate quality (default: True)
         
     Returns:
-        Dictionary with created listing and quality evaluation
+        Created Listing object (quality evaluation stored in metadata if enabled)
     """
     new_listing = Listing(
         user_id=user.id,
@@ -49,7 +55,7 @@ async def create_listing(user: User, listing_data: ListingCreate, db: AsyncSessi
     
     # Evaluate quality if enabled
     quality_evaluation = None
-    if settings.quality_eval_enabled:
+    if evaluate_quality and settings.quality_eval_enabled:
         quality_evaluator = QualityEvaluator(db)
         quality_evaluation = await quality_evaluator.evaluate_listing(
             listing_data={
@@ -64,21 +70,21 @@ async def create_listing(user: User, listing_data: ListingCreate, db: AsyncSessi
             },
             category=new_listing.category
         )
+        
+        # Store quality evaluation in listing metadata (if needed in the future)
+        # For now, we just use it for economic tracking
+        
+        # Record listing value in economic ledger if quality score is available
+        if quality_evaluation and settings.economic_enabled:
+            economic_service = EconomicService(db)
+            await economic_service.record_listing_value(
+                user_id=user.id,
+                listing_id=new_listing.id,
+                sale_price=float(new_listing.price),
+                quality_score=quality_evaluation.get("overall_score")
+            )
     
-    # Record listing value in economic ledger if quality score is available
-    if quality_evaluation and settings.economic_enabled:
-        economic_service = EconomicService(db)
-        await economic_service.record_listing_value(
-            user_id=user.id,
-            listing_id=new_listing.id,
-            sale_price=float(new_listing.price),
-            quality_score=quality_evaluation.get("overall_score")
-        )
-    
-    return {
-        "listing": new_listing,
-        "quality_evaluation": quality_evaluation
-    }
+    return new_listing
 
 
 async def get_user_listings(

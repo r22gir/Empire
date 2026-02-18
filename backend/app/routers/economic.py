@@ -3,7 +3,7 @@ Economic Intelligence API routes.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import uuid
 
 from app.database import get_db
@@ -233,7 +233,7 @@ async def evaluate_quality(
 
 @router.post("/quality/evaluate-batch")
 async def evaluate_quality_batch(
-    listings: list[Dict[str, Any]] = Body(...),
+    listings: List[Dict[str, Any]] = Body(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):

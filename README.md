@@ -111,6 +111,15 @@ Empire/
 - Auto-generate license keys on payment
 - Fulfillment tracking
 
+✅ **Economic Intelligence System** 🆕
+- Real-time cost and revenue tracking for all operations
+- Automatic tracking of AI token usage, compute costs, and API calls
+- Quality evaluation system for listings (AI-powered scoring)
+- Economic dashboard with balance, profit margin, and ROI metrics
+- Transaction history and audit trail
+- Status indicators (thriving/stable/struggling/failing)
+- See [Economic Intelligence Documentation](docs/ECONOMIC_INTELLIGENCE.md)
+
 ### Website (Next.js)
 
 ✅ **Setup Portal**
@@ -267,6 +276,8 @@ python empire_box_agents/test_safeguards.py
 
 Comprehensive documentation is available in the `docs/` directory:
 
+- **[ECONOMIC_INTELLIGENCE.md](docs/ECONOMIC_INTELLIGENCE.md)** 🆕 - Economic Intelligence System feature documentation and usage guide
+- **[API_ECONOMIC.md](docs/API_ECONOMIC.md)** 🆕 - Economic Intelligence API reference with examples
 - **[LEGAL_COMPLIANCE_AUDIT.md](docs/LEGAL_COMPLIANCE_AUDIT.md)** - Legal compliance audit, IP protection, competitive landscape, market intelligence
 - **[HARDWARE_BUNDLES.md](docs/HARDWARE_BUNDLES.md)** - Complete bundle specifications, pricing, sourcing details
 - **[QUICK_START_CARD.md](docs/QUICK_START_CARD.md)** - Print-ready QR card design, production specifications
@@ -426,6 +437,10 @@ flutter build apk --release
 | Deep Linking | ✅ Complete | App |
 | Agent Safeguards | ✅ Complete | Python |
 | Emergency Stop | ✅ Complete | Python |
+| Economic Intelligence System | ✅ Complete | Backend |
+| Cost Tracking (AI/Compute/API) | ✅ Complete | Backend |
+| Quality Evaluation | ✅ Complete | Backend |
+| Economic Dashboard API | ✅ Complete | Backend |
 
 ## 📄 License
 
