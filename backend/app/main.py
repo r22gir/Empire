@@ -87,6 +87,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from app.routers import economic
+    app.include_router(economic.router)
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -105,7 +111,8 @@ async def root():
             "messages": "/messages",
             "marketplaces": "/marketplaces",
             "webhooks": "/webhooks",
-            "ai": "/ai"
+            "ai": "/ai",
+            "economic": "/api/v1/economic"
         }
     }
 

@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     grok_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
     
+    # Economic Intelligence
+    economic_enabled: bool = True
+    economic_default_balance: float = 1000.00
+    economic_token_input_price_per_1m: float = 2.50  # GPT-4 pricing per 1M tokens
+    economic_token_output_price_per_1m: float = 10.00  # GPT-4 pricing per 1M tokens
+    economic_compute_cost_per_minute: float = 0.10
+    economic_listing_commission_rate: float = 0.05  # 5% commission on listings
+    
+    # Quality Evaluation
+    quality_eval_enabled: bool = True
+    quality_eval_model: str = "gpt-4-turbo-preview"
+    
     # CORS
     cors_origins: list = ["http://localhost:3000", "http://localhost:8080"]
     

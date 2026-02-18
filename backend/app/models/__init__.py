@@ -38,6 +38,13 @@ try:
 except ImportError:
     MarketplaceAccount = None
 
+# Economic intelligence models
+try:
+    from app.models.economic import EconomicLedger, EconomicTransaction
+except ImportError:
+    EconomicLedger = None
+    EconomicTransaction = None
+
 __all__ = [
     "License",
     "Shipment",
@@ -45,5 +52,7 @@ __all__ = [
     "User",
     "Listing",
     "Message",
-    "MarketplaceAccount"
+    "MarketplaceAccount",
+    "EconomicLedger",
+    "EconomicTransaction"
 ]
