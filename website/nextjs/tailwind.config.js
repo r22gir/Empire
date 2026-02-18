@@ -8,12 +8,26 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        primary: {
+          DEFAULT: '#0066FF',
+          dark: '#0052CC',
+        },
+        secondary: {
+          DEFAULT: '#FF6600',
+          dark: '#E55A00',
+        },
         empire: {
           blue: '#1E40AF',
           orange: '#F97316',
           lightBlue: '#60A5FA',
           darkBlue: '#1E3A8A',
         },
+        dark: '#1A1A1A',
+        light: '#F9F9F9',
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+        heading: ['Montserrat', 'system-ui', 'sans-serif'],
       },
     },
   },

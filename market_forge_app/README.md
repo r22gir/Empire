@@ -1,8 +1,17 @@
 # MarketForge App
 
-Flutter mobile application for MarketForge reselling platform with integrated shipping features (ShipForge).
+Flutter mobile application for MarketForge reselling platform - the flagship product of EmpireBox. Post to multiple marketplaces with a single workflow, integrated shipping (ShipForge), and AI-powered features.
 
 ## Features
+
+### Multi-Platform Listing
+- 📸 **Camera Integration**: Capture or select up to 10 photos per listing
+- ✍️ **Product Details**: Enter title, price, description, category, condition, and location
+- 🤖 **AI-Powered**: Get AI suggestions for titles, descriptions, categories, and pricing
+- 🏪 **Multi-Marketplace**: Post to multiple marketplaces simultaneously
+- 📊 **Dashboard**: View all your listings and their status at a glance
+- 🔔 **Status Tracking**: Track posting success/failure per marketplace
+- ⚙️ **Settings**: Manage account, subscription, and marketplace connections
 
 ### Shipping Integration (ShipForge)
 - **Compare Rates**: Get real-time shipping rates from USPS, FedEx, and UPS
@@ -17,59 +26,117 @@ Flutter mobile application for MarketForge reselling platform with integrated sh
 - Handle setup portal deep links from empirebox.store
 - Automatic license activation flow
 
+## Implementation Status
+
+### ✅ Fully Implemented
+- **Facebook Marketplace**: Complete implementation with OAuth, posting, status checking
+- **All Screens**: Home, Camera, Product Form, Marketplace Picker, Preview, Status, Settings
+- **Shipping**: Rate comparison, label purchase, printing, tracking
+- **State Management**: Provider-based state management
+- **Local Storage**: Draft products and listings saved locally
+- **UI/UX**: Modern Material 3 dark theme with smooth navigation
+
+### 🚧 Coming Soon
+- **eBay**: Integration planned
+- **Craigslist**: Integration planned
+- **Amazon**: Integration planned
+- **Etsy**: Integration planned
+- **Mercari**: Integration planned
+
 ## Getting Started
 
 ### Prerequisites
-- Flutter SDK (>=2.12.0 <3.0.0)
+- Flutter SDK (>=2.19.0 <4.0.0)
+- Dart SDK
 - Android Studio / Xcode for mobile development
 - Backend API running (see backend/README.md)
 
 ### Installation
 
-1. Install Flutter dependencies:
-```bash
-cd market_forge_app
-flutter pub get
-```
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/r22gir/Empire.git
+   cd Empire/market_forge_app
+   ```
 
-2. Configure API endpoint:
-Edit `lib/services/shipping_service.dart` and update the `baseUrl`:
-```dart
-ShippingService({
-  this.baseUrl = 'https://your-api-domain.com', // Update this
-  ...
-})
-```
+2. **Install dependencies**
+   ```bash
+   flutter pub get
+   ```
 
-3. Run the app:
-```bash
-flutter run
-```
+3. **Configure API endpoint**
+   Edit `lib/services/shipping_service.dart` and update the `baseUrl`:
+   ```dart
+   ShippingService({
+     this.baseUrl = 'https://your-api-domain.com', // Update this
+     ...
+   })
+   ```
+
+4. **Run the app**
+   ```bash
+   flutter run
+   ```
 
 ## Project Structure
 
 ```
-lib/
-├── main.dart                     # App entry point with navigation
-├── models/
-│   └── shipment.dart            # Data models for shipping
-├── services/
-│   ├── shipping_service.dart    # API client for shipping endpoints
-│   └── deep_link_service.dart   # Deep linking handler
-├── providers/
-│   └── shipping_provider.dart   # State management for shipping
-├── screens/
-│   ├── shipping_screen.dart     # Main shipping hub
-│   └── shipping/
-│       ├── create_shipment_screen.dart
-│       ├── rate_comparison_screen.dart
-│       ├── label_preview_screen.dart
-│       └── shipment_history_screen.dart
-└── widgets/
-    └── shipping/
-        ├── address_form.dart
-        ├── package_dimensions.dart
-        └── rate_card.dart
+market_forge_app/
+├── lib/
+│   ├── main.dart                      # App entry point with theme and navigation
+│   ├── config/
+│   │   └── app_config.dart            # API endpoints and feature flags
+│   ├── models/
+│   │   ├── product.dart               # Product data model
+│   │   ├── listing.dart               # Listing with marketplace status
+│   │   ├── marketplace.dart           # Marketplace enum and config
+│   │   ├── shipment.dart              # Shipping data models
+│   │   └── user.dart                  # User/subscription model
+│   ├── screens/
+│   │   ├── home_screen.dart           # Dashboard with recent listings
+│   │   ├── camera_screen.dart         # Camera capture + gallery picker
+│   │   ├── product_form_screen.dart   # Title, price, description, category
+│   │   ├── marketplace_picker_screen.dart  # Select target marketplaces
+│   │   ├── listing_preview_screen.dart     # Review before posting
+│   │   ├── listing_status_screen.dart      # Success/failure per marketplace
+│   │   ├── settings_screen.dart       # Account, subscription, API keys
+│   │   ├── shipping_screen.dart       # Main shipping hub
+│   │   └── shipping/
+│   │       ├── create_shipment_screen.dart
+│   │       ├── rate_comparison_screen.dart
+│   │       ├── label_preview_screen.dart
+│   │       └── shipment_history_screen.dart
+│   ├── services/
+│   │   ├── api_service.dart           # Base API client
+│   │   ├── shipping_service.dart      # API client for shipping endpoints
+│   │   ├── deep_link_service.dart     # Deep linking handler
+│   │   ├── marketplace_service.dart   # Abstract marketplace interface
+│   │   ├── marketplaces/
+│   │   │   ├── facebook_marketplace.dart   # FB Marketplace (implemented)
+│   │   │   ├── ebay_service.dart           # eBay (stub)
+│   │   │   ├── craigslist_service.dart     # Craigslist (stub)
+│   │   │   ├── amazon_service.dart         # Amazon (stub)
+│   │   │   ├── etsy_service.dart           # Etsy (stub)
+│   │   │   └── mercari_service.dart        # Mercari (stub)
+│   │   ├── ai_service.dart            # EmpireBox AI agent integration
+│   │   └── storage_service.dart       # Local storage for drafts
+│   ├── widgets/
+│   │   ├── product_card.dart          # Reusable product display
+│   │   ├── marketplace_chip.dart      # Marketplace selector chip
+│   │   ├── photo_thumbnail.dart       # Photo preview widget
+│   │   ├── loading_overlay.dart       # Loading state overlay
+│   │   ├── status_badge.dart          # Posted/Pending/Failed badge
+│   │   └── shipping/
+│   │       ├── address_form.dart
+│   │       ├── package_dimensions.dart
+│   │       └── rate_card.dart
+│   └── providers/
+│       ├── product_provider.dart      # State management for products
+│       ├── listing_provider.dart      # State for active listing flow
+│       ├── shipping_provider.dart     # State management for shipping
+│       └── user_provider.dart         # User/auth state
+├── pubspec.yaml                       # Dependencies
+└── README.md                          # This file
 ```
 
 ## Shipping Features
@@ -138,13 +205,20 @@ This will open the app and prompt the user to activate their license.
 
 ## API Integration
 
-The app connects to the backend API for shipping operations:
+The app connects to the backend API for various operations:
 
+### Shipping Endpoints
 - `POST /shipping/rates` - Get shipping rates
 - `POST /shipping/labels` - Purchase label
 - `GET /shipping/labels/{id}` - Get label details
 - `GET /shipping/track/{tracking}` - Track shipment
 - `GET /shipping/history` - Get shipment history
+
+### Listing Endpoints
+- `GET /listings` - Get user listings
+- `POST /listings` - Create listing
+- `PUT /listings/{id}` - Update listing
+- `POST /listings/{id}/publish` - Publish to marketplaces
 
 ## Dependencies
 
@@ -156,6 +230,35 @@ Key dependencies:
 - `share_plus` - Share label files
 - `uni_links` - Deep linking support
 - `qr_flutter` - QR code display
+- `camera` - Camera access
+- `image_picker` - Gallery photo selection
+- `shared_preferences` - Local data persistence
+- `cached_network_image` - Image caching
+
+## Example User Flow
+
+1. **Home Screen**: User sees dashboard with stats and recent listings
+2. **New Listing**: User taps "+" FAB to start new listing
+3. **Camera Screen**: User takes 3 photos or selects from gallery
+4. **Product Form**: User fills in title, price, description, category, condition, location
+   - AI can suggest title improvements
+   - AI can enhance description
+5. **Marketplace Picker**: User selects Facebook Marketplace + eBay
+6. **Preview Screen**: User reviews all details before posting
+7. **Post**: User taps "Post to 2 Marketplaces"
+8. **Status Screen**: Shows "Facebook: Posted ✓" and "eBay: Coming Soon"
+9. **Home**: Returns to dashboard with new listing visible
+
+## Theme & Design
+
+- **Dark Theme**: Primary color is deep purple
+- **Material 3**: Modern design language
+- **Status Colors**:
+  - Green: Success/Posted
+  - Orange: Pending
+  - Red: Failed
+  - Blue: Sold
+  - Grey: Deleted
 
 ## Development
 
@@ -176,9 +279,12 @@ To use production mode:
 
 ## Testing
 
-Run tests:
 ```bash
+# Run tests
 flutter test
+
+# Run with coverage
+flutter test --coverage
 ```
 
 ## Building for Production
@@ -208,6 +314,38 @@ flutter build ios --release
 - Check baseUrl in shipping_service.dart
 - Ensure device/emulator can reach the API (use actual IP, not localhost)
 
+## Roadmap
+
+### Q1 2026
+- ✅ Complete Flutter app skeleton
+- ✅ Shipping integration (ShipForge)
+- 🚧 Facebook Marketplace full integration
+- 🚧 Real camera and image picker
+- 🚧 Backend API integration
+
+### Q2 2026
+- eBay marketplace integration
+- Craigslist marketplace integration
+- Real AI-powered suggestions
+- User authentication
+
+### Q3 2026
+- Amazon marketplace integration
+- Etsy marketplace integration
+- Mercari marketplace integration
+- Analytics dashboard
+
+### Q4 2026
+- Advanced features (bulk listing, templates)
+- Performance optimizations
+- iOS and Android app store releases
+
 ## License
 
 Copyright © 2026 EmpireBox. All rights reserved.
+
+## Support
+
+For issues and questions:
+- Email: support@empirebox.store
+- GitHub Issues: https://github.com/r22gir/Empire/issues

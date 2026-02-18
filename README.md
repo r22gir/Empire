@@ -1,10 +1,10 @@
-# EmpireBox - Complete Setup Portal, License System & ShipForge Integration
+# EmpireBox - Complete Platform for Resellers
 
-![EmpireBox](https://img.shields.io/badge/EmpireBox-Setup%20Portal-blue)
+![EmpireBox](https://img.shields.io/badge/EmpireBox-Platform-blue)
 ![License](https://img.shields.io/badge/License-Proprietary-red)
 ![Status](https://img.shields.io/badge/Status-Development-yellow)
 
-Complete implementation of EmpireBox Setup Portal, License Key Management System, Hardware Bundle Pre-orders, and ShipForge shipping integration for MarketForge reselling platform.
+A comprehensive system combining Setup Portal, License Management, ShipForge shipping, agent safeguards, emergency stop protocols, and mobile marketplace functionality.
 
 ## 🎯 Project Overview
 
@@ -14,7 +14,8 @@ This repository contains the complete EmpireBox ecosystem:
 2. **License System** - Generate, validate, and activate subscription licenses
 3. **ShipForge** - Integrated shipping solution with EasyPost (compare rates, buy labels, print from phone)
 4. **Hardware Bundles** - Pre-order system for Solana Seeker phones + subscriptions
-5. **Mobile App** - Flutter app with shipping integration and deep linking
+5. **Agent Safeguards** - Production-ready safety system for autonomous agents
+6. **Mobile App** - Flutter app with shipping integration and deep linking
 
 ## 📁 Repository Structure
 
@@ -38,10 +39,16 @@ Empire/
 │   │   │   │   ├── page.tsx                    # Landing page
 │   │   │   │   └── [licenseKey]/page.tsx      # Setup flow
 │   │   │   ├── bundles/       # Hardware bundles showcase
+│   │   │   ├── privacy/       # Privacy Policy (Stripe-required)
+│   │   │   ├── terms/         # Terms of Service (Stripe-required)
+│   │   │   ├── refund-policy/ # Refund Policy (Stripe-required)
+│   │   │   ├── contact/       # Contact page
 │   │   │   └── page.tsx       # Homepage
 │   │   ├── components/
 │   │   │   ├── setup/         # Setup flow components
-│   │   │   └── bundles/       # Bundle components
+│   │   │   ├── bundles/       # Bundle components
+│   │   │   ├── Footer.tsx     # Site-wide footer
+│   │   │   └── LegalPageLayout.tsx
 │   │   └── lib/
 │   │       └── api.ts         # API client
 │   ├── package.json
@@ -61,11 +68,21 @@ Empire/
 │   ├── pubspec.yaml
 │   └── README.md              # App documentation
 │
+├── empire_box_agents/         # Agent Safeguards System
+│   ├── emergency_stop.py      # Emergency stop protocol
+│   ├── safeguards.py          # Rate limiting and budget management
+│   ├── integration_guide.py   # Complete usage example
+│   ├── test_emergency_stop.py # Unit tests
+│   ├── test_safeguards.py     # Unit tests
+│   ├── README.md              # Agent system documentation
+│   └── CAPABILITIES.md        # Detailed capabilities guide
+│
 ├── docs/                      # Comprehensive Documentation
 │   ├── HARDWARE_BUNDLES.md    # Bundle specifications, pricing, sourcing
 │   ├── QUICK_START_CARD.md    # QR card design specs
 │   ├── SETUP_FLOW.md          # Complete setup flow documentation
 │   ├── SHIPPING_INTEGRATION.md # EasyPost integration guide
+│   ├── STRIPE_COMPLIANCE_CHECKLIST.md # Stripe requirements
 │   └── SOLANA_PARTNERSHIP.md  # Partnership proposal template
 │
 └── README.md                  # This file
@@ -107,6 +124,12 @@ Empire/
 - License validation and activation
 - Progress tracking with visual stepper
 
+✅ **Legal Pages (Stripe-Compliant)**
+- Privacy Policy (/privacy) - GDPR/CCPA compliant
+- Terms of Service (/terms) - Subscription terms, auto-renewal disclosure
+- Refund Policy (/refund-policy) - Clear refund and cancellation policy
+- Contact Page (/contact) - Form and business information
+
 ✅ **Hardware Bundles**
 - Showcase 3 bundle tiers (Budget, Pro, Empire)
 - Pre-order checkout form
@@ -128,6 +151,37 @@ Empire/
 ✅ **Deep Linking**
 - Handle setup portal links: `empirebox.store/setup/EMPIRE-XXX...`
 - Auto-open app and prompt license activation
+
+### Agent Safeguards System
+
+✅ **Safety Features**
+- Emergency stop (manual and automatic)
+- Rate limiting (actions per minute)
+- Budget management (total action limits)
+- Action whitelisting (approved operations only)
+- State preservation during shutdown
+- Administrator alerting
+- Thread-safe operations
+
+**Quick Example:**
+```python
+from empire_box_agents.emergency_stop import EmergencyStop
+from empire_box_agents.safeguards import AgentSafeguards
+
+# Create safeguards
+safeguards = AgentSafeguards(
+    rate_limit=60,     # 60 actions per minute
+    budget=100,        # 100 total actions
+    action_whitelist=["read", "write", "analyze"]
+)
+
+# Execute actions safely
+try:
+    safeguards.can_execute_action("read")
+    # Perform your action here
+except Exception as e:
+    print(f"Action blocked: {e}")
+```
 
 ## 🛠️ Setup Instructions
 
@@ -196,15 +250,31 @@ flutter run -d ios
 flutter run -d android
 ```
 
+### Agent System Setup
+
+```bash
+# No installation required - uses only Python standard library
+
+# Run the integration demo
+python empire_box_agents/integration_guide.py
+
+# Run tests
+python empire_box_agents/test_emergency_stop.py
+python empire_box_agents/test_safeguards.py
+```
+
 ## 📚 Documentation
 
 Comprehensive documentation is available in the `docs/` directory:
 
-- **[HARDWARE_BUNDLES.md](docs/HARDWARE_BUNDLES.md)** - Complete bundle specifications, pricing, sourcing details, fulfillment options
+- **[HARDWARE_BUNDLES.md](docs/HARDWARE_BUNDLES.md)** - Complete bundle specifications, pricing, sourcing details
 - **[QUICK_START_CARD.md](docs/QUICK_START_CARD.md)** - Print-ready QR card design, production specifications
 - **[SETUP_FLOW.md](docs/SETUP_FLOW.md)** - Detailed setup flow documentation with UI mockups
-- **[SHIPPING_INTEGRATION.md](docs/SHIPPING_INTEGRATION.md)** - EasyPost setup guide, integration details, testing
-- **[SOLANA_PARTNERSHIP.md](docs/SOLANA_PARTNERSHIP.md)** - Partnership proposal template for Solana Foundation
+- **[SHIPPING_INTEGRATION.md](docs/SHIPPING_INTEGRATION.md)** - EasyPost setup guide, integration details
+- **[STRIPE_COMPLIANCE_CHECKLIST.md](docs/STRIPE_COMPLIANCE_CHECKLIST.md)** - Stripe application requirements
+- **[SOLANA_PARTNERSHIP.md](docs/SOLANA_PARTNERSHIP.md)** - Partnership proposal template
+- **[Agent System](empire_box_agents/README.md)** - Agent safeguards documentation
+- **[Agent Capabilities](empire_box_agents/CAPABILITIES.md)** - Detailed capabilities guide
 
 ## 🔐 Environment Variables
 
@@ -245,9 +315,17 @@ cd backend
 pytest
 ```
 
+### Agent System Tests
+
+```bash
+cd empire_box_agents
+python test_emergency_stop.py  # 10/10 tests pass
+python test_safeguards.py      # 15/15 tests pass
+```
+
 ### Test License Keys
 
-The backend automatically generates test licenses. You can also generate them via API:
+Generate test licenses via API:
 
 ```bash
 curl -X POST http://localhost:8000/licenses/generate \
@@ -258,32 +336,6 @@ curl -X POST http://localhost:8000/licenses/generate \
     "hardware_bundle": "seeker_pro",
     "quantity": 1
   }'
-```
-
-### Test Shipping (EasyPost Test Mode)
-
-The shipping service runs in test mode by default. Use these test addresses:
-
-**From Address:**
-```json
-{
-  "name": "EmpireBox",
-  "street1": "388 Townsend St",
-  "city": "San Francisco",
-  "state": "CA",
-  "zip": "94107"
-}
-```
-
-**To Address:**
-```json
-{
-  "name": "Test Customer",
-  "street1": "179 N Harbor Dr",
-  "city": "Redondo Beach",
-  "state": "CA",
-  "zip": "90277"
-}
 ```
 
 ## 📱 Mobile App Deep Linking
@@ -341,9 +393,6 @@ npm run build
 
 # Deploy to Vercel (recommended)
 vercel deploy --prod
-
-# Or deploy to any static host
-npm run build && npm run start
 ```
 
 ### Mobile App (Production)
@@ -354,8 +403,6 @@ flutter build ios --release
 
 # Android
 flutter build apk --release
-# or
-flutter build appbundle --release
 ```
 
 ## 🎯 Key Features Summary
@@ -367,8 +414,7 @@ flutter build appbundle --release
 | License Activation | ✅ Complete | Backend + Website |
 | Setup Portal UI | ✅ Complete | Website |
 | QR Code Scanning | ✅ Complete | Website |
-| Device Detection | ✅ Complete | Website |
-| Wallet Setup Guide | ✅ Complete | Website |
+| Legal Pages (Stripe) | ✅ Complete | Website |
 | Hardware Bundle Showcase | ✅ Complete | Website |
 | Pre-order System | ✅ Complete | Backend + Website |
 | Shipping Rate Comparison | ✅ Complete | Backend + App |
@@ -376,10 +422,8 @@ flutter build appbundle --release
 | Label Printing | ✅ Complete | App |
 | Shipment Tracking | ✅ Complete | Backend + App |
 | Deep Linking | ✅ Complete | App |
-
-## 🤝 Contributing
-
-This is a proprietary project for EmpireBox. Internal team members should follow the contribution guidelines in the team wiki.
+| Agent Safeguards | ✅ Complete | Python |
+| Emergency Stop | ✅ Complete | Python |
 
 ## 📄 License
 
@@ -390,11 +434,11 @@ This is proprietary software. Unauthorized copying, distribution, or use is stri
 ## 📞 Support
 
 - **Email**: support@empirebox.store
+- **General**: hello@empirebox.store
 - **Documentation**: [docs.empirebox.store](https://docs.empirebox.store)
-- **Status Page**: [status.empirebox.store](https://status.empirebox.store)
 
 ---
 
 **Built with ❤️ by the EmpireBox Team**
 
-*Last Updated: 2026-02-17*
+*Last Updated: 2026-02-18*
