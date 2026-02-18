@@ -301,6 +301,11 @@ open https://your-backend.railway.app/docs
 }
 ```
 
+**Alternative**: If the external repository is unavailable, you can:
+1. Pre-build the Flutter web app locally: `flutter build web`
+2. Deploy the static `build/web` directory directly to Vercel
+3. Or use a custom Docker container with Flutter pre-installed
+
 ### Backend Health Check Fails
 
 **Issue**: Railway reports unhealthy service
