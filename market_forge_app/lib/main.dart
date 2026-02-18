@@ -3,9 +3,12 @@ import 'package:provider/provider.dart';
 import 'package:market_forge_app/screens/home_screen.dart';
 import 'package:market_forge_app/screens/camera_screen.dart';
 import 'package:market_forge_app/screens/settings_screen.dart';
+import 'package:market_forge_app/screens/messages_screen.dart';
+import 'package:market_forge_app/screens/email_settings_screen.dart';
 import 'package:market_forge_app/providers/product_provider.dart';
 import 'package:market_forge_app/providers/listing_provider.dart';
 import 'package:market_forge_app/providers/user_provider.dart';
+import 'package:market_forge_app/providers/message_provider.dart';
 
 void main() {
   runApp(const MarketForgeApp());
@@ -21,6 +24,7 @@ class MarketForgeApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ProductProvider()),
         ChangeNotifierProvider(create: (_) => ListingProvider()),
         ChangeNotifierProvider(create: (_) => UserProvider()),
+        ChangeNotifierProvider(create: (_) => MessageProvider(username: 'demo_user')),
       ],
       child: MaterialApp(
         title: 'MarketForge',
@@ -81,6 +85,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   final List<Widget> _screens = [
     const HomeScreen(),
     const CameraScreen(),
+    const MessagesScreen(),
     const SettingsScreen(),
   ];
 
@@ -88,30 +93,47 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _screens[_currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
-        onDestinationSelected: (int index) {
-          setState(() {
-            _currentIndex = index;
-          });
+      bottomNavigationBar: Consumer<MessageProvider>(
+        builder: (context, messageProvider, child) {
+          return NavigationBar(
+            selectedIndex: _currentIndex,
+            onDestinationSelected: (int index) {
+              setState(() {
+                _currentIndex = index;
+              });
+            },
+            destinations: [
+              const NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home),
+                label: 'Home',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.add_a_photo_outlined),
+                selectedIcon: Icon(Icons.add_a_photo),
+                label: 'New Listing',
+              ),
+              NavigationDestination(
+                icon: Badge(
+                  label: Text('${messageProvider.unreadCount}'),
+                  isLabelVisible: messageProvider.unreadCount > 0,
+                  child: const Icon(Icons.chat_bubble_outline),
+                ),
+                selectedIcon: Badge(
+                  label: Text('${messageProvider.unreadCount}'),
+                  isLabelVisible: messageProvider.unreadCount > 0,
+                  child: const Icon(Icons.chat_bubble),
+                ),
+                label: 'Messages',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: 'Settings',
+              ),
+            ],
+          );
         },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.add_a_photo_outlined),
-            selectedIcon: Icon(Icons.add_a_photo),
-            label: 'New Listing',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
-        ],
       ),
     );
   }

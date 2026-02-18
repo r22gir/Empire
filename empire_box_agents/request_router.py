@@ -1,29 +1,151 @@
 """
 Request routing system for EmpireBox hybrid AI system.
 
-Routes AI requests between local (Ollama) and cloud (Grok/Claude/OpenAI)
-models based on task complexity, user budget, and model capabilities.
+Contains two routers:
+1. SimpleRequestRouter - For quick AI responses to buyer messages (messaging system)
+2. RequestRouter - For hybrid local/cloud AI routing with budget management
 """
 
+import re
 import logging
 from typing import Dict, Optional, Any, List
-from .config import (
-    LOCAL_TASKS,
-    CLOUD_TASKS,
-    LOCAL_MODELS,
-    CLOUD_MODELS,
-    API_ENDPOINTS,
-    DEFAULT_LOCAL_MODEL,
-    DEFAULT_CLOUD_MODEL,
-    AVERAGE_CHARS_PER_TOKEN,
-    TASK_COMPLEXITY_LEVELS
-)
-from .token_manager import TokenManager
-
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# SIMPLE REQUEST ROUTER (for messaging/buyer responses)
+# =============================================================================
+
+class SimpleRequestRouter:
+    """Routes simple AI requests for buyer message responses"""
+    
+    def __init__(self, local_threshold: int = 100):
+        """
+        Initialize request router
+        
+        Args:
+            local_threshold: Character count threshold for using local AI
+        """
+        self.local_threshold = local_threshold
+        self.simple_patterns = [
+            r"is (this|it) (still )?available",
+            r"do you (still )?have (this|it)",
+            r"can you ship to",
+            r"what'?s (the |your )?lowest",
+            r"will you take",
+            r"firm on (the )?price",
+        ]
+    
+    def route_request(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Route AI request based on complexity
+        
+        Args:
+            prompt: The input prompt/message
+            context: Optional context (message details, listing info, etc.)
+            
+        Returns:
+            AI-generated response
+        """
+        if self._is_simple_query(prompt):
+            return self._handle_local(prompt, context)
+        else:
+            return self._handle_cloud(prompt, context)
+    
+    def _is_simple_query(self, prompt: str) -> bool:
+        """Determine if query is simple enough for local handling"""
+        prompt_lower = prompt.lower()
+        
+        # Check against known simple patterns
+        for pattern in self.simple_patterns:
+            if re.search(pattern, prompt_lower):
+                return True
+        
+        # Check length threshold
+        if len(prompt) < self.local_threshold:
+            return True
+        
+        return False
+    
+    def _handle_local(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """Handle simple queries locally with rule-based responses"""
+        prompt_lower = prompt.lower()
+        
+        # Availability queries
+        if re.search(r"is (this|it) (still )?available", prompt_lower) or \
+           re.search(r"do you (still )?have (this|it)", prompt_lower):
+            return "Yes! It's still available. Ready to ship today!"
+        
+        # Shipping queries
+        if re.search(r"(can|do) you ship to", prompt_lower):
+            location = self._extract_location(prompt)
+            if location:
+                return f"Yes! I can ship to {location}. Shipping cost will be calculated based on the item's weight and dimensions."
+            return "Yes! I ship to most locations. Where are you located? I can calculate shipping for you."
+        
+        # Price negotiation
+        if re.search(r"what'?s (the |your )?lowest", prompt_lower) or \
+           re.search(r"will you take", prompt_lower) or \
+           re.search(r"firm on (the )?price", prompt_lower):
+            if context and context.get('price'):
+                price = context['price']
+                # Offer 10% discount
+                discount_price = price * 0.9
+                return f"I can do ${discount_price:.2f}, that's my best price for this quality item."
+            return "I have some flexibility on the price. What did you have in mind?"
+        
+        # Generic response for other simple queries
+        return "Thanks for your interest! I'm happy to answer any questions you have about this item."
+    
+    def _handle_cloud(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
+        """Handle complex queries with cloud AI (placeholder)"""
+        return (
+            "Thanks for your message! Let me provide you with detailed information. "
+            "Feel free to ask any follow-up questions you might have."
+        )
+    
+    def _extract_location(self, text: str) -> Optional[str]:
+        """Extract location from shipping query"""
+        match = re.search(r"ship to ([\w\s,]+?)[\?\.]?$", text.lower())
+        if match:
+            return match.group(1).strip()
+        return None
+
+
+# =============================================================================
+# HYBRID REQUEST ROUTER (for local/cloud AI with budget management)
+# =============================================================================
+
+# Import config - these may not exist yet, so handle gracefully
+try:
+    from .config import (
+        LOCAL_TASKS,
+        CLOUD_TASKS,
+        LOCAL_MODELS,
+        CLOUD_MODELS,
+        API_ENDPOINTS,
+        DEFAULT_LOCAL_MODEL,
+        DEFAULT_CLOUD_MODEL,
+        AVERAGE_CHARS_PER_TOKEN,
+        TASK_COMPLEXITY_LEVELS
+    )
+    from .token_manager import TokenManager
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
+    # Define defaults if config not available
+    LOCAL_TASKS = ["format_text", "categorize_product", "fill_template", "extract_fields", "simple_validation", "basic_lookup"]
+    CLOUD_TASKS = ["complex_reasoning", "content_generation", "price_optimization", "customer_service", "multi_turn_conversation"]
+    LOCAL_MODELS = {"phi-3-mini": {"use_cases": LOCAL_TASKS}}
+    CLOUD_MODELS = {"grok-2-fast": {"provider": "grok", "use_cases": CLOUD_TASKS}}
+    API_ENDPOINTS = {"ollama": "http://localhost:11434", "grok": "https://api.x.ai/v1"}
+    DEFAULT_LOCAL_MODEL = "phi-3-mini"
+    DEFAULT_CLOUD_MODEL = "grok-2-fast"
+    AVERAGE_CHARS_PER_TOKEN = 4
+    TASK_COMPLEXITY_LEVELS = ["low", "medium", "high"]
 
 
 class RequestRouter:
@@ -34,137 +156,63 @@ class RequestRouter:
     - Task complexity classification
     - Smart model selection based on task type
     - Budget-aware routing with local fallback
-    - Provider configuration management
-    
-    Example:
-        >>> token_mgr = TokenManager("user123", "pro")
-        >>> router = RequestRouter(token_manager=token_mgr)
-        >>> result = router.route_request(
-        ...     task_type="categorize_product",
-        ...     prompt="Categorize: Blue Nike shoes",
-        ...     complexity="low"
-        ... )
-        >>> result['provider']
-        'ollama'
     """
     
-    def __init__(self, token_manager: TokenManager, default_local_model: str = DEFAULT_LOCAL_MODEL,
-                 default_cloud_model: str = DEFAULT_CLOUD_MODEL):
+    def __init__(self, token_manager=None, default_local_model: str = None,
+                 default_cloud_model: str = None):
         """
         Initialize RequestRouter.
         
         Args:
-            token_manager: TokenManager instance for budget tracking
+            token_manager: TokenManager instance for budget tracking (optional)
             default_local_model: Default local model to use
             default_cloud_model: Default cloud model to use
         """
         self.token_manager = token_manager
-        self.default_local_model = default_local_model
-        self.default_cloud_model = default_cloud_model
+        self.default_local_model = default_local_model or DEFAULT_LOCAL_MODEL
+        self.default_cloud_model = default_cloud_model or DEFAULT_CLOUD_MODEL
     
     def classify_task(self, task_type: str, complexity: Optional[str] = None) -> str:
-        """
-        Classify task complexity based on task type and optional complexity hint.
-        
-        Args:
-            task_type: Type of task (e.g., 'categorize_product', 'content_generation')
-            complexity: Optional complexity hint ('low', 'medium', 'high')
-            
-        Returns:
-            Complexity level: 'low', 'medium', or 'high'
-            
-        Example:
-            >>> router = RequestRouter(TokenManager("user123", "pro"))
-            >>> router.classify_task("categorize_product")
-            'low'
-            >>> router.classify_task("content_generation")
-            'high'
-        """
-        # If explicit complexity provided and valid, use it
+        """Classify task complexity based on task type and optional complexity hint."""
         if complexity and complexity in TASK_COMPLEXITY_LEVELS:
             return complexity
         
-        # Classify based on task type
         if task_type in LOCAL_TASKS:
             return "low"
         elif task_type in CLOUD_TASKS:
             return "high"
         else:
-            # Unknown task type, default to medium
             logger.warning(f"Unknown task type: {task_type}. Defaulting to medium complexity.")
             return "medium"
     
     def estimate_tokens(self, prompt: str, response_length: int = 500) -> int:
-        """
-        Estimate token count for a request.
-        
-        Args:
-            prompt: Input prompt text
-            response_length: Estimated response length in characters
-            
-        Returns:
-            Estimated total token count (prompt + response)
-            
-        Example:
-            >>> router = RequestRouter(TokenManager("user123", "pro"))
-            >>> router.estimate_tokens("Short prompt", 100)
-            28
-        """
+        """Estimate token count for a request."""
         prompt_chars = len(prompt)
         total_chars = prompt_chars + response_length
         estimated_tokens = total_chars // AVERAGE_CHARS_PER_TOKEN
-        return max(estimated_tokens, 10)  # Minimum 10 tokens
+        return max(estimated_tokens, 10)
     
     def select_model(self, task_type: str, complexity: str, 
                     force_local: bool = False) -> Dict[str, Any]:
-        """
-        Select appropriate model based on task and complexity.
-        
-        Args:
-            task_type: Type of task
-            complexity: Task complexity level
-            force_local: Force local model selection (for budget overflow)
-            
-        Returns:
-            Dictionary with model information:
-            - model_name: Name of the selected model
-            - provider: Provider name (ollama, grok, anthropic, openai)
-            - is_local: Boolean indicating if model is local
-            - config: Full model configuration
-            
-        Example:
-            >>> router = RequestRouter(TokenManager("user123", "pro"))
-            >>> model = router.select_model("categorize_product", "low")
-            >>> model['is_local']
-            True
-        """
-        # Force local if requested (budget overflow)
-        if force_local:
+        """Select appropriate model based on task and complexity."""
+        if force_local or complexity == "low":
             return self._get_local_model(task_type)
         
-        # For low complexity, always use local
-        if complexity == "low":
-            return self._get_local_model(task_type)
-        
-        # For medium complexity, prefer local if task supports it
         if complexity == "medium":
             if task_type in LOCAL_TASKS:
                 return self._get_local_model(task_type)
             else:
                 return self._get_cloud_model(task_type)
         
-        # For high complexity, use cloud
         if complexity == "high":
             return self._get_cloud_model(task_type)
         
-        # Fallback to local
         return self._get_local_model(task_type)
     
     def _get_local_model(self, task_type: str) -> Dict[str, Any]:
         """Get local model configuration."""
-        # Find best local model for task
         for model_name, model_config in LOCAL_MODELS.items():
-            if task_type in model_config["use_cases"]:
+            if task_type in model_config.get("use_cases", []):
                 return {
                     "model_name": model_name,
                     "provider": "ollama",
@@ -172,8 +220,7 @@ class RequestRouter:
                     "config": model_config
                 }
         
-        # Fallback to default local model
-        default_config = LOCAL_MODELS[self.default_local_model]
+        default_config = LOCAL_MODELS.get(self.default_local_model, {})
         return {
             "model_name": self.default_local_model,
             "provider": "ollama",
@@ -183,41 +230,25 @@ class RequestRouter:
     
     def _get_cloud_model(self, task_type: str) -> Dict[str, Any]:
         """Get cloud model configuration."""
-        # Find best cloud model for task
         for model_name, model_config in CLOUD_MODELS.items():
-            if task_type in model_config["use_cases"]:
+            if task_type in model_config.get("use_cases", []):
                 return {
                     "model_name": model_name,
-                    "provider": model_config["provider"],
+                    "provider": model_config.get("provider", "grok"),
                     "is_local": False,
                     "config": model_config
                 }
         
-        # Fallback to default cloud model
-        default_config = CLOUD_MODELS[self.default_cloud_model]
+        default_config = CLOUD_MODELS.get(self.default_cloud_model, {})
         return {
             "model_name": self.default_cloud_model,
-            "provider": default_config["provider"],
+            "provider": default_config.get("provider", "grok"),
             "is_local": False,
             "config": default_config
         }
     
     def get_provider_config(self, provider: str) -> Dict[str, Any]:
-        """
-        Get provider configuration including API endpoint.
-        
-        Args:
-            provider: Provider name (ollama, grok, anthropic, openai)
-            
-        Returns:
-            Dictionary with provider configuration
-            
-        Example:
-            >>> router = RequestRouter(TokenManager("user123", "pro"))
-            >>> config = router.get_provider_config("ollama")
-            >>> 'endpoint' in config
-            True
-        """
+        """Get provider configuration including API endpoint."""
         if provider not in API_ENDPOINTS:
             raise ValueError(f"Unknown provider: {provider}")
         
@@ -227,68 +258,39 @@ class RequestRouter:
             "requires_auth": provider != "ollama"
         }
     
-    def route_request(self, task_type: str, prompt: str, 
+    def route_request(self, task_type: str = None, prompt: str = "", 
                      complexity: Optional[str] = None,
-                     estimated_response_length: int = 500) -> Dict[str, Any]:
+                     estimated_response_length: int = 500,
+                     context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Route an AI inference request to appropriate provider.
-        
-        Main entry point for request routing. Handles:
-        - Task complexity classification
-        - Token budget checking
-        - Model selection
-        - Fallback to local when over budget
-        
-        Args:
-            task_type: Type of task to perform
-            prompt: Input prompt for the model
-            complexity: Optional complexity hint
-            estimated_response_length: Expected response length in chars
-            
-        Returns:
-            Dictionary with routing decision:
-            - model: Selected model information
-            - provider_config: Provider configuration
-            - estimated_tokens: Estimated token usage
-            - budget_status: Budget availability
-            - fallback_used: Whether local fallback was used
-            
-        Example:
-            >>> token_mgr = TokenManager("user123", "pro")
-            >>> router = RequestRouter(token_manager=token_mgr)
-            >>> result = router.route_request(
-            ...     task_type="categorize_product",
-            ...     prompt="Categorize: Blue Nike shoes",
-            ...     complexity="low"
-            ... )
-            >>> result['model']['is_local']
-            True
         """
-        # Classify task complexity
+        # If no task_type, use simple routing for messaging
+        if task_type is None:
+            simple_router = SimpleRequestRouter()
+            response = simple_router.route_request(prompt, context)
+            return {
+                "model": {"model_name": "rule-based", "provider": "local", "is_local": True},
+                "response": response,
+                "estimated_tokens": 0,
+                "budget_status": {"ok": True},
+                "fallback_used": False
+            }
+        
         classified_complexity = self.classify_task(task_type, complexity)
-        
-        # Estimate token usage
         estimated_tokens = self.estimate_tokens(prompt, estimated_response_length)
-        
-        # Select model based on complexity
         selected_model = self.select_model(task_type, classified_complexity, force_local=False)
         
-        # Check budget if using cloud model
         fallback_used = False
         budget_ok = True
         
-        if not selected_model["is_local"]:
-            # Check if user has budget for cloud request
+        if not selected_model["is_local"] and self.token_manager:
             if not self.token_manager.can_use_tokens(estimated_tokens):
-                logger.warning(
-                    f"Budget exceeded for user {self.token_manager.user_id}. "
-                    f"Falling back to local model."
-                )
+                logger.warning(f"Budget exceeded. Falling back to local model.")
                 selected_model = self.select_model(task_type, classified_complexity, force_local=True)
                 fallback_used = True
                 budget_ok = False
         
-        # Get provider configuration
         provider_config = self.get_provider_config(selected_model["provider"])
         
         return {
@@ -297,7 +299,7 @@ class RequestRouter:
             "estimated_tokens": estimated_tokens,
             "budget_status": {
                 "ok": budget_ok,
-                "can_use_cloud": self.token_manager.can_use_tokens(estimated_tokens)
+                "can_use_cloud": self.token_manager.can_use_tokens(estimated_tokens) if self.token_manager else True
             },
             "fallback_used": fallback_used,
             "task_type": task_type,
@@ -305,121 +307,40 @@ class RequestRouter:
         }
     
     def execute_request(self, routing_result: Dict[str, Any], prompt: str) -> Dict[str, Any]:
-        """
-        Execute the routed request (placeholder for actual API calls).
-        
-        This method provides the interface for executing requests.
-        In production, this would make actual API calls to the selected provider.
-        
-        Args:
-            routing_result: Result from route_request()
-            prompt: The prompt to send to the model
-            
-        Returns:
-            Dictionary with execution result:
-            - success: Boolean indicating success
-            - response: Model response (or error message)
-            - tokens_used: Actual tokens used
-            - provider: Provider used
-            - model: Model used
-            
-        Example:
-            >>> token_mgr = TokenManager("user123", "pro")
-            >>> router = RequestRouter(token_manager=token_mgr)
-            >>> routing = router.route_request("categorize_product", "Blue shoes")
-            >>> result = router.execute_request(routing, "Blue shoes")
-            >>> result['success']
-            True
-        """
+        """Execute the routed request (placeholder for actual API calls)."""
         model = routing_result["model"]
-        provider_config = routing_result["provider_config"]
-        estimated_tokens = routing_result["estimated_tokens"]
+        estimated_tokens = routing_result.get("estimated_tokens", 0)
         
-        # Placeholder for actual API call
-        # In production, this would make real HTTP requests to the provider
-        logger.info(
-            f"Executing request on {model['provider']} "
-            f"with model {model['model_name']}"
-        )
+        logger.info(f"Executing request on {model['provider']} with model {model['model_name']}")
         
-        # Simulate successful execution
         response = {
             "success": True,
-            "response": f"[Simulated response from {model['model_name']}]",
+            "response": routing_result.get("response") or f"[Simulated response from {model['model_name']}]",
             "tokens_used": estimated_tokens if not model["is_local"] else 0,
             "provider": model["provider"],
             "model": model["model_name"],
             "is_local": model["is_local"]
         }
         
-        # Track token usage if cloud model
-        if not model["is_local"]:
+        if not model["is_local"] and self.token_manager:
             self.token_manager.track_usage(estimated_tokens)
-            logger.info(
-                f"Tracked {estimated_tokens} tokens for user {self.token_manager.user_id}"
-            )
         
         return response
 
 
-# Example usage and testing
+# Example usage
 if __name__ == "__main__":
-    print("=== RequestRouter Example Usage ===\n")
+    # Test SimpleRequestRouter
+    print("=== SimpleRequestRouter (Messaging) ===")
+    simple_router = SimpleRequestRouter()
+    print(simple_router.route_request("Is this still available?"))
+    print(simple_router.route_request("What's the lowest you'll go?", {"price": 100}))
     
-    # Example 1: Simple local task
-    print("Example 1: Simple local task (categorize_product)")
-    token_mgr = TokenManager(user_id="user123", tier="pro")
-    router = RequestRouter(token_manager=token_mgr)
-    
+    # Test RequestRouter
+    print("\n=== RequestRouter (Hybrid AI) ===")
+    router = RequestRouter()
     result = router.route_request(
         task_type="categorize_product",
-        prompt="Categorize this item: Blue Nike shoes size 10"
+        prompt="Categorize: Blue Nike shoes"
     )
-    print(f"Selected model: {result['model']['model_name']}")
-    print(f"Provider: {result['model']['provider']}")
-    print(f"Is local: {result['model']['is_local']}")
-    print(f"Estimated tokens: {result['estimated_tokens']}\n")
-    
-    # Example 2: Complex cloud task
-    print("Example 2: Complex cloud task (content_generation)")
-    result = router.route_request(
-        task_type="content_generation",
-        prompt="Write a compelling product description for a vintage Rolex watch",
-        complexity="high"
-    )
-    print(f"Selected model: {result['model']['model_name']}")
-    print(f"Provider: {result['model']['provider']}")
-    print(f"Is local: {result['model']['is_local']}")
-    print(f"Fallback used: {result['fallback_used']}\n")
-    
-    # Example 3: Budget exceeded fallback
-    print("Example 3: Budget exceeded - fallback to local")
-    small_token_mgr = TokenManager(user_id="user456", tier="free")
-    small_token_mgr.track_usage(500_000)  # Use all budget
-    
-    limited_router = RequestRouter(token_manager=small_token_mgr)
-    result = limited_router.route_request(
-        task_type="content_generation",
-        prompt="Generate content",
-        complexity="high"
-    )
-    print(f"Selected model: {result['model']['model_name']}")
-    print(f"Is local: {result['model']['is_local']}")
-    print(f"Fallback used: {result['fallback_used']}")
-    print(f"Budget OK: {result['budget_status']['ok']}\n")
-    
-    # Example 4: Execute request
-    print("Example 4: Execute request")
-    token_mgr2 = TokenManager(user_id="user789", tier="empire")
-    router2 = RequestRouter(token_manager=token_mgr2)
-    
-    routing = router2.route_request(
-        task_type="categorize_product",
-        prompt="Categorize: Red sneakers"
-    )
-    execution_result = router2.execute_request(routing, "Categorize: Red sneakers")
-    
-    print(f"Success: {execution_result['success']}")
-    print(f"Model used: {execution_result['model']}")
-    print(f"Tokens used: {execution_result['tokens_used']}")
-    print(f"Response: {execution_result['response']}")
+    print(f"Model: {result['model']['model_name']}, Local: {result['model']['is_local']}")
