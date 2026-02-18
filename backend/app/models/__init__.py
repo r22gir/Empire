@@ -1,9 +1,49 @@
 """
-Database models for MarketForge.
+Database models for EmpireBox.
 """
-from app.models.user import User
-from app.models.listing import Listing
-from app.models.message import Message
-from app.models.marketplace_account import MarketplaceAccount
+# License and shipping models
+try:
+    from app.models.license import License
+except ImportError:
+    License = None
 
-__all__ = ["User", "Listing", "Message", "MarketplaceAccount"]
+try:
+    from app.models.shipment import Shipment
+except ImportError:
+    Shipment = None
+
+try:
+    from app.models.preorder import PreOrder
+except ImportError:
+    PreOrder = None
+
+# User and marketplace models
+try:
+    from app.models.user import User
+except ImportError:
+    User = None
+
+try:
+    from app.models.listing import Listing
+except ImportError:
+    Listing = None
+
+try:
+    from app.models.message import Message
+except ImportError:
+    Message = None
+
+try:
+    from app.models.marketplace_account import MarketplaceAccount
+except ImportError:
+    MarketplaceAccount = None
+
+__all__ = [
+    "License",
+    "Shipment",
+    "PreOrder",
+    "User",
+    "Listing",
+    "Message",
+    "MarketplaceAccount"
+]

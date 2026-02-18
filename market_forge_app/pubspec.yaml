@@ -1,6 +1,6 @@
 name: market_forge_app
 
-description: MarketForge - Multi-platform product listing app from EmpireBox
+description: MarketForge - AI-powered multi-platform product listing app from EmpireBox with shipping integration
 
 publish_to: 'none'
 
@@ -22,6 +22,11 @@ dependencies:
   flutter_svg: ^2.0.7
   intl: ^0.18.0
   uuid: ^4.2.1
+  printing: ^5.11.0
+  image_gallery_saver: ^2.0.3
+  uni_links: ^0.5.1
+  share_plus: ^7.2.0
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

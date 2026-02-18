@@ -4,11 +4,13 @@ import 'package:market_forge_app/screens/home_screen.dart';
 import 'package:market_forge_app/screens/camera_screen.dart';
 import 'package:market_forge_app/screens/settings_screen.dart';
 import 'package:market_forge_app/screens/messages_screen.dart';
-import 'package:market_forge_app/screens/email_settings_screen.dart';
+import 'package:market_forge_app/screens/shipping_screen.dart';
 import 'package:market_forge_app/providers/product_provider.dart';
 import 'package:market_forge_app/providers/listing_provider.dart';
 import 'package:market_forge_app/providers/user_provider.dart';
 import 'package:market_forge_app/providers/message_provider.dart';
+import 'package:market_forge_app/providers/shipping_provider.dart';
+import 'package:market_forge_app/services/deep_link_service.dart';
 
 void main() {
   runApp(const MarketForgeApp());
@@ -25,6 +27,7 @@ class MarketForgeApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => ListingProvider()),
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => MessageProvider(username: 'demo_user')),
+        ChangeNotifierProvider(create: (_) => ShippingProvider()),
       ],
       child: MaterialApp(
         title: 'MarketForge',
@@ -81,13 +84,58 @@ class MainNavigationScreen extends StatefulWidget {
 
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
+  final DeepLinkService _deepLinkService = DeepLinkService();
 
   final List<Widget> _screens = [
     const HomeScreen(),
     const CameraScreen(),
+    const ShippingScreen(),
     const MessagesScreen(),
     const SettingsScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _deepLinkService.init((uri) {
+      _deepLinkService.handleDeepLink(uri, (licenseKey) {
+        // Navigate to activation screen
+        _showActivationDialog(licenseKey);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _deepLinkService.dispose();
+    super.dispose();
+  }
+
+  void _showActivationDialog(String licenseKey) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Activate License'),
+        content: Text('License Key: $licenseKey\n\nWould you like to activate this license?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              // TODO: Implement license activation
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('License activated!')),
+              );
+            },
+            child: const Text('Activate'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -112,6 +160,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 icon: Icon(Icons.add_a_photo_outlined),
                 selectedIcon: Icon(Icons.add_a_photo),
                 label: 'New Listing',
+              ),
+              const NavigationDestination(
+                icon: Icon(Icons.local_shipping_outlined),
+                selectedIcon: Icon(Icons.local_shipping),
+                label: 'Shipping',
               ),
               NavigationDestination(
                 icon: Badge(

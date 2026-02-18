@@ -1,9 +1,12 @@
-# MarketForge Backend
+# EmpireBox Backend API
 
-FastAPI backend server for MarketForge - AI-powered marketplace automation platform.
+FastAPI backend for EmpireBox - combining Setup Portal, License Management, ShipForge shipping, and AI-powered marketplace automation.
 
 ## Features
 
+- **License Key System**: Generate, validate, and activate license keys for hardware bundles
+- **Shipping Integration**: EasyPost integration for comparing rates and purchasing labels
+- **Pre-order Management**: Handle hardware bundle pre-orders with Stripe payments
 - **Authentication**: JWT-based auth with signup, login, and token refresh
 - **User Management**: Profile management and subscription tiers
 - **Listings**: CRUD operations for product listings
@@ -16,10 +19,12 @@ FastAPI backend server for MarketForge - AI-powered marketplace automation platf
 
 - **FastAPI**: Modern, fast web framework
 - **SQLAlchemy 2.0**: Async ORM for database operations
-- **PostgreSQL**: Primary database with async support
+- **SQLite/PostgreSQL**: Database support
 - **Alembic**: Database migrations
 - **JWT**: Secure authentication
 - **Pydantic**: Data validation and settings
+- **EasyPost**: Shipping integration
+- **Stripe**: Payment processing
 
 ## Quick Start
 
@@ -43,8 +48,6 @@ docker-compose up -d
 
 The API will be available at `http://localhost:8000`
 
-API documentation: `http://localhost:8000/docs`
-
 ### Local Development
 
 1. Install Python 3.11+
@@ -60,19 +63,18 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. Set up PostgreSQL database:
-```bash
-# Install PostgreSQL, then create database
-createdb marketforge
-```
-
-5. Configure environment:
+4. Configure environment:
 ```bash
 cp .env.example .env
-# Edit .env with your database URL and settings
+# Edit .env with your API keys (EasyPost, Stripe, etc.)
 ```
 
-6. Run database migrations:
+5. Initialize the database:
+```bash
+python -m app.init_db
+```
+
+6. Run database migrations (if using PostgreSQL):
 ```bash
 alembic upgrade head
 ```
@@ -112,6 +114,27 @@ backend/
 ```
 
 ## API Endpoints
+
+### Licenses
+- `POST /licenses/generate` - Generate license keys
+- `GET /licenses/{key}/validate` - Validate a license key
+- `POST /licenses/{key}/activate` - Activate a license
+- `GET /licenses/my-licenses` - Get user's licenses
+
+### Shipping
+- `POST /shipping/rates` - Get shipping rates
+- `POST /shipping/labels` - Purchase a shipping label
+- `GET /shipping/labels/{id}` - Get label details
+- `GET /shipping/track/{tracking_number}` - Track shipment
+- `GET /shipping/history` - Get shipment history
+- `POST /shipping/labels/{id}/email` - Email label PDF
+
+### Pre-orders
+- `POST /preorders/` - Create a pre-order
+- `GET /preorders/` - List pre-orders
+- `GET /preorders/{id}` - Get pre-order details
+- `PATCH /preorders/{id}` - Update pre-order
+- `POST /preorders/{id}/process-payment` - Process payment
 
 ### Authentication
 - `POST /auth/signup` - Create new user account
@@ -153,6 +176,20 @@ backend/
 - `POST /webhooks/ebay/notification` - eBay webhook
 - `POST /webhooks/stripe` - Stripe webhook
 
+## License Key Format
+
+License keys use the format: `EMPIRE-XXXX-XXXX-XXXX`
+- 16 alphanumeric characters (excluding confusing characters like O, 0, I, 1)
+- Always starts with "EMPIRE-"
+- Unique and randomly generated
+
+## Database
+
+Uses SQLite by default for development. For production, update `DATABASE_URL` in `.env` to use PostgreSQL:
+```
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/empirebox
+```
+
 ## Database Migrations
 
 Create a new migration:
@@ -175,25 +212,21 @@ alembic downgrade -1
 See `.env.example` for all available configuration options.
 
 Required variables:
-- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_URL` - Database connection string
 - `SECRET_KEY` - Secret key for JWT signing
 
 Optional variables:
+- `EASYPOST_API_KEY` - Shipping integration
+- `STRIPE_API_KEY`, `STRIPE_SECRET_KEY` - Payment processing
 - `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID` - eBay API credentials
-- `STRIPE_SECRET_KEY` - Stripe payment integration
 - `CLOUDFLARE_API_KEY` - Email routing
 - `GROK_API_KEY`, `OLLAMA_BASE_URL` - AI services
 
-## Integration with EmpireBox Agents
+## Test Mode
 
-The backend integrates with the `empire_box_agents` module for AI features:
-
-```python
-from app.services.ai_service import AIService
-
-ai_service = AIService(user)
-description = await ai_service.generate_description(product_info)
-```
+The shipping service runs in test mode by default (using simulated data). To use real EasyPost API:
+1. Set `EASYPOST_TEST_MODE=false` in `.env`
+2. Add your production `EASYPOST_API_KEY`
 
 ## Testing
 
@@ -213,7 +246,7 @@ pytest --cov=app tests/
 
 1. Build image:
 ```bash
-docker build -t marketforge-backend .
+docker build -t empirebox-backend .
 ```
 
 2. Run container:
@@ -221,7 +254,7 @@ docker build -t marketforge-backend .
 docker run -p 8000:8000 \
   -e DATABASE_URL=your_db_url \
   -e SECRET_KEY=your_secret_key \
-  marketforge-backend
+  empirebox-backend
 ```
 
 ### Production Considerations
@@ -236,8 +269,9 @@ docker run -p 8000:8000 \
 
 ## License
 
-See LICENSE file in repository root.
+Copyright © 2026 EmpireBox. All rights reserved.
 
 ## Support
 
-For issues and questions, please open an issue on GitHub.
+- **Email**: support@empirebox.store
+- **Documentation**: [docs.empirebox.store](https://docs.empirebox.store)

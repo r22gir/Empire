@@ -5,6 +5,8 @@
 @tailwind utilities;
 
 :root {
+  --empire-blue: #1E40AF;
+  --empire-orange: #F97316;
   --foreground-rgb: 0, 0, 0;
   --background-start-rgb: 214, 219, 220;
   --background-end-rgb: 255, 255, 255;
@@ -21,6 +23,11 @@
 @layer base {
   body {
     @apply font-sans text-dark bg-white;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     color: rgb(var(--foreground-rgb));
     background: linear-gradient(
         to bottom,

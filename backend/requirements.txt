@@ -12,3 +12,6 @@ httpx>=0.26.0
 python-dotenv>=1.0.0
 boto3>=1.34.0
 stripe>=7.0.0
+easypost>=8.0.0
+qrcode>=7.4.0
+Pillow>=10.0.0
