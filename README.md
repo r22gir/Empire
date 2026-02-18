@@ -267,12 +267,14 @@ python empire_box_agents/test_safeguards.py
 
 Comprehensive documentation is available in the `docs/` directory:
 
+- **[LEGAL_COMPLIANCE_AUDIT.md](docs/LEGAL_COMPLIANCE_AUDIT.md)** - Legal compliance audit, IP protection, competitive landscape, market intelligence
 - **[HARDWARE_BUNDLES.md](docs/HARDWARE_BUNDLES.md)** - Complete bundle specifications, pricing, sourcing details
 - **[QUICK_START_CARD.md](docs/QUICK_START_CARD.md)** - Print-ready QR card design, production specifications
 - **[SETUP_FLOW.md](docs/SETUP_FLOW.md)** - Detailed setup flow documentation with UI mockups
 - **[SHIPPING_INTEGRATION.md](docs/SHIPPING_INTEGRATION.md)** - EasyPost setup guide, integration details
 - **[STRIPE_COMPLIANCE_CHECKLIST.md](docs/STRIPE_COMPLIANCE_CHECKLIST.md)** - Stripe application requirements
 - **[SOLANA_PARTNERSHIP.md](docs/SOLANA_PARTNERSHIP.md)** - Partnership proposal template
+- **[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)** - Third-party dependency license tracking (SBOM)
 - **[Agent System](empire_box_agents/README.md)** - Agent safeguards documentation
 - **[Agent Capabilities](empire_box_agents/CAPABILITIES.md)** - Detailed capabilities guide
 
