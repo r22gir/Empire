@@ -10,6 +10,8 @@ jobs:
   build-flutter:
     name: Build Flutter Web App
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -38,6 +40,8 @@ jobs:
     name: Deploy Flutter App to Vercel
     needs: build-flutter
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ secrets.VERCEL_TOKEN != '' }}
     steps:
       - name: Checkout code
@@ -61,6 +65,8 @@ jobs:
   deploy-vercel-website:
     name: Deploy Website to Vercel
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ secrets.VERCEL_TOKEN != '' }}
     steps:
       - name: Checkout code
@@ -93,6 +99,8 @@ jobs:
   deploy-railway-backend:
     name: Deploy Backend to Railway
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: ${{ secrets.RAILWAY_TOKEN != '' }}
     steps:
       - name: Checkout code
