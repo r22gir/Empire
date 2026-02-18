@@ -1,7 +1,7 @@
 # Core API Framework
-fastapi==0.109.0
+fastapi==0.115.0
 uvicorn[standard]==0.27.0
-python-multipart==0.0.6
+python-multipart==0.0.22
 
 # Database
 sqlalchemy==2.0.25
@@ -23,11 +23,11 @@ email-validator==2.1.0
 openai==1.10.0
 opencv-python==4.9.0.80
 opencv-contrib-python==4.9.0.80
-torch==2.2.0
-torchvision==0.17.0
+torch==2.6.0
+torchvision==0.21.0
 timm==0.9.12
-transformers==4.37.2
-pillow==10.2.0
+transformers==4.48.0
+pillow==10.4.0
 numpy==1.26.3
 
 # Payment Processing
@@ -42,7 +42,7 @@ redis==5.0.1
 
 # HTTP Client
 httpx==0.26.0
-aiohttp==3.9.3
+aiohttp==3.13.3
 
 # Utilities
 python-dateutil==2.8.2
