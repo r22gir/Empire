@@ -47,43 +47,63 @@ except ImportError:
 
 try:
     from app.routers import auth
-    app.include_router(auth.router, prefix="/auth", tags=["auth"])
-except ImportError:
+    if auth:
+        app.include_router(auth.router, prefix="/auth", tags=["auth"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import users
-    app.include_router(users.router, prefix="/users", tags=["users"])
-except ImportError:
+    if users:
+        app.include_router(users.router, prefix="/users", tags=["users"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import listings
-    app.include_router(listings.router, prefix="/listings", tags=["listings"])
-except ImportError:
+    if listings:
+        app.include_router(listings.router, prefix="/listings", tags=["listings"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import messages
-    app.include_router(messages.router, prefix="/messages", tags=["messages"])
-except ImportError:
+    if messages:
+        app.include_router(messages.router, prefix="/messages", tags=["messages"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import marketplaces
-    app.include_router(marketplaces.router, prefix="/marketplaces", tags=["marketplaces"])
-except ImportError:
+    if marketplaces:
+        app.include_router(marketplaces.router, prefix="/marketplaces", tags=["marketplaces"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import webhooks
-    app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
-except ImportError:
+    if webhooks:
+        app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import ai
-    app.include_router(ai.router, prefix="/ai", tags=["ai"])
+    if ai:
+        app.include_router(ai.router, prefix="/ai", tags=["ai"])
+except (ImportError, AttributeError):
+    pass
+
+# SupportForge routers
+try:
+    from app.routers import supportforge_tickets
+    app.include_router(supportforge_tickets.router, prefix="/api/v1/tickets", tags=["supportforge-tickets"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import supportforge_customers
+    app.include_router(supportforge_customers.router, prefix="/api/v1/customers", tags=["supportforge-customers"])
 except ImportError:
     pass
 
@@ -105,7 +125,9 @@ async def root():
             "messages": "/messages",
             "marketplaces": "/marketplaces",
             "webhooks": "/webhooks",
-            "ai": "/ai"
+            "ai": "/ai",
+            "supportforge_tickets": "/api/v1/tickets",
+            "supportforge_customers": "/api/v1/customers"
         }
     }
 
