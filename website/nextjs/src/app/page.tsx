@@ -6,7 +6,6 @@ import HowItWorks from '@/components/HowItWorks';
 import Pricing from '@/components/Pricing';
 import FAQ from '@/components/FAQ';
 import CTA from '@/components/CTA';
-import Footer from '@/components/Footer';
 
 export default function Home() {
   return (
@@ -19,7 +18,6 @@ export default function Home() {
       <Pricing />
       <FAQ />
       <CTA />
-      <Footer />
     </main>
   );
 }

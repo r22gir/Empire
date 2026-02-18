@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import Footer from '@/components/Footer';
 
 export const metadata: Metadata = {
   title: 'EmpireBox - Operating System for Resellers',
@@ -24,7 +25,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="scroll-smooth">
-      <body>{children}</body>
+      <body className="font-sans">
+        {children}
+        <Footer />
+      </body>
     </html>
   );
 }
