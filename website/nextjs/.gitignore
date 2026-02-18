@@ -16,6 +16,7 @@ build/
 dist/
 
 # Production
+.vercel
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -26,8 +27,8 @@ yarn-error.log*
 *.pem
 
 # Debug
-.env*.local
 .env
+.env*.local
 
 # Vercel
 .vercel

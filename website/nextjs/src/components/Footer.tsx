@@ -13,7 +13,7 @@ export default function Footer() {
               EmpireBox
             </h3>
             <p className="text-sm text-gray-400 mb-4">
-              Multi-platform marketplace automation powered by AI
+              The Operating System for Resellers - Multi-platform marketplace automation powered by AI
             </p>
             <div className="text-sm text-gray-400">
               <p className="mb-1">
@@ -31,6 +31,11 @@ export default function Footer() {
             <h4 className="text-white font-semibold mb-4">Product</h4>
             <ul className="space-y-2 text-sm">
               <li>
+                <Link href="/" className="hover:text-white transition-colors">
+                  Home
+                </Link>
+              </li>
+              <li>
                 <Link href="/pricing" className="hover:text-white transition-colors">
                   Pricing
                 </Link>
@@ -41,7 +46,7 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="#faq" className="hover:text-white transition-colors">
+                <Link href="/faq" className="hover:text-white transition-colors">
                   FAQ
                 </Link>
               </li>
@@ -102,7 +107,7 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Social Media */}
+        {/* Social Media & Copyright */}
         <div className="mt-8 pt-8 border-t border-gray-800">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="flex space-x-6 mb-4 md:mb-0">
