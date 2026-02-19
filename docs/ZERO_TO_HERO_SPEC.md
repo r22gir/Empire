@@ -4,7 +4,8 @@
 
 **Zero to Hero** is the complete business automation flow that takes an entrepreneur from initial business idea to fully operational business with all necessary legal entities, payment processing, social media presence, and operational tools configured and ready to use.
 
-**Duration**: 24-72 hours (mostly automated, minimal user interaction)  
+**Duration**: 3-14 days total (mostly automated, state processing time varies)  
+**User Time Required**: 2-3 hours across initial conversations and confirmations  
 **AI Engine**: Powered by OpenClaw  
 **Integration**: Connects LLCFactory, SocialForge, Stripe Connect, and all EmpireBox products
 
@@ -20,7 +21,7 @@ Transform the complex, weeks-long process of starting a business into a guided, 
 - Professional branding
 - Initial operational setup
 
-**Goal**: From "I have a business idea" to "I'm taking orders" in under 3 days.
+**Goal**: From "I have a business idea" to "I'm taking orders" in 3-14 days (depending on state processing).
 
 ---
 
