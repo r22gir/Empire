@@ -1,0 +1,132 @@
+version: "3.8"
+
+# EmpireBox Core Services
+# Run: docker compose up -d
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: empirebox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-empirebox}
+      POSTGRES_USER: ${POSTGRES_USER:-empirebox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - empirebox
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-empirebox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: empirebox-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - empirebox
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── OpenClaw AI Agent ───────────────────────────
+  openclaw:
+    image: empirebox/openclaw:latest
+    container_name: empirebox-openclaw
+    restart: unless-stopped
+    ports:
+      - "7878:7878"
+    volumes:
+      - ./openclaw/config.yaml:/app/config.yaml:ro
+      - ./openclaw/skills:/app/skills:ro
+      - openclaw_data:/data
+    env_file:
+      - .env
+    environment:
+      - OPENCLAW_MODE=founders
+      - OPENCLAW_CONFIG=/app/config.yaml
+    networks:
+      - empirebox
+    depends_on:
+      - postgres
+      - redis
+
+  # ── API Gateway ─────────────────────────────────
+  api-gateway:
+    image: empirebox/api-gateway:latest
+    container_name: empirebox-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    networks:
+      - empirebox
+    depends_on:
+      - postgres
+      - redis
+
+  # ── Control Center ──────────────────────────────
+  control-center:
+    build:
+      context: ./control
+      dockerfile: Dockerfile
+    container_name: empirebox-control
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    networks:
+      - empirebox
+
+  # ── Founders Dashboard ──────────────────────────
+  dashboard:
+    image: nginx:alpine
+    container_name: empirebox-dashboard
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./dashboard:/usr/share/nginx/html:ro
+    networks:
+      - empirebox
+
+  # ── Portainer ───────────────────────────────────
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: empirebox-portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - empirebox
+
+volumes:
+  postgres_data:
+  redis_data:
+  openclaw_data:
+  portainer_data:
+
+networks:
+  empirebox:
+    name: empirebox
+    driver: bridge
