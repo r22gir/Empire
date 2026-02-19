@@ -8,7 +8,7 @@ import os
 # Create FastAPI app
 app = FastAPI(
     title="EmpireBox API",
-    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, and AI-powered marketplace automation",
+    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, SupportForge, and AI-powered marketplace automation",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -119,6 +119,16 @@ try:
 except (ImportError, AttributeError):
     pass
 
+# MarketF routers
+try:
+    from app.routers.marketplace import products, orders, reviews, seller
+    app.include_router(products.router, prefix="/marketplace", tags=["marketplace-products"])
+    app.include_router(orders.router, prefix="/marketplace", tags=["marketplace-orders"])
+    app.include_router(reviews.router, prefix="/marketplace", tags=["marketplace-reviews"])
+    app.include_router(seller.router, prefix="/marketplace", tags=["marketplace-seller"])
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -127,6 +137,7 @@ async def root():
         "message": "EmpireBox API",
         "version": "1.0.0",
         "status": "operational",
+        "marketplace_fee": "8%",
         "endpoints": {
             "licenses": "/licenses",
             "shipping": "/shipping",
@@ -138,6 +149,10 @@ async def root():
             "marketplaces": "/marketplaces",
             "webhooks": "/webhooks",
             "ai": "/ai",
+            "marketplace_products": "/marketplace/products",
+            "marketplace_orders": "/marketplace/orders",
+            "marketplace_reviews": "/marketplace/reviews",
+            "marketplace_seller": "/marketplace/seller",
             "supportforge_tickets": "/api/v1/tickets",
             "supportforge_customers": "/api/v1/customers",
             "supportforge_kb": "/api/v1/kb",
