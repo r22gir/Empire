@@ -31,3 +31,11 @@ telegram:
 openclaw:
   host: "http://openclaw:7878"
   timeout: 30
+
+voice:
+  enabled: true
+  service_url: "http://voice-service:8200"
+  voice_replies: true
+  always_voice_reply: false  # only reply with voice if user sent voice
+  show_transcript: true       # show text transcript alongside voice reply
+  reply_voice: "en_US-amy-medium"

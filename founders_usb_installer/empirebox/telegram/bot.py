@@ -16,6 +16,7 @@ from handlers import BotHandlers
 from notifications import NotificationService
 from openclaw_client import OpenClawClient
 from security import SecurityManager
+from voice_handler import VoiceHandler
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -75,6 +76,17 @@ def main() -> None:
         notifications=notifications,
     )
 
+    # Voice handler
+    voice_cfg = cfg.get("voice", {})
+    voice_handler = VoiceHandler(
+        openclaw=openclaw,
+        voice_service_url=voice_cfg.get("service_url", "http://voice-service:8200"),
+        voice_replies=voice_cfg.get("voice_replies", True),
+        always_voice_reply=voice_cfg.get("always_voice_reply", False),
+        show_transcript=voice_cfg.get("show_transcript", True),
+        reply_voice=voice_cfg.get("reply_voice", "en_US-amy-medium"),
+    )
+
     # Register command handlers
     app.add_handler(CommandHandler("start", handlers.cmd_start))
     app.add_handler(CommandHandler("help", handlers.cmd_help))
@@ -86,6 +98,13 @@ def main() -> None:
     app.add_handler(CommandHandler("logs", handlers.cmd_logs))
     app.add_handler(CommandHandler("health", handlers.cmd_health))
     app.add_handler(CommandHandler("backup", handlers.cmd_backup))
+    app.add_handler(CommandHandler("voice", voice_handler.cmd_voice))
+
+    # Voice message handler
+    if voice_cfg.get("enabled", True):
+        app.add_handler(
+            MessageHandler(filters.VOICE, voice_handler.handle_voice_message)
+        )
 
     # Fallback: forward plain text messages to OpenClaw
     app.add_handler(

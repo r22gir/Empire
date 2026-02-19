@@ -137,6 +137,26 @@ services:
       - /opt/empirebox:/opt/empirebox:ro
     depends_on:
       - openclaw
+      - voice-service
+    networks:
+      - empirebox
+
+  # ── Voice Service ────────────────────────────────
+  voice-service:
+    build:
+      context: ./voice
+      dockerfile: Dockerfile
+    container_name: empirebox-voice
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    volumes:
+      - voice_models:/app/models
+      - ./voice/config.yaml:/app/config.yaml:ro
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - PIPER_MODELS_DIR=/app/models/piper
+      - CONFIG_PATH=/app/config.yaml
     networks:
       - empirebox
 
@@ -145,6 +165,7 @@ volumes:
   redis_data:
   openclaw_data:
   portainer_data:
+  voice_models:
 
 networks:
   empirebox:

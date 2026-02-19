@@ -149,7 +149,25 @@ log "IMPORTANT: Edit ${INSTALL_PATH}/telegram/config.yaml to set your bot token 
 log "Then run: ebox telegram start"
 
 # ──────────────────────────────────────────────
-# 9. FIREWALL
+# 9. VOICE SERVICE SETUP
+# ──────────────────────────────────────────────
+log "=== Setting up Voice Service ==="
+mkdir -p "${INSTALL_PATH}/voice"
+cp -r "$(dirname "$0")/voice/"* "${INSTALL_PATH}/voice/"
+# Add voice env var if not already present
+if ! grep -q "WHISPER_MODEL" "${ENV_FILE}"; then
+  echo "" >> "${ENV_FILE}"
+  echo "# Voice Service" >> "${ENV_FILE}"
+  echo "WHISPER_MODEL=base" >> "${ENV_FILE}"
+  echo "VOICE_ENABLED=true" >> "${ENV_FILE}"
+fi
+log "Voice service files copied to ${INSTALL_PATH}/voice"
+log "Voice service will start automatically with core services"
+log "  - Whisper STT model: base (~1.5GB, downloads on first use)"
+log "  - Piper TTS voices: download with: docker exec empirebox-voice python -m piper.download --voice en_US-amy-medium --output-dir /app/models/piper"
+
+# ──────────────────────────────────────────────
+# 10. FIREWALL
 # ──────────────────────────────────────────────
 log "=== Configuring Firewall ==="
 ufw --force reset
@@ -162,19 +180,20 @@ ufw allow 7878/tcp  # OpenClaw
 ufw allow 8000/tcp  # API Gateway
 ufw allow 8001/tcp  # Control Center
 ufw allow 8010:8130/tcp  # Products
+ufw allow 8200/tcp  # Voice Service
 ufw allow 9000/tcp  # Portainer
 ufw allow 11434/tcp # Ollama
 ufw --force enable
 log "Firewall configured"
 
 # ──────────────────────────────────────────────
-# 10. WAIT FOR SERVICES
+# 11. WAIT FOR SERVICES
 # ──────────────────────────────────────────────
 log "=== Waiting for services to be healthy ==="
 sleep 30
 
 # ──────────────────────────────────────────────
-# 11. DONE
+# 12. DONE
 # ──────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
 log "=== EmpireBox Founders Install Complete ==="
@@ -185,6 +204,8 @@ log "  Control Center: http://${IP}:8001"
 log "  API Gateway:    http://${IP}:8000"
 log "  Portainer:      http://${IP}:9000"
 log "  Ollama:         http://${IP}:11434"
+log ""
+log "  Voice Service:  http://${IP}:8200"
 log ""
 log "  Credentials:    ${ENV_FILE}"
 log "  Logs:           ${LOG_FILE}"
