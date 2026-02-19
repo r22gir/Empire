@@ -46,9 +46,9 @@ export default function InstallStep({ state, deviceId, onPrev }: Props) {
   const addLog = (line: string) => setLogs((l) => [...l, line]);
 
   // Snapshot props at mount so the effect captures stable values
-  const deviceIdRef = deviceId;
-  const productsRef = state.selectedProducts.join(', ');
-  const modelsRef = state.selectedModels.join(', ');
+  const deviceIdSnapshot = deviceId;
+  const productsSnapshot = state.selectedProducts.join(', ');
+  const modelsSnapshot = state.selectedModels.join(', ');
 
   useEffect(() => {
     let cancelled = false;
@@ -58,11 +58,11 @@ export default function InstallStep({ state, deviceId, onPrev }: Props) {
       const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
       const steps: Array<{ id: string; ms: number; log: string }> = [
-        { id: 'connect',  ms: 1000, log: `Connected to device ${deviceIdRef}` },
+        { id: 'connect',  ms: 1000, log: `Connected to device ${deviceIdSnapshot}` },
         { id: 'system',   ms: 2000, log: 'System packages updated' },
         { id: 'docker',   ms: 2500, log: 'Docker installed and started' },
-        { id: 'products', ms: 4000, log: `Installed: ${productsRef}` },
-        { id: 'ollama',   ms: 3000, log: `Models downloaded: ${modelsRef}` },
+        { id: 'products', ms: 4000, log: `Installed: ${productsSnapshot}` },
+        { id: 'ollama',   ms: 3000, log: `Models downloaded: ${modelsSnapshot}` },
         { id: 'start',    ms: 1500, log: 'All services started' },
         { id: 'complete', ms: 500,  log: 'Setup complete!' },
       ];

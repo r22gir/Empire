@@ -67,9 +67,13 @@ start_ble_beacon() {
         $url_encoded \
         00 00 00 00 00 00 00 00 00 00 00 00 00 2>/dev/null || true
 
-    # Set advertising parameters: interval ~1000ms (0x0640)
+    # Set advertising interval from BEACON_INTERVAL_MS (convert ms to units of 0.625ms)
+    local interval_units=$(( BEACON_INTERVAL_MS * 8 / 5 ))
+    local interval_lo=$(printf '%02x' $(( interval_units & 0xFF )))
+    local interval_hi=$(printf '%02x' $(( (interval_units >> 8) & 0xFF )))
     hcitool -i "$hci_device" cmd 0x08 0x0006 \
-        40 06 40 06 00 00 00 00 00 00 00 00 00 07 00 2>/dev/null || true
+        "${interval_lo}" "${interval_hi}" "${interval_lo}" "${interval_hi}" \
+        00 00 00 00 00 00 00 00 00 07 00 2>/dev/null || true
 
     # Enable advertising
     hcitool -i "$hci_device" cmd 0x08 0x000A 01 2>/dev/null || true

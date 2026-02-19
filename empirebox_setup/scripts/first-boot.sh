@@ -68,9 +68,9 @@ main() {
     # Wait for config to appear (from any discovery method)
     CONFIG_FILE="$CONFIG_DIR/empirebox-config.json"
     log "Waiting for configuration..."
-    timeout=3600  # Wait up to 1 hour
+    max_wait=3600  # Wait up to 1 hour
     elapsed=0
-    while [[ ! -f "$CONFIG_FILE" && $elapsed -lt $timeout ]]; do
+    while [[ ! -f "$CONFIG_FILE" && $elapsed -lt $max_wait ]]; do
         sleep 5
         elapsed=$((elapsed + 5))
     done
