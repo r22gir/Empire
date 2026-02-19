@@ -1,0 +1,33 @@
+telegram:
+  bot_token: "YOUR_BOT_TOKEN_HERE"  # From @BotFather
+
+  # Whitelist - only these users can interact
+  allowed_users:
+    - 123456789  # Your Telegram user ID
+
+  # Optional PIN for sensitive commands
+  pin_enabled: false
+  pin_code: "1234"
+
+  # Commands requiring PIN (if enabled)
+  pin_required_commands:
+    - stop_product
+    - stop_all
+    - restart
+    - backup
+
+  # Rate limiting
+  rate_limit:
+    max_commands_per_minute: 30
+
+  # Notifications
+  notifications:
+    enabled: true
+    system_alerts: true
+    product_crashes: true
+    daily_summary: false
+    daily_summary_time: "09:00"
+
+openclaw:
+  host: "http://openclaw:7878"
+  timeout: 30

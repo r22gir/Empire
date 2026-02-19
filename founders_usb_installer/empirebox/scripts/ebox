@@ -38,6 +38,8 @@ PRODUCTS=("marketforge" "contractorforge" "luxeforge" "supportforge" "leadforge"
           "shipforge" "forgecrm" "relistapp" "socialforge" "llcfactory"
           "apostapp" "empireassist" "empirepay")
 
+TELEGRAM_PATH="${INSTALL_PATH}/telegram"
+
 usage() {
   cat <<EOF
 EmpireBox Product Launcher
@@ -51,6 +53,10 @@ COMMANDS:
   ebox logs <product>        View product logs
   ebox bundle <name>         Start a bundle (reseller|contractor|support|full)
   ebox stop-all              Stop all products
+  ebox telegram start        Start the Telegram bot
+  ebox telegram stop         Stop the Telegram bot
+  ebox telegram logs         View Telegram bot logs
+  ebox telegram status       Show Telegram bot status
 
 PRODUCTS:
 EOF
@@ -148,6 +154,32 @@ cmd_stop_all() {
   echo "All products stopped"
 }
 
+cmd_telegram() {
+  local subcmd="${1:-help}"
+  case "$subcmd" in
+    start)
+      echo "Starting Telegram bot..."
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" up -d
+      echo "Telegram bot started"
+      ;;
+    stop)
+      echo "Stopping Telegram bot..."
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" down
+      echo "Telegram bot stopped"
+      ;;
+    logs)
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" logs -f
+      ;;
+    status)
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" ps
+      ;;
+    *)
+      echo "Usage: ebox telegram <start|stop|logs|status>"
+      exit 1
+      ;;
+  esac
+}
+
 # Main
 CMD="${1:-help}"
 shift || true
@@ -161,6 +193,7 @@ case "$CMD" in
   logs)      cmd_logs "${1:?Usage: ebox logs <product>}" ;;
   bundle)    cmd_bundle "${1:?Usage: ebox bundle <name>}" ;;
   stop-all)  cmd_stop_all ;;
+  telegram)  cmd_telegram "${1:-help}" ;;
   help|--help|-h) usage ;;
   *) echo "Unknown command: $CMD"; usage; exit 1 ;;
 esac
