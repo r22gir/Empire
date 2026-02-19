@@ -32,7 +32,10 @@ export default function Navbar() {
                 className="flex items-center gap-1 text-gray-700 font-medium hover:text-primary-700 transition-colors"
                 onMouseEnter={() => { setProductsOpen(true); setServicesOpen(false); }}
                 onMouseLeave={() => setProductsOpen(false)}
+                onClick={() => { setProductsOpen(!productsOpen); setServicesOpen(false); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setProductsOpen(!productsOpen); setServicesOpen(false); } }}
                 aria-expanded={productsOpen}
+                aria-haspopup="true"
               >
                 Products
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,7 +73,10 @@ export default function Navbar() {
                 className="flex items-center gap-1 text-gray-700 font-medium hover:text-primary-700 transition-colors"
                 onMouseEnter={() => { setServicesOpen(true); setProductsOpen(false); }}
                 onMouseLeave={() => setServicesOpen(false)}
+                onClick={() => { setServicesOpen(!servicesOpen); setProductsOpen(false); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setServicesOpen(!servicesOpen); setProductsOpen(false); } }}
                 aria-expanded={servicesOpen}
+                aria-haspopup="true"
               >
                 Services
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

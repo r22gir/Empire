@@ -40,8 +40,8 @@ export default function MarketForgePage() {
         {
           name: 'Hybrid',
           price: '$5.99',
-          period: 'month + 1.5% per sale',
-          features: ['Unlimited listings', 'All platforms', 'Full AI features', 'Priority support', 'Best value for growing sellers'],
+          period: 'month',
+          features: ['Unlimited listings', 'All platforms', 'Full AI features', 'Priority support', '+ 1.5% commission per sale', 'Best value for growing sellers'],
         },
       ]}
     />
