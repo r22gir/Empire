@@ -170,8 +170,7 @@ export default function ContactPage() {
                       required
                       value={form.firstName}
                       onChange={handleChange}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all"
-                      style={{ ['--tw-ring-color' as string]: '#C9A84C' } as React.CSSProperties}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all"
                       placeholder="Jane"
                     />
                   </div>
@@ -186,7 +185,7 @@ export default function ContactPage() {
                       required
                       value={form.lastName}
                       onChange={handleChange}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                      className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all"
                       placeholder="Smith"
                     />
                   </div>
@@ -203,7 +202,7 @@ export default function ContactPage() {
                     required
                     value={form.email}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all"
                     placeholder="jane@yourworkroom.com"
                   />
                 </div>
@@ -218,7 +217,7 @@ export default function ContactPage() {
                     type="tel"
                     value={form.phone}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all"
                     placeholder="(555) 000-0000"
                   />
                 </div>
@@ -234,7 +233,7 @@ export default function ContactPage() {
                     required
                     value={form.company}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all"
                     placeholder="Luxe Drapery Studio"
                   />
                 </div>
@@ -249,7 +248,7 @@ export default function ContactPage() {
                     required
                     value={form.employees}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal focus:outline-none focus:ring-2 focus:border-transparent transition-all bg-white"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all bg-white"
                   >
                     <option value="" disabled>Select team size</option>
                     <option value="1-2">1–2 (Solo / Partner)</option>
@@ -269,7 +268,7 @@ export default function ContactPage() {
                     rows={4}
                     value={form.message}
                     onChange={handleChange}
-                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all resize-none"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg text-charcoal placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all resize-none"
                     placeholder="Tell us about your workroom and what you're looking to improve..."
                   />
                 </div>
