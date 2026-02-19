@@ -135,3 +135,14 @@ cython_debug/
 # OS
 .DS_Store
 Thumbs.db
+
+# Node.js
+node_modules/
+.next/
+out/
+.vercel
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
