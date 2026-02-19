@@ -1,0 +1,15 @@
+[Unit]
+Description=EmpireBox Network Discovery (mDNS/Avahi)
+After=network-online.target avahi-daemon.service
+Wants=network-online.target avahi-daemon.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/empirebox/scripts/network-discovery.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=empirebox-discovery
+
+[Install]
+WantedBy=multi-user.target
