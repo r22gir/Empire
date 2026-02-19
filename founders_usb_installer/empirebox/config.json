@@ -1,0 +1,44 @@
+{
+  "founders_unit": true,
+  "hostname": "empirebox-founders",
+  "version": "1.0.0",
+  "install_path": "/opt/empirebox",
+  "docker_network": "empirebox",
+  "products": {
+    "marketforge":    { "port": 8010, "enabled": true },
+    "contractorforge":{ "port": 8020, "enabled": true },
+    "luxeforge":      { "port": 8030, "enabled": true },
+    "supportforge":   { "port": 8040, "enabled": true },
+    "leadforge":      { "port": 8050, "enabled": true },
+    "shipforge":      { "port": 8060, "enabled": true },
+    "forgecrm":       { "port": 8070, "enabled": true },
+    "relistapp":      { "port": 8080, "enabled": true },
+    "socialforge":    { "port": 8090, "enabled": true },
+    "llcfactory":     { "port": 8100, "enabled": true },
+    "apostapp":       { "port": 8110, "enabled": true },
+    "empireassist":   { "port": 8120, "enabled": true },
+    "empirepay":      { "port": 8130, "enabled": true }
+  },
+  "bundles": {
+    "reseller":   ["marketforge", "shipforge", "relistapp", "forgecrm"],
+    "contractor": ["contractorforge", "luxeforge", "leadforge", "forgecrm"],
+    "support":    ["supportforge", "forgecrm", "empireassist"],
+    "full":       ["marketforge", "contractorforge", "luxeforge", "supportforge",
+                   "leadforge", "shipforge", "forgecrm", "relistapp", "socialforge",
+                   "llcfactory", "apostapp", "empireassist", "empirepay"]
+  },
+  "ollama": {
+    "host": "http://localhost:11434",
+    "models": ["llama3.1:8b", "codellama:7b", "nomic-embed-text"]
+  },
+  "openclaw": {
+    "port": 7878,
+    "mode": "founders",
+    "default_model": "ollama/llama3.1:8b",
+    "coding_model": "ollama/codellama:7b"
+  },
+  "control_center": {
+    "port": 8001,
+    "api_version": "v1"
+  }
+}
