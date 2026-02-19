@@ -8,7 +8,7 @@ import os
 # Create FastAPI app
 app = FastAPI(
     title="EmpireBox API",
-    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, and AI-powered marketplace automation",
+    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, and AI-powered marketplace automation",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -87,6 +87,16 @@ try:
 except ImportError:
     pass
 
+# MarketF routers
+try:
+    from app.routers.marketplace import products, orders, reviews, seller
+    app.include_router(products.router, prefix="/marketplace", tags=["marketplace-products"])
+    app.include_router(orders.router, prefix="/marketplace", tags=["marketplace-orders"])
+    app.include_router(reviews.router, prefix="/marketplace", tags=["marketplace-reviews"])
+    app.include_router(seller.router, prefix="/marketplace", tags=["marketplace-seller"])
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -95,30 +105,7 @@ async def root():
         "message": "EmpireBox API",
         "version": "1.0.0",
         "status": "operational",
-        "endpoints": {
-            "licenses": "/licenses",
-            "shipping": "/shipping",
-            "preorders": "/preorders",
-            "auth": "/auth",
-            "users": "/users",
-            "listings": "/listings",
-            "messages": "/messages",
-            "marketplaces": "/marketplaces",
-            "webhooks": "/webhooks",
-            "ai": "/ai"
-        }
-    }
-
-
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "empirebox-backend"
-    }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+        "features": {
+            "marketplace_fee": "8%",
+            "
+
