@@ -3,30 +3,41 @@
 ## Overview
 The EmpireBox ecosystem is a comprehensive suite of business automation tools designed to help entrepreneurs build and scale their businesses. The platform consists of 23+ integrated products organized into strategic categories.
 
-## Product Categories
+---
 
-### Core Platform
+## Core Platform
 
-#### OpenClaw (AI Brain)
+| Component | Description |
+|-----------|-------------|
+| **EmpireBox** | Central SaaS platform — subscriptions, billing, user management, unified dashboard |
+| **OpenClaw (AI Brain)** | Central AI engine powering all products — natural language, cross-product intelligence |
+| **ForgeCRM** | CRM integrated across all Forge products |
+| **Empire Wallet** | Custodial Solana wallet for non-crypto users |
+
+### OpenClaw (AI Brain)
 - Central AI engine powering all EmpireBox products
 - Natural language conversation intake
 - Cross-product intelligence and automation
 - Learning system that adapts to user behavior
 - **Integration**: Powers EmpireAssist, Zero to Hero automation, and all AI features
 
-#### EmpireBox
-- Main platform orchestrating all products
-- Unified dashboard and control center
-- License management and subscription handling
-- Cross-product data synchronization
-- Hardware bundle management
-
 ---
 
-## Standalone Products
+## Forge Products
+
+| Product | Description | Revenue Projection Y3 |
+|---------|-------------|----------------------|
+| **MarketForge** | Intelligent listing creation, photo enhancement, AI descriptions | $1.9M (11%) |
+| **MarketF** | P2P marketplace with escrow, Stripe Connect payments | $8.65M (50%) |
+| **SupportForge** | AI-powered customer support, ticket management | Included |
+| **ContractorForge** | Project/contract management for contractors | — |
+| **LuxeForge** | High-end service business management | — |
+| **ElectricForge** | Electrical service business template | — |
+| **LandscapeForge** | Landscaping service business template | — |
+| **ShipForge** | Shipping solutions, rate comparison, label generation | — |
+| **LeadForge** | AI-powered lead generation (see [LEADFORGE_SPEC.md](./LEADFORGE_SPEC.md)) | — |
 
 ### MarketForge
-**Revenue Projection Y3**: $1.9M (11%)
 - Intelligent listing creation tool
 - Photo enhancement and optimization
 - AI-powered description generation
@@ -34,8 +45,15 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
 - Inventory management
 - **Pricing**: Freemium with premium features
 
+### MarketF (P2P Marketplace)
+- Peer-to-peer marketplace platform
+- Buyer and seller matching
+- Integrated payments via Stripe Connect
+- Rating and review system
+- Dispute resolution
+- **Primary Revenue Driver**
+
 ### SupportForge
-**Revenue Projection Y3**: Included in MarketForge/other products
 - AI-powered customer support system
 - Ticket management and automation
 - Multi-channel support (email, chat, phone)
@@ -50,23 +68,43 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
 - Contact management and segmentation
 - Email campaigns and automation
 - Integration with all Forge products
-- **Decision**: Start with MVP, iterate based on user feedback
+
+### ContractorForge
+- Service business platform for contractors
+- Job management and scheduling
+- Quote generation and invoicing
+- Photo measurements via tablet/phone
+- Material tracking and ordering
+- **Hardware**: Optimized for Empire Tablet
+
+### LuxeForge
+- Premium service business template
+- Luxury branding and marketing
+- High-end client management
+- Premium pricing strategies
+- White-glove customer experience
+
+### LeadForge
+- AI-powered lead generation
+- Embedded in ContractorForge & LuxeForge
+- Smart lead scoring and qualification
+- See [LEADFORGE_SPEC.md](./LEADFORGE_SPEC.md) for full specification
 
 ---
 
 ## Revenue Generator Products
 
-### MarketF (P2P Marketplace)
-**Revenue Projection Y3**: $8.65M (50% of total revenue)
-- Peer-to-peer marketplace platform
-- Buyer and seller matching
-- Integrated payments via Stripe Connect
-- Rating and review system
-- Dispute resolution
-- **Primary Revenue Driver**
+| Product | Revenue Projection Y3 | % of Total |
+|---------|----------------------|------------|
+| MarketF (P2P Marketplace) | $8.65M | 50% |
+| LLCFactory | $2M | 12% |
+| MarketForge | $1.9M | 11% |
+| RelistApp | $1.5M | 9% |
+| ApostApp | $1.5M | 9% |
+| SocialForge | $800K | 5% |
+| Other Products | $850K | 5% |
 
 ### RelistApp
-**Revenue Projection Y3**: $1.5M (9%)
 - Automated relisting for expired listings
 - Multi-marketplace support
 - Smart scheduling and optimization
@@ -75,7 +113,6 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
 - **Integration**: Works with MarketForge
 
 ### LLCFactory
-**Revenue Projection Y3**: $2M (12%)
 - Automated LLC formation service
 - **Model**: Hybrid approach
   - Partner with Northwest Registered Agents for state filings
@@ -86,24 +123,60 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
 - **Integration**: Part of Zero to Hero flow
 
 ### SocialForge
-**Revenue Projection Y3**: $800K (5%)
 - Social media management and automation
 - Multi-platform posting (Facebook, Instagram, Twitter, LinkedIn)
-- **Approach**: Semi-automatic
-  - User confirms each platform creation
-  - Fully automatic posting where API allows
+- **Approach**: Semi-automatic (user confirms each platform creation)
 - Content calendar and scheduling
 - Analytics and engagement tracking
 - **Integration**: Part of Zero to Hero business setup
 
 ### ApostApp
-**Revenue Projection Y3**: $1.5M (9%)
 - Apostille and document authentication service
 - International document preparation
 - Notarization coordination
 - Document filler shared with LLCFactory
 - Tracking and status updates
-- **Integration**: Document automation engine used by LLCFactory
+
+---
+
+## Tokenomics & Licensing
+
+| Component | Description |
+|-----------|-------------|
+| **EMPIRE Token ($EMPIRE)** | Solana SPL utility + governance token — 1B supply (see [EMPIRE_TOKEN_SPEC.md](./EMPIRE_TOKEN_SPEC.md)) |
+| **NFT License System** | All licenses are Solana NFTs regardless of payment method (see [EMPIRE_LICENSE_NFT_SPEC.md](./EMPIRE_LICENSE_NFT_SPEC.md)) |
+
+### EMPIRE Token ($EMPIRE)
+- Solana SPL utility and governance token
+- 1 billion total supply
+- Used for discounts, staking, governance
+- See [EMPIRE_TOKEN_SPEC.md](./EMPIRE_TOKEN_SPEC.md) for distribution and DEX strategy
+
+### NFT License System
+- All EmpireBox licenses minted as Solana NFTs
+- Works regardless of payment method (fiat or crypto)
+- Transferable on secondary markets
+- Tier-based metadata
+- See [EMPIRE_LICENSE_NFT_SPEC.md](./EMPIRE_LICENSE_NFT_SPEC.md) for full specification
+
+---
+
+## Payments Infrastructure
+
+| Component | Description |
+|-----------|-------------|
+| **Stripe / PayPal** | Standard fiat checkout |
+| **Stripe Connect** | User payouts on MarketF and marketplaces |
+| **Multi-chain Crypto Payments** | Solana, BNB Chain, Cardano, Ethereum — optional 15% discount (see [CRYPTO_PAYMENTS_SPEC.md](./CRYPTO_PAYMENTS_SPEC.md)) |
+| **EMPIRE Token Payments** | Optional 20% discount when paying with $EMPIRE |
+| **Crypto Transparency Ledger** | On-chain record of all crypto transactions |
+
+### Payment Processing
+- **Regular Stripe**: EmpireBox subscriptions and payments
+- **Stripe Connect**: Required for user payouts on MarketF and other marketplaces
+- **Crypto Payments**: 15% discount for multi-chain payments
+- **EMPIRE Token**: 20% discount when paying with $EMPIRE
+- Automated onboarding during Zero to Hero flow
 
 ---
 
@@ -117,15 +190,6 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
 - Mobile app integration for on-the-go shipping
 - **Integration**: Works with phone camera and inventory scanner
 
-### ContractorForge
-- Service business platform for contractors
-- Job management and scheduling
-- Quote generation and invoicing
-- Photo measurements via tablet/phone
-- Material tracking and ordering
-- Customer communication
-- **Hardware**: Optimized for Empire Tablet
-
 ### VA Disability App
 **Status**: Telehealth is LEGAL with compliance
 - VA disability claim assistance
@@ -135,8 +199,6 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
   - HIPAA-compliant video platform
   - Documented informed consent
   - Thorough evaluation records
-- Document preparation and submission
-- Claims tracking and follow-up
 - **Name Options**: VetHelp Assist, VeteranForge
 
 ### RecoveryForge
@@ -149,70 +211,36 @@ The EmpireBox ecosystem is a comprehensive suite of business automation tools de
 
 ---
 
-## Template Products
+## Hardware
 
-### LuxeForge
-- Premium service business template
-- Luxury branding and marketing
-- High-end client management
-- Premium pricing strategies
-- White-glove customer experience
-
-### ElectricForge
-- Electrical service business template
-- Job management for electricians
-- Safety compliance tracking
-- Equipment and parts inventory
-- Licensing and insurance management
-
-### LandscapeForge
-- Landscaping service business template
-- Seasonal job planning
-- Equipment tracking
-- Weather-based scheduling
-- Customer property management
-
----
-
-## Core Components
-
-### Setup Portal
-- Web-based QR code activation flow
-- Hardware bundle activation
-- Account creation and onboarding
-- License redemption
-- Product selection and configuration
-
-### License System
-- License generation and validation
-- Subscription management
-- Tier-based feature access
-- Usage tracking and limits
-- Renewal automation
+| Component | Description |
+|-----------|-------------|
+| **Solana Seeker Phone** | All-in-one mobile business device, priority Solana Pay integration |
+| **Empire Tablet** | Larger screen for detailed work, ContractorForge optimized |
+| **Mini PC** | Full desktop experience, local AI via Ollama |
+| **Inventory Scanner** | Barcode/QR add-on for high-volume operations |
 
 ### Hardware Bundles
-Hardware options that integrate seamlessly with the EmpireBox ecosystem:
+See [HARDWARE_BUNDLES.md](./HARDWARE_BUNDLES.md) for full specifications.
 
-#### 1. Solana Seeker Phone - All-in-One Mobile Business Device
-- **Operation Modes**: 
-  - Standalone: Use independently with built-in features
-  - Connected: Full EmpireBox features when paired
+#### 1. Solana Seeker Phone
+- **Operation Modes**: Standalone or Connected (full EmpireBox features)
 - **Built-in Features**:
   - EmpireAssist (Telegram/WhatsApp) pre-installed
   - Camera for inventory scanning and photo listings
   - Barcode/QR scanning capability
   - Mobile shipping label generation
+  - Solana Pay priority integration
 - **Use Case**: "Pull out phone, ask business question, get instant answer"
-- **Perfect For**: Mobile resellers, on-the-go entrepreneurs
 
-#### 2. Empire Tablet - Larger Screen for Detailed Work
+#### 2. Empire Tablet
 - Same capabilities as phone with enhanced screen real estate
 - Better for inventory management workflows
 - Ideal for photo measurements and job estimation
 - Multi-window support for complex tasks
 - **Perfect For**: ContractorForge users, warehouse management
 
-#### 3. Mini PC - Full Desktop Experience
+#### 3. Mini PC
 - Complete desktop environment
 - Local AI processing via Ollama
 - Multi-monitor support
@@ -226,7 +254,24 @@ Hardware options that integrate seamlessly with the EmpireBox ecosystem:
 - Instant product lookup and identification
 - Rapid listing creation workflow
 - Battery-powered for mobility
-- **Perfect For**: High-volume sellers, warehouse operations
+
+---
+
+## Core Components
+
+### Setup Portal
+- Web-based QR code activation flow
+- Hardware bundle activation
+- Account creation and onboarding
+- License redemption
+- Product selection and configuration
+
+### License System
+- License generation and validation (NFT-based)
+- Subscription management
+- Tier-based feature access
+- Usage tracking and limits
+- Renewal automation
 
 ### Agent Safeguards
 - Production-ready safety system for autonomous agents
@@ -244,7 +289,7 @@ Hardware options that integrate seamlessly with the EmpireBox ecosystem:
 - Push notifications
 - Biometric authentication
 
-### EmpireAssist (NEW)
+### EmpireAssist
 **Type**: Core Component + Part of SupportForge  
 **Priority**: MVP (Phase 1)  
 **Status**: Included with EmpireBox
@@ -266,18 +311,18 @@ AI-powered messenger integration for managing your business from anywhere:
 - WhatsApp (Pro tier and above)
 - SMS (Business tier)
 
-**Hardware Integration**:
-- Seamless integration with Solana Seeker phone
-- Works perfectly with Empire Tablet
-- Push notifications on all devices
-- Camera integration for photo-based queries
-
 **Pricing Tiers**:
 - **Basic (Free with EmpireBox)**: Telegram only, 100 messages/month
 - **Pro ($19/month)**: Unlimited Telegram + WhatsApp
-- **Business ($49/month)**: + SMS, voice notes, team access (multiple users)
+- **Business ($49/month)**: + SMS, voice notes, team access
 
 **Powered by**: OpenClaw AI brain
+
+### Empire Wallet
+- Custodial Solana wallet for non-crypto users
+- Seamless crypto payments without complexity
+- Automatic conversion options
+- Integrated with NFT license system
 
 ---
 
@@ -289,16 +334,10 @@ Complete business automation from idea to operation:
 1. **OpenClaw Conversation Intake**: Natural language business idea discussion
 2. **LLCFactory**: Automated business formation (hybrid partner + DIY approach)
 3. **Stripe Connect Onboarding**: Payment processing setup
-4. **SocialForge Auto-Creation**: Semi-automatic social media profiles (user confirms each)
+4. **SocialForge Auto-Creation**: Semi-automatic social media profiles
 5. **Business Tools Activation**: Relevant Forge products enabled
 6. **EmpireAssist Setup**: Messenger integration configured
 7. **Cross-Product Data Flow**: Unified business data across all products
-
-### Payment Processing
-- **Regular Stripe**: Started for EmpireBox subscriptions and payments
-- **Stripe Connect**: Required for user payouts on MarketF and other marketplaces
-- Automated onboarding during Zero to Hero flow
-- Compliance and verification handling
 
 ### Document Automation
 - Shared document filler between ApostApp and LLCFactory
@@ -313,12 +352,13 @@ Complete business automation from idea to operation:
 **Total Products**: 23+
 
 **Breakdown**:
-- Core Platform: 2 (OpenClaw, EmpireBox)
+- Core Platform: 3 (OpenClaw, EmpireBox, Empire Wallet)
 - Standalone: 3 (MarketForge, SupportForge, ForgeCRM)
 - Revenue Generators: 5 (MarketF, RelistApp, LLCFactory, SocialForge, ApostApp)
 - Service Products: 4 (ShipForge, ContractorForge, VA Disability App, RecoveryForge)
 - Templates: 3 (LuxeForge, ElectricForge, LandscapeForge)
 - Core Components: 6 (Setup Portal, License System, Hardware Bundles, Agent Safeguards, Mobile App, EmpireAssist)
+- New: LeadForge (AI lead generation)
 
 ---
 
@@ -326,9 +366,10 @@ Complete business automation from idea to operation:
 
 ### Target Markets
 1. **Individual Resellers**: MarketForge, RelistApp, MarketF, ShipForge
-2. **Service Businesses**: ContractorForge, Template Forge products
+2. **Service Businesses**: ContractorForge, LuxeForge, LeadForge
 3. **New Entrepreneurs**: Zero to Hero flow, LLCFactory, SocialForge
 4. **Specialized Services**: VA Disability App, RecoveryForge, ApostApp
+5. **Crypto-Native Users**: EMPIRE token, NFT licenses, multi-chain payments
 
 ### Competitive Advantages
 - **Unified Ecosystem**: All products work together seamlessly
@@ -336,21 +377,27 @@ Complete business automation from idea to operation:
 - **Hardware Integration**: Purpose-built devices for business operations
 - **Mobile-First**: Manage everything from your phone via EmpireAssist
 - **Zero to Hero**: Complete business automation from formation to operation
-
-### Hardware Strategy
-- **Standalone Value**: Each device works independently
-- **Enhanced Experience**: Full features when connected to EmpireBox
-- **Multiple Form Factors**: Phone, tablet, and PC options for different use cases
-- **Add-on Ecosystem**: Inventory scanners and other accessories
-- **Pre-configured**: Hardware ships ready to use with software pre-installed
+- **Web3 Integration**: NFT licenses, token payments, on-chain transparency
 
 ---
 
-## Next Steps
+## Related Documentation
 
-For detailed specifications on specific products, see:
-- [EmpireAssist Specification](EMPIRE_ASSIST_SPEC.md)
-- [Zero to Hero Flow](ZERO_TO_HERO_SPEC.md)
-- [Product Decisions Log](PRODUCT_DECISIONS.md)
-- [Revenue Model](REVENUE_MODEL.md)
-- [VA App Telehealth Compliance](VA_APP_TELEHEALTH.md)
+### Core Specs
+- [EmpireAssist Specification](./EMPIRE_ASSIST_SPEC.md)
+- [Zero to Hero Flow](./ZERO_TO_HERO_SPEC.md)
+- [Product Decisions Log](./PRODUCT_DECISIONS.md)
+- [Revenue Model](./REVENUE_MODEL.md)
+- [VA App Telehealth Compliance](./VA_APP_TELEHEALTH.md)
+
+### Crypto & Token Specs
+- [CRYPTO_PAYMENTS_SPEC.md](./CRYPTO_PAYMENTS_SPEC.md) — Multi-chain payment architecture & DB schema
+- [EMPIRE_TOKEN_SPEC.md](./EMPIRE_TOKEN_SPEC.md) — Token details, distribution, DEX strategy
+- [EMPIRE_LICENSE_NFT_SPEC.md](./EMPIRE_LICENSE_NFT_SPEC.md) — NFT licensing tiers, metadata, secondary market
+- [LEADFORGE_SPEC.md](./LEADFORGE_SPEC.md) — Lead generation module specification
+
+### Infrastructure
+- [HARDWARE_BUNDLES.md](./HARDWARE_BUNDLES.md) — Hardware specifications
+- [SOLANA_PARTNERSHIP.md](./SOLANA_PARTNERSHIP.md) — Solana ecosystem partnerships
+- [STRIPE_COMPLIANCE_CHECKLIST.md](./STRIPE_COMPLIANCE_CHECKLIST.md) — Stripe compliance requirements
+- [LEGAL_COMPLIANCE_AUDIT.md](./LEGAL_COMPLIANCE_AUDIT.md) — Legal & compliance overview
