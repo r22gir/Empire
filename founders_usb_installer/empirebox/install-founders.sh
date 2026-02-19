@@ -133,7 +133,23 @@ chmod +x /usr/local/bin/ebox
 log "ebox CLI installed at /usr/local/bin/ebox"
 
 # ──────────────────────────────────────────────
-# 8. FIREWALL
+# 8. TELEGRAM BOT SETUP
+# ──────────────────────────────────────────────
+log "=== Setting up Telegram bot ==="
+mkdir -p "${INSTALL_PATH}/telegram"
+cp -r "$(dirname "$0")/telegram/"* "${INSTALL_PATH}/telegram/"
+# Add placeholder for bot token if not already present
+if ! grep -q "TELEGRAM_BOT_TOKEN" "${ENV_FILE}"; then
+  echo "" >> "${ENV_FILE}"
+  echo "# Telegram Bot (set your token from @BotFather)" >> "${ENV_FILE}"
+  echo "TELEGRAM_BOT_TOKEN=" >> "${ENV_FILE}"
+fi
+log "Telegram bot files copied to ${INSTALL_PATH}/telegram"
+log "IMPORTANT: Edit ${INSTALL_PATH}/telegram/config.yaml to set your bot token and allowed_users"
+log "Then run: ebox telegram start"
+
+# ──────────────────────────────────────────────
+# 9. FIREWALL
 # ──────────────────────────────────────────────
 log "=== Configuring Firewall ==="
 ufw --force reset
@@ -152,13 +168,13 @@ ufw --force enable
 log "Firewall configured"
 
 # ──────────────────────────────────────────────
-# 9. WAIT FOR SERVICES
+# 10. WAIT FOR SERVICES
 # ──────────────────────────────────────────────
 log "=== Waiting for services to be healthy ==="
 sleep 30
 
 # ──────────────────────────────────────────────
-# 10. DONE
+# 11. DONE
 # ──────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
 log "=== EmpireBox Founders Install Complete ==="
@@ -175,3 +191,6 @@ log "  Logs:           ${LOG_FILE}"
 log ""
 log "  Run 'ebox list' to see all products"
 log "  Run 'ebox bundle full' to start all products"
+log ""
+log "  Telegram Bot:   edit ${INSTALL_PATH}/telegram/config.yaml"
+log "                  then run: ebox telegram start"

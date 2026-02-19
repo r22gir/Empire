@@ -39,6 +39,9 @@ skills:
   - name: empirebox
     path: /app/skills/empirebox.yaml
     enabled: true
+  - name: telegram
+    path: /app/skills/telegram.yaml
+    enabled: true
 
 # Storage
 storage:

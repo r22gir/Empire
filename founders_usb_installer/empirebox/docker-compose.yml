@@ -120,6 +120,26 @@ services:
     networks:
       - empirebox
 
+  # ── Telegram Bot ────────────────────────────────
+  telegram-bot:
+    build:
+      context: ./telegram
+      dockerfile: Dockerfile
+    container_name: empirebox_telegram
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - OPENCLAW_HOST=http://openclaw:7878
+      - CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./telegram/config.yaml:/app/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/empirebox:/opt/empirebox:ro
+    depends_on:
+      - openclaw
+    networks:
+      - empirebox
+
 volumes:
   postgres_data:
   redis_data:
