@@ -30,9 +30,8 @@ export default function Navbar() {
             <li className="relative">
               <button
                 className="flex items-center gap-1 text-gray-700 font-medium hover:text-primary-700 transition-colors"
-                onMouseEnter={() => setProductsOpen(true)}
+                onMouseEnter={() => { setProductsOpen(true); setServicesOpen(false); }}
                 onMouseLeave={() => setProductsOpen(false)}
-                onClick={() => setProductsOpen(!productsOpen)}
                 aria-expanded={productsOpen}
               >
                 Products
@@ -69,9 +68,8 @@ export default function Navbar() {
             <li className="relative">
               <button
                 className="flex items-center gap-1 text-gray-700 font-medium hover:text-primary-700 transition-colors"
-                onMouseEnter={() => setServicesOpen(true)}
+                onMouseEnter={() => { setServicesOpen(true); setProductsOpen(false); }}
                 onMouseLeave={() => setServicesOpen(false)}
-                onClick={() => setServicesOpen(!servicesOpen)}
                 aria-expanded={servicesOpen}
               >
                 Services
@@ -146,7 +144,7 @@ export default function Navbar() {
             <div>
               <button
                 className="flex items-center gap-1 py-2 text-gray-700 font-medium hover:text-primary-700 w-full text-left"
-                onClick={() => setProductsOpen(!productsOpen)}
+                onClick={() => { setProductsOpen(!productsOpen); setServicesOpen(false); }}
               >
                 Products
                 <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -177,7 +175,7 @@ export default function Navbar() {
             <div>
               <button
                 className="flex items-center gap-1 py-2 text-gray-700 font-medium hover:text-primary-700 w-full text-left"
-                onClick={() => setServicesOpen(!servicesOpen)}
+                onClick={() => { setServicesOpen(!servicesOpen); setProductsOpen(false); }}
               >
                 Services
                 <svg className="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
