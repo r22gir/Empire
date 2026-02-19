@@ -8,7 +8,7 @@ import os
 # Create FastAPI app
 app = FastAPI(
     title="EmpireBox API",
-    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, and AI-powered marketplace automation",
+    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, SupportForge, and AI-powered marketplace automation",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -47,44 +47,76 @@ except ImportError:
 
 try:
     from app.routers import auth
-    app.include_router(auth.router, prefix="/auth", tags=["auth"])
-except ImportError:
+    if auth:
+        app.include_router(auth.router, prefix="/auth", tags=["auth"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import users
-    app.include_router(users.router, prefix="/users", tags=["users"])
-except ImportError:
+    if users:
+        app.include_router(users.router, prefix="/users", tags=["users"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import listings
-    app.include_router(listings.router, prefix="/listings", tags=["listings"])
-except ImportError:
+    if listings:
+        app.include_router(listings.router, prefix="/listings", tags=["listings"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import messages
-    app.include_router(messages.router, prefix="/messages", tags=["messages"])
-except ImportError:
+    if messages:
+        app.include_router(messages.router, prefix="/messages", tags=["messages"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import marketplaces
-    app.include_router(marketplaces.router, prefix="/marketplaces", tags=["marketplaces"])
-except ImportError:
+    if marketplaces:
+        app.include_router(marketplaces.router, prefix="/marketplaces", tags=["marketplaces"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import webhooks
-    app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
-except ImportError:
+    if webhooks:
+        app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+except (ImportError, AttributeError):
     pass
 
 try:
     from app.routers import ai
-    app.include_router(ai.router, prefix="/ai", tags=["ai"])
+    if ai:
+        app.include_router(ai.router, prefix="/ai", tags=["ai"])
+except (ImportError, AttributeError):
+    pass
+
+# SupportForge routers
+try:
+    from app.routers import supportforge_tickets
+    app.include_router(supportforge_tickets.router, prefix="/api/v1/tickets", tags=["supportforge-tickets"])
 except ImportError:
+    pass
+
+try:
+    from app.routers import supportforge_customers
+    app.include_router(supportforge_customers.router, prefix="/api/v1/customers", tags=["supportforge-customers"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import supportforge_kb
+    app.include_router(supportforge_kb.router, prefix="/api/v1/kb", tags=["supportforge-kb"])
+except (ImportError, AttributeError):
+    pass
+
+try:
+    from app.routers import supportforge_ai
+    app.include_router(supportforge_ai.router, prefix="/api/v1/ai", tags=["supportforge-ai"])
+except (ImportError, AttributeError):
     pass
 
 # MarketF routers
@@ -105,7 +137,39 @@ async def root():
         "message": "EmpireBox API",
         "version": "1.0.0",
         "status": "operational",
-        "features": {
-            "marketplace_fee": "8%",
-            "
-
+        "marketplace_fee": "8%",
+        "endpoints": {
+            "licenses": "/licenses",
+            "shipping": "/shipping",
+            "preorders": "/preorders",
+            "auth": "/auth",
+            "users": "/users",
+            "listings": "/listings",
+            "messages": "/messages",
+            "marketplaces": "/marketplaces",
+            "webhooks": "/webhooks",
+            "ai": "/ai",
+            "marketplace_products": "/marketplace/products",
+            "marketplace_orders": "/marketplace/orders",
+            "marketplace_reviews": "/marketplace/reviews",
+            "marketplace_seller": "/marketplace/seller",
+            "supportforge_tickets": "/api/v1/tickets",
+            "supportforge_customers": "/api/v1/customers",
+            "supportforge_kb": "/api/v1/kb",
+            "supportforge_ai": "/api/v1/ai"
+        }
+    }
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "service": "empirebox-backend"
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

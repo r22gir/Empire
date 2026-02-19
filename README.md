@@ -4,71 +4,24 @@
 ![License](https://img.shields.io/badge/License-Proprietary-red)
 ![Status](https://img.shields.io/badge/Status-Development-yellow)
 
-A comprehensive system combining Setup Portal, License Management, ShipForge shipping, agent safeguards, emergency stop protocols, and mobile marketplace functionality.
-
-## 🎯 Project Overview
-
-This repository contains the complete EmpireBox ecosystem:
-
-1. **Setup Portal** - Web-based QR code activation flow for hardware bundles
-2. **License System** - Generate, validate, and activate subscription licenses
-3. **ShipForge** - Integrated shipping solution with EasyPost (compare rates, buy labels, print from phone)
-4. **Hardware Bundles** - Pre-order system for Solana Seeker phones + subscriptions
-5. **Agent Safeguards** - Production-ready safety system for autonomous agents
-6. **Mobile App** - Flutter app with shipping integration and deep linking
+A comprehensive system combining Setup Portal, License Management, ShipForge shipping, agent safeguards, emergency stop protocols, mobile marketplace functionality, and enterprise customer support.
 
 ## 🎯 Ecosystem Overview
 
-| Product | Description |
-|---------|-------------|
-| 🛒 MarketForge | Listing Creation |
-| 🏪 MarketF | P2P Marketplace |
-| 📦 ShipForge | Shipping Solutions |
-| 🛠️ ContractorForge | Service Business Platform |
-| 🌟 LuxeForge | Premium Services |
-| ⚡ ElectricForge | Electric Services |
-| 🌳 LandscapeForge | Landscaping Services |
-| 💬 SupportForge | Customer Support |
-| 📑 Setup Portal | Activation Flow |
-| 🔑 License System | License Management |
-| 📦 Hardware Bundles | Hardware Packages |
-| 🔐 Agent Safeguards | Safety Systems |
-| 📱 Mobile App | Flutter App with Integrations |
-| 💬 EmpireAssist | Telegram/WhatsApp Messenger Integration |
+| Product | Description | Port |
+|---------|-------------|------|
+| 🛒 MarketForge | Multi-marketplace listing & inventory | 8010 |
+| 🏗️ ContractorForge | Contractor business management | 8020 |
+| ✨ LuxeForge | Custom workroom / window treatments | 8030 |
+| 💬 SupportForge | Customer support platform | 8040 |
+| 📈 LeadForge | Lead generation & nurturing | 8050 |
+| 📦 ShipForge | Shipping & label management | 8060 |
+| 👥 ForgeCRM | Customer relationship management | 8070 |
+| 🔄 RelistApp | Cross-platform relisting | 8080 |
+| 📱 SocialForge | Social media management | 8090 |
+| 🏢 LLCFactory | Business formation & compliance | 8100 |
+| 📜 ApostApp | Document apostille services | 8110 |
+| 🤖 EmpireAssist | AI assistant for all products | 8120 |
+| 💰 EmpirePay | Crypto payments & EMPIRE token | 8130 |
 
-## 🛠️ ContractorForge
-
-Universal SaaS platform for service businesses with AI intake, photo measurements, and smart quoting.
-
-```bash
-# Backend
-cd contractorforge_backend && pip install -r requirements.txt && uvicorn app.main:app --reload
-
-# Frontend  
-cd contractorforge_web && npm install && npm run dev
-```
-
-## 📚 Documentation
-
-Comprehensive documentation for the entire EmpireBox ecosystem:
-
-### Core Documentation
-- **[Product Ecosystem](docs/ECOSYSTEM.md)** - Complete product catalog with 23+ products, organized by category, including hardware options (Solana Seeker Phone, Tablet, Mini PC, Scanner)
-- **[EmpireAssist](docs/EMPIRE_ASSIST_SPEC.md)** - Telegram/WhatsApp messenger integration for managing your business via chat from anywhere
-- **[Zero to Hero](docs/ZERO_TO_HERO_SPEC.md)** - Complete business automation specification from idea to first sale in 3 days
-- **[Product Decisions](docs/PRODUCT_DECISIONS.md)** - Strategic decisions log documenting key choices and rationale
-- **[Revenue Model](docs/REVENUE_MODEL.md)** - Financial projections with conservative, moderate, and aspirational scenarios
-- **[VA Telehealth](docs/VA_APP_TELEHEALTH.md)** - Legal compliance requirements for VA disability app telehealth services
-
-### Technical Documentation
-- [Hardware Bundles](docs/HARDWARE_BUNDLES.md) - Pre-order system and hardware specifications
-- [Shipping Integration](docs/SHIPPING_INTEGRATION.md) - ShipForge integration details
-- [Setup Flow](docs/SETUP_FLOW.md) - QR code activation and onboarding
-- [Legal Compliance](docs/LEGAL_COMPLIANCE_AUDIT.md) - Compliance audit and requirements
-- [Quick Start Card](docs/QUICK_START_CARD.md) - Getting started guide
-- [Solana Partnership](docs/SOLANA_PARTNERSHIP.md) - Partnership details
-- [Stripe Compliance](docs/STRIPE_COMPLIANCE_CHECKLIST.md) - Payment processing compliance
-
-## 📄 License
-
-Proprietary © 2026 EmpireBox. All rights reserved.
+## 📁 Repository Structure

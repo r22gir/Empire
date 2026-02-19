@@ -16,3 +16,8 @@ stripe>=7.0.0
 easypost>=8.0.0
 qrcode>=7.4.0
 Pillow>=10.0.0
+# SupportForge dependencies
+redis>=5.0.0
+celery>=5.3.0
+openai>=1.12.0
+python-dateutil>=2.8.0
