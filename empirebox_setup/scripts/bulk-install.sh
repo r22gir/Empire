@@ -73,12 +73,20 @@ pull_ollama_models() {
     fi
 
     log "Pulling Ollama models: $models"
+    local pids=()
     for model in $models; do
         log "  Pulling $model..."
         ollama pull "$model" &
+        pids+=($!)
     done
-    wait
-    log "All Ollama models pulled."
+    local failed=0
+    for pid in "${pids[@]}"; do
+        wait "$pid" || { log "WARN: A model pull failed (PID $pid)"; failed=$((failed + 1)); }
+    done
+    if [[ $failed -gt 0 ]]; then
+        log "WARN: $failed model pull(s) failed."
+    fi
+    log "Ollama model pulls finished."
 }
 
 declare -A PRODUCT_IMAGES=(

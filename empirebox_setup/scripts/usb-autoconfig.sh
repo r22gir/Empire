@@ -74,12 +74,18 @@ watch_for_config() {
     log "Watching $WATCH_DIR for USB drives containing $CONFIG_FILENAME..."
 
     # Also check if a USB is already mounted
-    find "$WATCH_DIR" -maxdepth 3 -name "$CONFIG_FILENAME" 2>/dev/null | while read -r found; do
+    local already_found=false
+    while IFS= read -r found; do
         if validate_config "$found" 2>&1 | grep -q "passed"; then
             process_config "$found"
-            return
+            already_found=true
+            break
         fi
-    done
+    done < <(find "$WATCH_DIR" -maxdepth 3 -name "$CONFIG_FILENAME" 2>/dev/null)
+
+    if [[ "$already_found" == "true" ]]; then
+        return
+    fi
 
     # Use inotifywait to watch for new mounts
     inotifywait -m -r --event create --event moved_to --format '%w%f' "$WATCH_DIR" 2>/dev/null | \

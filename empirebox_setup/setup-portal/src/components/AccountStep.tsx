@@ -52,7 +52,7 @@ export default function AccountStep({ state, onUpdate, onNext }: Props) {
           placeholder="Email address"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:border-gold"
+          className="w-full px-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:ring-2"
           style={{ '--tw-ring-color': '#C9A84C' } as React.CSSProperties}
         />
         <input
