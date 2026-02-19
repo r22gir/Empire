@@ -8,7 +8,7 @@ import os
 # Create FastAPI app
 app = FastAPI(
     title="EmpireBox API",
-    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, SupportForge, and AI-powered marketplace automation",
+    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, SupportForge, Economic Intelligence, and AI-powered marketplace automation",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -129,6 +129,13 @@ try:
 except ImportError:
     pass
 
+# Economic Intelligence router
+try:
+    from app.routers import economic
+    app.include_router(economic.router, prefix="/api/v1/economic", tags=["economic"])
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -156,7 +163,8 @@ async def root():
             "supportforge_tickets": "/api/v1/tickets",
             "supportforge_customers": "/api/v1/customers",
             "supportforge_kb": "/api/v1/kb",
-            "supportforge_ai": "/api/v1/ai"
+            "supportforge_ai": "/api/v1/ai",
+            "economic": "/api/v1/economic"
         }
     }
 

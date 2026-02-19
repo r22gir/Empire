@@ -38,6 +38,13 @@ try:
 except ImportError:
     MarketplaceAccount = None
 
+# Economic intelligence models
+try:
+    from app.models.economic import EconomicLedger, EconomicTransaction
+except ImportError:
+    EconomicLedger = None
+    EconomicTransaction = None
+
 # SupportForge models
 try:
     from app.models.supportforge_tenant import Tenant
@@ -84,6 +91,7 @@ except ImportError:
     SatisfactionRating = None
 
 __all__ = [
+    # Core models
     "License",
     "Shipment",
     "PreOrder",
@@ -91,6 +99,9 @@ __all__ = [
     "Listing",
     "Message",
     "MarketplaceAccount",
+    # Economic Intelligence
+    "EconomicLedger",
+    "EconomicTransaction",
     # SupportForge
     "Tenant",
     "SupportAgent",

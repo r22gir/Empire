@@ -2,7 +2,10 @@
 AI service for interfacing with EmpireBox agents.
 """
 from typing import Optional, Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import User
+from app.services.economic_service import EconomicService
+from app.config import settings
 
 
 class AIService:
@@ -10,11 +13,12 @@ class AIService:
     Service for AI-powered features using EmpireBox agents.
     
     This would integrate with the empire_box_agents module when available.
-    For now, provides mock implementations.
+    For now, provides mock implementations with economic tracking.
     """
     
-    def __init__(self, user: User):
+    def __init__(self, user: User, db: Optional[AsyncSession] = None):
         self.user = user
+        self.db = db
         # TODO: Initialize TokenManager and RequestRouter from empire_box_agents
         # self.token_manager = TokenManager(user_id=str(user.id), tier=user.tier)
         # self.router = RequestRouter(token_manager=self.token_manager)
@@ -38,11 +42,26 @@ class AIService:
         
         # Mock implementation
         description = f"High-quality {product_info.get('title', 'item')} in excellent condition."
-        tokens_used = 50
+        input_tokens = 50
+        output_tokens = 100
+        
+        # Track economic cost if DB session available
+        if self.db and settings.economic_enabled:
+            economic_service = EconomicService(self.db)
+            await economic_service.record_ai_cost(
+                entity_type="user",
+                entity_id=self.user.id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model="gpt-4",
+                description="Generate product description"
+            )
         
         return {
             "description": description,
-            "tokens_used": tokens_used
+            "tokens_used": input_tokens + output_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
     
     async def enhance_description(self, current_description: str) -> Dict[str, Any]:
@@ -57,11 +76,26 @@ class AIService:
         """
         # Mock implementation
         enhanced = f"{current_description}\n\nEnhanced with additional details and SEO keywords."
-        tokens_used = 30
+        input_tokens = len(current_description.split()) * 2  # Rough estimate
+        output_tokens = 60
+        
+        # Track economic cost if DB session available
+        if self.db and settings.economic_enabled:
+            economic_service = EconomicService(self.db)
+            await economic_service.record_ai_cost(
+                entity_type="user",
+                entity_id=self.user.id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model="gpt-4",
+                description="Enhance product description"
+            )
         
         return {
             "enhanced_description": enhanced,
-            "tokens_used": tokens_used
+            "tokens_used": input_tokens + output_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
     
     async def suggest_price(self, product_info: Dict[str, Any]) -> Dict[str, Any]:
@@ -75,11 +109,28 @@ class AIService:
             Dictionary with suggested_price, price_range, reasoning
         """
         # Mock implementation
+        input_tokens = 80
+        output_tokens = 40
+        
+        # Track economic cost if DB session available
+        if self.db and settings.economic_enabled:
+            economic_service = EconomicService(self.db)
+            await economic_service.record_ai_cost(
+                entity_type="user",
+                entity_id=self.user.id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model="gpt-4",
+                description="Suggest product price"
+            )
+        
         return {
             "suggested_price": 49.99,
             "price_range": {"min": 39.99, "max": 59.99},
             "reasoning": "Based on similar items and market conditions",
-            "tokens_used": 40
+            "tokens_used": input_tokens + output_tokens,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
         }
     
     async def draft_message_response(
@@ -98,4 +149,19 @@ class AIService:
             Draft response text
         """
         # Mock implementation
+        input_tokens = len(message_content.split()) * 2
+        output_tokens = 50
+        
+        # Track economic cost if DB session available
+        if self.db and settings.economic_enabled:
+            economic_service = EconomicService(self.db)
+            await economic_service.record_ai_cost(
+                entity_type="user",
+                entity_id=self.user.id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                model="gpt-4",
+                description="Draft message response"
+            )
+        
         return f"Thank you for your interest! {message_content[:50]}... I'll get back to you shortly."

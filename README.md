@@ -4,7 +4,7 @@
 ![License](https://img.shields.io/badge/License-Proprietary-red)
 ![Status](https://img.shields.io/badge/Status-Development-yellow)
 
-A comprehensive system combining Setup Portal, License Management, ShipForge shipping, agent safeguards, emergency stop protocols, mobile marketplace functionality, and enterprise customer support.
+A comprehensive system combining Setup Portal, License Management, ShipForge shipping, agent safeguards, emergency stop protocols, mobile marketplace functionality, enterprise customer support, and economic intelligence.
 
 ## 🎯 Ecosystem Overview
 
@@ -12,7 +12,7 @@ A comprehensive system combining Setup Portal, License Management, ShipForge shi
 |---------|-------------|------|
 | 🛒 MarketForge | Multi-marketplace listing & inventory | 8010 |
 | 🏗️ ContractorForge | Contractor business management | 8020 |
-| ✨ LuxeForge | Custom workroom / window treatments | 8030 |
+| ��� LuxeForge | Custom workroom / window treatments | 8030 |
 | 💬 SupportForge | Customer support platform | 8040 |
 | 📈 LeadForge | Lead generation & nurturing | 8050 |
 | 📦 ShipForge | Shipping & label management | 8060 |

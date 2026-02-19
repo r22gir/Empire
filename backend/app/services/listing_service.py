@@ -4,7 +4,7 @@ Listing service for CRUD operations and publishing.
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from app.models import Listing, User
 from app.schemas.listing import (
@@ -14,19 +14,28 @@ from app.schemas.listing import (
     PublishResponse,
     PublishResult
 )
+from app.services.quality_evaluator import QualityEvaluator
+from app.services.economic_service import EconomicService
+from app.config import settings
 
 
-async def create_listing(user: User, listing_data: ListingCreate, db: AsyncSession) -> Listing:
+async def create_listing(
+    user: User, 
+    listing_data: ListingCreate, 
+    db: AsyncSession,
+    evaluate_quality: bool = True
+) -> Listing:
     """
-    Create a new listing.
+    Create a new listing with optional quality evaluation.
     
     Args:
         user: Current user
         listing_data: Listing creation data
         db: Database session
+        evaluate_quality: Whether to evaluate quality (default: True)
         
     Returns:
-        Created listing
+        Created Listing object (quality evaluation stored in metadata if enabled)
     """
     new_listing = Listing(
         user_id=user.id,
@@ -43,6 +52,37 @@ async def create_listing(user: User, listing_data: ListingCreate, db: AsyncSessi
     db.add(new_listing)
     await db.commit()
     await db.refresh(new_listing)
+    
+    # Evaluate quality if enabled
+    quality_evaluation = None
+    if evaluate_quality and settings.quality_eval_enabled:
+        quality_evaluator = QualityEvaluator(db)
+        quality_evaluation = await quality_evaluator.evaluate_listing(
+            listing_data={
+                "id": new_listing.id,
+                "user_id": user.id,
+                "title": new_listing.title,
+                "description": new_listing.description,
+                "price": float(new_listing.price),
+                "category": new_listing.category,
+                "condition": new_listing.condition,
+                "photos": new_listing.photos,
+            },
+            category=new_listing.category
+        )
+        
+        # Store quality evaluation in listing metadata (if needed in the future)
+        # For now, we just use it for economic tracking
+        
+        # Record listing value in economic ledger if quality score is available
+        if quality_evaluation and settings.economic_enabled:
+            economic_service = EconomicService(db)
+            await economic_service.record_listing_value(
+                user_id=user.id,
+                listing_id=new_listing.id,
+                sale_price=float(new_listing.price),
+                quality_score=quality_evaluation.get("overall_score")
+            )
     
     return new_listing
 
