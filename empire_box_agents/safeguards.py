@@ -8,21 +8,21 @@ class AgentSafeguards:
         self.action_whitelist = action_whitelist  # list of allowed actions
         self.current_balance = budget
         self.lock = threading.Lock()
-        self.last_action_time = time.time()
+        self.last_action_time = 0  # Set to 0 to allow first action immediately
 
     def can_execute_action(self, action):
         if action not in self.action_whitelist:
             raise Exception("Action not permitted.")
         
         with self.lock:
+            if self.current_balance <= 0:
+                raise Exception("Budget exhausted.")
+            
             current_time = time.time()
             time_since_last_action = current_time - self.last_action_time
 
             if time_since_last_action < 60 / self.rate_limit:
                 raise Exception("Rate limit exceeded. Please wait.")
-            
-            if self.current_balance <= 0:
-                raise Exception("Budget exhausted.")
             
             # Update state for the next action
             self.last_action_time = current_time

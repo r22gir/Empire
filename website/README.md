@@ -1,5 +1,4 @@
 # EmpireBox Website
-
 Complete marketing website for EmpireBox - The Operating System for Resellers.
 
 ## Overview

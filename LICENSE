@@ -1,21 +1,50 @@
 # Proprietary License
 
+Copyright © 2026 EmpireBox. All rights reserved.
+
 ## License Agreement
 
-This is a proprietary license for the software and intellectual property contained within this repository.
+This is a proprietary license for the software and intellectual property contained within this repository ("Software"), owned by EmpireBox ("Owner").
 
 ## Permission
 
-You are NOT permitted to copy, modify, or distribute this software or any parts of it without prior written permission from the owner.
+You are NOT permitted to copy, modify, merge, publish, distribute, sublicense, sell, or create derivative works of this Software or any parts of it without prior written permission from the Owner.
 
 ## Restrictions
 
-- Do not copy the software or any part of it.
-- Do not modify the software without permission.
-- Do not distribute the software under any circumstances.
+- Do not copy, reproduce, or duplicate the Software or any part of it.
+- Do not modify, adapt, or create derivative works based on the Software without permission.
+- Do not distribute, sublicense, lease, or lend the Software under any circumstances.
+- Do not reverse engineer, decompile, or disassemble the Software.
+- Do not use the Software to build a competing product or service.
+- Do not remove or alter any copyright, trademark, or other proprietary notices contained in the Software.
+
+## Intellectual Property
+
+The Software and all associated documentation, trademarks, trade names, logos, and visual designs are the exclusive property of EmpireBox. The names "EmpireBox", "MarketForge", and "ShipForge" are trademarks of EmpireBox.
+
+## Confidentiality
+
+The Software and any non-public technical information, business strategies, financial details, or other proprietary information contained within this repository are confidential. You agree not to disclose any such information to third parties.
+
+## DMCA and Copyright Infringement
+
+EmpireBox respects the intellectual property rights of others. If you believe that your copyrighted work has been copied in a way that constitutes copyright infringement, please contact: dmca@empirebox.store
+
+We will respond to notices of alleged copyright infringement that comply with the Digital Millennium Copyright Act (DMCA) and other applicable intellectual property laws.
 
 ## Limitation of Liability
 
-The owner of this software shall not be held liable for any damages arising from the use of this software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-By using this software, you acknowledge that you have read, understood, and agree to the terms of this license agreement.
+## Termination
+
+This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any of its terms.
+
+## Governing Law
+
+This license shall be governed by and construed in accordance with applicable federal and state law.
+
+---
+
+By using this Software, you acknowledge that you have read, understood, and agree to the terms of this license agreement.

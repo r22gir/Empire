@@ -1,6 +1,6 @@
 # EmpireBox Website - Next.js
 
-Modern, responsive marketing website for EmpireBox built with Next.js 14, TypeScript, and Tailwind CSS.
+Modern, responsive website for EmpireBox built with Next.js 15, TypeScript, and Tailwind CSS. Includes Setup Portal for hardware bundle activation, pre-orders, and marketing pages.
 
 ## Features
 
@@ -12,6 +12,11 @@ Modern, responsive marketing website for EmpireBox built with Next.js 14, TypeSc
 - 🚀 Fast page loads
 - 🎯 TypeScript for type safety
 - 🔒 Security vulnerabilities addressed
+- 📦 Hardware bundle showcase and pre-orders
+- 🔑 License key validation and activation
+- 📲 QR code scanning support
+- 📱 Device detection (Android/iOS/Desktop)
+- 💼 Solana wallet setup guide
 
 ## Getting Started
 
@@ -32,25 +37,39 @@ cd website/nextjs
 npm install
 ```
 
-3. Run the development server:
+3. Set environment variables:
+```bash
+# Create .env.local file
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+4. Run the development server:
 ```bash
 npm run dev
 ```
 
-4. Open [http://localhost:3000](http://localhost:3000) in your browser
+5. Open [http://localhost:3000](http://localhost:3000) in your browser
 
 ## Project Structure
 
 ```
 nextjs/
 ├── src/
-│   ├── app/              # Next.js 14 App Router pages
-│   │   ├── layout.tsx    # Root layout
-│   │   ├── page.tsx      # Home page
-│   │   ├── about/        # About page
-│   │   ├── pricing/      # Pricing page
-│   │   └── faq/          # FAQ page
-│   ├── components/       # React components
+│   ├── app/                    # Next.js App Router pages
+│   │   ├── layout.tsx          # Root layout
+│   │   ├── page.tsx            # Home page
+│   │   ├── about/              # About page
+│   │   ├── pricing/            # Pricing page
+│   │   ├── faq/                # FAQ page
+│   │   ├── privacy/            # Privacy Policy
+│   │   ├── terms/              # Terms of Service
+│   │   ├── refund-policy/      # Refund Policy
+│   │   ├── contact/            # Contact page
+│   │   ├── setup/              # Setup portal pages
+│   │   │   ├── page.tsx        # Landing page with QR scanner
+│   │   │   └── [licenseKey]/   # Step-by-step setup flow
+│   │   └── bundles/            # Hardware bundles showcase
+│   ├── components/             # React components
 │   │   ├── Navbar.tsx
 │   │   ├── Hero.tsx
 │   │   ├── Features.tsx
@@ -60,10 +79,87 @@ nextjs/
 │   │   ├── FAQ.tsx
 │   │   ├── CTA.tsx
 │   │   ├── Footer.tsx
-│   │   └── EmailForm.tsx
-│   └── lib/              # Utilities and constants
-│       └── constants.ts  # App-wide constants
-└── public/               # Static assets
+│   │   ├── EmailForm.tsx
+│   │   ├── LegalPageLayout.tsx
+│   │   ├── setup/              # Setup flow components
+│   │   │   ├── DeviceDetector.tsx
+│   │   │   ├── SetupProgress.tsx
+│   │   │   ├── AppDownloadButtons.tsx
+│   │   │   ├── WalletSetupGuide.tsx
+│   │   │   └── LicenseActivation.tsx
+│   │   └── bundles/            # Bundle components
+│   │       ├── BundleCard.tsx
+│   │       └── PreOrderForm.tsx
+│   └── lib/                    # Utilities and constants
+│       ├── constants.ts        # App-wide constants
+│       └── api.ts              # API client
+└── public/                     # Static assets
+```
+
+## Pages
+
+### Marketing Pages
+- `/` - Home page
+- `/about` - About EmpireBox
+- `/pricing` - Subscription pricing
+- `/faq` - Frequently asked questions
+
+### Legal Pages (Stripe-Compliant)
+- `/privacy` - Privacy Policy
+- `/terms` - Terms of Service
+- `/refund-policy` - Refund Policy
+- `/contact` - Contact form and information
+
+### Setup Portal
+- `/setup` - Landing page with QR scanner
+- `/setup/[licenseKey]` - Step-by-step setup flow
+
+### Hardware Bundles
+- `/bundles` - Bundle showcase and pre-orders
+
+## Components
+
+### Setup Components
+- `DeviceDetector` - Detects user device type
+- `SetupProgress` - Progress stepper
+- `AppDownloadButtons` - Platform-specific download links
+- `WalletSetupGuide` - Solana wallet creation guide
+- `LicenseActivation` - License activation flow
+
+### Bundle Components
+- `BundleCard` - Individual bundle display
+- `PreOrderForm` - Pre-order checkout form
+
+## API Integration
+
+The website connects to the FastAPI backend at `NEXT_PUBLIC_API_URL`.
+
+Endpoints used:
+- `GET /licenses/{key}/validate` - Validate license key
+- `POST /licenses/{key}/activate` - Activate license
+- `POST /preorders/` - Create pre-order
+
+## Styling
+
+Uses Tailwind CSS with custom EmpireBox theme colors:
+- Empire Blue: `#1E40AF`
+- Empire Orange: `#F97316`
+- Primary: `#0066FF`
+- Secondary: `#FF6600`
+
+Edit `tailwind.config.js` to customize:
+
+```js
+colors: {
+  primary: {
+    DEFAULT: '#0066FF',
+    dark: '#0052CC',
+  },
+  secondary: {
+    DEFAULT: '#FF6600',
+    dark: '#E55A00',
+  },
+}
 ```
 
 ## Available Scripts
@@ -104,35 +200,22 @@ Build the static export:
 npm run build
 ```
 
-The `out` directory can be deployed to any static hosting service (Netlify, AWS S3, etc.)
+The output can be deployed to any static hosting service (Netlify, AWS S3, etc.)
 
 ## Environment Variables
 
-Currently no environment variables are required. If you add features like form submissions or analytics, create a `.env.local` file:
+Create a `.env.local` file:
 
 ```
-NEXT_PUBLIC_API_URL=your_api_url
+NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_GA_ID=your_google_analytics_id
 ```
 
+## QR Code Format
+
+QR codes should link to: `https://empirebox.store/setup/EMPIRE-XXXX-XXXX-XXXX`
+
 ## Customization
-
-### Colors
-
-Edit `tailwind.config.js` to change the color scheme:
-
-```js
-colors: {
-  primary: {
-    DEFAULT: '#0066FF',
-    dark: '#0052CC',
-  },
-  secondary: {
-    DEFAULT: '#FF6600',
-    dark: '#E55A00',
-  },
-}
-```
 
 ### Content
 
@@ -149,9 +232,9 @@ All components are in `src/components/`. They use Framer Motion for animations a
 
 ## Performance
 
-- Uses Next.js 14 App Router for optimal performance
+- Uses Next.js 15 App Router for optimal performance
 - Automatic code splitting
-- Image optimization (when images are added)
+- Image optimization
 - Font optimization with next/font
 
 ## Browser Support
@@ -162,13 +245,6 @@ All components are in `src/components/`. They use Framer Motion for animations a
 - Edge (latest)
 - Mobile browsers
 
-## Contributing
-
-1. Create a feature branch
-2. Make your changes
-3. Test thoroughly
-4. Submit a pull request
-
 ## License
 
 Proprietary - EmpireBox © 2026
@@ -176,5 +252,5 @@ Proprietary - EmpireBox © 2026
 ## Support
 
 For questions or issues:
-- Email: hello@empirebox.com
-- Website: https://empirebox.com
+- Email: support@empirebox.store
+- Website: https://empirebox.store

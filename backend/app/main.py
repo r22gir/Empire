@@ -1,51 +1,111 @@
+"""
+Main FastAPI application entry point for EmpireBox backend.
+"""
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.database import Base, engine
-from app.routers.marketplace import products, orders, reviews, seller
+import os
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
-
+# Create FastAPI app
 app = FastAPI(
-    title="MarketF API",
-    description="Peer-to-peer marketplace platform with 8% fees, integrated shipping, and escrow payments",
-    version="1.0.0"
+    title="EmpireBox API",
+    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, and AI-powered marketplace automation",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# CORS middleware
+# Get CORS origins from environment or use default
+cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    allow_origins=cors_origins if cors_origins != ["*"] else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(products.router)
-app.include_router(orders.router)
-app.include_router(reviews.router)
-app.include_router(seller.router)
+# Import routers with error handling for missing modules
+try:
+    from app.routers import licenses
+    app.include_router(licenses.router, prefix="/licenses", tags=["licenses"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import shipping
+    app.include_router(shipping.router, prefix="/shipping", tags=["shipping"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import preorders
+    app.include_router(preorders.router, prefix="/preorders", tags=["preorders"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import auth
+    app.include_router(auth.router, prefix="/auth", tags=["auth"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import users
+    app.include_router(users.router, prefix="/users", tags=["users"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import listings
+    app.include_router(listings.router, prefix="/listings", tags=["listings"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import messages
+    app.include_router(messages.router, prefix="/messages", tags=["messages"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import marketplaces
+    app.include_router(marketplaces.router, prefix="/marketplaces", tags=["marketplaces"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import webhooks
+    app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
+except ImportError:
+    pass
+
+try:
+    from app.routers import ai
+    app.include_router(ai.router, prefix="/ai", tags=["ai"])
+except ImportError:
+    pass
+
+# MarketF routers
+try:
+    from app.routers.marketplace import products, orders, reviews, seller
+    app.include_router(products.router, prefix="/marketplace", tags=["marketplace-products"])
+    app.include_router(orders.router, prefix="/marketplace", tags=["marketplace-orders"])
+    app.include_router(reviews.router, prefix="/marketplace", tags=["marketplace-reviews"])
+    app.include_router(seller.router, prefix="/marketplace", tags=["marketplace-seller"])
+except ImportError:
+    pass
 
 
 @app.get("/")
-def root():
+async def root():
+    """Root endpoint - API info."""
     return {
-        "message": "MarketF API",
+        "message": "EmpireBox API",
         "version": "1.0.0",
+        "status": "operational",
         "features": {
             "marketplace_fee": "8%",
-            "escrow_payments": True,
-            "integrated_shipping": True
-        }
-    }
-
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+            "
+
