@@ -7,6 +7,8 @@ import HowItWorks from '@/components/HowItWorks';
 import Pricing from '@/components/Pricing';
 import FAQ from '@/components/FAQ';
 import CTA from '@/components/CTA';
+import ProductsShowcase from '@/components/ProductsShowcase';
+import ServicesShowcase from '@/components/ServicesShowcase';
 
 export default function Home() {
   return (
@@ -15,7 +17,7 @@ export default function Home() {
       <Hero />
       
       {/* Quick Links Section */}
-      <section className="py-16 bg-gradient-to-br from-primary to-primary-dark text-white">
+      <section className="py-16 bg-gradient-to-br from-primary-700 to-primary-800 text-white">
         <div className="container mx-auto px-4">
           <div className="max-w-4xl mx-auto text-center">
             <h2 className="text-4xl font-bold mb-6">Get Started Today</h2>
@@ -26,7 +28,7 @@ export default function Home() {
             <div className="grid md:grid-cols-2 gap-6 mb-12">
               <Link
                 href="/setup"
-                className="bg-white text-primary font-bold py-8 px-6 rounded-xl hover:shadow-2xl transition-shadow"
+                className="bg-white text-primary-700 font-bold py-8 px-6 rounded-xl hover:shadow-2xl transition-shadow"
               >
                 <h3 className="text-2xl mb-2">Setup Portal</h3>
                 <p className="text-sm opacity-75">
@@ -36,7 +38,7 @@ export default function Home() {
 
               <Link
                 href="/bundles"
-                className="bg-secondary text-white font-bold py-8 px-6 rounded-xl hover:shadow-2xl transition-shadow"
+                className="bg-accent-500 text-white font-bold py-8 px-6 rounded-xl hover:shadow-2xl transition-shadow"
               >
                 <h3 className="text-2xl mb-2">Hardware Bundles</h3>
                 <p className="text-sm opacity-90">
@@ -46,7 +48,7 @@ export default function Home() {
             </div>
 
             <div className="bg-white bg-opacity-10 backdrop-blur-sm rounded-xl p-8">
-              <h3 className="text-xl font-semibold mb-4">What's Included:</h3>
+              <h3 className="text-xl font-semibold mb-4">What&apos;s Included:</h3>
               <ul className="text-left max-w-2xl mx-auto space-y-2">
                 <li>✅ Professional reselling phone (factory sealed)</li>
                 <li>✅ MarketForge Pro subscription (12 months)</li>
@@ -61,6 +63,8 @@ export default function Home() {
       </section>
 
       <Features />
+      <ProductsShowcase />
+      <ServicesShowcase />
       <Testimonials />
       <HowItWorks />
       <Pricing />

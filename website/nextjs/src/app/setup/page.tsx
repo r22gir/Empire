@@ -1,3 +1,5 @@
+'use client';
+
 import Link from 'next/link';
 import { QrCode, Package, Shield } from 'lucide-react';
 
