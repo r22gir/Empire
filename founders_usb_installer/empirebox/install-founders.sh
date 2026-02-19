@@ -100,9 +100,12 @@ if ! command -v ollama &>/dev/null; then
   systemctl enable --now ollama
 fi
 sleep 5
+# NOTE: Model downloads can take 10-45 minutes depending on internet speed.
+# llama3.1:8b ~4.7GB, codellama:7b ~3.8GB, nomic-embed-text ~274MB
+log "Pulling Ollama models (this may take 30-45 minutes on first run)..."
 for model in llama3.1:8b codellama:7b nomic-embed-text; do
   log "Pulling Ollama model: ${model}"
-  ollama pull "${model}" || log "WARN: Failed to pull ${model}, will retry later"
+  ollama pull "${model}" || log "WARN: Failed to pull ${model}, retry with: ollama pull ${model}"
 done
 
 # ──────────────────────────────────────────────

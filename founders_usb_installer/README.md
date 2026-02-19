@@ -29,11 +29,16 @@ This USB installer sets up the EmpireBox Founders Unit on a **Beelink EQR5** (Ry
 
 1. Download [Ventoy](https://www.ventoy.net) and install it to your USB drive
 2. Download Ubuntu Server 24.04 ISO
-3. Copy the ISO to the Ventoy USB drive
-4. Copy this entire `founders_usb_installer/` directory to the USB drive
-5. Boot the Beelink EQR5 from USB (press F7 for boot menu)
-6. Select the Ubuntu ISO from Ventoy
-7. When prompted for autoinstall, Ventoy will use `autoinstall/user-data`
+3. **Generate the password hash** (required before burning):
+   ```bash
+   mkpasswd -m sha-512 founders2026
+   # Replace the placeholder in autoinstall/user-data line 10 with the output
+   ```
+4. Copy the ISO to the Ventoy USB drive
+5. Copy this entire `founders_usb_installer/` directory to the USB drive
+6. Boot the Beelink EQR5 from USB (press F7 for boot menu)
+7. Select the Ubuntu ISO from Ventoy
+8. When prompted for autoinstall, Ventoy will use `autoinstall/user-data`
 
 ## Installation Steps
 

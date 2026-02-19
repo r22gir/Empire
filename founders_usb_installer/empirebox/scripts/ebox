@@ -69,8 +69,9 @@ EOF
 
 is_running() {
   local product="$1"
-  docker compose -f "${PRODUCTS_PATH}/${product}/docker-compose.yml" ps --status running 2>/dev/null \
-    | grep -q "running" && echo "running" || echo "stopped"
+  docker compose -f "${PRODUCTS_PATH}/${product}/docker-compose.yml" \
+    ps --services --filter "status=running" 2>/dev/null \
+    | grep -q . && echo "running" || echo "stopped"
 }
 
 cmd_list() {

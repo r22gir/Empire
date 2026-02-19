@@ -7,7 +7,8 @@ autoinstall:
   identity:
     hostname: empirebox-founders
     username: empirebox
-    password: "$6$rounds=4096$empirebox$founders2026hashedpasswordplaceholder"
+    password: "$6$rounds=4096$empirebox$REPLACE_WITH_HASH_FROM_mkpasswd_-m_sha-512"
+    # Generate hash: mkpasswd -m sha-512 founders2026
     realname: EmpireBox
   ssh:
     install-server: true
