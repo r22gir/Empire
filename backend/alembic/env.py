@@ -10,7 +10,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings
 from app.database import Base
-from app.models import User, Listing, Message, MarketplaceAccount, EconomicLedger, EconomicTransaction
+from app.models import (
+    User, Listing, Message, MarketplaceAccount, EconomicLedger, EconomicTransaction,
+    ChatSession, ChatMessage, DecisionContext, DisruptionEvent
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

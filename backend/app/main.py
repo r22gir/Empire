@@ -136,6 +136,13 @@ try:
 except ImportError:
     pass
 
+# Chat Backup and Decision Context router
+try:
+    from app.routers import chat_backup
+    app.include_router(chat_backup.router, prefix="/api/v1/chat-backup", tags=["chat-backup"])
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -164,7 +171,8 @@ async def root():
             "supportforge_customers": "/api/v1/customers",
             "supportforge_kb": "/api/v1/kb",
             "supportforge_ai": "/api/v1/ai",
-            "economic": "/api/v1/economic"
+            "economic": "/api/v1/economic",
+            "chat_backup": "/api/v1/chat-backup"
         }
     }
 
