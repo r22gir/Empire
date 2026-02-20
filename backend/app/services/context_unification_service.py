@@ -82,7 +82,7 @@ class ContextUnificationService:
             and_(
                 DecisionContext.status == "active",
                 or_(
-                    DecisionContext.valid_until == None,
+                    DecisionContext.valid_until.is_(None),
                     DecisionContext.valid_until > now
                 )
             )
@@ -377,7 +377,7 @@ class ContextUnificationService:
         """Get unresolved disruption events."""
         result = await self.db.execute(
             select(DisruptionEvent)
-            .where(DisruptionEvent.resolved == False)
+            .where(DisruptionEvent.resolved.is_(False))
             .order_by(DisruptionEvent.occurred_at.desc())
         )
         return list(result.scalars().all())

@@ -310,9 +310,9 @@ class ChatBackupService:
                 if session:
                     sessions.append(session)
         else:
-            query = select(ChatSession).where(ChatSession.is_backed_up == False)
+            query = select(ChatSession).where(ChatSession.is_backed_up.is_(False))
             if not request.include_archived:
-                query = query.where(ChatSession.is_archived == False)
+                query = query.where(ChatSession.is_archived.is_(False))
             result = await self.db.execute(query)
             sessions = list(result.scalars().all())
 
@@ -359,7 +359,7 @@ class ChatBackupService:
         total_sessions = total_result.scalar() or 0
 
         backed_up_result = await self.db.execute(
-            select(func.count(ChatSession.id)).where(ChatSession.is_backed_up == True)
+            select(func.count(ChatSession.id)).where(ChatSession.is_backed_up.is_(True))
         )
         backed_up_sessions = backed_up_result.scalar() or 0
 
