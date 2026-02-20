@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     quality_eval_enabled: bool = True
     quality_eval_model: str = "gpt-4-turbo-preview"
     
+    # Chat Backup and Decision Context
+    chat_backup_enabled: bool = True
+    chat_backup_interval_hours: int = 6  # Backup interval in hours
+    chat_backup_dir: str = "/tmp/chat_backups"  # Local backup directory
+    chat_backup_cloud_enabled: bool = False  # Enable cloud backup
+    chat_backup_cloud_bucket: Optional[str] = None  # S3/GCS bucket for cloud backup
+    chat_backup_retention_days: int = 90  # How long to retain backups
+    
     # CORS
     cors_origins: list = ["http://localhost:3000", "http://localhost:8080"]
     

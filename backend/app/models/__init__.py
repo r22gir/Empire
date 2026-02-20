@@ -90,6 +90,15 @@ except ImportError:
     Integration = None
     SatisfactionRating = None
 
+# Chat Backup and Decision Context models
+try:
+    from app.models.chat_backup import ChatSession, ChatMessage, DecisionContext, DisruptionEvent
+except ImportError:
+    ChatSession = None
+    ChatMessage = None
+    DecisionContext = None
+    DisruptionEvent = None
+
 __all__ = [
     # Core models
     "License",
@@ -114,5 +123,10 @@ __all__ = [
     "SLAPolicy",
     "CannedResponse",
     "Integration",
-    "SatisfactionRating"
+    "SatisfactionRating",
+    # Chat Backup and Decision Context
+    "ChatSession",
+    "ChatMessage",
+    "DecisionContext",
+    "DisruptionEvent"
 ]
