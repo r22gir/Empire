@@ -71,7 +71,10 @@ For quick saves, add a summary comment to Issue #20 instead of creating a file.
 
 | Date | File | Topics |
 |------|------|--------|
-| 2026-02-19 | (Initial setup) | Chat preservation system created |
+| 2026-02-16 | [2026-02-16_MAIN_CHAT_SUMMARY.md](./2026-02-16_MAIN_CHAT_SUMMARY.md) | Project review, repo access, AI model upgrade (Haiku → Sonnet), MarketForge strategy, token cost model, PRs queued |
+| 2026-02-17 | [2026-02-17_MAIN_CHAT_SUMMARY.md](./2026-02-17_MAIN_CHAT_SUMMARY.md) | Email alias service, FB Marketplace integration, EmpireBox website, Stripe compliance, hardware (Solana Seeker + Xiaomi), VetForge, LuxeForge, ContractorForge, EmpireCoach, TimberChain, CNCForge, investor research |
+| 2026-02-18 | [2026-02-18_MAIN_CHAT_SUMMARY.md](./2026-02-18_MAIN_CHAT_SUMMARY.md) | Merged 8 PRs, resolved all merge conflicts, Windows dev environment setup (Python/Node/Flutter), backend API verified, AdForge introduced, complete product catalog reviewed |
+| 2026-02-19 | [2026-02-19_MAIN_CHAT_SUMMARY.md](./2026-02-19_MAIN_CHAT_SUMMARY.md) | Chat preservation system created, 7 open PRs reviewed, PR priority order established, hardware (Mini PC) update |
 
 ---
 
