@@ -1,0 +1,36 @@
+# OpenClaw configuration
+server:
+  host: "0.0.0.0"
+  port: 7878
+  log_level: "info"
+
+ai:
+  provider: "ollama"              # ollama | openai | anthropic | gemini
+  model: "llama3"
+  temperature: 0.7
+  max_tokens: 2048
+
+voice:
+  enabled: false
+  stt_engine: "whisper"           # whisper | whisper-api
+  whisper_model: "base"           # tiny | base | small | medium | large
+  tts_engine: "pyttsx3"           # pyttsx3 | openai
+  wake_word: "hey openclaw"
+
+skills:
+  auto_load: true
+  enabled:
+    - general
+    - calendar
+  optional:
+    - empirebox                   # Requires EmpireBox backend
+    - smarthome                   # Requires Home Assistant
+
+memory:
+  enabled: true
+  max_history: 50                 # Messages to retain per session
+
+integrations:
+  empirebox_url: "${EMPIREBOX_URL:-http://localhost:8000}"
+  home_assistant_url: "${HOME_ASSISTANT_URL:-http://localhost:8123}"
+  home_assistant_token: "${HOME_ASSISTANT_TOKEN}"
