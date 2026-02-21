@@ -1,248 +1,209 @@
 """
-OpenClaw - Standalone AI Assistant Server
-
-FastAPI server exposing chat, voice, skills management, and agent control APIs.
-
-Start with:
-    uvicorn openclaw.server:app --host 0.0.0.0 --port 7878
+OpenClaw AI Server — EmpireBox Command Center
+FastAPI backend providing /chat, /health, and /skills endpoints.
+Integrates with Ollama for AI responses and exposes EmpireBox skills.
 """
 
 import logging
 import os
-import tempfile
-from typing import Any, Dict, List, Optional
+import subprocess
+from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+import aiohttp
+import yaml
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .agents.memory import AgentMemory
-from .agents.orchestrator import Orchestrator
-from .skills import (
-    CalendarSkill,
-    CodeSkill,
-    EmpireBoxSkill,
-    FileSkill,
-    SearchSkill,
-    Skill,
-    SmartHomeSkill,
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("openclaw")
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+app = FastAPI(title="OpenClaw AI", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+CONFIG_PATH = Path(__file__).parent / "config.yaml"
+SKILLS_DIR = Path(__file__).parent / "skills"
 
-app = FastAPI(
-    title="OpenClaw",
-    description="Standalone AI assistant with plugin skills and autonomous agents",
-    version="1.0.0",
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://10.0.0.6:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+MAX_HISTORY_CONTEXT = 8
+
+# ---------------------------------------------------------------------------
+# Load skills
+# ---------------------------------------------------------------------------
+def _load_skills() -> list[dict]:
+    skills: list[dict] = []
+    if not SKILLS_DIR.exists():
+        return skills
+    for yaml_file in SKILLS_DIR.glob("*.yaml"):
+        try:
+            with open(yaml_file) as f:
+                data = yaml.safe_load(f)
+            if isinstance(data, dict) and "skills" in data:
+                skills.extend(data["skills"])
+        except Exception as exc:
+            logger.warning("Failed to load skill file %s: %s", yaml_file, exc)
+    return skills
+
+
+ALL_SKILLS: list[dict] = _load_skills()
+
+
+def _match_skill(message: str) -> Optional[dict]:
+    lower = message.lower()
+    for skill in ALL_SKILLS:
+        for kw in skill.get("keywords", []):
+            if kw.lower() in lower:
+                return skill
+    return None
+
+
+def _run_skill(skill: dict) -> str:
+    cmd = skill.get("command", "")
+    if not cmd:
+        return ""
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.stdout.strip() or result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return "Command timed out."
+    except Exception as exc:
+        logger.error("Skill execution error: %s", exc)
+        return f"Error running skill: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Ollama integration
+# ---------------------------------------------------------------------------
+SYSTEM_PROMPT = (
+    "You are OpenClaw, the AI assistant for EmpireBox — a reselling and e-commerce "
+    "management platform. You help the owner (RG) manage sales, shipments, listings, "
+    "support tickets, and AI agents across eBay, Poshmark, Mercari, and Etsy. "
+    "Be concise, practical, and friendly. Use emojis sparingly."
 )
 
+
+async def _ask_ollama(message: str, history: list[dict]) -> str:
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    for h in history[-MAX_HISTORY_CONTEXT:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": message})
+
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": messages,
+        "stream": False,
+    }
+
+    timeout = aiohttp.ClientTimeout(total=30)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(f"{OLLAMA_URL}/api/chat", json=payload) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            return data.get("message", {}).get("content", "No response from model.")
+
+
 # ---------------------------------------------------------------------------
-# State
+# Request / Response models
 # ---------------------------------------------------------------------------
-
-_skills: Dict[str, Skill] = {}
-_skill_enabled: Dict[str, bool] = {}
-_orchestrator = Orchestrator()
-_memory = AgentMemory(session_id="default")
-
-
-def _register_default_skills() -> None:
-    for skill_cls in [SearchSkill, CodeSkill, FileSkill, CalendarSkill, EmpireBoxSkill, SmartHomeSkill]:
-        instance = skill_cls()
-        _skills[instance.name] = instance
-        _skill_enabled[instance.name] = instance.name in ("search", "code", "files", "calendar")
-
-
-_register_default_skills()
-
-
-# ---------------------------------------------------------------------------
-# Request/response models
-# ---------------------------------------------------------------------------
-
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = "default"
-    use_skill: Optional[str] = None
+    history: list[dict] = []
 
 
 class ChatResponse(BaseModel):
-    reply: str
+    response: str
     skill_used: Optional[str] = None
-    session_id: str
-
-
-class TaskRequest(BaseModel):
-    task: Dict[str, Any]
-    priority: int = 5
+    source: str = "ollama"
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-
-@app.get("/")
-async def root():
-    return {"service": "OpenClaw", "version": "1.0.0", "status": "running"}
-
-
 @app.get("/health")
 async def health():
-    return {"status": "ok", "skills_loaded": len(_skills), "agents_registered": len(_orchestrator.list_agents())}
-
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest):
-    """Send a message to the AI assistant and receive a reply."""
-    memory = AgentMemory(session_id=req.session_id or "default")
-    memory.add("user", req.message)
-
-    # Try to match a skill
-    skill_used: Optional[str] = None
-    reply: str = ""
-
-    if req.use_skill and req.use_skill in _skills and _skill_enabled.get(req.use_skill):
-        skill = _skills[req.use_skill]
-        reply = await skill.execute(req.message, {"query": req.message})
-        skill_used = req.use_skill
-    else:
-        for name, skill in _skills.items():
-            if _skill_enabled.get(name) and skill.matches(req.message):
-                reply = await skill.execute(req.message, {"query": req.message})
-                skill_used = name
-                break
-
-    if not reply:
-        reply = _fallback_ai_reply(req.message, memory)
-
-    memory.add("assistant", reply)
-    return ChatResponse(reply=reply, skill_used=skill_used, session_id=req.session_id or "default")
-
-
-def _fallback_ai_reply(message: str, memory: AgentMemory) -> str:
-    """Simple fallback when no AI provider is configured."""
-    provider = os.getenv("AI_PROVIDER", "ollama")
-    if provider == "ollama":
-        return _ollama_chat(message, memory)
-    # For other providers a proper SDK call would go here.
-    return f"[OpenClaw] Received: '{message}'. Configure an AI provider in config.yaml for real responses."
-
-
-def _ollama_chat(message: str, memory: AgentMemory) -> str:
-    try:
-        import httpx  # already in requirements
-        ollama_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        model = os.getenv("OLLAMA_MODEL", "llama3")
-        history = [{"role": m["role"], "content": m["content"]} for m in memory.get_recent(10)]
-        payload = {"model": model, "messages": history, "stream": False}
-        resp = httpx.post(f"{ollama_url}/api/chat", json=payload, timeout=60)
-        resp.raise_for_status()
-        return resp.json()["message"]["content"]
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Ollama chat failed: %s", exc)
-        return f"[OpenClaw] Ollama unavailable: {exc}. Start Ollama or configure another provider."
-
-
-@app.post("/voice")
-async def voice_input(file: UploadFile = File(...)):
-    """Accept an audio upload, transcribe via Whisper, and return chat response."""
-    from .voice.stt import WhisperSTT
-
-    suffix = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
-    try:
-        stt = WhisperSTT()
-        text = stt.transcribe(tmp_path)
-        if not text:
-            raise HTTPException(status_code=422, detail="Could not transcribe audio")
-        req = ChatRequest(message=text)
-        return await chat(req)
-    finally:
-        os.unlink(tmp_path)
+    return {"status": "ok", "service": "openclaw", "version": "1.0.0"}
 
 
 @app.get("/skills")
 async def list_skills():
-    """List all available skills and their enabled state."""
-    return [
-        {
-            "name": name,
-            "description": skill.description,
-            "enabled": _skill_enabled.get(name, False),
-            "triggers": skill.triggers,
-        }
-        for name, skill in _skills.items()
-    ]
+    return {
+        "count": len(ALL_SKILLS),
+        "skills": [
+            {"name": s.get("name"), "description": s.get("description")}
+            for s in ALL_SKILLS
+        ],
+    }
 
 
-@app.post("/skills/{name}/enable")
-async def enable_skill(name: str):
-    """Enable a skill by name."""
-    if name not in _skills:
-        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
-    _skill_enabled[name] = True
-    return {"skill": name, "enabled": True}
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    skill = _match_skill(req.message)
+    skill_output = ""
+    skill_name = None
+
+    if skill:
+        skill_name = skill.get("name")
+        skill_output = _run_skill(skill)
+        logger.info("Skill matched: %s → %s", skill_name, skill_output[:80])
+
+    augmented_message = req.message
+    if skill_output:
+        augmented_message = (
+            f"{req.message}\n\n"
+            f"[EmpireBox system data for context — do not repeat verbatim]:\n{skill_output}"
+        )
+
+    try:
+        ai_response = await _ask_ollama(augmented_message, req.history)
+    except Exception as exc:
+        logger.warning("Ollama unavailable: %s", exc)
+        if skill_output:
+            ai_response = skill_output
+        else:
+            ai_response = "⚠️ AI model (Ollama) is not reachable."
+
+    return ChatResponse(
+        response=ai_response,
+        skill_used=skill_name,
+        source="ollama" if skill_output == "" else "skill+ollama",
+    )
 
 
-@app.post("/skills/{name}/disable")
-async def disable_skill(name: str):
-    """Disable a skill by name."""
-    if name not in _skills:
-        raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
-    _skill_enabled[name] = False
-    return {"skill": name, "enabled": False}
-
-
-@app.get("/agents")
-async def list_agents():
-    """List all registered agents."""
-    return _orchestrator.list_agents()
-
-
-@app.get("/agents/{name}/status")
-async def agent_status(name: str):
-    """Get status and stats for a named agent."""
-    agents = {a["name"]: a for a in _orchestrator.list_agents()}
-    if name not in agents:
-        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
-    return agents[name]
-
-
-@app.post("/agents/{name}/task")
-async def assign_task(name: str, req: TaskRequest):
-    """Assign a task to the named agent."""
-    result = await _orchestrator.assign_task(name, req.task, req.priority)
-    if not result.get("success"):
-        raise HTTPException(status_code=500, detail=result.get("error", "Task failed"))
-    return result
-
-
-@app.post("/agents/{name}/pause")
-async def pause_agent(name: str):
-    """Pause the named agent."""
-    from .agents.base import AgentStatus
-    agent = _orchestrator.get_agent(name)
-    if agent is None:
-        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
-    agent.status = AgentStatus.PAUSED
-    return {"agent": name, "status": "paused"}
-
-
-@app.post("/agents/{name}/resume")
-async def resume_agent(name: str):
-    """Resume a paused agent."""
-    from .agents.base import AgentStatus
-    agent = _orchestrator.get_agent(name)
-    if agent is None:
-        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
-    agent.status = AgentStatus.IDLE
-    return {"agent": name, "status": "idle"}
-
-
-@app.get("/agents/queue")
-async def view_queue():
-    """View the current task queue."""
-    return {"queue": _orchestrator.get_queue(), "metrics": _orchestrator.get_metrics()}
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=7878, reload=False, log_level="info")

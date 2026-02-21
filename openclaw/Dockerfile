@@ -1,12 +1,8 @@
 FROM python:3.11-slim
-
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
+RUN pip install --no-cache-dir fastapi uvicorn aiohttp pyyaml
+COPY server.py /app/
+COPY skills /app/skills/
+COPY config.yaml /app/
 EXPOSE 7878
-
-CMD ["uvicorn", "openclaw.server:app", "--host", "0.0.0.0", "--port", "7878"]
+CMD ["python", "server.py"]
