@@ -4,7 +4,6 @@ FastAPI backend providing /chat, /health, and /skills endpoints.
 Integrates with Ollama for AI responses and exposes EmpireBox skills.
 """
 
-import asyncio
 import logging
 import os
 import subprocess
@@ -45,10 +44,9 @@ app.add_middleware(
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 SKILLS_DIR = Path(__file__).parent / "skills"
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://10.0.0.6:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
-# Maximum number of previous messages sent to Ollama for conversation context
 MAX_HISTORY_CONTEXT = 8
 
 # ---------------------------------------------------------------------------
@@ -64,7 +62,7 @@ def _load_skills() -> list[dict]:
                 data = yaml.safe_load(f)
             if isinstance(data, dict) and "skills" in data:
                 skills.extend(data["skills"])
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("Failed to load skill file %s: %s", yaml_file, exc)
     return skills
 
@@ -73,7 +71,6 @@ ALL_SKILLS: list[dict] = _load_skills()
 
 
 def _match_skill(message: str) -> Optional[dict]:
-    """Return the first skill whose keywords match any word in *message*."""
     lower = message.lower()
     for skill in ALL_SKILLS:
         for kw in skill.get("keywords", []):
@@ -83,17 +80,13 @@ def _match_skill(message: str) -> Optional[dict]:
 
 
 def _run_skill(skill: dict) -> str:
-    """Execute a skill's shell command and return its stdout."""
     cmd = skill.get("command", "")
     if not cmd:
         return ""
     try:
-        # shell=True is required for skill commands that use shell builtins and
-        # variable expansion (e.g. $(date)). Skill definitions are developer-
-        # controlled YAML files and must not contain untrusted user input.
         result = subprocess.run(
             cmd,
-            shell=True,  # noqa: S602
+            shell=True,
             capture_output=True,
             text=True,
             timeout=10,
@@ -101,7 +94,7 @@ def _run_skill(skill: dict) -> str:
         return result.stdout.strip() or result.stderr.strip()
     except subprocess.TimeoutExpired:
         return "Command timed out."
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("Skill execution error: %s", exc)
         return f"Error running skill: {exc}"
 
@@ -118,7 +111,6 @@ SYSTEM_PROMPT = (
 
 
 async def _ask_ollama(message: str, history: list[dict]) -> str:
-    """Send a message to Ollama and return the response text."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     for h in history[-MAX_HISTORY_CONTEXT:]:
         if h.get("role") in ("user", "assistant") and h.get("content"):
@@ -133,9 +125,7 @@ async def _ask_ollama(message: str, history: list[dict]) -> str:
 
     timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            f"{OLLAMA_URL}/api/chat", json=payload
-        ) as resp:
+        async with session.post(f"{OLLAMA_URL}/api/chat", json=payload) as resp:
             resp.raise_for_status()
             data = await resp.json()
             return data.get("message", {}).get("content", "No response from model.")
@@ -160,13 +150,11 @@ class ChatResponse(BaseModel):
 # ---------------------------------------------------------------------------
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
     return {"status": "ok", "service": "openclaw", "version": "1.0.0"}
 
 
 @app.get("/skills")
 async def list_skills():
-    """List all loaded skills."""
     return {
         "count": len(ALL_SKILLS),
         "skills": [
@@ -178,13 +166,6 @@ async def list_skills():
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    """
-    Process a chat message.
-
-    1. Check if the message matches a skill keyword → run the skill command.
-    2. Send the message (plus skill output as context) to Ollama.
-    3. Return the AI response.
-    """
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
@@ -197,7 +178,6 @@ async def chat(req: ChatRequest):
         skill_output = _run_skill(skill)
         logger.info("Skill matched: %s → %s", skill_name, skill_output[:80])
 
-    # Build the final message for Ollama
     augmented_message = req.message
     if skill_output:
         augmented_message = (
@@ -207,17 +187,12 @@ async def chat(req: ChatRequest):
 
     try:
         ai_response = await _ask_ollama(augmented_message, req.history)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Ollama unavailable: %s", exc)
-        # Fall back to skill output or a canned message
         if skill_output:
             ai_response = skill_output
         else:
-            ai_response = (
-                "⚠️ AI model (Ollama) is not reachable. "
-                "Start Ollama with: `docker compose up ollama`\n"
-                "In the meantime, try a quick command like [sales today] or [check health]."
-            )
+            ai_response = "⚠️ AI model (Ollama) is not reachable."
 
     return ChatResponse(
         response=ai_response,
@@ -231,11 +206,4 @@ async def chat(req: ChatRequest):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(
-        "server:app",
-        host="0.0.0.0",  # noqa: S104
-        port=7878,
-        reload=False,
-        log_level="info",
-    )
+    uvicorn.run("server:app", host="0.0.0.0", port=7878, reload=False, log_level="info")

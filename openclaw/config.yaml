@@ -1,6 +1,37 @@
 # OpenClaw configuration
-ollama_url: "http://ollama:11434"
-ollama_model: "llama3"
-host: "0.0.0.0"
-port: 7878
-log_level: "info"
+server:
+  host: "0.0.0.0"
+  port: 7878
+  log_level: "info"
+
+ai:
+  provider: "ollama"
+  ollama_url: "http://10.0.0.6:11434"
+  model: "llama3.1:8b"
+  temperature: 0.7
+  max_tokens: 2048
+
+voice:
+  enabled: false
+  stt_engine: "whisper"
+  whisper_model: "base"
+  tts_engine: "pyttsx3"
+  wake_word: "hey openclaw"
+
+skills:
+  auto_load: true
+  enabled:
+    - general
+    - calendar
+  optional:
+    - empirebox
+    - smarthome
+
+memory:
+  enabled: true
+  max_history: 50
+
+integrations:
+  empirebox_url: "${EMPIREBOX_URL:-http://localhost:8000}"
+  home_assistant_url: "${HOME_ASSISTANT_URL:-http://localhost:8123}"
+  home_assistant_token: "${HOME_ASSISTANT_TOKEN}"
