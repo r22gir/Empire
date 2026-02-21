@@ -224,7 +224,7 @@ async def assign_task(name: str, req: TaskRequest):
 async def pause_agent(name: str):
     """Pause the named agent."""
     from .agents.base import AgentStatus
-    agent = _orchestrator._agents.get(name)
+    agent = _orchestrator.get_agent(name)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
     agent.status = AgentStatus.PAUSED
@@ -235,7 +235,7 @@ async def pause_agent(name: str):
 async def resume_agent(name: str):
     """Resume a paused agent."""
     from .agents.base import AgentStatus
-    agent = _orchestrator._agents.get(name)
+    agent = _orchestrator.get_agent(name)
     if agent is None:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
     agent.status = AgentStatus.IDLE

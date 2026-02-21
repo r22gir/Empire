@@ -8,7 +8,7 @@ pass data between steps.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ class AgentMemory:
     # Conversation log interface
     def append_log(self, agent: str, message: str) -> None:
         logs: List[Dict[str, Any]] = self._store.setdefault("_logs", [])
-        logs.append({"agent": agent, "message": message, "timestamp": datetime.utcnow().isoformat()})
+        logs.append({"agent": agent, "message": message, "timestamp": datetime.now(timezone.utc).isoformat()})
         self._save()
 
     def get_logs(self, agent: Optional[str] = None) -> List[Dict[str, Any]]:

@@ -7,7 +7,7 @@ Provides reminders and scheduling functionality using a simple JSON file store.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List
 
 from .base import Skill
@@ -59,7 +59,7 @@ class CalendarSkill(Skill):
                 "id": len(reminders) + 1,
                 "title": title,
                 "due": due,
-                "created": datetime.utcnow().isoformat(),
+                "created": datetime.now(timezone.utc).isoformat(),
             }
             reminders.append(entry)
             _save_reminders(reminders)

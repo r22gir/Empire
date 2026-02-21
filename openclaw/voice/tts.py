@@ -77,14 +77,27 @@ class TextToSpeech:
 
     def _speak_openai(self, text: str) -> bool:
         try:
+            import subprocess
+            import tempfile
+
             import openai  # type: ignore
             response = openai.audio.speech.create(
                 model="tts-1",
                 voice=self.voice if self.voice != "default" else "alloy",
                 input=text,
             )
-            response.stream_to_file("/tmp/openclaw_tts_output.mp3")
-            os.system("ffplay -nodisp -autoexit /tmp/openclaw_tts_output.mp3 2>/dev/null")
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                response.stream_to_file(tmp_path)
+                subprocess.run(
+                    ["ffplay", "-nodisp", "-autoexit", tmp_path],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            finally:
+                os.unlink(tmp_path)
             return True
         except Exception as exc:  # noqa: BLE001
             logger.error("OpenAI TTS failed: %s", exc)

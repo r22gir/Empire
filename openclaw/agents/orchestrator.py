@@ -81,3 +81,7 @@ class Orchestrator:
 
     def get_metrics(self) -> Dict[str, Any]:
         return dict(self._metrics)
+
+    def get_agent(self, name: str):
+        """Return the named agent, or None if not registered."""
+        return self._agents.get(name)
