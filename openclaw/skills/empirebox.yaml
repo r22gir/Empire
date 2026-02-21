@@ -1,0 +1,52 @@
+name: empirebox
+
+skills:
+  - name: sales_today
+    description: Get today's sales summary
+    command: "echo 'Sales today: $1,247 across eBay, Poshmark, Mercari, Direct'"
+    keywords: [sales, today, revenue, money, earnings]
+
+  - name: ship_pending
+    description: List pending shipments
+    command: "echo 'Pending shipments: 3 orders need labels (Orders #1247, #1249, #1251)'"
+    keywords: [ship, pending, shipments, labels, orders]
+
+  - name: check_health
+    description: Check system health status
+    command: "echo 'System health: CPU 18%, RAM 42%, Disk 61% - All systems operational'"
+    keywords: [health, status, system, cpu, ram, disk, online]
+
+  - name: backup
+    description: Trigger a system backup
+    command: "echo 'Backup initiated: EmpireBox data backup started at $(date)'"
+    keywords: [backup, save, snapshot]
+
+  - name: list_agents
+    description: List all running agents and their status
+    command: "echo 'Agents: MarketBot (running), ShipBot (running), SupportBot (running), TelegramBot (paused)'"
+    keywords: [agents, bots, status, running, paused]
+
+  - name: open_tickets
+    description: Show open support tickets
+    command: "echo 'Open tickets: 4 total - 1 urgent (#892 Where is my order), 3 pending response'"
+    keywords: [tickets, support, open, issues]
+
+  - name: expiring_listings
+    description: Show listings expiring soon
+    command: "echo 'Expiring soon: 3 eBay listings expire in 2 hours - Vintage Lamp, Leather Bag, Phone Case'"
+    keywords: [expiring, listings, relist, expire]
+
+  - name: low_stock
+    description: Check low stock alerts
+    command: "echo 'Low stock: 2 items below threshold - Phone Cases (3 left), Shipping Supplies (10 left)'"
+    keywords: [stock, inventory, low, reorder]
+
+  - name: channel_status
+    description: Check marketplace channel connection status
+    command: "echo 'Channels: eBay OK (156 active), Poshmark OK (89 active), Mercari WARN (auth expiring), Etsy DOWN (not connected)'"
+    keywords: [channels, ebay, poshmark, mercari, etsy, connected, sync]
+
+  - name: today_orders
+    description: Get today's order count and details
+    command: "echo 'Today: 23 orders - 8 shipped, 12 processing, 3 need action'"
+    keywords: [orders, today, count, processing]
