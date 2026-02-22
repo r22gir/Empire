@@ -129,6 +129,13 @@ try:
 except ImportError:
     pass
 
+# Crypto Payments router
+try:
+    from app.routers import crypto_payments
+    app.include_router(crypto_payments.router, prefix="/api/v1/crypto-payments", tags=["crypto-payments"])
+except ImportError:
+    pass
+
 # Economic Intelligence router
 try:
     from app.routers import economic
@@ -172,7 +179,8 @@ async def root():
             "supportforge_kb": "/api/v1/kb",
             "supportforge_ai": "/api/v1/ai",
             "economic": "/api/v1/economic",
-            "chat_backup": "/api/v1/chat-backup"
+            "chat_backup": "/api/v1/chat-backup",
+            "crypto_payments": "/api/v1/crypto-payments"
         }
     }
 
