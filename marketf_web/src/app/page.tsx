@@ -14,7 +14,7 @@ export default function HomePage() {
     async function loadFeaturedProducts() {
       try {
         const data = await productAPI.list({ page: 1, per_page: 8 });
-        setFeaturedProducts(data.products || []);
+        setFeaturedProducts((data as any).products || []);
       } catch (error) {
         console.error('Failed to load products:', error);
       } finally {

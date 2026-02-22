@@ -3,7 +3,6 @@
 
 services:
 
-  # ── PostgreSQL ──────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: empirebox-postgres
@@ -24,7 +23,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Redis ───────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: empirebox-redis
@@ -42,72 +40,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── OpenClaw AI Agent ───────────────────────────
-  openclaw:
-    image: empirebox/openclaw:latest
-    container_name: empirebox-openclaw
-    restart: unless-stopped
-    ports:
-      - "7878:7878"
-    volumes:
-      - ./openclaw/config.yaml:/app/config.yaml:ro
-      - ./openclaw/skills:/app/skills:ro
-      - openclaw_data:/data
-    env_file:
-      - .env
-    environment:
-      - OPENCLAW_MODE=founders
-      - OPENCLAW_CONFIG=/app/config.yaml
-    networks:
-      - empirebox
-    depends_on:
-      - postgres
-      - redis
-
-  # ── API Gateway ─────────────────────────────────
-  api-gateway:
-    build:
-      context: ./api-gateway
-      dockerfile: Dockerfile
-    container_name: empirebox-api-gateway
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    networks:
-      - empirebox
-    depends_on:
-      - postgres
-      - redis
-
-  # ── Control Center ──────────────────────────────
-  control-center:
-    build:
-      context: ./control
-      dockerfile: Dockerfile
-    container_name: empirebox-control
-    restart: unless-stopped
-    ports:
-      - "8001:8001"
-    env_file:
-      - .env
-    networks:
-      - empirebox
-
-  # ── Founders Dashboard ──────────────────────────
-  dashboard:
-    build:
-      context: ./dashboard
-      dockerfile: Dockerfile
-    container_name: empirebox-dashboard
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    networks:
-      - empirebox
-
-  # ── Portainer ───────────────────────────────────
   portainer:
     image: portainer/portainer-ce:latest
     container_name: empirebox-portainer
@@ -120,50 +52,56 @@ services:
     networks:
       - empirebox
 
-  # ── Telegram Bot ────────────────────────────────
-  telegram-bot:
-    build:
-      context: ./telegram
-      dockerfile: Dockerfile
-    container_name: empirebox_telegram
+  api-gateway:
+    build: ./api-gateway
+    container_name: empirebox-api-gateway
     restart: unless-stopped
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - OPENCLAW_HOST=http://openclaw:7878
-      - CONFIG_PATH=/app/config.yaml
-    volumes:
-      - ./telegram/config.yaml:/app/config.yaml
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/empirebox:/opt/empirebox:ro
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    networks:
+      - empirebox
     depends_on:
-      - openclaw
-      - voice-service
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  control-center:
+    build: ./control
+    container_name: empirebox-control
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
     networks:
       - empirebox
 
-  # ── Voice Service ────────────────────────────────
+  dashboard:
+    build: ./dashboard
+    container_name: empirebox-dashboard
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - empirebox
+
   voice-service:
-    build:
-      context: ./voice
-      dockerfile: Dockerfile
+    build: ./voice
     container_name: empirebox-voice
     restart: unless-stopped
     ports:
       - "8200:8200"
     volumes:
       - voice_models:/app/models
-      - ./voice/config.yaml:/app/config.yaml:ro
-    environment:
-      - WHISPER_MODEL=${WHISPER_MODEL:-base}
-      - PIPER_MODELS_DIR=/app/models/piper
-      - CONFIG_PATH=/app/config.yaml
     networks:
       - empirebox
 
 volumes:
   postgres_data:
   redis_data:
-  openclaw_data:
   portainer_data:
   voice_models:
 
