@@ -33,15 +33,27 @@ class Settings(BaseSettings):
     
     # AI Services
     grok_api_key: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    xai_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
+    
+    # AI Provider Configuration (Claude Primary, Ollama Fallback)
+    ai_primary_provider: str = "anthropic"
+    ai_primary_model: str = "claude-sonnet-4-20250514"
+    ai_fallback_provider: str = "ollama"
+    ai_fallback_model: str = "llama3"
+    
+    # Telegram
+    telegram_bot_token: Optional[str] = None
     
     # Economic Intelligence
     economic_enabled: bool = True
     economic_default_balance: float = 1000.00
-    economic_token_input_price_per_1m: float = 2.50  # GPT-4 pricing per 1M tokens
-    economic_token_output_price_per_1m: float = 10.00  # GPT-4 pricing per 1M tokens
+    economic_token_input_price_per_1m: float = 2.50
+    economic_token_output_price_per_1m: float = 10.00
     economic_compute_cost_per_minute: float = 0.10
-    economic_listing_commission_rate: float = 0.05  # 5% commission on listings
+    economic_listing_commission_rate: float = 0.05
     
     # Quality Evaluation
     quality_eval_enabled: bool = True
@@ -49,11 +61,11 @@ class Settings(BaseSettings):
     
     # Chat Backup and Decision Context
     chat_backup_enabled: bool = True
-    chat_backup_interval_hours: int = 6  # Backup interval in hours
-    chat_backup_dir: str = "/tmp/chat_backups"  # Local backup directory
-    chat_backup_cloud_enabled: bool = False  # Enable cloud backup
-    chat_backup_cloud_bucket: Optional[str] = None  # S3/GCS bucket for cloud backup
-    chat_backup_retention_days: int = 90  # How long to retain backups
+    chat_backup_interval_hours: int = 6
+    chat_backup_dir: str = "/tmp/chat_backups"
+    chat_backup_cloud_enabled: bool = False
+    chat_backup_cloud_bucket: Optional[str] = None
+    chat_backup_retention_days: int = 90
     
     # CORS
     cors_origins: list = ["http://localhost:3000", "http://localhost:8080"]

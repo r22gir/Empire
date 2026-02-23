@@ -10,6 +10,7 @@ import logging
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.desk_manager import desk_manager, TaskStatus
 from app.services.max.telegram_bot import telegram_bot
+from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
@@ -19,6 +20,7 @@ class ChatRequest(BaseModel):
     message: str
     model: Optional[str] = None
     history: List[Dict[str, str]] = []
+    image_filename: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -42,6 +44,16 @@ class TelegramMessageRequest(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest):
+    is_safe, reason = check_input(request.message)
+    if not is_safe:
+        logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
+        return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+    
+    for msg in request.history[-3:]:
+        hist_safe, _ = check_input(msg.get("content", ""))
+        if not hist_safe:
+            return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+    
     try:
         messages = [AIMessage(role=h["role"], content=h["content"]) for h in request.history]
         messages.append(AIMessage(role="user", content=request.message))
@@ -51,8 +63,8 @@ async def chat_with_max(request: ChatRequest):
                 model = AIModel(request.model)
             except ValueError:
                 pass
-        response = await ai_router.chat(messages, model=model)
-        return ChatResponse(response=response.content, model_used=response.model_used, fallback_used=response.fallback_used)
+        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename)
+        return ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -89,6 +101,36 @@ async def get_all_tasks(status: Optional[str] = None, desk_id: Optional[str] = N
     task_status = TaskStatus(status) if status else None
     tasks = desk_manager.get_all_tasks(status=task_status, desk_id=desk_id)
     return {"tasks": tasks}
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: str):
+    task = desk_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": task}
+
+
+@router.post("/tasks/{task_id}/complete")
+async def complete_task(task_id: str, background_tasks: BackgroundTasks):
+    task = desk_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    success = desk_manager.complete_task(task_id)
+    if telegram_bot.is_configured:
+        background_tasks.add_task(telegram_bot.send_task_update, task["title"], "completed", "", task["desk_id"])
+    return {"status": "completed", "task_id": task_id}
+
+
+@router.post("/tasks/{task_id}/fail")
+async def fail_task(task_id: str, error: str = "Unknown error", background_tasks: BackgroundTasks = None):
+    task = desk_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    success = desk_manager.fail_task(task_id, error)
+    if telegram_bot.is_configured and background_tasks:
+        background_tasks.add_task(telegram_bot.send_task_update, task["title"], "failed", error, task["desk_id"])
+    return {"status": "failed", "task_id": task_id, "error": error}
 
 
 @router.get("/stats")
