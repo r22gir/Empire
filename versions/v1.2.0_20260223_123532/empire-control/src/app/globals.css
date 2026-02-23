@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+body { background: #0D0D0D; color: white; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #1A1A1A; }
+::-webkit-scrollbar-thumb { background: #3C3C3C; border-radius: 4px; }
+@keyframes pulse-gold { 0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); } 50% { box-shadow: 0 0 20px 10px rgba(201, 168, 76, 0.1); } }
+.pulse-gold { animation: pulse-gold 2s infinite; }
