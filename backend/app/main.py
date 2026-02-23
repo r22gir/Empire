@@ -150,6 +150,13 @@ try:
 except ImportError:
     pass
 
+# Workroom Forge router
+try:
+    from app.routers import workroom
+    app.include_router(workroom.router)
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -180,7 +187,10 @@ async def root():
             "supportforge_ai": "/api/v1/ai",
             "economic": "/api/v1/economic",
             "chat_backup": "/api/v1/chat-backup",
-            "crypto_payments": "/api/v1/crypto-payments"
+            "crypto_payments": "/api/v1/crypto-payments",
+            "workroom_orders": "/api/workroom/orders",
+            "workroom_clients": "/api/workroom/clients",
+            "workroom_stats": "/api/workroom/stats"
         }
     }
 
