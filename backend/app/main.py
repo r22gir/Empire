@@ -150,6 +150,13 @@ try:
 except ImportError:
     pass
 
+# LuxeForge Measurements router
+try:
+    from app.routers import luxeforge_measurements
+    app.include_router(luxeforge_measurements.router, prefix="/api/luxeforge/measurements", tags=["luxeforge-measurements"])
+except ImportError:
+    pass
+
 
 @app.get("/")
 async def root():
@@ -180,7 +187,8 @@ async def root():
             "supportforge_ai": "/api/v1/ai",
             "economic": "/api/v1/economic",
             "chat_backup": "/api/v1/chat-backup",
-            "crypto_payments": "/api/v1/crypto-payments"
+            "crypto_payments": "/api/v1/crypto-payments",
+            "luxeforge_measurements": "/api/luxeforge/measurements"
         }
     }
 
