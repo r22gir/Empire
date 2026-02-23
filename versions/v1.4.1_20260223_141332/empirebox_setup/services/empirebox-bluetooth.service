@@ -1,0 +1,16 @@
+[Unit]
+Description=EmpireBox Bluetooth LE Beacon
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/opt/empirebox/scripts/bluetooth-beacon.sh
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=empirebox-bluetooth
+
+[Install]
+WantedBy=multi-user.target

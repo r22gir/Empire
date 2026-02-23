@@ -1,0 +1,113 @@
+# EmpireBox Product Registry
+version: "1.0"
+
+products:
+  marketforge:
+    name: "MarketForge"
+    description: "AI-powered marketplace listing creation and optimization"
+    port: 8010
+    category: reseller
+    enabled: true
+
+  contractorforge:
+    name: "ContractorForge"
+    description: "Universal SaaS platform for service businesses with AI intake"
+    port: 8020
+    category: contractor
+    enabled: true
+
+  luxeforge:
+    name: "LuxeForge"
+    description: "Premium service business platform with luxury market focus"
+    port: 8030
+    category: contractor
+    enabled: true
+
+  supportforge:
+    name: "SupportForge"
+    description: "AI-powered customer support and ticketing system"
+    port: 8040
+    category: support
+    enabled: true
+
+  leadforge:
+    name: "LeadForge"
+    description: "Lead generation and nurturing automation platform"
+    port: 8050
+    category: contractor
+    enabled: true
+
+  shipforge:
+    name: "ShipForge"
+    description: "Integrated shipping with EasyPost — compare rates, buy labels"
+    port: 8060
+    category: reseller
+    enabled: true
+
+  forgecrm:
+    name: "ForgeCRM"
+    description: "CRM system for managing customers across EmpireBox products"
+    port: 8070
+    category: core
+    enabled: true
+
+  relistapp:
+    name: "RelistApp"
+    description: "Cross-platform relisting tool for marketplace sellers"
+    port: 8080
+    category: reseller
+    enabled: true
+
+  socialforge:
+    name: "SocialForge"
+    description: "Social media management and automated posting"
+    port: 8090
+    category: marketing
+    enabled: true
+
+  llcfactory:
+    name: "LLCFactory"
+    description: "Automated LLC formation and business registration"
+    port: 8100
+    category: legal
+    enabled: true
+
+  apostapp:
+    name: "ApostApp"
+    description: "Apostille and document legalization service platform"
+    port: 8110
+    category: legal
+    enabled: true
+
+  empireassist:
+    name: "EmpireAssist"
+    description: "Telegram/WhatsApp messenger integration for business management"
+    port: 8120
+    category: support
+    enabled: true
+
+  empirepay:
+    name: "EmpirePay"
+    description: "Payment processing and invoicing with multi-gateway support"
+    port: 8130
+    category: payments
+    enabled: true
+
+bundles:
+  reseller:
+    name: "Reseller Bundle"
+    products: [marketforge, shipforge, relistapp, forgecrm]
+
+  contractor:
+    name: "Contractor Bundle"
+    products: [contractorforge, luxeforge, leadforge, forgecrm]
+
+  support:
+    name: "Support Bundle"
+    products: [supportforge, forgecrm, empireassist]
+
+  full:
+    name: "Full Suite"
+    products: [marketforge, contractorforge, luxeforge, supportforge, leadforge,
+               shipforge, forgecrm, relistapp, socialforge, llcfactory,
+               apostapp, empireassist, empirepay]

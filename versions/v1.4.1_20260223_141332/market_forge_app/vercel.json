@@ -1,0 +1,9 @@
+{
+  "buildCommand": "flutter build web",
+  "outputDirectory": "build/web",
+  "installCommand": "git clone --depth 1 https://github.com/aspect-build/aspect-workflows.git && ./aspect-workflows/flutter/setup.sh || (echo 'Flutter setup via aspect-workflows failed. Install Flutter manually.' && exit 1)",
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
