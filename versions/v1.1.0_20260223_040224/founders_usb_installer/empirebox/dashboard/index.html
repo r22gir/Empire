@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EmpireBox Founders Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --accent: #f78166;
+      --green: #3fb950;
+      --blue: #58a6ff;
+      --yellow: #e3b341;
+      --text: #e6edf3;
+      --muted: #8b949e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    .warning-banner {
+      background: #6e1c1c;
+      border-bottom: 2px solid var(--accent);
+      padding: 12px 24px;
+      text-align: center;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--accent);
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.5rem; }
+    header .badge {
+      background: var(--accent);
+      color: #000;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      letter-spacing: 1px;
+    }
+
+    main { padding: 32px; max-width: 1400px; margin: 0 auto; }
+
+    h2 { font-size: 1rem; color: var(--muted); text-transform: uppercase;
+         letter-spacing: 1px; margin-bottom: 16px; margin-top: 32px; }
+
+    .core-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .service-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color 0.2s, transform 0.1s;
+      display: block;
+    }
+    .service-card:hover { border-color: var(--blue); transform: translateY(-1px); }
+    .service-card .name { font-weight: 600; margin-bottom: 4px; }
+    .service-card .port { font-size: 0.8rem; color: var(--blue); font-family: monospace; }
+    .service-card .desc { font-size: 0.8rem; color: var(--muted); margin-top: 6px; }
+
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .product-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color 0.2s;
+      display: block;
+    }
+    .product-card:hover { border-color: var(--green); }
+    .product-card .pname { font-weight: 600; font-size: 0.9rem; }
+    .product-card .pport { font-size: 0.75rem; color: var(--green); font-family: monospace; margin-top: 4px; }
+
+    .cmd-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+    }
+    .cmd-box pre { font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.8; color: var(--green); }
+    .cmd-box .comment { color: var(--muted); }
+
+    footer {
+      text-align: center;
+      padding: 32px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="warning-banner">
+  ⚠️ INTERNAL USE ONLY — MASTER CONTROL DEVICE — NOT FOR CUSTOMER USE ⚠️
+</div>
+
+<header>
+  <div>
+    <h1>EmpireBox Founders Dashboard</h1>
+  </div>
+  <span class="badge">FOUNDERS UNIT</span>
+</header>
+
+<main>
+
+  <h2>Core Services</h2>
+  <div class="core-grid">
+    <a class="service-card" href="http://localhost:7878" target="_blank">
+      <div class="name">🤖 OpenClaw</div>
+      <div class="port">:7878</div>
+      <div class="desc">AI Agent — Founders Mode</div>
+    </a>
+    <a class="service-card" href="http://localhost:8001" target="_blank">
+      <div class="name">🎛️ Control Center</div>
+      <div class="port">:8001</div>
+      <div class="desc">Fleet Management API</div>
+    </a>
+    <a class="service-card" href="http://localhost:8000/docs" target="_blank">
+      <div class="name">⚡ API Gateway</div>
+      <div class="port">:8000</div>
+      <div class="desc">EmpireBox API Docs</div>
+    </a>
+    <a class="service-card" href="http://localhost:9000" target="_blank">
+      <div class="name">🐳 Portainer</div>
+      <div class="port">:9000</div>
+      <div class="desc">Docker Management</div>
+    </a>
+    <a class="service-card" href="http://localhost:11434" target="_blank">
+      <div class="name">🦙 Ollama</div>
+      <div class="port">:11434</div>
+      <div class="desc">Local AI Models</div>
+    </a>
+  </div>
+
+  <h2>Products (13)</h2>
+  <div class="product-grid">
+    <a class="product-card" href="http://localhost:8010" target="_blank">
+      <div class="pname">🛒 MarketForge</div>
+      <div class="pport">:8010</div>
+    </a>
+    <a class="product-card" href="http://localhost:8020" target="_blank">
+      <div class="pname">🏗️ ContractorForge</div>
+      <div class="pport">:8020</div>
+    </a>
+    <a class="product-card" href="http://localhost:8030" target="_blank">
+      <div class="pname">✨ LuxeForge</div>
+      <div class="pport">:8030</div>
+    </a>
+    <a class="product-card" href="http://localhost:8040" target="_blank">
+      <div class="pname">💬 SupportForge</div>
+      <div class="pport">:8040</div>
+    </a>
+    <a class="product-card" href="http://localhost:8050" target="_blank">
+      <div class="pname">🎯 LeadForge</div>
+      <div class="pport">:8050</div>
+    </a>
+    <a class="product-card" href="http://localhost:8060" target="_blank">
+      <div class="pname">📦 ShipForge</div>
+      <div class="pport">:8060</div>
+    </a>
+    <a class="product-card" href="http://localhost:8070" target="_blank">
+      <div class="pname">📋 ForgeCRM</div>
+      <div class="pport">:8070</div>
+    </a>
+    <a class="product-card" href="http://localhost:8080" target="_blank">
+      <div class="pname">🔁 RelistApp</div>
+      <div class="pport">:8080</div>
+    </a>
+    <a class="product-card" href="http://localhost:8090" target="_blank">
+      <div class="pname">📱 SocialForge</div>
+      <div class="pport">:8090</div>
+    </a>
+    <a class="product-card" href="http://localhost:8100" target="_blank">
+      <div class="pname">🏢 LLCFactory</div>
+      <div class="pport">:8100</div>
+    </a>
+    <a class="product-card" href="http://localhost:8110" target="_blank">
+      <div class="pname">📜 ApostApp</div>
+      <div class="pport">:8110</div>
+    </a>
+    <a class="product-card" href="http://localhost:8120" target="_blank">
+      <div class="pname">🤝 EmpireAssist</div>
+      <div class="pport">:8120</div>
+    </a>
+    <a class="product-card" href="http://localhost:8130" target="_blank">
+      <div class="pname">💳 EmpirePay</div>
+      <div class="pport">:8130</div>
+    </a>
+  </div>
+
+  <h2>Quick Commands (SSH: ssh empirebox@empirebox.local)</h2>
+  <div class="cmd-box">
+    <pre><span class="comment"># Product management</span>
+ebox list                  <span class="comment"># List all products + status</span>
+ebox status                <span class="comment"># Show running products</span>
+ebox start marketforge     <span class="comment"># Start a product</span>
+ebox stop marketforge      <span class="comment"># Stop a product</span>
+ebox logs marketforge      <span class="comment"># View product logs</span>
+
+<span class="comment"># Bundles</span>
+ebox bundle reseller       <span class="comment"># MarketForge + ShipForge + RelistApp + ForgeCRM</span>
+ebox bundle contractor     <span class="comment"># ContractorForge + LuxeForge + LeadForge + ForgeCRM</span>
+ebox bundle support        <span class="comment"># SupportForge + ForgeCRM + EmpireAssist</span>
+ebox bundle full           <span class="comment"># All 13 products</span>
+ebox stop-all              <span class="comment"># Stop everything</span>
+
+<span class="comment"># System</span>
+cat /opt/empirebox/.env    <span class="comment"># View credentials</span>
+tail -f /var/log/empirebox-install.log  <span class="comment"># Install log</span>
+/opt/empirebox/scripts/backup.sh        <span class="comment"># Run backup</span></pre>
+  </div>
+
+</main>
+
+<footer>
+  EmpireBox Founders Unit — Internal Use Only — © 2026 EmpireBox
+</footer>
+
+</body>
+</html>

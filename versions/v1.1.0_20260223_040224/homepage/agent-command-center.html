@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Command Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { gold: '#C9A84C', dark: '#1A1A1A', card: '#2C2C2C' }
+        }
+      }
+    }
+  </script>
+  <style>
+    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 5px #22c55e; } 50% { box-shadow: 0 0 20px #22c55e; } }
+    .pulse-online { animation: pulse-glow 2s infinite; }
+    .collapsed { max-height: 60px; overflow: hidden; }
+  </style>
+</head>
+<body class="bg-dark p-4">
+
+<div id="command-center" class="max-w-4xl mx-auto">
+  <!-- Collapsible Header -->
+  <div onclick="togglePanel()" class="bg-card rounded-t-2xl px-6 py-4 cursor-pointer flex items-center justify-between border-b border-gray-800">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🧠</span>
+      <h1 class="text-xl font-bold text-white">AGENT COMMAND CENTER</h1>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-green-500 text-sm flex items-center gap-1">
+        <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span> 3 Active
+      </span>
+      <button id="toggle-btn" class="text-gray-400 hover:text-white">
+        <svg id="chevron" class="w-6 h-6 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Panel Content -->
+  <div id="panel-content" class="bg-card rounded-b-2xl overflow-hidden transition-all duration-300">
+    
+    <!-- MAX Orchestrator Status -->
+    <div class="px-6 py-4 border-b border-gray-800 bg-gradient-to-r from-gold/10 to-transparent">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-3xl">👑</span>
+          <div>
+            <h2 class="text-lg font-bold text-white">MAX <span class="text-gold">(Orchestrator)</span></h2>
+            <p class="text-gray-400 text-sm">Coordinating 3 agents on 2 projects</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 bg-green-500/20 px-3 py-1 rounded-full">
+          <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>
+          <span class="text-green-500 font-semibold text-sm">ONLINE</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Cards Grid -->
+    <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      
+      <!-- Design Agent -->
+      <div class="bg-dark rounded-xl p-4 border border-gray-800 hover:border-gold/50 transition">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-2xl">🎨</span>
+          <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>
+        </div>
+        <h3 class="font-bold text-white text-sm">DESIGN</h3>
+        <p class="text-green-500 text-xs mb-2">Working</p>
+        <p class="text-gray-400 text-xs truncate">Agent Center UI</p>
+        <div class="mt-2 bg-gray-800 rounded-full h-1.5">
+          <div class="bg-gold h-1.5 rounded-full" style="width: 75%"></div>
+        </div>
+      </div>
+
+      <!-- Frontend Agent -->
+      <div class="bg-dark rounded-xl p-4 border border-gray-800 hover:border-gold/50 transition">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-2xl">⚛️</span>
+          <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>
+        </div>
+        <h3 class="font-bold text-white text-sm">FRONTEND</h3>
+        <p class="text-green-500 text-xs mb-2">Working</p>
+        <p class="text-gray-400 text-xs truncate">WorkroomForge</p>
+        <div class="mt-2 bg-gray-800 rounded-full h-1.5">
+          <div class="bg-gold h-1.5 rounded-full" style="width: 100%"></div>
+        </div>
+      </div>
+
+      <!-- Backend Agent -->
+      <div class="bg-dark rounded-xl p-4 border border-gray-800 hover:border-gold/50 transition">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-2xl">🐍</span>
+          <span class="w-2 h-2 bg-green-500 rounded-full pulse-online"></span>
+        </div>
+        <h3 class="font-bold text-white text-sm">BACKEND</h3>
+        <p class="text-green-500 text-xs mb-2">Working</p>
+        <p class="text-gray-400 text-xs truncate">Quote API</p>
+        <div class="mt-2 bg-gray-800 rounded-full h-1.5">
+          <div class="bg-gold h-1.5 rounded-full" style="width: 100%"></div>
+        </div>
+      </div>
+
+      <!-- Docs Agent -->
+      <div class="bg-dark rounded-xl p-4 border border-gray-800 hover:border-gray-700 transition opacity-60">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-2xl">📝</span>
+          <span class="w-2 h-2 bg-gray-600 rounded-full"></span>
+        </div>
+        <h3 class="font-bold text-white text-sm">DOCS</h3>
+        <p class="text-gray-500 text-xs mb-2">Idle</p>
+        <p class="text-gray-600 text-xs truncate">No tasks</p>
+        <div class="mt-2 bg-gray-800 rounded-full h-1.5">
+          <div class="bg-gray-600 h-1.5 rounded-full" style="width: 0%"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Active Projects -->
+    <div class="px-4 pb-4">
+      <h3 class="text-gray-400 text-xs font-semibold mb-3 px-2">📋 ACTIVE PROJECTS</h3>
+      
+      <!-- Project 1 -->
+      <div class="bg-dark rounded-xl p-4 mb-2 border border-gray-800">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-red-500">🚨</span>
+            <span class="font-bold text-white">LuxeForge + WorkroomForge MVP</span>
+          </div>
+          <span class="text-gold text-sm font-semibold">85%</span>
+        </div>
+        <div class="bg-gray-800 rounded-full h-2 mb-3">
+          <div class="bg-gradient-to-r from-gold to-green-500 h-2 rounded-full" style="width: 85%"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="flex items-center gap-2 text-green-500">
+            <span>🎨</span> Portal UI <span class="ml-auto">✅</span>
+          </div>
+          <div class="flex items-center gap-2 text-green-500">
+            <span>🐍</span> Quote API <span class="ml-auto">✅</span>
+          </div>
+          <div class="flex items-center gap-2 text-green-500">
+            <span>⚛️</span> WorkroomForge <span class="ml-auto">✅</span>
+          </div>
+          <div class="flex items-center gap-2 text-yellow-500">
+            <span>🔗</span> Integration <span class="ml-auto">🔄</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Project 2 -->
+      <div class="bg-dark rounded-xl p-4 border border-gray-800">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-yellow-500">🟡</span>
+            <span class="font-bold text-white">Agent Command Center</span>
+          </div>
+          <span class="text-gold text-sm font-semibold">75%</span>
+        </div>
+        <div class="bg-gray-800 rounded-full h-2 mb-3">
+          <div class="bg-gold h-2 rounded-full" style="width: 75%"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="flex items-center gap-2 text-green-500">
+            <span>🎨</span> UI Design <span class="ml-auto">✅</span>
+          </div>
+          <div class="flex items-center gap-2 text-yellow-500">
+            <span>⚛️</span> Integration <span class="ml-auto">🔄</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Command Input -->
+    <div class="px-4 pb-4">
+      <div class="flex gap-2">
+        <input 
+          type="text" 
+          placeholder="💬 Ask MAX: 'What's the status?' or 'Prioritize WorkroomForge'..."
+          class="flex-1 bg-dark border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:border-gold outline-none text-sm"
+        />
+        <button class="bg-gold hover:bg-gold/80 text-dark font-bold px-6 rounded-xl transition">
+          Send
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  let collapsed = false;
+  function togglePanel() {
+    collapsed = !collapsed;
+    const panel = document.getElementById('panel-content');
+    const chevron = document.getElementById('chevron');
+    if (collapsed) {
+      panel.style.maxHeight = '0px';
+      chevron.style.transform = 'rotate(180deg)';
+    } else {
+      panel.style.maxHeight = '1000px';
+      chevron.style.transform = 'rotate(0deg)';
+    }
+  }
+
+  // Fetch real status from API (future)
+  async function fetchAgentStatus() {
+    try {
+      const res = await fetch('http://localhost:8000/api/v1/agents/status');
+      const data = await res.json();
+      // Update UI with real data
+    } catch(e) { console.log('Agent API not available yet'); }
+  }
+  
+  // Poll every 5 seconds
+  setInterval(fetchAgentStatus, 5000);
+</script>
+
+</body>
+</html>

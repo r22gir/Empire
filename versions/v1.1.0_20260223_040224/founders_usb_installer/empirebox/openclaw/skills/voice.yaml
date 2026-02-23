@@ -1,0 +1,43 @@
+# Voice Skill for OpenClaw
+name: voice
+version: "1.0"
+description: "Voice synthesis and transcription capabilities via EmpireBox Voice Service"
+
+triggers:
+  - "speak"
+  - "say"
+  - "read aloud"
+  - "transcribe"
+  - "voice message"
+
+actions:
+
+  speak:
+    description: "Convert text to speech audio"
+    type: http
+    method: POST
+    url: "http://voice-service:8200/tts"
+    headers:
+      Content-Type: "application/x-www-form-urlencoded"
+    body: "text={text}&voice={voice}"
+    params:
+      - name: text
+        type: string
+        required: true
+        description: "The text to convert to speech"
+      - name: voice
+        type: string
+        required: false
+        default: "en_US-amy-medium"
+        description: "Piper voice identifier"
+
+  transcribe:
+    description: "Convert audio to text"
+    type: http
+    method: POST
+    url: "http://voice-service:8200/stt"
+    params:
+      - name: audio_url
+        type: string
+        required: true
+        description: "URL of the audio file to transcribe"
