@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  empireassist:
+    image: empirebox/empireassist:latest
+    container_name: empirebox-empireassist
+    restart: unless-stopped
+    ports:
+      - "8120:8000"
+    env_file:
+      - /opt/empirebox/.env
+    environment:
+      - SERVICE_NAME=empireassist
+      - SERVICE_PORT=8000
+    networks:
+      - empirebox
+    labels:
+      - "empirebox.product=empireassist"
+      - "empirebox.port=8120"
+
+networks:
+  empirebox:
+    external: true

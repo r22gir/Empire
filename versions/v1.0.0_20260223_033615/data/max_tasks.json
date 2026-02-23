@@ -1,0 +1,37 @@
+{
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Version Management System",
+      "description": "Maintain Empire versioning - save snapshots before major changes, manage GitHub tags",
+      "assigned_to": "MAX",
+      "status": "active",
+      "priority": "high",
+      "created_at": "2026-02-23T03:30:00Z",
+      "subtasks": [
+        {"title": "Auto-backup before deployments", "done": true},
+        {"title": "GitHub tag management", "done": true},
+        {"title": "Version restore capability", "done": true},
+        {"title": "Daily backup schedule", "done": false}
+      ]
+    },
+    {
+      "id": "task-002",
+      "title": "Inventory Management Module",
+      "description": "Build inventory tracking system with Rowley pricing integration",
+      "assigned_to": "MAX",
+      "status": "pending",
+      "priority": "high",
+      "created_at": "2026-02-23T02:56:00Z"
+    },
+    {
+      "id": "task-003",
+      "title": "Financial Module",
+      "description": "Build accounting/finance module with invoicing and reporting",
+      "assigned_to": "MAX",
+      "status": "pending",
+      "priority": "high",
+      "created_at": "2026-02-23T02:56:00Z"
+    }
+  ]
+}

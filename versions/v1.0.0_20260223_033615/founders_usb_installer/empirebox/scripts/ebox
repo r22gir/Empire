@@ -1,0 +1,253 @@
+#!/bin/bash
+# EmpireBox Product Launcher CLI
+# Usage: ebox <command> [args]
+
+INSTALL_PATH="/opt/empirebox"
+PRODUCTS_PATH="${INSTALL_PATH}/products"
+ENV_FILE="${INSTALL_PATH}/.env"
+
+# Load env if present
+[ -f "${ENV_FILE}" ] && set -a && source "${ENV_FILE}" && set +a
+
+# Product port map
+declare -A PRODUCT_PORTS=(
+  [marketforge]=8010
+  [contractorforge]=8020
+  [luxeforge]=8030
+  [supportforge]=8040
+  [leadforge]=8050
+  [shipforge]=8060
+  [forgecrm]=8070
+  [relistapp]=8080
+  [socialforge]=8090
+  [llcfactory]=8100
+  [apostapp]=8110
+  [empireassist]=8120
+  [empirepay]=8130
+)
+
+# Bundle definitions
+declare -A BUNDLES=(
+  [reseller]="marketforge shipforge relistapp forgecrm"
+  [contractor]="contractorforge luxeforge leadforge forgecrm"
+  [support]="supportforge forgecrm empireassist"
+  [full]="marketforge contractorforge luxeforge supportforge leadforge shipforge forgecrm relistapp socialforge llcfactory apostapp empireassist empirepay"
+)
+
+PRODUCTS=("marketforge" "contractorforge" "luxeforge" "supportforge" "leadforge"
+          "shipforge" "forgecrm" "relistapp" "socialforge" "llcfactory"
+          "apostapp" "empireassist" "empirepay")
+
+TELEGRAM_PATH="${INSTALL_PATH}/telegram"
+VOICE_PATH="${INSTALL_PATH}/voice"
+
+usage() {
+  cat <<EOF
+EmpireBox Product Launcher
+
+COMMANDS:
+  ebox list                  List all products with ports and status
+  ebox status                Show running products
+  ebox start <product>       Start a product
+  ebox stop <product>        Stop a product
+  ebox restart <product>     Restart a product
+  ebox logs <product>        View product logs
+  ebox bundle <name>         Start a bundle (reseller|contractor|support|full)
+  ebox stop-all              Stop all products
+  ebox health                System health check (core + voice + products)
+  ebox telegram start        Start the Telegram bot
+  ebox telegram stop         Stop the Telegram bot
+  ebox telegram logs         View Telegram bot logs
+  ebox telegram status       Show Telegram bot status
+  ebox voice start           Start the voice service
+  ebox voice stop            Stop the voice service
+  ebox voice logs            View voice service logs
+  ebox voice status          Show voice service status
+
+PRODUCTS:
+EOF
+  for p in "${PRODUCTS[@]}"; do
+    printf "  %-18s port %s\n" "$p" "${PRODUCT_PORTS[$p]}"
+  done
+  cat <<EOF
+
+BUNDLES:
+  reseller    marketforge, shipforge, relistapp, forgecrm
+  contractor  contractorforge, luxeforge, leadforge, forgecrm
+  support     supportforge, forgecrm, empireassist
+  full        all 13 products
+EOF
+}
+
+is_running() {
+  local product="$1"
+  docker compose -f "${PRODUCTS_PATH}/${product}/docker-compose.yml" \
+    ps --services --filter "status=running" 2>/dev/null \
+    | grep -q . && echo "running" || echo "stopped"
+}
+
+cmd_list() {
+  printf "%-20s %-6s %-10s\n" "PRODUCT" "PORT" "STATUS"
+  printf "%-20s %-6s %-10s\n" "-------" "----" "------"
+  for p in "${PRODUCTS[@]}"; do
+    status=$(is_running "$p")
+    printf "%-20s %-6s %-10s\n" "$p" "${PRODUCT_PORTS[$p]}" "$status"
+  done
+}
+
+cmd_status() {
+  echo "Running products:"
+  for p in "${PRODUCTS[@]}"; do
+    if [ "$(is_running "$p")" = "running" ]; then
+      echo "  ✓ $p (port ${PRODUCT_PORTS[$p]})"
+    fi
+  done
+}
+
+cmd_start() {
+  local product="$1"
+  if [ -z "${PRODUCT_PORTS[$product]+_}" ]; then
+    echo "Unknown product: $product"; exit 1
+  fi
+  echo "Starting $product on port ${PRODUCT_PORTS[$product]}..."
+  docker compose -f "${PRODUCTS_PATH}/${product}/docker-compose.yml" up -d
+  echo "$product started"
+}
+
+cmd_stop() {
+  local product="$1"
+  if [ -z "${PRODUCT_PORTS[$product]+_}" ]; then
+    echo "Unknown product: $product"; exit 1
+  fi
+  echo "Stopping $product..."
+  docker compose -f "${PRODUCTS_PATH}/${product}/docker-compose.yml" down
+  echo "$product stopped"
+}
+
+cmd_restart() {
+  cmd_stop "$1"
+  cmd_start "$1"
+}
+
+cmd_logs() {
+  local product="$1"
+  if [ -z "${PRODUCT_PORTS[$product]+_}" ]; then
+    echo "Unknown product: $product"; exit 1
+  fi
+  docker compose -f "${PRODUCTS_PATH}/${product}/docker-compose.yml" logs -f
+}
+
+cmd_bundle() {
+  local bundle="$1"
+  if [ -z "${BUNDLES[$bundle]+_}" ]; then
+    echo "Unknown bundle: $bundle. Use: reseller, contractor, support, full"
+    exit 1
+  fi
+  echo "Starting bundle: $bundle"
+  for product in ${BUNDLES[$bundle]}; do
+    cmd_start "$product"
+  done
+  echo "Bundle $bundle started"
+}
+
+cmd_stop_all() {
+  echo "Stopping all products..."
+  for p in "${PRODUCTS[@]}"; do
+    if [ "$(is_running "$p")" = "running" ]; then
+      cmd_stop "$p"
+    fi
+  done
+  echo "All products stopped"
+}
+
+cmd_health() {
+  echo "=== EmpireBox Health Check ==="
+  # Core services
+  for svc in postgres redis openclaw api-gateway; do
+    status=$(docker inspect --format='{{.State.Health.Status}}' "empirebox-${svc}" 2>/dev/null || echo "unknown")
+    printf "  %-20s %s\n" "$svc" "$status"
+  done
+  # Voice service
+  voice_status=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:8200/health 2>/dev/null)
+  if [ "${voice_status}" = "200" ]; then
+    printf "  %-20s %s\n" "voice-service" "healthy"
+  else
+    printf "  %-20s %s\n" "voice-service" "unreachable"
+  fi
+  # Products
+  for p in "${PRODUCTS[@]}"; do
+    printf "  %-20s %s\n" "$p" "$(is_running "$p")"
+  done
+}
+
+cmd_telegram() {
+  local subcmd="${1:-help}"
+  case "$subcmd" in
+    start)
+      echo "Starting Telegram bot..."
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" up -d
+      echo "Telegram bot started"
+      ;;
+    stop)
+      echo "Stopping Telegram bot..."
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" down
+      echo "Telegram bot stopped"
+      ;;
+    logs)
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" logs -f
+      ;;
+    status)
+      docker compose -f "${TELEGRAM_PATH}/docker-compose.yml" ps
+      ;;
+    *)
+      echo "Usage: ebox telegram <start|stop|logs|status>"
+      exit 1
+      ;;
+  esac
+}
+
+cmd_voice() {
+  local subcmd="${1:-help}"
+  case "$subcmd" in
+    start)
+      echo "Starting voice service..."
+      docker compose -f "${VOICE_PATH}/docker-compose.yml" up -d
+      echo "Voice service started on port 8200"
+      ;;
+    stop)
+      echo "Stopping voice service..."
+      docker compose -f "${VOICE_PATH}/docker-compose.yml" down
+      echo "Voice service stopped"
+      ;;
+    logs)
+      docker compose -f "${VOICE_PATH}/docker-compose.yml" logs -f
+      ;;
+    status)
+      docker compose -f "${VOICE_PATH}/docker-compose.yml" ps
+      ;;
+    *)
+      echo "Usage: ebox voice <start|stop|logs|status>"
+      exit 1
+      ;;
+  esac
+}
+
+# Main
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  list)      cmd_list ;;
+  status)    cmd_status ;;
+  start)     cmd_start "${1:?Usage: ebox start <product>}" ;;
+  stop)      cmd_stop "${1:?Usage: ebox stop <product>}" ;;
+  restart)   cmd_restart "${1:?Usage: ebox restart <product>}" ;;
+  logs)      cmd_logs "${1:?Usage: ebox logs <product>}" ;;
+  bundle)    cmd_bundle "${1:?Usage: ebox bundle <name>}" ;;
+  stop-all)  cmd_stop_all ;;
+  health)    cmd_health ;;
+  telegram)  cmd_telegram "${1:-help}" ;;
+  voice)     cmd_voice "${1:-help}" ;;
+  help|--help|-h) usage ;;
+  *) echo "Unknown command: $CMD"; usage; exit 1 ;;
+esac

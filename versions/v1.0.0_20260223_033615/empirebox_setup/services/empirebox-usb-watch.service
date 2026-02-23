@@ -1,0 +1,15 @@
+[Unit]
+Description=EmpireBox USB Auto-Configuration Watcher
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/opt/empirebox/scripts/usb-autoconfig.sh
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=empirebox-usb-watch
+
+[Install]
+WantedBy=multi-user.target
