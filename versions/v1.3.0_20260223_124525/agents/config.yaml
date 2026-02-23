@@ -1,0 +1,48 @@
+# Agent configurations for the EmpireBox Agent Framework
+
+defaults:
+  max_retries: 3
+  retry_backoff_base: 2      # seconds (exponential: 2^attempt)
+  task_timeout: 60           # seconds per task
+  log_activity: true
+
+agents:
+  listing_bot:
+    enabled: true
+    products: [MarketForge, RelistApp, SocialForge, ForgeCRM]
+    schedule: null             # null = on-demand only; cron string for scheduled runs
+
+  ship_bot:
+    enabled: true
+    products: [MarketForge, ShipForge, SupportForge]
+    schedule: null
+
+  quote_bot:
+    enabled: true
+    products: [LuxeForge, ContractorForge, ForgeCRM, SupportForge]
+    schedule: null
+
+  support_bot:
+    enabled: true
+    products: [SupportForge, MarketForge, ForgeCRM]
+    schedule: "*/5 * * * *"   # Poll every 5 minutes
+
+  lead_bot:
+    enabled: true
+    products: [LeadForge, ForgeCRM, SocialForge]
+    schedule: "0 * * * *"     # Hourly
+
+  telegram_bot:
+    enabled: false             # Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
+    products: [all]
+    schedule: null
+
+integrations:
+  marketforge_url: "${MARKETFORGE_URL:-http://localhost:8001}"
+  shipforge_url: "${SHIPFORGE_URL:-http://localhost:8002}"
+  supportforge_url: "${SUPPORTFORGE_URL:-http://localhost:8003}"
+  forgecrm_url: "${FORGECRM_URL:-http://localhost:8004}"
+  leadforge_url: "${LEADFORGE_URL:-http://localhost:8005}"
+  socialforge_url: "${SOCIALFORGE_URL:-http://localhost:8006}"
+  luxeforge_url: "${LUXEFORGE_URL:-http://localhost:8007}"
+  contractorforge_url: "${CONTRACTORFORGE_URL:-http://localhost:8008}"

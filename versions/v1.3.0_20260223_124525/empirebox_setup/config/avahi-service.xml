@@ -1,0 +1,28 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!--
+  EmpireBox mDNS Service Definition
+  Installed to /etc/avahi/services/empirebox.service
+  The network-discovery.sh script writes this file with the real serial substituted.
+-->
+<service-group>
+  <name replace-wildcards="yes">EmpireBox-%h</name>
+
+  <!-- EmpireBox setup service -->
+  <service>
+    <type>_empirebox._tcp</type>
+    <port>8080</port>
+    <txt-record>serial=PLACEHOLDER</txt-record>
+    <txt-record>device_id=PLACEHOLDER</txt-record>
+    <txt-record>setup_url=https://setup.empirebox.com/device/PLACEHOLDER</txt-record>
+    <txt-record>firmware=1.0.0</txt-record>
+    <txt-record>model=EmpireBox-Mini-Ryzen7</txt-record>
+  </service>
+
+  <!-- HTTP setup portal -->
+  <service>
+    <type>_http._tcp</type>
+    <port>8080</port>
+    <txt-record>path=/setup</txt-record>
+  </service>
+</service-group>
