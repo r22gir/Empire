@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  contractorforge:
+    image: empirebox/contractorforge:latest
+    container_name: empirebox-contractorforge
+    restart: unless-stopped
+    ports:
+      - "8020:8000"
+    env_file:
+      - /opt/empirebox/.env
+    environment:
+      - SERVICE_NAME=contractorforge
+      - SERVICE_PORT=8000
+    networks:
+      - empirebox
+    labels:
+      - "empirebox.product=contractorforge"
+      - "empirebox.port=8020"
+
+networks:
+  empirebox:
+    external: true

@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  telegram-bot:
+    build: .
+    container_name: empirebox_telegram
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENCLAW_HOST=http://openclaw:7878
+      - CONFIG_PATH=/app/config.yaml
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/empirebox:/opt/empirebox:ro
+    depends_on:
+      - openclaw
+    networks:
+      - empirebox_network
+
+networks:
+  empirebox_network:
+    external: true
+    name: empirebox

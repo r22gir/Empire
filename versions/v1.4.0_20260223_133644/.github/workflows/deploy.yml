@@ -1,0 +1,116 @@
+name: Deploy MarketForge
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-flutter:
+    name: Build Flutter Web App
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.16.0'
+          channel: 'stable'
+
+      - name: Get Flutter dependencies
+        working-directory: market_forge_app
+        run: flutter pub get
+
+      - name: Build Flutter web
+        working-directory: market_forge_app
+        run: flutter build web
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-web-build
+          path: market_forge_app/build/web
+
+  deploy-vercel-app:
+    name: Deploy Flutter App to Vercel
+    needs: build-flutter
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: flutter-web-build
+          path: market_forge_app/build/web
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: market_forge_app
+          vercel-args: '--prod'
+
+  deploy-vercel-website:
+    name: Deploy Website to Vercel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: website/nextjs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: website/nextjs
+        run: npm ci
+
+      - name: Build website
+        working-directory: website/nextjs
+        run: npm run build
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_WEBSITE_PROJECT_ID }}
+          working-directory: website/nextjs
+          vercel-args: '--prod'
+
+  deploy-railway-backend:
+    name: Deploy Backend to Railway
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: ${{ secrets.RAILWAY_TOKEN != '' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        working-directory: backend
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service backend

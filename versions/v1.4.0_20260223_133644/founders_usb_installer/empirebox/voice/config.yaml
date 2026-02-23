@@ -1,0 +1,21 @@
+voice:
+  stt:
+    model: "base"  # tiny, base, small, medium, large
+    language: "auto"  # auto-detect or specific: en, es, fr, etc.
+    device: "cpu"  # cpu or cuda
+
+  tts:
+    default_voice: "en_US-amy-medium"
+    output_format: "mp3"  # mp3 or ogg
+    speed: 1.0
+    available_voices:
+      - en_US-amy-medium
+      - en_US-ryan-medium
+      - en_GB-alan-medium
+      - es_ES-mls-medium
+
+  api:
+    host: "0.0.0.0"
+    port: 8200
+    max_audio_size_mb: 25
+    timeout_seconds: 60

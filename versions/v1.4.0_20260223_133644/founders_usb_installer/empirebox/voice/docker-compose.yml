@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  voice-service:
+    build: .
+    container_name: empirebox-voice
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    volumes:
+      - voice_models:/app/models
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - PIPER_MODELS_DIR=/app/models/piper
+      - CONFIG_PATH=/app/config.yaml
+    networks:
+      - empirebox
+
+volumes:
+  voice_models:
+
+networks:
+  empirebox:
+    external: true
+    name: empirebox

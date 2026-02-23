@@ -1,0 +1,32 @@
+{
+  "unit_id": "EMPIRE-MASTER-001",
+  "unit_name": "EmpireBox Prime",
+  "license_key": "EM-RG22-MSTR-2026",
+  "license_type": "MASTER",
+  "activated_at": "2026-02-22T21:02:55-05:00",
+  "activated_by": "RG22",
+  "machine": {
+    "hostname": "EmpireBox",
+    "os": "Ubuntu 24.04.4 LTS",
+    "cpu_cores": 16,
+    "ram_gb": 27,
+    "machine_id": "38ed9653304f418f905cfe7e59f5462d"
+  },
+  "products_unlocked": [
+    "workroom_forge",
+    "luxe_forge",
+    "market_forge",
+    "support_forge",
+    "lead_forge",
+    "empire_wallet",
+    "content_forge",
+    "open_claw"
+  ],
+  "is_founder_unit": true,
+  "first_activation": true,
+  "phone_home": {
+    "enabled": true,
+    "last_ping": null,
+    "server": "https://api.empirebox.io/activations"
+  }
+}
