@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EmpireBox Command Center</title>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [v-cloak] { display: none; }
+    body { background-color: #111827; }
+    .sidebar-collapsed { width: 4rem; }
+    .sidebar-expanded { width: 16rem; }
+    .transition-width { transition: width 0.3s ease; }
+    .chat-bubble-user { background: #6d28d9; }
+    .chat-bubble-ai { background: #1f2937; border: 1px solid #374151; }
+    .scrollbar-thin::-webkit-scrollbar { width: 4px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 2px; }
+    .kbd { display: inline-block; padding: 1px 6px; border-radius: 4px;
+           background: #374151; border: 1px solid #4b5563; font-size: 0.75rem; }
+  </style>
+</head>
+<body class="text-gray-100 min-h-screen">
+<div id="app" v-cloak class="flex min-h-screen">
+
+  <!-- Sidebar -->
+  <aside
+    :class="['flex flex-col bg-gray-900 border-r border-gray-700 transition-width overflow-hidden flex-shrink-0',
+             sidebarOpen ? 'sidebar-expanded' : 'sidebar-collapsed']">
+    <div class="flex items-center h-14 px-3 border-b border-gray-700 flex-shrink-0">
+      <button @click="sidebarOpen = !sidebarOpen"
+              class="p-1 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-white">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <span v-if="sidebarOpen" class="ml-3 font-bold text-purple-400 whitespace-nowrap">⚡ EmpireBox</span>
+    </div>
+    <nav class="flex-1 py-3 space-y-1 overflow-hidden">
+      <a v-for="item in navItems" :key="item.id"
+         @click="activeSection = item.id"
+         :class="['flex items-center px-3 py-2 rounded-lg mx-2 cursor-pointer transition-colors whitespace-nowrap',
+                  activeSection === item.id ? 'bg-purple-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white']">
+        <span class="text-lg flex-shrink-0">{{ item.icon }}</span>
+        <span v-if="sidebarOpen" class="ml-3 text-sm font-medium">{{ item.label }}</span>
+      </a>
+    </nav>
+    <div v-if="sidebarOpen" class="p-3 border-t border-gray-700 text-xs text-gray-500">
+      EmpireBox v1.0
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <div class="flex-1 flex flex-col min-w-0">
+
+    <!-- Header -->
+    <header class="bg-gray-900 border-b border-gray-700 px-4 py-2 flex items-center justify-between flex-shrink-0">
+      <div>
+        <h1 class="text-lg font-bold text-white">{{ greeting }}, RG 👋</h1>
+        <p class="text-xs text-gray-400">{{ currentTime }}</p>
+      </div>
+      <div class="flex items-center gap-4">
+        <!-- System health -->
+        <div class="hidden sm:flex items-center gap-3 text-xs">
+          <div class="flex items-center gap-1">
+            <span class="text-gray-400">CPU</span>
+            <div class="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+              <div :style="{width: health.cpu + '%'}" class="h-full bg-green-500 rounded-full"></div>
+            </div>
+            <span class="text-gray-300">{{ health.cpu }}%</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="text-gray-400">RAM</span>
+            <div class="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+              <div :style="{width: health.ram + '%'}" class="h-full bg-blue-500 rounded-full"></div>
+            </div>
+            <span class="text-gray-300">{{ health.ram }}%</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="text-gray-400">Disk</span>
+            <div class="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+              <div :style="{width: health.disk + '%'}" class="h-full bg-yellow-500 rounded-full"></div>
+            </div>
+            <span class="text-gray-300">{{ health.disk }}%</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-900/40 border border-green-700">
+          <span class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></span>
+          <span class="text-xs text-green-400">All Systems Online</span>
+        </div>
+        <button @click="showShortcuts = true"
+                class="text-gray-400 hover:text-white text-sm px-2 py-1 rounded border border-gray-700 hover:border-gray-500">
+          ?
+        </button>
+      </div>
+    </header>
+
+    <!-- Dashboard body -->
+    <main class="flex-1 overflow-auto p-4 space-y-4">
+
+      <!-- Money Dashboard -->
+      <section class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+        <div class="flex flex-wrap gap-4 mb-3">
+          <div class="flex-1 min-w-0">
+            <div class="text-2xl font-bold text-yellow-400">💰 TODAY: ${{ money.today.toLocaleString() }}</div>
+            <div class="text-sm text-green-400">▲ +${{ money.vsYesterday }} vs yesterday</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-bold">📦 ORDERS: {{ money.orders }}</div>
+            <div class="text-xs text-yellow-400">▲ {{ money.needShipping }} need shipping</div>
+          </div>
+          <div class="text-center">
+            <div class="text-xl font-bold">🎫 TICKETS: {{ money.tickets }} open</div>
+            <div class="text-xs text-red-400">{{ money.tickets }} need attention</div>
+          </div>
+        </div>
+        <div class="text-sm text-gray-300">
+          <span class="text-gray-500 mr-2">CHANNELS:</span>
+          <span v-for="(ch, i) in money.channels" :key="ch.name">
+            <span class="font-medium">{{ ch.name }}</span>
+            <span class="text-yellow-400 ml-1">${{ ch.amount }}</span>
+            <span v-if="i < money.channels.length - 1" class="text-gray-600 mx-2">│</span>
+          </span>
+        </div>
+      </section>
+
+      <!-- 3-column grid: Action Queue | OpenClaw Chat | Notifications -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        <!-- Action Queue -->
+        <section class="bg-gray-800 rounded-xl border border-gray-700 p-4 flex flex-col">
+          <h2 class="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+            ⚡ Action Queue
+            <span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-red-900/40 text-red-400 border border-red-800">
+              {{ actionQueue.filter(a=>a.urgency==='red').length }} urgent
+            </span>
+          </h2>
+          <div class="space-y-2 flex-1 overflow-auto scrollbar-thin">
+            <div v-for="item in actionQueue" :key="item.id"
+                 class="flex items-center gap-2 p-2 rounded-lg bg-gray-750 border border-gray-700">
+              <span class="flex-shrink-0 text-base">
+                {{ item.urgency === 'red' ? '🔴' : item.urgency === 'yellow' ? '🟡' : '🟢' }}
+              </span>
+              <span class="flex-1 text-xs text-gray-300 min-w-0 truncate">{{ item.text }}</span>
+              <button @click="handleAction(item)"
+                      :class="['flex-shrink-0 text-xs px-2 py-1 rounded font-medium',
+                               item.urgency === 'red' ? 'bg-red-700 hover:bg-red-600' :
+                               item.urgency === 'yellow' ? 'bg-yellow-700 hover:bg-yellow-600' :
+                               'bg-green-700 hover:bg-green-600']">
+                {{ item.action }}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- OpenClaw AI Chat -->
+        <section class="bg-gray-800 rounded-xl border border-gray-700 p-4 flex flex-col h-96 lg:h-auto">
+          <h2 class="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
+            🤖 OpenClaw AI
+            <span :class="['ml-auto w-2 h-2 rounded-full', clawOnline ? 'bg-green-400' : 'bg-red-400']"></span>
+            <span class="text-xs" :class="clawOnline ? 'text-green-400' : 'text-red-400'">
+              {{ clawOnline ? 'Online' : 'Offline' }}
+            </span>
+          </h2>
+          <!-- Quick commands -->
+          <div class="flex flex-wrap gap-1 mb-2">
+            <button v-for="cmd in quickCmds" :key="cmd"
+                    @click="sendChat(cmd)"
+                    class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-purple-700 border border-gray-600 hover:border-purple-500 transition-colors">
+              {{ cmd }}
+            </button>
+          </div>
+          <!-- Chat history -->
+          <div ref="chatBox" class="flex-1 overflow-auto scrollbar-thin space-y-2 mb-2 min-h-0">
+            <div v-for="(msg, i) in chatHistory" :key="i"
+                 :class="['flex', msg.role === 'user' ? 'justify-end' : 'justify-start']">
+              <div :class="['max-w-xs px-3 py-1.5 rounded-xl text-xs',
+                            msg.role === 'user' ? 'chat-bubble-user text-white' : 'chat-bubble-ai text-gray-200']">
+                {{ msg.content }}
+              </div>
+            </div>
+            <div v-if="chatLoading" class="flex justify-start">
+              <div class="chat-bubble-ai px-3 py-1.5 rounded-xl text-xs text-gray-400 animate-pulse">
+                OpenClaw is thinking…
+              </div>
+            </div>
+          </div>
+          <!-- Input row -->
+          <div class="flex gap-1">
+            <input
+              ref="chatInput"
+              v-model="chatMessage"
+              @keydown.enter="sendChat()"
+              placeholder="Ask OpenClaw… (press /)"
+              class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500" />
+            <button @click="toggleVoice"
+                    :class="['px-2 py-1.5 rounded-lg text-xs border transition-colors',
+                             listening ? 'bg-red-700 border-red-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-purple-500']"
+                    title="Voice input">
+              🎤
+            </button>
+            <button @click="sendChat()"
+                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-xs font-medium transition-colors">
+              Send
+            </button>
+          </div>
+        </section>
+
+        <!-- Live Notifications -->
+        <section class="bg-gray-800 rounded-xl border border-gray-700 p-4 flex flex-col">
+          <h2 class="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+            🔔 Live Feed
+            <button @click="clearNotifications"
+                    class="ml-auto text-xs text-gray-500 hover:text-gray-300">Clear</button>
+          </h2>
+          <div class="flex-1 overflow-auto scrollbar-thin space-y-2">
+            <div v-for="(n, i) in notifications" :key="i"
+                 class="flex items-start gap-2 p-2 rounded-lg border border-gray-700 hover:border-gray-600">
+              <span class="text-base flex-shrink-0">{{ n.icon }}</span>
+              <div class="flex-1 min-w-0">
+                <div class="text-xs text-gray-200 truncate">{{ n.text }}</div>
+                <div class="text-xs text-gray-500">{{ n.time }}</div>
+              </div>
+              <button v-if="n.action"
+                      class="flex-shrink-0 text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600">
+                {{ n.action }}
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Agents Dashboard -->
+      <section class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+        <h2 class="text-sm font-semibold text-gray-300 mb-3">🤖 Agent Activity</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-gray-500 border-b border-gray-700">
+                <th class="text-left pb-2 pr-4">Agent</th>
+                <th class="text-left pb-2 pr-4">Activity</th>
+                <th class="text-left pb-2 pr-4">Cost</th>
+                <th class="text-left pb-2 pr-4">Value / Savings</th>
+                <th class="text-left pb-2">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-700">
+              <tr v-for="agent in agents" :key="agent.name" class="hover:bg-gray-750">
+                <td class="py-2 pr-4 font-medium text-purple-300">{{ agent.name }}</td>
+                <td class="py-2 pr-4 text-gray-300">{{ agent.activity }}</td>
+                <td class="py-2 pr-4 text-gray-400">{{ agent.cost }}</td>
+                <td class="py-2 pr-4 text-green-400">{{ agent.value }}</td>
+                <td class="py-2">
+                  <button @click="toggleAgent(agent)"
+                          :class="['px-3 py-0.5 rounded-full text-xs font-medium border',
+                                   agent.running
+                                     ? 'bg-green-900/40 text-green-400 border-green-700 hover:bg-red-900/40 hover:text-red-400 hover:border-red-700'
+                                     : 'bg-gray-700 text-gray-400 border-gray-600 hover:bg-green-900/40 hover:text-green-400 hover:border-green-700']">
+                    {{ agent.running ? '⏸ Pause' : '▶ Resume' }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Forge Products Grid -->
+      <section>
+        <h2 class="text-sm font-semibold text-gray-300 mb-3">🔨 Forge Products</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div v-for="product in forgeProducts" :key="product.name"
+               class="bg-gray-800 rounded-xl border border-gray-700 p-3 hover:border-purple-600 transition-colors">
+            <div class="text-xl mb-1">{{ product.icon }}</div>
+            <div class="font-semibold text-sm text-white truncate">{{ product.name }}</div>
+            <div class="text-xs text-gray-400 mt-0.5">{{ product.stat1 }}</div>
+            <div class="text-xs text-yellow-400 mb-2">{{ product.stat2 }}</div>
+            <div class="flex gap-1">
+              <a :href="product.url" target="_blank"
+                 class="flex-1 text-center text-xs py-1 bg-purple-700 hover:bg-purple-600 rounded font-medium transition-colors">
+                Open
+              </a>
+              <button class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors">⚙️</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick Launch Pad & Channel Status row -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        <!-- Quick Launch Pad -->
+        <section class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+          <h2 class="text-sm font-semibold text-gray-300 mb-3">🚀 Quick Launch</h2>
+          <div class="grid grid-cols-5 gap-2">
+            <button v-for="task in quickLaunch" :key="task.label"
+                    @click="task.fn()"
+                    class="flex flex-col items-center gap-1 p-2 rounded-xl bg-gray-700 hover:bg-purple-800 border border-gray-600 hover:border-purple-500 transition-colors">
+              <span class="text-xl">{{ task.icon }}</span>
+              <span class="text-xs text-center leading-tight text-gray-300">{{ task.label }}</span>
+              <kbd class="kbd text-gray-500">{{ task.key }}</kbd>
+            </button>
+          </div>
+        </section>
+
+        <!-- Channel Status -->
+        <section class="bg-gray-800 rounded-xl border border-gray-700 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-gray-300">📡 Channel Status</h2>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-gray-500">Last sync: {{ lastSync }}</span>
+              <button @click="syncChannels"
+                      class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 border border-gray-600">
+                🔄 Sync Now
+              </button>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div v-for="ch in channels" :key="ch.name"
+                 class="flex items-center justify-between p-2 rounded-lg border"
+                 :class="ch.status === 'ok' ? 'border-green-800 bg-green-900/10'
+                       : ch.status === 'warn' ? 'border-yellow-800 bg-yellow-900/10'
+                       : 'border-red-800 bg-red-900/10'">
+              <div class="flex items-center gap-2">
+                <span>{{ ch.status === 'ok' ? '✅' : ch.status === 'warn' ? '⚠️' : '❌' }}</span>
+                <span class="font-medium text-sm">{{ ch.name }}</span>
+              </div>
+              <span class="text-xs" :class="ch.status === 'ok' ? 'text-green-400'
+                                          : ch.status === 'warn' ? 'text-yellow-400'
+                                          : 'text-red-400'">
+                {{ ch.info }}
+              </span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Keyboard shortcuts modal -->
+  <div v-if="showShortcuts"
+       class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+       @click.self="showShortcuts = false">
+    <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 w-80 shadow-2xl">
+      <h3 class="text-lg font-bold text-white mb-4">⌨️ Keyboard Shortcuts</h3>
+      <div class="space-y-2 text-sm">
+        <div v-for="sc in shortcuts" :key="sc.keys"
+             class="flex items-center justify-between">
+          <span class="text-gray-300">{{ sc.desc }}</span>
+          <kbd class="kbd">{{ sc.keys }}</kbd>
+        </div>
+      </div>
+      <button @click="showShortcuts = false"
+              class="mt-4 w-full py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition-colors">
+        Close
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+// Configuration
+const OPENCLAW_API = 'http://localhost:7878';
+const MAX_STORED_MESSAGES = 50; // max chat messages persisted in localStorage
+
+createApp({
+  setup() {
+    // --- Sidebar ---
+    const sidebarOpen = ref(true);
+    const activeSection = ref('dashboard');
+
+    const navItems = [
+      { id: 'dashboard', icon: '🏠', label: 'Dashboard' },
+      { id: 'market',    icon: '🛒', label: 'MarketForge' },
+      { id: 'luxe',      icon: '✂️', label: 'LuxeForge' },
+      { id: 'contractor',icon: '🔨', label: 'ContractorForge' },
+      { id: 'ship',      icon: '📦', label: 'ShipForge' },
+      { id: 'support',   icon: '🎫', label: 'SupportForge' },
+      { id: 'agents',    icon: '🤖', label: 'Agents' },
+      { id: 'reports',   icon: '📊', label: 'Reports' },
+    ];
+
+    // --- Time & Greeting ---
+    const currentTime = ref('');
+    const greeting = computed(() => {
+      const h = new Date().getHours();
+      if (h < 12) return 'Good morning';
+      if (h < 17) return 'Good afternoon';
+      return 'Good evening';
+    });
+    function updateTime() {
+      currentTime.value = new Date().toLocaleString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: 'numeric', minute: '2-digit', hour12: true
+      });
+    }
+
+    // --- System Health ---
+    const health = ref({ cpu: 18, ram: 42, disk: 61 });
+    function randomiseHealth() {
+      health.value.cpu  = Math.max(5,  Math.min(95, health.value.cpu  + (Math.random() * 6 - 3) | 0));
+      health.value.ram  = Math.max(20, Math.min(90, health.value.ram  + (Math.random() * 4 - 2) | 0));
+      health.value.disk = Math.max(30, Math.min(95, health.value.disk + (Math.random() * 2 - 1) | 0));
+    }
+
+    // --- Money ---
+    const money = ref({
+      today: 1247,
+      vsYesterday: 312,
+      orders: 23,
+      needShipping: 3,
+      tickets: 4,
+      channels: [
+        { name: 'eBay',    amount: 623 },
+        { name: 'Posh',    amount: 412 },
+        { name: 'Mercari', amount: 156 },
+        { name: 'Direct',  amount: 56  },
+      ],
+    });
+
+    // --- Action Queue ---
+    const actionQueue = ref([
+      { id: 1, urgency: 'red',    text: 'Ship order #1247 - Sarah J. (2 days overdue)', action: 'Ship'   },
+      { id: 2, urgency: 'yellow', text: "Reply to ticket #892 - \"Where's my order?\"",  action: 'View'   },
+      { id: 3, urgency: 'yellow', text: '3 listings expiring in 2 hours',                action: 'Relist' },
+      { id: 4, urgency: 'green',  text: 'Quote request from Michael Chen',               action: 'Review' },
+    ]);
+    function handleAction(item) {
+      alert(`Action: ${item.action} — ${item.text}`);
+    }
+
+    // --- OpenClaw Chat ---
+    const clawOnline = ref(false);
+    const chatHistory = ref([]);
+    const chatMessage = ref('');
+    const chatLoading = ref(false);
+    const chatInput   = ref(null);
+    const chatBox     = ref(null);
+    const listening   = ref(false);
+    const quickCmds   = ['sales today', 'ship pending', 'check health', 'backup'];
+
+    // Load chat history from localStorage
+    const CHAT_KEY = 'openclaw_chat_history';
+    function loadChat() {
+      try {
+        const stored = localStorage.getItem(CHAT_KEY);
+        if (stored) chatHistory.value = JSON.parse(stored);
+      } catch (e) { /* ignore */ }
+    }
+    function saveChat() {
+      try {
+        localStorage.setItem(CHAT_KEY, JSON.stringify(chatHistory.value.slice(-MAX_STORED_MESSAGES)));
+      } catch (e) { /* ignore */ }
+    }
+
+    async function checkClawHealth() {
+      try {
+        const r = await fetch(`${OPENCLAW_API}/health`, { signal: AbortSignal.timeout(3000) });
+        clawOnline.value = r.ok;
+      } catch {
+        clawOnline.value = false;
+      }
+    }
+
+    async function sendChat(text) {
+      const msg = (text || chatMessage.value).trim();
+      if (!msg) return;
+      chatMessage.value = '';
+      chatHistory.value.push({ role: 'user', content: msg });
+      chatLoading.value = true;
+      await nextTick();
+      if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
+
+      try {
+        const resp = await fetch(`${OPENCLAW_API}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: msg, history: chatHistory.value.slice(-10) }),
+          signal: AbortSignal.timeout(30000),
+        });
+        const data = await resp.json();
+        chatHistory.value.push({ role: 'assistant', content: data.response || data.message || 'No response.' });
+      } catch (e) {
+        chatHistory.value.push({
+          role: 'assistant',
+          content: clawOnline.value
+            ? '⚠️ Error reaching OpenClaw API.'
+            : '🔴 OpenClaw is offline. Start it with: docker compose -f docker-compose.command-center.yml up openclaw',
+        });
+      }
+      chatLoading.value = false;
+      saveChat();
+      await nextTick();
+      if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight;
+    }
+
+    function toggleVoice() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) { alert('Speech recognition not supported in this browser.'); return; }
+      if (listening.value) { recognition && recognition.stop(); listening.value = false; return; }
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.onresult = (e) => { chatMessage.value = e.results[0][0].transcript; };
+      recognition.onend = () => { listening.value = false; };
+      recognition.start();
+      listening.value = true;
+    }
+
+    // --- Agents ---
+    const agents = ref([
+      { name: 'MarketBot',   activity: 'Listed 12 items',   cost: '$0',    value: 'Est. value $340', running: true  },
+      { name: 'ShipBot',     activity: '8 labels made',     cost: '$0.24', value: 'Saved 45 min',    running: true  },
+      { name: 'SupportBot',  activity: '5 auto-replies',    cost: '$0.10', value: '3 escalated',     running: true  },
+      { name: 'TelegramBot', activity: '23 messages',       cost: '$0',    value: '2 orders via chat', running: false },
+    ]);
+    function toggleAgent(agent) { agent.running = !agent.running; }
+
+    // --- Forge Products ---
+    const forgeProducts = ref([
+      { icon: '🛒', name: 'MarketForge',      stat1: '156 listings',    stat2: '$892 today',     url: 'http://localhost:8010' },
+      { icon: '✂️', name: 'LuxeForge',        stat1: '3 quotes open',   stat2: '$4,250 pending', url: 'http://localhost:8030' },
+      { icon: '🔨', name: 'ContractorForge',  stat1: '2 projects',      stat2: '$12,400 active', url: 'http://localhost:8020' },
+      { icon: '📦', name: 'ShipForge',        stat1: '8 pending',       stat2: '23 shipped/mo',  url: 'http://localhost:8040' },
+      { icon: '🎫', name: 'SupportForge',     stat1: '4 open tickets',  stat2: '94% resolved',   url: 'http://localhost:8050' },
+      { icon: '🎯', name: 'LeadForge',        stat1: '12 new leads',    stat2: '$0 cost',        url: 'http://localhost:8060' },
+      { icon: '📱', name: 'SocialForge',      stat1: '3 posts today',   stat2: '1.2k reach',     url: 'http://localhost:8070' },
+      { icon: '👥', name: 'ForgeCRM',         stat1: '248 contacts',    stat2: '5 follow-ups',   url: 'http://localhost:8080' },
+      { icon: '🔄', name: 'RelistApp',        stat1: '45 re-listed',    stat2: 'Saved 2 hr',     url: 'http://localhost:8090' },
+      { icon: '🏢', name: 'LLCFactory',       stat1: '1 filing pending',stat2: '$299 fee due',   url: 'http://localhost:8100' },
+    ]);
+
+    // --- Quick Launch ---
+    const quickLaunch = [
+      { icon: '📸', label: 'List Item',  key: '1', fn: () => alert('List Item') },
+      { icon: '📦', label: 'Ship Order', key: '2', fn: () => alert('Ship Order') },
+      { icon: '💰', label: 'Invoice',    key: '3', fn: () => alert('Invoice') },
+      { icon: '🎫', label: 'New Ticket', key: '4', fn: () => alert('New Ticket') },
+      { icon: '📊', label: 'Reports',    key: '5', fn: () => alert('Reports') },
+    ];
+
+    // --- Channel Status ---
+    const lastSync = ref('3 min ago');
+    const channels = ref([
+      { name: 'eBay',     status: 'ok',   info: '156 active' },
+      { name: 'Poshmark', status: 'ok',   info: '89 active' },
+      { name: 'Mercari',  status: 'warn', info: 'Auth expiring' },
+      { name: 'Etsy',     status: 'down', info: 'Not connected' },
+    ]);
+    function syncChannels() {
+      lastSync.value = 'just now';
+      setTimeout(() => { lastSync.value = '1 min ago'; }, 60000);
+    }
+
+    // --- Notifications ---
+    const notifications = ref([
+      { icon: '💰', text: 'SALE: Vintage Lamp $45 (eBay)',      time: '2 min ago',  action: 'View' },
+      { icon: '📦', text: 'Delivered: Order #1243',             time: '15 min ago', action: '✓'   },
+      { icon: '🎫', text: 'Ticket closed: "Thanks!" - Sarah',   time: '1 hr ago',   action: 'View' },
+      { icon: '💰', text: 'SALE: Leather Bag $89 (Poshmark)',   time: '2 hr ago',   action: 'View' },
+    ]);
+    function clearNotifications() { notifications.value = []; }
+
+    // --- Shortcuts ---
+    const showShortcuts = ref(false);
+    const shortcuts = [
+      { keys: 'G + D', desc: 'Go to Dashboard' },
+      { keys: 'G + M', desc: 'Go to MarketForge' },
+      { keys: 'G + L', desc: 'Go to LuxeForge' },
+      { keys: '/',     desc: 'Focus chat input' },
+      { keys: 'N',     desc: 'New item (context-aware)' },
+      { keys: '1',     desc: 'Quick launch: List Item' },
+      { keys: '2',     desc: 'Quick launch: Ship Order' },
+      { keys: '3',     desc: 'Quick launch: Invoice' },
+      { keys: '4',     desc: 'Quick launch: New Ticket' },
+      { keys: '5',     desc: 'Quick launch: Reports' },
+      { keys: '?',     desc: 'Show this help' },
+    ];
+
+    // --- Keyboard shortcuts handler ---
+    let gPressed = false;
+    function handleKeydown(e) {
+      const tag = document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === '?') { showShortcuts.value = true; return; }
+      if (e.key === '/') {
+        e.preventDefault();
+        nextTick(() => chatInput.value && chatInput.value.focus());
+        return;
+      }
+      if (e.key.toLowerCase() === 'g') { gPressed = true; setTimeout(() => { gPressed = false; }, 1000); return; }
+      if (gPressed) {
+        if (e.key.toLowerCase() === 'd') { activeSection.value = 'dashboard'; gPressed = false; }
+        if (e.key.toLowerCase() === 'm') { activeSection.value = 'market';    gPressed = false; }
+        if (e.key.toLowerCase() === 'l') { activeSection.value = 'luxe';      gPressed = false; }
+        return;
+      }
+      if (e.key === '1') quickLaunch[0].fn();
+      if (e.key === '2') quickLaunch[1].fn();
+      if (e.key === '3') quickLaunch[2].fn();
+      if (e.key === '4') quickLaunch[3].fn();
+      if (e.key === '5') quickLaunch[4].fn();
+    }
+
+    onMounted(() => {
+      updateTime();
+      loadChat();
+      checkClawHealth();
+      setInterval(updateTime,     1000);
+      setInterval(randomiseHealth, 5000);
+      setInterval(checkClawHealth, 30000);
+      window.addEventListener('keydown', handleKeydown);
+    });
+
+    return {
+      sidebarOpen, activeSection, navItems,
+      currentTime, greeting,
+      health,
+      money,
+      actionQueue, handleAction,
+      clawOnline, chatHistory, chatMessage, chatLoading, chatInput, chatBox,
+      listening, quickCmds, sendChat, toggleVoice,
+      agents, toggleAgent,
+      forgeProducts,
+      quickLaunch,
+      lastSync, channels, syncChannels,
+      notifications, clearNotifications,
+      showShortcuts, shortcuts,
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
