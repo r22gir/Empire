@@ -1,17 +1,39 @@
 'use client';
-import { useState } from 'react';
-import { MOCK_FINANCE, MOCK_TRANSACTIONS, MOCK_INVOICES } from '@/lib/deskData';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { MOCK_FINANCE, MOCK_TRANSACTIONS, MOCK_INVOICES, Invoice, Transaction } from '@/lib/deskData';
 import { DollarSign, TrendingUp, FileText, PieChart } from 'lucide-react';
-import { StatsBar, FilterTabs, TaskList } from './shared';
+import { StatsBar, FilterTabs, TaskList, DetailPanel } from './shared';
 import RevenueTrend from './finance/RevenueTrend';
 import TransactionList from './finance/TransactionList';
 import InvoiceTable from './finance/InvoiceTable';
+import InvoiceDetail from './finance/InvoiceDetail';
+import TransactionDetail from './finance/TransactionDetail';
 
 const fmt = (n: number) => '$' + n.toLocaleString();
 
 export default function FinanceDesk() {
   const [tab, setTab] = useState('overview');
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const router = useRouter();
   const fin = MOCK_FINANCE;
+
+  const handleClientClick = useCallback((clientName: string) => {
+    router.push(`/desk/clients?filter=${encodeURIComponent(clientName)}`);
+  }, [router]);
+
+  const closePanel = useCallback(() => {
+    setSelectedInvoice(null);
+    setSelectedTransaction(null);
+  }, []);
+
+  const panelOpen = !!selectedInvoice || !!selectedTransaction;
+  const panelTitle = selectedInvoice
+    ? `Invoice ${selectedInvoice.id.toUpperCase()}`
+    : selectedTransaction
+      ? selectedTransaction.description
+      : '';
 
   return (
     <div className="flex flex-col h-full">
@@ -39,12 +61,17 @@ export default function FinanceDesk() {
         {tab === 'overview' && (
           <div className="grid grid-cols-2 gap-4 h-full">
             <RevenueTrend />
-            <TransactionList transactions={MOCK_TRANSACTIONS} />
+            <TransactionList transactions={MOCK_TRANSACTIONS} onTransactionClick={t => { setSelectedTransaction(t); setSelectedInvoice(null); }} />
           </div>
         )}
-        {tab === 'invoices' && <InvoiceTable invoices={MOCK_INVOICES} />}
+        {tab === 'invoices' && <InvoiceTable invoices={MOCK_INVOICES} onInvoiceClick={inv => { setSelectedInvoice(inv); setSelectedTransaction(null); }} selectedInvoiceId={selectedInvoice?.id} />}
         {tab === 'tasks' && <TaskList desk="finance" />}
       </div>
+
+      <DetailPanel open={panelOpen} onClose={closePanel} title={panelTitle}>
+        {selectedInvoice && <InvoiceDetail invoice={selectedInvoice} onClientClick={handleClientClick} />}
+        {selectedTransaction && <TransactionDetail transaction={selectedTransaction} />}
+      </DetailPanel>
     </div>
   );
 }

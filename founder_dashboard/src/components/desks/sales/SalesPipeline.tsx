@@ -22,9 +22,10 @@ const COLUMNS: KanbanColumn[] = LEAD_STAGES.map(s => ({
 
 interface SalesPipelineProps {
   leads: Lead[];
+  onLeadClick?: (lead: Lead) => void;
 }
 
-export default function SalesPipeline({ leads }: SalesPipelineProps) {
+export default function SalesPipeline({ leads, onLeadClick }: SalesPipelineProps) {
   return (
     <div className="flex gap-3 h-full min-w-max">
       {COLUMNS.map(col => {
@@ -49,7 +50,14 @@ export default function SalesPipeline({ leads }: SalesPipelineProps) {
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-2">
               {stageLeads.map(lead => (
-                <div key={lead.id} className="rounded-lg p-2.5" style={{ background: STAGE_BG[stage], border: '1px solid var(--border)' }}>
+                <div
+                  key={lead.id}
+                  className="rounded-lg p-2.5 cursor-pointer transition"
+                  style={{ background: STAGE_BG[stage], border: '1px solid var(--border)' }}
+                  onClick={() => onLeadClick?.(lead)}
+                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-border)')}
+                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                >
                   <div className="flex items-center justify-between mb-1">
                     <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{lead.client}</p>
                     <span className="text-[10px] font-mono font-semibold" style={{ color: 'var(--gold)' }}>{fmt(lead.estimatedValue)}</span>

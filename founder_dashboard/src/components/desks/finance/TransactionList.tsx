@@ -5,9 +5,10 @@ const fmt = (n: number) => '$' + n.toLocaleString();
 
 interface TransactionListProps {
   transactions: Transaction[];
+  onTransactionClick?: (transaction: Transaction) => void;
 }
 
-export default function TransactionList({ transactions }: TransactionListProps) {
+export default function TransactionList({ transactions, onTransactionClick }: TransactionListProps) {
   return (
     <div className="rounded-xl flex flex-col" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
       <p className="text-xs font-semibold px-4 pt-3 pb-2" style={{ color: 'var(--gold)' }}>Recent Transactions</p>
@@ -15,7 +16,8 @@ export default function TransactionList({ transactions }: TransactionListProps) 
         {transactions.map(t => (
           <div
             key={t.id}
-            className="flex items-center gap-3 px-2 py-2 rounded-lg transition"
+            className="flex items-center gap-3 px-2 py-2 rounded-lg transition cursor-pointer"
+            onClick={() => onTransactionClick?.(t)}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover)')}
             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
           >

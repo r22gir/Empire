@@ -213,3 +213,29 @@ html, body {
   backdrop-filter: blur(16px);
 }
 .panel-border { border-color: var(--border); }
+
+/* ── Detail Panel Slide-Out ─────────────────────────────────── */
+.detail-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5,5,13,0.55);
+  z-index: 40;
+  transition: opacity 0.25s ease;
+}
+.detail-panel-slide {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+  box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+}
+.detail-panel-slide.open {
+  transform: translateX(0);
+}

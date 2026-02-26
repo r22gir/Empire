@@ -1,14 +1,18 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { MOCK_LEADS, Lead } from '@/lib/deskData';
 import { Users, Target, TrendingUp, Phone } from 'lucide-react';
-import { StatsBar, TaskList } from './shared';
+import { StatsBar, TaskList, DetailPanel } from './shared';
 import SalesPipeline from './sales/SalesPipeline';
+import LeadDetail from './sales/LeadDetail';
 
 const fmt = (n: number) => '$' + n.toLocaleString();
 
 export default function SalesDesk() {
   const [leads] = useState<Lead[]>(MOCK_LEADS);
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const router = useRouter();
 
   const wonLeads = leads.filter(l => l.stage === 'Won');
   const lostLeads = leads.filter(l => l.stage === 'Lost');
@@ -17,6 +21,10 @@ export default function SalesDesk() {
   const avgQuote = leads.length > 0 ? Math.round(leads.reduce((s, l) => s + l.estimatedValue, 0) / leads.length) : 0;
   const newLeads = leads.filter(l => l.stage === 'New Lead').length;
   const pipelineVal = leads.filter(l => l.stage !== 'Won' && l.stage !== 'Lost').reduce((s, l) => s + l.estimatedValue, 0);
+
+  const handleClientClick = useCallback((clientName: string) => {
+    router.push(`/desk/clients?filter=${encodeURIComponent(clientName)}`);
+  }, [router]);
 
   return (
     <div className="flex flex-col h-full">
@@ -27,11 +35,15 @@ export default function SalesDesk() {
         { label: 'Pipeline Value', value: fmt(pipelineVal), icon: Phone, color: 'var(--cyan)' },
       ]} />
       <div className="flex-1 overflow-auto p-4">
-        <SalesPipeline leads={leads} />
+        <SalesPipeline leads={leads} onLeadClick={lead => setSelectedLead(lead)} />
       </div>
       <div className="p-4 pt-0">
         <TaskList desk="sales" compact />
       </div>
+
+      <DetailPanel open={!!selectedLead} onClose={() => setSelectedLead(null)} title={selectedLead ? `${selectedLead.client} — ${selectedLead.projectType}` : ''}>
+        {selectedLead && <LeadDetail lead={selectedLead} onClientClick={handleClientClick} />}
+      </DetailPanel>
     </div>
   );
 }

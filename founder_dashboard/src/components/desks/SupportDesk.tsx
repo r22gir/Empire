@@ -1,8 +1,10 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { MOCK_TICKETS, TICKET_STATUSES, SupportTicket, TicketStatus } from '@/lib/deskData';
 import { Headphones, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
-import { StatsBar, FilterTabs, StatusBadge, TaskList } from './shared';
+import { StatsBar, FilterTabs, StatusBadge, TaskList, DetailPanel } from './shared';
+import TicketDetail from './support/TicketDetail';
 
 const PRIORITY_COLOR: Record<string, string> = {
   high: '#ef4444',
@@ -20,11 +22,17 @@ const STATUS_COLOR: Record<TicketStatus, string> = {
 export default function SupportDesk() {
   const [tickets] = useState<SupportTicket[]>(MOCK_TICKETS);
   const [filter, setFilter] = useState<string>('all');
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const router = useRouter();
 
   const openCount = tickets.filter(t => t.status === 'open').length;
   const inProgress = tickets.filter(t => t.status === 'in_progress').length;
   const resolvedCount = tickets.filter(t => t.status === 'resolved').length;
   const filtered = filter === 'all' ? tickets : tickets.filter(t => t.status === filter);
+
+  const handleClientClick = useCallback((clientName: string) => {
+    router.push(`/desk/clients?filter=${encodeURIComponent(clientName)}`);
+  }, [router]);
 
   return (
     <div className="flex flex-col h-full">
@@ -36,16 +44,20 @@ export default function SupportDesk() {
 
       <FilterTabs options={['all', ...TICKET_STATUSES]} active={filter} onChange={setFilter} />
 
-      <div className="flex-1 overflow-auto p-4 flex gap-4">
-        <div className="flex-1 flex flex-col gap-4">
+      <div className="flex-1 overflow-auto p-4">
+        <div className="flex flex-col gap-4">
           <div className="space-y-2">
             {filtered.map(ticket => (
               <div
                 key={ticket.id}
-                className="rounded-xl p-4 transition"
-                style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'var(--surface)')}
+                className="rounded-xl p-4 transition cursor-pointer"
+                style={{
+                  background: selectedTicket?.id === ticket.id ? 'var(--gold-pale)' : 'var(--surface)',
+                  border: selectedTicket?.id === ticket.id ? '1px solid var(--gold-border)' : '1px solid var(--border)',
+                }}
+                onClick={() => setSelectedTicket(ticket)}
+                onMouseEnter={e => { if (selectedTicket?.id !== ticket.id) e.currentTarget.style.background = 'var(--hover)'; }}
+                onMouseLeave={e => { if (selectedTicket?.id !== ticket.id) e.currentTarget.style.background = 'var(--surface)'; }}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
@@ -73,6 +85,10 @@ export default function SupportDesk() {
           <TaskList desk="support" compact />
         </div>
       </div>
+
+      <DetailPanel open={!!selectedTicket} onClose={() => setSelectedTicket(null)} title={selectedTicket ? `Ticket ${selectedTicket.id.toUpperCase()}` : ''}>
+        {selectedTicket && <TicketDetail ticket={selectedTicket} onClientClick={handleClientClick} />}
+      </DetailPanel>
     </div>
   );
 }

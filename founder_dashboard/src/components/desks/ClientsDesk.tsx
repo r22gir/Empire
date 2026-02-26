@@ -1,8 +1,10 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { MOCK_CLIENTS, Client } from '@/lib/deskData';
-import { Users, Phone, Mail, MapPin } from 'lucide-react';
-import { StatsBar, SearchInput, DataTable, StatusBadge, type Column, TaskList } from './shared';
+import { Users, Phone, Mail } from 'lucide-react';
+import { StatsBar, SearchInput, DataTable, StatusBadge, type Column, TaskList, DetailPanel } from './shared';
+import ClientDetail from './clients/ClientDetail';
 
 const STATUS_COLORS: Record<string, string> = {
   active: '#22c55e', prospect: '#8b5cf6', inactive: '#78716c',
@@ -14,6 +16,17 @@ export default function ClientsDesk() {
   const [clients] = useState<Client[]>(MOCK_CLIENTS);
   const [search, setSearch] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const searchParams = useSearchParams();
+
+  // Handle cross-desk navigation: pre-filter and auto-select from query param
+  useEffect(() => {
+    const filterParam = searchParams.get('filter');
+    if (filterParam) {
+      setSearch(filterParam);
+      const match = clients.find(c => c.name.toLowerCase() === filterParam.toLowerCase());
+      if (match) setSelectedClient(match);
+    }
+  }, [searchParams, clients]);
 
   const filtered = clients.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -45,49 +58,17 @@ export default function ClientsDesk() {
         <SearchInput value={search} onChange={setSearch} placeholder="Search clients..." />
       </div>
 
-      <div className="flex-1 overflow-auto p-4 flex gap-4">
-        <div className="flex-1 flex flex-col gap-4">
+      <div className="flex-1 overflow-auto p-4">
+        <div className="flex flex-col gap-4">
           <DataTable columns={columns} data={filtered} getRowId={c => c.id}
             onRowClick={c => setSelectedClient(c)} selectedId={selectedClient?.id} />
           <TaskList desk="clients" compact />
         </div>
-
-        {selectedClient && (
-          <div className="w-[280px] shrink-0 rounded-xl p-4" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold" style={{ background: 'rgba(6,182,212,0.15)', color: '#06B6D4' }}>
-                {selectedClient.name.charAt(0)}
-              </div>
-              <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{selectedClient.name}</p>
-                <StatusBadge label={selectedClient.status} color={STATUS_COLORS[selectedClient.status]} />
-              </div>
-            </div>
-            <div className="space-y-3">
-              {[
-                { icon: Mail, label: selectedClient.email },
-                { icon: Phone, label: selectedClient.phone },
-                { icon: MapPin, label: selectedClient.address },
-              ].map((item, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <item.icon className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--text-muted)' }} />
-                  <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 pt-4 grid grid-cols-2 gap-3" style={{ borderTop: '1px solid var(--border)' }}>
-              <div className="rounded-lg p-2.5 text-center" style={{ background: 'var(--raised)' }}>
-                <p className="text-lg font-bold" style={{ color: 'var(--gold)' }}>{selectedClient.totalJobs}</p>
-                <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Jobs</p>
-              </div>
-              <div className="rounded-lg p-2.5 text-center" style={{ background: 'var(--raised)' }}>
-                <p className="text-lg font-bold" style={{ color: '#22c55e' }}>{fmt(selectedClient.totalSpent)}</p>
-                <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Revenue</p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
+
+      <DetailPanel open={!!selectedClient} onClose={() => setSelectedClient(null)} title={selectedClient?.name || ''}>
+        {selectedClient && <ClientDetail client={selectedClient} />}
+      </DetailPanel>
     </div>
   );
 }

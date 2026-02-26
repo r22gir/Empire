@@ -9,9 +9,11 @@ const STATUS_COLORS: Record<JobStatus, string> = {
 
 interface JobTableProps {
   jobs: Job[];
+  onJobClick?: (job: Job) => void;
+  selectedJobId?: string;
 }
 
-export default function JobTable({ jobs }: JobTableProps) {
+export default function JobTable({ jobs, onJobClick, selectedJobId }: JobTableProps) {
   const today = new Date().toISOString().split('T')[0];
 
   const columns: Column<Job>[] = [
@@ -29,5 +31,5 @@ export default function JobTable({ jobs }: JobTableProps) {
     { key: 'assignedTo', label: 'Assigned', render: j => <span style={{ color: 'var(--text-secondary)' }}>{j.assignedTo}</span> },
   ];
 
-  return <DataTable columns={columns} data={jobs} getRowId={j => j.id} />;
+  return <DataTable columns={columns} data={jobs} getRowId={j => j.id} onRowClick={onJobClick} selectedId={selectedJobId} />;
 }

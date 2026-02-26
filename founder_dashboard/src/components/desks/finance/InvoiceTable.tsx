@@ -10,9 +10,11 @@ const fmt = (n: number) => '$' + n.toLocaleString();
 
 interface InvoiceTableProps {
   invoices: Invoice[];
+  onInvoiceClick?: (invoice: Invoice) => void;
+  selectedInvoiceId?: string;
 }
 
-export default function InvoiceTable({ invoices }: InvoiceTableProps) {
+export default function InvoiceTable({ invoices, onInvoiceClick, selectedInvoiceId }: InvoiceTableProps) {
   const columns: Column<Invoice>[] = [
     { key: 'id', label: 'Invoice', render: inv => <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{inv.id.toUpperCase()}</span> },
     { key: 'client', label: 'Client' },
@@ -21,5 +23,5 @@ export default function InvoiceTable({ invoices }: InvoiceTableProps) {
     { key: 'dueDate', label: 'Due Date', render: inv => <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{inv.dueDate}</span> },
   ];
 
-  return <DataTable columns={columns} data={invoices} getRowId={inv => inv.id} />;
+  return <DataTable columns={columns} data={invoices} getRowId={inv => inv.id} onRowClick={onInvoiceClick} selectedId={selectedInvoiceId} />;
 }

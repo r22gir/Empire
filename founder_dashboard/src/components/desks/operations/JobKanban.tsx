@@ -25,9 +25,10 @@ const COLUMNS: KanbanColumn[] = JOB_STATUSES.map(s => ({
 interface JobKanbanProps {
   jobs: Job[];
   onMoveJob: (jobId: string, newStatus: JobStatus) => void;
+  onJobClick?: (job: Job) => void;
 }
 
-export default function JobKanban({ jobs, onMoveJob }: JobKanbanProps) {
+export default function JobKanban({ jobs, onMoveJob, onJobClick }: JobKanbanProps) {
   const today = new Date().toISOString().split('T')[0];
 
   return (
@@ -39,8 +40,11 @@ export default function JobKanban({ jobs, onMoveJob }: JobKanbanProps) {
       onMoveItem={(id, col) => onMoveJob(id, col as JobStatus)}
       renderCard={job => (
         <div
-          className="rounded-lg p-2.5"
+          className="rounded-lg p-2.5 cursor-pointer transition"
           style={{ background: STATUS_BG[job.status], border: '1px solid var(--border)' }}
+          onClick={() => onJobClick?.(job)}
+          onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--gold-border)')}
+          onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
         >
           <p className="text-xs font-medium mb-1" style={{ color: 'var(--text-primary)' }}>{job.name}</p>
           <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{job.client}</p>

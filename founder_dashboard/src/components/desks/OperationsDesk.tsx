@@ -1,15 +1,19 @@
 'use client';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { MOCK_JOBS, JOB_STATUSES, Job, JobStatus } from '@/lib/deskData';
 import { Clock, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { StatsBar } from './shared';
+import { StatsBar, DetailPanel } from './shared';
 import { TaskList } from './shared';
 import JobKanban from './operations/JobKanban';
 import JobTable from './operations/JobTable';
+import JobDetail from './operations/JobDetail';
 
 export default function OperationsDesk() {
   const [jobs, setJobs] = useState<Job[]>(MOCK_JOBS);
   const [view, setView] = useState<'kanban' | 'table'>('kanban');
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const router = useRouter();
 
   const today = new Date().toISOString().split('T')[0];
   const jobsToday = jobs.filter(j => j.dueDate === today).length;
@@ -24,6 +28,12 @@ export default function OperationsDesk() {
   const moveJob = (jobId: string, newStatus: JobStatus) => {
     setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
   };
+
+  const handleJobClick = useCallback((job: Job) => setSelectedJob(job), []);
+
+  const handleClientClick = useCallback((clientName: string) => {
+    router.push(`/desk/clients?filter=${encodeURIComponent(clientName)}`);
+  }, [router]);
 
   return (
     <div className="flex flex-col h-full">
@@ -49,11 +59,18 @@ export default function OperationsDesk() {
         }
       />
       <div className="flex-1 overflow-auto p-4">
-        {view === 'kanban' ? <JobKanban jobs={jobs} onMoveJob={moveJob} /> : <JobTable jobs={jobs} />}
+        {view === 'kanban'
+          ? <JobKanban jobs={jobs} onMoveJob={moveJob} onJobClick={handleJobClick} />
+          : <JobTable jobs={jobs} onJobClick={handleJobClick} selectedJobId={selectedJob?.id} />
+        }
       </div>
       <div className="p-4 pt-0">
         <TaskList desk="operations" compact />
       </div>
+
+      <DetailPanel open={!!selectedJob} onClose={() => setSelectedJob(null)} title={selectedJob?.name || ''}>
+        {selectedJob && <JobDetail job={selectedJob} onClientClick={handleClientClick} />}
+      </DetailPanel>
     </div>
   );
 }
