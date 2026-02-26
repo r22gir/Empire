@@ -72,6 +72,11 @@ load_router("app.routers.crypto_payments", "/api/v1/crypto-payments", ["crypto"]
 load_router("app.routers.economic", "/api/v1/economic", ["economic"])
 load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
 
+# Docker / System / Ollama management
+load_router("app.routers.docker_manager", "/api/v1", ["docker"])
+load_router("app.routers.system_monitor", "/api/v1", ["system"])
+load_router("app.routers.ollama_manager", "/api/v1", ["ollama"])
+
 @app.get("/")
 async def root():
     return {"message": "EmpireBox API", "version": "1.0.0", "status": "operational"}
@@ -86,6 +91,11 @@ if __name__ == "__main__":
 
 # Notifications API
 load_router("app.routers.notifications", "/api/v1", ["notifications"])
+
+# Empire Task Engine — AI Desks, Tasks, Contacts
+load_router("app.routers.desks", "/api/v1", ["desks"])
+load_router("app.routers.tasks", "/api/v1", ["tasks"])
+load_router("app.routers.contacts", "/api/v1", ["contacts"])
 
 # Smart Multi-Method Analyzer
 try:

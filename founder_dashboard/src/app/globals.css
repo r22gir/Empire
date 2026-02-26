@@ -2,18 +2,214 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background: #0a0a0f;
-  color: #ffffff;
+/* ── Fonts ───────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ── Empire Design Tokens ────────────────────────────────────── */
+:root {
+  --void:    #05050d;
+  --surface: #0a0a1a;
+  --raised:  #0f0f22;
+  --elevated:#141430;
+  --hover:   #111127;
+
+  --gold:        #D4AF37;
+  --gold-dim:    #B8962E;
+  --gold-bright: #F0C842;
+  --gold-glow:   rgba(212,175,55,0.18);
+  --gold-pale:   rgba(212,175,55,0.07);
+  --gold-border: rgba(212,175,55,0.12);
+  --gold-active: rgba(212,175,55,0.22);
+
+  --purple:       #8B5CF6;
+  --purple-dim:   #6D3FD0;
+  --purple-glow:  rgba(139,92,246,0.18);
+  --purple-pale:  rgba(139,92,246,0.08);
+  --purple-border:rgba(139,92,246,0.20);
+
+  --cyan:    #22D3EE;
+  --fuchsia: #D946EF;
+
+  --text-primary:   #EDE8D4;
+  --text-secondary: #8888A8;
+  --text-muted:     #44445A;
+
+  --border:        rgba(212,175,55,0.10);
+  --border-strong: rgba(212,175,55,0.25);
 }
 
-::-webkit-scrollbar {
-  width: 8px;
+/* ── Base ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--void);
+  color: var(--text-primary);
+  font-family: 'Outfit', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
-::-webkit-scrollbar-track {
-  background: #1a1a2e;
+
+/* ── Scrollbars ──────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e1e38; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
+
+/* ── Ambient Background Orbs ─────────────────────────────────── */
+@keyframes orb-drift {
+  0%,100% { transform: translate(0,0) scale(1); }
+  33%     { transform: translate(35px,-25px) scale(1.06); }
+  66%     { transform: translate(-20px,18px) scale(0.96); }
 }
-::-webkit-scrollbar-thumb {
-  background: #4a4a6a;
+.empire-ambient { position: relative; }
+.empire-ambient::before,
+.empire-ambient::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  filter: blur(150px);
+  animation: orb-drift 28s ease-in-out infinite;
+}
+.empire-ambient::before {
+  width: 800px; height: 800px;
+  background: radial-gradient(circle, rgba(212,175,55,0.04) 0%, transparent 65%);
+  top: -300px; right: -250px;
+}
+.empire-ambient::after {
+  width: 650px; height: 650px;
+  background: radial-gradient(circle, rgba(139,92,246,0.05) 0%, transparent 65%);
+  bottom: -250px; left: -200px;
+  animation-delay: -14s;
+}
+.empire-ambient > * { position: relative; z-index: 1; }
+
+/* ── Chat Markdown ───────────────────────────────────────────── */
+.chat-markdown {
+  font-size: 0.875rem;
+  line-height: 1.72;
+}
+.chat-markdown h1 {
+  font-size: 1.15rem; font-weight: 700;
+  color: var(--gold); margin: 0.85em 0 0.3em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+.chat-markdown h2 {
+  font-size: 1rem; font-weight: 600;
+  color: var(--gold); margin: 0.75em 0 0.25em;
+}
+.chat-markdown h3 {
+  font-size: 0.9rem; font-weight: 600;
+  color: #c9a030; margin: 0.55em 0 0.2em;
+}
+.chat-markdown p  { margin: 0.45em 0; }
+.chat-markdown ul, .chat-markdown ol { padding-left: 1.5em; margin: 0.4em 0; }
+.chat-markdown li { margin: 0.15em 0; }
+.chat-markdown li::marker { color: var(--gold-dim); }
+.chat-markdown blockquote {
+  border-left: 2px solid var(--gold-dim);
+  padding-left: 0.85em; margin: 0.6em 0;
+  color: var(--text-secondary); font-style: italic;
+}
+.chat-markdown strong { color: #fff; font-weight: 600; }
+.chat-markdown em     { color: #c4a8f0; }
+.chat-markdown hr     { border: none; border-top: 1px solid var(--border); margin: 0.8em 0; }
+.chat-markdown a      { color: var(--purple); text-decoration: underline; text-underline-offset: 2px; }
+.chat-markdown a:hover{ color: #a78bfa; }
+.chat-markdown table  { width: 100%; border-collapse: collapse; margin: 0.6em 0; font-size: 0.83rem; }
+.chat-markdown th {
+  background: var(--elevated); color: var(--gold);
+  font-weight: 600; padding: 0.45em 0.85em;
+  text-align: left; border: 1px solid var(--border);
+}
+.chat-markdown td { padding: 0.4em 0.85em; border: 1px solid var(--border); }
+.chat-markdown tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+.chat-markdown code:not(pre code) {
+  background: var(--purple-pale);
+  color: #c4b0ff;
+  padding: 0.12em 0.42em;
   border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.83em;
+  border: 1px solid var(--purple-border);
 }
+.chat-markdown pre {
+  margin: 0.65em 0;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--purple-border);
+}
+
+/* ── Desk Chat Markdown (compact) ────────────────────────────── */
+.desk-chat-markdown { font-size: 0.75rem; line-height: 1.65; color: var(--text-primary); }
+.desk-chat-markdown h1 { font-size: 0.85rem; font-weight: 700; color: var(--gold); margin: 0.5em 0 0.2em; }
+.desk-chat-markdown h2 { font-size: 0.8rem; font-weight: 600; color: var(--gold); margin: 0.4em 0 0.15em; }
+.desk-chat-markdown h3 { font-size: 0.75rem; font-weight: 600; color: #c9a030; margin: 0.35em 0 0.1em; }
+.desk-chat-markdown p { margin: 0.3em 0; }
+.desk-chat-markdown ul, .desk-chat-markdown ol { padding-left: 1.2em; margin: 0.25em 0; }
+.desk-chat-markdown li { margin: 0.1em 0; }
+.desk-chat-markdown li::marker { color: var(--gold-dim); }
+.desk-chat-markdown strong { color: #fff; font-weight: 600; }
+.desk-chat-markdown em { color: #c4a8f0; }
+.desk-chat-markdown code:not(pre code) {
+  background: var(--purple-pale); color: #c4b0ff;
+  padding: 0.1em 0.35em; border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.8em;
+  border: 1px solid var(--purple-border);
+}
+.desk-chat-markdown pre { margin: 0.4em 0; border-radius: 6px; overflow: hidden; font-size: 0.7rem; }
+.desk-chat-markdown a { color: var(--purple); text-decoration: underline; }
+
+/* ── Streaming Cursor ────────────────────────────────────────── */
+@keyframes cursor-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.streaming-cursor {
+  display: inline-block;
+  width: 2px; height: 1em;
+  background: var(--gold);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: cursor-blink 0.85s ease-in-out infinite;
+}
+
+/* ── Gold Shimmer Text ───────────────────────────────────────── */
+@keyframes gold-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.text-gold-shimmer {
+  background: linear-gradient(
+    90deg, #B8962E 0%, #D4AF37 25%, #F0C842 50%, #D4AF37 75%, #B8962E 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gold-shimmer 3.5s linear infinite;
+}
+
+/* ── Message Entrance ────────────────────────────────────────── */
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg-in { animation: msg-in 0.22s ease-out forwards; }
+
+/* ── Status Dots ─────────────────────────────────────────────── */
+@keyframes pulse-online {
+  0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.5); }
+  70%     { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+}
+.dot-online  { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; animation: pulse-online 2.2s infinite; }
+.dot-offline { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; }
+.dot-unknown { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+
+/* ── Utility ─────────────────────────────────────────────────── */
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(16px);
+}
+.panel-border { border-color: var(--border); }

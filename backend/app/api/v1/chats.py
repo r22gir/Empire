@@ -87,6 +87,22 @@ async def load_chat(chat_id: str, user_id: str = "founder"):
     with open(chat_file, 'r') as f:
         return json.load(f)
 
+class RenameChatRequest(BaseModel):
+    title: str
+
+@router.patch("/{chat_id}/title")
+async def rename_chat(chat_id: str, req: RenameChatRequest, user_id: str = "founder"):
+    chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
+    if not chat_file.exists():
+        raise HTTPException(status_code=404, detail="Chat not found")
+    with open(chat_file, 'r') as f:
+        chat_data = json.load(f)
+    chat_data["title"] = req.title
+    chat_data["updated_at"] = datetime.now().isoformat()
+    with open(chat_file, 'w') as f:
+        json.dump(chat_data, f, indent=2)
+    return {"status": "renamed", "title": req.title}
+
 @router.delete("/{chat_id}")
 async def delete_chat(chat_id: str, user_id: str = "founder"):
     chat_file = CHATS_DIR / user_id / f"{chat_id}.json"

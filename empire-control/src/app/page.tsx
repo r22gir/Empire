@@ -46,14 +46,14 @@ const PENDING_APPROVALS = [
 ]
 
 const APPS = [
-  { id: 'workroom', name: 'WorkroomForge', icon: Factory, color: 'from-amber-500 to-orange-600', port: 3001, desc: 'Quotes & Production', badge: 2 },
-  { id: 'luxe', name: 'LuxeForge', icon: Gem, color: 'from-purple-500 to-pink-600', port: 3002, desc: 'Marketplace', badge: 0 },
-  { id: 'support', name: 'SupportForge', icon: Ticket, color: 'from-blue-500 to-cyan-600', port: 3003, desc: 'Support Tickets', badge: 0 },
-  { id: 'inventory', name: 'Inventory', icon: Package, color: 'from-green-500 to-emerald-600', port: 3004, desc: 'Stock & Orders', badge: 1 },
-  { id: 'finance', name: 'Finance', icon: DollarSign, color: 'from-yellow-500 to-amber-600', port: 3005, desc: 'Accounting', badge: 0 },
-  { id: 'calendar', name: 'Schedule', icon: Calendar, color: 'from-red-500 to-rose-600', port: 3006, desc: 'Calendar', badge: 0 },
-  { id: 'crm', name: 'Customers', icon: Users, color: 'from-indigo-500 to-violet-600', port: 3007, desc: 'CRM', badge: 0 },
-  { id: 'analytics', name: 'Analytics', icon: BarChart3, color: 'from-teal-500 to-cyan-600', port: 3008, desc: 'Reports', badge: 0 },
+  { id: 'max', name: 'MAX AI', icon: Brain, color: 'from-amber-500 to-orange-600', url: 'http://localhost:3009', desc: 'AI Chat & Assistant', badge: 0 },
+  { id: 'products', name: 'Products', icon: Package, color: 'from-amber-600 to-yellow-600', url: 'http://localhost:3009/products', desc: 'All Empire Apps', badge: 0 },
+  { id: 'ollama', name: 'Ollama', icon: Cpu, color: 'from-red-500 to-orange-600', url: 'http://localhost:3009/ollama', desc: 'AI Model Manager', badge: 0 },
+  { id: 'workroom', name: 'WorkroomForge', icon: Factory, color: 'from-amber-500 to-orange-600', url: 'http://localhost:3009/products', desc: 'Quotes & Production', badge: 0 },
+  { id: 'openclaw', name: 'OpenClaw', icon: Sparkles, color: 'from-red-500 to-orange-600', url: 'http://localhost:7878/health', desc: 'Skills AI Engine', badge: 0 },
+  { id: 'api', name: 'API Docs', icon: FileText, color: 'from-green-500 to-emerald-600', url: 'http://localhost:8000/docs', desc: 'Backend API', badge: 0 },
+  { id: 'support', name: 'SupportForge', icon: Ticket, color: 'from-blue-500 to-cyan-600', url: 'http://localhost:3009/products', desc: 'Support Tickets', badge: 0 },
+  { id: 'analytics', name: 'Analytics', icon: BarChart3, color: 'from-teal-500 to-cyan-600', url: 'http://localhost:3009/products', desc: 'Reports & Data', badge: 0 },
 ]
 
 export default function EmpireControlCenter() {
@@ -97,21 +97,22 @@ export default function EmpireControlCenter() {
     setChatHistory(h => [...h, { role: 'user', content: userMsg, time: new Date() }])
     setIsTyping(true)
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-    
-    setTimeout(() => {
-      const response = getSmartResponse(userMsg)
-      setChatHistory(h => [...h, { role: 'max', content: response, time: new Date() }])
+
+    try {
+      const res = await fetch('http://localhost:8000/max/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMsg }),
+      })
+      const data = await res.json()
+      const reply = data.response || data.message || 'No response from MAX'
+      setChatHistory(h => [...h, { role: 'max', content: reply, time: new Date() }])
+    } catch (e) {
+      setChatHistory(h => [...h, { role: 'max', content: 'Could not reach MAX backend. Make sure the API is running on port 8000.', time: new Date() }])
+    } finally {
       setIsTyping(false)
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
-    }, 1000)
-  }
-
-  const getSmartResponse = (msg: string): string => {
-    const l = msg.toLowerCase()
-    if (l.includes('research') || l.includes('r&d') || l.includes('darwin')) return "🔬 **R&D Update:**\n\n3 active projects:\n• Motorized Shade Market (80%)\n• AI Vision Accuracy (45%)\n• Competitor Monitoring (60%)\n\n📋 **Pending Approval:**\n• Commercial market research\n• Smart home opportunity\n\nClick **R&D Lab** for details."
-    if (l.includes('approve')) return "📋 **2 items need your approval:**\n\n1. Delegate commercial research to DARWIN's team\n2. Smart Home Integration ($50-100k potential)\n\nClick **Approvals** button to review."
-    if (l.includes('opportunity') || l.includes('money')) return "💡 **Opportunities from R&D:**\n\n1. **Commercial Spaces** - High potential\n2. **Smart Home Integration** - $50-100k\n3. **Luxury Segment** - 15% YoY growth\n\nWant me to prioritize any?"
-    return "I'll analyze this. Click **R&D Lab** for research or **Agents** for operations."
+    }
   }
 
   const handleApproval = (id: string, approved: boolean) => {
@@ -122,7 +123,7 @@ export default function EmpireControlCenter() {
     }
   }
 
-  const openApp = (port: number) => window.open(`http://localhost:${port}`, '_blank')
+  const openApp = (url: string) => window.open(url, '_blank')
   const openMaxInterface = () => window.open('http://localhost:3009', '_blank')
   const toggleTask = (id: number) => setTasks(tasks.map(t => t.id === id ? { ...t, done: !t.done } : t))
   const getStatusColor = (s: string) => s === 'online' ? 'bg-green-500' : s === 'idle' ? 'bg-yellow-500' : 'bg-red-500'
@@ -219,7 +220,7 @@ export default function EmpireControlCenter() {
               <h3 className="text-lg font-semibold mb-4 flex items-center gap-2"><Zap className="w-5 h-5 text-[#C9A84C]" />Quick Launch</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {APPS.map(app => (
-                  <button key={app.id} onClick={() => openApp(app.port)} className="group relative bg-[#2C2C2C] hover:bg-[#3C3C3C] rounded-xl p-4 text-left border border-gray-700 hover:border-gray-600">
+                  <button key={app.id} onClick={() => openApp(app.url)} className="group relative bg-[#2C2C2C] hover:bg-[#3C3C3C] rounded-xl p-4 text-left border border-gray-700 hover:border-gray-600">
                     <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${app.color} flex items-center justify-center mb-3 group-hover:scale-110 transition`}><app.icon className="w-6 h-6 text-white" /></div>
                     <p className="font-semibold text-sm">{app.name}</p><p className="text-xs text-gray-500">{app.desc}</p>
                     {app.badge > 0 && <span className="absolute top-3 right-3 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center">{app.badge}</span>}

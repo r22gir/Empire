@@ -3,14 +3,17 @@ MAX API Router - Endpoints for AI Assistant Manager.
 """
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+import json
 import logging
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.desk_manager import desk_manager, TaskStatus
 from app.services.max.telegram_bot import telegram_bot
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
+from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
@@ -21,6 +24,7 @@ class ChatRequest(BaseModel):
     model: Optional[str] = None
     history: List[Dict[str, str]] = []
     image_filename: Optional[str] = None
+    desk: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -63,11 +67,63 @@ async def chat_with_max(request: ChatRequest):
                 model = AIModel(request.model)
             except ValueError:
                 pass
-        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename)
+        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk)
         return ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """SSE streaming endpoint for MAX chat."""
+    is_safe, reason = check_input(request.message)
+    if not is_safe:
+        logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
+        async def refusal_gen():
+            yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
+        return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    for msg in request.history[-3:]:
+        hist_safe, _ = check_input(msg.get("content", ""))
+        if not hist_safe:
+            async def refusal_gen():
+                yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
+            return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    messages = [AIMessage(role=h["role"], content=h["content"]) for h in request.history]
+    messages.append(AIMessage(role="user", content=request.message))
+    model = None
+    if request.model:
+        try:
+            model = AIModel(request.model)
+        except ValueError:
+            pass
+
+    async def event_generator():
+        model_used = "unknown"
+        full_response = ""
+        try:
+            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk):
+                model_used = m_used
+                safe_chunk = sanitize_output(chunk)
+                full_response += safe_chunk
+                yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+
+            # Parse and execute tool blocks from completed response
+            tool_calls = parse_tool_blocks(full_response)
+            for tc in tool_calls:
+                result = execute_tool(tc, desk=request.desk)
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done', 'model_used': model_used})}\n\n"
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 @router.get("/models")

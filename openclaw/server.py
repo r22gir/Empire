@@ -44,7 +44,7 @@ app.add_middleware(
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
 SKILLS_DIR = Path(__file__).parent / "skills"
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://10.0.0.6:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 MAX_HISTORY_CONTEXT = 8
@@ -103,15 +103,18 @@ def _run_skill(skill: dict) -> str:
 # Ollama integration
 # ---------------------------------------------------------------------------
 SYSTEM_PROMPT = (
-    "You are OpenClaw, the AI assistant for EmpireBox — a reselling and e-commerce "
-    "management platform. You help the owner (RG) manage sales, shipments, listings, "
-    "support tickets, and AI agents across eBay, Poshmark, Mercari, and Etsy. "
+    "You are MAX, the AI Assistant Manager for Empire — a founder's command center "
+    "and reselling/e-commerce management platform. You serve one founder (RG). "
+    "You coordinate 8 specialized AI desks: DevBot, OpsBot, SalesBot, SupportBot, "
+    "FinanceBot, ContentBot, ProductBot, QABot. You help RG manage sales, shipments, "
+    "listings, support tickets, custom window treatments, and AI agents across eBay, "
+    "Poshmark, Mercari, and Etsy. Your engine is OpenClaw (skills-augmented local AI). "
     "Be concise, practical, and friendly. Use emojis sparingly."
 )
 
 
-async def _ask_ollama(message: str, history: list[dict]) -> str:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+async def _ask_ollama(message: str, history: list[dict], system_prompt: str | None = None) -> str:
+    messages = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT}]
     for h in history[-MAX_HISTORY_CONTEXT:]:
         if h.get("role") in ("user", "assistant") and h.get("content"):
             messages.append({"role": h["role"], "content": h["content"]})
@@ -123,7 +126,7 @@ async def _ask_ollama(message: str, history: list[dict]) -> str:
         "stream": False,
     }
 
-    timeout = aiohttp.ClientTimeout(total=30)
+    timeout = aiohttp.ClientTimeout(total=60)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(f"{OLLAMA_URL}/api/chat", json=payload) as resp:
             resp.raise_for_status()
@@ -137,6 +140,7 @@ async def _ask_ollama(message: str, history: list[dict]) -> str:
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
+    system_prompt: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -186,7 +190,7 @@ async def chat(req: ChatRequest):
         )
 
     try:
-        ai_response = await _ask_ollama(augmented_message, req.history)
+        ai_response = await _ask_ollama(augmented_message, req.history, req.system_prompt)
     except Exception as exc:
         logger.warning("Ollama unavailable: %s", exc)
         if skill_output:

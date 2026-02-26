@@ -3,16 +3,21 @@ clear
 echo "🚀 LAUNCHING EMPIREBOX ECOSYSTEM..."
 echo ""
 
-# Kill any existing processes
-pkill -f uvicorn 2>/dev/null
-pkill -f "next dev" 2>/dev/null
-pkill -f "python3 -m http.server" 2>/dev/null
-sleep 2
+# Safely stop only processes on our specific ports
+echo "Stopping any existing services on our ports..."
+for port in 8000 8080 3009 3001 3002; do
+  pid=$(lsof -ti :$port 2>/dev/null)
+  if [ -n "$pid" ]; then
+    echo "  Stopping process on port $port (PID: $pid)"
+    kill $pid 2>/dev/null
+    sleep 1
+  fi
+done
 
 # Start Backend API
 echo "🐍 Starting Backend API..."
 cd ~/Empire/backend
-source venv/bin/activate
+source ~/Empire/venv/bin/activate
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 sleep 3
 
@@ -47,7 +52,7 @@ echo "════════════════════════�
 echo ""
 echo "🏠 Homepage:           http://localhost:8080"
 echo "🧠 Agent Command:      http://localhost:8080/agent-command-center.html"
-echo "📊 Founder Dashboard:  http://localhost:3000"
+echo "📊 Founder Dashboard:  http://localhost:3009"
 echo "🏭 WorkroomForge:      http://localhost:3001"
 echo "✨ LuxeForge Portal:   http://localhost:3002/portal"
 echo "🔌 Backend API:        http://localhost:8000/docs"
