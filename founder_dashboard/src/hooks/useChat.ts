@@ -3,21 +3,7 @@ import { useState, useRef, useCallback } from 'react';
 import { Message, StreamEvent, ToolResult } from '@/lib/types';
 import { API_URL } from '@/lib/api';
 
-const OFFLINE_MSG = `**⚡ Backend Offline**
-
-Could not connect to the FastAPI backend on port 8000.
-
-To start the backend:
-\`\`\`bash
-cd ~/Empire/backend
-source ~/Empire/venv/bin/activate
-python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-\`\`\`
-
-Or launch the full stack:
-\`\`\`bash
-~/Empire/launch-all.sh
-\`\`\``;
+const FALLBACK_NOTICE = '*[Using Grok direct — FastAPI backend offline]*\n\n';
 
 interface UseChatOptions {
   onSave?: (messages: Message[], chatId: string | null) => Promise<string | null>;
@@ -75,21 +61,39 @@ export function useChat({ onSave }: UseChatOptions = {}) {
         body.image_category = selectedImage.category;
       }
 
-      const response = await fetch(API_URL + '/max/chat/stream', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(body),
-        signal:  ctrl.signal,
-      });
+      let response: Response;
+      let usingFallback = false;
+
+      try {
+        response = await fetch(API_URL + '/max/chat/stream', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(body),
+          signal:  ctrl.signal,
+        });
+        if (!response.ok) throw new Error(`Backend ${response.status}`);
+      } catch (backendErr: any) {
+        if (backendErr.name === 'AbortError') throw backendErr;
+        // Backend unreachable — fall back to local Grok route
+        usingFallback = true;
+        response = await fetch('/api/chat', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ message: input, history: body.history, desk }),
+          signal:  ctrl.signal,
+        });
+      }
 
       if (!response.body) throw new Error('No response body');
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = '';
+      let accumulated = usingFallback ? FALLBACK_NOTICE : '';
       let modelUsed   = '';
       let buf = '';
       const toolResults: ToolResult[] = [];
+
+      if (usingFallback) setStreamingContent(accumulated);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -146,7 +150,7 @@ export function useChat({ onSave }: UseChatOptions = {}) {
           }]);
         }
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: OFFLINE_MSG }]);
+        setMessages(prev => [...prev, { role: 'assistant', content: '**⚡ All chat routes unavailable.** Both the FastAPI backend and Grok fallback failed.' }]);
       }
       setStreamingContent('');
     } finally {
