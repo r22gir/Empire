@@ -12,14 +12,24 @@ export default function StreamingMessage({ content }: { content: string }) {
         style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
       >
         {!content ? (
-          <div className="flex items-center gap-1.5 py-0.5">
-            {[0, 1, 2].map(i => (
-              <span
-                key={i}
-                className="w-1.5 h-1.5 rounded-full animate-bounce"
-                style={{ background: 'var(--gold)', animationDelay: `${i * 0.15}s` }}
-              />
-            ))}
+          <div className="flex items-center gap-3 py-1">
+            <div className="flex items-center gap-1.5">
+              {[0, 1, 2].map(i => (
+                <span
+                  key={i}
+                  className="w-2 h-2 rounded-full animate-bounce"
+                  style={{
+                    background: 'linear-gradient(135deg, #D4AF37, #F0C842)',
+                    animationDelay: `${i * 0.18}s`,
+                    boxShadow: '0 0 6px rgba(212,175,55,0.4)',
+                  }}
+                />
+              ))}
+            </div>
+            <div
+              className="typing-shimmer"
+              style={{ width: '80px', height: '4px', background: 'rgba(212,175,55,0.12)', borderRadius: '9999px' }}
+            />
           </div>
         ) : (
           <div className="chat-markdown">

@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState, useEffect } from 'react';
-import { FolderOpen, Paperclip, Send, Square } from 'lucide-react';
+import { FolderOpen, Paperclip, Send, Square, Mic } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (input: string) => void;
@@ -14,11 +14,13 @@ interface ChatInputProps {
   onCancelPasted: () => void;
   selectedImage: { name: string; category: string } | null;
   onClearImage: () => void;
+  onVoice?: () => void;
 }
 
 export default function ChatInput({
   onSend, isStreaming, onStop, onOpenBrowser, onFileUpload, uploading,
   pastedPreview, onUploadPasted, onCancelPasted, selectedImage, onClearImage,
+  onVoice,
 }: ChatInputProps) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -26,7 +28,8 @@ export default function ChatInput({
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px';
+      const maxH = Math.max(200, window.innerHeight * 0.22);
+      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, maxH) + 'px';
     }
   }, [input]);
 
@@ -39,10 +42,15 @@ export default function ChatInput({
 
   return (
     <div
-      className="p-4 shrink-0"
+      className="shrink-0"
       style={{
-        background: 'var(--void)',
+        background: 'linear-gradient(180deg, rgba(5,5,13,0.0) 0%, var(--void) 12%)',
         borderTop: '1px solid var(--border)',
+        minHeight: '25vh',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end',
+        padding: '16px 20px 18px',
       }}
     >
       {/* Pasted image preview */}
@@ -78,76 +86,101 @@ export default function ChatInput({
         </div>
       )}
 
-      <div className="flex gap-2 items-end">
+      {/* Main input row */}
+      <div className="flex gap-3 items-end">
         {/* File action buttons */}
         <div className="flex flex-col gap-1.5">
           <button
             onClick={onOpenBrowser}
-            className="w-9 h-9 rounded-xl flex items-center justify-center transition"
+            className="w-10 h-10 rounded-xl flex items-center justify-center transition"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             title="Browse files"
           >
-            <FolderOpen className="w-4 h-4" />
+            <FolderOpen className="w-4.5 h-4.5" />
           </button>
           <label
-            className="w-9 h-9 rounded-xl flex items-center justify-center cursor-pointer transition"
+            className="w-10 h-10 rounded-xl flex items-center justify-center cursor-pointer transition"
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             title="Upload file"
           >
             <input type="file" onChange={onFileUpload} className="hidden" />
-            {uploading ? <span className="text-sm animate-pulse">⏳</span> : <Paperclip className="w-4 h-4" />}
+            {uploading ? <span className="text-sm animate-pulse">⏳</span> : <Paperclip className="w-4.5 h-4.5" />}
           </label>
         </div>
 
-        {/* Textarea */}
+        {/* Textarea — premium dark input */}
         <textarea
           ref={textareaRef}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
           placeholder={selectedImage ? 'Ask about this image…' : 'Message MAX…'}
-          className="flex-1 resize-none rounded-xl px-4 py-2.5 text-sm outline-none transition"
+          className="flex-1 resize-none rounded-2xl px-5 py-4 text-sm outline-none transition"
           style={{
-            minHeight: '44px',
-            maxHeight: '200px',
+            minHeight: '60px',
+            maxHeight: `${Math.max(200, 22)}vh`,
             background: 'var(--surface)',
             color: 'var(--text-primary)',
             border: '1px solid var(--border)',
             fontFamily: 'inherit',
+            fontSize: '0.95rem',
+            lineHeight: '1.65',
           }}
-          onFocus={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; }}
-          onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
-          rows={1}
+          onFocus={e => { e.currentTarget.style.borderColor = 'rgba(212,175,55,0.35)'; e.currentTarget.style.boxShadow = '0 0 20px rgba(212,175,55,0.08)'; }}
+          onBlur={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; }}
+          rows={2}
         />
 
-        {/* Send / Stop */}
-        {isStreaming ? (
-          <button
-            onClick={onStop}
-            className="w-10 h-10 rounded-xl flex items-center justify-center transition shrink-0"
-            style={{ background: '#7f1d1d', border: '1px solid #ef4444', color: '#fca5a5' }}
-            title="Stop"
-          >
-            <Square className="w-4 h-4 fill-current" />
-          </button>
-        ) : (
-          <button
-            onClick={handleSend}
-            disabled={!input.trim()}
-            className="w-10 h-10 rounded-xl flex items-center justify-center transition shrink-0"
-            style={{
-              background: input.trim() ? 'var(--gold)' : 'var(--raised)',
-              color:      input.trim() ? '#0a0a0a'    : 'var(--text-muted)',
-              border:     '1px solid transparent',
-            }}
-            title="Send"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        )}
+        {/* Right side — Voice + Send/Stop stacked */}
+        <div className="flex flex-col items-center gap-2">
+          {/* Large gold voice button */}
+          {onVoice && (
+            <button
+              onClick={onVoice}
+              className="rounded-full flex items-center justify-center transition-all mic-pulse"
+              style={{
+                width: '60px',
+                height: '60px',
+                background: 'linear-gradient(135deg, #D4AF37 0%, #C9A025 50%, #B8962E 100%)',
+                color: '#0a0a0a',
+                border: '2px solid var(--gold-bright)',
+                boxShadow: '0 0 24px rgba(212,175,55,0.2)',
+              }}
+              title="Voice chat"
+            >
+              <Mic className="w-7 h-7" />
+            </button>
+          )}
+
+          {/* Send / Stop */}
+          {isStreaming ? (
+            <button
+              onClick={onStop}
+              className="w-11 h-11 rounded-xl flex items-center justify-center transition shrink-0"
+              style={{ background: '#7f1d1d', border: '1px solid #ef4444', color: '#fca5a5' }}
+              title="Stop"
+            >
+              <Square className="w-4 h-4 fill-current" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="w-11 h-11 rounded-xl flex items-center justify-center transition shrink-0"
+              style={{
+                background: input.trim() ? 'var(--gold)' : 'var(--raised)',
+                color:      input.trim() ? '#0a0a0a'    : 'var(--text-muted)',
+                border:     input.trim() ? '1px solid var(--gold-bright)' : '1px solid var(--border)',
+              }}
+              title="Send"
+            >
+              <Send className="w-4.5 h-4.5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      <p className="text-center mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+      <p className="text-center mt-2.5 text-xs" style={{ color: 'var(--text-muted)' }}>
         Shift+Enter for newline · Ctrl+V to paste images
       </p>
     </div>

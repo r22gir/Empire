@@ -5,7 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message } from '@/lib/types';
 import { ToolResultCard } from '@/components/desks/shared';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Brain } from 'lucide-react';
 import { useState } from 'react';
 
 function CopyButton({ text }: { text: string }) {
@@ -42,8 +42,19 @@ export default function MessageBubble({ message }: { message: Message }) {
         </div>
       ) : (
         /* ── assistant bubble ─────────────────────────────── */
+        <div className="max-w-[85%] flex gap-3 items-start">
+          {/* MAX avatar beside bubble */}
+          <div
+            className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 mt-0.5 max-avatar-glow"
+            style={{
+              background: 'linear-gradient(135deg, #D4AF37 0%, #8B5CF6 100%)',
+              border: '2px solid var(--gold)',
+            }}
+          >
+            <Brain className="w-4 h-4 text-white" />
+          </div>
         <div
-          className="max-w-[82%] rounded-2xl rounded-bl-sm px-4 py-3"
+          className="flex-1 rounded-2xl rounded-tl-sm px-4 py-3"
           style={{
             background: 'var(--surface)',
             border: '1px solid var(--border)',
@@ -110,6 +121,7 @@ export default function MessageBubble({ message }: { message: Message }) {
           {message.model && (
             <p className="text-xs mt-2 font-mono" style={{ color: 'var(--text-muted)' }}>via {message.model}</p>
           )}
+        </div>
         </div>
       )}
     </div>

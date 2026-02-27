@@ -5,7 +5,7 @@ import MessageBubble from './MessageBubble';
 import StreamingMessage from './StreamingMessage';
 import ChatInput from './ChatInput';
 import VoiceAgent from './VoiceAgent';
-import { Brain, WifiOff, Mic } from 'lucide-react';
+import { Brain, WifiOff } from 'lucide-react';
 
 interface ChatAreaProps {
   messages: Message[];
@@ -50,36 +50,23 @@ export default function ChatArea(props: ChatAreaProps) {
         }}
       >
         <div className="flex items-center gap-3">
-          {/* MAX avatar */}
+          {/* MAX avatar — larger with gold border */}
           <div
-            className="w-9 h-9 rounded-full flex items-center justify-center shrink-0"
-            style={{ background: 'linear-gradient(135deg, #D4AF37 0%, #8B5CF6 100%)' }}
+            className="w-11 h-11 rounded-full flex items-center justify-center shrink-0 max-avatar-glow"
+            style={{
+              background: 'linear-gradient(135deg, #D4AF37 0%, #8B5CF6 100%)',
+              border: '2px solid var(--gold)',
+            }}
           >
-            <Brain className="w-4.5 h-4.5 text-white" style={{ width: '18px', height: '18px' }} />
+            <Brain className="w-5 h-5 text-white" />
           </div>
           <div>
-            <span className="font-bold text-sm text-gold-shimmer tracking-wide">MAX</span>
+            <span className="font-bold text-base text-gold-shimmer tracking-wide">MAX</span>
             <span className="text-xs ml-2 font-light" style={{ color: 'var(--text-muted)' }}>Empire AI</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Voice button */}
-          <button
-            onClick={() => setShowVoice(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition"
-            style={{
-              background: 'var(--gold-pale)',
-              color: 'var(--gold)',
-              border: '1px solid var(--gold-border)',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = 'var(--gold-active)'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'var(--gold-pale)'; }}
-          >
-            <Mic className="w-3.5 h-3.5" />
-            Voice
-          </button>
-
           {/* Model badge */}
           <span
             className="text-xs px-3 py-1.5 rounded-lg font-mono"
@@ -140,6 +127,7 @@ export default function ChatArea(props: ChatAreaProps) {
         onCancelPasted={props.onCancelPasted}
         selectedImage={props.selectedImage}
         onClearImage={props.onClearImage}
+        onVoice={() => setShowVoice(true)}
       />
 
       {/* ── Voice Agent Modal ────────────────────────────── */}

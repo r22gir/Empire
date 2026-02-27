@@ -28,7 +28,11 @@ export async function POST() {
     }
 
     const data = await res.json();
-    return NextResponse.json(data);
+    // xAI returns { value, expires_at } at top level — normalize to { client_secret: { value } }
+    const normalized = data.client_secret
+      ? data
+      : { client_secret: { value: data.value || data.token || data.secret }, expires_at: data.expires_at };
+    return NextResponse.json(normalized);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Failed to get token';
     return NextResponse.json({ error: msg }, { status: 500 });
