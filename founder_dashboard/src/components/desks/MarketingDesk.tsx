@@ -4,6 +4,7 @@ import { MOCK_POSTS, ContentPost, PostStatus } from '@/lib/deskData';
 import { Megaphone, FileText, Calendar, Eye } from 'lucide-react';
 import { StatsBar, FilterTabs, StatusBadge, TaskList, DetailPanel } from './shared';
 import PostDetail from './marketing/PostDetail';
+import ContentGenerator from './marketing/ContentGenerator';
 
 const STATUS_COLOR: Record<PostStatus, string> = {
   draft: 'var(--text-muted)',
@@ -43,6 +44,9 @@ export default function MarketingDesk() {
 
       <div className="flex-1 overflow-auto p-4">
         <div className="flex flex-col gap-4">
+          {/* AI Content Generator */}
+          <ContentGenerator />
+
           <div className="grid grid-cols-2 gap-3">
             {filtered.map(post => (
               <div
