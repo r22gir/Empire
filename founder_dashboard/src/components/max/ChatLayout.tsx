@@ -117,7 +117,7 @@ export default function ChatLayout() {
       const data = await res.json();
       if (data.status === 'success') {
         sys.fetchFiles();
-        if (data.category === 'images') setSelectedImage({ name: data.filename, category: data.category });
+        setSelectedImage({ name: data.filename, category: data.category });
       }
     } catch {} finally { setUploading(false); e.target.value = ''; }
   };
@@ -161,7 +161,7 @@ export default function ChatLayout() {
       const data = await res.json();
       if (data.status === 'success') {
         sys.fetchFiles();
-        if (data.category === 'images') setSelectedImage({ name: data.filename, category: data.category });
+        setSelectedImage({ name: data.filename, category: data.category });
       }
     } catch {} finally { setUploading(false); setSelectedBrowseFile(null); }
   };
@@ -243,7 +243,7 @@ export default function ChatLayout() {
                   onMouseEnter={e => { if (selectedBrowseFile !== f.path) e.currentTarget.style.background = 'var(--hover)'; }}
                   onMouseLeave={e => { if (selectedBrowseFile !== f.path) e.currentTarget.style.background = 'transparent'; }}
                 >
-                  <span className="text-xl">{f.isDir ? '📁' : f.name.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? '🖼️' : '📄'}</span>
+                  <span className="text-xl">{f.isDir ? '📁' : f.name.match(/\.(png|jpg|jpeg|gif|webp)$/i) ? '🖼️' : f.name.match(/\.(m4a|mp3|wav|ogg|flac|aac)$/i) ? '🎵' : '📄'}</span>
                   <span className="flex-1 truncate text-sm">{f.name}</span>
                   {!f.isDir && <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{formatSize(f.size)}</span>}
                 </div>
@@ -555,7 +555,7 @@ export default function ChatLayout() {
           </div>
           {/* Desk content + chat */}
           <div className="flex-1 flex min-h-0">
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative overflow-hidden">
               {(() => {
                 const DeskComponent = DESK_COMPONENTS[desk.activeDesk];
                 return <DeskComponent />;
