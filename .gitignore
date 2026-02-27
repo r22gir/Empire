@@ -35,3 +35,9 @@ npm-debug.log*
 
 # Max temp files
 max
+
+# Environment files with secrets
+.env.local
+
+# Version archives
+versions/*.tar.gz
