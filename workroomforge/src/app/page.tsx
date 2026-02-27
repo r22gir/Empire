@@ -219,15 +219,41 @@ export default function WorkroomForge() {
   const analyzeImage = async () => {
     if (!uploadedImage) return
     setIsAnalyzing(true)
-    // TODO: Replace with real API call to /api/v1/smart-analyze
-    await new Promise(r => setTimeout(r, 2500))
-    const types = ['Single Hung', 'Double Hung', 'Casement', 'Picture Window', 'Bay Window', 'Sliding']
-    const type = types[Math.floor(Math.random() * types.length)]
-    let w = 36 + Math.floor(Math.random() * 48), h = 48 + Math.floor(Math.random() * 48)
-    if (type === 'Picture Window') { w = 60 + Math.floor(Math.random() * 60); h = 48 + Math.floor(Math.random() * 36) }
-    if (type === 'Bay Window') { w = 72 + Math.floor(Math.random() * 48); h = 54 + Math.floor(Math.random() * 30) }
-    setAnalysisResult({ confidence: 85 + Math.floor(Math.random() * 12), suggestedWidth: w, suggestedHeight: h, windowType: type, recommendations: [`${type} - recommend ${w > 60 ? 'ripplefold drapes' : 'roman shades'}`, h > 72 ? 'Ceiling mount for dramatic effect' : 'Wall mount recommended', 'Blackout lining for bedrooms', w > 72 ? 'Motorization recommended' : 'Manual operation suitable'] })
-    setIsAnalyzing(false)
+    try {
+      const res = await fetch('/api/measure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: uploadedImage }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Analysis failed')
+
+      const w = Math.round(data.width_inches || 36)
+      const h = Math.round(data.height_inches || 48)
+      const type = data.window_type || 'Standard'
+      const confidence = Math.min(100, Math.max(0, data.confidence || 70))
+      const suggestions: string[] = data.treatment_suggestions || []
+      const notes = data.notes || ''
+
+      setAnalysisResult({
+        confidence,
+        suggestedWidth: w,
+        suggestedHeight: h,
+        windowType: type,
+        recommendations: suggestions.length > 0
+          ? suggestions
+          : [
+              `${type} - recommend ${w > 60 ? 'ripplefold drapes' : 'roman shades'}`,
+              h > 72 ? 'Ceiling mount for dramatic effect' : 'Wall mount recommended',
+              ...(notes ? [notes] : []),
+            ],
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Analysis failed'
+      alert('AI analysis error: ' + msg)
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
   const applyAnalysis = () => {
