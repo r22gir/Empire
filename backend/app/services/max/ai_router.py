@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from typing import List, Optional, AsyncGenerator
 from pathlib import Path
 import logging
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 logger = logging.getLogger("max.ai_router")
 
@@ -240,7 +243,7 @@ class AIRouter:
             resp = await client.post(
                 "https://api.x.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
-                json={"model": "grok-3-latest", "messages": api_messages, "max_tokens": 8192}
+                json={"model": "grok-3-fast", "messages": api_messages, "max_tokens": 8192}
             )
             if resp.status_code != 200:
                 raise Exception(f"xAI HTTP {resp.status_code}: {resp.text}")
@@ -253,7 +256,7 @@ class AIRouter:
                 "POST",
                 "https://api.x.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
-                json={"model": "grok-3-latest", "messages": api_messages, "max_tokens": 8192, "stream": True}
+                json={"model": "grok-3-fast", "messages": api_messages, "max_tokens": 8192, "stream": True}
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()
