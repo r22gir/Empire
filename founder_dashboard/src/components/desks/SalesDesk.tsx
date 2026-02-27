@@ -6,12 +6,14 @@ import { Users, Target, TrendingUp, Phone } from 'lucide-react';
 import { StatsBar, TaskList, DetailPanel } from './shared';
 import SalesPipeline from './sales/SalesPipeline';
 import LeadDetail from './sales/LeadDetail';
+import SalesAgent from './sales/SalesAgent';
 
 const fmt = (n: number) => '$' + n.toLocaleString();
 
 export default function SalesDesk() {
   const [leads] = useState<Lead[]>(MOCK_LEADS);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [showAgent, setShowAgent] = useState(true);
   const router = useRouter();
 
   const wonLeads = leads.filter(l => l.stage === 'Won');
@@ -34,6 +36,28 @@ export default function SalesDesk() {
         { label: 'New Leads', value: String(newLeads), icon: Users, color: 'var(--purple)' },
         { label: 'Pipeline Value', value: fmt(pipelineVal), icon: Phone, color: 'var(--cyan)' },
       ]} />
+
+      {/* Sales Agent toggle */}
+      <div className="px-4 pt-3">
+        <button
+          onClick={() => setShowAgent(!showAgent)}
+          className="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition"
+          style={{
+            background: showAgent ? 'rgba(139,92,246,0.15)' : 'var(--raised)',
+            color: showAgent ? '#8B5CF6' : 'var(--text-secondary)',
+            border: showAgent ? '1px solid rgba(139,92,246,0.3)' : '1px solid var(--border)',
+          }}
+        >
+          {showAgent ? 'Hide AI Agent' : '🤖 Sales AI Agent'}
+        </button>
+      </div>
+
+      {showAgent && (
+        <div className="px-4 pt-3">
+          <SalesAgent selectedLead={selectedLead} />
+        </div>
+      )}
+
       <div className="flex-1 overflow-auto p-4">
         <SalesPipeline leads={leads} onLeadClick={lead => setSelectedLead(lead)} />
       </div>
