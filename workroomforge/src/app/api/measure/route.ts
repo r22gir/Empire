@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const VISION_PROMPT =
-  'You are an expert window measurement estimator. Analyze this window photo. ' +
-  'Look for reference objects (doors are 80 inches tall, outlets are 4.5 inches, ' +
-  'standard windows are 36x48). Estimate width and height in inches. ' +
-  'Return JSON only: {"width_inches": number, "height_inches": number, ' +
-  '"confidence": number (0-100), "window_type": string, "notes": string, ' +
-  '"treatment_suggestions": string[]}';
+const VISION_PROMPT = `You are an expert window treatment estimator with 20+ years measuring windows for custom drapery. Analyze this photo and estimate the window dimensions as accurately as possible.
+
+STEP 1 — IDENTIFY ALL REFERENCE OBJECTS in the scene and use them to establish scale:
+- Doors/door frames: 80" tall, 32-36" wide
+- Standard electrical outlets: 4.5" tall, mounted 12-16" from floor
+- Light switches: 5" tall, mounted 48" from floor
+- Baseboards: typically 4-6" tall
+- Standard ceiling height: 96" (8 ft) unless clearly taller (vaulted, 10ft, etc.)
+- Dining/desk chairs: seat height 17-18", total height 30-34"
+- Sofas/couches: seat height 17-19", back height 30-36"
+- Bookshelves/shelving units: shelves typically spaced 10-12" apart, units are often 72-84" tall
+- Floor plants/plant baskets: large decorative baskets are 12-18" diameter, floor planters 14-24" tall
+- People standing: average 65-69" (women) or 69-73" (men)
+- People seated: torso from seat to top of head ~30-34"
+- Standard counter height: 36", bar height: 42"
+- Bed frame with mattress: 25" tall (standard), headboard 48-56"
+- Floor-to-ceiling windows typically run 84-108" depending on ceiling height
+
+STEP 2 — ESTIMATE WINDOW DIMENSIONS using the reference objects for scale. Cross-reference at least 2 objects if possible. Consider the full window opening from frame edge to frame edge.
+
+STEP 3 — CLASSIFY the window type and suggest treatments for a luxury drapery business.
+
+Return JSON only — no markdown, no explanation outside the JSON:
+{"width_inches": number, "height_inches": number, "confidence": number (0-100), "window_type": string, "reference_objects_used": string[], "notes": string, "treatment_suggestions": string[]}`;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.XAI_API_KEY;

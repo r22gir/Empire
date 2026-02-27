@@ -32,8 +32,26 @@ interface WindowItem {
   aiAnalysis?: { confidence: number; suggestedWidth: number; suggestedHeight: number; windowType: string; recommendations: string[] }
 }
 
+interface UpholsteryItem {
+  id: string; name: string; furnitureType: string; style: string
+  width: number; depth: number; height: number; cushionCount: number
+  fabricYards: number; fabricType: 'plain' | 'patterned' | 'leather'
+  laborType: 'standard' | 'tufted' | 'channeled' | 'leather'
+  notes: string; imageUrl?: string
+  aiAnalysis?: {
+    confidence: number; furnitureType: string; style: string
+    dimensions: { width: number; depth: number; height: number }
+    cushions: { seat: number; back: number; throw_pillows: number }
+    fabricYardsPlain: number; fabricYardsPatterned: number
+    hasWelting: boolean; hasTufting: boolean; hasChanneling: boolean
+    hasSkirt: boolean; hasNailhead: boolean; suggestedLaborType: string
+    laborCostLow: number; laborCostHigh: number; newFoamRecommended: boolean
+    notes: string; questions: string[]
+  }
+}
+
 interface Room {
-  id: string; name: string; windows: WindowItem[]; expanded: boolean
+  id: string; name: string; windows: WindowItem[]; upholstery: UpholsteryItem[]; expanded: boolean
 }
 
 interface InventoryItem {
@@ -67,6 +85,11 @@ const PRICING = {
   lining: { 'unlined': 0, 'standard': 8, 'blackout': 15, 'thermal': 12, 'interlining': 18 } as Record<string, number>,
   hardware: { 'none': 0, 'rod-standard': 45, 'rod-decorative': 85, 'track-basic': 65, 'track-ripplefold': 95 } as Record<string, number>,
   motor: { 'none': 0, 'somfy': 285, 'lutron': 425, 'generic': 185 } as Record<string, number>,
+}
+
+const UPHOLSTERY_PRICING = {
+  labor: { 'standard': 62, 'tufted': 78, 'channeled': 72, 'leather': 100 } as Record<string, number>,
+  fabric: { 'plain': 22, 'patterned': 50, 'leather': 110 } as Record<string, number>,
 }
 
 // ═══════════════════════════════════════════════════════
@@ -143,7 +166,7 @@ export default function WorkroomForge() {
 
   // Quote Builder State
   const [rooms, setRooms] = useState<Room[]>([
-    { id: 'room-1', name: 'Living Room', expanded: true, windows: [
+    { id: 'room-1', name: 'Living Room', expanded: true, upholstery: [], windows: [
       { id: 'w1', name: 'Main Window', width: 72, height: 84, quantity: 1, treatmentType: 'ripplefold', mountType: 'ceiling', liningType: 'blackout', hardwareType: 'track-ripplefold', motorization: 'somfy', notes: '' }
     ]}
   ])
@@ -153,6 +176,8 @@ export default function WorkroomForge() {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
+  const [photoModalMode, setPhotoModalMode] = useState<'window' | 'upholstery'>('window')
+  const [activeUpholsteryId, setActiveUpholsteryId] = useState<string | null>(null)
   const [showCamera, setShowCamera] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -195,11 +220,20 @@ export default function WorkroomForge() {
     return Math.round((base + lining + hardware + motor) * qty)
   }
 
-  const calculateRoomTotal = (room: Room): number => room.windows.reduce((sum, w) => sum + calculateWindowPrice(w), 0)
+  const calculateUpholsteryPrice = (u: UpholsteryItem): number => {
+    const yards = Number(u.fabricYards) || 0
+    const labor = UPHOLSTERY_PRICING.labor[u.laborType] || 62
+    const fabric = UPHOLSTERY_PRICING.fabric[u.fabricType] || 22
+    return Math.round(yards * (labor + fabric))
+  }
+
+  const calculateRoomTotal = (room: Room): number =>
+    room.windows.reduce((sum, w) => sum + calculateWindowPrice(w), 0) +
+    (room.upholstery || []).reduce((sum, u) => sum + calculateUpholsteryPrice(u), 0)
   const calculateGrandTotal = (): number => rooms.reduce((sum, r) => sum + calculateRoomTotal(r), 0)
 
   // Room/Window CRUD
-  const addRoom = () => setRooms([...rooms, { id: genId(), name: `Room ${rooms.length + 1}`, expanded: true, windows: [] }])
+  const addRoom = () => setRooms([...rooms, { id: genId(), name: `Room ${rooms.length + 1}`, expanded: true, windows: [], upholstery: [] }])
   const deleteRoom = (roomId: string) => { if (rooms.length > 1) setRooms(rooms.filter(r => r.id !== roomId)) }
   const toggleRoom = (roomId: string) => setRooms(rooms.map(r => r.id === roomId ? { ...r, expanded: !r.expanded } : r))
   const updateRoomName = (roomId: string, name: string) => setRooms(rooms.map(r => r.id === roomId ? { ...r, name } : r))
@@ -208,8 +242,18 @@ export default function WorkroomForge() {
   const deleteWindow = (roomId: string, windowId: string) => setRooms(rooms.map(r => r.id === roomId ? { ...r, windows: r.windows.filter(w => w.id !== windowId) } : r))
   const copyWindow = (roomId: string, windowId: string) => setRooms(rooms.map(r => { if (r.id === roomId) { const w = r.windows.find(w => w.id === windowId); if (w) return { ...r, windows: [...r.windows, { ...w, id: genId(), name: `${w.name} (Copy)` }] } } return r }))
 
+  // Upholstery CRUD
+  const addUpholstery = (roomId: string) => setRooms(rooms.map(r => r.id === roomId ? { ...r, upholstery: [...(r.upholstery || []), { id: genId(), name: `Piece ${(r.upholstery || []).length + 1}`, furnitureType: 'sofa', style: '', width: 84, depth: 36, height: 34, cushionCount: 3, fabricYards: 14, fabricType: 'plain' as const, laborType: 'standard' as const, notes: '' }] } : r))
+  const updateUpholstery = (roomId: string, uId: string, updates: Partial<UpholsteryItem>) => setRooms(rooms.map(r => r.id === roomId ? { ...r, upholstery: (r.upholstery || []).map(u => u.id === uId ? { ...u, ...updates } : u) } : r))
+  const deleteUpholstery = (roomId: string, uId: string) => setRooms(rooms.map(r => r.id === roomId ? { ...r, upholstery: (r.upholstery || []).filter(u => u.id !== uId) } : r))
+  const copyUpholstery = (roomId: string, uId: string) => setRooms(rooms.map(r => { if (r.id === roomId) { const u = (r.upholstery || []).find(u => u.id === uId); if (u) return { ...r, upholstery: [...(r.upholstery || []), { ...u, id: genId(), name: `${u.name} (Copy)` }] } } return r }))
+
   // Photo/AI
-  const openPhotoModal = (roomId: string, windowId: string) => { setActiveRoomId(roomId); setActiveWindowId(windowId); setShowPhotoModal(true); setUploadedImage(null); setAnalysisResult(null) }
+  const openPhotoModal = (roomId: string, itemId: string, mode: 'window' | 'upholstery' = 'window') => {
+    setActiveRoomId(roomId); setPhotoModalMode(mode); setShowPhotoModal(true); setUploadedImage(null); setAnalysisResult(null)
+    if (mode === 'window') { setActiveWindowId(itemId); setActiveUpholsteryId(null) }
+    else { setActiveUpholsteryId(itemId); setActiveWindowId(null) }
+  }
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (e) => { setUploadedImage(e.target?.result as string); setShowCamera(false) }; reader.readAsDataURL(file) } }
   const startCamera = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } }); setCameraStream(stream); setShowCamera(true); if (videoRef.current) videoRef.current.srcObject = stream } catch { alert('Unable to access camera.') } }
   const capturePhoto = () => { if (videoRef.current && canvasRef.current) { const v = videoRef.current, c = canvasRef.current; c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d')?.drawImage(v, 0, 0); setUploadedImage(c.toDataURL('image/jpeg', 0.9)); stopCamera() } }
@@ -220,7 +264,8 @@ export default function WorkroomForge() {
     if (!uploadedImage) return
     setIsAnalyzing(true)
     try {
-      const res = await fetch('/api/measure', {
+      const endpoint = photoModalMode === 'upholstery' ? '/api/upholstery' : '/api/measure'
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: uploadedImage }),
@@ -228,26 +273,45 @@ export default function WorkroomForge() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Analysis failed')
 
-      const w = Math.round(data.width_inches || 36)
-      const h = Math.round(data.height_inches || 48)
-      const type = data.window_type || 'Standard'
-      const confidence = Math.min(100, Math.max(0, data.confidence || 70))
-      const suggestions: string[] = data.treatment_suggestions || []
-      const notes = data.notes || ''
-
-      setAnalysisResult({
-        confidence,
-        suggestedWidth: w,
-        suggestedHeight: h,
-        windowType: type,
-        recommendations: suggestions.length > 0
-          ? suggestions
-          : [
-              `${type} - recommend ${w > 60 ? 'ripplefold drapes' : 'roman shades'}`,
-              h > 72 ? 'Ceiling mount for dramatic effect' : 'Wall mount recommended',
-              ...(notes ? [notes] : []),
-            ],
-      })
+      if (photoModalMode === 'upholstery') {
+        setAnalysisResult({
+          mode: 'upholstery',
+          confidence: Math.min(100, Math.max(0, data.confidence || 70)),
+          furnitureType: data.furniture_type || 'Unknown',
+          style: data.style || '',
+          dimensions: data.estimated_dimensions || { width: 0, depth: 0, height: 0 },
+          cushions: data.cushion_count || { seat: 0, back: 0, throw_pillows: 0 },
+          fabricYardsPlain: data.fabric_yards_plain || 0,
+          fabricYardsPatterned: data.fabric_yards_patterned || 0,
+          hasWelting: data.has_welting || false,
+          hasTufting: data.has_tufting || false,
+          hasChanneling: data.has_channeling || false,
+          hasSkirt: data.has_skirt || false,
+          hasNailhead: data.has_nailhead || false,
+          suggestedLaborType: data.suggested_labor_type || 'standard',
+          laborCostLow: data.estimated_labor_cost_low || 0,
+          laborCostHigh: data.estimated_labor_cost_high || 0,
+          newFoamRecommended: data.new_foam_recommended || false,
+          notes: data.notes || '',
+          questions: data.questions || [],
+        })
+      } else {
+        const w = Math.round(data.width_inches || 36)
+        const h = Math.round(data.height_inches || 48)
+        const type = data.window_type || 'Standard'
+        const confidence = Math.min(100, Math.max(0, data.confidence || 70))
+        const suggestions: string[] = data.treatment_suggestions || []
+        const notes = data.notes || ''
+        const refs: string[] = data.reference_objects_used || []
+        setAnalysisResult({
+          mode: 'window', confidence, suggestedWidth: w, suggestedHeight: h, windowType: type,
+          recommendations: [
+            ...(refs.length > 0 ? [`Scale references: ${refs.join(', ')}`] : []),
+            ...(suggestions.length > 0 ? suggestions : [`${type} - recommend ${w > 60 ? 'ripplefold drapes' : 'roman shades'}`, h > 72 ? 'Ceiling mount for dramatic effect' : 'Wall mount recommended']),
+            ...(notes ? [notes] : []),
+          ],
+        })
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Analysis failed'
       alert('AI analysis error: ' + msg)
@@ -257,7 +321,19 @@ export default function WorkroomForge() {
   }
 
   const applyAnalysis = () => {
-    if (analysisResult && activeRoomId && activeWindowId) {
+    if (!analysisResult || !activeRoomId) return
+    if (analysisResult.mode === 'upholstery' && activeUpholsteryId) {
+      const suggestedLabor = analysisResult.hasTufting ? 'tufted' : analysisResult.hasChanneling ? 'channeled' : 'standard'
+      updateUpholstery(activeRoomId, activeUpholsteryId, {
+        furnitureType: analysisResult.furnitureType, style: analysisResult.style,
+        width: analysisResult.dimensions?.width || 0, depth: analysisResult.dimensions?.depth || 0, height: analysisResult.dimensions?.height || 0,
+        cushionCount: (analysisResult.cushions?.seat || 0) + (analysisResult.cushions?.back || 0),
+        fabricYards: analysisResult.fabricYardsPlain || 0,
+        laborType: suggestedLabor as UpholsteryItem['laborType'],
+        imageUrl: uploadedImage || undefined, aiAnalysis: analysisResult,
+      })
+      closePhotoModal()
+    } else if (analysisResult.mode === 'window' && activeWindowId) {
       updateWindow(activeRoomId, activeWindowId, { width: analysisResult.suggestedWidth, height: analysisResult.suggestedHeight, imageUrl: uploadedImage || undefined, aiAnalysis: analysisResult })
       closePhotoModal()
     }
@@ -290,7 +366,7 @@ export default function WorkroomForge() {
 
   // Section configs
   const sections = [
-    { id: 'quotes' as const, label: 'Quote Builder', icon: Calculator, badge: rooms.reduce((s, r) => s + r.windows.length, 0) },
+    { id: 'quotes' as const, label: 'Quote Builder', icon: Calculator, badge: rooms.reduce((s, r) => s + r.windows.length + (r.upholstery || []).length, 0) },
     { id: 'inventory' as const, label: 'Inventory', icon: Package, badge: lowStockItems.length > 0 ? lowStockItems.length : undefined, badgeColor: 'bg-red-500' },
     { id: 'crm' as const, label: 'CRM', icon: Users, badge: activeJobs.length },
     { id: 'finance' as const, label: 'Finance', icon: DollarSign },
@@ -396,8 +472,8 @@ export default function WorkroomForge() {
                   <Brain className="w-5 h-5 text-white" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-sm flex items-center gap-2">AI Window Analysis <span className="text-[10px] bg-purple-500/30 text-purple-300 px-1.5 py-0.5 rounded-full">BETA</span></h3>
-                  <p className="text-xs text-gray-400">Upload photo, use Polycam 3D scan, or enter manual measurements</p>
+                  <h3 className="font-semibold text-sm flex items-center gap-2">AI Window & Upholstery Analysis <span className="text-[10px] bg-purple-500/30 text-purple-300 px-1.5 py-0.5 rounded-full">BETA</span></h3>
+                  <p className="text-xs text-gray-400">Upload photo for AI-powered window measurement or upholstery estimation with DC-area pricing</p>
                 </div>
               </div>
 
@@ -410,7 +486,7 @@ export default function WorkroomForge() {
                         {room.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
                       <input type="text" value={room.name} onChange={(e) => updateRoomName(room.id, e.target.value)} className="bg-transparent font-semibold focus:outline-none text-sm" />
-                      <span className="text-xs text-gray-500">({room.windows.length} windows)</span>
+                      <span className="text-xs text-gray-500">({room.windows.length} windows{(room.upholstery || []).length > 0 ? `, ${(room.upholstery || []).length} upholstery` : ''})</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-bold text-[#C9A84C]">${calculateRoomTotal(room).toLocaleString()}</span>
@@ -487,9 +563,118 @@ export default function WorkroomForge() {
                         </div>
                       ))}
 
-                      <button onClick={() => addWindow(room.id)} className="w-full py-2.5 border border-dashed border-white/10 hover:border-[#C9A84C] rounded-lg text-gray-500 hover:text-[#C9A84C] flex items-center justify-center gap-2 text-sm transition">
-                        <Plus className="w-4 h-4" /> Add Window
-                      </button>
+                      {/* Upholstery Items */}
+                      {(room.upholstery || []).map(u => (
+                        <div key={u.id} className={`bg-[#1a1a2e] rounded-lg p-4 border ${u.aiAnalysis ? 'border-amber-500/30' : 'border-white/[0.04]'}`}>
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <input type="text" value={u.name} onChange={(e) => updateUpholstery(room.id, u.id, { name: e.target.value })} className="bg-transparent font-medium text-sm focus:outline-none" />
+                              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full">UPHOLSTERY</span>
+                              {u.aiAnalysis && <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full flex items-center gap-1"><Sparkles className="w-2.5 h-2.5" /> AI {u.aiAnalysis.confidence}%</span>}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-bold text-green-400">${calculateUpholsteryPrice(u).toLocaleString()}</span>
+                              <button onClick={() => copyUpholstery(room.id, u.id)} className="p-1.5 text-gray-500 hover:text-white hover:bg-white/[0.06] rounded"><Copy className="w-3.5 h-3.5" /></button>
+                              <button onClick={() => deleteUpholstery(room.id, u.id)} className="p-1.5 text-gray-500 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">AI Estimate</label>
+                              <button onClick={() => openPhotoModal(room.id, u.id, 'upholstery')} className="w-full h-9 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg flex items-center justify-center gap-1.5 text-xs text-amber-300 transition">
+                                <Camera className="w-3.5 h-3.5" /> Photo
+                              </button>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">Type</label>
+                              <select value={u.furnitureType} onChange={(e) => updateUpholstery(room.id, u.id, { furnitureType: e.target.value })} className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-2 text-sm focus:border-[#C9A84C] outline-none">
+                                {['sofa','loveseat','chair','club-chair','wing-chair','recliner','ottoman','bench','chaise','daybed','sectional','dining-chair','stool','headboard'].map(t => <option key={t} value={t}>{t.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">Fabric Yards</label>
+                              <input type="number" value={u.fabricYards} onChange={(e) => updateUpholstery(room.id, u.id, { fabricYards: Number(e.target.value) })} className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-3 text-sm focus:border-[#C9A84C] outline-none" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">Cushions</label>
+                              <input type="number" value={u.cushionCount} onChange={(e) => updateUpholstery(room.id, u.id, { cushionCount: Number(e.target.value) })} className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-3 text-sm focus:border-[#C9A84C] outline-none" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">Fabric</label>
+                              <select value={u.fabricType} onChange={(e) => updateUpholstery(room.id, u.id, { fabricType: e.target.value as UpholsteryItem['fabricType'] })} className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-2 text-sm focus:border-[#C9A84C] outline-none">
+                                <option value="plain">Plain $22/yd</option>
+                                <option value="patterned">Patterned $50/yd</option>
+                                <option value="leather">Leather $110/yd</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">Labor</label>
+                              <select value={u.laborType} onChange={(e) => updateUpholstery(room.id, u.id, { laborType: e.target.value as UpholsteryItem['laborType'] })} className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-2 text-sm focus:border-[#C9A84C] outline-none">
+                                <option value="standard">Standard $62/yd</option>
+                                <option value="tufted">Tufted $78/yd</option>
+                                <option value="channeled">Channeled $72/yd</option>
+                                <option value="leather">Leather $100/yd</option>
+                              </select>
+                            </div>
+                            {[
+                              { label: 'W (in)', value: u.width, key: 'width' },
+                              { label: 'D (in)', value: u.depth, key: 'depth' },
+                              { label: 'H (in)', value: u.height, key: 'height' },
+                            ].map(f => (
+                              <div key={f.key}>
+                                <label className="block text-[10px] text-gray-500 mb-1">{f.label}</label>
+                                <input type="number" value={f.value} onChange={(e) => updateUpholstery(room.id, u.id, { [f.key]: Number(e.target.value) })} className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-3 text-sm focus:border-[#C9A84C] outline-none" />
+                              </div>
+                            ))}
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-1">Style</label>
+                              <input type="text" value={u.style} onChange={(e) => updateUpholstery(room.id, u.id, { style: e.target.value })} placeholder="e.g. Chesterfield" className="w-full h-9 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-3 text-sm focus:border-[#C9A84C] outline-none" />
+                            </div>
+                          </div>
+
+                          {u.aiAnalysis && (
+                            <div className="mt-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                              <div className="flex items-center gap-2 mb-2">
+                                <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                                <span className="text-xs font-medium text-amber-300">AI: {u.aiAnalysis.furnitureType} — {u.aiAnalysis.style}</span>
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5 mb-2">
+                                <div className="text-[11px] text-gray-400">Fabric: {u.aiAnalysis.fabricYardsPlain} yd (plain) / {u.aiAnalysis.fabricYardsPatterned} yd (patterned)</div>
+                                <div className="text-[11px] text-gray-400">Cushions: {u.aiAnalysis.cushions.seat}S + {u.aiAnalysis.cushions.back}B + {u.aiAnalysis.cushions.throw_pillows}P</div>
+                                <div className="text-[11px] text-gray-400">Labor est: ${u.aiAnalysis.laborCostLow} — ${u.aiAnalysis.laborCostHigh}</div>
+                                <div className="text-[11px] text-gray-400">
+                                  {[u.aiAnalysis.hasWelting && 'Welting', u.aiAnalysis.hasTufting && 'Tufting', u.aiAnalysis.hasChanneling && 'Channeling', u.aiAnalysis.hasSkirt && 'Skirt', u.aiAnalysis.hasNailhead && 'Nailhead'].filter(Boolean).join(', ') || 'No special details'}
+                                </div>
+                              </div>
+                              {u.aiAnalysis.newFoamRecommended && (
+                                <p className="text-[11px] text-amber-400 mb-2">New foam recommended ($45-85/seat)</p>
+                              )}
+                              {u.aiAnalysis.questions.length > 0 && (
+                                <div className="bg-amber-500/5 rounded-lg p-2">
+                                  <p className="text-[10px] font-medium text-amber-300 mb-1">Questions for customer:</p>
+                                  {u.aiAnalysis.questions.map((q, i) => (
+                                    <p key={i} className="text-[11px] text-gray-400 flex items-start gap-1.5 mb-1 last:mb-0">
+                                      <span className="text-amber-400 flex-shrink-0">?</span>{q}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <input type="text" value={u.notes} onChange={(e) => updateUpholstery(room.id, u.id, { notes: e.target.value })} placeholder="Notes..." className="w-full mt-3 bg-[#0c0c18] border border-white/[0.08] rounded-lg px-3 py-2 text-xs focus:border-[#C9A84C] outline-none" />
+                        </div>
+                      ))}
+
+                      <div className="flex gap-2">
+                        <button onClick={() => addWindow(room.id)} className="flex-1 py-2.5 border border-dashed border-white/10 hover:border-purple-500/40 rounded-lg text-gray-500 hover:text-purple-400 flex items-center justify-center gap-2 text-sm transition">
+                          <Plus className="w-4 h-4" /> Add Window
+                        </button>
+                        <button onClick={() => addUpholstery(room.id)} className="flex-1 py-2.5 border border-dashed border-white/10 hover:border-amber-500/40 rounded-lg text-gray-500 hover:text-amber-400 flex items-center justify-center gap-2 text-sm transition">
+                          <Plus className="w-4 h-4" /> Add Upholstery
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -504,7 +689,7 @@ export default function WorkroomForge() {
                 <h3 className="text-sm font-bold mb-3">Quote Summary</h3>
                 {rooms.map(r => (
                   <div key={r.id} className="flex justify-between py-2 border-b border-white/[0.04] text-sm">
-                    <span className="text-gray-400">{r.name} ({r.windows.length} windows)</span>
+                    <span className="text-gray-400">{r.name} ({r.windows.length} win{(r.upholstery || []).length > 0 ? `, ${(r.upholstery || []).length} uph` : ''})</span>
                     <span className="font-semibold">${calculateRoomTotal(r).toLocaleString()}</span>
                   </div>
                 ))}
@@ -908,10 +1093,10 @@ export default function WorkroomForge() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/80" onClick={closePhotoModal} />
           <div className="relative bg-[#12121e] rounded-2xl border border-white/[0.08] w-full max-w-2xl overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between bg-gradient-to-r from-purple-500/10 to-pink-500/10">
+            <div className={`px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between bg-gradient-to-r ${photoModalMode === 'upholstery' ? 'from-amber-500/10 to-orange-500/10' : 'from-purple-500/10 to-pink-500/10'}`}>
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center"><Brain className="w-4 h-4 text-white" /></div>
-                <div><h2 className="font-bold text-sm">AI Window Analysis</h2><p className="text-[10px] text-gray-400">Photo • Polycam 3D • Manual</p></div>
+                <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${photoModalMode === 'upholstery' ? 'from-amber-500 to-orange-600' : 'from-purple-500 to-pink-600'} flex items-center justify-center`}><Brain className="w-4 h-4 text-white" /></div>
+                <div><h2 className="font-bold text-sm">{photoModalMode === 'upholstery' ? 'AI Upholstery Estimation' : 'AI Window Analysis'}</h2><p className="text-[10px] text-gray-400">{photoModalMode === 'upholstery' ? 'Photo • Yardage • DC Pricing' : 'Photo • Polycam 3D • Manual'}</p></div>
               </div>
               <button onClick={closePhotoModal} className="p-1.5 hover:bg-white/10 rounded-lg"><X className="w-4 h-4" /></button>
             </div>
@@ -954,7 +1139,7 @@ export default function WorkroomForge() {
                 </div>
               )}
 
-              {analysisResult && (
+              {analysisResult && analysisResult.mode === 'window' && (
                 <div className="bg-[#1a1a2e] rounded-xl p-4 mb-4 border border-purple-500/20">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-sm font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-purple-400" /> Results</h3>
@@ -978,6 +1163,45 @@ export default function WorkroomForge() {
                       <p key={i} className="text-[11px] text-gray-400 flex items-start gap-1.5 mb-1 last:mb-0"><Check className="w-3 h-3 text-purple-400 flex-shrink-0 mt-0.5" />{r}</p>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {analysisResult && analysisResult.mode === 'upholstery' && (
+                <div className="bg-[#1a1a2e] rounded-xl p-4 mb-4 border border-amber-500/20">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold flex items-center gap-2"><Sparkles className="w-4 h-4 text-amber-400" /> Upholstery Estimate</h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">{analysisResult.confidence}%</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    <div className="bg-[#0c0c18] rounded-lg p-3 text-center">
+                      <p className="text-lg font-bold">{analysisResult.fabricYardsPlain}</p>
+                      <p className="text-[10px] text-gray-500">Yards (plain)</p>
+                    </div>
+                    <div className="bg-[#0c0c18] rounded-lg p-3 text-center">
+                      <p className="text-lg font-bold">{(analysisResult.cushions?.seat || 0) + (analysisResult.cushions?.back || 0)}</p>
+                      <p className="text-[10px] text-gray-500">Cushions</p>
+                    </div>
+                    <div className="bg-[#0c0c18] rounded-lg p-3 text-center">
+                      <p className="text-lg font-bold text-amber-400">${analysisResult.laborCostLow}-{analysisResult.laborCostHigh}</p>
+                      <p className="text-[10px] text-gray-500">Labor Est.</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-1">{analysisResult.furnitureType} — <span className="text-white">{analysisResult.style}</span></p>
+                  <p className="text-xs text-gray-400 mb-2">Dimensions: {analysisResult.dimensions?.width}" W x {analysisResult.dimensions?.depth}" D x {analysisResult.dimensions?.height}" H</p>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {[analysisResult.hasWelting && 'Welting', analysisResult.hasTufting && 'Tufting', analysisResult.hasChanneling && 'Channeling', analysisResult.hasSkirt && 'Skirt', analysisResult.hasNailhead && 'Nailhead', analysisResult.newFoamRecommended && 'New Foam Rec.'].filter(Boolean).map((tag, i) => (
+                      <span key={i} className="text-[10px] bg-amber-500/15 text-amber-300 px-1.5 py-0.5 rounded">{tag}</span>
+                    ))}
+                  </div>
+                  {analysisResult.notes && <p className="text-[11px] text-gray-400 mb-2">{analysisResult.notes}</p>}
+                  {analysisResult.questions?.length > 0 && (
+                    <div className="bg-amber-500/5 rounded-lg p-2.5">
+                      <p className="text-[10px] font-medium text-amber-300 mb-1">Ask the customer:</p>
+                      {analysisResult.questions.map((q: string, i: number) => (
+                        <p key={i} className="text-[11px] text-gray-400 flex items-start gap-1.5 mb-1 last:mb-0"><span className="text-amber-400 flex-shrink-0">?</span>{q}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
