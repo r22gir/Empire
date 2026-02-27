@@ -85,6 +85,22 @@ async def root():
 async def health():
     return {"status": "healthy", "service": "empirebox-backend"}
 
+
+# Telegram Bot auto-start (if configured)
+@app.on_event("startup")
+async def start_telegram_bot():
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if telegram_bot.is_configured:
+            import asyncio
+            asyncio.create_task(telegram_bot.start_bot())
+            print("✓ Telegram Bot: starting in background")
+        else:
+            print("✗ Telegram Bot: not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_FOUNDER_CHAT_ID)")
+    except Exception as e:
+        print(f"✗ Telegram Bot: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
