@@ -5,6 +5,7 @@ import { Megaphone, FileText, Calendar, Eye } from 'lucide-react';
 import { StatsBar, FilterTabs, StatusBadge, TaskList, DetailPanel } from './shared';
 import PostDetail from './marketing/PostDetail';
 import ContentGenerator from './marketing/ContentGenerator';
+import SocialSetupWizard from './marketing/SocialSetupWizard';
 
 const STATUS_COLOR: Record<PostStatus, string> = {
   draft: 'var(--text-muted)',
@@ -24,6 +25,7 @@ export default function MarketingDesk() {
   const [posts] = useState<ContentPost[]>(MOCK_POSTS);
   const [filter, setFilter] = useState<string>('all');
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null);
+  const [showSocialSetup, setShowSocialSetup] = useState(false);
 
   const published = posts.filter(p => p.status === 'published').length;
   const scheduled = posts.filter(p => p.status === 'scheduled').length;
@@ -40,10 +42,26 @@ export default function MarketingDesk() {
         { label: 'Total Engagement', value: totalEngagement.toLocaleString(), icon: Eye, color: 'var(--gold)' },
       ]} />
 
-      <FilterTabs options={['all', 'draft', 'scheduled', 'published']} active={filter} onChange={setFilter} />
+      <div className="flex items-center justify-between px-4">
+        <FilterTabs options={['all', 'draft', 'scheduled', 'published']} active={filter} onChange={setFilter} />
+        <button
+          onClick={() => setShowSocialSetup(!showSocialSetup)}
+          className="px-3 py-1.5 rounded-lg text-[10px] font-semibold transition shrink-0"
+          style={{
+            background: showSocialSetup ? 'rgba(168,85,247,0.15)' : 'var(--raised)',
+            color: showSocialSetup ? '#A855F7' : 'var(--text-secondary)',
+            border: showSocialSetup ? '1px solid rgba(168,85,247,0.3)' : '1px solid var(--border)',
+          }}
+        >
+          {showSocialSetup ? 'Hide Setup' : '🔗 Social Setup'}
+        </button>
+      </div>
 
       <div className="flex-1 overflow-auto p-4">
         <div className="flex flex-col gap-4">
+          {/* Social Media Setup Wizard */}
+          {showSocialSetup && <SocialSetupWizard onClose={() => setShowSocialSetup(false)} />}
+
           {/* AI Content Generator */}
           <ContentGenerator />
 
