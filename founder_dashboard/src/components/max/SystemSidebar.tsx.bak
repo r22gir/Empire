@@ -1,0 +1,207 @@
+'use client';
+import { useState } from 'react';
+import { ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Desk, UploadedFile, Task, Reminder, AINotification, ServiceHealth, SystemStats } from '@/lib/types';
+import { API_URL } from '@/lib/api';
+import ModelSelector from './ModelSelector';
+import { AIModel } from '@/lib/types';
+
+interface SystemSidebarProps {
+  desks: Desk[];
+  models: AIModel[];
+  selectedModel: string;
+  onModelChange: (m: string) => void;
+  stats: { total_completed: number; active_tasks: number; pending_tasks: number; total_failed: number };
+  files: UploadedFile[];
+  tasks: Task[];
+  reminders: Reminder[];
+  aiNotifications: AINotification[];
+  serviceHealth: ServiceHealth;
+  systemStats: SystemStats | null;
+  onSelectImage: (name: string, category: string) => void;
+  onOpenTasks: () => void;
+  onAddReminder: (text: string, dueDate: string, priority: 'low' | 'medium' | 'high') => void;
+  onToggleReminder: (id: string) => void;
+  onDeleteReminder: (id: string) => void;
+  onMarkNotifRead: (id: string) => void;
+  onDismissNotif: (id: string) => void;
+  onRespondNotif: (id: string, action: string) => void;
+  onSelectNotif: (n: AINotification) => void;
+  onDeleteFile: (category: string, filename: string) => void;
+  onOpenFile: (category: string, filename: string) => void;
+}
+
+export default function SystemSidebar(props: SystemSidebarProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [showReminders, setShowReminders] = useState(false);
+  const [newReminder, setNewReminder] = useState({ text: '', dueDate: '', priority: 'medium' as 'low' | 'medium' | 'high' });
+
+  const getStatusColor = (s: string) => s === 'idle' ? 'bg-green-500' : s === 'busy' ? 'bg-yellow-500' : 'bg-gray-500';
+  const getPriorityColor = (p: string) => p === 'high' ? 'text-red-400' : p === 'medium' ? 'text-yellow-400' : 'text-green-400';
+  const formatSize = (b: number) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : b > 1024 ? (b / 1024).toFixed(1) + ' KB' : b + ' B';
+
+  if (collapsed) {
+    return (
+      <div className="w-10 bg-[#050508] border-l border-gray-800/50 flex flex-col items-center py-3 shrink-0">
+        <button onClick={() => setCollapsed(false)} className="p-2 text-gray-500 hover:text-white transition" title="Expand sidebar">
+          <PanelRightOpen className="w-4 h-4" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-[260px] bg-[#050508]/80 backdrop-blur-md border-l border-white/[0.04] flex flex-col shrink-0 overflow-hidden">
+      {/* Header */}
+      <div className="p-3 border-b border-gray-800/50 flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-bold text-shimmer tracking-wide">Empire System</h2>
+          <div className="flex items-center gap-2.5 mt-1.5 text-xs">
+            <div className="flex items-center gap-1" title="Backend API">
+              <span className={'w-1.5 h-1.5 rounded-full ' + (props.serviceHealth.backend ? 'bg-green-500' : 'bg-red-500')} />
+              <span className="text-gray-500">API</span>
+            </div>
+            <div className="flex items-center gap-1" title="OpenClaw">
+              <span className={'w-1.5 h-1.5 rounded-full ' + (props.serviceHealth.openclaw ? 'bg-green-500' : 'bg-red-500')} />
+              <span className="text-gray-500">Claw</span>
+            </div>
+            <div className="flex items-center gap-1" title="MAX AI">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+              <span className="text-gray-500">MAX</span>
+            </div>
+          </div>
+        </div>
+        <button onClick={() => setCollapsed(true)} className="p-1.5 text-gray-500 hover:text-white transition" title="Collapse">
+          <PanelRightClose className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Model */}
+      <div className="p-3 border-b border-gray-800/50">
+        <ModelSelector models={props.models} selectedModel={props.selectedModel} onSelect={props.onModelChange} />
+      </div>
+
+      {/* Tasks */}
+      <div className="p-3 border-b border-gray-800/50">
+        <button onClick={props.onOpenTasks} className="w-full grid grid-cols-2 gap-2 hover:opacity-80 transition-opacity">
+          <div className="bg-[#0a0a0f] rounded-lg p-2 text-center border border-gray-800/50 stat-card">
+            <span className="text-[10px] text-gray-500 uppercase">Done</span>
+            <p className="text-lg font-bold text-green-400">{props.stats.total_completed}</p>
+          </div>
+          <div className="bg-[#0a0a0f] rounded-lg p-2 text-center border border-gray-800/50 stat-card">
+            <span className="text-[10px] text-gray-500 uppercase">Active</span>
+            <p className="text-lg font-bold text-yellow-400">{props.stats.active_tasks}</p>
+          </div>
+        </button>
+        <p className="text-[10px] text-gray-600 text-center mt-1">Click to manage tasks</p>
+      </div>
+
+      {/* System Stats */}
+      {props.systemStats && (
+        <div className="p-3 border-b border-gray-800/50">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase mb-2">System</p>
+          <div className="space-y-1.5">
+            {[
+              { label: 'CPU', value: props.systemStats.cpu.percent },
+              { label: 'RAM', value: props.systemStats.memory.percent, extra: `${props.systemStats.memory.used_gb}/${props.systemStats.memory.total_gb} GB` },
+              { label: 'Disk', value: props.systemStats.disk.percent, extra: `${props.systemStats.disk.used_gb}/${props.systemStats.disk.total_gb} GB` },
+            ].map(s => (
+              <div key={s.label}>
+                <div className="flex justify-between text-xs"><span className="text-gray-400">{s.label}</span><span className="text-gray-300">{s.extra || s.value + '%'}</span></div>
+                <div className="w-full bg-gray-800 rounded-full h-1 mt-0.5">
+                  <div className={'h-1 rounded-full transition-all ' + (s.value > 80 ? 'bg-red-500' : s.value > 50 ? 'bg-yellow-500' : 'bg-green-500')} style={{ width: `${s.value}%` }} />
+                </div>
+              </div>
+            ))}
+            {Object.entries(props.systemStats.temperatures).slice(0, 2).map(([name, sensors]) =>
+              sensors.slice(0, 1).map((s, i) => (
+                <div key={name + i} className="flex justify-between text-xs">
+                  <span className="text-gray-400">{s.label || name}</span>
+                  <span className={s.current > 80 ? 'text-red-400' : s.current > 60 ? 'text-yellow-400' : 'text-green-400'}>{s.current.toFixed(0)}°C</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto">
+        {/* Files */}
+        <div className="p-3 border-b border-gray-800/50">
+          <button onClick={() => setShowFiles(!showFiles)} className="w-full text-left text-[10px] font-semibold text-gray-500 uppercase flex justify-between items-center hover:text-gray-300">
+            <span>Files ({props.files.length})</span>{showFiles ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+          {showFiles && (
+            <div className="mt-2 space-y-0.5 max-h-32 overflow-y-auto">
+              {props.files.map((f, i) => (
+                <div key={i} className="text-xs p-1 rounded flex items-center gap-1 group hover:bg-gray-800/50">
+                  <span className="cursor-pointer flex-1 truncate hover:text-white" onClick={() => props.onOpenFile(f.category, f.name)}>{f.name}</span>
+                  {f.category === 'images' && <button onClick={() => props.onSelectImage(f.name, f.category)} className="text-amber-400 hover:text-amber-200 px-1" title="Analyze">📐</button>}
+                  <button onClick={() => props.onDeleteFile(f.category, f.name)} className="opacity-0 group-hover:opacity-100 text-red-400 px-1">×</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Reminders & Notifications */}
+        <div className="p-3 border-b border-gray-800/50">
+          <button onClick={() => setShowReminders(!showReminders)} className="w-full text-left text-[10px] font-semibold text-gray-500 uppercase flex justify-between items-center hover:text-gray-300">
+            <span>Reminders ({props.reminders.filter(r => !r.completed).length})</span>
+            {showReminders ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
+          {showReminders && (
+            <div className="mt-2 space-y-2">
+              <div className="flex gap-1">
+                <input type="text" value={newReminder.text} onChange={e => setNewReminder({ ...newReminder, text: e.target.value })} placeholder="New reminder..." className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs" onKeyDown={e => { if (e.key === 'Enter' && newReminder.text.trim()) { props.onAddReminder(newReminder.text, newReminder.dueDate, newReminder.priority); setNewReminder({ text: '', dueDate: '', priority: 'medium' }); } }} />
+                <button onClick={() => { if (newReminder.text.trim()) { props.onAddReminder(newReminder.text, newReminder.dueDate, newReminder.priority); setNewReminder({ text: '', dueDate: '', priority: 'medium' }); } }} className="px-2 bg-amber-600 hover:bg-amber-500 rounded text-xs">+</button>
+              </div>
+              {/* Notifications */}
+              {props.aiNotifications.filter(n => !n.read).length > 0 && (
+                <div className="border-b border-gray-700/50 pb-2">
+                  <p className="text-xs text-amber-400 font-semibold mb-1">Alerts ({props.aiNotifications.filter(n => !n.read).length})</p>
+                  {props.aiNotifications.filter(n => !n.read).map(n => (
+                    <div key={n.id} onClick={() => props.onSelectNotif(n)} className={'text-xs p-2 rounded mb-1 cursor-pointer hover:bg-white/10 flex items-center gap-2 border ' + (n.priority === 'high' ? 'bg-red-900/20 border-red-700/50' : 'bg-amber-900/20 border-amber-700/50')}>
+                      <span>{n.source === 'MAX' ? '🧠' : n.source === 'System' ? '⚙️' : '💰'}</span>
+                      <span className="text-white truncate flex-1">{n.title}</span>
+                      {n.priority === 'high' && <span className="text-red-400 animate-pulse">●</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Manual Reminders */}
+              <div className="max-h-28 overflow-y-auto space-y-0.5">
+                {props.reminders.sort((a, b) => a.completed === b.completed ? 0 : a.completed ? 1 : -1).map(r => (
+                  <div key={r.id} className={'text-xs p-1.5 rounded flex items-center gap-2 group ' + (r.completed ? 'opacity-40' : 'bg-gray-800/50')}>
+                    <input type="checkbox" checked={r.completed} onChange={() => props.onToggleReminder(r.id)} className="rounded" />
+                    <div className="flex-1 min-w-0"><p className={r.completed ? 'line-through text-gray-500' : ''}>{r.text}</p></div>
+                    <span className={getPriorityColor(r.priority)}>●</span>
+                    <button onClick={() => props.onDeleteReminder(r.id)} className="opacity-0 group-hover:opacity-100 text-red-400">×</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* AI Desks */}
+        <div className="p-3">
+          <h3 className="text-[10px] font-semibold text-gray-500 uppercase mb-2">AI Desks</h3>
+          {props.desks.map(desk => (
+            <div key={desk.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-gray-800/50">
+              <div className="relative">
+                <div className="w-7 h-7 rounded bg-gray-800 flex items-center justify-center text-xs font-medium">{desk.name.charAt(0)}</div>
+                <div className={'absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-[#050508] ' + getStatusColor(desk.status)} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs truncate">{desk.name}</p>
+                <p className="text-[10px] text-gray-600 truncate">{desk.description}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -2,6 +2,24 @@
 import { useRef, useState, useEffect } from 'react';
 import { FolderOpen, Paperclip, Send, Square, Mic } from 'lucide-react';
 
+const FILE_ACCEPT = 'image/*,.m4a,.mp3,.wav,.ogg,.flac,.aac,.pdf,.txt,.md,.csv,.json,.doc,.docx';
+
+function getFileIcon(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (['m4a', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'wma'].includes(ext)) return '🎵';
+  if (['pdf', 'doc', 'docx'].includes(ext)) return '📄';
+  if (['txt', 'md', 'csv', 'json'].includes(ext)) return '📝';
+  if (['py', 'js', 'ts', 'tsx', 'jsx', 'html', 'css', 'sh'].includes(ext)) return '💻';
+  return '📐';
+}
+
+function getFilePlaceholder(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() || '';
+  if (['m4a', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'wma'].includes(ext)) return 'Ask about this audio…';
+  if (['pdf', 'doc', 'docx', 'txt', 'md', 'csv', 'json'].includes(ext)) return 'Ask about this document…';
+  return 'Ask about this image…';
+}
+
 interface ChatInputProps {
   onSend: (input: string) => void;
   isStreaming: boolean;
@@ -75,13 +93,13 @@ export default function ChatInput({
         </div>
       )}
 
-      {/* Selected image indicator */}
+      {/* Selected file indicator */}
       {selectedImage && !pastedPreview && (
         <div
           className="mb-3 px-3 py-2 rounded-xl flex items-center justify-between text-sm"
           style={{ background: 'var(--gold-pale)', border: '1px solid var(--gold-border)' }}
         >
-          <span style={{ color: 'var(--gold)' }}>📐 {selectedImage.name}</span>
+          <span style={{ color: 'var(--gold)' }}>{getFileIcon(selectedImage.name)} {selectedImage.name}</span>
           <button onClick={onClearImage} className="text-lg leading-none" style={{ color: 'var(--text-secondary)' }}>×</button>
         </div>
       )}
@@ -103,7 +121,7 @@ export default function ChatInput({
             style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
             title="Upload file"
           >
-            <input type="file" onChange={onFileUpload} className="hidden" />
+            <input type="file" accept={FILE_ACCEPT} onChange={onFileUpload} className="hidden" />
             {uploading ? <span className="text-sm animate-pulse">⏳</span> : <Paperclip className="w-4.5 h-4.5" />}
           </label>
         </div>
@@ -114,7 +132,7 @@ export default function ChatInput({
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder={selectedImage ? 'Ask about this image…' : 'Message MAX…'}
+          placeholder={selectedImage ? getFilePlaceholder(selectedImage.name) : 'Message MAX…'}
           className="flex-1 resize-none rounded-2xl px-5 py-4 text-sm outline-none transition"
           style={{
             minHeight: '60px',
@@ -181,7 +199,7 @@ export default function ChatInput({
       </div>
 
       <p className="text-center mt-2.5 text-xs" style={{ color: 'var(--text-muted)' }}>
-        Shift+Enter for newline · Ctrl+V to paste images
+        Shift+Enter for newline · Ctrl+V to paste images · Upload audio, docs & images
       </p>
     </div>
   );

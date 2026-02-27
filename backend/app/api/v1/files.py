@@ -16,7 +16,7 @@ router = APIRouter(prefix="/files", tags=["files"])
 UPLOAD_DIR = Path.home() / "Empire" / "uploads"
 LOG_DIR = Path.home() / "Empire" / "logs" / "file_access"
 
-for cat in ['documents', 'code', 'images', 'other']:
+for cat in ['documents', 'code', 'images', 'audio', 'other']:
     (UPLOAD_DIR / cat).mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -28,6 +28,8 @@ def get_category(filename: str) -> str:
         return 'code'
     elif ext in ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico']:
         return 'images'
+    elif ext in ['m4a', 'mp3', 'wav', 'ogg', 'flac', 'wma', 'aac']:
+        return 'audio'
     return 'other'
 
 def log_access(action: str, filename: str, agent: str, details: str = ""):
@@ -96,7 +98,7 @@ async def browse_directory(path: str = "~"):
 @router.get("/list")
 async def list_files(category: Optional[str] = None):
     files = []
-    categories = [category] if category else ['documents', 'code', 'images', 'other']
+    categories = [category] if category else ['documents', 'code', 'images', 'audio', 'other']
     for cat in categories:
         cat_path = UPLOAD_DIR / cat
         if cat_path.exists():
