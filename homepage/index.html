@@ -140,6 +140,7 @@
       <div class="status-item"><span class="status-dot online" id="frontend-status"></span> Dashboard</div>
       <div class="status-item"><span class="status-dot online" id="workroom-status"></span> WorkroomForge</div>
       <div class="status-item"><span class="status-dot online" id="luxe-status"></span> LuxeForge</div>
+      <div class="status-item"><span class="status-dot online" id="amp-status"></span> AMP</div>
     </div>
   </header>
 
@@ -148,6 +149,7 @@
     <div class="quick-actions">
       <a href="http://localhost:3009" class="quick-btn">Open Dashboard</a>
       <a href="http://localhost:3001" class="quick-btn">WorkroomForge</a>
+      <a href="http://localhost:3003" class="quick-btn secondary">AMP</a>
       <a href="http://localhost:3002/portal" class="quick-btn secondary">LuxeForge Portal</a>
       <a href="http://localhost:8000/docs" class="quick-btn secondary">API Docs</a>
     </div>
@@ -222,6 +224,14 @@
         <p class="card-desc">Customer management and contacts</p>
         <span class="card-port">localhost:3009/customers</span>
       </a>
+      <a href="http://localhost:3003" class="card">
+        <div class="card-top">
+          <div class="card-icon">⚡</div>
+          <div><div class="card-title">AMP</div><div class="card-sub">Actitud Mental Positiva</div></div>
+        </div>
+        <p class="card-desc">Spanish personal development, leadership & wellness platform</p>
+        <span class="card-port">localhost:3003</span>
+      </a>
     </div>
 
     <p class="section-label">Tools</p>
@@ -272,6 +282,7 @@
         { id: 'frontend-status', url: 'http://localhost:3009' },
         { id: 'workroom-status', url: 'http://localhost:3001' },
         { id: 'luxe-status', url: 'http://localhost:3002' },
+        { id: 'amp-status', url: 'http://localhost:3003' },
       ];
       for (const check of checks) {
         try {
