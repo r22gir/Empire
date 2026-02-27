@@ -331,16 +331,23 @@ class TelegramBot:
             await app.start()
             await app.updater.start_polling(drop_pending_updates=True)
             logger.info("🤖 MAX Telegram Bot is running!")
-            # Keep running until stopped
             while self._running:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            logger.error(f"🤖 Telegram Bot failed to start: {e}")
+            print(f"❌ Telegram Bot error: {e}")
+            return
         finally:
-            if app.updater.running:
-                await app.updater.stop()
-            await app.stop()
-            await app.shutdown()
+            try:
+                if app.updater and app.updater.running:
+                    await app.updater.stop()
+                if app.running:
+                    await app.stop()
+                await app.shutdown()
+            except Exception:
+                pass
             logger.info("🤖 MAX Telegram Bot stopped")
 
     def stop_bot(self):
