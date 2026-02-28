@@ -18,12 +18,16 @@ from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks,
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.token_tracker import token_tracker
+from app.services.max.desks import AIDeskManager
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
 
 # Brain instances (shared across requests)
 conversation_tracker = ConversationTracker()
+
+# AI Desk delegation system
+ai_desk_manager = AIDeskManager()
 
 
 class ChatRequest(BaseModel):
@@ -351,3 +355,59 @@ async def update_budget(request: BudgetUpdateRequest):
         auto_switch_threshold=request.auto_switch_threshold,
     )
     return {"status": "updated"}
+
+
+# ── AI Desk Delegation System ────────────────────────────────────────────
+
+
+class DeskTaskRequest(BaseModel):
+    title: str
+    description: str
+    priority: str = "normal"
+    customer_name: Optional[str] = None
+    source: str = "founder"
+    conversation_id: Optional[str] = None
+
+
+@router.post("/ai-desks/tasks")
+async def submit_desk_task(request: DeskTaskRequest):
+    """Submit a task to the AI desk delegation system.
+    Task is routed to the appropriate desk automatically.
+    """
+    task = await ai_desk_manager.submit_task(
+        title=request.title,
+        description=request.description,
+        priority=request.priority,
+        customer_name=request.customer_name,
+        source=request.source,
+        conversation_id=request.conversation_id,
+    )
+    return {
+        "task_id": task.id,
+        "title": task.title,
+        "state": task.state.value,
+        "escalation_reason": task.escalation_reason,
+        "result": task.result,
+        "actions": [{"action": a.action, "detail": a.detail, "timestamp": a.timestamp} for a in task.actions],
+    }
+
+
+@router.get("/ai-desks/status")
+async def get_ai_desk_statuses():
+    """Get status of all AI desks."""
+    statuses = await ai_desk_manager.get_all_statuses()
+    return {"desks": statuses}
+
+
+@router.get("/ai-desks/briefing")
+async def get_desk_briefing():
+    """Get morning briefing from all AI desks."""
+    briefing = await ai_desk_manager.generate_briefing()
+    return {"briefing": briefing}
+
+
+@router.get("/ai-desks/report")
+async def get_desk_daily_report():
+    """Get end-of-day desk report."""
+    report = await ai_desk_manager.generate_daily_report()
+    return {"report": report}
