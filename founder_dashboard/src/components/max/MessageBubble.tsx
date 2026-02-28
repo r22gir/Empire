@@ -5,8 +5,9 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Message } from '@/lib/types';
 import { ToolResultCard } from '@/components/desks/shared';
-import { Copy, Check, Brain } from 'lucide-react';
-import { useState } from 'react';
+import { Copy, Check, Brain, Volume2, Square, Loader2 } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { API_URL } from '@/lib/api';
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -17,6 +18,84 @@ function CopyButton({ text }: { text: string }) {
       style={{ background: 'var(--elevated)', color: copied ? '#22c55e' : 'var(--text-secondary)', border: '1px solid var(--border)' }}
     >
       {copied ? <><Check className="w-3 h-3" />Copied</> : <><Copy className="w-3 h-3" />Copy</>}
+    </button>
+  );
+}
+
+function PlayButton({ text }: { text: string }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stop = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      URL.revokeObjectURL(audioRef.current.src);
+      audioRef.current = null;
+    }
+    setState('idle');
+  }, []);
+
+  const play = useCallback(async () => {
+    if (state === 'playing') { stop(); return; }
+
+    // Strip markdown for cleaner speech
+    const plain = text
+      .replace(/```[\s\S]*?```/g, '')          // remove code blocks
+      .replace(/`[^`]+`/g, '')                 // remove inline code
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links → text only
+      .replace(/[#*_~>|]/g, '')                // remove markdown chars
+      .replace(/\n{2,}/g, '. ')                // paragraph breaks → periods
+      .replace(/\n/g, ' ')                     // newlines → spaces
+      .trim();
+
+    if (!plain) return;
+
+    setState('loading');
+    try {
+      const resp = await fetch(API_URL + '/max/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: plain }),
+      });
+
+      if (!resp.ok) { setState('idle'); return; }
+
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.onplay = () => setState('playing');
+      audio.onended = () => { URL.revokeObjectURL(url); audioRef.current = null; setState('idle'); };
+      audio.onerror = () => { URL.revokeObjectURL(url); audioRef.current = null; setState('idle'); };
+
+      await audio.play();
+    } catch {
+      setState('idle');
+    }
+  }, [text, state, stop]);
+
+  const icon = state === 'loading'
+    ? <Loader2 className="w-3 h-3 animate-spin" />
+    : state === 'playing'
+      ? <Square className="w-3 h-3" />
+      : <Volume2 className="w-3 h-3" />;
+
+  const label = state === 'loading' ? 'Loading...' : state === 'playing' ? 'Stop' : 'Listen';
+
+  return (
+    <button
+      onClick={play}
+      className="flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors"
+      style={{
+        background: state === 'playing' ? 'rgba(212,175,55,0.15)' : 'var(--elevated)',
+        color: state === 'playing' ? 'var(--gold)' : 'var(--text-secondary)',
+        border: `1px solid ${state === 'playing' ? 'var(--gold-border)' : 'var(--border)'}`,
+      }}
+      title={state === 'playing' ? 'Stop playback' : 'Listen to MAX'}
+    >
+      {icon}{label}
     </button>
   );
 }
@@ -118,9 +197,12 @@ export default function MessageBubble({ message }: { message: Message }) {
           {message.toolResults?.map((tr, i) => (
             <ToolResultCard key={i} result={tr} />
           ))}
-          {message.model && (
-            <p className="text-xs mt-2 font-mono" style={{ color: 'var(--text-muted)' }}>via {message.model}</p>
-          )}
+          <div className="flex items-center gap-2 mt-2">
+            <PlayButton text={message.content} />
+            {message.model && (
+              <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>via {message.model}</span>
+            )}
+          </div>
         </div>
         </div>
       )}
