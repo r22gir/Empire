@@ -1,27 +1,14 @@
 'use client';
+import { useState } from 'react';
 import { ServiceHealth, SystemStats } from '@/lib/types';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
 const SERVICES = [
-  { key: 'backend',       label: 'FastAPI Backend', port: 8000, icon: '⚡' },
-  { key: 'workroomforge', label: 'WorkroomForge',   port: 3001, icon: '🪡' },
-  { key: 'luxeforge',     label: 'LuxeForge',       port: 3002, icon: '💎' },
-  { key: 'homepage',      label: 'Homepage',        port: 8080, icon: '🏠' },
+  { key: 'backend',       label: 'API',  port: 8000, icon: '⚡' },
+  { key: 'workroomforge', label: 'WF',   port: 3001, icon: '🪡' },
+  { key: 'luxeforge',     label: 'LX',   port: 3002, icon: '💎' },
+  { key: 'homepage',      label: 'HP',   port: 8080, icon: '🏠' },
 ] as const;
-
-function StatBar({ label, value, extra }: { label: string; value: number; extra?: string }) {
-  const color = value > 80 ? '#ef4444' : value > 60 ? '#f59e0b' : '#22c55e';
-  return (
-    <div>
-      <div className="flex justify-between text-xs mb-1">
-        <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
-        <span style={{ color: 'var(--text-primary)' }}>{extra || `${value}%`}</span>
-      </div>
-      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--elevated)' }}>
-        <div className="h-full rounded-full transition-all" style={{ width: `${value}%`, background: color }} />
-      </div>
-    </div>
-  );
-}
 
 interface Props {
   systemStats: SystemStats | null;
@@ -30,79 +17,73 @@ interface Props {
 }
 
 export default function SystemStatusPanel({ systemStats, serviceHealth, backendOnline }: Props) {
-  const onlineCount = Object.values(serviceHealth).filter(Boolean).length;
+  const [open, setOpen] = useState(false);
+  const s = systemStats;
+  const temp = s ? Object.values(s.temperatures).flat()[0]?.current : null;
+
+  const summary = s
+    ? `CPU ${s.cpu.percent}% | RAM ${s.memory.used_gb}/${s.memory.total_gb}G | Disk ${s.disk.used_gb}/${s.disk.total_gb}G${temp ? ` | ${temp.toFixed(0)}°C` : ''}`
+    : backendOnline ? 'Loading...' : 'Backend offline';
+
+  const summaryColor = !s
+    ? 'var(--text-muted)'
+    : s.cpu.percent > 80 || s.memory.percent > 80 ? '#f59e0b' : 'var(--text-secondary)';
 
   return (
-    <div className="cc-panel">
-      <div className="flex items-center justify-between mb-3">
-        <p className="cc-panel-header mb-0">System Status</p>
-        <div className="flex items-center gap-1.5">
-          <span className={backendOnline ? 'dot-online' : 'dot-offline'} />
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            {onlineCount}/{SERVICES.length}
-          </span>
-        </div>
-      </div>
+    <div className="cc-panel" style={{ padding: '8px 10px' }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2"
+      >
+        <span className={backendOnline ? 'dot-online' : 'dot-offline'} />
+        <span className="flex-1 text-[11px] font-mono text-left truncate" style={{ color: summaryColor }}>
+          {summary}
+        </span>
+        {open
+          ? <ChevronDown className="w-3 h-3 shrink-0" style={{ color: 'var(--text-muted)' }} />
+          : <ChevronRight className="w-3 h-3 shrink-0" style={{ color: 'var(--text-muted)' }} />
+        }
+      </button>
 
-      {/* Resource bars */}
-      {systemStats && (
-        <div className="space-y-2.5 mb-4">
-          <StatBar label="CPU" value={systemStats.cpu.percent} />
-          <StatBar
-            label="RAM"
-            value={systemStats.memory.percent}
-            extra={`${systemStats.memory.used_gb}/${systemStats.memory.total_gb} GB`}
-          />
-          <StatBar
-            label="Disk"
-            value={systemStats.disk.percent}
-            extra={`${systemStats.disk.used_gb}/${systemStats.disk.total_gb} GB`}
-          />
-          {Object.entries(systemStats.temperatures).slice(0, 2).map(([name, sensors]) =>
-            sensors.slice(0, 1).map((s, i) => (
-              <div key={name + i} className="flex justify-between text-xs">
-                <span style={{ color: 'var(--text-secondary)' }}>{s.label || name}</span>
-                <span style={{ color: s.current > 80 ? '#ef4444' : s.current > 65 ? '#f59e0b' : '#22c55e' }}>
-                  {s.current.toFixed(0)}°C
-                </span>
-              </div>
-            ))
+      {open && (
+        <div className="mt-2 pt-2 space-y-2" style={{ borderTop: '1px solid var(--border)' }}>
+          {s && (
+            <>
+              {[
+                { label: 'CPU', value: s.cpu.percent, extra: `${s.cpu.percent}%` },
+                { label: 'RAM', value: s.memory.percent, extra: `${s.memory.used_gb}/${s.memory.total_gb} GB` },
+                { label: 'Disk', value: s.disk.percent, extra: `${s.disk.used_gb}/${s.disk.total_gb} GB` },
+              ].map(bar => (
+                <div key={bar.label}>
+                  <div className="flex justify-between text-[10px] mb-0.5">
+                    <span style={{ color: 'var(--text-secondary)' }}>{bar.label}</span>
+                    <span style={{ color: 'var(--text-primary)' }}>{bar.extra}</span>
+                  </div>
+                  <div className="h-1 rounded-full overflow-hidden" style={{ background: 'var(--elevated)' }}>
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${bar.value}%`,
+                        background: bar.value > 80 ? '#ef4444' : bar.value > 60 ? '#f59e0b' : '#22c55e',
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </>
           )}
+          <div className="flex gap-2 flex-wrap">
+            {SERVICES.map(svc => {
+              const online = serviceHealth[svc.key as keyof ServiceHealth];
+              return (
+                <span key={svc.key} className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                  {svc.icon}<span className={online ? 'dot-online' : 'dot-offline'} />
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
-
-      {!systemStats && (
-        <div className="mb-4 space-y-2.5">
-          <StatBar label="CPU" value={0} extra="--" />
-          <StatBar label="RAM" value={0} extra="--" />
-          <StatBar label="Disk" value={0} extra="--" />
-          <p className="text-[10px] text-center pt-1" style={{ color: 'var(--text-muted)' }}>
-            {backendOnline ? 'Loading stats...' : 'Connect backend for live data'}
-          </p>
-        </div>
-      )}
-
-      {/* Services */}
-      <div className="space-y-1.5">
-        {SERVICES.map(svc => {
-          const online = serviceHealth[svc.key as keyof ServiceHealth];
-          return (
-            <div key={svc.key} className="flex items-center gap-2">
-              <span className="text-sm">{svc.icon}</span>
-              <span
-                className="flex-1 text-xs truncate"
-                style={{ color: online ? 'var(--text-primary)' : 'var(--text-muted)' }}
-              >
-                {svc.label}
-              </span>
-              <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
-                :{svc.port}
-              </span>
-              <span className={online ? 'dot-online' : 'dot-offline'} />
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

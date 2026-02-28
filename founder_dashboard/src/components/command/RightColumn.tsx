@@ -15,7 +15,7 @@ interface Props {
 
 export default function RightColumn({ systemStats, serviceHealth, backendOnline, models }: Props) {
   return (
-    <div className="flex-[1] overflow-y-auto p-4 space-y-4 min-w-[300px]">
+    <div className="overflow-y-auto p-2 space-y-2" style={{ width: '220px', minWidth: '220px' }}>
       <SystemStatusPanel
         systemStats={systemStats}
         serviceHealth={serviceHealth}

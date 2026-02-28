@@ -1,62 +1,41 @@
 'use client';
 import { ServiceHealth } from '@/lib/types';
-import { ExternalLink } from 'lucide-react';
+
+const FORGES = [
+  { key: 'workroomforge' as const, name: 'WorkroomForge', icon: '🪡', port: 3001 },
+  { key: 'luxeforge'     as const, name: 'LuxeForge',     icon: '💎', port: 3002 },
+];
 
 interface Props {
   serviceHealth: ServiceHealth;
 }
 
-const FORGES = [
-  {
-    key: 'workroomforge' as const,
-    name: 'WorkroomForge',
-    desc: 'Quote builder & AI photo analysis',
-    icon: '🪡',
-    port: 3001,
-  },
-  {
-    key: 'luxeforge' as const,
-    name: 'LuxeForge',
-    desc: 'Designer portal & marketplace',
-    icon: '💎',
-    port: 3002,
-  },
-];
-
 export default function ForgePanel({ serviceHealth }: Props) {
   return (
-    <div className="cc-panel">
-      <p className="cc-panel-header">Workroom & Luxe Forge</p>
-      <div className="space-y-2">
-        {FORGES.map(forge => {
-          const online = serviceHealth[forge.key];
+    <div className="cc-panel" style={{ padding: '8px 10px' }}>
+      <div className="flex gap-2">
+        {FORGES.map(f => {
+          const online = serviceHealth[f.key];
           return (
             <a
-              key={forge.key}
-              href={online ? `http://localhost:${forge.port}` : undefined}
+              key={f.key}
+              href={online ? `http://localhost:${f.port}` : undefined}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-3 p-3 rounded-xl transition-all group"
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[11px] font-medium transition"
               style={{
                 background: 'var(--raised)',
+                color: online ? 'var(--text-primary)' : 'var(--text-muted)',
                 border: '1px solid var(--border)',
                 cursor: online ? 'pointer' : 'default',
-                opacity: online ? 1 : 0.5,
+                opacity: online ? 1 : 0.6,
                 textDecoration: 'none',
               }}
-              onMouseEnter={e => { if (online) { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.background = 'var(--elevated)'; } }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--raised)'; }}
+              onMouseEnter={e => { if (online) e.currentTarget.style.borderColor = 'var(--gold-border)'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; }}
             >
-              <span className="text-2xl">{forge.icon}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{forge.name}</p>
-                <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{forge.desc}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>:{forge.port}</span>
-                <span className={online ? 'dot-online' : 'dot-offline'} />
-                {online && <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition" style={{ color: 'var(--gold)' }} />}
-              </div>
+              {f.icon} {f.name.replace('Forge', '')}
+              <span className={online ? 'dot-online' : 'dot-offline'} />
             </a>
           );
         })}
