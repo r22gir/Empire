@@ -1,84 +1,109 @@
 #!/bin/bash
-# CoPilotForge - Session Launcher
-# Main entry point
+# CoPilotForge v2 — One-Click Launch
+# Generates context, copies to clipboard, opens Copilot, starts autosave
 
 FORGE_DIR=~/Empire/products/copilotforge
 SCRIPTS_DIR=$FORGE_DIR/scripts
 DATA_DIR=$FORGE_DIR/data
+CHATS_DIR=$DATA_DIR/chats
+LAST_FILE=$DATA_DIR/last_session.txt
+LOCK_FILE=/tmp/copilotforge.lock
 
-# Colors
-GREEN='\033[0;32m'
 BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+PURPLE='\033[0;35m'
+RED='\033[0;31m'
+DIM='\033[2m'
 NC='\033[0m'
 
-echo ""
-echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║                                                               ║${NC}"
-echo -e "${BLUE}║     🔷 ${GREEN}CoPilotForge${BLUE}                                          ║${NC}"
-echo -e "${BLUE}║        ${NC}Empire Tools${BLUE}                                           ║${NC}"
-echo -e "${BLUE}║                                                               ║${NC}"
-echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
-echo ""
-
-# Check for recent session
-LAST_SESSION_FILE="$DATA_DIR/last_session.txt"
-if [ -f "$LAST_SESSION_FILE" ]; then
-  LAST_URL=$(grep "url:" "$LAST_SESSION_FILE" | cut -d' ' -f2)
-  LAST_TIME=$(grep "time:" "$LAST_SESSION_FILE" | cut -d' ' -f2-)
-  
-  echo -e "${YELLOW}📂 Recent session found:${NC}"
-  echo "   Last active: $LAST_TIME"
-  echo ""
-  echo "   [1] Continue previous session"
-  echo "   [2] Start new session"
-  echo ""
-  read -p "   Choice (1/2): " CHOICE
-  
-  if [ "$CHOICE" = "1" ] && [ -n "$LAST_URL" ]; then
-    URL="$LAST_URL"
-  else
-    URL="https://github.com/copilot"
-  fi
-else
-  URL="https://github.com/copilot"
+# ── If already running, trigger end_session instead ──────────────────
+if [ -f "$LOCK_FILE" ]; then
+    RUNNING_PID=$(cat "$LOCK_FILE" 2>/dev/null)
+    if kill -0 "$RUNNING_PID" 2>/dev/null; then
+        echo -e "${BLUE}CoPilotForge is running — ending session...${NC}"
+        "$SCRIPTS_DIR/end_session.sh"
+        exit 0
+    else
+        rm -f "$LOCK_FILE"
+    fi
 fi
 
-echo ""
-echo -e "${GREEN}🔄 Generating context...${NC}"
-$SCRIPTS_DIR/generate_context.sh
+# Write lock
+echo $$ > "$LOCK_FILE"
+trap "rm -f '$LOCK_FILE'" EXIT
 
+# ── Banner ───────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}📋 Copying context to clipboard...${NC}"
-cat "$DATA_DIR/context.md" | xclip -selection clipboard
-echo "   ✅ Context copied! Ready to paste (Ctrl+V)"
+echo -e "${BLUE}+-------------------------------------------------------+${NC}"
+echo -e "${BLUE}|     ${PURPLE}CoPilotForge v2${BLUE}                                |${NC}"
+echo -e "${BLUE}|     ${NC}One-Click AI Session Manager${BLUE}                     |${NC}"
+echo -e "${BLUE}+-------------------------------------------------------+${NC}"
+echo ""
 
-echo ""
-echo -e "${GREEN}🌐 Opening Copilot...${NC}"
-firefox "$URL" &
+# Show last session info
+if [ -f "$LAST_FILE" ]; then
+    LAST_TIME=$(grep "^started:" "$LAST_FILE" | cut -d' ' -f2-)
+    LAST_NOTES=$(grep "^notes:" "$LAST_FILE" | cut -d' ' -f2-)
+    if [ -n "$LAST_TIME" ]; then
+        echo -e "${DIM}Last session: $LAST_TIME${NC}"
+        [ -n "$LAST_NOTES" ] && echo -e "${DIM}Notes: $LAST_NOTES${NC}"
+        echo ""
+    fi
+fi
 
-echo ""
-echo -e "${GREEN}💾 Starting auto-save service...${NC}"
-$SCRIPTS_DIR/autosave.sh &
+# ── Step 1: Generate context ─────────────────────────────────────────
+echo -e "${GREEN}[1/4]${NC} Generating context..."
+"$SCRIPTS_DIR/generate_context.sh" 2>/dev/null
+CONTEXT_LINES=$(wc -l < "$DATA_DIR/context.md" 2>/dev/null || echo 0)
+echo -e "      ${DIM}Context: $CONTEXT_LINES lines${NC}"
+
+# ── Step 2: Copy to clipboard ────────────────────────────────────────
+echo -e "${GREEN}[2/4]${NC} Copying to clipboard..."
+if command -v xclip &>/dev/null; then
+    xclip -selection clipboard < "$DATA_DIR/context.md" 2>/dev/null
+    echo -e "      ${DIM}Ready to paste (Ctrl+V)${NC}"
+else
+    echo -e "      ${RED}xclip not installed — copy manually from $DATA_DIR/context.md${NC}"
+fi
+
+# ── Step 3: Open Copilot ─────────────────────────────────────────────
+echo -e "${GREEN}[3/4]${NC} Opening GitHub Copilot..."
+xdg-open "https://github.com/copilot" 2>/dev/null &
+disown
+
+# ── Step 4: Start autosave ───────────────────────────────────────────
+SESSION_ID=$(date +%Y-%m-%d)_session$$
+SESSION_DIR="$CHATS_DIR/$SESSION_ID"
+mkdir -p "$SESSION_DIR"
+
+"$SCRIPTS_DIR/autosave.sh" "$SESSION_DIR" &
 AUTOSAVE_PID=$!
-echo "   Auto-save PID: $AUTOSAVE_PID"
+disown $AUTOSAVE_PID
+echo -e "${GREEN}[4/4]${NC} Autosave started (PID $AUTOSAVE_PID, every 5 min)"
 
-# Save session info
-cat > "$LAST_SESSION_FILE" << SESS
-url: $URL
-time: $(date '+%Y-%m-%d %H:%M:%S')
+# ── Write session file ───────────────────────────────────────────────
+cat > "$LAST_FILE" << SESS
+started: $(date '+%Y-%m-%d %H:%M:%S')
+session_id: $SESSION_ID
+session_dir: $SESSION_DIR
 autosave_pid: $AUTOSAVE_PID
+status: active
 SESS
 
 echo ""
-echo -e "${BLUE}══════��════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}+-------------------------------------------------------+${NC}"
 echo ""
-echo "   ✅ Session started!"
+echo "   Session ${PURPLE}$SESSION_ID${NC} started"
 echo ""
-echo "   📋 Paste context into Copilot (Ctrl+V)"
-echo "   💾 Auto-save running every 5 minutes"
-echo "   🔔 You'll get notifications to save"
+echo "   Paste context into Copilot (Ctrl+V)"
+echo "   Autosave snapshots every 5 minutes"
 echo ""
-echo "   To end session: ./scripts/end_session.sh"
+echo "   To end: click CoPilotForge again"
+echo "           or run end_session.sh"
+echo "           or press Enter here"
 echo ""
-echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}+-------------------------------------------------------+${NC}"
+
+# ── Wait for user to end ─────────────────────────────────────────────
+read -p ""
+"$SCRIPTS_DIR/end_session.sh"
