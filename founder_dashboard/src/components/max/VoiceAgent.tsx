@@ -54,6 +54,10 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
 
       ws.onopen = () => {
         setStatus('connected');
+        // Initialize AudioContext early so playback works before mic is used
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new AudioContext({ sampleRate: 24000 });
+        }
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {

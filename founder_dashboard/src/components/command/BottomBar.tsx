@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { FolderOpen, Paperclip, Send, Square, Mic, MessageCircle } from 'lucide-react';
+import { FolderOpen, Paperclip, Send, Square, Mic } from 'lucide-react';
 import { AIModel } from '@/lib/types';
 import VoiceAgent from '../max/VoiceAgent';
 import ModelSelector from '../max/ModelSelector';

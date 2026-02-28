@@ -123,8 +123,6 @@ export interface ServiceHealth {
   workroomforge: boolean;
   luxeforge:    boolean;
   homepage:     boolean;
-  openclaw:     boolean;
-  ollama:       boolean;
 }
 
 export interface SystemStats {

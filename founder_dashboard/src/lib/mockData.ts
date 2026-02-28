@@ -12,8 +12,6 @@ export const MOCK_DESKS: Desk[] = [
 ];
 
 export const MOCK_MODELS: AIModel[] = [
-  { id: 'claude',       name: 'Claude 4.6 Sonnet', available: false, primary: true,  type: 'cloud' },
-  { id: 'grok',         name: 'xAI Grok',          available: false, primary: false, type: 'cloud' },
-  { id: 'ollama-llama', name: 'Ollama LLaMA 3.1',  available: false, primary: false, type: 'local' },
-  { id: 'openclaw',     name: 'OpenClaw AI',        available: false, primary: false, type: 'local' },
+  { id: 'grok',         name: 'xAI Grok',          available: false, primary: true,  type: 'cloud' },
+  { id: 'claude',       name: 'Claude 4.6 Sonnet', available: false, primary: false, type: 'cloud' },
 ];

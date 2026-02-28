@@ -1,4 +1,5 @@
 'use client';
+import { useRef, useEffect } from 'react';
 import { Message, AIModel } from '@/lib/types';
 import { Brain, WifiOff } from 'lucide-react';
 
@@ -15,6 +16,7 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
   const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
   const currentModel = models.find(m => m.id === selectedModel);
   const modelLabel = currentModel?.name || selectedModel;
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const statusText = !backendOnline
     ? 'Offline'
@@ -26,12 +28,19 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
     ? '#ef4444'
     : isStreaming ? 'var(--gold)' : '#22c55e';
 
+  // Auto-scroll during streaming
+  useEffect(() => {
+    if (isStreaming && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [isStreaming, streamingContent]);
+
   return (
     <div
-      className="rounded-2xl p-5"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
+      className="rounded-2xl p-5 flex flex-col"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)', minHeight: 0 }}
     >
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-4 shrink-0">
         {/* Animated avatar */}
         <div className="relative shrink-0">
           <div
@@ -72,7 +81,7 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
             </span>
           </div>
 
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2">
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{ background: statusColor }}
@@ -84,41 +93,47 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
               <WifiOff className="w-3 h-3" style={{ color: '#ef4444' }} />
             )}
           </div>
-
-          {/* Typing indicator */}
-          {isStreaming && !streamingContent && (
-            <div className="typing-shimmer h-2 w-24 rounded-full" style={{ background: 'var(--elevated)' }} />
-          )}
-
-          {/* Streaming preview */}
-          {isStreaming && streamingContent && (
-            <div
-              className="text-xs leading-relaxed line-clamp-2 mt-1"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {streamingContent.slice(-150)}
-              <span className="streaming-cursor" />
-            </div>
-          )}
-
-          {/* Last response preview (when idle) */}
-          {!isStreaming && lastAssistant && (
-            <p
-              className="text-xs leading-relaxed line-clamp-2 mt-1"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              {lastAssistant.content.slice(0, 150)}
-              {lastAssistant.content.length > 150 && '...'}
-            </p>
-          )}
-
-          {/* Empty state */}
-          {!isStreaming && !lastAssistant && (
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Ready to assist. Type below or use voice.
-            </p>
-          )}
         </div>
+      </div>
+
+      {/* Response area — scrollable, fills available space */}
+      <div
+        ref={scrollRef}
+        className="mt-3 flex-1 overflow-y-auto"
+        style={{ maxHeight: '45vh', minHeight: '60px' }}
+      >
+        {/* Typing indicator */}
+        {isStreaming && !streamingContent && (
+          <div className="typing-shimmer h-2 w-24 rounded-full" style={{ background: 'var(--elevated)' }} />
+        )}
+
+        {/* Streaming content — full, not truncated */}
+        {isStreaming && streamingContent && (
+          <div
+            className="text-xs leading-relaxed whitespace-pre-wrap break-words"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {streamingContent}
+            <span className="streaming-cursor" />
+          </div>
+        )}
+
+        {/* Last response — full, not truncated */}
+        {!isStreaming && lastAssistant && (
+          <div
+            className="text-xs leading-relaxed whitespace-pre-wrap break-words"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {lastAssistant.content}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!isStreaming && !lastAssistant && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Ready to assist. Type below.
+          </p>
+        )}
       </div>
     </div>
   );

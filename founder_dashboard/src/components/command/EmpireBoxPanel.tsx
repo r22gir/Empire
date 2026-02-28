@@ -9,10 +9,8 @@ interface Props {
 }
 
 export default function EmpireBoxPanel({ serviceHealth, backendOnline, models }: Props) {
-  const cloudModels = models.filter(m => m.available && m.id !== 'ollama');
   const hasGrok = models.some(m => m.id === 'grok' && m.available);
   const hasClaude = models.some(m => m.id === 'claude' && m.available);
-  const hasOllama = serviceHealth.ollama;
 
   return (
     <div className="cc-panel">
@@ -89,16 +87,6 @@ export default function EmpireBoxPanel({ serviceHealth, backendOnline, models }:
                 }}
               >
                 Claude {hasClaude ? '✓' : '✗'}
-              </span>
-              <span
-                className="text-[10px] px-1.5 py-0.5 rounded"
-                style={{
-                  background: hasOllama ? 'rgba(34,211,238,0.12)' : 'var(--elevated)',
-                  color: hasOllama ? '#22D3EE' : 'var(--text-muted)',
-                  border: `1px solid ${hasOllama ? 'rgba(34,211,238,0.2)' : 'var(--border)'}`,
-                }}
-              >
-                Ollama {hasOllama ? '✓' : '✗'}
               </span>
             </div>
           </div>

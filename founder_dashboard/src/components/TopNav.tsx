@@ -1,11 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { Brain, Package, Cpu, Menu, X } from 'lucide-react';
+import { Brain, Package, Menu, X } from 'lucide-react';
 
 const NAV_LINKS = [
   { label: 'MAX AI',   icon: Brain,   href: '/' },
   { label: 'Products', icon: Package, href: '/products' },
-  { label: 'Ollama',   icon: Cpu,     href: '/ollama' },
 ];
 
 export default function TopNav({ currentApp, currentPort }: { currentApp: string; currentPort: number }) {

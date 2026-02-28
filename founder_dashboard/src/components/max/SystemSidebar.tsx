@@ -13,8 +13,6 @@ const SERVICES = [
   { key: 'workroomforge', label: 'WorkroomForge',   port: 3001, path: '/',      icon: '🪡' },
   { key: 'luxeforge',     label: 'LuxeForge',       port: 3002, path: '/',      icon: '💎' },
   { key: 'homepage',      label: 'Homepage',        port: 8080, path: '/',      icon: '🏠' },
-  { key: 'openclaw',      label: 'OpenClaw AI',     port: 7878, path: '/health',icon: '🧠' },
-  { key: 'ollama',        label: 'Ollama',          port: 11434,path: '/',      icon: '🦙' },
 ] as const;
 
 interface SystemSidebarProps {

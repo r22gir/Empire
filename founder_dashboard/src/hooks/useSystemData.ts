@@ -24,7 +24,7 @@ export function useSystemData() {
   const [backendOnline,  setBackendOnline]  = useState(false);
   const [desks,          setDesks]          = useState<Desk[]>(MOCK_DESKS);
   const [models,         setModels]         = useState<AIModel[]>(MOCK_MODELS);
-  const [selectedModel,  setSelectedModel]  = useState('claude');
+  const [selectedModel,  setSelectedModel]  = useState('grok');
   const [stats,          setStats]          = useState({ total_completed: 0, active_tasks: 0, pending_tasks: 0, total_failed: 0 });
   const [files,          setFiles]          = useState<UploadedFile[]>([]);
   const [tasks,          setTasks]          = useState<MaxTask[]>([]);
@@ -32,7 +32,7 @@ export function useSystemData() {
   const [aiNotifications,setAiNotifications]= useState<AINotification[]>([]);
   const [serviceHealth,  setServiceHealth]  = useState<ServiceHealth>({
     backend: false, workroomforge: false, luxeforge: false,
-    homepage: false, openclaw: false, ollama: false,
+    homepage: false,
   });
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
 
@@ -53,15 +53,13 @@ export function useSystemData() {
   /* ── service health ────────────────────────────────────────── */
   const checkHealth = useCallback(async () => {
     const base = API_URL.replace('/api/v1', '');
-    const [be, wf, lx, hp, oc, ol] = await Promise.all([
+    const [be, wf, lx, hp] = await Promise.all([
       checkPort(base + '/health'),
       checkPort('http://localhost:3001'),
       checkPort('http://localhost:3002'),
       checkPort('http://localhost:8080'),
-      checkPort('http://localhost:7878/health'),
-      checkPort('http://localhost:11434/api/tags'),
     ]);
-    setServiceHealth({ backend: be, workroomforge: wf, luxeforge: lx, homepage: hp, openclaw: oc, ollama: ol });
+    setServiceHealth({ backend: be, workroomforge: wf, luxeforge: lx, homepage: hp });
     setBackendOnline(be);
   }, [checkPort]);
 
