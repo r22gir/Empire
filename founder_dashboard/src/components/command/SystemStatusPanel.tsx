@@ -6,8 +6,6 @@ const SERVICES = [
   { key: 'workroomforge', label: 'WorkroomForge',   port: 3001, icon: '🪡' },
   { key: 'luxeforge',     label: 'LuxeForge',       port: 3002, icon: '💎' },
   { key: 'homepage',      label: 'Homepage',        port: 8080, icon: '🏠' },
-  { key: 'openclaw',      label: 'OpenClaw AI',     port: 7878, icon: '🧠' },
-  { key: 'ollama',        label: 'Ollama',          port: 11434,icon: '🦙' },
 ] as const;
 
 function StatBar({ label, value, extra }: { label: string; value: number; extra?: string }) {

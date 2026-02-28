@@ -8,8 +8,11 @@ interface TranscriptEntry {
 }
 
 const SYSTEM_PROMPT =
-  'You are MAX, the Empire AI Manager for a luxury drapery and window treatment business. ' +
-  'Professional, confident, bilingual English/Spanish. Keep voice responses concise.';
+  'You are MAX, the AI Director for the entire Empire ecosystem. ' +
+  'Bilingual English/Spanish. Keep voice responses concise. ' +
+  'You oversee ALL businesses: WorkroomForge (DC window treatments), LuxeForge (designer portal), ' +
+  'AMP (Cali Colombia, 9 services), SocialForge (in dev), CRM Personal, Empire Box. ' +
+  'Help the founder with anything across every business.';
 
 export default function VoiceAgent({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
