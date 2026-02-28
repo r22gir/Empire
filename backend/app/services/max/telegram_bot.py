@@ -325,41 +325,26 @@ class TelegramBot:
                 "📷 <b>Photo</b> — Analyzed with AI vision"
             )
 
-        # Handle text messages — classify, store in inbox, then respond
+        # Handle text messages — respond naturally, classify silently in background
         async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
                 return
             text = update.message.text
             msg_id = update.message.message_id
 
-            # Immediate acknowledgment
-            await update.message.reply_html("✅ <b>Got it, I'll handle this.</b>")
             await update.message.reply_chat_action("typing")
 
-            # Classify and store
-            intent_data = await self._classify_and_store(text, telegram_message_id=msg_id)
-            intent = intent_data.get("intent", "note")
-            summary = intent_data.get("summary", "")
-            desk = intent_data.get("desk_target")
+            # Get natural MAX response (always shown to user)
+            response = await self._chat_with_max(text)
+            if len(response) > 4000:
+                response = response[:4000] + "\n\n<i>[truncated]</i>"
+            await update.message.reply_html(response)
 
-            # Intent-specific behavior
-            intent_emoji = {"task": "📋", "question": "❓", "instruction": "📌", "note": "📝"}.get(intent, "📝")
-            status_line = f"{intent_emoji} <b>Classified as:</b> {intent.upper()}"
-            if desk:
-                status_line += f" → {desk}"
-            if intent == "task":
-                status_line += f"\n✅ Task created: <i>{summary}</i>"
-
-            # For questions, also get a full response
-            if intent == "question":
-                response = await self._chat_with_max(text)
-                if len(response) > 3800:
-                    response = response[:3800] + "\n\n<i>[truncated]</i>"
-                full_reply = f"{status_line}\n\n{response}"
-            else:
-                full_reply = f"{status_line}\n<i>{summary}</i>"
-
-            await update.message.reply_html(full_reply)
+            # Classify and store in inbox silently (background, never shown to user)
+            try:
+                await self._classify_and_store(text, telegram_message_id=msg_id)
+            except Exception as e:
+                logger.warning(f"Background classification failed: {e}")
 
         # Handle voice messages
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
