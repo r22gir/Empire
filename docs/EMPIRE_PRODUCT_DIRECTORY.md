@@ -1,347 +1,566 @@
 # Empire Product Directory
 
-**Generated:** February 28, 2026
-**Source:** Full codebase scan of `~/Empire/`
+**Last Updated:** February 28, 2026
+**Source:** Full scan of BACKUP11/EMPIRE/docs/, ~/Empire/ codebase, and all spec documents
+**Total Products:** 30+ across 8 categories
 
 ---
 
-## Active Development (Code Exists + In Use)
+## Table of Contents
 
-### 1. Founder Dashboard
-- **Directory:** `founder_dashboard/`
-- **Port:** 3009
-- **Stack:** Next.js 14, TypeScript, Tailwind CSS, Recharts
-- **Status:** **ACTIVE — Primary UI**
-- **Description:** Empire Founders Edition command center. Three-panel layout with MAX AI chat, conversation history, system sidebar. Includes Response Canvas (charts, media, comms, workspace), file browser, task manager, AI desk grid, quote builder workspace. All AI-focused founder operations.
-
-### 2. Backend API
-- **Directory:** `backend/`
-- **Port:** 8000
-- **Stack:** Python 3.12, FastAPI, SQLAlchemy, SQLite, httpx
-- **Status:** **ACTIVE — Core API**
-- **Description:** Central API for all Empire services. Routes: `/api/v1/max/*` (AI chat, desks, tasks, brain, tokens), `/api/v1/chats/*`, `/api/v1/files/*`, `/api/v1/system/*`, `/api/v1/ollama/*`, `/api/v1/notifications/*`, `/api/v1/customers/*`, `/api/v1/kb/*`. AI routing: xAI Grok → Claude → OpenClaw → Ollama. Includes MAX Brain (portable persistent memory on BACKUP11), token tracking, guardrails, tool execution.
-
-### 3. WorkroomForge
-- **Directory:** `workroomforge/`
-- **Port:** 3001
-- **Stack:** Next.js 14, TypeScript
-- **Status:** **ACTIVE — Production**
-- **Description:** Standalone quote builder + AI photo analysis for custom window treatments (drapes, shades, cornices, valances, bedding, upholstery). Fabric markup 2x wholesale, $50/hr labor. DC area business. Primary revenue product.
-
-### 4. LuxeForge Web
-- **Directory:** `luxeforge_web/`
-- **Port:** 3002
-- **Stack:** Next.js 15, TypeScript, Tailwind CSS
-- **Status:** **ACTIVE — Live**
-- **Description:** Designer portal and marketing site for LuxeForge — AI-powered software for custom workroom businesses. Pages: homepage, pricing (Solo $79, Pro $249, Enterprise $599), features, contact/demo request.
-
-### 5. Empire App (Unified Dashboard)
-- **Directory:** `empire-app/`
-- **Port:** 3000
-- **Stack:** Next.js 14, TypeScript
-- **Status:** **ACTIVE**
-- **Description:** Unified all-in-one dashboard with full modules: `/inventory`, `/finance`, `/customers`, `/workroom`, `/creations`, `/tasks`, `/shipping`, `/max`, `/settings`. Distinct from founder_dashboard (which is MAX AI-focused).
-
-### 6. OpenClaw AI
-- **Directory:** `openclaw/`
-- **Port:** 7878
-- **Stack:** Python, FastAPI
-- **Status:** **ACTIVE**
-- **Description:** Skills-augmented local AI service wrapping Ollama. Multi-model support (Ollama, Claude, OpenAI, xAI Grok, Gemini). Natural language conversation, cross-product intelligence, voice support.
-
-### 7. Homepage
-- **Directory:** `homepage/`
-- **Port:** 8080
-- **Stack:** Static HTML
-- **Status:** **ACTIVE**
-- **Description:** Static HTML navigation hub with 3 variants (agent, command, standard). Links to all Empire services by port.
+1. [Core Platform](#1-core-platform)
+2. [Forge Products (Business Tools)](#2-forge-products)
+3. [Revenue Generator Products](#3-revenue-generator-products)
+4. [Service & Specialized Products](#4-service--specialized-products)
+5. [Tokenomics & Web3](#5-tokenomics--web3)
+6. [Hardware](#6-hardware)
+7. [Infrastructure & AI](#7-infrastructure--ai)
+8. [Content & Media](#8-content--media)
+9. [Revenue Projections Summary](#9-revenue-projections-summary)
+10. [File Location Index](#10-file-location-index)
 
 ---
 
-## Built but Not Primary (Code Exists, Lower Priority)
+## 1. Core Platform
 
-### 8. AMP (Actitud Mental Positiva)
-- **Directory:** `amp/`
-- **Port:** 3003
-- **Stack:** Next.js 14
-- **Status:** **PAUSED**
-- **Description:** Spanish-language personal development platform. Hybrid of Mindvalley + PuraMente + John Maxwell. Features: 21-day challenges ("Retos AMP"), guided meditations, leadership masterclasses, community. Freemium + Premium ($4.99/mo) + Pro ($14.99/mo) + B2B. Domain: actitudmentalpositiva.com.
-- **Spec:** `docs/AMP_BUILD_PROMPT.md`
+### EmpireBox (Central SaaS Platform)
+| Field | Detail |
+|-------|--------|
+| **Description** | Central subscription platform — billing, user management, unified dashboard, license system |
+| **Status** | Active Development |
+| **Tech Stack** | FastAPI backend (Python 3.12) + Next.js 14 frontend |
+| **Ports** | Backend: 8000, Founder Dashboard: 3009, Empire App: 3000 |
+| **Code** | `~/Empire/backend/`, `~/Empire/empire-app/`, `~/Empire/founder_dashboard/` |
+| **Docs** | `ECOSYSTEM.md`, `DEPLOYMENT.md`, `SETUP.md` |
+| **Subscription Tiers** | Solo ($79/mo), Pro ($249/mo), Enterprise ($599/mo), Founder Lifetime ($2,500) |
 
-### 9. ContractorForge Web
-- **Directory:** `contractorforge_web/`
-- **Port:** 3001 (shares with WorkroomForge)
-- **Stack:** Next.js 15
-- **Status:** **BUILT**
-- **Description:** Contractor/quote management portal. Universal SaaS for service businesses — AI intake forms, photo-based measurements, smart quoting, job management, scheduling, invoicing.
+### MAX (AI Assistant Manager)
+| Field | Detail |
+|-------|--------|
+| **Description** | Central AI assistant — multi-model routing (Grok → Claude → Ollama), brain memory, task delegation, Telegram bot, TTS voice |
+| **Status** | Active Development — fully functional |
+| **Tech Stack** | FastAPI router, SSE streaming, edge-tts voice, Whisper transcription |
+| **Code** | `~/Empire/backend/app/routers/max/`, `~/Empire/backend/app/services/max/` |
+| **Docs** | `MAX_BRAIN_SPEC.md`, `TELEGRAM_SETUP.md` |
+| **Key Features** | Brain memory (ChromaDB + Ollama embeddings), AI Desk delegation, token/cost tracking, guardrails, tool execution |
+| **Endpoints** | `/max/chat`, `/max/chat/stream`, `/max/tts`, `/max/brain/status`, `/max/ai-desks/*`, `/max/tokens/*` |
 
-### 10. ContractorForge Backend
-- **Directory:** `contractorforge_backend/`
-- **Stack:** Python, FastAPI, OpenCV, ML models, Stripe
-- **Status:** **BUILT**
-- **Description:** Backend for ContractorForge with ML-based measurement from photos, email service, Stripe payments.
+### OpenClaw (AI Brain Engine)
+| Field | Detail |
+|-------|--------|
+| **Description** | Skills-augmented local AI engine — Ollama wrapper powering all AI features across the ecosystem |
+| **Status** | Active — running on port 7878 |
+| **Tech Stack** | Python, Ollama integration |
+| **Code** | `~/Empire/openclaw/` |
+| **Docs** | `ECOSYSTEM.md` |
+| **Key Features** | Natural language conversation intake, cross-product intelligence, image analysis, learning system |
 
-### 11. MarketForge App (Mobile)
-- **Directory:** `market_forge_app/`
-- **Stack:** Flutter (Dart)
-- **Status:** **BUILT**
-- **Description:** Flutter mobile app for multi-marketplace listing. Camera integration, AI-powered suggestions, ShipForge shipping (rate comparison, label purchase, tracking). Facebook Marketplace fully implemented; eBay, Craigslist, Amazon, Etsy coming.
-- **Roadmap:** Q1 2026 skeleton → Q4 2026 app store release.
+### Founder Dashboard (Command Center)
+| Field | Detail |
+|-------|--------|
+| **Description** | Founder-focused interface for MAX AI chat, system monitoring, desk management, token tracking |
+| **Status** | Active Development — fully functional |
+| **Tech Stack** | Next.js 14, Tailwind CSS, SSE streaming |
+| **Port** | 3009 |
+| **Code** | `~/Empire/founder_dashboard/` |
+| **Key Features** | Chat with MAX, AI Desk grid, Ollama/Brain status, token cost panel, voice playback, conversation history |
 
-### 12. MarketF Web
-- **Directory:** `marketf_web/`
-- **Port:** 3001
-- **Stack:** Next.js 15, Stripe
-- **Status:** **BUILT**
-- **Description:** P2P marketplace platform (alternative to eBay). Stripe Connect payments, buyer/seller matching, 8% fees (vs eBay 12.9%). Projected Y3 revenue: $8.65M (50% of total).
-- **Spec:** `docs/MARKETF_OVERVIEW.md`
-
-### 13. Command Center
-- **Directory:** `command_center/`
-- **Stack:** Static HTML, Docker
-- **Status:** **BUILT**
-- **Description:** Earlier version of command center UI (29KB HTML). Has Dockerfile for containerized deployment.
-
-### 14. Empire Control
-- **Directory:** `empire-control/`
-- **Port:** 3000
-- **Stack:** Next.js 14
-- **Status:** **BUILT**
-- **Description:** Control/administration interface. Separate from founder_dashboard and empire-app.
-
----
-
-## Standalone Modules (Part of Empire App)
-
-### 15. Inventory Module
-- **Directory:** `inventory/`
-- **Port:** 3004
-- **Stack:** Next.js 14
-- **Status:** **MODULE**
-- **Description:** Inventory management. 33 pre-loaded items, categories, low-stock alerts. Also accessible at `empire-app/inventory`.
-
-### 16. Finance Module
-- **Directory:** `finance/`
-- **Port:** 3005
-- **Stack:** Next.js 14
-- **Status:** **MODULE**
-- **Description:** Income/expense tracking, quote tracking, invoice generation, profit margins. Also at `empire-app/finance`.
-
-### 17. Creations Module
-- **Directory:** `creations/`
-- **Port:** 3006
-- **Stack:** Next.js 14
-- **Status:** **MODULE**
-- **Description:** R&D and innovation ideas lab. Also at `empire-app/creations`.
-
-### 18. CRM Module
-- **Directory:** `crm/`
-- **Port:** 3007
-- **Stack:** Next.js 14
-- **Status:** **MODULE**
-- **Description:** Customer relationship management. Also at `empire-app/customers`.
+### Empire App (Unified Dashboard)
+| Field | Detail |
+|-------|--------|
+| **Description** | All-in-one business management dashboard with full modules |
+| **Status** | Active Development |
+| **Tech Stack** | Next.js 14 |
+| **Port** | 3000 |
+| **Code** | `~/Empire/empire-app/` |
+| **Modules** | `/inventory`, `/finance`, `/customers`, `/workroom`, `/creations`, `/tasks`, `/shipping`, `/max`, `/settings` |
 
 ---
 
-## Infrastructure & Tooling
+## 2. Forge Products
 
-### 19. EmpireBox Installer (Founders USB)
-- **Directory:** `founders_usb_installer/`
-- **Stack:** Shell, Docker Compose, JSON config
-- **Status:** **INTERNAL ONLY**
-- **Description:** Master control USB installer for Beelink EQR5 (Ryzen 7 5825U, 32GB RAM). Installs Ubuntu 24.04, Docker, Ollama, OpenClaw, all 13 products. Ventoy USB, unattended install. Default SSH: `empirebox@empirebox.local`.
-- **Contains:** `config.json` defining all 13 products, bundles, Docker services.
+### WorkroomForge (CraftForge)
+| Field | Detail |
+|-------|--------|
+| **Description** | Quote builder + AI photo analysis for custom window treatments, furniture, upholstery |
+| **Status** | Active Development |
+| **Tech Stack** | Next.js |
+| **Port** | 3001 |
+| **Code** | `~/Empire/workroomforge/` |
+| **Docs** | `CRAFTFORGE_SPEC.md`, `CRAFTFORGE_SPACESCAN_ADDENDUM.md` |
+| **Key Features** | AI-powered measurements from photos, quote generation, material tracking, job scheduling |
 
-### 20. EmpireBox Setup Portal
-- **Directory:** `empirebox_setup/`
-- **Stack:** Next.js, Shell, systemd
-- **Status:** **BUILT**
-- **Description:** Headless setup system for EmpireBox Mini PCs. Discovery via QR code, mDNS, Bluetooth LE, USB config. No monitor needed.
+### LuxeForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Designer portal for high-end service businesses — luxury branding, premium client management |
+| **Status** | Active Development |
+| **Tech Stack** | Next.js 15 |
+| **Port** | 3002 |
+| **Code** | `~/Empire/luxeforge_web/` |
+| **Docs** | `ECOSYSTEM.md`, `LEADFORGE_SPEC.md` (LeadForge is embedded) |
 
-### 21. EmpireBox Installer (Generic)
-- **Directory:** `empirebox_installer/`
-- **Stack:** Shell, Docker
-- **Status:** **BUILT**
-- **Description:** Automated installer with contracts, installation scripts, empirebox setup.
+### MarketForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Intelligent listing creation — AI descriptions, photo enhancement, multi-marketplace publishing |
+| **Status** | Planned — Flutter mobile app + backend models exist |
+| **Tech Stack** | Flutter (mobile), FastAPI (backend) |
+| **Code** | `~/Empire/market_forge_app/` (Flutter), BACKUP11: `backend/app/models/marketplace/` |
+| **Docs** | `MARKETF_OVERVIEW.md`, `MARKETF_API.md`, `MARKETF_FEES.md`, `MARKETF_SELLER_GUIDE.md`, `MARKETF_AMAZON_SPEC.md`, `MARKETFORGE_AD_STUDY.md` |
+| **Revenue Y3** | $1.9M (11%) |
+| **Pricing** | Free (5 listings), Starter $19/mo, Pro $39/mo, Business $99/mo |
+| **Killer Feature** | "Snap, List, Done!" — barcode scan or photo → AI auto-fills complete listing |
 
-### 22. Agent Framework
-- **Directory:** `agents/`
-- **Stack:** Python
-- **Status:** **BUILT**
-- **Description:** Agent orchestrator framework with memory, config, and built-in agent definitions.
+### ContractorForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Project/contract management for service contractors — job management, scheduling, quotes, invoicing |
+| **Status** | Backend exists on BACKUP11 |
+| **Code** | BACKUP11: `contractorforge_backend/`, `contractorforge_web/` |
+| **Docs** | `INDUSTRY_TEMPLATES.md`, `ECOSYSTEM.md` |
+| **Key Features** | Photo measurements, material tracking, customizable industry templates (plumbing, electrical, landscaping) |
 
-### 23. Empire Box Agents (Safeguards)
-- **Directory:** `empire_box_agents/`
-- **Stack:** Python
-- **Status:** **BUILT**
-- **Description:** Agent safeguards and emergency stop system. Rate limiting, budget management, action whitelisting, state preservation, admin alerting, thread safety.
+### SupportForge
+| Field | Detail |
+|-------|--------|
+| **Description** | AI-powered customer support — ticket management, multi-channel support, knowledge base |
+| **Status** | Database models exist, AI desk placeholder built |
+| **Code** | BACKUP11: `backend/app/models/supportforge_*.py` (8 model files), `backend/alembic/versions/supportforge_001_*.py` |
+| **Docs** | Root-level `SUPPORTFORGE_*.md` files on BACKUP11 |
+| **DB Models** | `supportforge_ticket`, `supportforge_customer`, `supportforge_agent`, `supportforge_kb`, `supportforge_message`, `supportforge_automation`, `supportforge_integration`, `supportforge_tenant` |
 
-### 24. Hardware Documentation
-- **Directory:** `hardware/`
-- **Status:** **DOCS**
-- **Description:** BOM, assembly guides, Mini PC options for 3 tiers: Starter ($299, Intel N100), Business ($599, Ryzen 7 6800H), Enterprise ($1,299, Core i7). BIOS settings, Ubuntu installation, networking.
+### SocialForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Social media management and automation — multi-platform posting, content calendar, analytics |
+| **Status** | AI Desk placeholder built, full product planned |
+| **Code** | `~/Empire/backend/app/services/max/desks/social_desk.py` |
+| **Docs** | `ECOSYSTEM.md`, `ZERO_TO_HERO_SPEC.md` |
+| **Revenue Y3** | $800K (5%) |
+| **Pricing** | Starter $19/mo, Pro $49/mo, Business $99/mo |
+| **Platforms** | Facebook, Instagram, Twitter, LinkedIn |
+| **Approach** | Semi-automatic — user confirms each platform creation |
 
-### 25. EmpireBox Website
-- **Directory:** `website/`
-- **Stack:** Static HTML + Next.js 15
-- **Status:** **BUILT**
-- **Description:** Marketing website — "The Operating System for Resellers". Hero, features, pricing tiers, testimonials, FAQ. Vercel deployment ready.
+### ShipForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Shipping solutions — rate comparison, label generation, package tracking |
+| **Status** | Planned |
+| **Docs** | `SHIPPING_INTEGRATION.md`, `ECOSYSTEM.md` |
+| **Integration** | EasyPost API for discounted carrier rates |
 
----
+### LeadForge
+| Field | Detail |
+|-------|--------|
+| **Description** | AI-powered lead generation — embedded inside ContractorForge & LuxeForge (not standalone) |
+| **Status** | Spec complete, not yet built |
+| **Docs** | `LEADFORGE_SPEC.md` |
+| **Key Features** | Scrape directories, AI lead scoring (1-100), automated outreach, appointment booking, CRM integration |
+| **Lead Sources** | ASID directory, Houzz Pro, AIA, builder associations, Zillow, WeddingWire |
+| **Tier Access** | Solo: 50 leads/mo, Pro: full access, Enterprise: unlimited |
 
-## Browser Extensions / External Tools
+### ForgeCRM
+| Field | Detail |
+|-------|--------|
+| **Description** | CRM integrated across all Forge products — contacts, pipeline, campaigns |
+| **Status** | Planned — freemium model |
+| **Docs** | `ECOSYSTEM.md` |
 
-### 26. ClaudeForge
-- **Directory:** `products/claudeforge/`
-- **Status:** **DEVELOPMENT**
-- **Description:** Persistent chat storage with session management for Claude. Contains chat history archives.
-
-### 27. CoPilotForge
-- **Directory:** `products/copilotforge/`
-- **Stack:** Firefox extension (XPI), native bridge
-- **Status:** **DEVELOPMENT**
-- **Description:** Browser extension for AI coding session management. Firefox-compatible with native bridge component.
-
----
-
-## Spec-Only Products (No Codebase Yet)
-
-### 28. CraftForge
-- **Spec:** `docs/CRAFTFORGE_SPEC.md` (804 lines)
-- **Status:** **SPEC READY**
-- **Description:** AI-powered CNC design platform. Text→CNC, Photo→CNC, 3D Scan→CNC, Template Library. G-code generation, machine profiles, cost estimation, CNC simulation, marketplace for buying/selling plans. SaaS: Free, Hobby ($29/mo), Pro ($79/mo), Business ($199/mo).
-- **Addendum:** `docs/CRAFTFORGE_SPACESCAN_ADDENDUM.md`
-
-### 29. SocialForge
-- **Port:** 3004 (planned), Docker 8090
-- **Status:** **PLANNED**
-- **Description:** Social media management and automated posting across Facebook, Instagram, Twitter, LinkedIn. Y3 revenue projection: $800K.
-
-### 30. SupportForge
-- **Status:** **PLANNED**
-- **Description:** AI-powered customer support and ticketing. Multi-channel with automated responses. Backend already has `/api/v1/tickets/*` routes.
-
-### 31. LLCFactory
-- **Port:** 8100 (Docker)
-- **Status:** **PLANNED**
-- **Description:** Automated LLC formation and business registration. Partner with Northwest Registered Agents. Y3 revenue: $2M.
-
-### 32. ApostApp
-- **Port:** 8110 (Docker)
-- **Status:** **PLANNED**
-- **Description:** Document apostille and legalization services. Shared document filler with LLCFactory. Y3 revenue: $1.5M.
-
-### 33. ShipForge
-- **Port:** 8060 (Docker)
-- **Status:** **INTEGRATED**
-- **Description:** Shipping integration via EasyPost. Rate comparison (USPS, FedEx, UPS), label purchase, tracking. Embedded in MarketForge and MarketF, not standalone.
-- **Spec:** `docs/SHIPPING_INTEGRATION.md`
-
-### 34. EmpireAssist
-- **Port:** 8120 (Docker)
-- **Spec:** `docs/EMPIRE_ASSIST_SPEC.md`
-- **Status:** **SPECIFIED**
-- **Description:** Telegram/WhatsApp messenger integration. Manage business via chat: orders, inventory, revenue, photo listings, shipping labels, calendar, support tickets, voice notes.
-
-### 35. EmpirePay / CryptoPay
-- **Port:** 8130 (Docker)
-- **Spec:** `docs/CRYPTO_PAYMENTS_SPEC.md`
-- **Status:** **SPECIFIED**
-- **Description:** Multi-gateway payments. Stripe, PayPal, multi-chain crypto (Solana priority, BNB, Cardano, ETH). 15% crypto discount, 20% for $EMPIRE token. NFT license minting.
-
-### 36. VetForge (VA Disability App)
-- **Spec:** `docs/VA_APP_TELEHEALTH.md`
-- **Status:** **SPECIFIED**
-- **Description:** VA disability claim assistance with telehealth consultations. HIPAA-compliant, licensed providers.
-
-### 37. RecoveryForge
-- **Status:** **CONCEPT**
-- **Description:** Addiction recovery support. Daily check-ins, support groups, resource directory, crisis intervention. HIPAA-compliant.
+### ElectricForge / LandscapeForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Industry-specific templates for ContractorForge |
+| **Status** | Template specs exist |
+| **Docs** | `INDUSTRY_TEMPLATES.md` |
 
 ---
 
-## Shared / Utility Directories
+## 3. Revenue Generator Products
 
-| Directory | Purpose |
+### MarketF (P2P Marketplace)
+| Field | Detail |
+|-------|--------|
+| **Description** | Peer-to-peer marketplace with escrow, Stripe Connect payments, ratings, dispute resolution |
+| **Status** | Database models exist on BACKUP11 |
+| **Code** | BACKUP11: `backend/app/models/marketplace/` (category, dispute, escrow, order, product, review), `marketf_web/` |
+| **Docs** | `MARKETF_OVERVIEW.md`, `MARKETF_FEES.md`, `MARKETF_API.md`, `MARKETF_SELLER_GUIDE.md`, `MARKETF_AMAZON_SPEC.md` |
+| **Revenue Y3** | $8.65M (50% of total — primary revenue driver) |
+| **Business Model** | 5-10% seller fee, 2-3% buyer protection, premium subscriptions $29-99/mo |
+
+### LLCFactory
+| Field | Detail |
+|-------|--------|
+| **Description** | Automated LLC formation service + ongoing compliance |
+| **Status** | Planned — part of Zero to Hero flow |
+| **Docs** | `ZERO_TO_HERO_SPEC.md`, `REVENUE_MODEL.md` |
+| **Revenue Y3** | $2M (12%) |
+| **Business Model** | Formation $149 + state fees, registered agent $100/yr, compliance $49/yr, amendments $99 |
+| **Partner** | Northwest Registered Agents for state filings |
+
+### RelistApp
+| Field | Detail |
+|-------|--------|
+| **Description** | Automated relisting for expired marketplace listings — smart scheduling, bulk operations |
+| **Status** | Planned |
+| **Docs** | `REVENUE_MODEL.md`, `ECOSYSTEM.md` |
+| **Revenue Y3** | $1.5M (9%) |
+| **Pricing** | Basic $19/mo (100 listings), Pro $39/mo (500), Business $79/mo (unlimited) |
+
+### ApostApp
+| Field | Detail |
+|-------|--------|
+| **Description** | Document apostille and authentication service — international documents, notarization, translation |
+| **Status** | Planned — shared document filler with LLCFactory |
+| **Docs** | `REVENUE_MODEL.md`, `ECOSYSTEM.md` |
+| **Revenue Y3** | $1.5M (9%) |
+| **Pricing** | Single doc $149, package $299, rush +$100, translation $0.15/word |
+
+---
+
+## 4. Service & Specialized Products
+
+### VeteranForge (VA Disability App)
+| Field | Detail |
+|-------|--------|
+| **Description** | VA disability claim assistance via telehealth — licensed provider evaluations, HIPAA-compliant |
+| **Status** | Legal compliance spec complete, no code yet |
+| **Docs** | `VA_APP_TELEHEALTH.md` (544 lines — comprehensive legal framework) |
+| **Files** | BACKUP11: `VetForge-PandT.pptx` (PowerPoint deck) |
+| **Name Options** | VeteranForge (recommended), VetHelp Assist, ClaimForge |
+| **Compliance** | HIPAA, 38 CFR VA regulations, state telehealth parity, multi-state provider licensing |
+| **Conditions** | Best for: PTSD, depression, anxiety, dermatological, chronic pain. Requires in-person: musculoskeletal, cardiovascular, neurological |
+| **Requirements** | HIPAA-compliant video (Doxy.me recommended), BAAs with all vendors, provider credentialing, malpractice insurance ($1M min) |
+
+### RecoveryForge
+| Field | Detail |
+|-------|--------|
+| **Description** | Addiction recovery support platform — daily check-ins, support groups, crisis tools |
+| **Status** | Concept — mentioned in ecosystem docs |
+| **Docs** | `ECOSYSTEM.md` |
+| **Key Features** | Progress tracking, resource directory, crisis intervention, anonymous options |
+| **Privacy** | HIPAA-compliant required |
+
+### EmpireAssist
+| Field | Detail |
+|-------|--------|
+| **Description** | AI-powered messenger integration — manage business via Telegram/WhatsApp/SMS |
+| **Status** | Telegram bot active (part of MAX), WhatsApp/SMS planned |
+| **Code** | `~/Empire/backend/app/services/max/telegram_bot.py` |
+| **Docs** | `EMPIRE_ASSIST_SPEC.md` |
+| **Pricing** | Basic (free, Telegram, 100 msg/mo), Pro ($19/mo + WhatsApp), Business ($49/mo + SMS + voice) |
+| **Key Features** | Check orders/inventory via chat, create listings from photos, shipping labels, task management, voice notes |
+
+---
+
+## 5. Tokenomics & Web3
+
+### EMPIRE Token ($EMPIRE)
+| Field | Detail |
+|-------|--------|
+| **Description** | Solana SPL utility + governance token |
+| **Status** | Spec complete, not minted |
+| **Docs** | `EMPIRE_TOKEN_SPEC.md` |
+| **Supply** | 1,000,000,000 (1 billion), 9 decimals |
+| **Distribution** | Community 40%, Rewards 30%, Team 15% (2yr vest), Liquidity 10%, Treasury 5% |
+| **Utility** | 20% subscription discount, 6% marketplace fee (vs 8%), staking, governance, referral rewards, NFT license purchases |
+| **DEX Strategy** | Raydium/Orca → Jupiter → CoinGecko/CMC → CEX (if volume warrants) |
+
+### NFT License System
+| Field | Detail |
+|-------|--------|
+| **Description** | All EmpireBox licenses are Solana NFTs — transferable, verifiable, upgradeable |
+| **Status** | Spec complete, not implemented |
+| **Docs** | `EMPIRE_LICENSE_NFT_SPEC.md` |
+| **Tiers** | Solo $79/mo, Pro $249/mo, Enterprise $599/mo, Founder Lifetime $2,500 |
+| **Discounts** | Crypto 15% off, EMPIRE token 20% off |
+| **Royalties** | 5% on all secondary market resales |
+| **Metadata** | On-chain: tier, products, billing, issue/expiry dates, transfer count |
+| **Editions** | Standard, Founder (first 1K, gold art), OG (first 100, platinum), Partner (top referrers) |
+| **Secondary** | Magic Eden, Tensor, wallet-to-wallet, EmpireBox official resale |
+
+### Multi-Chain Crypto Payments
+| Field | Detail |
+|-------|--------|
+| **Description** | Optional crypto checkout with per-order HD wallet addresses |
+| **Status** | Spec + DB schema complete |
+| **Docs** | `CRYPTO_PAYMENTS_SPEC.md` |
+| **Chains** | Solana (#1), BNB Chain (#2), Cardano (#3), Ethereum (#4) |
+| **Discounts** | 15% off crypto, 20% off $EMPIRE |
+| **Architecture** | HD wallet per order, blockchain monitoring, transparency ledger |
+| **DB Tables** | `crypto_payments`, `crypto_ledger` |
+
+### Empire Wallet
+| Field | Detail |
+|-------|--------|
+| **Description** | Custodial Solana wallet for non-crypto users — seamless crypto payments without complexity |
+| **Status** | Planned |
+| **Docs** | `ECOSYSTEM.md` |
+
+---
+
+## 6. Hardware
+
+### Full specs: `EMPIRE_BOX_HARDWARE_SPEC.md` (608 lines) + `HARDWARE_BUNDLES.md`
+
+### Budget Mobile Bundle — $349
+| Field | Detail |
+|-------|--------|
+| **Phone** | Xiaomi Redmi Note 13 (6.67" AMOLED, 120Hz, Snapdragon 685, 8GB/256GB, 108MP) |
+| **Software** | MarketForge Lite (12 months, $29/mo value) |
+| **Target** | Entry-level resellers, students, side hustlers |
+| **Margin** | Loss leader (-$204), break-even month 7 |
+| **Sourcing** | Alibaba (Shenzhen Global Tech), MOQ 100, $180/unit FOB |
+
+### Seeker Pro Bundle — $599 (Flagship)
+| Field | Detail |
+|-------|--------|
+| **Phone** | Solana Seeker (6.53" OLED, Snapdragon 765G, 12GB/512GB, Seed Vault hardware wallet) |
+| **Software** | MarketForge Pro (12 months, $59/mo value) |
+| **Target** | Serious resellers, crypto enthusiasts |
+| **Margin** | Loss leader (-$499), break-even month 9 |
+| **Sourcing** | Direct from Solana Foundation/OSOM, $350 partnership pricing |
+
+### Full Empire Bundle — $899
+| Field | Detail |
+|-------|--------|
+| **Phone** | Solana Seeker (same as Pro) |
+| **Mini PC** | Beelink Mini S12 Pro (Intel N100, 16GB, 500GB NVMe, WiFi 6) |
+| **Software** | MarketForge Empire (12 months, $99/mo value) |
+| **Target** | Professional power sellers ($10K+/mo) |
+| **Pre-configured Agents** | Price Optimizer, Inventory Scout, Smart Crosslister, Message Responder, Analytics Dashboard |
+| **Margin** | Loss leader (-$879), break-even month 9 |
+
+### Accessories
+| Item | Detail |
+|------|--------|
+| **Quick Start Card** | 3.5"x2" laminated with QR → `empirebox.store/setup/[LICENSE-KEY]` |
+| **Inventory Scanner** | Bluetooth/USB barcode/QR scanner add-on |
+| **Empire Tablet** | Larger screen for ContractorForge, warehouse management |
+
+---
+
+## 7. Infrastructure & AI
+
+### AI Desk Delegation System
+| Field | Detail |
+|-------|--------|
+| **Description** | AI-powered task routing to specialized desks — ForgeDesk, MarketDesk, SocialDesk, SupportDesk |
+| **Status** | Active — ForgeDesk fully functional, others placeholder |
+| **Code** | `~/Empire/backend/app/services/max/desks/` |
+| **Docs** | `AI_DESK_DELEGATION_PLAN.md` |
+| **Routing** | LLM classification (Ollama Mistral, >=0.6 confidence) + keyword fallback |
+
+### MAX Brain (Memory System)
+| Field | Detail |
+|-------|--------|
+| **Description** | Persistent memory for MAX — ChromaDB vector store, Ollama embeddings, context-aware retrieval |
+| **Status** | Active |
+| **Code** | `~/Empire/backend/app/services/max/brain/` |
+| **Docs** | `MAX_BRAIN_SPEC.md` |
+| **Storage** | External drive `/media/rg/BACKUP11/ollama/brain/` |
+
+### Token/Cost Tracker
+| Field | Detail |
+|-------|--------|
+| **Description** | Track API token usage, costs, budget alerts, auto-switch to local models |
+| **Status** | Active |
+| **Code** | `~/Empire/backend/app/services/max/token_tracker.py` |
+
+### TTS Service
+| Field | Detail |
+|-------|--------|
+| **Description** | Text-to-speech for MAX — edge-tts (free, no API key), en-US-GuyNeural voice |
+| **Status** | Active |
+| **Code** | `~/Empire/backend/app/services/max/tts_service.py` |
+| **Outputs** | MP3 for web playback, MP3 for Telegram voice notes |
+
+### Agent Safeguards
+| Field | Detail |
+|-------|--------|
+| **Description** | Production safety for autonomous agents — rate limiting, emergency stop, approval workflows, audit logging |
+| **Status** | Active |
+| **Code** | `~/Empire/backend/app/services/max/guardrails.py` |
+
+### Homepage (Navigation Hub)
+| Field | Detail |
+|-------|--------|
+| **Description** | Static HTML hub linking all Empire services |
+| **Port** | 8080 |
+| **Code** | `~/Empire/homepage/` |
+
+---
+
+## 8. Content & Media
+
+### AMP (Actitud Mental Positiva)
+| Field | Detail |
+|-------|--------|
+| **Description** | Spanish-language personal development platform — hybrid of Mindvalley + PuraMente + John Maxwell |
+| **Status** | Next.js scaffolding exists, needs revival |
+| **Domain** | actitudmentalpositiva.com |
+| **Tech Stack** | Next.js 14, Tailwind CSS |
+| **Port** | 3003 |
+| **Code** | `~/Empire/amp/` (scaffolded, default README) |
+| **Docs** | `AMP_BUILD_PROMPT.md` (250 lines — full build specification) |
+| **Business Model** | Freemium: Free daily content, Premium $4.99/mo, Pro $14.99/mo (+ 1:1 coaching), Empresas B2B custom |
+| **Content** | 21-day challenges ("Retos"), guided meditations, leadership masterclasses, Coach AMP certification |
+| **Three Pillars** | Mentalidad (mindset), Bienestar (wellness), Liderazgo (leadership) |
+| **Revenue Y2** | Target $25K MRR (50K free users, 2.5K premium, 200 pro, 20 B2B) |
+
+### EmpireBox Website
+| Field | Detail |
+|-------|--------|
+| **Description** | Marketing website with legal pages, pricing, contact |
+| **Status** | Exists on BACKUP11 |
+| **Code** | BACKUP11: `website/` |
+| **Legal Pages** | Privacy, Terms, Refund Policy, Contact — all present and Stripe-compliant |
+
+---
+
+## 9. Revenue Projections Summary
+
+### Year 3 Projections (from REVENUE_MODEL.md)
+
+| Product | Conservative | Moderate | Aspirational |
+|---------|-------------|----------|-------------|
+| **MarketF** | $1.7-2.6M | $4.3M | $8.65M |
+| **LLCFactory** | $400-600K | $1M | $2M |
+| **MarketForge** | $380-570K | $950K | $1.9M |
+| **RelistApp** | $300-450K | $750K | $1.5M |
+| **ApostApp** | $300-450K | $750K | $1.5M |
+| **SocialForge** | $160-240K | $400K | $800K |
+| **Other** | $170-255K | $425K | $850K |
+| **TOTAL** | **$3.4-5.2M** | **$8.6M** | **$17.2M** |
+
+### Growth Trajectory
+- **Year 1:** $500K-750K ARR (product-market fit)
+- **Year 2:** $1.5M-2.5M ARR (scale what works)
+- **Year 3:** $3.4M-17.2M ARR (depending on scenario)
+
+### Gross Margins
+- SaaS Products: 70-80%
+- Marketplace (MarketF): 60-70%
+- Service Products (LLCFactory, ApostApp): 50-60%
+
+---
+
+## 10. File Location Index
+
+### Spec Documents (`~/Empire/docs/`)
+| Document | Content |
+|----------|---------|
+| `ECOSYSTEM.md` | Master product catalog (23+ products) |
+| `REVENUE_MODEL.md` | Full revenue projections, cost structure, fundraising |
+| `ZERO_TO_HERO_SPEC.md` | Complete business automation flow (676 lines) |
+| `EMPIRE_BOX_HARDWARE_SPEC.md` | 4-tier hardware spec, BOM, margins (608 lines) |
+| `HARDWARE_BUNDLES.md` | Original 3-bundle hardware spec with sourcing |
+| `EMPIRE_TOKEN_SPEC.md` | $EMPIRE token details, distribution, DEX |
+| `EMPIRE_LICENSE_NFT_SPEC.md` | NFT license tiers, metadata, secondary market |
+| `CRYPTO_PAYMENTS_SPEC.md` | Multi-chain payments, DB schema, architecture |
+| `LEADFORGE_SPEC.md` | Lead generation module spec |
+| `VA_APP_TELEHEALTH.md` | VeteranForge legal/HIPAA compliance (544 lines) |
+| `AMP_BUILD_PROMPT.md` | AMP platform full build spec (250 lines) |
+| `STRIPE_COMPLIANCE_CHECKLIST.md` | Stripe merchant approval checklist |
+| `LEGAL_COMPLIANCE_AUDIT.md` | Full legal audit — FTC, GDPR, CCPA, IP |
+| `MARKETFORGE_AD_STUDY.md` | $5K ad budget allocation, CAC benchmarks |
+| `CRAFTFORGE_SPEC.md` | WorkroomForge/CraftForge spec |
+| `MAX_BRAIN_SPEC.md` | MAX memory and brain architecture |
+| `AI_DESK_DELEGATION_PLAN.md` | AI desk system design |
+| `EMPIRE_ASSIST_SPEC.md` | EmpireAssist messenger integration |
+| `INDUSTRY_TEMPLATES.md` | ContractorForge template system |
+| `MARKETF_OVERVIEW.md` | MarketF marketplace overview |
+| `MARKETF_API.md` | MarketF API spec |
+| `MARKETF_FEES.md` | MarketF fee structure |
+| `MARKETF_SELLER_GUIDE.md` | MarketF seller guide |
+| `MARKETF_AMAZON_SPEC.md` | Amazon compliance for MarketF |
+| `SHIPPING_INTEGRATION.md` | ShipForge shipping spec |
+| `SOLANA_PARTNERSHIP.md` | Solana ecosystem partnerships |
+| `BRAND_GUIDELINES.md` | Branding standards |
+
+### Code Directories (Active — `~/Empire/`)
+| Directory | Product | Port |
+|-----------|---------|------|
+| `backend/` | FastAPI backend + MAX | 8000 |
+| `founder_dashboard/` | Founder Command Center | 3009 |
+| `empire-app/` | Unified Dashboard | 3000 |
+| `workroomforge/` | WorkroomForge/CraftForge | 3001 |
+| `luxeforge_web/` | LuxeForge Designer Portal | 3002 |
+| `openclaw/` | OpenClaw AI Engine | 7878 |
+| `homepage/` | Static Navigation Hub | 8080 |
+| `amp/` | AMP Personal Development | 3003 |
+| `market_forge_app/` | MarketForge Flutter App | — |
+| `max/` | MAX persistent memory | — |
+
+### Code Directories (BACKUP11 Only)
+| Directory | Product |
 |-----------|---------|
-| `shared/` | Shared React components (TopNav.tsx) |
-| `max/` | MAX persistent memory (memory.md) |
-| `config/` | Service configurations |
-| `scripts/` | Utility scripts (seed_brain.py, start_brain.sh) |
-| `uploads/` | Uploaded files (images, documents, code, audio) |
-| `logs/` | Session logs by date |
-| `docs/` | All specs and documentation |
-| `data/` | Runtime data (chats, quotes) |
-| `icons/` | App icons and assets |
-| `assets/` | Shared assets |
-| `issues/` | Issue tracking |
-| `saves/` | Session snapshots |
-| `versions/` | Version archives (v1.0.0 through v2.0.0) |
-| `venv/` | Shared Python virtualenv |
+| `contractorforge_backend/` | ContractorForge API |
+| `contractorforge_web/` | ContractorForge Frontend |
+| `marketf_web/` | MarketF Marketplace Frontend |
+| `website/` | EmpireBox Marketing Website |
+| `command_center/` | Old Command Center (replaced by founder_dashboard) |
+| `empire-control/` | Old Empire Control |
+| `empirebox_setup/` | EmpireBox Setup Wizard |
+| `founders_usb_installer/` | USB installer for hardware bundles |
+| `empirebox_installer/` | EmpireBox installer |
+| `empire_box_agents/` | Agent system |
+| `hardware/` | Hardware specs and designs |
+
+### Key Backend Files (SupportForge — BACKUP11)
+```
+backend/app/models/supportforge_ticket.py
+backend/app/models/supportforge_customer.py
+backend/app/models/supportforge_agent.py
+backend/app/models/supportforge_kb.py
+backend/app/models/supportforge_message.py
+backend/app/models/supportforge_automation.py
+backend/app/models/supportforge_integration.py
+backend/app/models/supportforge_tenant.py
+backend/alembic/versions/supportforge_001_add_supportforge_tables.py
+```
+
+### Other Notable Files
+| File | Location | Content |
+|------|----------|---------|
+| `VetForge-PandT.pptx` | BACKUP11 root + versions/ | VeteranForge pitch deck |
+| `Idea started after video from Alex Fin.pdf` | BACKUP11/EMPIRE/Empire/ | Original inspiration doc |
+| `ZERO_TO_HERO_SPECIFICATION_Version7.md` | BACKUP11/EMPIRE/Empire/ | Older version of Zero to Hero |
 
 ---
 
-## Port Map
+## Compliance & Legal Status
 
-| Port | Service | Status |
-|------|---------|--------|
-| 3000 | Empire App (unified) | Active |
-| 3001 | WorkroomForge | Active |
-| 3002 | LuxeForge Web | Active |
-| 3003 | AMP | Paused |
-| 3004 | Inventory / SocialForge | Module |
-| 3005 | Finance | Module |
-| 3006 | Creations | Module |
-| 3007 | CRM | Module |
-| 3009 | Founder Dashboard | Active |
-| 7878 | OpenClaw AI | Active |
-| 8000 | Backend API (FastAPI) | Active |
-| 8080 | Homepage (static) | Active |
-| 11434 | Ollama | Active |
-| 8010 | MarketForge (Docker) | Planned |
-| 8020 | ContractorForge (Docker) | Built |
-| 8030 | LuxeForge (Docker) | Planned |
-| 8040 | SupportForge (Docker) | Planned |
-| 8050 | LeadForge (Docker) | Planned |
-| 8060 | ShipForge (Docker) | Integrated |
-| 8070 | ForgeCRM (Docker) | Planned |
-| 8080 | RelistApp (Docker) | Planned |
-| 8090 | SocialForge (Docker) | Planned |
-| 8100 | LLCFactory (Docker) | Planned |
-| 8110 | ApostApp (Docker) | Planned |
-| 8120 | EmpireAssist (Docker) | Planned |
-| 8130 | EmpirePay (Docker) | Planned |
+| Area | Status | Key Doc |
+|------|--------|---------|
+| Stripe/Payments | Strong (placeholders need replacing) | `STRIPE_COMPLIANCE_CHECKLIST.md` |
+| Privacy (GDPR/CCPA) | Strong (cookie banner needed) | `LEGAL_COMPLIANCE_AUDIT.md` |
+| Terms of Service | Strong | `LEGAL_COMPLIANCE_AUDIT.md` |
+| FTC Compliance | Needs earnings disclaimers | `LEGAL_COMPLIANCE_AUDIT.md` |
+| Copyright/IP | Needs trademark registration | `LEGAL_COMPLIANCE_AUDIT.md` |
+| DMCA Policy | Missing — needs creation | `LEGAL_COMPLIANCE_AUDIT.md` |
+| Open Source Licenses | All deps are MIT/BSD/Apache (safe) | `LEGAL_COMPLIANCE_AUDIT.md` |
+| HIPAA (VeteranForge) | Full compliance framework documented | `VA_APP_TELEHEALTH.md` |
+| Amazon Marketplace | Compliance checklist exists | `AMAZON_COMPLIANCE_CHECKLIST.md` |
+| Marketplace APIs | eBay (low risk), Poshmark (high risk — no API) | `LEGAL_COMPLIANCE_AUDIT.md` |
 
 ---
 
-## Crypto / Tokenomics
+## Ad Budget & Marketing
 
-- **$EMPIRE Token:** Solana SPL, 1B supply, utility + governance
-- **Spec:** `docs/EMPIRE_TOKEN_SPEC.md`
-- **NFT Licenses:** All EmpireBox licenses minted as Solana NFTs
-- **Spec:** `docs/EMPIRE_LICENSE_NFT_SPEC.md`
-- **Revenue Model:** `docs/REVENUE_MODEL.md` — Y3 aspirational $17.2M
+From `MARKETFORGE_AD_STUDY.md`:
+
+| Channel | Budget | CPC | CAC Target |
+|---------|--------|-----|------------|
+| Meta (FB/IG) | $1,600 | $0.97-$2.50 | $50-$200 |
+| Google Ads | $1,200 | $2.70-$5.30 | $75-$200 |
+| TikTok | $800 | $0.20-$0.50 | $80-$250 |
+| YouTube | $600 | $0.50-$2 | $100-$300 |
+| Reddit | $400 | $0.50-$2 | $50-$150 |
+| **Total** | **$5,000** | | |
+
+**Decision Rules:** Kill channel if CAC > $150. Scale 2x if CAC < $50.
 
 ---
 
-## Key Specs Index
-
-| Spec | File |
-|------|------|
-| MAX Brain | `docs/MAX_BRAIN_SPEC.md` |
-| CraftForge | `docs/CRAFTFORGE_SPEC.md` |
-| CraftForge SpaceScan | `docs/CRAFTFORGE_SPACESCAN_ADDENDUM.md` |
-| Visual Mockup Engine | `docs/VISUAL_MOCKUP_ENGINE_SPEC.md` |
-| MAX Response Canvas v2 | `docs/MAX_RESPONSE_CANVAS_SPEC_v2.md` |
-| LeadForge | `docs/LEADFORGE_SPEC.md` |
-| EmpireAssist | `docs/EMPIRE_ASSIST_SPEC.md` |
-| AMP Build | `docs/AMP_BUILD_PROMPT.md` |
-| Crypto Payments | `docs/CRYPTO_PAYMENTS_SPEC.md` |
-| EMPIRE Token | `docs/EMPIRE_TOKEN_SPEC.md` |
-| NFT Licenses | `docs/EMPIRE_LICENSE_NFT_SPEC.md` |
-| Revenue Model | `docs/REVENUE_MODEL.md` |
-| MarketF Overview | `docs/MARKETF_OVERVIEW.md` |
-| Shipping Integration | `docs/SHIPPING_INTEGRATION.md` |
-| VA Telehealth | `docs/VA_APP_TELEHEALTH.md` |
-| Ecosystem | `docs/ECOSYSTEM.md` |
-| Zero to Hero | `docs/ZERO_TO_HERO_SPEC.md` |
+*This directory consolidates ALL Empire products, specs, code, and docs from both the active repo (`~/Empire/`) and backup drive (`/media/rg/BACKUP11/EMPIRE/`). All BACKUP11 docs already exist in the active repo — no missing specs to copy.*
