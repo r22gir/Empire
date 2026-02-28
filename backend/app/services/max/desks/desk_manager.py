@@ -14,8 +14,10 @@ from .base_desk import BaseDesk, DeskTask, TaskPriority, TaskState
 from .desk_router import DeskRouter
 from .forge_desk import ForgeDesk
 from .market_desk import MarketDesk
-from .social_desk import SocialDesk
+from .marketing_desk import MarketingDesk
 from .support_desk import SupportDesk
+from .sales_desk import SalesDesk
+from .finance_desk import FinanceDesk
 
 logger = logging.getLogger("max.desks.manager")
 
@@ -43,7 +45,10 @@ class AIDeskManager:
         if self._initialized:
             return
 
-        desks = [ForgeDesk(), MarketDesk(), SocialDesk(), SupportDesk()]
+        desks = [
+            ForgeDesk(), MarketDesk(), MarketingDesk(),
+            SupportDesk(), SalesDesk(), FinanceDesk(),
+        ]
         for desk in desks:
             self.router.register_desk(desk)
 

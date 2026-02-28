@@ -28,22 +28,36 @@ KEYWORD_MAP = {
             "production", "job queue", "job status", "yardage", "design consult",
         ],
     },
-    "market": {
+    "sales": {
         "keywords": [
-            "listing", "marketplace", "ebay", "facebook marketplace", "sell online",
-            "inventory sync", "competitor", "shipping label", "relist",
-        ],
-    },
-    "social": {
-        "keywords": [
-            "social media", "post", "instagram", "facebook post", "twitter",
-            "linkedin", "content calendar", "engagement", "hashtag",
+            "lead", "prospect", "pipeline", "proposal", "follow up",
+            "consultation", "referral", "close", "deposit", "new customer",
         ],
     },
     "support": {
         "keywords": [
-            "ticket", "support", "customer issue", "complaint", "refund",
-            "return", "help desk", "faq",
+            "ticket", "complaint", "refund", "return", "warranty",
+            "service request", "issue", "unhappy", "help desk", "faq",
+        ],
+    },
+    "marketing": {
+        "keywords": [
+            "social media", "post", "instagram", "content", "hashtag",
+            "campaign", "before after", "pinterest", "facebook post",
+            "engagement", "seo", "blog",
+        ],
+    },
+    "market": {
+        "keywords": [
+            "listing", "marketplace", "ebay", "inventory", "shipping",
+            "relist", "fulfillment", "tracking", "facebook marketplace",
+            "sell online", "competitor",
+        ],
+    },
+    "finance": {
+        "keywords": [
+            "invoice", "payment", "expense", "revenue", "profit",
+            "billing", "subscription", "p&l", "overdue", "cost",
         ],
     },
 }
