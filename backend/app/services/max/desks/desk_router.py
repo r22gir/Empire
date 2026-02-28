@@ -60,6 +60,42 @@ KEYWORD_MAP = {
             "billing", "subscription", "p&l", "overdue", "cost",
         ],
     },
+    "clients": {
+        "keywords": [
+            "client", "customer record", "contact info", "preferences",
+            "meeting prep", "thank you note", "client history",
+        ],
+    },
+    "contractors": {
+        "keywords": [
+            "installer", "seamstress", "availability", "contractor",
+            "crew", "pay rate", "schedule install", "dispatch",
+        ],
+    },
+    "it": {
+        "keywords": [
+            "server", "deploy", "monitoring", "uptime", "port",
+            "restart", "logs", "disk space", "ram", "service health",
+        ],
+    },
+    "website": {
+        "keywords": [
+            "seo", "portfolio", "web copy", "meta description",
+            "google business", "homepage", "review response",
+        ],
+    },
+    "legal": {
+        "keywords": [
+            "contract", "terms", "compliance", "liability", "insurance",
+            "llc", "agreement", "warranty policy",
+        ],
+    },
+    "lab": {
+        "keywords": [
+            "experiment", "prototype", "test feature", "vision api",
+            "sandbox", "r&d", "brainstorm",
+        ],
+    },
 }
 
 
