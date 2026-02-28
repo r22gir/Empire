@@ -1,6 +1,6 @@
 'use client';
-import ChatLayout from '@/components/max/ChatLayout';
+import CommandCenter from '@/components/command/CommandCenter';
 
 export default function FounderDashboard() {
-  return <ChatLayout />;
+  return <CommandCenter />;
 }

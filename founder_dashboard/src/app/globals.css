@@ -271,3 +271,33 @@ html, body {
 .detail-panel-slide.open {
   transform: translateX(0);
 }
+
+/* ── Command Center: MAX Avatar Streaming ─────────────────── */
+@keyframes avatar-stream {
+  0%, 100% { box-shadow: 0 0 12px rgba(212,175,55,0.3), 0 0 40px rgba(139,92,246,0.2); }
+  50%      { box-shadow: 0 0 24px rgba(212,175,55,0.55), 0 0 60px rgba(139,92,246,0.35); }
+}
+.max-avatar-streaming { animation: avatar-stream 1.2s ease-in-out infinite; }
+
+/* ── Command Center: Panel Cards ──────────────────────────── */
+.cc-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+}
+.cc-panel-header {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+/* ── Command Center: Desk Grid Modal ─────────────────────── */
+@keyframes desk-card-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.desk-card-enter { animation: desk-card-in 0.2s ease-out forwards; }
