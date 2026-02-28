@@ -1,6 +1,7 @@
 'use client';
 import { ServiceHealth, SystemStats, AIModel } from '@/lib/types';
 import SystemStatusPanel from './SystemStatusPanel';
+import AiUsagePanel from './AiUsagePanel';
 import EmpireBoxPanel from './EmpireBoxPanel';
 import ForgePanel from './ForgePanel';
 import CrmPanel from './CrmPanel';
@@ -20,6 +21,7 @@ export default function RightColumn({ systemStats, serviceHealth, backendOnline,
         serviceHealth={serviceHealth}
         backendOnline={backendOnline}
       />
+      <AiUsagePanel backendOnline={backendOnline} />
       <EmpireBoxPanel
         serviceHealth={serviceHealth}
         backendOnline={backendOnline}

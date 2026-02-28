@@ -72,9 +72,14 @@ export default function SystemStatusPanel({ systemStats, serviceHealth, backendO
       )}
 
       {!systemStats && (
-        <p className="text-xs text-center py-3 mb-3" style={{ color: 'var(--text-muted)' }}>
-          {backendOnline ? 'Loading stats...' : 'Backend offline'}
-        </p>
+        <div className="mb-4 space-y-2.5">
+          <StatBar label="CPU" value={0} extra="--" />
+          <StatBar label="RAM" value={0} extra="--" />
+          <StatBar label="Disk" value={0} extra="--" />
+          <p className="text-[10px] text-center pt-1" style={{ color: 'var(--text-muted)' }}>
+            {backendOnline ? 'Loading stats...' : 'Connect backend for live data'}
+          </p>
+        </div>
       )}
 
       {/* Services */}
