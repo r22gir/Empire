@@ -9,10 +9,10 @@ from .market_desk import MarketDesk
 from .social_desk import SocialDesk
 from .support_desk import SupportDesk
 from .desk_router import DeskRouter
-from .desk_manager import AIDeskManager
+from .desk_manager import AIDeskManager, TaskStatus
 
 __all__ = [
     "BaseDesk", "DeskTask", "DeskAction",
     "ForgeDesk", "MarketDesk", "SocialDesk", "SupportDesk",
-    "DeskRouter", "AIDeskManager",
+    "DeskRouter", "AIDeskManager", "TaskStatus",
 ]

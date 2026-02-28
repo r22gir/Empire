@@ -69,6 +69,7 @@ class BaseDesk(ABC):
         self.escalated_tasks: list[DeskTask] = []
         self._memory_store = None
         self._token_tracker = None
+        self._telegram = None
 
     @property
     def memory_store(self):
@@ -89,6 +90,29 @@ class BaseDesk(ABC):
             except Exception:
                 pass
         return self._token_tracker
+
+    @property
+    def telegram(self):
+        """Lazy-load the shared TelegramBot instance."""
+        if self._telegram is None:
+            try:
+                from app.services.max.telegram_bot import telegram_bot
+                self._telegram = telegram_bot
+            except Exception:
+                pass
+        return self._telegram
+
+    async def notify_telegram(self, message: str) -> bool:
+        """Send a notification via Telegram. Available to all desks."""
+        if not self.telegram or not self.telegram.is_configured:
+            return False
+        try:
+            return await self.telegram.send_message(
+                f"🏢 <b>{self.desk_name}</b>\n\n{message}"
+            )
+        except Exception as e:
+            logger.warning(f"Telegram notification failed: {e}")
+            return False
 
     def _log_to_brain(self, content: str, importance: int = 5, tags: list[str] = None):
         """Log an action to the brain memory store."""

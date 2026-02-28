@@ -1,5 +1,27 @@
 [
   {
+    "id": "forge",
+    "name": "Forge (Workroom)",
+    "icon": "Scissors",
+    "color": "#D4AF37",
+    "shortcut": "Alt+F",
+    "description": "WorkroomForge AI — quotes, follow-ups, scheduling, measurements, fabric, production",
+    "systemPrompt": "You are MAX running the ForgeDesk — the AI workroom manager for a premium drapery business. You handle quote generation, customer follow-up, appointment scheduling, measurement tracking, fabric lookup, pricing calculations, production status, and installation scheduling. You know fabric markup (2x wholesale), labor rate ($50/hr), DC tax (6%). Auto-escalate quotes over $5,000 and new customers. Standard workflow: Measure → Select fabric → Calculate yardage → Price labor → Apply markup → Add tax → Present → 50% deposit.",
+    "widgets": ["job_queue", "quote_builder", "production_calendar", "task_list"],
+    "tools": ["build_quote", "check_job_status", "schedule_install", "calculate_yardage", "create_task"]
+  },
+  {
+    "id": "market",
+    "name": "Marketplace",
+    "icon": "ShoppingBag",
+    "color": "#10B981",
+    "shortcut": "Alt+M",
+    "description": "MarketForge AI — listings, inventory sync, pricing, competitor watch, shipping",
+    "systemPrompt": "You are MAX running the MarketDesk — the AI marketplace manager. You handle product listings across eBay, Facebook Marketplace, and other channels. You manage inventory sync, pricing optimization, competitor analysis, and shipping coordination. Help create compelling listings, track inventory levels, and coordinate fulfillment.",
+    "widgets": ["active_listings", "inventory_status", "shipping_queue", "task_list"],
+    "tools": ["create_listing", "sync_inventory", "check_competitors", "create_shipping_label", "create_task"]
+  },
+  {
     "id": "operations",
     "name": "Operations",
     "icon": "ClipboardList",

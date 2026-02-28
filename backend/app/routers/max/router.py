@@ -11,14 +11,13 @@ import logging
 import uuid
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
-from app.services.max.desk_manager import desk_manager, TaskStatus
 from app.services.max.telegram_bot import telegram_bot
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.token_tracker import token_tracker
-from app.services.max.desks import AIDeskManager
+from app.services.max.desks import AIDeskManager, TaskStatus
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
@@ -26,8 +25,9 @@ router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
 # Brain instances (shared across requests)
 conversation_tracker = ConversationTracker()
 
-# AI Desk delegation system
-ai_desk_manager = AIDeskManager()
+# Unified desk manager (replaces both legacy DeskManager and AIDeskManager)
+from app.services.max.desks.desk_manager import desk_manager
+ai_desk_manager = desk_manager
 
 
 class ChatRequest(BaseModel):
@@ -201,9 +201,18 @@ async def get_all_desks():
     return {"desks": desk_manager.get_all_desks()}
 
 
+@router.get("/desks/status")
+async def get_desk_statuses():
+    """Get status of all AI desks (ForgeDesk, MarketDesk, SocialDesk, SupportDesk).
+    Alias for /ai-desks/status — kept for convenience.
+    """
+    statuses = await ai_desk_manager.get_all_statuses()
+    return {"desks": statuses}
+
+
 @router.get("/desks/{desk_id}")
 async def get_desk(desk_id: str):
-    desk = desk_manager.get_desk(desk_id)
+    desk = desk_manager.get_desk_legacy(desk_id)
     if not desk:
         raise HTTPException(status_code=404, detail=f"Desk {desk_id} not found")
     return desk

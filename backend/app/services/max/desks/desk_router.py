@@ -9,6 +9,15 @@ from .base_desk import BaseDesk, DeskTask, TaskPriority
 
 logger = logging.getLogger("max.desks.router")
 
+# DB desk_ids that should route to a different AI desk for execution.
+# These desks keep their own UI layouts in the frontend but their tasks
+# are handled by the target desk's handle_task().
+DESK_ALIASES = {
+    "operations": "forge",   # job tracking → ForgeDesk
+    "design": "forge",       # treatment selection → ForgeDesk
+    "estimating": "forge",   # quote building → ForgeDesk
+}
+
 # Keyword → desk_id mapping for fallback routing
 KEYWORD_MAP = {
     "forge": {
@@ -16,6 +25,7 @@ KEYWORD_MAP = {
             "quote", "estimate", "price", "pricing", "drape", "shade", "cornice",
             "valance", "bedding", "upholstery", "fabric", "window treatment",
             "workroom", "measurement", "install", "customer follow",
+            "production", "job queue", "job status", "yardage", "design consult",
         ],
     },
     "market": {
@@ -85,11 +95,20 @@ class DeskRouter:
     def desk_ids(self) -> list[str]:
         return list(self._desks.keys())
 
-    async def route_task(self, task: DeskTask) -> tuple[str | None, str]:
+    async def route_task(self, task: DeskTask, source_desk_id: str | None = None) -> tuple[str | None, str]:
         """Determine which desk should handle a task.
 
         Returns (desk_id, reasoning). desk_id is None if no desk matches (→ founder inbox).
+        If source_desk_id is given (e.g. from a UI desk), check aliases first.
         """
+        # Check desk aliases (e.g. operations → forge)
+        if source_desk_id and source_desk_id in DESK_ALIASES:
+            target = DESK_ALIASES[source_desk_id]
+            if target in self._desks:
+                reason = f"Alias: {source_desk_id} → {target}"
+                self._log_routing(task, target, reason, method="alias")
+                return target, reason
+
         # Try LLM-based routing first
         desk_id, reason = await self._route_with_llm(task)
         if desk_id:
