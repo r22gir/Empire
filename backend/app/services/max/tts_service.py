@@ -1,96 +1,85 @@
 """
-MAX TTS Service — Text-to-Speech via OpenAI API.
+MAX TTS Service — Text-to-Speech via edge-tts (free, no API key needed).
 One voice for MAX everywhere: Telegram voice replies, Command Center audio.
 
-Uses OpenAI TTS API (gpt-4o-mini-tts model, 'onyx' voice — deep, authoritative).
-Falls back gracefully if API key missing or call fails.
+Uses Microsoft Edge TTS — deep male voice (en-US-GuyNeural).
 """
-import os
 import logging
 import tempfile
-import httpx
+import asyncio
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("max.tts")
 
 # MAX voice config — one voice everywhere
-TTS_MODEL = "gpt-4o-mini-tts"
-TTS_VOICE = "onyx"  # deep, confident — fits MAX's personality
-TTS_SPEED = 1.0
-TTS_FORMAT = "opus"  # small file, Telegram-native
-MAX_TEXT_LENGTH = 4096  # OpenAI TTS limit
+TTS_VOICE = "en-US-GuyNeural"  # deep, confident male voice
+TTS_RATE = "+0%"  # normal speed
+MAX_TEXT_LENGTH = 4096
 
 
 class TTSService:
-    """Text-to-Speech service using OpenAI API."""
+    """Text-to-Speech service using edge-tts (free, no API key)."""
 
     def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.api_url = "https://api.openai.com/v1/audio/speech"
         self.cache_dir = Path(tempfile.gettempdir()) / "max_tts_cache"
         self.cache_dir.mkdir(exist_ok=True)
+        self._available: Optional[bool] = None
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.api_key)
+        """edge-tts needs no API key — always configured if the package is installed."""
+        if self._available is None:
+            try:
+                import edge_tts  # noqa: F401
+                self._available = True
+            except ImportError:
+                self._available = False
+                logger.error("edge-tts not installed. Run: pip install edge-tts")
+        return self._available
 
     async def synthesize(
         self,
         text: str,
         voice: str = TTS_VOICE,
-        speed: float = TTS_SPEED,
-        output_format: str = TTS_FORMAT,
+        rate: str = TTS_RATE,
+        output_format: str = "mp3",
     ) -> Optional[Path]:
         """Convert text to speech audio file.
 
         Returns path to audio file, or None on failure.
         """
         if not self.is_configured:
-            logger.warning("TTS not configured — OPENAI_API_KEY not set")
             return None
 
         if not text or not text.strip():
             return None
 
-        # Trim to API limit
         clean_text = text.strip()[:MAX_TEXT_LENGTH]
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    self.api_url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": TTS_MODEL,
-                        "input": clean_text,
-                        "voice": voice,
-                        "speed": speed,
-                        "response_format": output_format,
-                    },
-                )
+            import edge_tts
 
-                if resp.status_code != 200:
-                    logger.error(f"TTS API error {resp.status_code}: {resp.text[:200]}")
-                    return None
+            suffix = ".ogg" if output_format == "opus" else f".{output_format}"
+            audio_path = Path(tempfile.mktemp(suffix=suffix, dir=str(self.cache_dir)))
 
-                # Save audio to temp file
-                suffix = f".{output_format}" if output_format != "opus" else ".ogg"
-                audio_path = Path(tempfile.mktemp(suffix=suffix, dir=str(self.cache_dir)))
-                audio_path.write_bytes(resp.content)
-                logger.info(f"TTS generated: {len(resp.content)} bytes → {audio_path.name}")
+            communicate = edge_tts.Communicate(clean_text, voice, rate=rate)
+            await communicate.save(str(audio_path))
+
+            if audio_path.exists() and audio_path.stat().st_size > 0:
+                logger.info(f"TTS generated: {audio_path.stat().st_size} bytes → {audio_path.name}")
                 return audio_path
+            else:
+                logger.error("TTS produced empty file")
+                return None
 
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
             return None
 
     async def synthesize_for_telegram(self, text: str) -> Optional[Path]:
-        """Generate voice note optimized for Telegram (opus/ogg format)."""
-        return await self.synthesize(text, output_format="opus")
+        """Generate voice note for Telegram (mp3 — Telegram accepts it as voice)."""
+        return await self.synthesize(text, output_format="mp3")
 
     async def synthesize_for_web(self, text: str) -> Optional[bytes]:
         """Generate audio bytes for web playback (mp3 format).
@@ -103,27 +92,17 @@ class TTSService:
         clean_text = text.strip()[:MAX_TEXT_LENGTH]
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    self.api_url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": TTS_MODEL,
-                        "input": clean_text,
-                        "voice": TTS_VOICE,
-                        "speed": TTS_SPEED,
-                        "response_format": "mp3",
-                    },
-                )
+            import edge_tts
 
-                if resp.status_code != 200:
-                    logger.error(f"TTS web error {resp.status_code}: {resp.text[:200]}")
-                    return None
+            audio_path = Path(tempfile.mktemp(suffix=".mp3", dir=str(self.cache_dir)))
+            communicate = edge_tts.Communicate(clean_text, TTS_VOICE, rate=TTS_RATE)
+            await communicate.save(str(audio_path))
 
-                return resp.content
+            if audio_path.exists() and audio_path.stat().st_size > 0:
+                data = audio_path.read_bytes()
+                audio_path.unlink(missing_ok=True)
+                return data
+            return None
 
         except Exception as e:
             logger.error(f"TTS web synthesis failed: {e}")
