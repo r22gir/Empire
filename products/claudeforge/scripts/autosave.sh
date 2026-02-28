@@ -1,36 +1,57 @@
 #!/bin/bash
-# ClaudeForge - Auto-Save Service
-SAVE_DIR=~/Empire/products/claudeforge/data/chats
-SESSION_ID=$(date +%Y-%m-%d)_session$$
-SESSION_DIR="$SAVE_DIR/$SESSION_ID"
-INTERVAL=60
-mkdir -p "$SESSION_DIR"
+# ClaudeForge v3 — Autosave Service
+# Runs in background, saves clipboard every 5 minutes silently
+# Only saves when clipboard content has changed and is substantial
 
-log() { echo "[$(date '+%H:%M:%S')] $1"; }
+SESSION_DIR="$1"
+INTERVAL=300  # 5 minutes
 
-save_chat() {
-  TIMESTAMP=$(date +%H-%M)
-  SAVE_FILE="$SESSION_DIR/$TIMESTAMP.md"
-  CLIPBOARD=$(xclip -selection clipboard -o 2>/dev/null)
-  if [ -n "$CLIPBOARD" ]; then
-    echo "# Claude Chat Save - $TIMESTAMP" > "$SAVE_FILE"
-    echo "Saved: $(date)" >> "$SAVE_FILE"
-    echo "" >> "$SAVE_FILE"
-    echo "$CLIPBOARD" >> "$SAVE_FILE"
+if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
+    echo "Usage: autosave.sh <session_dir>"
+    exit 1
+fi
+
+LAST_HASH=""
+
+log() { echo "[$(date '+%H:%M:%S')] autosave: $1"; }
+
+save_clip() {
+    if ! command -v xclip &>/dev/null; then
+        return
+    fi
+
+    CLIP=$(xclip -selection clipboard -o 2>/dev/null)
+
+    # Skip if empty or too short (less than 50 chars = not a chat)
+    if [ -z "$CLIP" ] || [ ${#CLIP} -lt 50 ]; then
+        return
+    fi
+
+    # Skip if content hasn't changed
+    HASH=$(echo "$CLIP" | md5sum | awk '{print $1}')
+    if [ "$HASH" = "$LAST_HASH" ]; then
+        return
+    fi
+    LAST_HASH="$HASH"
+
+    TIMESTAMP=$(date +%H-%M)
+    SAVE_FILE="$SESSION_DIR/${TIMESTAMP}.md"
+    {
+        echo "# ClaudeForge Auto-Save"
+        echo "Saved: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo ""
+        echo "$CLIP"
+    } > "$SAVE_FILE"
+
+    # Keep a "current" pointer
     cp "$SAVE_FILE" "$SESSION_DIR/current.md"
-    cp "$SAVE_FILE" ~/Empire/docs/CHAT_ARCHIVE/latest_claude.md
-    log "Saved: $SAVE_FILE"
-  else
-    log "Clipboard empty, skipping"
-  fi
+
+    log "Saved ${#CLIP} chars → $SAVE_FILE"
 }
 
-log "ClaudeForge Auto-Save Started"
-log "Session: $SESSION_ID"
+log "Started (interval: ${INTERVAL}s)"
 
 while true; do
-  sleep $INTERVAL
-  notify-send -u normal -t 10000 "ClaudeForge" "Time to save! Select all in Claude (Ctrl+A), copy (Ctrl+C), then come back." 2>/dev/null
-  sleep 5
-  save_chat
+    sleep $INTERVAL
+    save_clip
 done

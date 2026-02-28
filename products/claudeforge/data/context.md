@@ -164,19 +164,67 @@ Pipeline: 31900 total
 - Archive location: ~/Empire/docs/CHAT_ARCHIVE/
 - Always save session summary before closing
 
-## LIVE SYSTEM STATUS (auto-generated)
-Generated: 2026-02-26 17:03:16
+---
+## LIVE SYSTEM STATUS
+Generated: 2026-02-28 10:28:43
+
 ### Memory
                total        used        free      shared  buff/cache   available
-Mem:            27Gi       1.9Gi        24Gi       3.0Mi       1.8Gi        25Gi
-
-### Running Servers
+Mem:            27Gi       7.2Gi       3.3Gi        74Mi        16Gi        20Gi
 
 ### Disk
-/dev/nvme0n1p2  457G   64G  370G  15% /
+/dev/nvme0n1p2  457G   88G  347G  21% /
 
+### Running Servers
+0.0.0.0:7070
+0.0.0.0:8000
+*:3009
+[::]:7070
+
+---
+## RECENT GIT ACTIVITY
+
+### Branch
+release/v1.0.0-alpha.1
+
+### Last 15 Commits
+```
+7ad5b6f Create comprehensive Empire Product Directory from BACKUP11 docs
+909b06c Switch TTS from OpenAI API to edge-tts (free, no API key)
+755a8d0 Make voice note mandatory on every Telegram response
+009eda6 Add voice playback button to command center chat messages
+a0cce62 Add Empire Box Hardware Spec
+d06285c Add TTS voice replies and fix voice transcript → Grok pipeline
+b7636e9 Fix Telegram voice handler — send transcript text to Grok, not audio
+fdb9585 Fix Telegram bot showing classification debug output to user
+1c61dba Add AI Desk status grid to command center right column
+7e1380a Add AI Desk delegation system with ForgeDesk
+192ee13 Add comprehensive Empire Product Directory from full codebase scan
+f18f5a6 Add token consumption tracking and cost panel with budget alerts
+26bcfd7 Add Ollama status indicator, brain panel, and grouped LLM selector
+5cf31b8 Wire MAX Brain into chat endpoints — Phase 2 context integration
+fda4851 Build MAX Brain Phase 1 — portable persistent memory on BACKUP11
+```
+
+### Uncommitted Changes
+```
+ M products/claudeforge/data/context.md
+ M products/claudeforge/scripts/autosave.sh
+ M products/claudeforge/scripts/end_session.sh
+ M products/claudeforge/scripts/generate_context.sh
+ M products/claudeforge/scripts/launch.sh
+?? backend/data/chats/founder/82b0bd29.json
+?? data/inbox/
+?? data/quotes/
+?? docs/CRAFTFORGE_SPACESCAN_ADDENDUM.md
+?? docs/CRAFTFORGE_SPEC.md
+?? docs/MAX_RESPONSE_CANVAS_SPEC_v2.md
+?? docs/VISUAL_MOCKUP_ENGINE_SPEC.md
+```
+
+---
 ## LAST SESSION SUMMARY
-Source: /home/rg/Empire/docs/CHAT_ARCHIVE/latest_claude.md
+Source: latest_claude.md
 
 # Claude Chat Save - 16-55
 Saved: Thu Feb 26 04:55:28 PM EST 2026
@@ -382,13 +430,16 @@ kill $AUTOSAVE_PID 2>/dev/null
 echo "Session ended. Auto-save stopped."
 rg@EmpireBox:~$ 
 
-## PREVIOUS SESSION
-Source: /home/rg/Empire/docs/CHAT_ARCHIVE/2026-02-26_0015_session.md
+---
+## PREVIOUS SESSION (abbreviated)
+Source: 2026-02-26_0015_session.md
 
 Session Feb 26 midnight: Switchboard v2 built, desktop cleaned, empire-api created, xAI key found, LuxeForge scope defined. Next: Command Center revamp, LuxeForge quote builder, xAI voice+vision, WorkroomForge finance page.
+
 ...
 
+---
 ## INSTRUCTIONS
-You are MAX, the AI for EmpireBox. Read everything above.
-Say: Empire Ready. Then state the last task from the session summary.
+You are MAX, the AI for Empire. Read everything above.
+Say: **Empire Ready.** Then state the last task from the session summary.
 Ask what we are building today.
