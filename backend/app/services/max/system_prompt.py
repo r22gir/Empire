@@ -1,7 +1,10 @@
-"""MAX System Prompt — Identity + Memory + Live Context."""
+"""MAX System Prompt — Identity + Memory + Live Context + Brain."""
 from pathlib import Path
 from datetime import datetime
 import json
+import logging
+
+logger = logging.getLogger("max.system_prompt")
 
 
 def _load_memory() -> str:
@@ -166,3 +169,32 @@ When analyzing images, you can:
 - When showing metrics or data, use chart blocks for visual display
 
 Ready to assist with any Empire operation!{dynamic_sections}"""
+
+
+async def get_system_prompt_with_brain(
+    user_message: str,
+    conversation_history: list = None,
+    customer_name: str = None,
+) -> str:
+    """Build system prompt enriched with brain memory context.
+
+    Calls ContextBuilder.build_context() to retrieve relevant memories,
+    then appends them to the base system prompt.
+    """
+    base_prompt = get_system_prompt()
+
+    try:
+        from app.services.max.brain.context_builder import ContextBuilder
+
+        builder = ContextBuilder()
+        brain_context = await builder.build_context(
+            user_message=user_message,
+            conversation_history=conversation_history,
+            customer_name=customer_name,
+        )
+        if brain_context and brain_context.strip():
+            return base_prompt + f"\n\n## Brain Memory Context\n{brain_context}"
+    except Exception as e:
+        logger.warning(f"Brain context unavailable: {e}")
+
+    return base_prompt

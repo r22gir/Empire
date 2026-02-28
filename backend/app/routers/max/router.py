@@ -8,15 +8,21 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
 import logging
+import uuid
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.desk_manager import desk_manager, TaskStatus
 from app.services.max.telegram_bot import telegram_bot
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
+from app.services.max.system_prompt import get_system_prompt_with_brain
+from app.services.max.brain import ContextBuilder, ConversationTracker
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
+
+# Brain instances (shared across requests)
+conversation_tracker = ConversationTracker()
 
 
 class ChatRequest(BaseModel):
@@ -47,17 +53,17 @@ class TelegramMessageRequest(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_max(request: ChatRequest):
+async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks):
     is_safe, reason = check_input(request.message)
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
         return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
-    
+
     for msg in request.history[-3:]:
         hist_safe, _ = check_input(msg.get("content", ""))
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
-    
+
     try:
         messages = [AIMessage(role=h["role"], content=h["content"]) for h in request.history]
         messages.append(AIMessage(role="user", content=request.message))
@@ -67,7 +73,26 @@ async def chat_with_max(request: ChatRequest):
                 model = AIModel(request.model)
             except ValueError:
                 pass
-        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk)
+
+        # Build brain-enriched system prompt (non-desk requests only)
+        enriched_prompt = None
+        if not request.desk:
+            try:
+                enriched_prompt = await get_system_prompt_with_brain(
+                    user_message=request.message,
+                    conversation_history=request.history,
+                )
+            except Exception as e:
+                logger.warning(f"Brain context failed, using base prompt: {e}")
+
+        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
+
+        # Track conversation in background
+        conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
+        conversation_tracker.add_message(conv_id, "user", request.message)
+        conversation_tracker.add_message(conv_id, "assistant", response.content)
+        background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
+
         return ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -76,7 +101,7 @@ async def chat_with_max(request: ChatRequest):
 
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
-    """SSE streaming endpoint for MAX chat."""
+    """SSE streaming endpoint for MAX chat with brain context."""
     is_safe, reason = check_input(request.message)
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
@@ -102,11 +127,26 @@ async def chat_stream(request: ChatRequest):
         except ValueError:
             pass
 
+    # Build brain-enriched system prompt before streaming (non-desk only)
+    enriched_prompt = None
+    if not request.desk:
+        try:
+            enriched_prompt = await get_system_prompt_with_brain(
+                user_message=request.message,
+                conversation_history=request.history,
+            )
+        except Exception as e:
+            logger.warning(f"Brain context failed, using base prompt: {e}")
+
+    # Conversation tracking ID
+    conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
+    conversation_tracker.add_message(conv_id, "user", request.message)
+
     async def event_generator():
         model_used = "unknown"
         full_response = ""
         try:
-            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk):
+            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt):
                 model_used = m_used
                 safe_chunk = sanitize_output(chunk)
                 full_response += safe_chunk
@@ -117,6 +157,13 @@ async def chat_stream(request: ChatRequest):
             for tc in tool_calls:
                 result = execute_tool(tc, desk=request.desk)
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
+
+            # Track assistant response and trigger summarization if needed
+            conversation_tracker.add_message(conv_id, "assistant", full_response)
+            try:
+                await conversation_tracker.check_and_summarize(conv_id)
+            except Exception as e:
+                logger.warning(f"Conversation summarization failed: {e}")
 
             yield f"data: {json.dumps({'type': 'done', 'model_used': model_used})}\n\n"
         except Exception as e:
@@ -213,3 +260,55 @@ async def send_telegram_message(request: TelegramMessageRequest):
 @router.get("/telegram/status")
 async def telegram_status():
     return {"configured": telegram_bot.is_configured, "bot_token_set": bool(telegram_bot.bot_token), "chat_id_set": bool(telegram_bot.founder_chat_id)}
+
+
+@router.get("/brain/status")
+async def brain_status():
+    """Get MAX Brain status — memory counts, drive status, Ollama health."""
+    from app.services.max.brain.brain_config import get_brain_path, get_db_path, OLLAMA_BASE_URL
+    from app.services.max.brain.memory_store import MemoryStore
+    import httpx
+
+    brain_path = get_brain_path()
+    db_path = get_db_path()
+    is_external = "/media/rg/BACKUP11" in str(brain_path)
+
+    # Memory stats
+    try:
+        store = MemoryStore(db_path)
+        memory_count = store.count()
+    except Exception as e:
+        memory_count = -1
+        logger.warning(f"Brain DB error: {e}")
+
+    # Ollama health
+    ollama_ok = False
+    ollama_models = []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{OLLAMA_BASE_URL}/api/tags")
+            if resp.status_code == 200:
+                ollama_ok = True
+                ollama_models = [m["name"] for m in resp.json().get("models", [])]
+    except Exception:
+        pass
+
+    return {
+        "brain_online": memory_count >= 0 and ollama_ok,
+        "storage": {
+            "path": str(brain_path),
+            "external_drive": is_external,
+            "db_path": db_path,
+        },
+        "memories": {
+            "total": memory_count,
+        },
+        "ollama": {
+            "online": ollama_ok,
+            "url": OLLAMA_BASE_URL,
+            "models": ollama_models,
+        },
+        "conversations": {
+            "active": conversation_tracker.get_active_count(),
+        },
+    }

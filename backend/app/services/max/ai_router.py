@@ -205,9 +205,9 @@ class AIRouter:
 
     # ── Non-streaming chat ──────────────────────────────────────────────
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None) -> AIResponse:
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None) -> AIResponse:
         use_model = model or self.primary_model
-        prompt = get_desk_system_prompt(desk) if desk else self.system_prompt
+        prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
 
         image_path = None
         if image_filename:
@@ -271,9 +271,9 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None) -> AsyncGenerator[tuple[str, str], None]:
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None) -> AsyncGenerator[tuple[str, str], None]:
         use_model = model or self.primary_model
-        prompt = get_desk_system_prompt(desk) if desk else self.system_prompt
+        prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
 
         image_path = None
         if image_filename:
