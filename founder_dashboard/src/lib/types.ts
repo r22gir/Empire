@@ -144,6 +144,26 @@ export interface StreamEvent {
   error?: string;
 }
 
+export interface BrainStatus {
+  brain_online: boolean;
+  storage: {
+    path: string;
+    external_drive: boolean;
+    db_path: string;
+  };
+  memories: {
+    total: number;
+  };
+  ollama: {
+    online: boolean;
+    url: string;
+    models: string[];
+  };
+  conversations: {
+    active: number;
+  };
+}
+
 /** Legacy task shape from /max/tasks endpoint (used by useSystemData) */
 export interface MaxTask {
   id: string;

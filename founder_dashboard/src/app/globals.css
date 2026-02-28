@@ -204,6 +204,7 @@ html, body {
 }
 .dot-online  { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; animation: pulse-online 2.2s infinite; }
 .dot-offline { width: 7px; height: 7px; border-radius: 50%; background: #ef4444; }
+.dot-warning { width: 7px; height: 7px; border-radius: 50%; background: #f59e0b; animation: pulse-online 2.2s infinite; }
 .dot-unknown { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
 
 /* ── Pulsing Mic Button ──────────────────────────────────────── */

@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Desk, AIModel, UploadedFile, MaxTask, Reminder,
-  AINotification, ServiceHealth, SystemStats,
+  AINotification, ServiceHealth, SystemStats, BrainStatus,
 } from '@/lib/types';
 import { API_URL } from '@/lib/api';
 import { MOCK_DESKS, MOCK_MODELS } from '@/lib/mockData';
@@ -35,6 +35,7 @@ export function useSystemData() {
     homepage: false, amp: false, socialforge: false,
   });
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
+  const [brainStatus, setBrainStatus] = useState<BrainStatus | null>(null);
 
   /* ── port probe (2 s timeout, any response = alive) ───────── */
   const checkPort = useCallback(async (url: string): Promise<boolean> => {
@@ -101,6 +102,11 @@ export function useSystemData() {
     if (r) setSystemStats(await r.json());
   }, []);
 
+  const fetchBrainStatus = useCallback(async () => {
+    const r = await timedFetch(API_URL + '/max/brain/status', 5000);
+    if (r) setBrainStatus(await r.json());
+  }, []);
+
   /* ── polling ───────────────────────────────────────────────── */
   useEffect(() => {
     checkHealth();
@@ -111,12 +117,13 @@ export function useSystemData() {
   useEffect(() => {
     if (!backendOnline) return;
     fetchDesks(); fetchModels(); fetchStats(); fetchFiles(); fetchTasks();
-    fetchNotifications(); fetchSystemStats();
+    fetchNotifications(); fetchSystemStats(); fetchBrainStatus();
     const i1 = setInterval(() => { fetchDesks(); fetchStats(); fetchFiles(); fetchTasks(); }, 30000);
     const i2 = setInterval(fetchSystemStats, 15000);
     const i3 = setInterval(fetchNotifications, 10000);
-    return () => { clearInterval(i1); clearInterval(i2); clearInterval(i3); };
-  }, [backendOnline, fetchDesks, fetchModels, fetchStats, fetchFiles, fetchTasks, fetchNotifications, fetchSystemStats]);
+    const i4 = setInterval(fetchBrainStatus, 30000);
+    return () => { clearInterval(i1); clearInterval(i2); clearInterval(i3); clearInterval(i4); };
+  }, [backendOnline, fetchDesks, fetchModels, fetchStats, fetchFiles, fetchTasks, fetchNotifications, fetchSystemStats, fetchBrainStatus]);
 
   /* ── reminders (localStorage) ──────────────────────────────── */
   useEffect(() => {
@@ -168,7 +175,7 @@ export function useSystemData() {
     backendOnline,
     desks, models, selectedModel, setSelectedModel,
     stats, files, tasks, reminders, aiNotifications,
-    serviceHealth, systemStats,
+    serviceHealth, systemStats, brainStatus,
     fetchDesks, fetchModels, fetchStats, fetchFiles, fetchTasks, fetchNotifications,
     addReminder, toggleReminder, deleteReminder,
     createTask, completeTask, failTask,

@@ -419,6 +419,7 @@ export default function CommandCenter() {
               serviceHealth={sys.serviceHealth}
               backendOnline={sys.backendOnline}
               models={sys.models}
+              brainStatus={sys.brainStatus}
             />
           </>
         )}

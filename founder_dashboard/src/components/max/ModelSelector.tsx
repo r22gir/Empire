@@ -9,6 +9,9 @@ interface ModelSelectorProps {
 }
 
 export default function ModelSelector({ models, selectedModel, onSelect }: ModelSelectorProps) {
+  const cloudModels = models.filter(m => m.type === 'cloud');
+  const localModels = models.filter(m => m.type !== 'cloud');
+
   return (
     <div className="flex items-center gap-2">
       <Cpu className="w-3.5 h-3.5 shrink-0" style={{ color: 'var(--purple)' }} />
@@ -23,11 +26,24 @@ export default function ModelSelector({ models, selectedModel, onSelect }: Model
           fontFamily: "'JetBrains Mono', monospace",
         }}
       >
-        {models.map(m => (
-          <option key={m.id} value={m.id}>
-            {m.available ? '◆' : '◇'} {m.name}{m.primary ? ' ✦' : ''}
-          </option>
-        ))}
+        {cloudModels.length > 0 && (
+          <optgroup label="Cloud">
+            {cloudModels.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.available ? '◆' : '◇'} {m.name}{m.primary ? ' ✦' : ''}
+              </option>
+            ))}
+          </optgroup>
+        )}
+        {localModels.length > 0 && (
+          <optgroup label="Local">
+            {localModels.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.available ? '◆' : '◇'} {m.name}{m.primary ? ' ✦' : ''}
+              </option>
+            ))}
+          </optgroup>
+        )}
         {models.length === 0 && <option value="claude">◇ Claude 4.6 Sonnet</option>}
       </select>
     </div>
