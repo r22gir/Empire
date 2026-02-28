@@ -411,3 +411,32 @@ async def get_desk_daily_report():
     """Get end-of-day desk report."""
     report = await ai_desk_manager.generate_daily_report()
     return {"report": report}
+
+
+# ── TTS (Text-to-Speech) ─────────────────────────────────────────────
+
+
+class TTSRequest(BaseModel):
+    text: str
+    voice: str = "onyx"
+    speed: float = 1.0
+
+
+@router.post("/tts")
+async def text_to_speech(request: TTSRequest):
+    """Convert text to speech audio (MP3). Used by Command Center voice playback."""
+    from app.services.max.tts_service import tts_service
+
+    if not tts_service.is_configured:
+        raise HTTPException(status_code=503, detail="TTS not configured — OPENAI_API_KEY not set")
+
+    audio_bytes = await tts_service.synthesize_for_web(request.text)
+    if not audio_bytes:
+        raise HTTPException(status_code=500, detail="TTS synthesis failed")
+
+    from fastapi.responses import Response
+    return Response(
+        content=audio_bytes,
+        media_type="audio/mpeg",
+        headers={"Content-Disposition": "inline; filename=max_speech.mp3"},
+    )

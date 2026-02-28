@@ -199,8 +199,11 @@ class TelegramBot:
 
     # ── Chat with MAX ───────────────────────────────────────────
 
-    async def _chat_with_max(self, text: str, image_filename: Optional[str] = None) -> str:
-        """Send message to MAX via the backend API."""
+    async def _chat_with_max(self, text: str, image_filename: Optional[str] = None) -> tuple[str, str]:
+        """Send message to MAX via the backend API.
+
+        Returns (html_response, plain_text) — html for Telegram display, plain for TTS.
+        """
         try:
             payload: Dict[str, Any] = {"message": text, "history": []}
             if image_filename:
@@ -211,12 +214,30 @@ class TelegramBot:
                     data = resp.json()
                     model = data.get("model_used", "")
                     response = data.get("response", "No response.")
-                    return f"{response}\n\n<i>— via {model}</i>"
+                    html = f"{response}\n\n<i>— via {model}</i>"
+                    return html, response
                 else:
-                    return f"Backend error: {resp.status_code}"
+                    err = f"Backend error: {resp.status_code}"
+                    return err, err
         except Exception as e:
             logger.error(f"MAX chat error: {e}")
-            return f"Could not reach MAX: {e}"
+            err = f"Could not reach MAX: {e}"
+            return err, err
+
+    async def _send_voice_reply(self, update, plain_text: str):
+        """Generate TTS audio from plain text and send as Telegram voice note."""
+        try:
+            from app.services.max.tts_service import tts_service
+            if not tts_service.is_configured:
+                return
+            audio_path = await tts_service.synthesize_for_telegram(plain_text)
+            if audio_path and audio_path.exists():
+                try:
+                    await update.message.reply_voice(voice=open(audio_path, "rb"))
+                finally:
+                    audio_path.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"TTS voice reply failed: {e}")
 
     # ── Full bot with python-telegram-bot ────────────────────────
 
@@ -335,10 +356,13 @@ class TelegramBot:
             await update.message.reply_chat_action("typing")
 
             # Get natural MAX response (always shown to user)
-            response = await self._chat_with_max(text)
-            if len(response) > 4000:
-                response = response[:4000] + "\n\n<i>[truncated]</i>"
-            await update.message.reply_html(response)
+            html_response, plain_text = await self._chat_with_max(text)
+            if len(html_response) > 4000:
+                html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
+            await update.message.reply_html(html_response)
+
+            # Send voice reply (TTS)
+            await self._send_voice_reply(update, plain_text)
 
             # Classify and store in inbox silently (background, never shown to user)
             try:
@@ -377,12 +401,15 @@ class TelegramBot:
 
                 # 4. Send transcript TEXT to Grok (same as if user typed it)
                 await update.message.reply_chat_action("typing")
-                response = await self._chat_with_max(transcript)
-                if len(response) > 4000:
-                    response = response[:4000] + "\n\n<i>[truncated]</i>"
+                html_response, plain_text = await self._chat_with_max(transcript)
+                if len(html_response) > 4000:
+                    html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
 
-                # 5. Send Grok's response back to Telegram
-                await update.message.reply_html(response)
+                # 5. Send Grok's text response back to Telegram
+                await update.message.reply_html(html_response)
+
+                # 5b. Send Grok's response as voice note (TTS)
+                await self._send_voice_reply(update, plain_text)
 
                 # 6. Silent background classification
                 try:
