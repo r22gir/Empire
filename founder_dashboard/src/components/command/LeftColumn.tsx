@@ -1,6 +1,6 @@
 'use client';
 import { Message, AIModel, ChatSession } from '@/lib/types';
-import { LayoutGrid, Plus, ChevronDown, ChevronRight, MessageSquare, Trash2, Pencil, Check, X } from 'lucide-react';
+import { LayoutGrid, Plus, ChevronDown, ChevronRight, MessageSquare, Trash2, Pencil, Check, X, Rocket } from 'lucide-react';
 import { useState } from 'react';
 import MaxSection from './MaxSection';
 
@@ -26,6 +26,8 @@ interface Props {
   onDeleteConversation: (id: string) => void;
   onRenameConversation: (id: string, title: string) => void;
   onSuggest: (prompt: string) => void;
+  onOpenWorkspaces?: () => void;
+  onOpenWorkspace?: (id: string) => void;
 }
 
 export default function LeftColumn({
@@ -33,6 +35,7 @@ export default function LeftColumn({
   onOpenDeskGrid,
   conversations, activeConversationId, onSelectConversation, onNewChat,
   onDeleteConversation, onRenameConversation, onSuggest,
+  onOpenWorkspaces, onOpenWorkspace,
 }: Props) {
   const [showConvos, setShowConvos] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -76,6 +79,16 @@ export default function LeftColumn({
             <LayoutGrid className="w-3 h-3" />
             Desks
           </button>
+          {onOpenWorkspaces && (
+            <button
+              onClick={onOpenWorkspaces}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold transition"
+              style={{ background: 'var(--purple)', color: '#fff', border: '1px solid var(--purple-border)' }}
+            >
+              <Rocket className="w-3 h-3" />
+              Apps
+            </button>
+          )}
           <button
             onClick={onNewChat}
             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium transition"

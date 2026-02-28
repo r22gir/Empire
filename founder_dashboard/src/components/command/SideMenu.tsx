@@ -11,13 +11,17 @@ interface Props {
   onDeleteConversation: (id: string) => void;
   onRenameConversation: (id: string, title: string) => void;
   onSuggest: (prompt: string) => void;
+  onOpenWorkspace?: (id: string) => void;
 }
 
 const EMPIRE_APPS = [
-  { name: 'WorkroomForge', port: 3001, icon: '🪡' },
-  { name: 'LuxeForge',     port: 3002, icon: '💎' },
-  { name: 'Homepage',      port: 8080, icon: '🏠' },
-  { name: 'API Docs',      port: 8000, icon: '⚡', path: '/docs' },
+  { name: 'WorkroomForge',  id: 'workroomforge', icon: '🪡', ready: true },
+  { name: 'MarketForge',    id: 'marketforge',   icon: '🛒', ready: false },
+  { name: 'AMP',            id: 'amp',            icon: '📢', ready: false },
+  { name: 'SocialForge',    id: 'socialforge',    icon: '🌐', ready: false },
+  { name: 'LuxeForge',      id: 'luxeforge',      icon: '💎', ready: false },
+  { name: 'RecoveryForge',  id: 'recoveryforge',  icon: '🔄', ready: false },
+  { name: 'CRM',            id: 'crm',            icon: '👥', ready: false },
 ];
 
 const SUGGESTIONS = [
@@ -30,6 +34,7 @@ const SUGGESTIONS = [
 export default function SideMenu({
   conversations, activeConversationId, onSelectConversation,
   onNewChat, onDeleteConversation, onRenameConversation, onSuggest,
+  onOpenWorkspace,
 }: Props) {
   const [showConvos, setShowConvos] = useState(true);
   const [showApps, setShowApps] = useState(false);
@@ -171,14 +176,17 @@ export default function SideMenu({
             {EMPIRE_APPS.map(app => (
               <button
                 key={app.name}
-                onClick={() => window.open(`http://localhost:${app.port}${(app as { path?: string }).path || ''}`, '_blank')}
+                onClick={() => onOpenWorkspace?.(app.id)}
                 className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition"
                 onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
                 <span className="text-sm">{app.icon}</span>
                 <span className="flex-1 text-xs" style={{ color: 'var(--text-primary)' }}>{app.name}</span>
-                <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>:{app.port}</span>
+                {app.ready
+                  ? <span className="dot-online" />
+                  : <span className="text-[8px] px-1 py-0.5 rounded font-bold" style={{ color: 'var(--text-muted)', background: 'var(--elevated)' }}>SOON</span>
+                }
               </button>
             ))}
           </div>

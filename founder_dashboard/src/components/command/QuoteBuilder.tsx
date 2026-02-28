@@ -87,7 +87,7 @@ export default function QuoteBuilder({ onClose }: Props) {
   // ── Item management ──────────────────────────────────────
   const updateItem = (idx: number, field: keyof LineItem, value: string | number) => {
     const items = [...data.line_items];
-    (items[idx] as Record<string, unknown>)[field] = value;
+    (items[idx] as unknown as Record<string, unknown>)[field] = value;
     items[idx].amount = items[idx].quantity * items[idx].rate;
     setData({ ...data, line_items: items });
   };

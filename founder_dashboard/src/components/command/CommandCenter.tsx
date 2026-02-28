@@ -13,6 +13,9 @@ import RightColumn from './RightColumn';
 import BottomBar from './BottomBar';
 import DeskGrid from './DeskGrid';
 import ActiveDeskView from './ActiveDeskView';
+import WorkspaceOverview, { EMPIRE_APPS } from './WorkspaceOverview';
+import WorkroomForgeWorkspace from './WorkroomForgeWorkspace';
+import PlaceholderWorkspace from './PlaceholderWorkspace';
 
 export default function CommandCenter() {
   const history = useChatHistory();
@@ -32,6 +35,10 @@ export default function CommandCenter() {
 
   /* ── Desk grid modal ──────────────────────────────────────── */
   const [showDeskGrid, setShowDeskGrid] = useState(false);
+
+  /* ── Workspace navigation ───────────────────────────────── */
+  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [showWorkspaces, setShowWorkspaces] = useState(false);
 
   /* ── Suggestion input ─────────────────────────────────────── */
   const [suggestedInput, setSuggestedInput] = useState('');
@@ -93,12 +100,14 @@ export default function CommandCenter() {
         setShowDeskGrid(false);
       } else if (e.key === 'Escape') {
         if (showDeskGrid) setShowDeskGrid(false);
+        else if (activeWorkspace) setActiveWorkspace(null);
+        else if (showWorkspaces) setShowWorkspaces(false);
         else if (desk.activeDesk) desk.closeDesk();
       }
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
-  }, [desk, showDeskGrid]);
+  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces]);
 
   /* ── File operations ────────────────────────────────────── */
   const uploadPastedImage = async () => {
@@ -370,7 +379,20 @@ export default function CommandCenter() {
 
       {/* ════ MAIN CONTENT AREA ══════════════════════════════ */}
       <div className="flex-1 flex min-h-0">
-        {desk.activeDesk ? (
+        {/* Workspace view — full width */}
+        {activeWorkspace ? (
+          activeWorkspace === 'workroomforge' ? (
+            <WorkroomForgeWorkspace onBack={() => setActiveWorkspace(null)} />
+          ) : (
+            <PlaceholderWorkspace
+              app={EMPIRE_APPS.find(a => a.id === activeWorkspace) || EMPIRE_APPS[0]}
+              onBack={() => setActiveWorkspace(null)}
+            />
+          )
+        ) : showWorkspaces ? (
+          /* Workspace overview grid */
+          <WorkspaceOverview onOpenWorkspace={(id) => { setActiveWorkspace(id); setShowWorkspaces(false); }} />
+        ) : desk.activeDesk ? (
           <ActiveDeskView activeDesk={desk.activeDesk} onClose={desk.closeDesk} />
         ) : (
           <>
@@ -389,6 +411,8 @@ export default function CommandCenter() {
               onDeleteConversation={(id) => { history.deleteConversation(id); if (history.activeId === id) chat.loadMessages([], null); }}
               onRenameConversation={history.renameConversation}
               onSuggest={setSuggestedInput}
+              onOpenWorkspaces={() => setShowWorkspaces(true)}
+              onOpenWorkspace={setActiveWorkspace}
             />
             <RightColumn
               systemStats={sys.systemStats}
