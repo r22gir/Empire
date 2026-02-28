@@ -32,7 +32,7 @@ export function useSystemData() {
   const [aiNotifications,setAiNotifications]= useState<AINotification[]>([]);
   const [serviceHealth,  setServiceHealth]  = useState<ServiceHealth>({
     backend: false, workroomforge: false, luxeforge: false,
-    homepage: false,
+    homepage: false, amp: false, socialforge: false,
   });
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
 
@@ -53,13 +53,15 @@ export function useSystemData() {
   /* ── service health ────────────────────────────────────────── */
   const checkHealth = useCallback(async () => {
     const base = API_URL.replace('/api/v1', '');
-    const [be, wf, lx, hp] = await Promise.all([
+    const [be, wf, lx, hp, amp, sf] = await Promise.all([
       checkPort(base + '/health'),
       checkPort('http://localhost:3001'),
       checkPort('http://localhost:3002'),
       checkPort('http://localhost:8080'),
+      checkPort('http://localhost:3003'),
+      checkPort('http://localhost:3004'),
     ]);
-    setServiceHealth({ backend: be, workroomforge: wf, luxeforge: lx, homepage: hp });
+    setServiceHealth({ backend: be, workroomforge: wf, luxeforge: lx, homepage: hp, amp, socialforge: sf });
     setBackendOnline(be);
   }, [checkPort]);
 

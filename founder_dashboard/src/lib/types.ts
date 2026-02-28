@@ -119,10 +119,12 @@ export interface AINotification {
 }
 
 export interface ServiceHealth {
-  backend:      boolean;
+  backend:       boolean;
   workroomforge: boolean;
-  luxeforge:    boolean;
-  homepage:     boolean;
+  luxeforge:     boolean;
+  homepage:      boolean;
+  amp:           boolean;
+  socialforge:   boolean;
 }
 
 export interface SystemStats {
