@@ -21,6 +21,9 @@ import PiPOverlay from './canvas/PiPOverlay';
 import PresentationCanvas, { parseSlides } from './canvas/PresentationCanvas';
 import { urlToMediaItem, type MediaItem } from './canvas/MediaController';
 import { saveSnapshot, autoLabel, autoTags } from './canvas/CanvasHistory';
+// Phase 3
+import CommsCanvas, { parseCommsFromContent } from './canvas/CommsCanvas';
+import WorkspaceCanvas, { isWorkspaceContent } from './canvas/WorkspaceCanvas';
 
 /* ── Code Block with Copy + Collapse ────────────────────────── */
 function CodeBlock({ children, className }: { children: string; className?: string }) {
@@ -81,6 +84,8 @@ function ModeBadge({ mode }: { mode: CanvasMode }) {
     image: '#D946EF',
     split: 'var(--purple)',
     media: '#ef4444',
+    comms: '#22c55e',
+    workspace: '#f59e0b',
   };
 
   return (
@@ -246,6 +251,18 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
     return parseSlides(content, analysis);
   }, [analysis, content]);
 
+  /* ── Build comms data from analysis (Phase 3) ─────────────── */
+  const commsData = useMemo(() => {
+    if (!analysis?.isComms || !content) return null;
+    return parseCommsFromContent(content);
+  }, [analysis, content]);
+
+  /* ── Detect workspace mode (Phase 3) ─────────────────────── */
+  const workspaceActive = useMemo(() => {
+    if (!analysis) return false;
+    return analysis.isWorkspace;
+  }, [analysis]);
+
   /* ── Determine avatar state ───────────────────────────────── */
   const avatarState = useMemo(() => {
     if (!isStreaming && !content) return 'idle' as const;
@@ -349,6 +366,30 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
                   autoAdvance={5000}
                   isStreaming={isStreaming}
                 />
+              ) : mode === 'comms' && commsData ? (
+                <>
+                  {/* Comms canvas (Phase 3) */}
+                  <CommsCanvas
+                    call={commsData.call}
+                    thread={commsData.thread}
+                  />
+                  {/* Still render markdown text below */}
+                  <div className="mt-3">
+                    <MarkdownContent content={content} />
+                  </div>
+                </>
+              ) : mode === 'workspace' && workspaceActive ? (
+                <>
+                  {/* Workspace canvas (Phase 3) */}
+                  <WorkspaceCanvas
+                    codeBlocks={analysis?.codeBlocks}
+                    isStreaming={isStreaming}
+                  />
+                  {/* Render non-code text below */}
+                  <div className="mt-3">
+                    <MarkdownContent content={content} />
+                  </div>
+                </>
               ) : (
                 <>
                   {/* Structured content (charts, metrics, previews, media) rendered above text */}

@@ -19,3 +19,9 @@ export { useMedia, urlToMediaItem, extractYoutubeId, extractVimeoId, formatTime,
 export type { MediaItem, MediaState, MediaActions } from './MediaController';
 export { loadHistory, saveSnapshot, deleteSnapshot, clearHistory, searchHistory, getByMode, getRecent, autoLabel, autoTags } from './CanvasHistory';
 export type { CanvasSnapshot } from './CanvasHistory';
+
+// Phase 3
+export { default as CommsCanvas, parseCommsFromContent } from './CommsCanvas';
+export type { CallInfo, ThreadMessage, CommsThread, CommsView } from './CommsCanvas';
+export { default as WorkspaceCanvas, isWorkspaceContent } from './WorkspaceCanvas';
+export type { WorkspaceTab, CodeBlock as WorkspaceCodeBlock, TerminalOutput, CalendarEvent, QuoteLine, QuotePreview } from './WorkspaceCanvas';

@@ -64,6 +64,8 @@ export interface AnalysisResult {
   hasCode: boolean;
   codeBlocks: { lang: string; code: string }[];
   isPresentation: boolean;   // Phase 2: detected presentation structure
+  isComms: boolean;          // Phase 3: detected comms content (calls/messages)
+  isWorkspace: boolean;      // Phase 3: detected workspace content (code/terminal/quote/calendar)
 }
 
 /* ── Pattern matchers ─────────────────────────────────────────── */
@@ -78,6 +80,8 @@ const VIDEO_EXT_REGEX = /\.(mp4|webm|ogg|mov)(\?.*)?$/i;
 const AUDIO_EXT_REGEX = /\.(mp3|wav|m4a|aac|flac)(\?.*)?$/i;
 const STREAM_REGEX = /\.(m3u8|mpd)(\?.*)?$/i;
 const PRESENTATION_REGEX = /morning briefing|daily report|weekly report|presentation|slide deck/i;
+const COMMS_REGEX = /(?:call(?:ed|ing)?|phone call|video call)\s+(?:with\s+)?[A-Z][a-z]+|(?:message|telegram|email|text|sms|whatsapp)\s+(?:from|thread|conversation)\s+[A-Z]/i;
+const WORKSPACE_REGEX = /(?:terminal|console|shell|command line|running|executed|output|compile|build|npm|yarn|pip|cargo|make)\s/i;
 const METRIC_REGEX = /(?:^|\n)[\s]*(?:\*\*|#+\s*)?\$?[\d,]+\.?\d*[%KMBkmb]?(?:\s*(?:→|->|↑|↓|▲|▼)\s*\$?[\d,]+\.?\d*[%KMBkmb]?)?/g;
 const DOC_REF_REGEX = /\b[\w-]+\.(pdf|docx?|xlsx?|csv|pptx?)\b/gi;
 const BLOCKQUOTE_REGEX = /(?:^|\n)>\s+(.+?)(?:\n(?!>)|$)/g;
@@ -172,6 +176,8 @@ export function analyzeContent(content: string): AnalysisResult {
     hasCode: false,
     codeBlocks: [],
     isPresentation: false,
+    isComms: false,
+    isWorkspace: false,
   };
 
   if (!content || content.trim().length === 0) {
@@ -258,9 +264,24 @@ export function analyzeContent(content: string): AnalysisResult {
     (dividerCount >= 2 && headingCount >= 2)
   );
 
+  // 9. Detect comms content (Phase 3)
+  result.isComms = COMMS_REGEX.test(content);
+
+  // 10. Detect workspace content (Phase 3)
+  const hasMultipleCodeBlocks = result.codeBlocks.length >= 2;
+  const hasTerminalPatterns = WORKSPACE_REGEX.test(content) && result.hasCode;
+  const hasQuoteBuilder = /(?:quote|estimate|invoice|proposal)\s*(?:#|number|for)/i.test(content) &&
+    /(?:subtotal|total|line items?|qty|quantity)/i.test(content);
+  const hasCalendarContent = /(?:schedule|calendar|appointments?|meetings?)\s+(?:for|this|next|today)/i.test(content) &&
+    /\d{1,2}:\d{2}/.test(content);
+  result.isWorkspace = hasMultipleCodeBlocks || hasTerminalPatterns || hasQuoteBuilder || hasCalendarContent;
+
   // ── Determine primary mode ─────────────────────────────────
   const modes: CanvasMode[] = [];
 
+  // Comms and workspace take high priority (Phase 3)
+  if (result.isComms) modes.push('comms');
+  if (result.isWorkspace) modes.push('workspace');
   // Presentation takes priority if detected
   if (result.isPresentation) modes.push('presentation');
   if (result.charts.length > 0) modes.push('chart');
@@ -303,6 +324,8 @@ export function shouldReanalyze(prev: string, next: string): boolean {
   if (/!\[/.test(tail)) return true; // Image
   if (/```/.test(tail)) return true; // Code block
   if (/\*\*[^*]+\*\*[:\s]+\$?[\d,]/.test(tail)) return true; // Metric
+  if (/call(?:ed|ing)?\s+(?:with\s+)?[A-Z]/i.test(tail)) return true; // Comms
+  if (/terminal|console|schedule|calendar/i.test(tail)) return true; // Workspace
   if (diff > 200) return true; // Big chunk
 
   return false;
