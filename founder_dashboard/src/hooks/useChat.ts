@@ -19,13 +19,28 @@ export function useChat({ onSave }: UseChatOptions = {}) {
   const [isStreaming,     setIsStreaming]      = useState(false);
   const [streamingContent,setStreamingContent]= useState('');
   const [streamingModel,  setStreamingModel]  = useState('');
-  const abortRef  = useRef<AbortController | null>(null);
-  const chatIdRef = useRef<string | null>(null);
+  const abortRef     = useRef<AbortController | null>(null);
+  const chatIdRef    = useRef<string | null>(null);
+  const streamingRef = useRef(false);
+  const messagesRef  = useRef<Message[]>([WELCOME]);
+  const onSaveRef    = useRef(onSave);
+  onSaveRef.current  = onSave;
+
+  // Keep messagesRef in sync
+  const updateMessages = useCallback((msgs: Message[] | ((prev: Message[]) => Message[])) => {
+    setMessages(prev => {
+      const next = typeof msgs === 'function' ? msgs(prev) : msgs;
+      messagesRef.current = next;
+      return next;
+    });
+  }, []);
 
   const setChatId   = useCallback((id: string | null) => { chatIdRef.current = id; }, []);
 
   const loadMessages = useCallback((msgs: Message[], chatId: string | null) => {
-    setMessages(msgs.length > 0 ? msgs : [WELCOME]);
+    const next = msgs.length > 0 ? msgs : [WELCOME];
+    setMessages(next);
+    messagesRef.current = next;
     chatIdRef.current = chatId;
   }, []);
 
@@ -36,18 +51,22 @@ export function useChat({ onSave }: UseChatOptions = {}) {
     history?: Message[],
     desk?: string,
   ) => {
-    if (!input.trim() || isStreaming) return;
+    if (!input.trim() || streamingRef.current) return;
 
     const userMsg: Message = { role: 'user', content: input, image: selectedImage?.name };
-    const current   = history || messages;
+    const current   = history || messagesRef.current;
     const newMsgs   = [...current, userMsg];
-    setMessages(newMsgs);
+    updateMessages(newMsgs);
     setIsStreaming(true);
+    streamingRef.current = true;
     setStreamingContent('');
     setStreamingModel('');
 
     const ctrl = new AbortController();
     abortRef.current = ctrl;
+
+    let accumulated = '';
+    let modelUsed   = '';
 
     try {
       const body: Record<string, unknown> = {
@@ -88,8 +107,7 @@ export function useChat({ onSave }: UseChatOptions = {}) {
 
       const reader  = response.body.getReader();
       const decoder = new TextDecoder();
-      let accumulated = usingFallback ? FALLBACK_NOTICE : '';
-      let modelUsed   = '';
+      accumulated = usingFallback ? FALLBACK_NOTICE : '';
       let buf = '';
       const toolResults: ToolResult[] = [];
 
@@ -118,6 +136,7 @@ export function useChat({ onSave }: UseChatOptions = {}) {
               });
             } else if (ev.type === 'done') {
               modelUsed = ev.model_used || '';
+              setStreamingModel(modelUsed);
             } else if (ev.type === 'error') {
               accumulated += '\n\n*Error: ' + (ev.content || 'Unknown error') + '*';
               setStreamingContent(accumulated);
@@ -133,31 +152,32 @@ export function useChat({ onSave }: UseChatOptions = {}) {
         ...(toolResults.length > 0 ? { toolResults } : {}),
       };
       const finalMsgs = [...newMsgs, assistantMsg];
-      setMessages(finalMsgs);
+      updateMessages(finalMsgs);
       setStreamingContent('');
 
-      if (onSave) {
-        const savedId = await onSave(finalMsgs, chatIdRef.current);
+      if (onSaveRef.current) {
+        const savedId = await onSaveRef.current(finalMsgs, chatIdRef.current);
         if (savedId) chatIdRef.current = savedId;
       }
     } catch (e: any) {
       if (e.name === 'AbortError') {
-        if (streamingContent) {
-          setMessages(prev => [...prev, {
+        if (accumulated) {
+          updateMessages(prev => [...prev, {
             role: 'assistant',
-            content: streamingContent + '\n\n*[Stopped]*',
-            model: streamingModel,
+            content: accumulated + '\n\n*[Stopped]*',
+            model: modelUsed,
           }]);
         }
       } else {
-        setMessages(prev => [...prev, { role: 'assistant', content: '**⚡ All chat routes unavailable.** Both the FastAPI backend and Grok fallback failed.' }]);
+        updateMessages(prev => [...prev, { role: 'assistant', content: '**⚡ All chat routes unavailable.** Both the FastAPI backend and Grok fallback failed.' }]);
       }
       setStreamingContent('');
     } finally {
       setIsStreaming(false);
+      streamingRef.current = false;
       abortRef.current = null;
     }
-  }, [messages, isStreaming, onSave, streamingContent, streamingModel]);
+  }, [updateMessages]);
 
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
 
