@@ -23,6 +23,7 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const micCaptureCtxRef = useRef<AudioContext | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const playbackQueueRef = useRef<Float32Array[]>([]);
@@ -167,22 +168,43 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    if (!audioCtxRef.current) {
-      audioCtxRef.current = new AudioContext({ sampleRate: 24000 });
-    }
-    const ctx = audioCtxRef.current;
-
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { sampleRate: { ideal: 24000 }, channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
     micStreamRef.current = stream;
 
-    // Register the PCM capture worklet
+    // Create a capture context at the mic's native sample rate (Firefox
+    // does not allow connecting MediaStreamSource to an AudioContext with
+    // a different sample rate).
+    const micCtx = new AudioContext();
+    micCaptureCtxRef.current = micCtx;
+    const nativeRate = micCtx.sampleRate;
+    const TARGET_RATE = 24000;
+
+    // Register the PCM capture worklet — resamples to 24 kHz on the fly
     const workletCode = `
       class PCMProcessor extends AudioWorkletProcessor {
+        constructor() {
+          super();
+          this._buf = [];
+          this._nativeRate = ${nativeRate};
+          this._targetRate = ${TARGET_RATE};
+          this._ratio = this._nativeRate / this._targetRate;
+        }
         process(inputs) {
           const input = inputs[0][0];
-          if (input) this.port.postMessage(input);
+          if (!input) return true;
+          if (this._nativeRate === this._targetRate) {
+            this.port.postMessage(input);
+          } else {
+            // Simple linear resampling
+            const outLen = Math.floor(input.length / this._ratio);
+            const out = new Float32Array(outLen);
+            for (let i = 0; i < outLen; i++) {
+              out[i] = input[Math.floor(i * this._ratio)];
+            }
+            this.port.postMessage(out);
+          }
           return true;
         }
       }
@@ -190,11 +212,11 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
     `;
     const blob = new Blob([workletCode], { type: 'application/javascript' });
     const url = URL.createObjectURL(blob);
-    await ctx.audioWorklet.addModule(url);
+    await micCtx.audioWorklet.addModule(url);
     URL.revokeObjectURL(url);
 
-    const source = ctx.createMediaStreamSource(stream);
-    const worklet = new AudioWorkletNode(ctx, 'pcm-capture');
+    const source = micCtx.createMediaStreamSource(stream);
+    const worklet = new AudioWorkletNode(micCtx, 'pcm-capture');
     workletNodeRef.current = worklet;
 
     worklet.port.onmessage = (e: MessageEvent<Float32Array>) => {
@@ -213,7 +235,7 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
     };
 
     source.connect(worklet);
-    worklet.connect(ctx.destination);
+    worklet.connect(micCtx.destination);
     setIsTalking(true);
   }, []);
 
@@ -250,6 +272,8 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
     workletNodeRef.current = null;
     audioCtxRef.current?.close();
     audioCtxRef.current = null;
+    micCaptureCtxRef.current?.close();
+    micCaptureCtxRef.current = null;
     playbackQueueRef.current = [];
     isPlayingRef.current = false;
     setIsTalking(false);
@@ -263,6 +287,7 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
       micStreamRef.current?.getTracks().forEach(t => t.stop());
       workletNodeRef.current?.disconnect();
       audioCtxRef.current?.close();
+      micCaptureCtxRef.current?.close();
     };
   }, []);
 
