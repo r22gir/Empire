@@ -96,6 +96,12 @@ try:
 except ImportError:
     Quote = None
 
+# Inbox models
+try:
+    from app.models.inbox import InboxMessage
+except ImportError:
+    InboxMessage = None
+
 # Chat Backup and Decision Context models
 try:
     from app.models.chat_backup import ChatSession, ChatMessage, DecisionContext, DisruptionEvent
@@ -132,6 +138,8 @@ __all__ = [
     "SatisfactionRating",
     # Quotes
     "Quote",
+    # Inbox
+    "InboxMessage",
     # Chat Backup and Decision Context
     "ChatSession",
     "ChatMessage",

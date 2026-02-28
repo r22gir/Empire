@@ -121,6 +121,82 @@ class TelegramBot:
             logger.error(f"Failed to download Telegram file: {e}")
             return None
 
+    # ── Inbox + Intent Classification ──────────────────────────
+
+    async def _classify_and_store(self, text: str, telegram_message_id: Optional[int] = None) -> Dict[str, Any]:
+        """Classify message intent via AI and store in inbox."""
+        import json as _json
+
+        # Classify intent
+        classify_prompt = (
+            "Classify this message from a business founder into exactly one category. "
+            "Respond with ONLY a JSON object, no other text:\n"
+            '{"intent": "task|question|instruction|note", '
+            '"desk_target": "workroomforge|marketforge|socialforge|amp|recoveryforge|support|null", '
+            '"priority": 1-10, '
+            '"summary": "one-line summary"}\n\n'
+            f"Message: {text}"
+        )
+
+        intent_data = {"intent": "note", "desk_target": None, "priority": 5, "summary": text[:100]}
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "http://localhost:8000/api/v1/max/chat",
+                    json={"message": classify_prompt, "history": []},
+                )
+                if resp.status_code == 200:
+                    raw = resp.json().get("response", "")
+                    # Extract JSON from response
+                    start = raw.find("{")
+                    end = raw.rfind("}") + 1
+                    if start >= 0 and end > start:
+                        parsed = _json.loads(raw[start:end])
+                        intent_data.update({
+                            "intent": parsed.get("intent", "note"),
+                            "desk_target": parsed.get("desk_target"),
+                            "priority": min(10, max(1, int(parsed.get("priority", 5)))),
+                            "summary": parsed.get("summary", text[:100]),
+                        })
+        except Exception as e:
+            logger.error(f"Intent classification failed: {e}")
+
+        # Store in inbox
+        inbox_msg = {
+            "text": text,
+            "source": "telegram",
+            "telegram_message_id": telegram_message_id,
+            **intent_data,
+            "ai_summary": intent_data["summary"],
+            "status": "received",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post("http://localhost:8000/api/v1/inbox", json=inbox_msg)
+                if resp.status_code == 200:
+                    inbox_msg = resp.json().get("message", inbox_msg)
+        except Exception as e:
+            logger.error(f"Inbox storage failed: {e}")
+
+        # If it's a task, create it in the task engine
+        if intent_data["intent"] == "task":
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    task_payload = {
+                        "title": intent_data["summary"],
+                        "description": text,
+                        "desk_id": intent_data.get("desk_target") or "operations",
+                        "priority": intent_data["priority"],
+                    }
+                    resp = await client.post("http://localhost:8000/api/v1/max/tasks", json=task_payload)
+                    if resp.status_code == 200:
+                        task_data = resp.json()
+                        inbox_msg["linked_task_id"] = task_data.get("task", {}).get("id")
+            except Exception as e:
+                logger.error(f"Task creation failed: {e}")
+
+        return intent_data
+
     # ── Chat with MAX ───────────────────────────────────────────
 
     async def _chat_with_max(self, text: str, image_filename: Optional[str] = None) -> str:
@@ -249,17 +325,41 @@ class TelegramBot:
                 "📷 <b>Photo</b> — Analyzed with AI vision"
             )
 
-        # Handle text messages
+        # Handle text messages — classify, store in inbox, then respond
         async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
                 return
             text = update.message.text
+            msg_id = update.message.message_id
+
+            # Immediate acknowledgment
+            await update.message.reply_html("✅ <b>Got it, I'll handle this.</b>")
             await update.message.reply_chat_action("typing")
-            response = await self._chat_with_max(text)
-            # Telegram HTML max is 4096 chars
-            if len(response) > 4000:
-                response = response[:4000] + "\n\n<i>[truncated]</i>"
-            await update.message.reply_html(response)
+
+            # Classify and store
+            intent_data = await self._classify_and_store(text, telegram_message_id=msg_id)
+            intent = intent_data.get("intent", "note")
+            summary = intent_data.get("summary", "")
+            desk = intent_data.get("desk_target")
+
+            # Intent-specific behavior
+            intent_emoji = {"task": "📋", "question": "❓", "instruction": "📌", "note": "📝"}.get(intent, "📝")
+            status_line = f"{intent_emoji} <b>Classified as:</b> {intent.upper()}"
+            if desk:
+                status_line += f" → {desk}"
+            if intent == "task":
+                status_line += f"\n✅ Task created: <i>{summary}</i>"
+
+            # For questions, also get a full response
+            if intent == "question":
+                response = await self._chat_with_max(text)
+                if len(response) > 3800:
+                    response = response[:3800] + "\n\n<i>[truncated]</i>"
+                full_reply = f"{status_line}\n\n{response}"
+            else:
+                full_reply = f"{status_line}\n<i>{summary}</i>"
+
+            await update.message.reply_html(full_reply)
 
         # Handle voice messages
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
