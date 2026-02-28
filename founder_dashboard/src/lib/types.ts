@@ -164,6 +164,50 @@ export interface BrainStatus {
   };
 }
 
+export interface TokenModelBreakdown {
+  model: string;
+  provider: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost: number;
+  requests: number;
+}
+
+export interface TokenDailyUsage {
+  day: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost: number;
+  requests: number;
+}
+
+export interface TokenStats {
+  period_days: number;
+  total: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    cost_usd: number;
+    requests: number;
+  };
+  today: {
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+    requests: number;
+  };
+  by_model: TokenModelBreakdown[];
+  daily: TokenDailyUsage[];
+  budget: {
+    monthly_limit: number;
+    monthly_spent: number;
+    percent_used: number;
+    alert: boolean;
+    auto_switch_to_local: boolean;
+    auto_switch_threshold: number;
+  };
+}
+
 /** Legacy task shape from /max/tasks endpoint (used by useSystemData) */
 export interface MaxTask {
   id: string;

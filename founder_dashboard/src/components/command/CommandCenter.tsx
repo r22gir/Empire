@@ -420,6 +420,7 @@ export default function CommandCenter() {
               backendOnline={sys.backendOnline}
               models={sys.models}
               brainStatus={sys.brainStatus}
+              tokenStats={sys.tokenStats}
             />
           </>
         )}

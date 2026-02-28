@@ -17,6 +17,7 @@ from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUS
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
+from app.services.max.token_tracker import token_tracker
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
@@ -93,6 +94,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         conversation_tracker.add_message(conv_id, "assistant", response.content)
         background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
 
+        # Log token usage
+        input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
+        token_tracker.log_chat(response.model_used, input_text, response.content, "chat", conv_id)
+
         return ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -126,6 +131,11 @@ async def chat_stream(request: ChatRequest):
             model = AIModel(request.model)
         except ValueError:
             pass
+
+    # Auto-switch to local if budget threshold reached
+    if model != AIModel.OLLAMA and token_tracker.should_switch_to_local():
+        logger.info("Budget threshold reached — auto-switching to Ollama")
+        model = AIModel.OLLAMA
 
     # Build brain-enriched system prompt before streaming (non-desk only)
     enriched_prompt = None
@@ -164,6 +174,10 @@ async def chat_stream(request: ChatRequest):
                 await conversation_tracker.check_and_summarize(conv_id)
             except Exception as e:
                 logger.warning(f"Conversation summarization failed: {e}")
+
+            # Log token usage
+            input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
+            token_tracker.log_chat(model_used, input_text, full_response, "chat/stream", conv_id)
 
             yield f"data: {json.dumps({'type': 'done', 'model_used': model_used})}\n\n"
         except Exception as e:
@@ -312,3 +326,28 @@ async def brain_status():
             "active": conversation_tracker.get_active_count(),
         },
     }
+
+
+@router.get("/tokens/stats")
+async def get_token_stats(days: int = 30):
+    """Get token usage statistics and cost tracking."""
+    return token_tracker.get_stats(days=days)
+
+
+class BudgetUpdateRequest(BaseModel):
+    monthly_budget: Optional[float] = None
+    alert_threshold: Optional[float] = None
+    auto_switch_to_local: Optional[bool] = None
+    auto_switch_threshold: Optional[float] = None
+
+
+@router.patch("/tokens/budget")
+async def update_budget(request: BudgetUpdateRequest):
+    """Update monthly budget configuration."""
+    token_tracker.update_budget(
+        monthly_budget=request.monthly_budget,
+        alert_threshold=request.alert_threshold,
+        auto_switch=request.auto_switch_to_local,
+        auto_switch_threshold=request.auto_switch_threshold,
+    )
+    return {"status": "updated"}
