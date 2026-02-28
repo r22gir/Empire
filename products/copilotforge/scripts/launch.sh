@@ -32,6 +32,19 @@ fi
 echo $$ > "$LOCK_FILE"
 trap "rm -f '$LOCK_FILE'" EXIT
 
+# ── Auto-start backend + frontend if not running ─────────────────────
+if ! pgrep -f "uvicorn app.main:app" >/dev/null 2>&1; then
+    echo -e "${DIM}Starting backend...${NC}"
+    cd ~/Empire/backend && source ~/Empire/venv/bin/activate
+    python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 &
+    disown
+fi
+if ! pgrep -f "next dev -p 3009" >/dev/null 2>&1; then
+    echo -e "${DIM}Starting frontend...${NC}"
+    cd ~/Empire/founder_dashboard && npm run dev > /tmp/frontend.log 2>&1 &
+    disown
+fi
+
 # ── Banner ───────────────────────────────────────────────────────────
 echo ""
 echo -e "${BLUE}+-------------------------------------------------------+${NC}"
