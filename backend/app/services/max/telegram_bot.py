@@ -346,7 +346,7 @@ class TelegramBot:
             except Exception as e:
                 logger.warning(f"Background classification failed: {e}")
 
-        # Handle voice messages
+        # Handle voice messages — transcribe then send transcript text to Grok
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
                 return
@@ -355,17 +355,40 @@ class TelegramBot:
                 return
             await update.message.reply_chat_action("typing")
             await update.message.reply_text("🎤 Transcribing voice...")
+
+            # 1. Download audio file
             audio_path = await self._download_telegram_file(voice.file_id, suffix=".ogg")
             if not audio_path:
                 await update.message.reply_text("Failed to download audio.")
                 return
+
             try:
-                transcript = self._transcribe_audio(audio_path)
+                # 2. Transcribe audio → text (run in thread to avoid blocking event loop)
+                loop = asyncio.get_event_loop()
+                transcript = await loop.run_in_executor(None, self._transcribe_audio, audio_path)
+
+                # Guard: if transcription failed, tell user and stop
+                if not transcript or transcript.startswith("["):
+                    await update.message.reply_text(f"Transcription issue: {transcript or 'empty result'}")
+                    return
+
+                # 3. Show transcript to user
                 await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
+
+                # 4. Send transcript TEXT to Grok (same as if user typed it)
+                await update.message.reply_chat_action("typing")
                 response = await self._chat_with_max(transcript)
                 if len(response) > 4000:
                     response = response[:4000] + "\n\n<i>[truncated]</i>"
+
+                # 5. Send Grok's response back to Telegram
                 await update.message.reply_html(response)
+
+                # 6. Silent background classification
+                try:
+                    await self._classify_and_store(transcript, telegram_message_id=update.message.message_id)
+                except Exception as e:
+                    logger.warning(f"Voice classification failed: {e}")
             finally:
                 audio_path.unlink(missing_ok=True)
 
