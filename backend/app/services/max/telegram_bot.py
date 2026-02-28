@@ -225,10 +225,14 @@ class TelegramBot:
             return err, err
 
     async def _send_voice_reply(self, update, plain_text: str):
-        """Generate TTS audio from plain text and send as Telegram voice note."""
+        """Generate TTS audio from plain text and send as Telegram voice note.
+
+        Every response MUST include a voice note — founder listens while driving.
+        """
         try:
             from app.services.max.tts_service import tts_service
             if not tts_service.is_configured:
+                logger.warning("TTS not configured (OPENAI_API_KEY missing) — voice reply skipped")
                 return
             audio_path = await tts_service.synthesize_for_telegram(plain_text)
             if audio_path and audio_path.exists():
@@ -236,8 +240,10 @@ class TelegramBot:
                     await update.message.reply_voice(voice=open(audio_path, "rb"))
                 finally:
                     audio_path.unlink(missing_ok=True)
+            else:
+                logger.warning("TTS synthesis returned no audio — voice reply skipped")
         except Exception as e:
-            logger.warning(f"TTS voice reply failed: {e}")
+            logger.error(f"TTS voice reply failed: {e}")
 
     # ── Full bot with python-telegram-bot ────────────────────────
 
@@ -439,10 +445,13 @@ class TelegramBot:
                 import shutil
                 shutil.move(str(photo_path), str(dest))
                 caption = update.message.caption or "Describe this image in detail."
-                response = await self._chat_with_max(caption, image_filename=dest.name)
-                if len(response) > 4000:
-                    response = response[:4000] + "\n\n<i>[truncated]</i>"
-                await update.message.reply_html(response)
+                html_response, plain_text = await self._chat_with_max(caption, image_filename=dest.name)
+                if len(html_response) > 4000:
+                    html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
+                await update.message.reply_html(html_response)
+
+                # Send voice reply (TTS) — every response gets a voice note
+                await self._send_voice_reply(update, plain_text)
             except Exception as e:
                 await update.message.reply_text(f"Photo analysis failed: {e}")
 
