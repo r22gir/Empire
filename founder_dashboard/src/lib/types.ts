@@ -208,6 +208,20 @@ export interface TokenStats {
   };
 }
 
+/** AI Desk status from /max/ai-desks/status */
+export interface AIDeskStatus {
+  desk_id: string;
+  desk_name: string;
+  description: string;
+  capabilities: string[];
+  active_tasks: number;
+  completed_today: number;
+  escalated: number;
+  status: 'idle' | 'busy' | 'error';
+  pending_followups?: number;
+  pending_reminders?: number;
+}
+
 /** Legacy task shape from /max/tasks endpoint (used by useSystemData) */
 export interface MaxTask {
   id: string;

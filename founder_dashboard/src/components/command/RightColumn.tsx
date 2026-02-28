@@ -1,8 +1,9 @@
 'use client';
-import { ServiceHealth, SystemStats, AIModel, BrainStatus, TokenStats } from '@/lib/types';
+import { ServiceHealth, SystemStats, AIModel, BrainStatus, TokenStats, AIDeskStatus } from '@/lib/types';
 import SystemStatusPanel from './SystemStatusPanel';
 import TokenCostPanel from './TokenCostPanel';
 import OllamaBrainPanel from './OllamaBrainPanel';
+import AIDeskGrid from './AIDeskGrid';
 import EmpireBoxPanel from './EmpireBoxPanel';
 import ForgePanel from './ForgePanel';
 import CrmPanel from './CrmPanel';
@@ -14,9 +15,10 @@ interface Props {
   models: AIModel[];
   brainStatus: BrainStatus | null;
   tokenStats: TokenStats | null;
+  aiDeskStatuses: AIDeskStatus[];
 }
 
-export default function RightColumn({ systemStats, serviceHealth, backendOnline, models, brainStatus, tokenStats }: Props) {
+export default function RightColumn({ systemStats, serviceHealth, backendOnline, models, brainStatus, tokenStats, aiDeskStatuses }: Props) {
   return (
     <div className="overflow-y-auto p-2 space-y-2" style={{ width: '220px', minWidth: '220px' }}>
       <SystemStatusPanel
@@ -26,6 +28,10 @@ export default function RightColumn({ systemStats, serviceHealth, backendOnline,
       />
       <TokenCostPanel
         tokenStats={tokenStats}
+        backendOnline={backendOnline}
+      />
+      <AIDeskGrid
+        aiDeskStatuses={aiDeskStatuses}
         backendOnline={backendOnline}
       />
       <OllamaBrainPanel

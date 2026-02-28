@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Desk, AIModel, UploadedFile, MaxTask, Reminder,
   AINotification, ServiceHealth, SystemStats, BrainStatus, TokenStats,
+  AIDeskStatus,
 } from '@/lib/types';
 import { API_URL } from '@/lib/api';
 import { MOCK_DESKS, MOCK_MODELS } from '@/lib/mockData';
@@ -37,6 +38,7 @@ export function useSystemData() {
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
   const [brainStatus, setBrainStatus] = useState<BrainStatus | null>(null);
   const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
+  const [aiDeskStatuses, setAiDeskStatuses] = useState<AIDeskStatus[]>([]);
 
   /* ── port probe (2 s timeout, any response = alive) ───────── */
   const checkPort = useCallback(async (url: string): Promise<boolean> => {
@@ -113,6 +115,11 @@ export function useSystemData() {
     if (r) setTokenStats(await r.json());
   }, []);
 
+  const fetchAIDeskStatuses = useCallback(async () => {
+    const r = await timedFetch(API_URL + '/max/ai-desks/status');
+    if (r) { const d = await r.json(); setAiDeskStatuses(d.desks || []); }
+  }, []);
+
   /* ── polling ───────────────────────────────────────────────── */
   useEffect(() => {
     checkHealth();
@@ -124,12 +131,13 @@ export function useSystemData() {
     if (!backendOnline) return;
     fetchDesks(); fetchModels(); fetchStats(); fetchFiles(); fetchTasks();
     fetchNotifications(); fetchSystemStats(); fetchBrainStatus(); fetchTokenStats();
+    fetchAIDeskStatuses();
     const i1 = setInterval(() => { fetchDesks(); fetchStats(); fetchFiles(); fetchTasks(); }, 30000);
     const i2 = setInterval(fetchSystemStats, 15000);
     const i3 = setInterval(fetchNotifications, 10000);
-    const i4 = setInterval(() => { fetchBrainStatus(); fetchTokenStats(); }, 30000);
+    const i4 = setInterval(() => { fetchBrainStatus(); fetchTokenStats(); fetchAIDeskStatuses(); }, 30000);
     return () => { clearInterval(i1); clearInterval(i2); clearInterval(i3); clearInterval(i4); };
-  }, [backendOnline, fetchDesks, fetchModels, fetchStats, fetchFiles, fetchTasks, fetchNotifications, fetchSystemStats, fetchBrainStatus, fetchTokenStats]);
+  }, [backendOnline, fetchDesks, fetchModels, fetchStats, fetchFiles, fetchTasks, fetchNotifications, fetchSystemStats, fetchBrainStatus, fetchTokenStats, fetchAIDeskStatuses]);
 
   /* ── reminders (localStorage) ──────────────────────────────── */
   useEffect(() => {
@@ -181,7 +189,7 @@ export function useSystemData() {
     backendOnline,
     desks, models, selectedModel, setSelectedModel,
     stats, files, tasks, reminders, aiNotifications,
-    serviceHealth, systemStats, brainStatus, tokenStats,
+    serviceHealth, systemStats, brainStatus, tokenStats, aiDeskStatuses,
     fetchDesks, fetchModels, fetchStats, fetchFiles, fetchTasks, fetchNotifications,
     addReminder, toggleReminder, deleteReminder,
     createTask, completeTask, failTask,

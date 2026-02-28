@@ -421,6 +421,7 @@ export default function CommandCenter() {
               models={sys.models}
               brainStatus={sys.brainStatus}
               tokenStats={sys.tokenStats}
+              aiDeskStatuses={sys.aiDeskStatuses}
             />
           </>
         )}
