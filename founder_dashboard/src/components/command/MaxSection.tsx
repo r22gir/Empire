@@ -37,10 +37,10 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
 
   return (
     <div
-      className="rounded-2xl p-5 flex flex-col"
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)', minHeight: 0 }}
+      className="rounded-2xl p-5"
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}
     >
-      <div className="flex items-start gap-4 shrink-0">
+      <div className="flex items-start gap-4">
         {/* Animated avatar */}
         <div className="relative shrink-0">
           <div
@@ -96,11 +96,11 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
         </div>
       </div>
 
-      {/* Response area — scrollable, fills available space */}
+      {/* Response area — scrollable */}
       <div
         ref={scrollRef}
-        className="mt-3 flex-1 overflow-y-auto"
-        style={{ maxHeight: '45vh', minHeight: '60px' }}
+        className="mt-3 overflow-y-auto"
+        style={{ maxHeight: '40vh' }}
       >
         {/* Typing indicator */}
         {isStreaming && !streamingContent && (

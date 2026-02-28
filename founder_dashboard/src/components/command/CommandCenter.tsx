@@ -201,8 +201,8 @@ export default function CommandCenter() {
 
   return (
     <div
-      className="h-screen flex flex-col overflow-hidden empire-ambient"
-      style={{ background: 'var(--void)', color: 'var(--text-primary)' }}
+      className="flex flex-col overflow-hidden empire-ambient"
+      style={{ background: 'var(--void)', color: 'var(--text-primary)', height: 'calc(100vh - 44px)' }}
     >
       {/* ════ IMAGE PREVIEW MODAL ════════════════════════════ */}
       {previewImage && (
