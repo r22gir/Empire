@@ -15,6 +15,12 @@ import WebPreviewCanvas from './canvas/WebPreviewCanvas';
 import DocumentCanvas from './canvas/DocumentCanvas';
 import SplitCanvas from './canvas/SplitCanvas';
 import CanvasTransition from './canvas/CanvasTransition';
+// Phase 2
+import MediaCanvas from './canvas/MediaCanvas';
+import PiPOverlay from './canvas/PiPOverlay';
+import PresentationCanvas, { parseSlides } from './canvas/PresentationCanvas';
+import { urlToMediaItem, type MediaItem } from './canvas/MediaController';
+import { saveSnapshot, autoLabel, autoTags } from './canvas/CanvasHistory';
 
 /* ── Code Block with Copy + Collapse ────────────────────────── */
 function CodeBlock({ children, className }: { children: string; className?: string }) {
@@ -156,6 +162,9 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
   const userScrolled = useRef(false);
   const lastAnalyzed = useRef('');
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  // Phase 2 state
+  const [pipItem, setPipItem] = useState<MediaItem | null>(null);
+  const lastSavedContent = useRef('');
 
   /* ── Content analysis (runs during streaming) ─────────────── */
   useEffect(() => {
@@ -207,6 +216,36 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
     scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  /* ── Save to canvas history when streaming ends (Phase 2) ── */
+  useEffect(() => {
+    if (!isStreaming && analysis && content && content !== lastSavedContent.current) {
+      if (analysis.primaryMode !== 'avatar') {
+        saveSnapshot({
+          mode: analysis.primaryMode,
+          label: autoLabel(analysis),
+          content,
+          analysis,
+          tags: autoTags(analysis),
+        });
+        lastSavedContent.current = content;
+      }
+    }
+  }, [isStreaming, analysis, content]);
+
+  /* ── Build media items from analysis (Phase 2) ────────────── */
+  const mediaItems = useMemo((): MediaItem[] => {
+    if (!analysis) return [];
+    return analysis.mediaRefs
+      .map(ref => urlToMediaItem(ref.url, ref.title))
+      .filter((item): item is MediaItem => item !== null);
+  }, [analysis]);
+
+  /* ── Build presentation slides (Phase 2) ──────────────────── */
+  const slides = useMemo(() => {
+    if (!analysis?.isPresentation || !content) return [];
+    return parseSlides(content, analysis);
+  }, [analysis, content]);
+
   /* ── Determine avatar state ───────────────────────────────── */
   const avatarState = useMemo(() => {
     if (!isStreaming && !content) return 'idle' as const;
@@ -241,6 +280,18 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
     // Standalone images (not inline markdown images)
     if (analysis.images.length > 1) {
       elements.push(<ImageCanvas key="images" images={analysis.images} inline />);
+    }
+
+    // Media (Phase 2)
+    if (mediaItems.length > 0) {
+      elements.push(
+        <MediaCanvas
+          key="media"
+          items={mediaItems}
+          onPipToggle={(item) => setPipItem(item)}
+          inline
+        />
+      );
     }
 
     // Quotes
@@ -291,11 +342,22 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
                 </div>
               )}
 
-              {/* Structured content (charts, metrics, previews) rendered above text */}
-              {renderStructuredContent()}
+              {/* Presentation mode — full slide view (Phase 2) */}
+              {mode === 'presentation' && slides.length > 1 ? (
+                <PresentationCanvas
+                  slides={slides}
+                  autoAdvance={5000}
+                  isStreaming={isStreaming}
+                />
+              ) : (
+                <>
+                  {/* Structured content (charts, metrics, previews, media) rendered above text */}
+                  {renderStructuredContent()}
 
-              {/* Main markdown text */}
-              <MarkdownContent content={content} />
+                  {/* Main markdown text */}
+                  <MarkdownContent content={content} />
+                </>
+              )}
 
               {/* Streaming cursor */}
               {isStreaming && <span className="streaming-cursor" />}
@@ -313,6 +375,15 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
         >
           <ChevronUp className="w-4 h-4" />
         </button>
+      )}
+
+      {/* PiP Overlay (Phase 2) — floats above everything */}
+      {pipItem && (
+        <PiPOverlay
+          item={pipItem}
+          onClose={() => setPipItem(null)}
+          onExpand={() => setPipItem(null)}
+        />
       )}
     </div>
   );

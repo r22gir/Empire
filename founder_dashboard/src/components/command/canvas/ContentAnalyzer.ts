@@ -45,6 +45,12 @@ export interface QuoteData {
   source?: string;
 }
 
+export interface MediaRef {
+  url: string;
+  type: 'youtube' | 'vimeo' | 'video' | 'audio' | 'stream' | 'iframe';
+  title?: string;
+}
+
 export interface AnalysisResult {
   primaryMode: CanvasMode;
   secondaryModes: CanvasMode[];
@@ -53,9 +59,11 @@ export interface AnalysisResult {
   webPreviews: WebPreview[];
   images: ImageData[];
   quotes: QuoteData[];
+  mediaRefs: MediaRef[];     // Phase 2: detected media URLs
   textContent: string;       // The text portions (non-structured)
   hasCode: boolean;
   codeBlocks: { lang: string; code: string }[];
+  isPresentation: boolean;   // Phase 2: detected presentation structure
 }
 
 /* ── Pattern matchers ─────────────────────────────────────────── */
@@ -64,7 +72,12 @@ const TABLE_REGEX = /(\|.+\|\n\|[\s|:-]+\|\n(?:\|.+\|\n?)+)/g;
 const URL_REGEX = /(https?:\/\/[^\s)>\]]+)/g;
 const IMAGE_URL_REGEX = /!\[([^\]]*)\]\(([^)]+)\)/g;
 const IMAGE_EXT_REGEX = /\.(png|jpg|jpeg|gif|webp|svg)(\?.*)?$/i;
-const YOUTUBE_REGEX = /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/;
+const YOUTUBE_REGEX = /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/;
+const VIMEO_REGEX = /vimeo\.com\/(\d+)/;
+const VIDEO_EXT_REGEX = /\.(mp4|webm|ogg|mov)(\?.*)?$/i;
+const AUDIO_EXT_REGEX = /\.(mp3|wav|m4a|aac|flac)(\?.*)?$/i;
+const STREAM_REGEX = /\.(m3u8|mpd)(\?.*)?$/i;
+const PRESENTATION_REGEX = /morning briefing|daily report|weekly report|presentation|slide deck/i;
 const METRIC_REGEX = /(?:^|\n)[\s]*(?:\*\*|#+\s*)?\$?[\d,]+\.?\d*[%KMBkmb]?(?:\s*(?:→|->|↑|↓|▲|▼)\s*\$?[\d,]+\.?\d*[%KMBkmb]?)?/g;
 const DOC_REF_REGEX = /\b[\w-]+\.(pdf|docx?|xlsx?|csv|pptx?)\b/gi;
 const BLOCKQUOTE_REGEX = /(?:^|\n)>\s+(.+?)(?:\n(?!>)|$)/g;
@@ -154,9 +167,11 @@ export function analyzeContent(content: string): AnalysisResult {
     webPreviews: [],
     images: [],
     quotes: [],
+    mediaRefs: [],
     textContent: content,
     hasCode: false,
     codeBlocks: [],
+    isPresentation: false,
   };
 
   if (!content || content.trim().length === 0) {
@@ -219,13 +234,40 @@ export function analyzeContent(content: string): AnalysisResult {
   const docRefs = contentWithoutCode.match(DOC_REF_REGEX);
   const hasDocRefs = docRefs && docRefs.length > 0;
 
+  // 7. Detect media URLs (Phase 2)
+  for (const wp of result.webPreviews) {
+    if (YOUTUBE_REGEX.test(wp.url)) {
+      result.mediaRefs.push({ url: wp.url, type: 'youtube', title: wp.title });
+    } else if (VIMEO_REGEX.test(wp.url)) {
+      result.mediaRefs.push({ url: wp.url, type: 'vimeo', title: wp.title });
+    } else if (VIDEO_EXT_REGEX.test(wp.url)) {
+      result.mediaRefs.push({ url: wp.url, type: 'video', title: wp.title });
+    } else if (AUDIO_EXT_REGEX.test(wp.url)) {
+      result.mediaRefs.push({ url: wp.url, type: 'audio', title: wp.title });
+    } else if (STREAM_REGEX.test(wp.url)) {
+      result.mediaRefs.push({ url: wp.url, type: 'stream', title: wp.title });
+    }
+  }
+
+  // 8. Detect presentation structure (Phase 2)
+  const headingCount = (content.match(/^##\s+/gm) || []).length;
+  const dividerCount = (content.match(/^---$/gm) || []).length;
+  result.isPresentation = (
+    PRESENTATION_REGEX.test(content.slice(0, 300)) ||
+    headingCount >= 3 ||
+    (dividerCount >= 2 && headingCount >= 2)
+  );
+
   // ── Determine primary mode ─────────────────────────────────
   const modes: CanvasMode[] = [];
 
+  // Presentation takes priority if detected
+  if (result.isPresentation) modes.push('presentation');
   if (result.charts.length > 0) modes.push('chart');
   if (result.metrics.length >= 3) modes.push('chart'); // Multiple KPIs → chart mode
   if (hasDocRefs) modes.push('document');
-  if (result.webPreviews.some(w => w.type === 'youtube')) modes.push('media');
+  if (result.mediaRefs.length > 0) modes.push('media');
+  else if (result.webPreviews.some(w => w.type === 'youtube')) modes.push('media');
   if (result.webPreviews.some(w => w.type !== 'youtube') && result.webPreviews.length > 0) modes.push('web');
   if (result.images.length > 0) modes.push('image');
 
