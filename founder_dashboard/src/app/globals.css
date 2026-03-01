@@ -27,7 +27,13 @@
   --purple-pale:  rgba(139,92,246,0.08);
   --purple-border:rgba(139,92,246,0.20);
 
-  --cyan:    #22D3EE;
+  --cyan:         #18E0FF;
+  --cyan-dim:     #0BBCE0;
+  --cyan-glow:    rgba(24,224,255,0.18);
+  --cyan-pale:    rgba(24,224,255,0.07);
+  --cyan-border:  rgba(24,224,255,0.15);
+  --cyan-active:  rgba(24,224,255,0.22);
+
   --fuchsia: #D946EF;
 
   --text-primary:   #EDE8D4;
@@ -36,6 +42,16 @@
 
   --border:        rgba(212,175,55,0.10);
   --border-strong: rgba(212,175,55,0.25);
+
+  /* Glass system */
+  --glass-bg:      rgba(10,10,26,0.65);
+  --glass-bg-solid:rgba(10,10,26,0.85);
+  --glass-border:  rgba(255,255,255,0.06);
+  --glass-shine:   rgba(255,255,255,0.03);
+
+  /* Sidebar */
+  --sidebar-w:       64px;
+  --sidebar-w-open: 240px;
 }
 
 /* ── Base ────────────────────────────────────────────────────── */
@@ -55,11 +71,17 @@ html, body {
 ::-webkit-scrollbar-thumb { background: #1e1e38; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
 
-/* ── Ambient Background Orbs ─────────────────────────────────── */
+/* ── Aurora Background ─────────────────────────────────────────── */
 @keyframes orb-drift {
   0%,100% { transform: translate(0,0) scale(1); }
   33%     { transform: translate(35px,-25px) scale(1.06); }
   66%     { transform: translate(-20px,18px) scale(0.96); }
+}
+@keyframes aurora-shift {
+  0%,100% { transform: translate(0,0) rotate(0deg) scale(1); opacity: 0.6; }
+  25%     { transform: translate(60px,-40px) rotate(15deg) scale(1.1); opacity: 0.8; }
+  50%     { transform: translate(-30px,50px) rotate(-10deg) scale(0.95); opacity: 0.5; }
+  75%     { transform: translate(40px,20px) rotate(8deg) scale(1.05); opacity: 0.7; }
 }
 .empire-ambient { position: relative; }
 .empire-ambient::before,
@@ -69,19 +91,19 @@ html, body {
   border-radius: 50%;
   pointer-events: none;
   z-index: 0;
-  filter: blur(150px);
-  animation: orb-drift 28s ease-in-out infinite;
+  filter: blur(180px);
+  animation: aurora-shift 40s ease-in-out infinite;
 }
 .empire-ambient::before {
-  width: 800px; height: 800px;
-  background: radial-gradient(circle, rgba(212,175,55,0.04) 0%, transparent 65%);
-  top: -300px; right: -250px;
+  width: 900px; height: 900px;
+  background: radial-gradient(ellipse, rgba(212,175,55,0.035) 0%, rgba(24,224,255,0.02) 45%, transparent 70%);
+  top: -350px; right: -300px;
 }
 .empire-ambient::after {
-  width: 650px; height: 650px;
-  background: radial-gradient(circle, rgba(139,92,246,0.05) 0%, transparent 65%);
-  bottom: -250px; left: -200px;
-  animation-delay: -14s;
+  width: 750px; height: 750px;
+  background: radial-gradient(ellipse, rgba(24,224,255,0.03) 0%, rgba(139,92,246,0.04) 40%, transparent 70%);
+  bottom: -300px; left: -250px;
+  animation-delay: -20s;
 }
 .empire-ambient > * { position: relative; z-index: 1; }
 
@@ -239,13 +261,154 @@ html, body {
 }
 .max-avatar-glow { animation: avatar-glow 3s ease-in-out infinite; }
 
-/* ── Utility ─────────────────────────────────────────────────── */
+/* ── Glassmorphism Utilities ──────────────────────────────────── */
 .glass {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.glass-solid {
+  background: var(--glass-bg-solid);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+.glass-card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 var(--glass-shine);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-card:hover {
+  border-color: rgba(255,255,255,0.1);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 var(--glass-shine);
+  transform: translateY(-1px);
+}
+.glass-card-cyan {
+  background: var(--glass-bg);
+  border: 1px solid var(--cyan-border);
+  border-radius: 16px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3), 0 0 1px var(--cyan-border), inset 0 1px 0 var(--glass-shine);
 }
 .panel-border { border-color: var(--border); }
+
+/* ── Collapsible Sidebar ────────────────────────────────────── */
+.sidebar-collapsed {
+  width: var(--sidebar-w);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+.sidebar-expanded {
+  width: var(--sidebar-w-open);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Floating Cards ──────────────────────────────────────────── */
+@keyframes float-in {
+  from { opacity: 0; transform: translateX(20px) scale(0.95); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes float-out {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(20px) scale(0.95); }
+}
+.float-card-enter { animation: float-in 0.25s ease-out forwards; }
+.float-card-exit  { animation: float-out 0.2s ease-in forwards; }
+
+.floating-stat-card {
+  position: absolute;
+  right: 16px;
+  z-index: 30;
+  width: 280px;
+  padding: 14px 16px;
+  background: var(--glass-bg-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.05);
+  transition: all 0.25s ease;
+}
+.floating-stat-card:hover {
+  border-color: var(--cyan-border);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 12px var(--cyan-pale);
+}
+
+/* ── Command Palette Bar ─────────────────────────────────────── */
+.command-bar {
+  background: var(--glass-bg-solid);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: 0 -4px 32px rgba(0,0,0,0.4), inset 0 1px 0 var(--glass-shine);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.command-bar:focus-within {
+  border-color: var(--cyan-border);
+  box-shadow: 0 -4px 32px rgba(0,0,0,0.4), 0 0 20px var(--cyan-pale), inset 0 1px 0 var(--glass-shine);
+}
+
+/* ── Cyan Accent Shimmer ─────────────────────────────────────── */
+@keyframes cyan-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.text-cyan-shimmer {
+  background: linear-gradient(90deg, #0BBCE0 0%, #18E0FF 25%, #7EEDFF 50%, #18E0FF 75%, #0BBCE0 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cyan-shimmer 4s linear infinite;
+}
+
+/* ── Sidebar Icon Button ─────────────────────────────────────── */
+.sidebar-icon-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sidebar-icon-btn:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  border-color: var(--glass-border);
+}
+.sidebar-icon-btn.active {
+  background: var(--cyan-pale);
+  color: var(--cyan);
+  border-color: var(--cyan-border);
+}
+.sidebar-icon-btn .icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+.sidebar-icon-btn .label {
+  opacity: 0;
+  transition: opacity 0.2s ease 0.1s;
+  font-size: 13px;
+  font-weight: 500;
+}
+.sidebar-expanded .sidebar-icon-btn .label {
+  opacity: 1;
+}
 
 /* ── Detail Panel Slide-Out ─────────────────────────────────── */
 .detail-panel-backdrop {
@@ -260,14 +423,16 @@ html, body {
   top: 0;
   right: 0;
   height: 100%;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
+  background: var(--glass-bg-solid);
+  border-left: 1px solid var(--glass-border);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   z-index: 50;
   display: flex;
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 0.25s ease;
-  box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+  box-shadow: -8px 0 40px rgba(0,0,0,0.5);
 }
 .detail-panel-slide.open {
   transform: translateX(0);
@@ -275,17 +440,19 @@ html, body {
 
 /* ── Command Center: MAX Avatar Streaming ─────────────────── */
 @keyframes avatar-stream {
-  0%, 100% { box-shadow: 0 0 12px rgba(212,175,55,0.3), 0 0 40px rgba(139,92,246,0.2); }
-  50%      { box-shadow: 0 0 24px rgba(212,175,55,0.55), 0 0 60px rgba(139,92,246,0.35); }
+  0%, 100% { box-shadow: 0 0 12px rgba(24,224,255,0.2), 0 0 40px rgba(212,175,55,0.15); }
+  50%      { box-shadow: 0 0 24px rgba(24,224,255,0.4), 0 0 60px rgba(212,175,55,0.25); }
 }
 .max-avatar-streaming { animation: avatar-stream 1.2s ease-in-out infinite; }
 
-/* ── Command Center: Panel Cards ──────────────────────────── */
+/* ── Panel Cards ──────────────────────────────────────────── */
 .cc-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
   border-radius: 16px;
   padding: 16px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 .cc-panel-header {
   font-size: 10px;
@@ -296,9 +463,80 @@ html, body {
   margin-bottom: 12px;
 }
 
-/* ── Command Center: Desk Grid Modal ─────────────────────── */
+/* ── Desk Grid Modal ─────────────────────────────────────── */
 @keyframes desk-card-in {
   from { opacity: 0; transform: scale(0.92); }
   to   { opacity: 1; transform: scale(1); }
 }
 .desk-card-enter { animation: desk-card-in 0.2s ease-out forwards; }
+
+/* ── Progressive Disclosure (QuickBooks-style) ────────────── */
+.dig-deeper {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+}
+.dig-deeper.open {
+  max-height: 600px;
+  opacity: 1;
+}
+.dig-deeper-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--cyan);
+  cursor: pointer;
+  border: none;
+  background: none;
+  transition: color 0.2s;
+}
+.dig-deeper-trigger:hover { color: var(--cyan-dim); }
+.dig-deeper-trigger svg {
+  transition: transform 0.25s ease;
+}
+.dig-deeper-trigger.open svg {
+  transform: rotate(180deg);
+}
+
+/* ── Stat Pill ────────────────────────────────────────────── */
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.stat-pill:hover {
+  background: rgba(255,255,255,0.14);
+  border-color: rgba(255,255,255,0.22);
+}
+
+/* ── Drag & Drop glow on command bar ─────────────────────── */
+.command-bar.drag-over {
+  border-color: var(--cyan) !important;
+  box-shadow: 0 0 20px var(--cyan-pale), inset 0 0 30px rgba(24,224,255,0.05);
+}
+
+/* ── Warm Glow Ring (around MAX avatar) ───────────────────── */
+@keyframes warm-glow {
+  0%,100% {
+    box-shadow: 0 0 12px rgba(212,175,55,0.2),
+                0 0 30px rgba(24,224,255,0.1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(212,175,55,0.35),
+                0 0 50px rgba(24,224,255,0.2);
+  }
+}
+.warm-glow { animation: warm-glow 3s ease-in-out infinite; }

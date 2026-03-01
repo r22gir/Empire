@@ -1,4 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { corsResponse, corsOptions } from '../cors';
+
+// Allow large base64 image payloads (up to 10MB)
+export const config = {
+  api: { bodyParser: { sizeLimit: '10mb' } },
+};
+
+// Allow up to 60 seconds for xAI vision API
+export const maxDuration = 60;
+
+export async function OPTIONS() { return corsOptions(); }
 
 const VISION_PROMPT = `You are an expert window treatment estimator with 20+ years measuring windows for custom drapery. Analyze this photo and estimate the window dimensions as accurately as possible.
 
@@ -28,16 +39,16 @@ Return JSON only — no markdown, no explanation outside the JSON:
 export async function POST(req: NextRequest) {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
+    return corsResponse(
       { error: 'XAI_API_KEY not configured' },
-      { status: 500 },
+      500,
     );
   }
 
   try {
     const { image } = await req.json();
     if (!image) {
-      return NextResponse.json({ error: 'No image provided' }, { status: 400 });
+      return corsResponse({ error: 'No image provided' }, 400);
     }
 
     // image is a data URL like "data:image/jpeg;base64,..."
@@ -65,9 +76,9 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => 'Unknown error');
-      return NextResponse.json(
+      return corsResponse(
         { error: `xAI Vision error: ${res.status} ${errText}` },
-        { status: res.status },
+        res.status,
       );
     }
 
@@ -77,16 +88,16 @@ export async function POST(req: NextRequest) {
     // Extract JSON from response (may be wrapped in markdown code block)
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return NextResponse.json(
+      return corsResponse(
         { error: 'Could not parse vision response', raw: content },
-        { status: 500 },
+        500,
       );
     }
 
     const analysis = JSON.parse(jsonMatch[0]);
-    return NextResponse.json(analysis);
+    return corsResponse(analysis);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Analysis failed';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return corsResponse({ error: msg }, { status: 500 });
   }
 }

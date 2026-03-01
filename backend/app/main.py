@@ -88,19 +88,29 @@ async def health():
     return {"status": "healthy", "service": "empirebox-backend"}
 
 
-# Telegram Bot auto-start (if configured)
+# Telegram Bot + Desk Scheduler auto-start
 @app.on_event("startup")
-async def start_telegram_bot():
+async def start_background_services():
+    import asyncio
+
+    # Telegram Bot
     try:
         from app.services.max.telegram_bot import telegram_bot
         if telegram_bot.is_configured:
-            import asyncio
             asyncio.create_task(telegram_bot.start_bot())
             print("✓ Telegram Bot: starting in background")
         else:
             print("✗ Telegram Bot: not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_FOUNDER_CHAT_ID)")
     except Exception as e:
         print(f"✗ Telegram Bot: {e}")
+
+    # Desk Scheduler
+    try:
+        from app.services.max.desks.desk_scheduler import desk_scheduler
+        asyncio.create_task(desk_scheduler.start())
+        print("✓ Desk Scheduler: starting in background")
+    except Exception as e:
+        print(f"✗ Desk Scheduler: {e}")
 
 
 if __name__ == "__main__":

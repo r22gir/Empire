@@ -191,6 +191,19 @@ export function analyzeContent(content: string): AnalysisResult {
   while ((codeMatch = codeRegex.exec(content)) !== null) {
     result.hasCode = true;
     result.codeBlocks.push({ lang: codeMatch[1] || 'code', code: codeMatch[2] });
+    // Parse ```chart JSON blocks into ChartData for ChartCanvas
+    if (codeMatch[1] === 'chart') {
+      try {
+        const chartJson = JSON.parse(codeMatch[2]);
+        const labelHeader = chartJson.title || 'Category';
+        const rows = (chartJson.labels || []).map((l: string, i: number) => ({
+          [labelHeader]: l, Value: chartJson.data?.[i] ?? 0,
+        }));
+        if (rows.length > 0) {
+          result.charts.push({ headers: [labelHeader, 'Value'], rows, raw: codeMatch[2] });
+        }
+      } catch { /* invalid chart JSON, skip */ }
+    }
     contentWithoutCode = contentWithoutCode.replace(codeMatch[0], '');
   }
 

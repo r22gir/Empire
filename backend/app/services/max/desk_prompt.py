@@ -58,14 +58,17 @@ def get_desk_system_prompt(desk_id: str) -> str:
         f"({total_open} open)"
     )
 
-    tool_instructions = (
-        "\n\n## Tool Calling\n"
-        "When the user asks you to create a task, respond with a tool block:\n"
-        "```tool\n"
-        '{"tool": "create_task", "title": "...", "description": "...", "priority": "normal", "due_date": "YYYY-MM-DD"}\n'
-        "```\n"
-        "Priority options: urgent, high, normal, low. "
-        "due_date is optional. Always confirm the action in your response text."
-    )
+    try:
+        from app.services.max.tool_executor import TOOLS_DOC
+        tool_instructions = f"\n\n{TOOLS_DOC}"
+    except Exception:
+        tool_instructions = ""
 
-    return f"{config['system_prompt']}\n\n## Live Context\n{task_summary}{tool_instructions}"
+    # Inject code of conduct for this desk
+    try:
+        from app.services.max.conduct import get_conduct_prompt
+        conduct_section = get_conduct_prompt(desk_id)
+    except Exception:
+        conduct_section = ""
+
+    return f"{config['system_prompt']}\n\n## Live Context\n{task_summary}{conduct_section}{tool_instructions}"

@@ -181,6 +181,7 @@ export default function WorkroomForge() {
   const [showCamera, setShowCamera] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const file3DInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -201,6 +202,9 @@ export default function WorkroomForge() {
   // Finance State
   const [financeTab, setFinanceTab] = useState<FinanceTab>('overview')
   const [invoices] = useState(INITIAL_INVOICES)
+
+  // PDF State
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
 
   // ═══════════════════════════════════════════════════════
   // HELPERS
@@ -232,6 +236,62 @@ export default function WorkroomForge() {
     (room.upholstery || []).reduce((sum, u) => sum + calculateUpholsteryPrice(u), 0)
   const calculateGrandTotal = (): number => rooms.reduce((sum, r) => sum + calculateRoomTotal(r), 0)
 
+  const handleDownloadPdf = async () => {
+    setIsGeneratingPdf(true)
+    try {
+      const API = 'http://localhost:8000/api/v1'
+      const lineItems = rooms.flatMap(room => [
+        ...room.windows.map(w => ({
+          description: `${room.name} - ${w.name} (${w.treatmentType}, ${w.liningType})`,
+          quantity: w.quantity,
+          unit: 'ea',
+          rate: calculateWindowPrice(w) / (w.quantity || 1),
+          amount: calculateWindowPrice(w),
+          category: 'labor'
+        })),
+        ...(room.upholstery || []).map(u => ({
+          description: `${room.name} - ${u.name} (${u.furnitureType}, ${u.laborType})`,
+          quantity: 1,
+          unit: 'ea',
+          rate: calculateUpholsteryPrice(u),
+          amount: calculateUpholsteryPrice(u),
+          category: 'labor'
+        }))
+      ])
+      const createRes = await fetch(`${API}/quotes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name: 'Customer',
+          line_items: lineItems,
+          subtotal: calculateGrandTotal(),
+          total: calculateGrandTotal(),
+          business_name: 'Empire',
+          terms: 'Payment due upon completion. 50% deposit required to begin work.',
+          valid_days: 30,
+        })
+      })
+      if (!createRes.ok) throw new Error('Failed to create quote')
+      const { quote } = await createRes.json()
+      const pdfRes = await fetch(`${API}/quotes/${quote.id}/pdf`, { method: 'POST' })
+      if (!pdfRes.ok) throw new Error('Failed to generate PDF')
+      const blob = await pdfRes.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${quote.quote_number}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('PDF generation failed:', err)
+      alert('Failed to generate PDF. Check that the backend is running.')
+    } finally {
+      setIsGeneratingPdf(false)
+    }
+  }
+
   // Room/Window CRUD
   const addRoom = () => setRooms([...rooms, { id: genId(), name: `Room ${rooms.length + 1}`, expanded: true, windows: [], upholstery: [] }])
   const deleteRoom = (roomId: string) => { if (rooms.length > 1) setRooms(rooms.filter(r => r.id !== roomId)) }
@@ -255,20 +315,53 @@ export default function WorkroomForge() {
     else { setActiveUpholsteryId(itemId); setActiveWindowId(null) }
   }
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onload = (e) => { setUploadedImage(e.target?.result as string); setShowCamera(false) }; reader.readAsDataURL(file) } }
+  const handle3DUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!['glb', 'gltf', 'obj', 'ply'].includes(ext || '')) { alert('Please upload a 3D file (.glb, .gltf, .obj, .ply)'); return; }
+    // Upload 3D file to backend for AI analysis
+    try {
+      const fd = new FormData(); fd.append('file', file);
+      const res = await fetch('http://localhost:8000/api/v1/files/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.status === 'success') {
+        alert(`3D scan "${file.name}" uploaded successfully.\nFilename: ${data.filename}\n\nUse the AI analysis tools to process this 3D model for measurement extraction.`);
+      } else { alert('Upload failed: ' + (data.detail || 'Unknown error')); }
+    } catch (err) { alert('Upload failed — ensure the backend is running on port 8000'); }
+    e.target.value = '';
+  }
   const startCamera = async () => { try { const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } }); setCameraStream(stream); setShowCamera(true); if (videoRef.current) videoRef.current.srcObject = stream } catch { alert('Unable to access camera.') } }
   const capturePhoto = () => { if (videoRef.current && canvasRef.current) { const v = videoRef.current, c = canvasRef.current; c.width = v.videoWidth; c.height = v.videoHeight; c.getContext('2d')?.drawImage(v, 0, 0); setUploadedImage(c.toDataURL('image/jpeg', 0.9)); stopCamera() } }
   const stopCamera = () => { cameraStream?.getTracks().forEach(t => t.stop()); setCameraStream(null); setShowCamera(false) }
   const closePhotoModal = () => { stopCamera(); setShowPhotoModal(false); setUploadedImage(null); setAnalysisResult(null) }
 
+  // Compress image to reduce payload size and speed up API calls
+  const compressImage = (dataUrl: string, maxWidth = 1600, quality = 0.8): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        let w = img.width, h = img.height
+        if (w > maxWidth) { h = (h * maxWidth) / w; w = maxWidth }
+        canvas.width = w; canvas.height = h
+        canvas.getContext('2d')?.drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', quality))
+      }
+      img.src = dataUrl
+    })
+  }
+
   const analyzeImage = async () => {
     if (!uploadedImage) return
     setIsAnalyzing(true)
     try {
+      // Compress image to speed up transfer
+      const compressed = await compressImage(uploadedImage)
       const endpoint = photoModalMode === 'upholstery' ? '/api/upholstery' : '/api/measure'
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: uploadedImage }),
+        body: JSON.stringify({ image: compressed }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Analysis failed')
@@ -446,6 +539,17 @@ export default function WorkroomForge() {
                   <p className="text-xl font-bold text-[#C9A84C]">${calculateGrandTotal().toLocaleString()}</p>
                   <p className="text-[10px] text-gray-500">Grand Total</p>
                 </div>
+                <button
+                  onClick={handleDownloadPdf}
+                  disabled={isGeneratingPdf}
+                  className="flex items-center gap-2 bg-[#1a1a2e] hover:bg-[#252540] text-white px-4 py-2 rounded-lg font-semibold text-sm transition border border-white/10 disabled:opacity-50"
+                >
+                  {isGeneratingPdf ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating...</>
+                  ) : (
+                    <><Download className="w-3.5 h-3.5" /> Download PDF</>
+                  )}
+                </button>
                 <button className="flex items-center gap-2 bg-[#C9A84C] hover:bg-[#B8973F] text-[#0D0D0D] px-4 py-2 rounded-lg font-semibold text-sm transition">
                   <Send className="w-3.5 h-3.5" /> Send Quote
                 </button>
@@ -1119,10 +1223,11 @@ export default function WorkroomForge() {
                   <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 p-6 bg-[#1a1a2e] hover:bg-[#252540] border border-dashed border-white/10 hover:border-purple-500/50 rounded-xl group transition">
                     <Upload className="w-8 h-8 text-gray-500 group-hover:text-purple-400" /><span className="text-xs">Upload Photo</span>
                   </button>
-                  <button className="flex flex-col items-center gap-2 p-6 bg-[#1a1a2e] hover:bg-[#252540] border border-dashed border-white/10 hover:border-purple-500/50 rounded-xl group transition">
+                  <button onClick={() => file3DInputRef.current?.click()} className="flex flex-col items-center gap-2 p-6 bg-[#1a1a2e] hover:bg-[#252540] border border-dashed border-white/10 hover:border-purple-500/50 rounded-xl group transition">
                     <Box className="w-8 h-8 text-gray-500 group-hover:text-purple-400" /><span className="text-xs">Polycam 3D</span>
                   </button>
-                  <input ref={fileInputRef} type="file" accept="image/*,.obj,.ply,.glb" onChange={handleFileUpload} className="hidden" />
+                  <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
+                  <input ref={file3DInputRef} type="file" accept=".glb,.gltf,.obj,.ply" onChange={handle3DUpload} className="hidden" />
                 </div>
               )}
 

@@ -45,7 +45,7 @@ export default function EstimatingDesk() {
           <TaskList desk="estimating" compact />
         </div>
         <div className="col-span-1">
-          <PriceBreakdown calc={calc} windowCount={windowCount} />
+          <PriceBreakdown calc={calc} windowCount={windowCount} treatment={treatment} fabricGrade={fabricGrade} windowWidth={windowWidth} windowHeight={windowHeight} />
         </div>
       </div>
     </div>

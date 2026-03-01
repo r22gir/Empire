@@ -14,6 +14,10 @@ import httpx
 
 logger = logging.getLogger("max.telegram")
 
+# ── Per-chat conversation history for memory across messages ──
+_telegram_history: dict[str, list[dict]] = {}
+_MAX_HISTORY = 10  # Keep last 10 exchanges per chat
+
 
 class TelegramBot:
     """Telegram bot for MAX <-> Founder communication with voice/photo/text."""
@@ -79,6 +83,36 @@ class TelegramBot:
         alert = f"🚨 <b>URGENT: {title}</b>\n\n{message}"
         markup = {"inline_keyboard": [[{"text": "✅ Acknowledge", "callback_data": "ack_alert"}]]}
         await self.send_message(alert, reply_markup=markup)
+
+    async def send_document(
+        self,
+        file_path: str,
+        caption: Optional[str] = None,
+        chat_id: Optional[str] = None,
+    ) -> bool:
+        """Send a document/file via Telegram."""
+        if not self.is_configured:
+            logger.warning("Telegram not configured, document not sent")
+            return False
+        target_chat = chat_id or self.founder_chat_id
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                with open(file_path, "rb") as f:
+                    files = {"document": (os.path.basename(file_path), f)}
+                    data: Dict[str, Any] = {"chat_id": target_chat}
+                    if caption:
+                        data["caption"] = caption
+                        data["parse_mode"] = "HTML"
+                    resp = await client.post(
+                        f"{self.api_base}/sendDocument",
+                        data=data,
+                        files=files,
+                    )
+                    resp.raise_for_status()
+                    return True
+        except Exception as e:
+            logger.error(f"Failed to send Telegram document: {e}")
+            return False
 
     # ── Voice transcription ─────────────────────────────────────
 
@@ -199,13 +233,17 @@ class TelegramBot:
 
     # ── Chat with MAX ───────────────────────────────────────────
 
-    async def _chat_with_max(self, text: str, image_filename: Optional[str] = None) -> tuple[str, str]:
-        """Send message to MAX via the backend API.
+    async def _chat_with_max(
+        self, text: str, image_filename: Optional[str] = None, chat_id: Optional[str] = None,
+    ) -> tuple[str, str]:
+        """Send message to MAX via the backend API with conversation memory.
 
         Returns (html_response, plain_text) — html for Telegram display, plain for TTS.
         """
+        cid = str(chat_id or self.founder_chat_id or "default")
+        history = _telegram_history.get(cid, [])[-_MAX_HISTORY:]
         try:
-            payload: Dict[str, Any] = {"message": text, "history": []}
+            payload: Dict[str, Any] = {"message": text, "history": history}
             if image_filename:
                 payload["image_filename"] = image_filename
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -214,6 +252,14 @@ class TelegramBot:
                     data = resp.json()
                     model = data.get("model_used", "")
                     response = data.get("response", "No response.")
+                    # Store in conversation history
+                    if cid not in _telegram_history:
+                        _telegram_history[cid] = []
+                    _telegram_history[cid].append({"role": "user", "content": text})
+                    _telegram_history[cid].append({"role": "assistant", "content": response})
+                    # Trim to keep memory bounded
+                    if len(_telegram_history[cid]) > _MAX_HISTORY * 2:
+                        _telegram_history[cid] = _telegram_history[cid][-_MAX_HISTORY * 2:]
                     html = f"{response}\n\n<i>— via {model}</i>"
                     return html, response
                 else:
@@ -362,7 +408,8 @@ class TelegramBot:
             await update.message.reply_chat_action("typing")
 
             # Get natural MAX response (always shown to user)
-            html_response, plain_text = await self._chat_with_max(text)
+            chat_id = str(update.effective_chat.id) if update.effective_chat else None
+            html_response, plain_text = await self._chat_with_max(text, chat_id=chat_id)
             if len(html_response) > 4000:
                 html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
             await update.message.reply_html(html_response)
@@ -407,7 +454,8 @@ class TelegramBot:
 
                 # 4. Send transcript TEXT to Grok (same as if user typed it)
                 await update.message.reply_chat_action("typing")
-                html_response, plain_text = await self._chat_with_max(transcript)
+                voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+                html_response, plain_text = await self._chat_with_max(transcript, chat_id=voice_chat_id)
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
 
@@ -445,7 +493,8 @@ class TelegramBot:
                 import shutil
                 shutil.move(str(photo_path), str(dest))
                 caption = update.message.caption or "Describe this image in detail."
-                html_response, plain_text = await self._chat_with_max(caption, image_filename=dest.name)
+                photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+                html_response, plain_text = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id)
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
                 await update.message.reply_html(html_response)

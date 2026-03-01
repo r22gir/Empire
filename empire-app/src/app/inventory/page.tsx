@@ -81,8 +81,18 @@ export default function InventoryPage() {
   useEffect(() => {
     const saved = localStorage.getItem('empire_inventory')
     if (saved) {
-      setItems(JSON.parse(saved))
+      try {
+        const parsed = JSON.parse(saved)
+        if (parsed.length > 0) {
+          setItems(parsed)
+          return
+        }
+      } catch {}
     }
+    // Auto-load defaults on first visit
+    const newItems = DEFAULT_MATERIALS.map(m => ({ ...m, id: Math.random().toString(36).substr(2, 9) }))
+    setItems(newItems)
+    localStorage.setItem('empire_inventory', JSON.stringify(newItems))
   }, [])
 
   useEffect(() => {

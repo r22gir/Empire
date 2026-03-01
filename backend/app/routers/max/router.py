@@ -6,9 +6,12 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
+from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot
@@ -16,11 +19,24 @@ from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUS
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
+from app.services.max.brain.brain_config import (
+    REALTIME_LEARNING_ENABLED,
+    BATCH_LEARNING_ENABLED,
+    BATCH_LEARNING_INTERVAL,
+)
 from app.services.max.token_tracker import token_tracker
 from app.services.max.desks import AIDeskManager, TaskStatus
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
+
+
+async def _safe_background(coro, label: str):
+    """Run a coroutine in background, logging any errors without crashing."""
+    try:
+        await coro
+    except Exception as e:
+        logger.warning(f"Background {label} failed: {e}")
 
 # Brain instances (shared across requests)
 conversation_tracker = ConversationTracker()
@@ -98,6 +114,20 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         conversation_tracker.add_message(conv_id, "assistant", response.content)
         background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
 
+        # Learning: real-time (every exchange) or batch (every N messages)
+        if REALTIME_LEARNING_ENABLED:
+            background_tasks.add_task(
+                conversation_tracker.learn_from_exchange,
+                conv_id, request.message, response.content
+            )
+        elif BATCH_LEARNING_ENABLED:
+            msg_count = conversation_tracker.get_message_count(conv_id)
+            if msg_count > 0 and msg_count % BATCH_LEARNING_INTERVAL == 0:
+                background_tasks.add_task(
+                    conversation_tracker.learn_from_exchange,
+                    conv_id, request.message, response.content
+                )
+
         # Log token usage
         input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
         token_tracker.log_chat(response.model_used, input_text, response.content, "chat", conv_id)
@@ -172,12 +202,25 @@ async def chat_stream(request: ChatRequest):
                 result = execute_tool(tc, desk=request.desk)
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
 
-            # Track assistant response and trigger summarization if needed
+            # Track assistant response — fire-and-forget background tasks
             conversation_tracker.add_message(conv_id, "assistant", full_response)
-            try:
-                await conversation_tracker.check_and_summarize(conv_id)
-            except Exception as e:
-                logger.warning(f"Conversation summarization failed: {e}")
+            asyncio.create_task(_safe_background(
+                conversation_tracker.check_and_summarize(conv_id),
+                "summarization"
+            ))
+            # Learning: real-time (every exchange) or batch (every N messages)
+            if REALTIME_LEARNING_ENABLED:
+                asyncio.create_task(_safe_background(
+                    conversation_tracker.learn_from_exchange(conv_id, request.message, full_response),
+                    "real-time learning"
+                ))
+            elif BATCH_LEARNING_ENABLED:
+                msg_count = conversation_tracker.get_message_count(conv_id)
+                if msg_count > 0 and msg_count % BATCH_LEARNING_INTERVAL == 0:
+                    asyncio.create_task(_safe_background(
+                        conversation_tracker.learn_from_exchange(conv_id, request.message, full_response),
+                        "batch learning"
+                    ))
 
             # Log token usage
             input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
@@ -437,7 +480,7 @@ async def text_to_speech(request: TTSRequest):
     from app.services.max.tts_service import tts_service
 
     if not tts_service.is_configured:
-        raise HTTPException(status_code=503, detail="TTS not configured — OPENAI_API_KEY not set")
+        raise HTTPException(status_code=503, detail="TTS not configured — edge-tts package not installed")
 
     audio_bytes = await tts_service.synthesize_for_web(request.text)
     if not audio_bytes:
@@ -449,3 +492,52 @@ async def text_to_speech(request: TTSRequest):
         media_type="audio/mpeg",
         headers={"Content-Disposition": "inline; filename=max_speech.mp3"},
     )
+
+
+# ── Agent Code of Conduct ─────────────────────────────────────────────
+
+
+@router.get("/conduct")
+async def get_all_agent_conducts():
+    """Get all agent codes of conduct."""
+    from app.services.max.conduct import get_all_conducts
+    return get_all_conducts()
+
+
+@router.get("/conduct/{agent_id}")
+async def get_agent_conduct(agent_id: str):
+    """Get code of conduct for a specific agent."""
+    from app.services.max.conduct import get_conduct
+    conduct = get_conduct(agent_id)
+    if not conduct:
+        raise HTTPException(status_code=404, detail=f"No conduct defined for agent '{agent_id}'")
+    return conduct
+
+
+# ── Security Scanner ──────────────────────────────────────────────────
+
+
+@router.get("/security/scan")
+async def run_security_scan():
+    """Run the security scanner on the Empire codebase."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "tools"))
+    from pathlib import Path as P
+    from security_scan import SecurityScanner
+
+    empire_root = P(__file__).parent.parent.parent.parent.parent
+    scanner = SecurityScanner(empire_root)
+    # Quick scan (no npm audit — that's slow)
+    for scan_dir in scanner.__class__.__dict__.get("SCAN_DIRS", []) or ["backend", "founder_dashboard/src"]:
+        dir_path = empire_root / scan_dir
+        if dir_path.exists():
+            scanner.scan_directory(dir_path)
+
+    return {
+        "scan_time": datetime.utcnow().isoformat(),
+        "stats": scanner.stats,
+        "findings_count": len(scanner.findings),
+        "critical": [f for f in scanner.findings if f["severity"] == "CRITICAL"][:10],
+        "high": [f for f in scanner.findings if f["severity"] == "HIGH"][:20],
+        "medium": [f for f in scanner.findings if f["severity"] == "MEDIUM"][:10],
+    }

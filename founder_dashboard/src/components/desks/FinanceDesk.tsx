@@ -2,7 +2,7 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { MOCK_FINANCE, MOCK_TRANSACTIONS, MOCK_INVOICES, Invoice, Transaction } from '@/lib/deskData';
-import { DollarSign, TrendingUp, FileText, PieChart } from 'lucide-react';
+import { DollarSign, TrendingUp, FileText, PieChart, ExternalLink, AlertTriangle, Receipt, ShoppingCart } from 'lucide-react';
 import { StatsBar, FilterTabs, TaskList, DetailPanel } from './shared';
 import RevenueTrend from './finance/RevenueTrend';
 import TransactionList from './finance/TransactionList';
@@ -54,6 +54,34 @@ export default function FinanceDesk() {
           </div>
         ))}
       </div>
+
+      {/* Quick Links — Quotes, Sales, Pending */}
+      {tab === 'overview' && (
+        <div className="flex gap-3 px-4 pt-3 shrink-0">
+          <a href="http://localhost:3001" target="_blank" rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition"
+            style={{ background: 'var(--gold)', color: '#0D0D0D' }}>
+            <Receipt className="w-3.5 h-3.5" /> New Quote <ExternalLink className="w-3 h-3" />
+          </a>
+          <button onClick={() => setTab('invoices')}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition"
+            style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)' }}>
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {MOCK_INVOICES.filter(i => i.status === 'pending').length} Pending Invoices
+          </button>
+          <button onClick={() => setTab('invoices')}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition"
+            style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {MOCK_INVOICES.filter(i => i.status === 'overdue').length} Overdue
+          </button>
+          <a href="/desk/sales"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition"
+            style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+            <ShoppingCart className="w-3.5 h-3.5" /> Sales Pipeline
+          </a>
+        </div>
+      )}
 
       <FilterTabs options={['overview', 'invoices', 'tasks']} active={tab} onChange={setTab} />
 

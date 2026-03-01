@@ -2,7 +2,7 @@ import './globals.css'
 import TopNav from '../components/TopNav'
 
 export const metadata = {
-  title: 'MAX AI | Empire',
+  title: 'MAX | Empire',
   description: 'AI Director',
 }
 
@@ -10,7 +10,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body>
-        <TopNav currentApp="MAX AI" currentPort={3009} />
+        <TopNav currentApp="MAX" currentPort={3009} />
         {children}
       </body>
     </html>

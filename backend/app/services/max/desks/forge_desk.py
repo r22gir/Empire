@@ -1,8 +1,10 @@
 """
 ForgeDesk — WorkroomForge AI desk for custom window treatments.
 PRIORITY 1: Handles quoting, customer follow-up, scheduling, measurements.
+Integrates with WorkroomForge AI vision APIs for measurement, design, and analysis.
 """
 import logging
+import httpx
 from datetime import datetime
 from .base_desk import BaseDesk, DeskTask, DeskAction, TaskPriority, TaskState
 
@@ -30,7 +32,14 @@ class ForgeDesk(BaseDesk):
         "pricing_calculation",
         "production_status",
         "installation_scheduling",
+        "ai_vision_measure",
+        "ai_vision_mockup",
+        "ai_vision_outline",
+        "ai_vision_upholstery",
     ]
+
+    # WorkroomForge API base (port 3001)
+    WORKROOM_API = "http://localhost:3001/api"
 
     # WorkroomForge pricing constants
     FABRIC_MARKUP = 2.0  # 2x wholesale
@@ -62,6 +71,14 @@ class ForgeDesk(BaseDesk):
                 return await self._handle_measurement(task)
             elif any(w in combined for w in ["fabric", "material", "supplier"]):
                 return await self._handle_fabric_lookup(task)
+            elif any(w in combined for w in ["mockup", "design mockup", "design proposal"]):
+                return await self._handle_ai_vision(task, "mockup")
+            elif any(w in combined for w in ["outline", "dimensional", "window outline"]):
+                return await self._handle_ai_vision(task, "outline")
+            elif any(w in combined for w in ["upholster", "sofa", "couch", "chair reupholster"]):
+                return await self._handle_ai_vision(task, "upholstery")
+            elif any(w in combined for w in ["ai measure", "photo measure", "vision measure"]):
+                return await self._handle_ai_vision(task, "measure")
             elif any(w in combined for w in ["complaint", "issue", "problem", "unhappy", "angry"]):
                 # Complaints always escalate
                 return await self.escalate(task, "Customer complaint — needs founder attention")
@@ -213,6 +230,72 @@ class ForgeDesk(BaseDesk):
         )
 
         return await self.complete_task(task, result)
+
+    async def _handle_ai_vision(self, task: DeskTask, vision_type: str) -> DeskTask:
+        """Call WorkroomForge AI vision API (measure, mockup, outline, upholstery)."""
+        task.actions.append(DeskAction(
+            action=f"ai_vision_{vision_type}",
+            detail=f"Calling WorkroomForge AI vision: {vision_type}",
+        ))
+
+        # Extract image URL from task description
+        image_url = self._extract_image_url(task.description)
+        if not image_url:
+            return await self.complete_task(
+                task,
+                f"AI vision ({vision_type}) requires an image. "
+                "Please upload or reference a window/room photo in the task description."
+            )
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                payload = {"imageUrl": image_url}
+                if vision_type == "mockup":
+                    payload["notes"] = task.description[:500]
+                resp = await client.post(
+                    f"{self.WORKROOM_API}/{vision_type}",
+                    json=payload,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    result = f"AI Vision ({vision_type}) complete: {str(data)[:500]}"
+
+                    # Log to brain for future reference
+                    self._log_to_brain(
+                        f"AI vision {vision_type} for {task.customer_name or 'customer'}: {result[:300]}",
+                        importance=7,
+                        tags=["desk", "forge", "ai_vision", vision_type],
+                    )
+
+                    task.actions.append(DeskAction(
+                        action=f"ai_vision_{vision_type}_complete",
+                        detail=result[:200],
+                        success=True,
+                    ))
+                    return await self.complete_task(task, result)
+                else:
+                    error = f"WorkroomForge API error: {resp.status_code}"
+                    return await self.fail_task(task, error)
+        except httpx.ConnectError:
+            return await self.fail_task(
+                task,
+                "WorkroomForge (port 3001) is not running. Start it with: cd ~/Empire/workroomforge && npm run dev"
+            )
+        except Exception as e:
+            return await self.fail_task(task, f"AI vision failed: {e}")
+
+    def _extract_image_url(self, text: str) -> str | None:
+        """Extract image URL or uploaded file reference from text."""
+        import re
+        # Direct URL
+        url_match = re.search(r'https?://[^\s]+\.(?:jpg|jpeg|png|webp|gif)', text, re.IGNORECASE)
+        if url_match:
+            return url_match.group(0)
+        # Uploaded file reference
+        file_match = re.search(r'(?:uploads?/images?/|file:?\s*)(\S+\.(?:jpg|jpeg|png|webp|gif))', text, re.IGNORECASE)
+        if file_match:
+            return f"http://localhost:8000/api/v1/files/view/images/{file_match.group(1)}"
+        return None
 
     async def _handle_general(self, task: DeskTask) -> DeskTask:
         """Handle general WorkroomForge tasks."""

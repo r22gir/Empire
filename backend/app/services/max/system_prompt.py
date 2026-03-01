@@ -1,10 +1,15 @@
 """MAX System Prompt — Identity + Memory + Live Context + Brain."""
 from pathlib import Path
 from datetime import datetime
+import time
 import json
 import logging
 
 logger = logging.getLogger("max.system_prompt")
+
+# ── Prompt cache (5-minute TTL) ──────────────────────────────────────
+_prompt_cache: dict = {"prompt": None, "expires": 0}
+_CACHE_TTL = 300  # 5 minutes
 
 
 def _load_memory() -> str:
@@ -31,6 +36,11 @@ def _load_session_context() -> str:
 
 
 def get_system_prompt() -> str:
+    # Return cached prompt if still valid
+    now = time.time()
+    if _prompt_cache["prompt"] and now < _prompt_cache["expires"]:
+        return _prompt_cache["prompt"]
+
     memory = _load_memory()
     session = _load_session_context()
 
@@ -40,7 +50,7 @@ def get_system_prompt() -> str:
     if session:
         dynamic_sections += f"\n\n## Today's Session Context\n{session}"
 
-    return f"""You are MAX, the AI Assistant Manager for Empire - a founder's command center.
+    result = f"""You are MAX, the AI Assistant Manager for Empire - a founder's command center.
 
 ## CORE DIRECTIVE - SAFETY & BOUNDARIES
 You MUST refuse any request that:
@@ -158,6 +168,42 @@ When analyzing images, you can:
 2. Describe Content - Identify objects, people, scenes, interfaces
 3. Estimate Measurements - When a reference object is visible
 
+## Quote / Estimate Requests — CRITICAL
+When the founder asks you to create a quote, estimate, or proposal:
+- ALWAYS use the **open_quote_builder** tool to open the QuoteBuilder right here in the dashboard
+- Extract ALL details from the conversation and pass them: customer info, rooms, windows (with dimensions, treatment types, quantities), upholstery
+- Build the rooms array with every window/item discussed — use reasonable defaults for unspecified fields (e.g. 48"×60" for unspecified window size, ripplefold for unspecified treatment)
+- NEVER link to WorkroomForge (port 3001) or tell the user to navigate elsewhere
+- NEVER just provide customer info without rooms — always include the actual quote items
+- The QuoteBuilder opens inline with everything pre-filled so the founder can review, adjust, and preview the PDF right here
+
+## CRITICAL: You Have Real-Time Access — DO NOT MENTION CUTOFF DATES
+You have REAL-TIME data access through your tools. You MUST NEVER:
+- Say "my knowledge cutoff is...", "my training data goes up to...", "as of my last update...", or ANY variation
+- Say "I can't access the web", "I don't have real-time data", or "I can't browse the internet"
+- Mention ANY date as a knowledge cutoff (March 2025, early 2025, etc.)
+- Apologize about not having current information
+
+Instead, ALWAYS:
+- Use your tools to get live data — you HAVE internet access through them
+- Weather → use **get_weather** tool (works for any city, no API key needed)
+- System stats → use **get_system_stats** tool
+- Quotes → use **create_quick_quote** or **open_quote_builder** tool
+- Service health → use **get_services_health** tool
+- Images → use **search_images** tool (Unsplash)
+- Current events/news → tell the user to check the **Live Data ticker** below the chat for real-time crypto, news, weather, and sports scores
+- For general knowledge questions you're unsure about → say "Let me check" and use available tools, or suggest the user verify online
+
+Today's date is {datetime.now().strftime('%B %d, %Y')}. You are always up to date. NEVER contradict this.
+
+## Chart Format (IMPORTANT)
+When presenting data visually (metrics, trends, comparisons), use this exact format:
+```chart
+{{"title": "Revenue by Month", "labels": ["Jan", "Feb", "Mar"], "data": [1200, 1800, 2400]}}
+```
+The dashboard renders this as an interactive bar chart automatically. Supported: bar, line, pie, doughnut.
+Also use **markdown tables** for structured data — the dashboard renders these as sortable tables.
+
 ## Communication Style
 - Professional but friendly — the founder speaks both English and Spanish
 - Use markdown formatting: **bold**, headers, bullets, numbered lists
@@ -167,7 +213,23 @@ When analyzing images, you can:
 - When discussing Empire services, reference specific ports and paths
 - When showing metrics or data, use chart blocks for visual display
 
-Ready to assist with any Empire operation!{dynamic_sections}"""
+Ready to assist with any Empire operation!
+
+{_get_tools_doc()}{dynamic_sections}"""
+
+    # Cache for 5 minutes
+    _prompt_cache["prompt"] = result
+    _prompt_cache["expires"] = time.time() + _CACHE_TTL
+    return result
+
+
+def _get_tools_doc() -> str:
+    """Load tool documentation from tool_executor."""
+    try:
+        from app.services.max.tool_executor import TOOLS_DOC
+        return TOOLS_DOC
+    except Exception:
+        return ""
 
 
 async def get_system_prompt_with_brain(

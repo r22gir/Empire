@@ -16,6 +16,7 @@ stripe>=7.0.0
 easypost>=8.0.0
 qrcode>=7.4.0
 Pillow>=10.0.0
+weasyprint>=62.0
 
 # Testing
 pytest>=7.4.0

@@ -1,4 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { corsResponse, corsOptions } from '../cors';
+
+// Allow large base64 image payloads (up to 10MB)
+export const config = {
+  api: { bodyParser: { sizeLimit: '10mb' } },
+};
+
+// Allow up to 60 seconds for xAI vision API
+export const maxDuration = 60;
+
+export async function OPTIONS() { return corsOptions(); }
 
 const UPHOLSTERY_VISION_PROMPT = `You are an expert upholstery estimator with 20+ years experience in the Washington DC area custom upholstery market. Analyze this photo of furniture and provide a detailed reupholstery estimate.
 
@@ -101,16 +112,16 @@ Return JSON only — no markdown, no explanation outside the JSON:
 export async function POST(req: NextRequest) {
   const apiKey = process.env.XAI_API_KEY;
   if (!apiKey) {
-    return NextResponse.json(
+    return corsResponse(
       { error: 'XAI_API_KEY not configured' },
-      { status: 500 },
+      500,
     );
   }
 
   try {
     const { image } = await req.json();
     if (!image) {
-      return NextResponse.json({ error: 'No image provided' }, { status: 400 });
+      return corsResponse({ error: 'No image provided' }, 400);
     }
 
     const res = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -137,9 +148,9 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => 'Unknown error');
-      return NextResponse.json(
+      return corsResponse(
         { error: `xAI Vision error: ${res.status} ${errText}` },
-        { status: res.status },
+        res.status,
       );
     }
 
@@ -148,16 +159,43 @@ export async function POST(req: NextRequest) {
 
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return NextResponse.json(
+      return corsResponse(
         { error: 'Could not parse vision response', raw: content },
-        { status: 500 },
+        500,
       );
     }
 
     const analysis = JSON.parse(jsonMatch[0]);
-    return NextResponse.json(analysis);
+
+    // Generate AI before/after illustration (non-blocking)
+    try {
+      const details: string[] = [];
+      if (analysis.has_tufting) details.push('diamond tufting');
+      if (analysis.has_welting) details.push('contrast welting/piping');
+      if (analysis.has_nailhead) details.push('brass nailhead trim');
+      if (analysis.has_skirt) details.push('tailored skirt');
+      if (analysis.has_channeling) details.push('vertical channeling');
+      const detailText = details.length > 0 ? details.join(', ') : 'clean upholstery';
+      const cushions = analysis.cushion_count || {};
+
+      const prompt = `Professional design studio illustration of furniture reupholstery transformation: A ${analysis.furniture_type || 'sofa'} in ${analysis.style || 'traditional'} style, split-view showing before and after. Left side shows the original piece needing reupholstery work, slightly worn. Right side shows the beautifully reupholstered result with fresh fabric featuring ${detailText}. ${cushions.seat ? `${cushions.seat} seat cushions` : ''}${cushions.back ? `, ${cushions.back} back cushions` : ''}. Clean white studio background, detailed craftsmanship visible, professional furniture design rendering, high quality.`;
+
+      const imgRes = await fetch('https://api.x.ai/v1/images/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model: 'grok-imagine-image', prompt, n: 1, response_format: 'url' }),
+      });
+      if (imgRes.ok) {
+        const imgData = await imgRes.json();
+        analysis.generated_image = imgData.data?.[0]?.url || null;
+      }
+    } catch {
+      analysis.generated_image = null;
+    }
+
+    return corsResponse(analysis);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Analysis failed';
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return corsResponse({ error: msg }, 500);
   }
 }

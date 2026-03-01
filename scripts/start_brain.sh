@@ -15,13 +15,19 @@ fi
 export OLLAMA_MODELS="$BRAIN_DRIVE/ollama/models"
 export MAX_BRAIN_PATH="$BRAIN_DRIVE/ollama/brain"
 
-# Start Ollama if not running
-if ! pgrep -x "ollama" > /dev/null; then
-    OLLAMA_MODELS="$BRAIN_DRIVE/ollama/models" ollama serve &
-    sleep 3
-    echo "✓ Ollama server started"
+# Start Ollama via systemd if not already running (native only, no Docker)
+if systemctl is-active --quiet ollama.service 2>/dev/null; then
+    echo "✓ Ollama already running (systemd)"
 else
-    echo "✓ Ollama already running"
+    echo "Starting Ollama via systemd..."
+    sudo systemctl start ollama.service 2>/dev/null
+    sleep 2
+    if systemctl is-active --quiet ollama.service 2>/dev/null; then
+        echo "✓ Ollama server started"
+    else
+        echo "✗ Failed to start Ollama — check: systemctl status ollama.service"
+        exit 1
+    fi
 fi
 
 # Verify models are available

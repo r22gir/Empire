@@ -37,5 +37,8 @@ FALLBACK_MODEL = "llama3:latest"
 # Memory limits
 MAX_CONTEXT_MEMORIES = 20           # max memories to inject into context
 MAX_CONTEXT_TOKENS = 4000           # max tokens of memory in context
-CONVERSATION_SUMMARY_THRESHOLD = 10 # summarize after N messages
+CONVERSATION_SUMMARY_THRESHOLD = 6  # summarize after N messages (lowered from 10)
 MEMORY_IMPORTANCE_DECAY = 0.95      # importance decays over time if not accessed
+REALTIME_LEARNING_ENABLED = False   # disabled for performance — use batch learning instead
+BATCH_LEARNING_ENABLED = True       # learn every N exchanges instead of every exchange
+BATCH_LEARNING_INTERVAL = 5         # trigger learning every 5 messages (background Ollama call)

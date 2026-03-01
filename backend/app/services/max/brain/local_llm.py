@@ -73,18 +73,15 @@ Conversation:
             prompt, system="You are a conversation analyzer. Respond only in valid JSON."
         )
 
-        try:
-            return json.loads(response)
-        except (json.JSONDecodeError, TypeError):
-            return {
-                "summary": response,
-                "key_decisions": [],
-                "tasks": [],
-                "customers": [],
-                "topics": [],
-                "mood": "productive",
-                "key_facts": [],
-            }
+        return self._parse_json_dict(response, {
+            "summary": response[:200] if response else "",
+            "key_decisions": [],
+            "tasks": [],
+            "customers": [],
+            "topics": [],
+            "mood": "productive",
+            "key_facts": [],
+        })
 
     async def classify_intent(self, message: str) -> dict:
         """Classify the intent of an incoming message."""
@@ -105,15 +102,35 @@ Respond in JSON: {{"intent": "...", "priority": "low/medium/high/urgent", "custo
             prompt, system="You are an intent classifier. Respond only in valid JSON."
         )
 
+        return self._parse_json_dict(response, {
+            "intent": "note",
+            "priority": "medium",
+            "customer_name": None,
+            "summary": message[:100],
+        })
+
+    @staticmethod
+    def _parse_json_dict(text: str, fallback: dict) -> dict:
+        """Robustly parse a JSON object from LLM output."""
+        if not text:
+            return fallback
+        text = text.strip()
         try:
-            return json.loads(response)
+            result = json.loads(text)
+            if isinstance(result, dict):
+                return result
         except (json.JSONDecodeError, TypeError):
-            return {
-                "intent": "note",
-                "priority": "medium",
-                "customer_name": None,
-                "summary": message[:100],
-            }
+            pass
+        import re
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            try:
+                result = json.loads(match.group())
+                if isinstance(result, dict):
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return fallback
 
     async def extract_facts(self, text: str) -> list[str]:
         """Extract memorable facts from text."""
@@ -127,7 +144,29 @@ Text: {text}"""
             prompt, system="Extract facts as JSON array of strings."
         )
 
-        try:
-            return json.loads(response)
-        except (json.JSONDecodeError, TypeError):
+        return self._parse_json_list(response)
+
+    @staticmethod
+    def _parse_json_list(text: str) -> list:
+        """Robustly parse a JSON array from LLM output."""
+        if not text:
             return []
+        text = text.strip()
+        # Try direct parse
+        try:
+            result = json.loads(text)
+            if isinstance(result, list):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Try extracting JSON array from surrounding text
+        import re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            try:
+                result = json.loads(match.group())
+                if isinstance(result, list):
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return []

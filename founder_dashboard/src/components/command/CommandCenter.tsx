@@ -11,11 +11,15 @@ import { DeskId } from '@/lib/deskData';
 import LeftColumn from './LeftColumn';
 import RightColumn from './RightColumn';
 import BottomBar from './BottomBar';
+import MaxSection from './MaxSection';
 import DeskGrid from './DeskGrid';
 import ActiveDeskView from './ActiveDeskView';
 import WorkspaceOverview, { EMPIRE_APPS } from './WorkspaceOverview';
 import WorkroomForgeWorkspace from './WorkroomForgeWorkspace';
 import PlaceholderWorkspace from './PlaceholderWorkspace';
+import QuoteBuilder from './QuoteBuilder';
+import DocumentCanvas from './canvas/DocumentCanvas';
+import LiveTicker from './LiveTicker';
 
 export default function CommandCenter() {
   const history = useChatHistory();
@@ -25,6 +29,12 @@ export default function CommandCenter() {
   const chat = useChat({
     onSave: async (messages, chatId) => history.saveConversation(messages, chatId),
   });
+
+  /* ── Sidebar collapse state ───────────────────────────────── */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+
+  /* ── Stats panel visibility ───────────────────────────────── */
+  const [showStats, setShowStats] = useState(true);
 
   /* ── File state ─────────────────────────────────────────── */
   const [selectedImage,  setSelectedImage]  = useState<{ name: string; category: string } | null>(null);
@@ -42,6 +52,17 @@ export default function CommandCenter() {
 
   /* ── Suggestion input ─────────────────────────────────────── */
   const [suggestedInput, setSuggestedInput] = useState('');
+
+  /* ── Inline QuoteBuilder ─────────────────────────────────── */
+  const [showQuoteBuilder, setShowQuoteBuilder] = useState(false);
+  const [quoteInitData, setQuoteInitData] = useState<{
+    customer: { name: string; email: string; phone: string; address: string; project: string };
+    rooms: any[];
+    maxAnalysis?: string;
+  } | null>(null);
+
+  /* ── Quick Quote inline PDF ─────────────────────────────── */
+  const [quickQuotePdf, setQuickQuotePdf] = useState<string | null>(null);
 
   /* ── Browser modal ──────────────────────────────────────── */
   const [showBrowser,        setShowBrowser]        = useState(false);
@@ -99,7 +120,8 @@ export default function CommandCenter() {
         desk.openDesk(ctrlAltMap[e.key]);
         setShowDeskGrid(false);
       } else if (e.key === 'Escape') {
-        if (showDeskGrid) setShowDeskGrid(false);
+        if (showQuoteBuilder) { setShowQuoteBuilder(false); setQuoteInitData(null); }
+        else if (showDeskGrid) setShowDeskGrid(false);
         else if (activeWorkspace) setActiveWorkspace(null);
         else if (showWorkspaces) setShowWorkspaces(false);
         else if (desk.activeDesk) desk.closeDesk();
@@ -107,7 +129,41 @@ export default function CommandCenter() {
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
-  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces]);
+  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces, showQuoteBuilder]);
+
+  /* ── Detect open_quote_builder / create_quick_quote tool results ── */
+  useEffect(() => {
+    const lastMsg = chat.messages[chat.messages.length - 1];
+    if (lastMsg?.role === 'assistant' && lastMsg.toolResults) {
+      const qbTool = lastMsg.toolResults.find(
+        (tr: any) => tr.tool === 'open_quote_builder' && tr.success
+      );
+      if (qbTool?.result) {
+        const r = qbTool.result as any;
+        setQuoteInitData({
+          customer: {
+            name: r.customer_name || '',
+            email: r.customer_email || '',
+            phone: r.customer_phone || '',
+            address: r.customer_address || '',
+            project: r.project_name || '',
+          },
+          rooms: r.rooms || [],
+          maxAnalysis: r.max_analysis || '',
+        });
+        setShowQuoteBuilder(true);
+        setShowStats(false); // auto-hide stat cards when QuoteBuilder opens
+      }
+
+      // Quick quote → show inline PDF
+      const qqTool = lastMsg.toolResults.find(
+        (tr: any) => tr.tool === 'create_quick_quote' && tr.success
+      );
+      if (qqTool?.result?.pdf_url) {
+        setQuickQuotePdf(API_URL.replace('/api/v1', '') + qqTool.result.pdf_url);
+      }
+    }
+  }, [chat.messages]);
 
   /* ── File operations ────────────────────────────────────── */
   const uploadPastedImage = async () => {
@@ -224,16 +280,16 @@ export default function CommandCenter() {
       {/* ════ FILE BROWSER MODAL ═════════════════════════════ */}
       {showBrowser && (
         <div className={modalOverlay}>
-          <div className={modalBox + ' max-w-2xl max-h-[80vh]'} style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
-              <h3 className="font-semibold text-sm" style={{ color: 'var(--gold)' }}>Browse Files</h3>
+          <div className={modalBox + ' max-w-2xl max-h-[80vh] glass-card'} style={{ background: 'var(--glass-bg-solid)' }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+              <h3 className="font-semibold text-sm" style={{ color: 'var(--cyan)' }}>Browse Files</h3>
               <button onClick={() => setShowBrowser(false)} className="text-lg" style={{ color: 'var(--text-secondary)' }}>×</button>
             </div>
-            <div className="px-3 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)', background: 'var(--raised)' }}>
+            <div className="px-3 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid var(--glass-border)', background: 'var(--raised)' }}>
               <button
                 onClick={() => browseDirApi(browsePath.split('/').slice(0, -1).join('/') || '/')}
                 className="px-2.5 py-1 rounded-lg text-xs transition"
-                style={{ background: 'var(--elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                style={{ background: 'var(--elevated)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}
               >↑ Up</button>
               <span className="text-xs truncate flex-1 font-mono" style={{ color: 'var(--text-muted)' }}>{browsePath}</span>
             </div>
@@ -243,7 +299,7 @@ export default function CommandCenter() {
                   key={i}
                   onClick={() => f.isDir ? browseDirApi(f.path) : setSelectedBrowseFile(f.path)}
                   className="flex items-center gap-3 p-2 rounded-lg cursor-pointer transition"
-                  style={{ background: selectedBrowseFile === f.path ? 'var(--gold-pale)' : 'transparent', border: selectedBrowseFile === f.path ? '1px solid var(--gold-border)' : '1px solid transparent' }}
+                  style={{ background: selectedBrowseFile === f.path ? 'var(--cyan-pale)' : 'transparent', border: selectedBrowseFile === f.path ? '1px solid var(--cyan-border)' : '1px solid transparent' }}
                   onMouseEnter={e => { if (selectedBrowseFile !== f.path) e.currentTarget.style.background = 'var(--hover)'; }}
                   onMouseLeave={e => { if (selectedBrowseFile !== f.path) e.currentTarget.style.background = 'transparent'; }}
                 >
@@ -254,9 +310,9 @@ export default function CommandCenter() {
               ))}
               {browseFiles.length === 0 && <p className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>Empty folder</p>}
             </div>
-            <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid var(--border)' }}>
-              <button onClick={() => setShowBrowser(false)} className="px-4 py-2 rounded-lg text-sm transition" style={{ background: 'var(--raised)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>Cancel</button>
-              <button onClick={selectFileForUpload} disabled={!selectedBrowseFile} className="px-4 py-2 rounded-lg text-sm font-semibold transition" style={{ background: selectedBrowseFile ? 'var(--gold)' : 'var(--elevated)', color: selectedBrowseFile ? '#0a0a0a' : 'var(--text-muted)' }}>Upload Selected</button>
+            <div className="px-4 py-3 flex justify-end gap-2" style={{ borderTop: '1px solid var(--glass-border)' }}>
+              <button onClick={() => setShowBrowser(false)} className="px-4 py-2 rounded-lg text-sm transition" style={{ background: 'var(--raised)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}>Cancel</button>
+              <button onClick={selectFileForUpload} disabled={!selectedBrowseFile} className="px-4 py-2 rounded-lg text-sm font-semibold transition" style={{ background: selectedBrowseFile ? 'var(--cyan)' : 'var(--elevated)', color: selectedBrowseFile ? '#0a0a0a' : 'var(--text-muted)' }}>Upload Selected</button>
             </div>
           </div>
         </div>
@@ -265,33 +321,33 @@ export default function CommandCenter() {
       {/* ════ TASKS MODAL ════════════════════════════════════ */}
       {showTasks && (
         <div className={modalOverlay}>
-          <div className={modalBox + ' max-w-3xl max-h-[80vh]'} style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
-              <h3 className="font-semibold text-sm" style={{ color: 'var(--gold)' }}>Tasks</h3>
+          <div className={modalBox + ' max-w-3xl max-h-[80vh] glass-card'} style={{ background: 'var(--glass-bg-solid)' }}>
+            <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+              <h3 className="font-semibold text-sm" style={{ color: 'var(--cyan)' }}>Tasks</h3>
               <div className="flex gap-2">
-                <button onClick={() => setShowNewTask(true)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition" style={{ background: 'var(--gold)', color: '#0a0a0a' }}>+ New Task</button>
+                <button onClick={() => setShowNewTask(true)} className="px-3 py-1.5 rounded-lg text-xs font-semibold transition" style={{ background: 'var(--cyan)', color: '#0a0a0a' }}>+ New Task</button>
                 <button onClick={() => setShowTasks(false)} className="text-lg px-2" style={{ color: 'var(--text-secondary)' }}>×</button>
               </div>
             </div>
             {showNewTask && (
-              <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)', background: 'var(--raised)' }}>
+              <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--glass-border)', background: 'var(--raised)' }}>
                 <div className="grid grid-cols-2 gap-3 mb-3">
-                  <input type="text" placeholder="Task title…" value={newTask.title} onChange={e => setNewTask({ ...newTask, title: e.target.value })} className="rounded-lg px-3 py-2 text-sm outline-none" style={{ background: 'var(--elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
-                  <select value={newTask.desk_id} onChange={e => setNewTask({ ...newTask, desk_id: e.target.value })} className="rounded-lg px-3 py-2 text-sm outline-none cursor-pointer" style={{ background: 'var(--elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                  <input type="text" placeholder="Task title…" value={newTask.title} onChange={e => setNewTask({ ...newTask, title: e.target.value })} className="rounded-lg px-3 py-2 text-sm outline-none" style={{ background: 'var(--elevated)', border: '1px solid var(--glass-border)', color: 'var(--text-primary)' }} />
+                  <select value={newTask.desk_id} onChange={e => setNewTask({ ...newTask, desk_id: e.target.value })} className="rounded-lg px-3 py-2 text-sm outline-none cursor-pointer" style={{ background: 'var(--elevated)', border: '1px solid var(--glass-border)', color: 'var(--text-primary)' }}>
                     <option value="">Auto-assign</option>
                     {sys.desks.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                   </select>
                 </div>
-                <textarea placeholder="Description…" value={newTask.description} onChange={e => setNewTask({ ...newTask, description: e.target.value })} className="w-full rounded-lg px-3 py-2 text-sm mb-3 resize-none outline-none" style={{ background: 'var(--elevated)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} rows={2} />
+                <textarea placeholder="Description…" value={newTask.description} onChange={e => setNewTask({ ...newTask, description: e.target.value })} className="w-full rounded-lg px-3 py-2 text-sm mb-3 resize-none outline-none" style={{ background: 'var(--elevated)', border: '1px solid var(--glass-border)', color: 'var(--text-primary)' }} rows={2} />
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2 text-sm">
                     <span style={{ color: 'var(--text-muted)' }}>Priority:</span>
-                    <input type="range" min="1" max="10" value={newTask.priority} onChange={e => setNewTask({ ...newTask, priority: parseInt(e.target.value) })} className="w-24" style={{ accentColor: 'var(--gold)' }} />
-                    <span style={{ color: 'var(--gold)' }}>{newTask.priority}</span>
+                    <input type="range" min="1" max="10" value={newTask.priority} onChange={e => setNewTask({ ...newTask, priority: parseInt(e.target.value) })} className="w-24" style={{ accentColor: 'var(--cyan)' }} />
+                    <span style={{ color: 'var(--cyan)' }}>{newTask.priority}</span>
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => setShowNewTask(false)} className="px-3 py-1.5 rounded-lg text-sm transition" style={{ background: 'var(--elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>Cancel</button>
-                    <button onClick={() => { if (newTask.title.trim()) { sys.createTask(newTask.title, newTask.description, newTask.desk_id, newTask.priority); setNewTask({ title: '', description: '', desk_id: '', priority: 5 }); setShowNewTask(false); } }} className="px-3 py-1.5 rounded-lg text-sm font-semibold transition" style={{ background: 'var(--gold)', color: '#0a0a0a' }}>Create</button>
+                    <button onClick={() => setShowNewTask(false)} className="px-3 py-1.5 rounded-lg text-sm transition" style={{ background: 'var(--elevated)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}>Cancel</button>
+                    <button onClick={() => { if (newTask.title.trim()) { sys.createTask(newTask.title, newTask.description, newTask.desk_id, newTask.priority); setNewTask({ title: '', description: '', desk_id: '', priority: 5 }); setShowNewTask(false); } }} className="px-3 py-1.5 rounded-lg text-sm font-semibold transition" style={{ background: 'var(--cyan)', color: '#0a0a0a' }}>Create</button>
                   </div>
                 </div>
               </div>
@@ -302,7 +358,7 @@ export default function CommandCenter() {
               ) : (
                 <div className="space-y-2">
                   {sys.tasks.map(task => (
-                    <div key={task.id} className="rounded-xl p-3" style={{ background: 'var(--raised)', border: '1px solid var(--border)' }}>
+                    <div key={task.id} className="rounded-xl p-3 glass-card">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
@@ -332,8 +388,8 @@ export default function CommandCenter() {
       {/* ════ NOTIFICATION MODAL ═════════════════════════════ */}
       {selectedNotif && (
         <div className={modalOverlay} onClick={() => setSelectedNotif(null)}>
-          <div className={modalBox + ' max-w-2xl max-h-[80vh]'} style={{ background: 'var(--surface)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
-            <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)', background: selectedNotif.priority === 'high' ? 'rgba(239,68,68,0.08)' : 'var(--gold-pale)' }}>
+          <div className={modalBox + ' max-w-2xl max-h-[80vh] glass-card'} style={{ background: 'var(--glass-bg-solid)' }} onClick={e => e.stopPropagation()}>
+            <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--glass-border)', background: selectedNotif.priority === 'high' ? 'rgba(239,68,68,0.08)' : 'var(--cyan-pale)' }}>
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{selectedNotif.source === 'MAX' ? '🧠' : selectedNotif.source === 'System' ? '⚙️' : '💰'}</span>
                 <div>
@@ -350,18 +406,18 @@ export default function CommandCenter() {
                   <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Quick Actions:</p>
                   <div className="flex gap-2 flex-wrap">
                     {selectedNotif.context.options.map((opt: string) => (
-                      <button key={opt} onClick={() => { sys.respondToNotification(selectedNotif.id, opt); setSelectedNotif(null); }} className="px-4 py-2 rounded-lg text-sm font-medium transition" style={{ background: opt.toLowerCase().includes('approve') ? 'rgba(34,197,94,0.15)' : opt.toLowerCase().includes('reject') ? 'rgba(239,68,68,0.15)' : 'var(--raised)', color: opt.toLowerCase().includes('approve') ? '#22c55e' : opt.toLowerCase().includes('reject') ? '#ef4444' : 'var(--text-primary)', border: '1px solid var(--border)' }}>{opt}</button>
+                      <button key={opt} onClick={() => { sys.respondToNotification(selectedNotif.id, opt); setSelectedNotif(null); }} className="px-4 py-2 rounded-lg text-sm font-medium transition" style={{ background: opt.toLowerCase().includes('approve') ? 'rgba(34,197,94,0.15)' : opt.toLowerCase().includes('reject') ? 'rgba(239,68,68,0.15)' : 'var(--raised)', color: opt.toLowerCase().includes('approve') ? '#22c55e' : opt.toLowerCase().includes('reject') ? '#ef4444' : 'var(--text-primary)', border: '1px solid var(--glass-border)' }}>{opt}</button>
                     ))}
                   </div>
                 </div>
               )}
-              <textarea value={notifReply} onChange={e => setNotifReply(e.target.value)} placeholder="Custom reply…" className="w-full rounded-xl px-4 py-3 text-sm resize-none outline-none" style={{ background: 'var(--raised)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} rows={3} />
+              <textarea value={notifReply} onChange={e => setNotifReply(e.target.value)} placeholder="Custom reply…" className="w-full rounded-xl px-4 py-3 text-sm resize-none outline-none" style={{ background: 'var(--raised)', border: '1px solid var(--glass-border)', color: 'var(--text-primary)' }} rows={3} />
               <div className="flex justify-between items-center mt-3">
                 <button onClick={() => { sys.markNotificationRead(selectedNotif.id); setSelectedNotif(null); }} className="text-xs transition" style={{ color: 'var(--text-muted)' }}>Mark read</button>
-                <button onClick={() => { if (notifReply.trim()) { sys.respondToNotification(selectedNotif.id, notifReply); setNotifReply(''); setSelectedNotif(null); } }} disabled={!notifReply.trim()} className="px-4 py-2 rounded-lg text-sm font-semibold transition" style={{ background: notifReply.trim() ? 'var(--gold)' : 'var(--raised)', color: notifReply.trim() ? '#0a0a0a' : 'var(--text-muted)' }}>Send</button>
+                <button onClick={() => { if (notifReply.trim()) { sys.respondToNotification(selectedNotif.id, notifReply); setNotifReply(''); setSelectedNotif(null); } }} disabled={!notifReply.trim()} className="px-4 py-2 rounded-lg text-sm font-semibold transition" style={{ background: notifReply.trim() ? 'var(--cyan)' : 'var(--raised)', color: notifReply.trim() ? '#0a0a0a' : 'var(--text-muted)' }}>Send</button>
               </div>
             </div>
-            <div className="px-5 py-2.5 flex justify-between items-center" style={{ borderTop: '1px solid var(--border)', background: 'var(--raised)' }}>
+            <div className="px-5 py-2.5 flex justify-between items-center" style={{ borderTop: '1px solid var(--glass-border)', background: 'var(--raised)' }}>
               <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{new Date(selectedNotif.created_at).toLocaleString()}</span>
               <button onClick={() => { sys.dismissNotification(selectedNotif.id); setSelectedNotif(null); }} className="text-xs transition" style={{ color: '#ef4444' }}>Dismiss</button>
             </div>
@@ -390,19 +446,13 @@ export default function CommandCenter() {
             />
           )
         ) : showWorkspaces ? (
-          /* Workspace overview grid */
           <WorkspaceOverview onOpenWorkspace={(id) => { setActiveWorkspace(id); setShowWorkspaces(false); }} />
         ) : desk.activeDesk ? (
           <ActiveDeskView activeDesk={desk.activeDesk} onClose={desk.closeDesk} />
         ) : (
           <>
+            {/* Collapsible sidebar */}
             <LeftColumn
-              isStreaming={chat.isStreaming}
-              streamingContent={chat.streamingContent}
-              messages={chat.messages}
-              backendOnline={sys.backendOnline}
-              selectedModel={sys.selectedModel}
-              models={sys.models}
               onOpenDeskGrid={() => setShowDeskGrid(true)}
               conversations={history.conversations}
               activeConversationId={history.activeId}
@@ -413,21 +463,65 @@ export default function CommandCenter() {
               onSuggest={setSuggestedInput}
               onOpenWorkspaces={() => setShowWorkspaces(true)}
               onOpenWorkspace={setActiveWorkspace}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
-            <RightColumn
-              systemStats={sys.systemStats}
-              serviceHealth={sys.serviceHealth}
-              backendOnline={sys.backendOnline}
-              models={sys.models}
-              brainStatus={sys.brainStatus}
-              tokenStats={sys.tokenStats}
-              aiDeskStatuses={sys.aiDeskStatuses}
-            />
+
+            {/* Central chat area + floating stat cards */}
+            <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
+              {/* QuoteBuilder (shown when triggered by MAX) */}
+              {showQuoteBuilder ? (
+                <QuoteBuilder
+                  onClose={() => { setShowQuoteBuilder(false); setQuoteInitData(null); }}
+                  initialCustomer={quoteInitData?.customer}
+                  initialRooms={quoteInitData?.rooms}
+                  initialMaxAnalysis={quoteInitData?.maxAnalysis}
+                />
+              ) : (
+              /* MAX chat fills the space */
+              <>
+                <MaxSection
+                  isStreaming={chat.isStreaming}
+                  streamingContent={chat.streamingContent}
+                  messages={chat.messages}
+                  backendOnline={sys.backendOnline}
+                  selectedModel={sys.selectedModel}
+                  models={sys.models}
+                />
+                {/* Inline PDF viewer for quick quotes */}
+                {quickQuotePdf && (
+                  <div className="px-4 pb-2">
+                    <div className="relative">
+                      <button
+                        onClick={() => setQuickQuotePdf(null)}
+                        className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-sm"
+                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                      >×</button>
+                      <DocumentCanvas documentUrl={quickQuotePdf} inline />
+                    </div>
+                  </div>
+                )}
+              </>
+              )}
+
+              {/* Floating stat cards — overlaid on top right */}
+              <RightColumn
+                systemStats={sys.systemStats}
+                serviceHealth={sys.serviceHealth}
+                backendOnline={sys.backendOnline}
+                models={sys.models}
+                brainStatus={sys.brainStatus}
+                tokenStats={sys.tokenStats}
+                aiDeskStatuses={sys.aiDeskStatuses}
+                visible={showStats}
+                onClose={() => setShowStats(false)}
+              />
+            </div>
           </>
         )}
       </div>
 
-      {/* ════ BOTTOM BAR (always visible) ════════════════════ */}
+      {/* ════ COMMAND PALETTE BAR (always visible) ═══════════ */}
       <BottomBar
         onSend={handleSend}
         isStreaming={chat.isStreaming}
@@ -446,7 +540,11 @@ export default function CommandCenter() {
         onModelChange={sys.setSelectedModel}
         suggestedInput={suggestedInput}
         onClearSuggestion={() => setSuggestedInput('')}
+        onToggleStats={() => setShowStats(!showStats)}
       />
+
+      {/* ════ LIVE TICKER (crypto, news, sports) ════════════ */}
+      <LiveTicker />
     </div>
   );
 }
