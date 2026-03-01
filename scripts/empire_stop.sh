@@ -32,9 +32,17 @@ pkill -f "autosave.sh" 2>/dev/null
 # ── Kill backend ─────────────────────────────────────────────────────
 pkill -f "uvicorn app.main:app" 2>/dev/null
 
-# ── Kill frontend ────────────────────────────────────────────────────
-pkill -f "next dev -p 3009" 2>/dev/null
-pkill -f "next-server" 2>/dev/null
+# ── Kill all Next.js frontends ──────────────────────────────────────
+for port in 3009 3001 3002 3000; do
+    pid=$(lsof -ti :$port 2>/dev/null)
+    if [ -n "$pid" ]; then
+        kill $pid 2>/dev/null
+    fi
+done
+
+# ── Kill homepage ───────────────────────────────────────────────────
+pid=$(lsof -ti :8080 2>/dev/null)
+[ -n "$pid" ] && kill $pid 2>/dev/null
 
 # ── Clean up lock files ──────────────────────────────────────────────
 rm -f /tmp/claudeforge.lock /tmp/copilotforge.lock 2>/dev/null
