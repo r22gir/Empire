@@ -1,0 +1,110 @@
+{
+  "id": "2a9ddb02",
+  "quote_number": "EST-2026-016",
+  "status": "draft",
+  "customer_name": "Pedro Morales",
+  "customer_email": "",
+  "customer_phone": "",
+  "customer_address": "",
+  "project_name": "Bedroom Refresh - Green Palette",
+  "project_description": null,
+  "desk_id": null,
+  "line_items": [
+    {
+      "description": "Bedroom \u2014 Window 1 (ripplefold, blackout, track-ripplefold)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 3335.0,
+      "amount": 3335.0,
+      "category": "labor"
+    },
+    {
+      "description": "Bedroom \u2014 Headboard (sofa, standard)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1176.0,
+      "amount": 1176.0,
+      "category": "labor"
+    },
+    {
+      "description": "Bedroom \u2014 Bench (sofa, standard)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1176.0,
+      "amount": 1176.0,
+      "category": "labor"
+    }
+  ],
+  "measurements": null,
+  "subtotal": 5687.0,
+  "tax_rate": 0.08,
+  "tax_amount": 454.96,
+  "discount_amount": 0.0,
+  "total": 6141.96,
+  "deposit": null,
+  "terms": "50% deposit required. Balance due upon completion.",
+  "valid_days": 30,
+  "install_date": null,
+  "notes": null,
+  "business_name": "Empire",
+  "business_logo_url": null,
+  "rooms": [
+    {
+      "name": "Bedroom",
+      "windows": [
+        {
+          "name": "Window 1",
+          "width": 72,
+          "height": 108,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "blackout",
+          "hardwareType": "track-ripplefold",
+          "motorization": "none",
+          "mountType": "ceiling",
+          "notes": "",
+          "price": 3335,
+          "aiAnalysis": null
+        }
+      ],
+      "upholstery": [
+        {
+          "name": "Headboard",
+          "furnitureType": "sofa",
+          "fabricYards": 14,
+          "fabricType": "plain",
+          "laborType": "standard",
+          "cushionCount": 3,
+          "width": 84,
+          "depth": 36,
+          "height": 34,
+          "notes": "",
+          "price": 1176,
+          "aiAnalysis": null
+        },
+        {
+          "name": "Bench",
+          "furnitureType": "sofa",
+          "fabricYards": 14,
+          "fabricType": "plain",
+          "laborType": "standard",
+          "cushionCount": 3,
+          "width": 84,
+          "depth": 36,
+          "height": 34,
+          "notes": "",
+          "price": 1176,
+          "aiAnalysis": null
+        }
+      ]
+    }
+  ],
+  "ai_outlines": null,
+  "ai_mockups": null,
+  "max_analysis": "For Pedro Morales' bedroom, I've designed a luxurious refresh with a green palette to bring warmth and sophistication. The single window is treated with ripplefold drapery featuring a blackout lining on a ceiling-mounted track for a seamless, high-end look. The headboard and bench reupholstery in a rich green fabric (suggesting velvet or chenille) ties the design together, creating a cohesive and elegant retreat.",
+  "created_at": "2026-03-01T20:31:28.655523",
+  "updated_at": "2026-03-01T20:31:28.655523",
+  "sent_at": null,
+  "accepted_at": null,
+  "expires_at": "2026-03-31T20:31:28.655827"
+}

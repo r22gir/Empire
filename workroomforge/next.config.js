@@ -8,3 +8,7 @@ const nextConfig = {
   },
 }
 module.exports = nextConfig
+
+// Note: For App Router API routes, body size is handled by
+// reading the request manually (req.json()) which has no
+// built-in limit. If issues persist, it's likely CORS or network.

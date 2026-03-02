@@ -25,9 +25,16 @@ export default function OperationsDesk() {
     return d <= weekEnd && j.status !== 'Complete';
   }).length;
 
-  const moveJob = (jobId: string, newStatus: JobStatus) => {
+  const moveJob = useCallback((jobId: string, newStatus: JobStatus) => {
     setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: newStatus } : j));
-  };
+    // Keep selectedJob in sync
+    setSelectedJob(prev => prev?.id === jobId ? { ...prev, status: newStatus } : prev);
+  }, []);
+
+  const updateJob = useCallback((jobId: string, updates: Partial<Job>) => {
+    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, ...updates } : j));
+    setSelectedJob(prev => prev?.id === jobId ? { ...prev, ...updates } : prev);
+  }, []);
 
   const handleJobClick = useCallback((job: Job) => setSelectedJob(job), []);
 
@@ -69,7 +76,7 @@ export default function OperationsDesk() {
       </div>
 
       <DetailPanel open={!!selectedJob} onClose={() => setSelectedJob(null)} title={selectedJob?.name || ''}>
-        {selectedJob && <JobDetail job={selectedJob} onClientClick={handleClientClick} />}
+        {selectedJob && <JobDetail job={selectedJob} onClientClick={handleClientClick} onMoveJob={moveJob} onUpdateJob={updateJob} />}
       </DetailPanel>
     </div>
   );

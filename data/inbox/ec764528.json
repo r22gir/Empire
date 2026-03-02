@@ -1,0 +1,17 @@
+{
+  "id": "ec764528",
+  "text": "Do a mock up image how it can look",
+  "source": "telegram",
+  "telegram_message_id": 73,
+  "intent": "task",
+  "desk_target": "null",
+  "priority": 5,
+  "ai_summary": "Create a mock-up image for visualization",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T07:27:58.222996",
+  "processed_at": null,
+  "reviewed_at": null
+}

@@ -1,0 +1,17 @@
+{
+  "id": "51491432",
+  "text": "Hey Max",
+  "source": "telegram",
+  "telegram_message_id": 16,
+  "intent": "note",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Simple greeting without specific task or question.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T05:25:55.605479",
+  "processed_at": null,
+  "reviewed_at": null
+}

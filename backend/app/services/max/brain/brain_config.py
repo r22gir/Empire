@@ -1,23 +1,18 @@
 """
 Brain configuration — paths, models, limits.
-Detects external drive (BACKUP11) or falls back to local storage.
+Local NVMe is primary. External drive is backup-only (no live I/O).
 """
 import os
 from pathlib import Path
 
-# Brain location — defaults to external drive, falls back to local
-BRAIN_DRIVE = os.environ.get("MAX_BRAIN_PATH", "/media/rg/BACKUP11/ollama/brain")
-LOCAL_FALLBACK = Path.home() / "Empire" / "backend" / "data" / "brain"
+# Brain location — local NVMe is primary (fast, reliable, no USB power issues)
+LOCAL_BRAIN = Path.home() / "Empire" / "backend" / "data" / "brain"
 
 
 def get_brain_path() -> Path:
-    """Get brain storage path — external drive preferred, local fallback."""
-    brain_path = Path(BRAIN_DRIVE)
-    if brain_path.exists():
-        return brain_path
-    # Fallback to local if drive not mounted
-    LOCAL_FALLBACK.mkdir(parents=True, exist_ok=True)
-    return LOCAL_FALLBACK
+    """Get brain storage path — always local NVMe."""
+    LOCAL_BRAIN.mkdir(parents=True, exist_ok=True)
+    return LOCAL_BRAIN
 
 
 def get_db_path() -> str:
@@ -40,5 +35,5 @@ MAX_CONTEXT_TOKENS = 4000           # max tokens of memory in context
 CONVERSATION_SUMMARY_THRESHOLD = 6  # summarize after N messages (lowered from 10)
 MEMORY_IMPORTANCE_DECAY = 0.95      # importance decays over time if not accessed
 REALTIME_LEARNING_ENABLED = False   # disabled for performance — use batch learning instead
-BATCH_LEARNING_ENABLED = True       # learn every N exchanges instead of every exchange
-BATCH_LEARNING_INTERVAL = 5         # trigger learning every 5 messages (background Ollama call)
+BATCH_LEARNING_ENABLED = False      # DISABLED — Ollama bypassed to prevent crashes
+BATCH_LEARNING_INTERVAL = 5         # (inactive — batch learning disabled)

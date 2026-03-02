@@ -1,6 +1,7 @@
 'use client';
+import { useState } from 'react';
 import { type Job, type JobStatus } from '@/lib/deskData';
-import { Calendar, User, Ruler, Scissors, FileText, StickyNote, Wrench, ClipboardList } from 'lucide-react';
+import { Calendar, User, Ruler, Scissors, FileText, StickyNote, Wrench, ClipboardList, ChevronRight, Plus, UserPlus, ExternalLink } from 'lucide-react';
 
 const STATUS_COLORS: Record<JobStatus, string> = {
   New: 'var(--purple)', Cutting: 'var(--cyan)', Sewing: '#f59e0b',
@@ -12,10 +13,47 @@ const TIMELINE_STEPS: JobStatus[] = ['New', 'Cutting', 'Sewing', 'Installing', '
 interface JobDetailProps {
   job: Job;
   onClientClick?: (clientName: string) => void;
+  onMoveJob?: (jobId: string, newStatus: JobStatus) => void;
+  onUpdateJob?: (jobId: string, updates: Partial<Job>) => void;
 }
 
-export default function JobDetail({ job, onClientClick }: JobDetailProps) {
+export default function JobDetail({ job, onClientClick, onMoveJob, onUpdateJob }: JobDetailProps) {
   const currentIdx = TIMELINE_STEPS.indexOf(job.status);
+  const nextStatus = currentIdx < TIMELINE_STEPS.length - 1 ? TIMELINE_STEPS[currentIdx + 1] : null;
+
+  const [showNoteInput, setShowNoteInput] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const [showAssignInput, setShowAssignInput] = useState(false);
+  const [assignText, setAssignText] = useState(job.assignedTo);
+
+  const handleUpdateStatus = () => {
+    if (nextStatus && onMoveJob) {
+      onMoveJob(job.id, nextStatus);
+    }
+  };
+
+  const handleAddNote = () => {
+    if (noteText.trim() && onUpdateJob) {
+      const existing = job.notes || '';
+      const newNotes = existing ? `${existing}\n${noteText.trim()}` : noteText.trim();
+      onUpdateJob(job.id, { notes: newNotes });
+      setNoteText('');
+      setShowNoteInput(false);
+    }
+  };
+
+  const handleAssign = () => {
+    if (assignText.trim() && onUpdateJob) {
+      onUpdateJob(job.id, { assignedTo: assignText.trim() });
+      setShowAssignInput(false);
+    }
+  };
+
+  const handleViewQuote = () => {
+    if (job.quoteId) {
+      window.open(`/workroom?quote=${job.quoteId}`, '_blank');
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -84,7 +122,7 @@ export default function JobDetail({ job, onClientClick }: JobDetailProps) {
             <StickyNote className="w-3 h-3" style={{ color: 'var(--gold)' }} />
             <span className="text-[10px] font-semibold" style={{ color: 'var(--gold)' }}>Notes</span>
           </div>
-          <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{job.notes}</p>
+          <p className="text-xs whitespace-pre-line" style={{ color: 'var(--text-secondary)' }}>{job.notes}</p>
         </div>
       )}
 
@@ -99,19 +137,102 @@ export default function JobDetail({ job, onClientClick }: JobDetailProps) {
         </div>
       )}
 
+      {/* Note input */}
+      {showNoteInput && (
+        <div className="rounded-lg p-3 space-y-2" style={{ background: 'var(--raised)', border: '1px solid var(--gold-border)' }}>
+          <textarea
+            value={noteText}
+            onChange={e => setNoteText(e.target.value)}
+            placeholder="Add a note..."
+            rows={3}
+            autoFocus
+            className="w-full text-xs rounded-lg p-2 resize-none"
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', outline: 'none' }}
+            onFocus={e => (e.currentTarget.style.borderColor = 'var(--gold-border)')}
+            onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+          />
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => { setShowNoteInput(false); setNoteText(''); }} className="text-[10px] px-3 py-1 rounded" style={{ color: 'var(--text-muted)' }}>Cancel</button>
+            <button onClick={handleAddNote} className="text-[10px] px-3 py-1 rounded font-semibold" style={{ background: 'var(--gold)', color: '#000' }}>Save Note</button>
+          </div>
+        </div>
+      )}
+
+      {/* Assign input */}
+      {showAssignInput && (
+        <div className="rounded-lg p-3 space-y-2" style={{ background: 'var(--raised)', border: '1px solid var(--gold-border)' }}>
+          <input
+            value={assignText}
+            onChange={e => setAssignText(e.target.value)}
+            placeholder="Installer name..."
+            autoFocus
+            className="w-full text-xs rounded-lg p-2"
+            style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border)', outline: 'none' }}
+            onFocus={e => (e.currentTarget.style.borderColor = 'var(--gold-border)')}
+            onBlur={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+            onKeyDown={e => { if (e.key === 'Enter') handleAssign(); if (e.key === 'Escape') setShowAssignInput(false); }}
+          />
+          <div className="flex gap-2 justify-end">
+            <button onClick={() => setShowAssignInput(false)} className="text-[10px] px-3 py-1 rounded" style={{ color: 'var(--text-muted)' }}>Cancel</button>
+            <button onClick={handleAssign} className="text-[10px] px-3 py-1 rounded font-semibold" style={{ background: 'var(--gold)', color: '#000' }}>Assign</button>
+          </div>
+        </div>
+      )}
+
       {/* Action buttons */}
       <div className="grid grid-cols-2 gap-2 pt-2">
-        {['Update Status', 'Add Note', 'Assign Installer', 'View Quote'].map(label => (
-          <button
-            key={label}
-            className="text-xs font-medium py-2 px-3 rounded-lg transition"
-            style={{ background: 'var(--raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-          >
-            {label}
-          </button>
-        ))}
+        {/* Update Status */}
+        <button
+          onClick={handleUpdateStatus}
+          disabled={!nextStatus}
+          className="text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
+          style={{
+            background: nextStatus ? 'var(--gold-pale)' : 'var(--raised)',
+            border: `1px solid ${nextStatus ? 'var(--gold-border)' : 'var(--border)'}`,
+            color: nextStatus ? 'var(--gold)' : 'var(--text-muted)',
+            cursor: nextStatus ? 'pointer' : 'default',
+            opacity: nextStatus ? 1 : 0.5,
+          }}
+        >
+          <ChevronRight className="w-3 h-3" />
+          {nextStatus ? `Move to ${nextStatus}` : 'Complete'}
+        </button>
+
+        {/* Add Note */}
+        <button
+          onClick={() => setShowNoteInput(!showNoteInput)}
+          className="text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
+          style={{ background: 'var(--raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        >
+          <Plus className="w-3 h-3" />
+          Add Note
+        </button>
+
+        {/* Assign Installer */}
+        <button
+          onClick={() => { setAssignText(job.assignedTo); setShowAssignInput(!showAssignInput); }}
+          className="text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
+          style={{ background: 'var(--raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        >
+          <UserPlus className="w-3 h-3" />
+          Assign Installer
+        </button>
+
+        {/* View Quote */}
+        <button
+          onClick={handleViewQuote}
+          className="text-xs font-medium py-2 px-3 rounded-lg transition flex items-center justify-center gap-1.5"
+          style={{ background: 'var(--raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-border)'; e.currentTarget.style.color = 'var(--gold)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+        >
+          <ExternalLink className="w-3 h-3" />
+          View Quote
+        </button>
       </div>
     </div>
   );

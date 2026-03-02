@@ -17,6 +17,7 @@ const SYSTEM_PROMPT =
 export default function VoiceAgent({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [isTalking, setIsTalking] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [currentAssistantText, setCurrentAssistantText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -95,7 +96,7 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
           session: {
             instructions: SYSTEM_PROMPT,
             voice: 'Rex',
-            turn_detection: { type: 'server_vad', threshold: 0.3, silence_duration_ms: 800 },
+            turn_detection: { type: 'server_vad', threshold: 0.15, silence_duration_ms: 600 },
             input_audio_transcription: { model: 'grok-2-latest' },
             audio: {
               input: { format: { type: 'audio/pcm', rate: 24000 } },
@@ -127,6 +128,10 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
 
   /* ── Server events ───────────────────────────────────── */
   const handleServerEvent = useCallback((msg: { type: string; delta?: string; transcript?: string; [key: string]: unknown }) => {
+    // Log all non-audio events for debugging
+    if (msg.type !== 'response.output_audio.delta') {
+      console.log('[VoiceAgent] Server event:', msg.type, msg.transcript ? `"${msg.transcript}"` : '');
+    }
     switch (msg.type) {
       case 'response.output_audio.delta':
         if (msg.delta) queueAudioChunk(msg.delta);
@@ -179,18 +184,30 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
     const ctx = audioCtxRef.current;
     if (!ctx || isPlayingRef.current) return;
     isPlayingRef.current = true;
+    setIsPlaying(true);
 
-    while (playbackQueueRef.current.length > 0) {
-      const chunk = playbackQueueRef.current.shift()!;
-      const audioBuf = ctx.createBuffer(1, chunk.length, 24000);
-      audioBuf.getChannelData(0).set(chunk);
-      const src = ctx.createBufferSource();
-      src.buffer = audioBuf;
-      src.connect(ctx.destination);
-      src.start();
-      await new Promise<void>(r => { src.onended = () => r(); });
+    try {
+      while (playbackQueueRef.current.length > 0) {
+        const chunk = playbackQueueRef.current.shift()!;
+        const audioBuf = ctx.createBuffer(1, chunk.length, 24000);
+        audioBuf.getChannelData(0).set(chunk);
+        const src = ctx.createBufferSource();
+        src.buffer = audioBuf;
+        src.connect(ctx.destination);
+        src.start();
+        await new Promise<void>(r => {
+          src.onended = () => r();
+          // Safety timeout — never block for more than 5s per chunk
+          setTimeout(() => r(), 5000);
+        });
+      }
+    } catch (err) {
+      console.error('[VoiceAgent] Playback error:', err);
+    } finally {
+      // Always reset — never leave mic permanently muted
+      isPlayingRef.current = false;
+      setIsPlaying(false);
     }
-    isPlayingRef.current = false;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -267,9 +284,18 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
       const worklet = new AudioWorkletNode(micCtx, 'pcm-capture');
       workletNodeRef.current = worklet;
 
+      let chunkCount = 0;
       worklet.port.onmessage = (e: MessageEvent<Float32Array>) => {
         if (ws.readyState !== WebSocket.OPEN) return;
+        // Suppress mic input while MAX is speaking to prevent echo feedback
+        if (isPlayingRef.current) return;
         const float32 = e.data;
+        // Log first few chunks to verify mic data is flowing
+        chunkCount++;
+        if (chunkCount <= 3) {
+          const maxVal = float32.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+          console.log(`[VoiceAgent] Mic chunk #${chunkCount}: ${float32.length} samples, peak=${maxVal.toFixed(4)}`);
+        }
         const pcm16 = new Int16Array(float32.length);
         for (let i = 0; i < float32.length; i++) {
           const s = Math.max(-1, Math.min(1, float32[i]));
@@ -283,8 +309,14 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
       };
 
       source.connect(worklet);
-      worklet.connect(micCtx.destination);
+      // Connect to a silent gain node to keep the audio graph alive
+      // Do NOT connect to micCtx.destination — that plays mic audio through speakers!
+      const silentGain = micCtx.createGain();
+      silentGain.gain.value = 0;
+      worklet.connect(silentGain);
+      silentGain.connect(micCtx.destination);
       setIsTalking(true);
+      console.log('[VoiceAgent] Mic started, native rate:', nativeRate, 'resampling to', TARGET_RATE);
     } catch (err: unknown) {
       console.error('Mic start failed:', err);
       const msg = err instanceof Error ? err.message : String(err);
@@ -312,6 +344,7 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
     setIsTalking(false);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
+      console.log('[VoiceAgent] Mic stopped — committing audio buffer + requesting response');
       ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
       ws.send(JSON.stringify({
         type: 'response.create',
@@ -544,16 +577,19 @@ export default function VoiceAgent({ onClose }: { onClose: () => void }) {
               onTouchEnd={stopMic}
               className="w-14 h-14 rounded-full flex items-center justify-center transition-all"
               style={{
-                background: isTalking
-                  ? 'linear-gradient(135deg, var(--gold-bright), var(--gold))'
-                  : 'var(--elevated)',
-                border: isTalking ? '2px solid var(--gold)' : '2px solid var(--gold-border)',
-                boxShadow: isTalking ? '0 0 24px var(--gold-glow)' : 'none',
-                color: isTalking ? '#0a0a0a' : 'var(--gold)',
+                background: isPlaying
+                  ? 'linear-gradient(135deg, #8B5CF6, #7c3aed)'
+                  : isTalking
+                    ? 'linear-gradient(135deg, var(--gold-bright), var(--gold))'
+                    : 'var(--elevated)',
+                border: isPlaying ? '2px solid #8B5CF6' : isTalking ? '2px solid var(--gold)' : '2px solid var(--gold-border)',
+                boxShadow: isPlaying ? '0 0 24px rgba(139,92,246,0.4)' : isTalking ? '0 0 24px var(--gold-glow)' : 'none',
+                color: isPlaying ? '#fff' : isTalking ? '#0a0a0a' : 'var(--gold)',
                 transform: isTalking ? 'scale(1.08)' : 'scale(1)',
               }}
+              title={isPlaying ? 'MAX is speaking — mic muted' : 'Hold to talk'}
             >
-              {isTalking ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
+              {isPlaying ? <Volume2 className="w-5 h-5" /> : isTalking ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
             </button>
 
             {/* Disconnect */}

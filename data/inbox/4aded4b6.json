@@ -1,0 +1,17 @@
+{
+  "id": "4aded4b6",
+  "text": "Okay, so this is test number three. Let's see if we can do all the way around. Make\nit there and come back at voice two. Can you do that?",
+  "source": "telegram",
+  "telegram_message_id": 33,
+  "intent": "instruction",
+  "desk_target": "null",
+  "priority": 3,
+  "ai_summary": "Test instruction to perform a task and return.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T06:10:14.111147",
+  "processed_at": null,
+  "reviewed_at": null
+}

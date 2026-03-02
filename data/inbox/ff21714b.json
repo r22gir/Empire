@@ -1,0 +1,17 @@
+{
+  "id": "ff21714b",
+  "text": "Add task to generate images. Have ai teaM ready for answers when i wake up",
+  "source": "telegram",
+  "telegram_message_id": 77,
+  "intent": "task",
+  "desk_target": "null",
+  "priority": 7,
+  "ai_summary": "Add task to generate images and prepare AI team for answers.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T07:28:52.293871",
+  "processed_at": null,
+  "reviewed_at": null
+}

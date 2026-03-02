@@ -1,0 +1,17 @@
+{
+  "id": "460df7b8",
+  "text": "I'm going to give you the updated grinders of the FB4 category and we'll update the list here and thank you.\nBring it up by the end of the system.",
+  "source": "telegram",
+  "telegram_message_id": 174,
+  "intent": "instruction",
+  "desk_target": "marketforge",
+  "priority": 5,
+  "ai_summary": "Update FB4 category grinders list.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-01T23:40:44.083055",
+  "processed_at": null,
+  "reviewed_at": null
+}

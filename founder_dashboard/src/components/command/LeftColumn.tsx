@@ -3,7 +3,7 @@ import { ChatSession } from '@/lib/types';
 import {
   LayoutGrid, Plus, ChevronDown, ChevronRight, MessageSquare, Trash2,
   Pencil, Check, X, Rocket, PanelLeftClose, PanelLeft, Zap, ListTodo,
-  FileText, CalendarDays, History
+  FileText, CalendarDays, History, Receipt
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -25,6 +25,7 @@ interface Props {
   onSuggest: (prompt: string) => void;
   onOpenWorkspaces?: () => void;
   onOpenWorkspace?: (id: string) => void;
+  onQuickQuote?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -33,7 +34,7 @@ export default function LeftColumn({
   onOpenDeskGrid,
   conversations, activeConversationId, onSelectConversation, onNewChat,
   onDeleteConversation, onRenameConversation, onSuggest,
-  onOpenWorkspaces, onOpenWorkspace,
+  onOpenWorkspaces, onOpenWorkspace, onQuickQuote,
   collapsed = false, onToggleCollapse,
 }: Props) {
   const [showConvos, setShowConvos] = useState(false);
@@ -113,6 +114,20 @@ export default function LeftColumn({
         >
           <Plus className="w-5 h-5" />
         </button>
+
+        {/* Quick Quote */}
+        {onQuickQuote && (
+          <button
+            onClick={onQuickQuote}
+            className="w-10 h-10 rounded-xl flex items-center justify-center transition"
+            style={{ color: 'var(--fuchsia)' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(236,72,153,0.1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            title="Quick Quote"
+          >
+            <Receipt className="w-5 h-5" />
+          </button>
+        )}
 
         <div className="w-8 h-px my-1" style={{ background: 'var(--glass-border)' }} />
 
@@ -198,6 +213,12 @@ export default function LeftColumn({
           <Plus className="icon" style={{ color: 'var(--cyan)' }} />
           <span className="label" style={{ color: 'var(--cyan)' }}>New Chat</span>
         </button>
+        {onQuickQuote && (
+          <button onClick={onQuickQuote} className="sidebar-icon-btn">
+            <Receipt className="icon" style={{ color: 'var(--fuchsia)' }} />
+            <span className="label" style={{ color: 'var(--fuchsia)' }}>Quick Quote</span>
+          </button>
+        )}
       </div>
 
       <div className="w-full h-px" style={{ background: 'var(--glass-border)' }} />

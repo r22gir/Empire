@@ -302,6 +302,8 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "project_name": params.get("project_name", "Quick Quote"),
         "rooms": rooms,
         "line_items": line_items,
+        "ai_outlines": params.get("ai_outlines", []),
+        "ai_mockups": params.get("ai_mockups", []),
         "subtotal": total,
         "tax_rate": 0,
         "tax": 0,
@@ -312,6 +314,69 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "updated_at": now,
         "source": "max_quick_quote",
     }
+
+    # Generate AI mockup images for each room's windows
+    xai_key = os.environ.get("XAI_API_KEY")
+    if xai_key and rooms:
+        try:
+            ai_mockups = []
+            treatment_labels = {
+                'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
+                'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
+            }
+            for room in rooms:
+                room_name = room.get("name", "Room")
+                windows = room.get("windows", [])
+                if not windows:
+                    continue
+                # Build one mockup entry per room with generated images
+                gen_images = []
+                for win in windows[:2]:  # Max 2 windows per room
+                    treatment = win.get("treatmentType", "ripplefold")
+                    label = treatment_labels.get(treatment, treatment.replace('-', ' ').title())
+                    w = win.get("width", 48)
+                    h = win.get("height", 60)
+                    lining = win.get("liningType", "standard").replace('-', ' ')
+                    mount = win.get("mountType", "wall")
+                    hardware = win.get("hardwareType", "standard").replace('-', ' ')
+
+                    prompt = (
+                        f"Professional interior design photo: a {room_name.lower()} with a "
+                        f"{w}-inch wide by {h}-inch tall window. "
+                        f"Installed: {label} drapery panels in elegant fabric. "
+                        f"IMPORTANT: The panels are FULLY OPEN and RETRACTED to each side of the window frame, "
+                        f"gathered in neat stackback folds, showing the full window glass and view. "
+                        f"The panels hang from {hardware} hardware, {mount}-mounted. "
+                        f"{lining} lining visible at panel edges. "
+                        f"Clean, bright natural light streaming through the uncovered window. "
+                        f"Magazine-quality architectural photography, straight-on view."
+                    )
+                    try:
+                        img_resp = httpx.post(
+                            "https://api.x.ai/v1/images/generations",
+                            headers={"Content-Type": "application/json", "Authorization": f"Bearer {xai_key}"},
+                            json={"model": "grok-imagine-image", "prompt": prompt, "n": 1, "response_format": "url"},
+                            timeout=30,
+                        )
+                        if img_resp.status_code == 200:
+                            img_url = img_resp.json().get("data", [{}])[0].get("url")
+                            if img_url:
+                                gen_images.append({"tier": f"{label} — {win.get('name', 'Window')}", "url": img_url})
+                    except Exception as img_err:
+                        logger.warning(f"Quick quote image gen failed for {room_name}: {img_err}")
+
+                if gen_images:
+                    ai_mockups.append({
+                        "roomName": room_name,
+                        "generated_images": gen_images,
+                        "proposals": [],
+                        "generalRecommendations": [],
+                    })
+            if ai_mockups:
+                quote_data["ai_mockups"] = ai_mockups
+                logger.info(f"Generated {sum(len(m['generated_images']) for m in ai_mockups)} mockup images for quick quote")
+        except Exception as e:
+            logger.warning(f"Quick quote mockup generation failed: {e}")
 
     # Save JSON
     os.makedirs(QUOTES_DIR, exist_ok=True)
@@ -606,6 +671,98 @@ async def _generate_pdf_for_quote(quote_id: str):
     await _gen_pdf_endpoint(quote_id)
 
 
+# ── EMAIL TOOLS ───────────────────────────────────────────────────
+
+@tool("send_email")
+def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Send an email with optional file attachments."""
+    to = params.get("to", "").strip()
+    subject = params.get("subject", "").strip()
+    body = params.get("body", "").strip()
+    if not to or not subject or not body:
+        return ToolResult(tool="send_email", success=False, error="to, subject, and body are required")
+
+    attachments = params.get("attachments", [])
+    cc = params.get("cc")
+
+    try:
+        from app.services.max.email_service import EmailService
+        svc = EmailService()
+        if not svc.is_configured:
+            return ToolResult(tool="send_email", success=False, error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env")
+        svc.send(to=to, subject=subject, body_html=body, attachments=attachments, cc=cc)
+        return ToolResult(tool="send_email", success=True, result={"sent_to": to, "subject": subject})
+    except Exception as e:
+        return ToolResult(tool="send_email", success=False, error=str(e))
+
+
+@tool("send_quote_email")
+def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate PDF for a quote and send it to a recipient via email."""
+    quote_id = params.get("quote_id", "")
+    to = params.get("to", "").strip()
+    if not quote_id:
+        return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
+    if not to:
+        return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
+
+    # Load quote
+    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
+    if not os.path.exists(quote_path):
+        return ToolResult(tool="send_quote_email", success=False, error=f"Quote {quote_id} not found")
+
+    import json as _json
+    with open(quote_path) as f:
+        quote = _json.load(f)
+
+    quote_number = quote.get("quote_number", quote_id)
+    customer = quote.get("customer_name", "Unknown")
+    total = quote.get("total", 0)
+
+    # Generate PDF
+    pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
+
+    try:
+        _run_async(_generate_pdf_for_quote(quote["id"]))
+        if not os.path.exists(pdf_path):
+            return ToolResult(tool="send_quote_email", success=False, error="PDF generation failed")
+    except Exception as e:
+        return ToolResult(tool="send_quote_email", success=False, error=f"PDF generation failed: {e}")
+
+    # Send via email
+    try:
+        from app.services.max.email_service import EmailService
+        svc = EmailService()
+        if not svc.is_configured:
+            return ToolResult(tool="send_quote_email", success=False, error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env")
+
+        subject = f"Estimate {quote_number} — {customer}"
+        body_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px;">
+            <h2 style="color: #D4AF37;">Estimate {quote_number}</h2>
+            <p>Hi,</p>
+            <p>Please find attached your estimate for review.</p>
+            <table style="margin: 16px 0; border-collapse: collapse;">
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Customer:</td><td>{customer}</td></tr>
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Estimate Total:</td><td>${total:,.2f}</td></tr>
+                <tr><td style="padding: 4px 12px 4px 0; font-weight: bold;">Quote #:</td><td>{quote_number}</td></tr>
+            </table>
+            <p>If you have any questions, please don't hesitate to reach out.</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <p style="color: #888; font-size: 12px;">Sent via Empire — Powered by MAX AI</p>
+        </div>
+        """
+
+        svc.send(to=to, subject=subject, body_html=body_html, attachments=[pdf_path])
+        return ToolResult(tool="send_quote_email", success=True, result={
+            "sent_to": to, "quote_number": quote_number, "customer": customer, "total": total,
+        })
+    except Exception as e:
+        return ToolResult(tool="send_quote_email", success=False, error=f"Email send failed: {e}")
+
+
 # ── IMAGE SEARCH TOOL ─────────────────────────────────────────────
 
 @tool("search_images")
@@ -722,6 +879,11 @@ To call a tool, include a tool block in your response:
 - **send_quote_telegram** — Generate a quote PDF and send it to the founder via Telegram
   `{"tool": "send_quote_telegram", "quote_id": "abc123"}`
   Use this after creating/saving a quote to deliver the PDF directly to Telegram.
+- **send_email** — Send an email with optional file attachments
+  `{"tool": "send_email", "to": "client@example.com", "subject": "Your Estimate", "body": "<h2>Hello</h2><p>HTML body here</p>", "attachments": ["/path/to/file.pdf"], "cc": "optional@cc.com"}`
+- **send_quote_email** — Generate a quote PDF and email it to the recipient
+  `{"tool": "send_quote_email", "quote_id": "abc123", "to": "client@example.com"}`
+  Use this after creating/saving a quote to email the PDF directly to a client or the founder.
 
 ### Research Tools
 - **search_images** — Search for relevant images (Unsplash) to enhance your response. Embed results in markdown.

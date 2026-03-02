@@ -1,0 +1,17 @@
+{
+  "id": "99b49d4a",
+  "text": "Ok",
+  "source": "telegram",
+  "telegram_message_id": 89,
+  "intent": "note",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Simple acknowledgment or placeholder message",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T07:49:35.110154",
+  "processed_at": null,
+  "reviewed_at": null
+}

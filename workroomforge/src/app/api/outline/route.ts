@@ -103,20 +103,20 @@ export async function POST(req: NextRequest) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => 'Unknown error');
-      return corsResponse({ error: `Vision error: ${res.status} ${errText}` }, { status: res.status });
+      return corsResponse({ error: `Vision error: ${res.status} ${errText}` }, res.status);
     }
 
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content || '';
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return corsResponse({ error: 'Could not parse response', raw: content }, { status: 500 });
+      return corsResponse({ error: 'Could not parse response', raw: content }, 500);
     }
 
     const analysis = JSON.parse(jsonMatch[0]);
     return corsResponse(analysis);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Outline analysis failed';
-    return corsResponse({ error: msg }, { status: 500 });
+    return corsResponse({ error: msg }, 500);
   }
 }

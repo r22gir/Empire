@@ -1,0 +1,17 @@
+{
+  "id": "9f5f5289",
+  "text": "Puedes enviar un mensaje a tu correo de empirebox2026@gmail.com",
+  "source": "telegram",
+  "telegram_message_id": 166,
+  "intent": "instruction",
+  "desk_target": "null",
+  "priority": 3,
+  "ai_summary": "Send a message to empirebox2026@gmail.com",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-01T22:53:51.847725",
+  "processed_at": null,
+  "reviewed_at": null
+}

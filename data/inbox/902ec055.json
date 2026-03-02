@@ -1,0 +1,17 @@
+{
+  "id": "902ec055",
+  "text": "Add widgets to home page. Give me relevant ideas",
+  "source": "telegram",
+  "telegram_message_id": 70,
+  "intent": "instruction",
+  "desk_target": "null",
+  "priority": 5,
+  "ai_summary": "Add widgets to home page and provide relevant ideas.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T07:25:55.129225",
+  "processed_at": null,
+  "reviewed_at": null
+}

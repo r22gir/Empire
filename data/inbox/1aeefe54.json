@@ -1,0 +1,17 @@
+{
+  "id": "1aeefe54",
+  "text": "Yes",
+  "source": "telegram",
+  "telegram_message_id": 132,
+  "intent": "note",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Simple affirmation or agreement",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-01T21:38:50.222286",
+  "processed_at": null,
+  "reviewed_at": null
+}

@@ -1,0 +1,17 @@
+{
+  "id": "df7e9878",
+  "text": "Can a get my pdf?",
+  "source": "telegram",
+  "telegram_message_id": 247,
+  "intent": "question",
+  "desk_target": "workroomforge",
+  "priority": 5,
+  "ai_summary": "Requesting a PDF, likely for a quote or document.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-02T05:40:58.121586",
+  "processed_at": null,
+  "reviewed_at": null
+}

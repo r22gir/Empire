@@ -463,6 +463,7 @@ export default function CommandCenter() {
               onSuggest={setSuggestedInput}
               onOpenWorkspaces={() => setShowWorkspaces(true)}
               onOpenWorkspace={setActiveWorkspace}
+              onQuickQuote={() => { setShowQuoteBuilder(true); setShowStats(false); }}
               collapsed={sidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
@@ -521,8 +522,8 @@ export default function CommandCenter() {
         )}
       </div>
 
-      {/* ════ COMMAND PALETTE BAR (always visible) ═══════════ */}
-      <BottomBar
+      {/* ════ COMMAND PALETTE BAR ═══════════ */}
+      {<BottomBar
         onSend={handleSend}
         isStreaming={chat.isStreaming}
         onStop={chat.stopStreaming}
@@ -541,7 +542,7 @@ export default function CommandCenter() {
         suggestedInput={suggestedInput}
         onClearSuggestion={() => setSuggestedInput('')}
         onToggleStats={() => setShowStats(!showStats)}
-      />
+      />}
 
       {/* ════ LIVE TICKER (crypto, news, sports) ════════════ */}
       <LiveTicker />

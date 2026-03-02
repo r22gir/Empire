@@ -1,0 +1,17 @@
+{
+  "id": "3709d8dc",
+  "text": "Pull in external resources or AI assistance",
+  "source": "telegram",
+  "telegram_message_id": 48,
+  "intent": "instruction",
+  "desk_target": "null",
+  "priority": 5,
+  "ai_summary": "Request to integrate external resources or AI assistance",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T06:45:09.614441",
+  "processed_at": null,
+  "reviewed_at": null
+}

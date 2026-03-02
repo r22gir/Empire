@@ -1,0 +1,17 @@
+{
+  "id": "749d20c6",
+  "text": "Choose any is a test",
+  "source": "telegram",
+  "telegram_message_id": 226,
+  "intent": "instruction",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Test message with no specific target or task.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-02T03:37:23.908401",
+  "processed_at": null,
+  "reviewed_at": null
+}

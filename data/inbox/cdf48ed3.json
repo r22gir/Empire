@@ -1,0 +1,17 @@
+{
+  "id": "cdf48ed3",
+  "text": "Ok let me\nKnow tomorrow.",
+  "source": "telegram",
+  "telegram_message_id": 57,
+  "intent": "note",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Reminder to follow up tomorrow",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T06:49:19.286305",
+  "processed_at": null,
+  "reviewed_at": null
+}

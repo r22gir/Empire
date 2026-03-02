@@ -339,7 +339,7 @@ class AIRouter:
 
     async def _grok_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 "https://api.x.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
@@ -351,7 +351,7 @@ class AIRouter:
 
     async def _grok_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.x.ai/v1/chat/completions",
@@ -380,7 +380,7 @@ class AIRouter:
 
     async def _claude_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
         system_msg, api_messages = self._prepare_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": self.anthropic_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
@@ -392,7 +392,7 @@ class AIRouter:
 
     async def _claude_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         system_msg, api_messages = self._prepare_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.anthropic.com/v1/messages",

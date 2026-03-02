@@ -108,6 +108,13 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
         response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
 
+        # Parse and execute tool blocks from response (same as streaming endpoint)
+        tool_results_list = []
+        tool_calls = parse_tool_blocks(response.content)
+        for tc in tool_calls:
+            result = execute_tool(tc, desk=request.desk)
+            tool_results_list.append({"tool": result.tool, "success": result.success, "result": result.result, "error": result.error})
+
         # Track conversation in background
         conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
         conversation_tracker.add_message(conv_id, "user", request.message)
@@ -132,7 +139,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
         token_tracker.log_chat(response.model_used, input_text, response.content, "chat", conv_id)
 
-        return ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
+        resp = ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
+        # Attach tool results to the response JSON (extra field, not in schema but included in dict)
+        resp_dict = resp.dict()
+        if tool_results_list:
+            resp_dict["tool_results"] = tool_results_list
+        return resp_dict
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -341,7 +353,7 @@ async def brain_status():
 
     brain_path = get_brain_path()
     db_path = get_db_path()
-    is_external = "/media/rg/BACKUP11" in str(brain_path)
+    is_external = False  # brain is local-only now (NVMe primary)
 
     # Memory stats
     try:

@@ -235,10 +235,10 @@ class TelegramBot:
 
     async def _chat_with_max(
         self, text: str, image_filename: Optional[str] = None, chat_id: Optional[str] = None,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, list]:
         """Send message to MAX via the backend API with conversation memory.
 
-        Returns (html_response, plain_text) — html for Telegram display, plain for TTS.
+        Returns (html_response, plain_text, tool_results) — html for Telegram display, plain for TTS, tool results list.
         """
         cid = str(chat_id or self.founder_chat_id or "default")
         history = _telegram_history.get(cid, [])[-_MAX_HISTORY:]
@@ -252,6 +252,7 @@ class TelegramBot:
                     data = resp.json()
                     model = data.get("model_used", "")
                     response = data.get("response", "No response.")
+                    tool_results = data.get("tool_results", [])
                     # Store in conversation history
                     if cid not in _telegram_history:
                         _telegram_history[cid] = []
@@ -261,14 +262,14 @@ class TelegramBot:
                     if len(_telegram_history[cid]) > _MAX_HISTORY * 2:
                         _telegram_history[cid] = _telegram_history[cid][-_MAX_HISTORY * 2:]
                     html = f"{response}\n\n<i>— via {model}</i>"
-                    return html, response
+                    return html, response, tool_results
                 else:
                     err = f"Backend error: {resp.status_code}"
-                    return err, err
+                    return err, err, []
         except Exception as e:
             logger.error(f"MAX chat error: {e}")
             err = f"Could not reach MAX: {e}"
-            return err, err
+            return err, err, []
 
     async def _send_voice_reply(self, update, plain_text: str):
         """Generate TTS audio from plain text and send as Telegram voice note.
@@ -409,10 +410,28 @@ class TelegramBot:
 
             # Get natural MAX response (always shown to user)
             chat_id = str(update.effective_chat.id) if update.effective_chat else None
-            html_response, plain_text = await self._chat_with_max(text, chat_id=chat_id)
+            html_response, plain_text, tool_results = await self._chat_with_max(text, chat_id=chat_id)
             if len(html_response) > 4000:
                 html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
             await update.message.reply_html(html_response)
+
+            # Send any documents/files produced by tool execution
+            for tr in tool_results:
+                if tr.get("success") and tr.get("result"):
+                    res = tr["result"]
+                    # send_quote_telegram tool already sends via bot, but for other tools:
+                    # Check if result has a file path
+                    file_path = res.get("file_path") or res.get("pdf_path")
+                    if file_path and os.path.exists(file_path):
+                        caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
+                        await self.send_document(file_path, caption=caption, chat_id=chat_id)
+                    # Check if result has an image URL
+                    image_url = res.get("image_url") or res.get("url")
+                    if image_url and image_url.startswith("http"):
+                        try:
+                            await update.message.reply_photo(photo=image_url, caption=res.get("caption", ""))
+                        except Exception as img_err:
+                            logger.warning(f"Failed to send image via Telegram: {img_err}")
 
             # Send voice reply (TTS)
             await self._send_voice_reply(update, plain_text)
@@ -455,7 +474,7 @@ class TelegramBot:
                 # 4. Send transcript TEXT to Grok (same as if user typed it)
                 await update.message.reply_chat_action("typing")
                 voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-                html_response, plain_text = await self._chat_with_max(transcript, chat_id=voice_chat_id)
+                html_response, plain_text, _ = await self._chat_with_max(transcript, chat_id=voice_chat_id)
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
 
@@ -494,7 +513,7 @@ class TelegramBot:
                 shutil.move(str(photo_path), str(dest))
                 caption = update.message.caption or "Describe this image in detail."
                 photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-                html_response, plain_text = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id)
+                html_response, plain_text, _ = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id)
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
                 await update.message.reply_html(html_response)
@@ -504,8 +523,28 @@ class TelegramBot:
             except Exception as e:
                 await update.message.reply_text(f"Photo analysis failed: {e}")
 
-        # Build and run the bot
-        app = Application.builder().token(self.bot_token).build()
+        # Build and run the bot — increase timeouts for reliability
+        from telegram.request import HTTPXRequest
+        request = HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=45.0,
+            write_timeout=30.0,
+            pool_timeout=15.0,
+            connection_pool_size=8,
+        )
+        get_updates_request = HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=90.0,
+            write_timeout=30.0,
+            pool_timeout=15.0,
+        )
+        app = (
+            Application.builder()
+            .token(self.bot_token)
+            .request(request)
+            .get_updates_request(get_updates_request)
+            .build()
+        )
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("desks", cmd_desks))
@@ -519,29 +558,48 @@ class TelegramBot:
         self._running = True
         logger.info("🤖 MAX Telegram Bot starting...")
 
+        # Clear any stale webhook/polling before starting
         try:
-            await app.initialize()
-            await app.start()
-            await app.updater.start_polling(drop_pending_updates=True)
-            logger.info("🤖 MAX Telegram Bot is running!")
-            while self._running:
-                await asyncio.sleep(1)
-        except asyncio.CancelledError:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(
+                    f"{self.api_base}/deleteWebhook",
+                    json={"drop_pending_updates": True},
+                )
+        except Exception:
             pass
-        except Exception as e:
-            logger.error(f"🤖 Telegram Bot failed to start: {e}")
-            print(f"❌ Telegram Bot error: {e}")
-            return
-        finally:
+
+        # Retry startup up to 3 times (previous instance may still hold connection)
+        for attempt in range(3):
             try:
-                if app.updater and app.updater.running:
-                    await app.updater.stop()
-                if app.running:
-                    await app.stop()
-                await app.shutdown()
-            except Exception:
-                pass
-            logger.info("🤖 MAX Telegram Bot stopped")
+                await app.initialize()
+                await app.start()
+                await app.updater.start_polling(
+                    drop_pending_updates=True,
+                    allowed_updates=["message", "callback_query"],
+                )
+                logger.info("🤖 MAX Telegram Bot is running!")
+                while self._running:
+                    await asyncio.sleep(1)
+                break
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning(f"🤖 Telegram Bot attempt {attempt+1}/3 failed: {e}")
+                if attempt < 2:
+                    await asyncio.sleep(5)
+                else:
+                    logger.error(f"🤖 Telegram Bot failed after 3 attempts: {e}")
+                    print(f"❌ Telegram Bot error: {e}")
+                    return
+        try:
+            if app.updater and app.updater.running:
+                await app.updater.stop()
+            if app.running:
+                await app.stop()
+            await app.shutdown()
+        except Exception:
+            pass
+        logger.info("🤖 MAX Telegram Bot stopped")
 
     def stop_bot(self):
         self._running = False

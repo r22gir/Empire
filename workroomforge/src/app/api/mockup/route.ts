@@ -8,15 +8,21 @@ export const maxDuration = 60;
 
 export async function OPTIONS() { return corsOptions(); }
 
-const MOCKUP_PROMPT_BASE = `You are a luxury interior designer specializing in custom window treatments and soft furnishings for high-end residential projects in the Washington DC area. You have 25+ years of experience creating stunning, functional window solutions.
+const MOCKUP_PROMPT_BASE = `You are a luxury interior designer specializing in custom window treatments and soft furnishings for high-end residential projects. You have 25+ years of experience creating stunning, functional window solutions.
 
-Analyze this photo and create a detailed mockup/design proposal for new or replacement window treatments.
+CRITICAL RULES:
+- You are designing WINDOW TREATMENTS ONLY. Do NOT suggest moving, replacing, or rearranging furniture, flooring, or wall decor.
+- Keep existing room elements (furniture, art, rugs, paint) exactly as they are — your job is ONLY the windows.
+- Each tier MUST be clearly different from the others in treatment type, fabric, hardware, and visual impact.
+- Ensure design logic: rods/tracks go BEHIND or ABOVE valances/cornices, never in front. Hardware must be compatible with the treatment style.
+
+Analyze this photo and create a detailed mockup/design proposal for window treatments ONLY.
 
 STEP 1 — ASSESS THE SPACE:
 - Room type and function (living room, bedroom, dining, office, etc.)
 - Architectural style (modern, traditional, transitional, contemporary, colonial, etc.)
 - Light exposure and direction (bright, moderate, low — affects lining and opacity recommendations)
-- Existing decor elements (furniture style, color palette, flooring, wall color)
+- Existing decor elements (furniture style, color palette, flooring, wall color) — NOTE these but do NOT change them
 - Privacy needs based on room type and window position
 
 STEP 2 — WINDOW ANALYSIS:
@@ -25,37 +31,54 @@ STEP 2 — WINDOW ANALYSIS:
 - Current treatment (if any) and its condition
 - How the window is used (needs to open? sliding door access?)
 
-STEP 3 — DESIGN PROPOSALS (provide 3 options from budget to luxury):`;
+STEP 3 — DESIGN PROPOSALS (provide 3 distinctly different options from budget to luxury):`;
 
 const TREATMENT_OPTIONS = `
-OPTION 1 — ELEGANT ESSENTIAL (budget-conscious luxury):
-- Treatment type and style
-- Fabric weight and type recommendation
-- Lining recommendation
-- Hardware style
-- Estimated price range
-- Why this works for the space
+OPTION 1 — ELEGANT ESSENTIAL (budget-conscious, clean, simple):
+- SIMPLE treatment: single-layer panels OR a clean shade/blind — no layering
+- Standard-weight fabric: cotton, polyester blend, or basic linen in solid colors
+- Standard lining (privacy or light-filtering)
+- Simple hardware: basic rod with matching finials OR inside-mount brackets
+- NO extras — clean, functional, elegant
+- Price range: $200-$600 per window
+- Explain why this simple approach works for the space
 
-OPTION 2 — DESIGNER'S CHOICE (mid-range luxury):
-- Treatment type and style (more elaborate)
-- Fabric recommendation with pattern/texture suggestions
-- Lining and interlining
-- Decorative hardware
-- Layering suggestions (sheer + drapery, shade + panels)
-- Estimated price range
-- Design rationale
+OPTION 2 — DESIGNER'S CHOICE (mid-range, layered, textured):
+- MUST be a different treatment type than Option 1 (e.g., if Option 1 is panels, use Roman shade + sheers)
+- Mid-range fabric: textured linen, jacquard, subtle pattern, or woven blend
+- Blackout or thermal lining + interlining for body
+- Decorative hardware: ornamental rod with detailed finials, rings, or a ripplefold track system
+- ONE layer of extras: sheers behind panels, OR decorative trim, OR contrasting banding
+- Describe specific fabric texture (e.g., "nubby linen weave" not just "linen")
+- Price range: $600-$1,500 per window
+- Design rationale explaining the layered approach
 
-OPTION 3 — ULTIMATE LUXURY (premium):
-- Full custom treatment with all premium details
-- Premium fabric recommendations (silks, velvets, designer prints)
-- Motorization options
-- Full layering (sheers + functional panels + decorative valance/cornice)
-- Custom hardware (hand-forged, crystal finials, etc.)
-- Estimated price range
-- Why this creates maximum impact
+OPTION 3 — ULTIMATE LUXURY (premium, statement, multi-layered):
+- MUST be the most elaborate — completely different look from Options 1 and 2
+- FULL LAYERING: sheers + functional drapery panels + decorative top treatment (cornice, valance, or swag)
+- Premium fabric: silk dupioni, Italian velvet, designer embroidered, or hand-printed
+- Specify exact fabric texture and sheen (e.g., "crushed silk velvet with a deep luster" not just "velvet")
+- Motorization (Lutron or Somfy) for functional layers
+- Custom hardware: hand-forged iron, crystal finials, gilded brackets, or hidden motorized track
+- Multiple extras: decorative trim, contrast lining reveal, tassel tiebacks, beaded fringe
+- Price range: $1,500-$4,000+ per window
+- Explain the "wow factor" — what makes someone walk into the room and gasp
 
-STEP 4 — VISUAL DESCRIPTION:
-For each option, describe in vivid detail how the treatment would look installed — colors, how the fabric drapes, how light filters through, the overall aesthetic impact. This should help the client visualize the finished result.
+DESIGN VALIDATION — Before finalizing, check each proposal:
+- Rods/tracks mount ABOVE or BEHIND any valance/cornice — never in front
+- Hardware style matches the treatment (no ornate finials with ripplefold tracks)
+- Fabric weight is appropriate (heavy velvet needs sturdy hardware, not tension rods)
+- Inside-mount only if window frame depth allows it (3.5"+ for blinds)
+- Colors complement the existing room palette, don't clash
+- Do NOT suggest moving or replacing any furniture or non-window elements
+
+STEP 4 — VISUAL DESCRIPTION (CRITICAL — be extremely specific and vivid):
+For each option, paint a picture in words:
+- Exact fabric appearance: texture, sheen, drape quality, pattern detail
+- How light interacts: does it glow through sheers? Create pooling shadows from heavy velvet?
+- Hardware finish: brushed brass with spiral finials? Matte black iron with ball ends?
+- The overall emotional impact: cozy? dramatic? serene? grand?
+- Include specific color descriptions (not "blue" — say "deep navy with tonal damask pattern")
 
 Return JSON only:
 {
@@ -155,8 +178,33 @@ export async function POST(req: NextRequest) {
       const colorPalette = (analysis.room_assessment?.color_palette || []).join(', ') || 'neutral tones';
       const lightLevel = analysis.room_assessment?.light_level || 'natural';
 
-      const imagePromises = proposals.slice(0, 3).map(async (p: any) => {
-        const prompt = `Photorealistic interior design photograph: a ${roomType} with a ${windowType} window. Installed treatment: ${p.treatment_type} in ${p.fabric} fabric, ${p.style} style. The drapery panels are RETRACTED to each side, gathered in elegant stackback folds, revealing the window. Hardware: ${p.hardware}. ${p.lining} lining visible at edges. ${(p.extras || []).join(', ')}. Room color scheme: ${colorPalette}. ${lightLevel} natural light. Professional architectural photography, straight-on view, sharp focus, magazine quality interior design photo.`;
+      const tierImageStyles: Record<string, string> = {
+        'Elegant Essential': 'Simple, clean, minimal design. Single-layer treatment. Standard fabric with solid color. Basic rod or brackets. Bright, airy, budget-friendly elegance. The simplicity IS the style.',
+        "Designer's Choice": 'Layered, textured, curated design. Multiple elements working together. Visible fabric texture and weave. Decorative hardware with detailed finials. Rich mid-range materials. The room feels "designed" and intentional.',
+        'Ultimate Luxury': 'Opulent, grand, multi-layered statement. Floor-to-ceiling panels with sheers behind. Visible fabric sheen and luster (silk, velvet). Ornate custom hardware with crystal or gilded finials. Decorative top treatment (cornice or valance). Tiebacks or trim details. The room feels like a luxury magazine cover.',
+      };
+
+      const imagePromises = proposals.slice(0, 3).map(async (p: any, idx: number) => {
+        const tierStyle = tierImageStyles[p.tier] || tierImageStyles['Elegant Essential'];
+        const isValance = p.treatment_type?.toLowerCase().includes('valance') || p.treatment_type?.toLowerCase().includes('cornice');
+        const hardwareNote = isValance
+          ? `The ${p.hardware || 'mounting board'} is HIDDEN BEHIND the valance/cornice — NOT visible in front.`
+          : `Hardware: ${p.hardware || 'decorative rod'} mounted 4-6 inches ABOVE the window frame.`;
+
+        const prompt = [
+          `PROFESSIONAL interior design photograph of a ${roomType} with a ${windowType} window.`,
+          `WINDOW TREATMENT ONLY (do NOT change furniture or decor):`,
+          `Installed: ${p.treatment_type} in ${p.fabric} fabric, ${p.style} style.`,
+          tierStyle,
+          `The fabric has visible texture: ${p.fabric?.includes('velvet') ? 'deep plush velvet pile with light-catching sheen' : p.fabric?.includes('silk') ? 'smooth lustrous silk with subtle shimmer' : p.fabric?.includes('linen') ? 'natural linen weave with organic texture' : 'rich woven textile with visible drape and body'}.`,
+          hardwareNote,
+          p.lining ? `${p.lining} lining providing ${p.lining === 'blackout' ? 'complete light blocking' : 'privacy and light filtering'}.` : '',
+          (p.extras || []).length > 0 ? `Details: ${p.extras.join(', ')}.` : '',
+          `Room: ${colorPalette} color scheme. ${lightLevel} light. All existing furniture and decor UNCHANGED.`,
+          `Photorealistic, straight-on view, 4K sharp focus, Architectural Digest magazine quality.`,
+          idx === 2 ? 'This is the MOST LUXURIOUS option — make it visually stunning and dramatically different from a basic treatment.' : '',
+        ].filter(Boolean).join(' ');
+
 
         try {
           const imgRes = await fetch('https://api.x.ai/v1/images/generations', {

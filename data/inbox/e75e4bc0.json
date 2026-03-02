@@ -1,0 +1,17 @@
+{
+  "id": "e75e4bc0",
+  "text": "We need to set up a local network management system to monitor connected devices to wifi to pause some or stop when needed. Like an app to manage router. Not an empire project. Add to personal",
+  "source": "telegram",
+  "telegram_message_id": 102,
+  "intent": "task",
+  "desk_target": "null",
+  "priority": 3,
+  "ai_summary": "Set up local network management system for WiFi device control.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T19:21:01.532165",
+  "processed_at": null,
+  "reviewed_at": null
+}
