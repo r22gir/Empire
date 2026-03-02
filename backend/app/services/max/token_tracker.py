@@ -1,0 +1,335 @@
+"""
+Token usage tracking and cost estimation for all LLM providers.
+Stores usage in SQLite on the brain drive (or local fallback).
+"""
+import sqlite3
+import logging
+from datetime import datetime, timedelta
+from pathlib import Path
+
+logger = logging.getLogger("max.tokens")
+
+# Cost per 1M tokens (USD) — updated Feb 2026
+COST_RATES = {
+    # xAI Grok
+    "grok": {"input": 5.00, "output": 15.00},
+    "grok-3-fast": {"input": 5.00, "output": 15.00},
+    # Anthropic Claude
+    "claude-4.6-sonnet": {"input": 3.00, "output": 15.00},
+    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    # Local models (free)
+    "ollama-llama3.1": {"input": 0.0, "output": 0.0},
+    "ollama-llama": {"input": 0.0, "output": 0.0},
+    "openclaw": {"input": 0.0, "output": 0.0},
+    "mistral:7b": {"input": 0.0, "output": 0.0},
+    "nomic-embed-text": {"input": 0.0, "output": 0.0},
+}
+
+# Default monthly budget (USD)
+DEFAULT_MONTHLY_BUDGET = 50.00
+
+
+def _get_db_path() -> str:
+    try:
+        from app.services.max.brain.brain_config import get_brain_path
+        return str(get_brain_path() / "token_usage.db")
+    except Exception:
+        fallback = Path.home() / "Empire" / "backend" / "data" / "token_usage.db"
+        fallback.parent.mkdir(parents=True, exist_ok=True)
+        return str(fallback)
+
+
+class TokenTracker:
+    def __init__(self, db_path: str = None):
+        self.db_path = db_path or _get_db_path()
+        self._init_db()
+
+    def _init_db(self):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                    model TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    cost_usd REAL NOT NULL DEFAULT 0.0,
+                    endpoint TEXT DEFAULT 'chat',
+                    conversation_id TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_timestamp
+                ON token_usage(timestamp)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_token_model
+                ON token_usage(model)
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS budget_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    monthly_budget REAL NOT NULL DEFAULT 50.0,
+                    alert_threshold REAL NOT NULL DEFAULT 0.8,
+                    auto_switch_to_local BOOLEAN NOT NULL DEFAULT 0,
+                    auto_switch_threshold REAL NOT NULL DEFAULT 0.95
+                )
+            """)
+            conn.execute("""
+                INSERT OR IGNORE INTO budget_config (id, monthly_budget, alert_threshold, auto_switch_to_local, auto_switch_threshold)
+                VALUES (1, ?, 0.8, 0, 0.95)
+            """, (DEFAULT_MONTHLY_BUDGET,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Token tracker DB init failed: {e}")
+
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        """Estimate token count from text (roughly 4 chars per token)."""
+        return max(1, len(text) // 4)
+
+    @staticmethod
+    def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+        rates = COST_RATES.get(model, COST_RATES.get("grok"))
+        if not rates:
+            return 0.0
+        input_cost = (input_tokens / 1_000_000) * rates["input"]
+        output_cost = (output_tokens / 1_000_000) * rates["output"]
+        return round(input_cost + output_cost, 6)
+
+    def log_usage(
+        self,
+        model: str,
+        provider: str,
+        input_tokens: int,
+        output_tokens: int,
+        endpoint: str = "chat",
+        conversation_id: str = None,
+    ):
+        cost = self.calculate_cost(model, input_tokens, output_tokens)
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute(
+                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (model, provider, input_tokens, output_tokens, cost, endpoint, conversation_id),
+            )
+            conn.commit()
+            conn.close()
+            logger.debug(f"Token usage logged: {model} in={input_tokens} out={output_tokens} cost=${cost:.4f}")
+        except Exception as e:
+            logger.warning(f"Failed to log token usage: {e}")
+
+    def log_chat(
+        self,
+        model: str,
+        input_text: str,
+        output_text: str,
+        endpoint: str = "chat",
+        conversation_id: str = None,
+    ):
+        """Convenience: estimate tokens from text and log."""
+        provider = "local" if model in ("ollama-llama3.1", "ollama-llama", "openclaw", "mistral:7b") else "cloud"
+        input_tokens = self.estimate_tokens(input_text)
+        output_tokens = self.estimate_tokens(output_text)
+        self.log_usage(model, provider, input_tokens, output_tokens, endpoint, conversation_id)
+
+    def get_stats(self, days: int = 30) -> dict:
+        """Get aggregated token usage stats."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+            # Total usage in period
+            row = conn.execute(
+                """SELECT
+                     COALESCE(SUM(input_tokens), 0) as total_input,
+                     COALESCE(SUM(output_tokens), 0) as total_output,
+                     COALESCE(SUM(cost_usd), 0) as total_cost,
+                     COUNT(*) as total_requests
+                   FROM token_usage WHERE timestamp >= ?""",
+                (since,),
+            ).fetchone()
+
+            total_input = row["total_input"]
+            total_output = row["total_output"]
+            total_cost = round(row["total_cost"], 4)
+            total_requests = row["total_requests"]
+
+            # Per-model breakdown
+            model_rows = conn.execute(
+                """SELECT model, provider,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY model ORDER BY cost DESC""",
+                (since,),
+            ).fetchall()
+
+            by_model = [
+                {
+                    "model": r["model"],
+                    "provider": r["provider"],
+                    "input_tokens": r["input_tokens"],
+                    "output_tokens": r["output_tokens"],
+                    "cost": round(r["cost"], 4),
+                    "requests": r["requests"],
+                }
+                for r in model_rows
+            ]
+
+            # Daily usage (last 7 days)
+            week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+            daily_rows = conn.execute(
+                """SELECT DATE(timestamp) as day,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY DATE(timestamp) ORDER BY day""",
+                (week_ago,),
+            ).fetchall()
+
+            daily = [
+                {
+                    "day": r["day"],
+                    "input_tokens": r["input_tokens"],
+                    "output_tokens": r["output_tokens"],
+                    "cost": round(r["cost"], 4),
+                    "requests": r["requests"],
+                }
+                for r in daily_rows
+            ]
+
+            # Today's usage
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+            today_row = conn.execute(
+                """SELECT
+                     COALESCE(SUM(input_tokens), 0) as input_tokens,
+                     COALESCE(SUM(output_tokens), 0) as output_tokens,
+                     COALESCE(SUM(cost_usd), 0) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE DATE(timestamp) = ?""",
+                (today,),
+            ).fetchone()
+
+            # Monthly cost (current month)
+            month_start = datetime.utcnow().replace(day=1).strftime("%Y-%m-%d")
+            month_row = conn.execute(
+                """SELECT COALESCE(SUM(cost_usd), 0) as cost
+                   FROM token_usage WHERE timestamp >= ?""",
+                (month_start,),
+            ).fetchone()
+            monthly_cost = round(month_row["cost"], 4)
+
+            # Budget config
+            budget_row = conn.execute("SELECT * FROM budget_config WHERE id = 1").fetchone()
+            monthly_budget = budget_row["monthly_budget"] if budget_row else DEFAULT_MONTHLY_BUDGET
+            alert_threshold = budget_row["alert_threshold"] if budget_row else 0.8
+            auto_switch = bool(budget_row["auto_switch_to_local"]) if budget_row else False
+            auto_switch_at = budget_row["auto_switch_threshold"] if budget_row else 0.95
+
+            budget_used = monthly_cost / monthly_budget if monthly_budget > 0 else 0
+            budget_alert = budget_used >= alert_threshold
+
+            conn.close()
+
+            return {
+                "period_days": days,
+                "total": {
+                    "input_tokens": total_input,
+                    "output_tokens": total_output,
+                    "total_tokens": total_input + total_output,
+                    "cost_usd": total_cost,
+                    "requests": total_requests,
+                },
+                "today": {
+                    "input_tokens": today_row["input_tokens"],
+                    "output_tokens": today_row["output_tokens"],
+                    "cost_usd": round(today_row["cost"], 4),
+                    "requests": today_row["requests"],
+                },
+                "by_model": by_model,
+                "daily": daily,
+                "budget": {
+                    "monthly_limit": monthly_budget,
+                    "monthly_spent": monthly_cost,
+                    "percent_used": round(budget_used * 100, 1),
+                    "alert": budget_alert,
+                    "auto_switch_to_local": auto_switch,
+                    "auto_switch_threshold": auto_switch_at,
+                },
+            }
+        except Exception as e:
+            logger.error(f"Token stats query failed: {e}")
+            return {
+                "period_days": days,
+                "total": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0, "requests": 0},
+                "today": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0, "requests": 0},
+                "by_model": [],
+                "daily": [],
+                "budget": {
+                    "monthly_limit": DEFAULT_MONTHLY_BUDGET,
+                    "monthly_spent": 0,
+                    "percent_used": 0,
+                    "alert": False,
+                    "auto_switch_to_local": False,
+                    "auto_switch_threshold": 0.95,
+                },
+            }
+
+    def update_budget(self, monthly_budget: float = None, alert_threshold: float = None,
+                      auto_switch: bool = None, auto_switch_threshold: float = None):
+        try:
+            conn = sqlite3.connect(self.db_path)
+            updates = []
+            params = []
+            if monthly_budget is not None:
+                updates.append("monthly_budget = ?")
+                params.append(monthly_budget)
+            if alert_threshold is not None:
+                updates.append("alert_threshold = ?")
+                params.append(alert_threshold)
+            if auto_switch is not None:
+                updates.append("auto_switch_to_local = ?")
+                params.append(int(auto_switch))
+            if auto_switch_threshold is not None:
+                updates.append("auto_switch_threshold = ?")
+                params.append(auto_switch_threshold)
+            if updates:
+                conn.execute(f"UPDATE budget_config SET {', '.join(updates)} WHERE id = 1", params)
+                conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Budget update failed: {e}")
+
+    def should_switch_to_local(self) -> bool:
+        """Check if budget threshold is reached and auto-switch is enabled."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            budget = conn.execute("SELECT * FROM budget_config WHERE id = 1").fetchone()
+            if not budget or not budget["auto_switch_to_local"]:
+                conn.close()
+                return False
+            month_start = datetime.utcnow().replace(day=1).strftime("%Y-%m-%d")
+            row = conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0) as cost FROM token_usage WHERE timestamp >= ?",
+                (month_start,),
+            ).fetchone()
+            conn.close()
+            spent = row["cost"]
+            return (spent / budget["monthly_budget"]) >= budget["auto_switch_threshold"]
+        except Exception:
+            return False
+
+
+# Singleton
+token_tracker = TokenTracker()

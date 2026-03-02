@@ -1,0 +1,394 @@
+{
+  "timestamp": "2026-02-22T04:50:53.514932",
+  "environment": {
+    "python": "Python 3.12.3",
+    "node": "v20.20.0",
+    "npm": "10.8.2",
+    "cwd": "/home/rg/Empire",
+    "env_exists": true
+  },
+  "tests": [
+    {
+      "name": "API Root",
+      "status": "PASS",
+      "details": {
+        "message": "EmpireBox API",
+        "status": "operational"
+      }
+    },
+    {
+      "name": "Health Check",
+      "status": "PASS",
+      "details": {
+        "status": "healthy"
+      }
+    },
+    {
+      "name": "OpenAPI Docs",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "MAX AI Chat",
+      "status": "PASS",
+      "details": {
+        "response": "It looks like you're testing to see if I'm working properly! That's a great idea. I'm happy to report that I am functioning correctly and ready to assist with any questions or tasks you might have. What would you like to chat about or ask?",
+        "model_used": "ollama-llama",
+        "fallback_used": false
+      }
+    },
+    {
+      "name": "founder_dashboard - exists",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "founder_dashboard - package.json valid",
+      "status": "PASS",
+      "details": {
+        "name": "empirebox-founder-dashboard",
+        "version": "1.0.0",
+        "private": true,
+        "scripts": {
+          "dev": "next dev -p 3000",
+          "build": "next build",
+          "start": "next start -p 3000"
+        },
+        "dependencies": {
+          "next": "^14.0.0",
+          "react": "^18.2.0",
+          "react-dom": "^18.2.0",
+          "lucide-react": "^0.400.0"
+        },
+        "devDependencies": {
+          "typescript": "^5.0.0",
+          "@types/node": "^20.0.0",
+          "@types/react": "^18.2.0",
+          "@types/react-dom": "^18.2.0",
+          "tailwindcss": "^3.4.0",
+          "postcss": "^8.0.0",
+          "autoprefixer": "^10.0.0"
+        }
+      }
+    },
+    {
+      "name": "founder_dashboard - dependencies installed",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "founder_dashboard - built (.next)",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "luxeforge_web - exists",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "luxeforge_web - package.json valid",
+      "status": "PASS",
+      "details": {
+        "name": "luxeforge-web",
+        "version": "1.0.0",
+        "private": true,
+        "scripts": {
+          "dev": "next dev -p 3002",
+          "build": "next build",
+          "start": "next start -p 3002",
+          "lint": "next lint"
+        },
+        "dependencies": {
+          "next": "^15.0.8",
+          "react": "^19.0.0",
+          "react-dom": "^19.0.0",
+          "lucide-react": "^0.475.0",
+          "clsx": "^2.1.0",
+          "tailwind-merge": "^2.2.0"
+        },
+        "devDependencies": {
+          "typescript": "^5.3.0",
+          "@types/node": "^20.11.0",
+          "@types/react": "^19.0.0",
+          "@types/react-dom": "^19.0.0",
+          "tailwindcss": "^3.4.0",
+          "postcss": "^8.4.0",
+          "autoprefixer": "^10.4.0",
+          "eslint": "^8.56.0",
+          "eslint-config-next": "^15.0.8"
+        }
+      }
+    },
+    {
+      "name": "luxeforge_web - dependencies installed",
+      "status": "PASS",
+      "details": false
+    },
+    {
+      "name": "luxeforge_web - built (.next)",
+      "status": "PASS",
+      "details": false
+    },
+    {
+      "name": "contractorforge_web - exists",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "contractorforge_web - package.json valid",
+      "status": "PASS",
+      "details": {
+        "name": "contractorforge-web",
+        "version": "1.0.0",
+        "private": true,
+        "scripts": {
+          "dev": "next dev -p 3001",
+          "build": "next build",
+          "start": "next start -p 3001",
+          "lint": "next lint"
+        },
+        "dependencies": {
+          "next": "^15.0.8",
+          "react": "^19.0.0",
+          "react-dom": "^19.0.0",
+          "@radix-ui/react-accordion": "^1.1.2",
+          "@radix-ui/react-alert-dialog": "^1.0.5",
+          "@radix-ui/react-avatar": "^1.0.4",
+          "@radix-ui/react-checkbox": "^1.0.4",
+          "@radix-ui/react-dialog": "^1.0.5",
+          "@radix-ui/react-dropdown-menu": "^2.0.6",
+          "@radix-ui/react-label": "^2.0.2",
+          "@radix-ui/react-popover": "^1.0.7",
+          "@radix-ui/react-select": "^2.0.0",
+          "@radix-ui/react-separator": "^1.0.3",
+          "@radix-ui/react-slot": "^1.0.2",
+          "@radix-ui/react-tabs": "^1.0.4",
+          "@radix-ui/react-toast": "^1.1.5",
+          "class-variance-authority": "^0.7.0",
+          "clsx": "^2.1.0",
+          "date-fns": "^3.0.6",
+          "framer-motion": "^11.0.0",
+          "lucide-react": "^0.309.0",
+          "tailwind-merge": "^2.2.0",
+          "tailwindcss-animate": "^1.0.7",
+          "axios": "^1.6.5"
+        },
+        "devDependencies": {
+          "typescript": "^5.3.0",
+          "@types/node": "^20.11.0",
+          "@types/react": "^19.0.0",
+          "@types/react-dom": "^19.0.0",
+          "tailwindcss": "^3.4.0",
+          "postcss": "^8.4.0",
+          "autoprefixer": "^10.4.0",
+          "eslint": "^8.56.0",
+          "eslint-config-next": "^15.0.8"
+        }
+      }
+    },
+    {
+      "name": "contractorforge_web - dependencies installed",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "contractorforge_web - built (.next)",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "marketf_web - exists",
+      "status": "PASS",
+      "details": true
+    },
+    {
+      "name": "marketf_web - package.json valid",
+      "status": "PASS",
+      "details": {
+        "name": "marketf-web",
+        "version": "1.0.0",
+        "private": true,
+        "scripts": {
+          "dev": "next dev -p 3001",
+          "build": "next build",
+          "start": "next start -p 3001",
+          "lint": "next lint"
+        },
+        "dependencies": {
+          "next": "^15.0.8",
+          "react": "^19.0.0",
+          "react-dom": "^19.0.0",
+          "@stripe/stripe-js": "^2.4.0",
+          "@stripe/react-stripe-js": "^2.4.0",
+          "framer-motion": "^11.0.0",
+          "zustand": "^4.5.0",
+          "swr": "^2.2.0"
+        },
+        "devDependencies": {
+          "typescript": "^5.3.0",
+          "@types/node": "^20.11.0",
+          "@types/react": "^19.0.0",
+          "@types/react-dom": "^19.0.0",
+          "tailwindcss": "^3.4.0",
+          "postcss": "^8.4.0",
+          "autoprefixer": "^10.4.0",
+          "eslint": "^8.56.0",
+          "eslint-config-next": "^15.0.8"
+        }
+      }
+    },
+    {
+      "name": "marketf_web - dependencies installed",
+      "status": "PASS",
+      "details": false
+    },
+    {
+      "name": "marketf_web - built (.next)",
+      "status": "PASS",
+      "details": false
+    }
+  ],
+  "pages": {
+    "founder_dashboard": [
+      {
+        "path": "src/app/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/layout.tsx",
+        "exists": true
+      }
+    ],
+    "luxeforge_web": [
+      {
+        "path": "src/app/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/layout.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/pricing/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/features/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/contact/page.tsx",
+        "exists": true
+      }
+    ],
+    "contractorforge_web": [
+      {
+        "path": "src/app/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/layout.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/pricing/page.tsx",
+        "exists": true
+      }
+    ],
+    "marketf_web": [
+      {
+        "path": "src/app/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/layout.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/search/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/seller/dashboard/page.tsx",
+        "exists": true
+      },
+      {
+        "path": "src/app/product/[id]/page.tsx",
+        "exists": true
+      }
+    ]
+  },
+  "routers": [
+    {
+      "name": "ai.py",
+      "exists": true
+    },
+    {
+      "name": "auth.py",
+      "exists": true
+    },
+    {
+      "name": "economic.py",
+      "exists": true
+    },
+    {
+      "name": "licenses.py",
+      "exists": true
+    },
+    {
+      "name": "listings.py",
+      "exists": true
+    },
+    {
+      "name": "marketplaces.py",
+      "exists": true
+    },
+    {
+      "name": "messages.py",
+      "exists": true
+    },
+    {
+      "name": "preorders.py",
+      "exists": true
+    },
+    {
+      "name": "shipping.py",
+      "exists": true
+    },
+    {
+      "name": "supportforge_ai.py",
+      "exists": true
+    },
+    {
+      "name": "supportforge_customers.py",
+      "exists": true
+    },
+    {
+      "name": "supportforge_kb.py",
+      "exists": true
+    },
+    {
+      "name": "supportforge_tickets.py",
+      "exists": true
+    },
+    {
+      "name": "users.py",
+      "exists": true
+    },
+    {
+      "name": "webhooks.py",
+      "exists": true
+    },
+    {
+      "name": "max/",
+      "exists": true
+    }
+  ],
+  "summary": {
+    "total": 20,
+    "passed": 20,
+    "failed": 0,
+    "pass_rate": "100.0%"
+  }
+}

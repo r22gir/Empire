@@ -1,0 +1,35 @@
+version: '3.8'
+services:
+  openclaw:
+    build: .
+    container_name: openclaw
+    ports:
+      - "7878:7878"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./data:/app/data
+      - ./skills:/app/skills
+    networks:
+      - openclaw-net
+    restart: unless-stopped
+    depends_on:
+      - ollama
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - openclaw-net
+    restart: unless-stopped
+
+networks:
+  openclaw-net:
+    driver: bridge
+
+volumes:
+  ollama-data:

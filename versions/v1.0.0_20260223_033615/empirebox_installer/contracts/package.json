@@ -1,0 +1,19 @@
+{
+  "name": "empirebox-contracts",
+  "version": "1.0.0",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:sepolia": "hardhat run deploy/deploy.js --network sepolia",
+    "deploy:base": "hardhat run deploy/deploy.js --network base",
+    "deploy:polygon": "hardhat run deploy/deploy.js --network polygon",
+    "deploy:bnb": "hardhat run deploy/deploy.js --network bnb",
+    "deploy:cronos": "hardhat run deploy/deploy.js --network cronos"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "dotenv": "^16.3.1",
+    "hardhat": "^2.19.0"
+  }
+}

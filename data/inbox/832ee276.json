@@ -1,0 +1,17 @@
+{
+  "id": "832ee276",
+  "text": "I think a usb to usb transfer cable works because pc powers on",
+  "source": "telegram",
+  "telegram_message_id": 85,
+  "intent": "note",
+  "desk_target": "recoveryforge",
+  "priority": 3,
+  "ai_summary": "USB to USB transfer cable may work for powered-on PC.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T07:38:37.726018",
+  "processed_at": null,
+  "reviewed_at": null
+}

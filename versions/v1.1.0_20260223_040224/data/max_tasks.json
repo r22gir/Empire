@@ -1,0 +1,45 @@
+{
+  "tasks": [
+    {
+      "id": "task-001",
+      "title": "Version Management System",
+      "assigned_to": "MAX",
+      "status": "completed",
+      "priority": "high",
+      "completed_at": "2026-02-23T03:36:00Z"
+    },
+    {
+      "id": "task-002",
+      "title": "CRM Module",
+      "description": "Build customer relationship management system",
+      "assigned_to": "MAX",
+      "status": "completed",
+      "priority": "high",
+      "completed_at": "2026-02-23T04:00:00Z"
+    },
+    {
+      "id": "task-003",
+      "title": "Inventory Management Module",
+      "description": "Build inventory tracking with Rowley pricing",
+      "assigned_to": "MAX",
+      "status": "pending",
+      "priority": "high"
+    },
+    {
+      "id": "task-004",
+      "title": "Financial Module",
+      "description": "Build accounting/finance with invoicing",
+      "assigned_to": "MAX",
+      "status": "pending",
+      "priority": "high"
+    },
+    {
+      "id": "task-005",
+      "title": "R&D System",
+      "assigned_to": "MAX",
+      "status": "completed",
+      "priority": "high",
+      "completed_at": "2026-02-23T03:50:00Z"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "id": "642c129a",
+  "quote_number": "EST-2026-008",
+  "status": "draft",
+  "customer_name": "Placeholder Customer",
+  "customer_email": "",
+  "customer_phone": "",
+  "customer_address": "",
+  "project_name": "Master Bedroom Drapery",
+  "project_description": null,
+  "desk_id": null,
+  "line_items": [
+    {
+      "description": "Master Bedroom \u2014 3-Panel Grid Window (ripplefold, blackout, track-ripplefold)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 4370.0,
+      "amount": 4370.0,
+      "category": "labor"
+    }
+  ],
+  "measurements": null,
+  "subtotal": 4370.0,
+  "tax_rate": 0.08,
+  "tax_amount": 349.6,
+  "discount_amount": 0.0,
+  "total": 4719.6,
+  "deposit": null,
+  "terms": "50% deposit required. Balance due upon completion.",
+  "valid_days": 30,
+  "install_date": null,
+  "notes": null,
+  "business_name": "Empire",
+  "business_logo_url": null,
+  "rooms": [
+    {
+      "name": "Master Bedroom",
+      "windows": [
+        {
+          "name": "3-Panel Grid Window",
+          "width": 90,
+          "height": 114,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "blackout",
+          "hardwareType": "track-ripplefold",
+          "motorization": "none",
+          "mountType": "wall",
+          "notes": "",
+          "price": 4370,
+          "aiAnalysis": null
+        }
+      ],
+      "upholstery": []
+    }
+  ],
+  "ai_outlines": null,
+  "ai_mockups": null,
+  "created_at": "2026-03-01T04:42:52.163447",
+  "updated_at": "2026-03-01T04:42:52.163447",
+  "sent_at": null,
+  "accepted_at": null,
+  "expires_at": "2026-03-31T04:42:52.163669"
+}

@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  apostapp:
+    image: empirebox/apostapp:latest
+    container_name: empirebox-apostapp
+    restart: unless-stopped
+    ports:
+      - "8110:8000"
+    env_file:
+      - /opt/empirebox/.env
+    environment:
+      - SERVICE_NAME=apostapp
+      - SERVICE_PORT=8000
+    networks:
+      - empirebox
+    labels:
+      - "empirebox.product=apostapp"
+      - "empirebox.port=8110"
+
+networks:
+  empirebox:
+    external: true

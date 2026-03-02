@@ -1,0 +1,17 @@
+{
+  "id": "01a0245b",
+  "text": "Monetize ASAP",
+  "source": "telegram",
+  "telegram_message_id": 60,
+  "intent": "instruction",
+  "desk_target": "marketforge",
+  "priority": 8,
+  "ai_summary": "Urgent need to monetize business operations quickly",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T06:50:34.941558",
+  "processed_at": null,
+  "reviewed_at": null
+}

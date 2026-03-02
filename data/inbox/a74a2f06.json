@@ -1,0 +1,17 @@
+{
+  "id": "a74a2f06",
+  "text": "Tasks for tomorrow?",
+  "source": "telegram",
+  "telegram_message_id": 253,
+  "intent": "question",
+  "desk_target": "null",
+  "priority": 3,
+  "ai_summary": "Asking about tasks scheduled for tomorrow",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-02T05:48:35.748465",
+  "processed_at": null,
+  "reviewed_at": null
+}

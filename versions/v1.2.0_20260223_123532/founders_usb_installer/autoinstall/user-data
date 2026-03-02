@@ -1,0 +1,59 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  identity:
+    hostname: empirebox-founders
+    username: empirebox
+    password: "$6$rounds=4096$empirebox$REPLACE_WITH_HASH_FROM_mkpasswd_-m_sha-512"
+    # Generate hash: mkpasswd -m sha-512 founders2026
+    realname: EmpireBox
+  ssh:
+    install-server: true
+    allow-pw: true
+  packages:
+    - curl
+    - wget
+    - git
+    - jq
+    - htop
+    - vim
+    - net-tools
+    - avahi-daemon
+    - ufw
+    - openssh-server
+  storage:
+    layout:
+      name: direct
+  late-commands:
+    - mkdir -p /target/opt/empirebox
+    - "cp -r /cdrom/founders_usb_installer/empirebox/. /target/opt/empirebox/"
+    - "chmod +x /target/opt/empirebox/install-founders.sh"
+    - "chmod +x /target/opt/empirebox/scripts/ebox"
+    - "chmod +x /target/opt/empirebox/scripts/backup.sh"
+    - |
+      cat > /target/etc/systemd/system/empirebox-install.service << 'EOF'
+      [Unit]
+      Description=EmpireBox Founders Install
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=/opt/empirebox/install-founders.sh
+
+      [Service]
+      Type=oneshot
+      ExecStart=/opt/empirebox/install-founders.sh
+      ExecStartPost=/bin/rm -f /etc/systemd/system/empirebox-install.service
+      RemainAfterExit=yes
+      StandardOutput=journal+console
+      StandardError=journal+console
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+    - curtin in-target --target=/target systemctl enable empirebox-install.service
+  user-data:
+    disable_root: false
+  updates: security
+  shutdown: reboot

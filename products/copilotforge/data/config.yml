@@ -1,0 +1,33 @@
+# CoPilotForge Configuration
+version: "2.0.0"
+brand: "Empire Tools"
+
+# Save settings
+autosave:
+  enabled: true
+  interval_minutes: 5
+  cleanup_hourly: true
+  keep_hourly_snapshots: true
+
+# Projects to track
+projects:
+  - name: "Empire"
+    path: "~/Empire/empire-app"
+    port: 3000
+  - name: "AMP"
+    path: "~/Projects/actitud-mental-positiva/amp-app"
+    port: 3002
+  - name: "Backend"
+    path: "~/Empire/backend"
+    port: 8000
+
+# Copilot settings
+copilot:
+  url: "https://github.com/copilot"
+  browser: "firefox"
+
+# Cloud backup (optional)
+backup:
+  enabled: false
+  provider: ""  # google, dropbox, github
+  path: ""

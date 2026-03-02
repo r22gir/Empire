@@ -1,0 +1,20 @@
+═══════════════════════════════════════════════════════════
+EMPIRE VERSION MANIFEST
+═══════════════════════════════════════════════════════════
+
+Version:     v1.4.0
+Created:     2026-02-23 13:36:44
+Description: Unified navigation - TopNav bar on all apps, Coming Soon pages, mobile responsive
+
+Previous Version: v1.3.0
+
+Files Included:
+823 files
+
+Apps:
+- Empire Control Center (port 3000)
+- WorkroomForge (port 3001)
+- MAX Interface (port 3009)
+- Backend API (port 8000)
+
+════════════════════════════════════════════════��══════════

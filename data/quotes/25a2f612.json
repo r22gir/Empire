@@ -1,0 +1,154 @@
+{
+  "id": "25a2f612",
+  "quote_number": "EST-2026-036",
+  "status": "draft",
+  "customer_name": "Tony BAhamas",
+  "customer_email": "",
+  "customer_phone": "",
+  "customer_address": "",
+  "project_name": "Living Room Drapery",
+  "project_description": null,
+  "desk_id": null,
+  "line_items": [
+    {
+      "description": "Living Room \u2014 Left Window 1 (Center) (ripplefold, Luxe, 10.8yd)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1486.0,
+      "amount": 1486.0,
+      "category": "labor"
+    },
+    {
+      "description": "Living Room \u2014 Left Window 2 (Far Left) (ripplefold, Standard, 10.8yd)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1023.0,
+      "amount": 1023.0,
+      "category": "labor"
+    },
+    {
+      "description": "Living Room \u2014 Right Window (ripplefold, Standard, 10.8yd)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1023.0,
+      "amount": 1023.0,
+      "category": "labor"
+    }
+  ],
+  "measurements": null,
+  "subtotal": 3532.0,
+  "tax_rate": 0.08,
+  "tax_amount": 282.56,
+  "discount_amount": 0.0,
+  "total": 3814.56,
+  "deposit": null,
+  "terms": "50% deposit required. Balance due upon completion.",
+  "valid_days": 30,
+  "install_date": null,
+  "notes": null,
+  "business_name": "Empire",
+  "business_logo_url": null,
+  "rooms": [
+    {
+      "name": "Living Room",
+      "windows": [
+        {
+          "name": "Left Window 1 (Center)",
+          "width": 72,
+          "height": 96,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "blackout",
+          "hardwareType": "decorative-rod",
+          "motorization": "none",
+          "mountType": "wall",
+          "notes": "",
+          "fabricGrade": "Luxe",
+          "fullness": 2,
+          "laborRate": 95,
+          "price": 1486,
+          "yardage": {
+            "panels": 3,
+            "perWindow": 9.4,
+            "waste": 1.5,
+            "total": 10.8
+          },
+          "breakdown": {
+            "materials": 432,
+            "labor": 895,
+            "hardware": 45,
+            "tax": 113
+          },
+          "aiAnalysis": null
+        },
+        {
+          "name": "Left Window 2 (Far Left)",
+          "width": 60,
+          "height": 96,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "blackout",
+          "hardwareType": "decorative-rod",
+          "motorization": "none",
+          "mountType": "wall",
+          "notes": "",
+          "fabricGrade": "Standard",
+          "fullness": 2.5,
+          "laborRate": 65,
+          "price": 1023,
+          "yardage": {
+            "panels": 3,
+            "perWindow": 9.4,
+            "waste": 1.5,
+            "total": 10.8
+          },
+          "breakdown": {
+            "materials": 180,
+            "labor": 720,
+            "hardware": 45,
+            "tax": 78
+          },
+          "aiAnalysis": null
+        },
+        {
+          "name": "Right Window",
+          "width": 60,
+          "height": 96,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "blackout",
+          "hardwareType": "decorative-rod",
+          "motorization": "none",
+          "mountType": "wall",
+          "notes": "",
+          "fabricGrade": "Standard",
+          "fullness": 2.5,
+          "laborRate": 65,
+          "price": 1023,
+          "yardage": {
+            "panels": 3,
+            "perWindow": 9.4,
+            "waste": 1.5,
+            "total": 10.8
+          },
+          "breakdown": {
+            "materials": 180,
+            "labor": 720,
+            "hardware": 45,
+            "tax": 78
+          },
+          "aiAnalysis": null
+        }
+      ],
+      "upholstery": []
+    }
+  ],
+  "ai_outlines": null,
+  "ai_mockups": null,
+  "max_analysis": "Tony, your living room is a stunning canvas with a dramatic botanical mural and high-end eclectic style. Based on the bright south/west-facing light, I've recommended blackout lining for these ripplefold draperies to ensure privacy and light control. Reusing your existing brass rods complements the chandelier's aesthetic while keeping costs down. Let us know if you'd like fabric swatches or motorization options to elevate this further!",
+  "created_at": "2026-03-02T03:41:20.815041",
+  "updated_at": "2026-03-02T03:41:20.815041",
+  "sent_at": null,
+  "accepted_at": null,
+  "expires_at": "2026-04-01T03:41:20.815273"
+}

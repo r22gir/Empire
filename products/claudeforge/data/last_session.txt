@@ -1,0 +1,5 @@
+started: 2026-02-28 11:12:50
+session_id: 2026-02-28_session4989
+session_dir: /home/rg/Empire/products/claudeforge/data/chats/2026-02-28_session4989
+autosave_pid: 5063
+status: active

@@ -1,0 +1,53 @@
+{
+  "id": "53e76021",
+  "quote_number": "EST-2026-001",
+  "status": "draft",
+  "customer_name": "Test Client",
+  "customer_email": "test@test.com",
+  "customer_phone": null,
+  "customer_address": null,
+  "project_name": null,
+  "project_description": null,
+  "desk_id": null,
+  "line_items": [
+    {
+      "description": "Drapery - Living Room",
+      "quantity": 3.0,
+      "unit": "width",
+      "rate": 120.0,
+      "amount": 360.0,
+      "category": "materials"
+    },
+    {
+      "description": "Installation Labor",
+      "quantity": 4.0,
+      "unit": "hr",
+      "rate": 85.0,
+      "amount": 340.0,
+      "category": "labor"
+    }
+  ],
+  "measurements": null,
+  "subtotal": 700.0,
+  "tax_rate": 0.08,
+  "tax_amount": 56.0,
+  "discount_amount": 0.0,
+  "total": 756.0,
+  "deposit": {
+    "deposit_percent": 50.0,
+    "deposit_amount": 378.0,
+    "deposit_due": null,
+    "balance_due": null
+  },
+  "terms": null,
+  "valid_days": 30,
+  "install_date": null,
+  "notes": null,
+  "business_name": null,
+  "business_logo_url": null,
+  "created_at": "2026-02-28T02:23:29.630278",
+  "updated_at": "2026-02-28T02:23:29.630278",
+  "sent_at": null,
+  "accepted_at": null,
+  "expires_at": "2026-03-30T02:23:29.652579"
+}

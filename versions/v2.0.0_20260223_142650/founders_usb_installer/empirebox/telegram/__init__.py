@@ -1,0 +1,1 @@
+"""EmpireBox Telegram bot package."""

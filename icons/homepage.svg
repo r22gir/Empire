@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<defs><linearGradient id="g5" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#22D3EE"/><stop offset="100%" style="stop-color:#8B5CF6"/></linearGradient></defs>
+<rect width="128" height="128" rx="28" fill="#0a0a18"/>
+<rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="url(#g5)" stroke-width="2" opacity="0.5"/>
+<path d="M64 35 L92 58 L92 90 L36 90 L36 58 Z" fill="none" stroke="#22D3EE" stroke-width="2.5" opacity="0.8"/>
+<rect x="54" y="70" width="20" height="20" rx="2" fill="#22D3EE" opacity="0.3"/>
+<text x="64" y="112" text-anchor="middle" fill="#22D3EE" font-family="sans-serif" font-size="9" font-weight="bold">HOME</text>
+</svg>

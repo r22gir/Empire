@@ -1,6 +1,7 @@
 #!/bin/bash
 # EmpireBox Health Check — run every 5 minutes via cron
-# Monitors memory, swap, and Docker; restarts services if needed
+# Monitors memory, swap, and native services
+# Docker is disabled — deployment planned for future use only
 #
 # Automated install: sudo bash scripts/setup/apply_stability_fixes.sh
 # Manual install:    sudo crontab -e
@@ -8,8 +9,8 @@
 
 LOG_DIR="/var/log/empirebox"
 LOG_FILE="$LOG_DIR/health.log"
-MEM_RESTART_PCT=80   # restart non-essential Docker containers above this
-MEM_CRIT_PCT=90      # emergency stop above this
+MEM_WARN_PCT=80
+MEM_CRIT_PCT=90
 
 mkdir -p "$LOG_DIR"
 
@@ -23,28 +24,26 @@ get_mem_pct() {
     free -m | awk '/^Mem:/{printf "%d", $3*100/$2}'
 }
 
-restart_docker_if_needed() {
+check_memory() {
     local pct
     pct=$(get_mem_pct)
 
     if [ "$pct" -ge "$MEM_CRIT_PCT" ]; then
-        log "CRITICAL" "Memory at ${pct}% — stopping all Docker containers for emergency recovery"
-        docker ps -q | xargs -r docker stop 2>/dev/null
-        log "CRITICAL" "All containers stopped. Manual intervention required."
-    elif [ "$pct" -ge "$MEM_RESTART_PCT" ]; then
-        log "WARN" "Memory at ${pct}% — restarting Docker daemon to reclaim memory"
-        systemctl restart docker 2>/dev/null && log "INFO" "Docker daemon restarted" \
-            || log "ERROR" "Failed to restart Docker daemon (not running as root?)"
+        log "CRITICAL" "Memory at ${pct}% — manual intervention required"
+    elif [ "$pct" -ge "$MEM_WARN_PCT" ]; then
+        log "WARN" "Memory at ${pct}% — elevated"
     else
         log "OK" "Memory at ${pct}% — within safe limits"
     fi
 }
 
-check_docker_daemon() {
-    if ! systemctl is-active --quiet docker 2>/dev/null; then
-        log "WARN" "Docker daemon is not running — attempting restart"
-        systemctl start docker 2>/dev/null && log "INFO" "Docker daemon started" \
-            || log "ERROR" "Failed to start Docker daemon"
+check_ollama() {
+    if systemctl is-active --quiet ollama.service 2>/dev/null; then
+        log "OK" "Ollama service running"
+    else
+        log "WARN" "Ollama service not running — attempting restart"
+        systemctl start ollama.service 2>/dev/null && log "INFO" "Ollama service started" \
+            || log "ERROR" "Failed to start Ollama service"
     fi
 }
 
@@ -63,7 +62,7 @@ check_temperatures() {
 }
 
 log "INFO" "=== Health check started ==="
-check_docker_daemon
-restart_docker_if_needed
+check_memory
+check_ollama
 check_temperatures
 log "INFO" "=== Health check complete ==="

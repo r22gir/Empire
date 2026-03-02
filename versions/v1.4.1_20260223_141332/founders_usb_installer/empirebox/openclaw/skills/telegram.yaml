@@ -1,0 +1,46 @@
+# Telegram Notification Skill for OpenClaw
+name: telegram
+version: "1.0"
+description: "Send notifications to Telegram users from OpenClaw"
+
+triggers:
+  - "send telegram"
+  - "notify telegram"
+  - "telegram alert"
+  - "message user"
+
+actions:
+
+  send_notification:
+    description: "Send a notification message to all allowed Telegram users"
+    type: http
+    method: POST
+    url: "http://telegram-bot:8080/notify"
+    headers:
+      Content-Type: "application/json"
+    body: |
+      {"message": "{message}"}
+    params:
+      - name: message
+        type: string
+        required: true
+        description: "The message text to send"
+
+  send_alert:
+    description: "Send a system alert to all allowed Telegram users"
+    type: http
+    method: POST
+    url: "http://telegram-bot:8080/alert"
+    headers:
+      Content-Type: "application/json"
+    body: |
+      {"level": "{level}", "message": "{message}"}
+    params:
+      - name: level
+        type: string
+        required: true
+        enum: [info, warning, error, critical]
+      - name: message
+        type: string
+        required: true
+        description: "The alert message text"

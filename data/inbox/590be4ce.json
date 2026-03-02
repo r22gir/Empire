@@ -1,0 +1,17 @@
+{
+  "id": "590be4ce",
+  "text": "3",
+  "source": "telegram",
+  "telegram_message_id": 45,
+  "intent": "note",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Message content unclear or incomplete",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T06:43:52.205992",
+  "processed_at": null,
+  "reviewed_at": null
+}

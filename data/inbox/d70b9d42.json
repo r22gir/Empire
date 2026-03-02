@@ -1,0 +1,17 @@
+{
+  "id": "d70b9d42",
+  "text": "Not received",
+  "source": "telegram",
+  "telegram_message_id": 149,
+  "intent": "note",
+  "desk_target": "null",
+  "priority": 1,
+  "ai_summary": "Message not received.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-01T22:12:55.408088",
+  "processed_at": null,
+  "reviewed_at": null
+}

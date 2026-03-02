@@ -1,0 +1,17 @@
+{
+  "id": "079e0e6f",
+  "text": "repeat response because the message that you sent me was truncated so I need to\nfix that can you fix that",
+  "source": "telegram",
+  "telegram_message_id": 141,
+  "intent": "instruction",
+  "desk_target": "null",
+  "priority": 3,
+  "ai_summary": "Request to repeat or fix a truncated response.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-01T22:01:20.008274",
+  "processed_at": null,
+  "reviewed_at": null
+}

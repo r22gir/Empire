@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmpireBox USB Configuration",
+  "description": "Configuration file for EmpireBox zero-touch USB setup",
+  "type": "object",
+  "required": ["licenseKey", "accountEmail", "selectedProducts"],
+  "properties": {
+    "licenseKey": {
+      "type": "string",
+      "pattern": "^EMPIRE-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$",
+      "description": "EmpireBox license key (format: EMPIRE-XXXX-XXXX-XXXX-XXXX)"
+    },
+    "accountEmail": {
+      "type": "string",
+      "format": "email",
+      "description": "EmpireBox account email address"
+    },
+    "accountToken": {
+      "type": "string",
+      "description": "JWT authentication token from setup.empirebox.com"
+    },
+    "wifi": {
+      "type": "object",
+      "description": "Optional WiFi network configuration",
+      "properties": {
+        "ssid": {
+          "type": "string",
+          "description": "WiFi network name (SSID)"
+        },
+        "password": {
+          "type": "string",
+          "description": "WiFi password"
+        }
+      },
+      "required": ["ssid", "password"]
+    },
+    "selectedProducts": {
+      "type": "array",
+      "description": "List of EmpireBox products to install",
+      "items": {
+        "type": "string",
+        "enum": [
+          "marketforge",
+          "supportforge",
+          "contractorforge",
+          "luxeforge",
+          "leadforge",
+          "shipforge",
+          "forgecrm",
+          "relistapp",
+          "socialforge",
+          "llcfactory",
+          "apostapp",
+          "empireassist"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "ollamaModels": {
+      "type": "array",
+      "description": "Ollama AI models to download",
+      "items": {
+        "type": "string",
+        "enum": [
+          "llama3.1:8b",
+          "llama3.1:70b",
+          "codellama:7b",
+          "mistral:7b",
+          "nomic-embed-text"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "enableCrypto": {
+      "type": "boolean",
+      "description": "Enable cryptocurrency payment features",
+      "default": false
+    },
+    "timezone": {
+      "type": "string",
+      "description": "System timezone (e.g. America/New_York)",
+      "default": "America/New_York"
+    }
+  },
+  "additionalProperties": false
+}

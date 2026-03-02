@@ -1,0 +1,111 @@
+# EmpireBox Core Services
+# Run: docker compose up -d
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: empirebox-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-empirebox}
+      POSTGRES_USER: ${POSTGRES_USER:-empirebox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - empirebox
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-empirebox}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: empirebox-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - empirebox
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: empirebox-portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - empirebox
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: empirebox-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    networks:
+      - empirebox
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  control-center:
+    build: ./control
+    container_name: empirebox-control
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    networks:
+      - empirebox
+
+  dashboard:
+    build: ./dashboard
+    container_name: empirebox-dashboard
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - empirebox
+
+  voice-service:
+    build: ./voice
+    container_name: empirebox-voice
+    restart: unless-stopped
+    ports:
+      - "8200:8200"
+    volumes:
+      - voice_models:/app/models
+    networks:
+      - empirebox
+
+volumes:
+  postgres_data:
+  redis_data:
+  portainer_data:
+  voice_models:
+
+networks:
+  empirebox:
+    name: empirebox
+    driver: bridge

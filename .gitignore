@@ -34,4 +34,10 @@ npm-debug.log*
 **/empire_test_results.json
 
 # Max temp files
-max
+/max
+
+# Environment files with secrets
+.env.local
+
+# Version archives
+versions/*.tar.gz

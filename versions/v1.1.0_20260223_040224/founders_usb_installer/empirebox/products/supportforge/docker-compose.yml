@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  supportforge:
+    image: empirebox/supportforge:latest
+    container_name: empirebox-supportforge
+    restart: unless-stopped
+    ports:
+      - "8040:8000"
+    env_file:
+      - /opt/empirebox/.env
+    environment:
+      - SERVICE_NAME=supportforge
+      - SERVICE_PORT=8000
+    networks:
+      - empirebox
+    labels:
+      - "empirebox.product=supportforge"
+      - "empirebox.port=8040"
+
+networks:
+  empirebox:
+    external: true

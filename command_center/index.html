@@ -12,7 +12,7 @@
     .sidebar-collapsed { width: 4rem; }
     .sidebar-expanded { width: 16rem; }
     .transition-width { transition: width 0.3s ease; }
-    .chat-bubble-user { background: #6d28d9; }
+    .chat-bubble-user { background: #d97706; }
     .chat-bubble-ai { background: #1f2937; border: 1px solid #374151; }
     .scrollbar-thin::-webkit-scrollbar { width: 4px; }
     .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
@@ -35,13 +35,13 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
         </svg>
       </button>
-      <span v-if="sidebarOpen" class="ml-3 font-bold text-purple-400 whitespace-nowrap">⚡ EmpireBox</span>
+      <span v-if="sidebarOpen" class="ml-3 font-bold text-amber-400 whitespace-nowrap">⚡ EmpireBox</span>
     </div>
     <nav class="flex-1 py-3 space-y-1 overflow-hidden">
       <a v-for="item in navItems" :key="item.id"
-         @click="activeSection = item.id"
+         @click="item.id === 'dashboard' ? (activeSection = item.id) : window.open(item.id === 'max' ? EMPIRE : item.id === 'products' ? EMPIRE + '/products' : item.id === 'ollama' ? EMPIRE + '/ollama' : '#', '_blank')"
          :class="['flex items-center px-3 py-2 rounded-lg mx-2 cursor-pointer transition-colors whitespace-nowrap',
-                  activeSection === item.id ? 'bg-purple-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white']">
+                  activeSection === item.id ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white']">
         <span class="text-lg flex-shrink-0">{{ item.icon }}</span>
         <span v-if="sidebarOpen" class="ml-3 text-sm font-medium">{{ item.label }}</span>
       </a>
@@ -167,7 +167,7 @@
           <div class="flex flex-wrap gap-1 mb-2">
             <button v-for="cmd in quickCmds" :key="cmd"
                     @click="sendChat(cmd)"
-                    class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-purple-700 border border-gray-600 hover:border-purple-500 transition-colors">
+                    class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-amber-700 border border-gray-600 hover:border-amber-500 transition-colors">
               {{ cmd }}
             </button>
           </div>
@@ -193,15 +193,15 @@
               v-model="chatMessage"
               @keydown.enter="sendChat()"
               placeholder="Ask OpenClaw… (press /)"
-              class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500" />
+              class="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-amber-500" />
             <button @click="toggleVoice"
                     :class="['px-2 py-1.5 rounded-lg text-xs border transition-colors',
-                             listening ? 'bg-red-700 border-red-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-purple-500']"
+                             listening ? 'bg-red-700 border-red-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-300 hover:border-amber-500']"
                     title="Voice input">
               🎤
             </button>
             <button @click="sendChat()"
-                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded-lg text-xs font-medium transition-colors">
+                    class="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 rounded-lg text-xs font-medium transition-colors">
               Send
             </button>
           </div>
@@ -247,7 +247,7 @@
             </thead>
             <tbody class="divide-y divide-gray-700">
               <tr v-for="agent in agents" :key="agent.name" class="hover:bg-gray-750">
-                <td class="py-2 pr-4 font-medium text-purple-300">{{ agent.name }}</td>
+                <td class="py-2 pr-4 font-medium text-amber-300">{{ agent.name }}</td>
                 <td class="py-2 pr-4 text-gray-300">{{ agent.activity }}</td>
                 <td class="py-2 pr-4 text-gray-400">{{ agent.cost }}</td>
                 <td class="py-2 pr-4 text-green-400">{{ agent.value }}</td>
@@ -278,7 +278,7 @@
             <div class="text-xs text-yellow-400 mb-2">{{ product.stat2 }}</div>
             <div class="flex gap-1">
               <a :href="product.url" target="_blank"
-                 class="flex-1 text-center text-xs py-1 bg-purple-700 hover:bg-purple-600 rounded font-medium transition-colors">
+                 class="flex-1 text-center text-xs py-1 bg-amber-700 hover:bg-amber-600 rounded font-medium transition-colors">
                 Open
               </a>
               <button class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition-colors">⚙️</button>
@@ -296,7 +296,7 @@
           <div class="grid grid-cols-5 gap-2">
             <button v-for="task in quickLaunch" :key="task.label"
                     @click="task.fn()"
-                    class="flex flex-col items-center gap-1 p-2 rounded-xl bg-gray-700 hover:bg-purple-800 border border-gray-600 hover:border-purple-500 transition-colors">
+                    class="flex flex-col items-center gap-1 p-2 rounded-xl bg-gray-700 hover:bg-amber-800 border border-gray-600 hover:border-amber-500 transition-colors">
               <span class="text-xl">{{ task.icon }}</span>
               <span class="text-xs text-center leading-tight text-gray-300">{{ task.label }}</span>
               <kbd class="kbd text-gray-500">{{ task.key }}</kbd>
@@ -353,7 +353,7 @@
         </div>
       </div>
       <button @click="showShortcuts = false"
-              class="mt-4 w-full py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm font-medium transition-colors">
+              class="mt-4 w-full py-2 bg-amber-600 hover:bg-amber-500 rounded-lg text-sm font-medium transition-colors">
         Close
       </button>
     </div>
@@ -376,13 +376,9 @@ createApp({
 
     const navItems = [
       { id: 'dashboard', icon: '🏠', label: 'Dashboard' },
-      { id: 'market',    icon: '🛒', label: 'MarketForge' },
-      { id: 'luxe',      icon: '✂️', label: 'LuxeForge' },
-      { id: 'contractor',icon: '🔨', label: 'ContractorForge' },
-      { id: 'ship',      icon: '📦', label: 'ShipForge' },
-      { id: 'support',   icon: '🎫', label: 'SupportForge' },
-      { id: 'agents',    icon: '🤖', label: 'Agents' },
-      { id: 'reports',   icon: '📊', label: 'Reports' },
+      { id: 'max',       icon: '🤖', label: 'MAX AI' },
+      { id: 'products',  icon: '📦', label: 'Products' },
+      { id: 'ollama',    icon: '🧠', label: 'Ollama' },
     ];
 
     // --- Time & Greeting ---
@@ -522,26 +518,27 @@ createApp({
     function toggleAgent(agent) { agent.running = !agent.running; }
 
     // --- Forge Products ---
+    const EMPIRE = 'http://localhost:3009';
     const forgeProducts = ref([
-      { icon: '🛒', name: 'MarketForge',      stat1: '156 listings',    stat2: '$892 today',     url: 'http://localhost:8010' },
-      { icon: '✂️', name: 'LuxeForge',        stat1: '3 quotes open',   stat2: '$4,250 pending', url: 'http://localhost:8030' },
-      { icon: '🔨', name: 'ContractorForge',  stat1: '2 projects',      stat2: '$12,400 active', url: 'http://localhost:8020' },
-      { icon: '📦', name: 'ShipForge',        stat1: '8 pending',       stat2: '23 shipped/mo',  url: 'http://localhost:8040' },
-      { icon: '🎫', name: 'SupportForge',     stat1: '4 open tickets',  stat2: '94% resolved',   url: 'http://localhost:8050' },
-      { icon: '🎯', name: 'LeadForge',        stat1: '12 new leads',    stat2: '$0 cost',        url: 'http://localhost:8060' },
-      { icon: '📱', name: 'SocialForge',      stat1: '3 posts today',   stat2: '1.2k reach',     url: 'http://localhost:8070' },
-      { icon: '👥', name: 'ForgeCRM',         stat1: '248 contacts',    stat2: '5 follow-ups',   url: 'http://localhost:8080' },
-      { icon: '🔄', name: 'RelistApp',        stat1: '45 re-listed',    stat2: 'Saved 2 hr',     url: 'http://localhost:8090' },
-      { icon: '🏢', name: 'LLCFactory',       stat1: '1 filing pending',stat2: '$299 fee due',   url: 'http://localhost:8100' },
+      { icon: '🛒', name: 'MarketForge',      stat1: '156 listings',    stat2: '$892 today',     url: EMPIRE + '/products' },
+      { icon: '✂️', name: 'LuxeForge',        stat1: '3 quotes open',   stat2: '$4,250 pending', url: EMPIRE + '/products' },
+      { icon: '🔨', name: 'ContractorForge',  stat1: '2 projects',      stat2: '$12,400 active', url: EMPIRE + '/products' },
+      { icon: '📦', name: 'ShipForge',        stat1: '8 pending',       stat2: '23 shipped/mo',  url: EMPIRE + '/products' },
+      { icon: '🎫', name: 'SupportForge',     stat1: '4 open tickets',  stat2: '94% resolved',   url: EMPIRE + '/products' },
+      { icon: '🎯', name: 'LeadForge',        stat1: '12 new leads',    stat2: '$0 cost',        url: EMPIRE + '/products' },
+      { icon: '📱', name: 'SocialForge',      stat1: '3 posts today',   stat2: '1.2k reach',     url: EMPIRE + '/products' },
+      { icon: '👥', name: 'ForgeCRM',         stat1: '248 contacts',    stat2: '5 follow-ups',   url: EMPIRE + '/products' },
+      { icon: '🔄', name: 'RelistApp',        stat1: '45 re-listed',    stat2: 'Saved 2 hr',     url: EMPIRE + '/products' },
+      { icon: '🏢', name: 'LLCFactory',       stat1: '1 filing pending',stat2: '$299 fee due',   url: EMPIRE + '/products' },
     ]);
 
     // --- Quick Launch ---
     const quickLaunch = [
-      { icon: '📸', label: 'List Item',  key: '1', fn: () => alert('List Item') },
-      { icon: '📦', label: 'Ship Order', key: '2', fn: () => alert('Ship Order') },
-      { icon: '💰', label: 'Invoice',    key: '3', fn: () => alert('Invoice') },
-      { icon: '🎫', label: 'New Ticket', key: '4', fn: () => alert('New Ticket') },
-      { icon: '📊', label: 'Reports',    key: '5', fn: () => alert('Reports') },
+      { icon: '🤖', label: 'MAX AI',     key: '1', fn: () => window.open(EMPIRE, '_blank') },
+      { icon: '📦', label: 'Products',   key: '2', fn: () => window.open(EMPIRE + '/products', '_blank') },
+      { icon: '🧠', label: 'Ollama',     key: '3', fn: () => window.open(EMPIRE + '/ollama', '_blank') },
+      { icon: '📊', label: 'API Docs',   key: '4', fn: () => window.open('http://localhost:8000/docs', '_blank') },
+      { icon: '🦀', label: 'OpenClaw',   key: '5', fn: () => window.open('http://localhost:7878/docs', '_blank') },
     ];
 
     // --- Channel Status ---
@@ -570,15 +567,12 @@ createApp({
     const showShortcuts = ref(false);
     const shortcuts = [
       { keys: 'G + D', desc: 'Go to Dashboard' },
-      { keys: 'G + M', desc: 'Go to MarketForge' },
-      { keys: 'G + L', desc: 'Go to LuxeForge' },
       { keys: '/',     desc: 'Focus chat input' },
-      { keys: 'N',     desc: 'New item (context-aware)' },
-      { keys: '1',     desc: 'Quick launch: List Item' },
-      { keys: '2',     desc: 'Quick launch: Ship Order' },
-      { keys: '3',     desc: 'Quick launch: Invoice' },
-      { keys: '4',     desc: 'Quick launch: New Ticket' },
-      { keys: '5',     desc: 'Quick launch: Reports' },
+      { keys: '1',     desc: 'Open MAX AI' },
+      { keys: '2',     desc: 'Open Products' },
+      { keys: '3',     desc: 'Open Ollama' },
+      { keys: '4',     desc: 'Open API Docs' },
+      { keys: '5',     desc: 'Open OpenClaw' },
       { keys: '?',     desc: 'Show this help' },
     ];
 
@@ -596,8 +590,6 @@ createApp({
       if (e.key.toLowerCase() === 'g') { gPressed = true; setTimeout(() => { gPressed = false; }, 1000); return; }
       if (gPressed) {
         if (e.key.toLowerCase() === 'd') { activeSection.value = 'dashboard'; gPressed = false; }
-        if (e.key.toLowerCase() === 'm') { activeSection.value = 'market';    gPressed = false; }
-        if (e.key.toLowerCase() === 'l') { activeSection.value = 'luxe';      gPressed = false; }
         return;
       }
       if (e.key === '1') quickLaunch[0].fn();
@@ -618,7 +610,7 @@ createApp({
     });
 
     return {
-      sidebarOpen, activeSection, navItems,
+      EMPIRE, sidebarOpen, activeSection, navItems,
       currentTime, greeting,
       health,
       money,

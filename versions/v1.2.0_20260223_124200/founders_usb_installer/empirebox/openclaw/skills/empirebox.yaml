@@ -1,0 +1,96 @@
+# EmpireBox Management Skill for OpenClaw
+name: empirebox
+version: "1.0"
+description: "Manage EmpireBox products, health checks, backups, and logs"
+
+triggers:
+  - "start product"
+  - "stop product"
+  - "list products"
+  - "product status"
+  - "check health"
+  - "run backup"
+  - "show logs"
+  - "launch bundle"
+
+actions:
+
+  list_products:
+    description: "List all EmpireBox products and their status"
+    command: "ebox list"
+    type: shell
+
+  start_product:
+    description: "Start an EmpireBox product"
+    command: "ebox start {product}"
+    type: shell
+    params:
+      - name: product
+        type: string
+        required: true
+        enum:
+          - marketforge
+          - contractorforge
+          - luxeforge
+          - supportforge
+          - leadforge
+          - shipforge
+          - forgecrm
+          - relistapp
+          - socialforge
+          - llcfactory
+          - apostapp
+          - empireassist
+          - empirepay
+
+  stop_product:
+    description: "Stop an EmpireBox product"
+    command: "ebox stop {product}"
+    type: shell
+    params:
+      - name: product
+        type: string
+        required: true
+
+  product_status:
+    description: "Show running EmpireBox products"
+    command: "ebox status"
+    type: shell
+
+  start_bundle:
+    description: "Start a bundle of EmpireBox products"
+    command: "ebox bundle {bundle}"
+    type: shell
+    params:
+      - name: bundle
+        type: string
+        required: true
+        enum: [reseller, contractor, support, full]
+
+  health_check:
+    description: "Check health of all core services"
+    command: |
+      echo "=== EmpireBox Health Check ===" &&
+      docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" &&
+      echo "=== Ollama ===" &&
+      curl -sf http://localhost:11434/api/tags | jq '.models[].name' 2>/dev/null || echo "Ollama not responding"
+    type: shell
+
+  run_backup:
+    description: "Run EmpireBox backup"
+    command: "/opt/empirebox/scripts/backup.sh"
+    type: shell
+
+  show_logs:
+    description: "Show logs for an EmpireBox product"
+    command: "docker compose -f /opt/empirebox/products/{product}/docker-compose.yml logs --tail=50"
+    type: shell
+    params:
+      - name: product
+        type: string
+        required: true
+
+  show_install_log:
+    description: "Show the installation log"
+    command: "tail -100 /var/log/empirebox-install.log"
+    type: shell

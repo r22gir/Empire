@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Empire Command Center</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+      background: #030308;
+      min-height: 100vh;
+      color: white;
+    }
+
+    /* Header */
+    .header {
+      background: #0a0a12;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      padding: 20px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo { display: flex; align-items: center; gap: 14px; }
+    .logo-icon {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, #f59e0b, #ea580c);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 20px; color: #fff;
+    }
+    .logo h1 { font-size: 18px; color: #f59e0b; font-weight: 700; letter-spacing: 1px; }
+    .logo p { font-size: 11px; color: #555; }
+    .status-bar { display: flex; gap: 16px; }
+    .status-item {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 8px 16px; border-radius: 8px;
+      font-size: 13px; color: #999;
+    }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .status-dot.online { background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    .status-dot.offline { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,0.5); }
+
+    /* Main */
+    .main { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+
+    /* Quick Actions */
+    .quick-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+    .quick-btn {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #0a0a12; font-weight: 600; font-size: 14px;
+      padding: 10px 22px; border-radius: 10px;
+      text-decoration: none; transition: all 0.2s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .quick-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(245,158,11,0.3); }
+    .quick-btn.secondary {
+      background: transparent;
+      border: 1px solid rgba(245,158,11,0.4);
+      color: #f59e0b;
+    }
+    .quick-btn.secondary:hover { background: rgba(245,158,11,0.1); }
+
+    /* Section */
+    .section-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 2px;
+      color: #555; margin-bottom: 16px; padding-left: 4px;
+    }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px; margin-bottom: 40px;
+    }
+    .card {
+      background: #0a0a12;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 22px;
+      text-decoration: none; color: white;
+      display: flex; flex-direction: column; gap: 12px;
+      transition: all 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(245,158,11,0.4);
+      box-shadow: 0 8px 32px rgba(245,158,11,0.08);
+    }
+    .card.priority {
+      background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(234,88,12,0.04));
+      border-color: rgba(245,158,11,0.25);
+    }
+    .card-top { display: flex; align-items: center; gap: 14px; }
+    .card-icon {
+      width: 48px; height: 48px;
+      background: rgba(245,158,11,0.1);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; flex-shrink: 0;
+    }
+    .card-title { font-size: 15px; font-weight: 600; }
+    .card-sub { font-size: 11px; color: #666; }
+    .card-desc { font-size: 13px; color: #888; line-height: 1.5; }
+    .card-port {
+      font-family: 'SF Mono', 'Cascadia Code', monospace;
+      font-size: 11px; color: #f59e0b; opacity: 0.6;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center; padding: 32px;
+      color: #333; font-size: 12px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+
+    @media (max-width: 640px) {
+      .header { flex-direction: column; gap: 16px; padding: 16px; }
+      .status-bar { justify-content: center; }
+      .main { padding: 20px 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">E</div>
+      <div>
+        <h1>EMPIRE</h1>
+        <p>Founder's Edition</p>
+      </div>
+    </div>
+    <div class="status-bar">
+      <div class="status-item"><span class="status-dot online" id="backend-status"></span> Backend API</div>
+      <div class="status-item"><span class="status-dot online" id="frontend-status"></span> Dashboard</div>
+      <div class="status-item"><span class="status-dot online" id="workroom-status"></span> WorkroomForge</div>
+      <div class="status-item"><span class="status-dot online" id="luxe-status"></span> LuxeForge</div>
+      <div class="status-item"><span class="status-dot online" id="amp-status"></span> AMP</div>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <div class="quick-actions">
+      <a href="http://localhost:3009" class="quick-btn">Open Dashboard</a>
+      <a href="http://localhost:3001" class="quick-btn">WorkroomForge</a>
+      <a href="http://localhost:3003" class="quick-btn secondary">AMP</a>
+      <a href="http://localhost:3002/portal" class="quick-btn secondary">LuxeForge Portal</a>
+      <a href="http://localhost:8000/docs" class="quick-btn secondary">API Docs</a>
+    </div>
+
+    <p class="section-label">Core Systems</p>
+    <div class="grid">
+      <a href="http://localhost:3009" class="card priority">
+        <div class="card-top">
+          <div class="card-icon">📊</div>
+          <div><div class="card-title">Founder Dashboard</div><div class="card-sub">Control Center</div></div>
+        </div>
+        <p class="card-desc">KPIs, tasks, inventory, finance, CRM — all in one place</p>
+        <span class="card-port">localhost:3009</span>
+      </a>
+      <a href="http://localhost:3001" class="card priority">
+        <div class="card-top">
+          <div class="card-icon">🏭</div>
+          <div><div class="card-title">WorkroomForge</div><div class="card-sub">Production Suite</div></div>
+        </div>
+        <p class="card-desc">Quote builder, AI photo analysis, window treatments</p>
+        <span class="card-port">localhost:3001</span>
+      </a>
+      <a href="http://localhost:3009/max" class="card">
+        <div class="card-top">
+          <div class="card-icon">🧠</div>
+          <div><div class="card-title">MAX AI</div><div class="card-sub">AI Assistant</div></div>
+        </div>
+        <p class="card-desc">Voice + chat AI business partner</p>
+        <span class="card-port">localhost:3009/max</span>
+      </a>
+      <a href="http://localhost:8080/agent-command-center.html" class="card">
+        <div class="card-top">
+          <div class="card-icon">🤖</div>
+          <div><div class="card-title">Agent Command</div><div class="card-sub">AI Agents</div></div>
+        </div>
+        <p class="card-desc">Manage AI agents and automated workflows</p>
+        <span class="card-port">localhost:8080</span>
+      </a>
+    </div>
+
+    <p class="section-label">Business Apps</p>
+    <div class="grid">
+      <a href="http://localhost:3002" class="card">
+        <div class="card-top">
+          <div class="card-icon">✨</div>
+          <div><div class="card-title">LuxeForge</div><div class="card-sub">Designer Portal</div></div>
+        </div>
+        <p class="card-desc">Marketing site and designer quote portal</p>
+        <span class="card-port">localhost:3002</span>
+      </a>
+      <a href="http://localhost:3009/inventory" class="card">
+        <div class="card-top">
+          <div class="card-icon">📦</div>
+          <div><div class="card-title">Inventory</div><div class="card-sub">Materials Tracking</div></div>
+        </div>
+        <p class="card-desc">Fabrics, hardware, linings, motors, supplies</p>
+        <span class="card-port">localhost:3009/inventory</span>
+      </a>
+      <a href="http://localhost:3009/finance" class="card">
+        <div class="card-top">
+          <div class="card-icon">💰</div>
+          <div><div class="card-title">Finance</div><div class="card-sub">Accounting</div></div>
+        </div>
+        <p class="card-desc">Income, expenses, profit tracking</p>
+        <span class="card-port">localhost:3009/finance</span>
+      </a>
+      <a href="http://localhost:3009/customers" class="card">
+        <div class="card-top">
+          <div class="card-icon">👥</div>
+          <div><div class="card-title">Customers</div><div class="card-sub">CRM</div></div>
+        </div>
+        <p class="card-desc">Customer management and contacts</p>
+        <span class="card-port">localhost:3009/customers</span>
+      </a>
+      <a href="http://localhost:3003" class="card">
+        <div class="card-top">
+          <div class="card-icon">⚡</div>
+          <div><div class="card-title">AMP</div><div class="card-sub">Actitud Mental Positiva</div></div>
+        </div>
+        <p class="card-desc">Spanish personal development, leadership & wellness platform</p>
+        <span class="card-port">localhost:3003</span>
+      </a>
+    </div>
+
+    <p class="section-label">Tools</p>
+    <div class="grid">
+      <a href="http://localhost:8000/docs" class="card">
+        <div class="card-top">
+          <div class="card-icon">📡</div>
+          <div><div class="card-title">API Docs</div><div class="card-sub">FastAPI Swagger</div></div>
+        </div>
+        <p class="card-desc">Interactive backend API documentation</p>
+        <span class="card-port">localhost:8000/docs</span>
+      </a>
+      <a href="https://github.com/r22gir/Empire" class="card">
+        <div class="card-top">
+          <div class="card-icon">🐙</div>
+          <div><div class="card-title">GitHub</div><div class="card-sub">Source Control</div></div>
+        </div>
+        <p class="card-desc">r22gir/Empire repository</p>
+      </a>
+      <a href="http://localhost:3009/creations" class="card">
+        <div class="card-top">
+          <div class="card-icon">🧪</div>
+          <div><div class="card-title">Creations Lab</div><div class="card-sub">R&D</div></div>
+        </div>
+        <p class="card-desc">Innovation ideas and experiments</p>
+        <span class="card-port">localhost:3009/creations</span>
+      </a>
+      <a href="http://localhost:3009/settings" class="card">
+        <div class="card-top">
+          <div class="card-icon">⚙️</div>
+          <div><div class="card-title">Settings</div><div class="card-sub">Configuration</div></div>
+        </div>
+        <p class="card-desc">Profile, integrations, billing</p>
+        <span class="card-port">localhost:3009/settings</span>
+      </a>
+    </div>
+
+  </main>
+
+  <footer class="footer">
+    Empire v1.3.0 | EmpireBox | Founder's Edition | 2026
+  </footer>
+
+  <script>
+    async function checkStatus() {
+      const checks = [
+        { id: 'backend-status', url: 'http://localhost:8000/health' },
+        { id: 'frontend-status', url: 'http://localhost:3009' },
+        { id: 'workroom-status', url: 'http://localhost:3001' },
+        { id: 'luxe-status', url: 'http://localhost:3002' },
+        { id: 'amp-status', url: 'http://localhost:3003' },
+      ];
+      for (const check of checks) {
+        try {
+          await fetch(check.url, { mode: 'no-cors' });
+          document.getElementById(check.id).className = 'status-dot online';
+        } catch {
+          document.getElementById(check.id).className = 'status-dot offline';
+        }
+      }
+    }
+    checkStatus();
+    setInterval(checkStatus, 30000);
+  </script>
+</body>
+</html>

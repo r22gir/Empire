@@ -1,0 +1,17 @@
+{
+  "id": "6a4fec04",
+  "text": "Send me a pdf of any quote on your system",
+  "source": "telegram",
+  "telegram_message_id": 222,
+  "intent": "instruction",
+  "desk_target": "workroomforge",
+  "priority": 5,
+  "ai_summary": "Requesting PDF of any existing quote in the system",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-03-02T03:35:27.770083",
+  "processed_at": null,
+  "reviewed_at": null
+}

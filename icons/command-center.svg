@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<defs><linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#D4AF37"/><stop offset="100%" style="stop-color:#8B5CF6"/></linearGradient></defs>
+<rect width="128" height="128" rx="28" fill="#0a0a18"/>
+<rect x="2" y="2" width="124" height="124" rx="26" fill="none" stroke="url(#g1)" stroke-width="2" opacity="0.5"/>
+<circle cx="64" cy="64" r="32" fill="none" stroke="#D4AF37" stroke-width="2.5" opacity="0.8"/>
+<circle cx="64" cy="64" r="18" fill="none" stroke="#8B5CF6" stroke-width="1.5" opacity="0.6"/>
+<circle cx="64" cy="64" r="5" fill="#D4AF37"/>
+<line x1="64" y1="32" x2="64" y2="44" stroke="#D4AF37" stroke-width="2" stroke-linecap="round"/>
+<line x1="64" y1="84" x2="64" y2="96" stroke="#D4AF37" stroke-width="2" stroke-linecap="round"/>
+<line x1="32" y1="64" x2="44" y2="64" stroke="#D4AF37" stroke-width="2" stroke-linecap="round"/>
+<line x1="84" y1="64" x2="96" y2="64" stroke="#D4AF37" stroke-width="2" stroke-linecap="round"/>
+<text x="64" y="112" text-anchor="middle" fill="#D4AF37" font-family="sans-serif" font-size="10" font-weight="bold">MAX</text>
+</svg>

@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  marketforge:
+    image: empirebox/marketforge:latest
+    container_name: empirebox-marketforge
+    restart: unless-stopped
+    ports:
+      - "8010:8000"
+    env_file:
+      - /opt/empirebox/.env
+    environment:
+      - SERVICE_NAME=marketforge
+      - SERVICE_PORT=8000
+    networks:
+      - empirebox
+    labels:
+      - "empirebox.product=marketforge"
+      - "empirebox.port=8010"
+
+networks:
+  empirebox:
+    external: true

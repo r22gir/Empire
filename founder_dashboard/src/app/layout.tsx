@@ -1,15 +1,18 @@
 import './globals.css'
-import type { Metadata } from 'next'
+import TopNav from '../components/TopNav'
 
-export const metadata: Metadata = {
-  title: 'EmpireBox Founder Dashboard',
-  description: 'AI-Powered Business Command Center',
+export const metadata = {
+  title: 'MAX | Empire',
+  description: 'AI Director',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <TopNav currentApp="MAX" currentPort={3009} />
+        {children}
+      </body>
     </html>
   )
 }

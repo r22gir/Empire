@@ -1,0 +1,74 @@
+{
+  "id": "60fdb337",
+  "quote_number": "EMP-Q-260301-60FD",
+  "customer_name": "Customer 1",
+  "customer_email": "",
+  "customer_phone": "",
+  "customer_address": "",
+  "project_name": "Quick Quote",
+  "rooms": [
+    {
+      "name": "Master Bedroom",
+      "windows": [
+        {
+          "name": "Window 1",
+          "width": 72,
+          "height": 84,
+          "quantity": 1,
+          "treatmentType": "ripplefold"
+        }
+      ],
+      "upholstery": [
+        {
+          "name": "Channel Back Headboard",
+          "width": 80,
+          "height": 72,
+          "quantity": 1,
+          "treatmentType": "channel-back"
+        },
+        {
+          "name": "Bench Reupholstery",
+          "width": 60,
+          "height": 18,
+          "quantity": 1,
+          "treatmentType": "biscuit-tufted"
+        }
+      ]
+    }
+  ],
+  "line_items": [
+    {
+      "room": "Master Bedroom",
+      "description": "Ripplefold \u2014 72\"W \u00d7 84\"H",
+      "quantity": 1,
+      "unit_price": 1890.0,
+      "total": 1890.0,
+      "treatment_type": "ripplefold",
+      "width": 72,
+      "height": 84
+    },
+    {
+      "room": "Master Bedroom",
+      "description": "Upholstery item",
+      "quantity": 1,
+      "unit_price": 250,
+      "total": 250
+    },
+    {
+      "room": "Master Bedroom",
+      "description": "Upholstery item",
+      "quantity": 1,
+      "unit_price": 250,
+      "total": 250
+    }
+  ],
+  "subtotal": 2390.0,
+  "tax_rate": 0,
+  "tax": 0,
+  "total": 2390.0,
+  "status": "draft",
+  "max_analysis": "This project transforms the master bedroom into a luxurious retreat with a cohesive green palette. The ripplefold drapery in sage green velvet adds elegance and softness to the large window. The channel back headboard in deep emerald velvet creates a dramatic focal point, while the bench reupholstery in hunter green ties the design together with sophisticated texture.",
+  "created_at": "2026-03-01T20:48:27.886062",
+  "updated_at": "2026-03-01T20:48:27.886062",
+  "source": "max_quick_quote"
+}

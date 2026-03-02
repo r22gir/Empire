@@ -8,16 +8,14 @@ import os
 # Create FastAPI app
 app = FastAPI(
     title="EmpireBox API",
-    description="Backend API for EmpireBox - Setup Portal, License Management, ShipForge, MarketF, SupportForge, Economic Intelligence, and AI-powered marketplace automation",
+    description="Backend API for EmpireBox",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-# Get CORS origins from environment or use default
-cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
-
 # Configure CORS
+cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins if cors_origins != ["*"] else ["*"],
@@ -26,129 +24,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Import routers with error handling for missing modules
-try:
-    from app.routers import licenses
-    app.include_router(licenses.router, prefix="/licenses", tags=["licenses"])
-except ImportError:
-    pass
+# Helper to safely load routers
+def load_router(module_path, prefix, tags):
+    try:
+        import importlib
+        module = importlib.import_module(module_path)
+        if hasattr(module, 'router') and module.router:
+            app.include_router(module.router, prefix=prefix, tags=tags)
+            print(f"✓ Loaded: {prefix}")
+        else:
+            print(f"✗ No router in: {module_path}")
+    except Exception as e:
+        print(f"✗ Failed {module_path}: {e}")
 
-try:
-    from app.routers import shipping
-    app.include_router(shipping.router, prefix="/shipping", tags=["shipping"])
-except ImportError:
-    pass
+# MAX AI Router (primary)
+load_router("app.routers.max", "", ["max"])
+load_router("app.routers.max", "/api/v1", ["api-v1"])
 
-try:
-    from app.routers import preorders
-    app.include_router(preorders.router, prefix="/preorders", tags=["preorders"])
-except ImportError:
-    pass
+# Files API
+load_router("app.api.v1.files", "/api/v1", ["files"])
 
-try:
-    from app.routers import auth
-    if auth:
-        app.include_router(auth.router, prefix="/auth", tags=["auth"])
-except (ImportError, AttributeError):
-    pass
+# Chat History API
 
-try:
-    from app.routers import users
-    if users:
-        app.include_router(users.router, prefix="/users", tags=["users"])
-except (ImportError, AttributeError):
-    pass
+# Quote Requests API (LuxeForge)
+load_router("app.api.v1.quote_requests", "/api/v1", ["quote-requests"])
+load_router("app.api.v1.chats", "/api/v1", ["chats"])
 
-try:
-    from app.routers import listings
-    if listings:
-        app.include_router(listings.router, prefix="/listings", tags=["listings"])
-except (ImportError, AttributeError):
-    pass
+# Security/License API
+load_router("app.api.v1.license", "/api/v1", ["license"])
 
-try:
-    from app.routers import messages
-    if messages:
-        app.include_router(messages.router, prefix="/messages", tags=["messages"])
-except (ImportError, AttributeError):
-    pass
-
-try:
-    from app.routers import marketplaces
-    if marketplaces:
-        app.include_router(marketplaces.router, prefix="/marketplaces", tags=["marketplaces"])
-except (ImportError, AttributeError):
-    pass
-
-try:
-    from app.routers import webhooks
-    if webhooks:
-        app.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
-except (ImportError, AttributeError):
-    pass
-
-try:
-    from app.routers import ai
-    if ai:
-        app.include_router(ai.router, prefix="/ai", tags=["ai"])
-except (ImportError, AttributeError):
-    pass
-
-# SupportForge routers
-try:
-    from app.routers import supportforge_tickets
-    app.include_router(supportforge_tickets.router, prefix="/api/v1/tickets", tags=["supportforge-tickets"])
-except ImportError:
-    pass
-
-try:
-    from app.routers import supportforge_customers
-    app.include_router(supportforge_customers.router, prefix="/api/v1/customers", tags=["supportforge-customers"])
-except ImportError:
-    pass
-
-try:
-    from app.routers import supportforge_kb
-    app.include_router(supportforge_kb.router, prefix="/api/v1/kb", tags=["supportforge-kb"])
-except (ImportError, AttributeError):
-    pass
-
-try:
-    from app.routers import supportforge_ai
-    app.include_router(supportforge_ai.router, prefix="/api/v1/ai", tags=["supportforge-ai"])
-except (ImportError, AttributeError):
-    pass
-
-# MarketF routers
-try:
-    from app.routers.marketplace import products, orders, reviews, seller
-    app.include_router(products.router, prefix="/marketplace", tags=["marketplace-products"])
-    app.include_router(orders.router, prefix="/marketplace", tags=["marketplace-orders"])
-    app.include_router(reviews.router, prefix="/marketplace", tags=["marketplace-reviews"])
-    app.include_router(seller.router, prefix="/marketplace", tags=["marketplace-seller"])
-except ImportError:
-    pass
-
-# Crypto Payments router
-try:
-    from app.routers import crypto_payments
-    app.include_router(crypto_payments.router, prefix="/api/v1/crypto-payments", tags=["crypto-payments"])
-except ImportError:
-    pass
-
-# Economic Intelligence router
-try:
-    from app.routers import economic
-    app.include_router(economic.router, prefix="/api/v1/economic", tags=["economic"])
-except ImportError:
-    pass
-
-# Chat Backup and Decision Context router
-try:
-    from app.routers import chat_backup
-    app.include_router(chat_backup.router, prefix="/api/v1/chat-backup", tags=["chat-backup"])
-except ImportError:
-    pass
+# Other routers
+load_router("app.routers.licenses", "/licenses", ["licenses"])
+load_router("app.routers.shipping", "/shipping", ["shipping"])
+load_router("app.routers.preorders", "/preorders", ["preorders"])
+load_router("app.routers.auth", "/auth", ["auth"])
+load_router("app.routers.users", "/users", ["users"])
+load_router("app.routers.listings", "/listings", ["listings"])
+load_router("app.routers.messages", "/messages", ["messages"])
+load_router("app.routers.marketplaces", "/marketplaces", ["marketplaces"])
+load_router("app.routers.webhooks", "/webhooks", ["webhooks"])
+load_router("app.routers.ai", "/ai", ["ai"])
+load_router("app.routers.supportforge_tickets", "/api/v1/tickets", ["supportforge"])
+load_router("app.routers.supportforge_customers", "/api/v1/customers", ["supportforge"])
+load_router("app.routers.supportforge_kb", "/api/v1/kb", ["supportforge"])
+load_router("app.routers.supportforge_ai", "/api/v1/ai", ["supportforge"])
+load_router("app.routers.crypto_payments", "/api/v1/crypto-payments", ["crypto"])
+load_router("app.routers.economic", "/api/v1/economic", ["economic"])
+load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
+load_router("app.routers.quotes", "/api/v1", ["quotes"])
+load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
 # LuxeForge Measurements router
 try:
@@ -157,51 +81,61 @@ try:
 except ImportError:
     pass
 
+# Docker / System / Ollama management
+load_router("app.routers.docker_manager", "/api/v1", ["docker"])
+load_router("app.routers.system_monitor", "/api/v1", ["system"])
+load_router("app.routers.ollama_manager", "/api/v1", ["ollama"])
 
 @app.get("/")
 async def root():
-    """Root endpoint - API info."""
-    return {
-        "message": "EmpireBox API",
-        "version": "1.0.0",
-        "status": "operational",
-        "marketplace_fee": "8%",
-        "endpoints": {
-            "licenses": "/licenses",
-            "shipping": "/shipping",
-            "preorders": "/preorders",
-            "auth": "/auth",
-            "users": "/users",
-            "listings": "/listings",
-            "messages": "/messages",
-            "marketplaces": "/marketplaces",
-            "webhooks": "/webhooks",
-            "ai": "/ai",
-            "marketplace_products": "/marketplace/products",
-            "marketplace_orders": "/marketplace/orders",
-            "marketplace_reviews": "/marketplace/reviews",
-            "marketplace_seller": "/marketplace/seller",
-            "supportforge_tickets": "/api/v1/tickets",
-            "supportforge_customers": "/api/v1/customers",
-            "supportforge_kb": "/api/v1/kb",
-            "supportforge_ai": "/api/v1/ai",
-            "economic": "/api/v1/economic",
-            "chat_backup": "/api/v1/chat-backup",
-            "crypto_payments": "/api/v1/crypto-payments",
-            "luxeforge_measurements": "/api/luxeforge/measurements"
-        }
-    }
-
+    return {"message": "EmpireBox API", "version": "1.0.0", "status": "operational"}
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "empirebox-backend"
-    }
+    return {"status": "healthy", "service": "empirebox-backend"}
+
+
+# Telegram Bot + Desk Scheduler auto-start
+@app.on_event("startup")
+async def start_background_services():
+    import asyncio
+
+    # Telegram Bot
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if telegram_bot.is_configured:
+            asyncio.create_task(telegram_bot.start_bot())
+            print("✓ Telegram Bot: starting in background")
+        else:
+            print("✗ Telegram Bot: not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_FOUNDER_CHAT_ID)")
+    except Exception as e:
+        print(f"✗ Telegram Bot: {e}")
+
+    # Desk Scheduler
+    try:
+        from app.services.max.desks.desk_scheduler import desk_scheduler
+        asyncio.create_task(desk_scheduler.start())
+        print("✓ Desk Scheduler: starting in background")
+    except Exception as e:
+        print(f"✗ Desk Scheduler: {e}")
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# Notifications API
+load_router("app.routers.notifications", "/api/v1", ["notifications"])
+
+# Empire Task Engine — AI Desks, Tasks, Contacts
+load_router("app.routers.desks", "/api/v1", ["desks"])
+load_router("app.routers.tasks", "/api/v1", ["tasks"])
+load_router("app.routers.contacts", "/api/v1", ["contacts"])
+
+# Smart Multi-Method Analyzer
+try:
+    from app.api.v1 import smart_analyzer
+    app.include_router(smart_analyzer.router, prefix="/api/v1", tags=["Smart AI"])
+    print("✓ Loaded: /api/v1/smart-analyze")
+except Exception as e:
+    print(f"✗ smart_analyzer: {e}")

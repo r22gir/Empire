@@ -1,0 +1,132 @@
+{
+  "id": "b7e410cd",
+  "quote_number": "EST-2026-028",
+  "status": "draft",
+  "customer_name": "Robinson Crusoe",
+  "customer_email": "",
+  "customer_phone": "",
+  "customer_address": "",
+  "project_name": "Master Bedroom \u2013 Azul Oscuro (Referencia Foto)",
+  "project_description": null,
+  "desk_id": null,
+  "line_items": [
+    {
+      "description": "Master Bedroom \u2014 Window Left (ripplefold, sheer, track-ripplefold)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 2323.0,
+      "amount": 2323.0,
+      "category": "labor"
+    },
+    {
+      "description": "Master Bedroom \u2014 Window Right (ripplefold, sheer, track-ripplefold)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 2323.0,
+      "amount": 2323.0,
+      "category": "labor"
+    },
+    {
+      "description": "Master Bedroom \u2014 Sill\u00f3n \u2013 Full Reupholstery (sofa, standard)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1176.0,
+      "amount": 1176.0,
+      "category": "labor"
+    },
+    {
+      "description": "Master Bedroom \u2014 Banco al Pie de Cama (sofa, standard)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1176.0,
+      "amount": 1176.0,
+      "category": "labor"
+    }
+  ],
+  "measurements": null,
+  "subtotal": 6998.0,
+  "tax_rate": 0.08,
+  "tax_amount": 559.84,
+  "discount_amount": 0.0,
+  "total": 7557.84,
+  "deposit": null,
+  "terms": "50% deposit required. Balance due upon completion.",
+  "valid_days": 30,
+  "install_date": null,
+  "notes": null,
+  "business_name": "Empire",
+  "business_logo_url": null,
+  "rooms": [
+    {
+      "name": "Master Bedroom",
+      "windows": [
+        {
+          "name": "Window Left",
+          "width": 66,
+          "height": 108,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "sheer",
+          "hardwareType": "track-ripplefold",
+          "motorization": "smart",
+          "mountType": "ceiling",
+          "notes": "",
+          "price": 2323,
+          "aiAnalysis": null
+        },
+        {
+          "name": "Window Right",
+          "width": 66,
+          "height": 108,
+          "quantity": 1,
+          "treatmentType": "ripplefold",
+          "liningType": "sheer",
+          "hardwareType": "track-ripplefold",
+          "motorization": "smart",
+          "mountType": "ceiling",
+          "notes": "",
+          "price": 2323,
+          "aiAnalysis": null
+        }
+      ],
+      "upholstery": [
+        {
+          "name": "Sill\u00f3n \u2013 Full Reupholstery",
+          "furnitureType": "sofa",
+          "fabricYards": 14,
+          "fabricType": "plain",
+          "laborType": "standard",
+          "cushionCount": 3,
+          "width": 84,
+          "depth": 36,
+          "height": 34,
+          "notes": "Full reupholstery in deep navy velvet, contrast piping, matching cushion",
+          "price": 1176,
+          "aiAnalysis": null
+        },
+        {
+          "name": "Banco al Pie de Cama",
+          "furnitureType": "sofa",
+          "fabricYards": 14,
+          "fabricType": "plain",
+          "laborType": "standard",
+          "cushionCount": 3,
+          "width": 84,
+          "depth": 36,
+          "height": 34,
+          "notes": "Reupholstery banco estilo franc\u00e9s, patas doradas",
+          "price": 1176,
+          "aiAnalysis": null
+        }
+      ]
+    }
+  ],
+  "ai_outlines": null,
+  "ai_mockups": null,
+  "max_analysis": "Based on the reference photo, this is a sophisticated luxury master bedroom project. The room features floor-to-ceiling window treatments with a double-layer approach: sheer white underlayers for daytime privacy and elegance, paired with deep navy/steel blue ripplefold drapery as the main panels \u2014 motorized for effortless operation. The existing d\u00e9cor shows French-style furniture with gold accents and a tufted diamond headboard, so fabric selections should be high-end \u2014 Belgian linen, silk velvet, or a structured jacquard in deep navy would be ideal. The accent chair reupholstery in coordinating deep blue velvet will anchor the seating area and tie the entire room's color story together beautifully.",
+  "created_at": "2026-03-02T00:09:31.587298",
+  "updated_at": "2026-03-02T00:09:31.587298",
+  "sent_at": null,
+  "accepted_at": null,
+  "expires_at": "2026-04-01T00:09:31.587559"
+}

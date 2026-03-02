@@ -1,0 +1,17 @@
+{
+  "id": "9fd61968",
+  "text": "What are workroom forge\u2019s fabric markup rates?",
+  "source": "telegram",
+  "telegram_message_id": 37,
+  "intent": "question",
+  "desk_target": "workroomforge",
+  "priority": 3,
+  "ai_summary": "Asking about fabric markup rates for WorkroomForge.",
+  "ai_response": null,
+  "status": "received",
+  "linked_task_id": null,
+  "result": null,
+  "created_at": "2026-02-28T06:13:58.637600",
+  "processed_at": null,
+  "reviewed_at": null
+}

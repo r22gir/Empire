@@ -1,0 +1,22 @@
+version: "3.8"
+services:
+  socialforge:
+    image: empirebox/socialforge:latest
+    container_name: empirebox-socialforge
+    restart: unless-stopped
+    ports:
+      - "8090:8000"
+    env_file:
+      - /opt/empirebox/.env
+    environment:
+      - SERVICE_NAME=socialforge
+      - SERVICE_PORT=8000
+    networks:
+      - empirebox
+    labels:
+      - "empirebox.product=socialforge"
+      - "empirebox.port=8090"
+
+networks:
+  empirebox:
+    external: true
