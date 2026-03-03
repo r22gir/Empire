@@ -323,11 +323,31 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   // ── Photo/AI ───────────────────────────────────────────
   const openPhotoModal = (roomId: string, itemId: string, mode: 'window' | 'upholstery' | 'outline' | 'mockup') => {
     setActiveRoomId(roomId); setActiveItemId(itemId); setPhotoMode(mode);
-    setShowPhotoModal(true); setUploadedImage(null); setAnalysisResult(null);
+    setShowPhotoModal(true); setAnalysisResult(null);
+    // For outline/mockup, reuse existing photo if available
+    if (mode === 'outline' || mode === 'mockup') {
+      const room = rooms.find(r => r.id === roomId);
+      const win = room?.windows.find(w => w.id === itemId);
+      const uph = room?.upholstery.find(u => u.id === itemId);
+      const existing = win?.sourcePhoto || uph?.sourcePhoto || null;
+      setUploadedImage(existing);
+    } else {
+      setUploadedImage(null);
+    }
   };
   const openStandalonePhotoModal = (mode: 'outline' | 'mockup', roomId?: string) => {
-    setActiveRoomId(roomId || rooms[0]?.id || null); setActiveItemId(null); setPhotoMode(mode);
-    setShowPhotoModal(true); setUploadedImage(null); setAnalysisResult(null);
+    const rid = roomId || rooms[0]?.id || null;
+    setActiveRoomId(rid); setActiveItemId(null); setPhotoMode(mode);
+    setShowPhotoModal(true); setAnalysisResult(null);
+    // For standalone outline/mockup, check if the first window in the room has a photo
+    if (rid) {
+      const room = rooms.find(r => r.id === rid);
+      const firstPhoto = room?.windows.find(w => w.sourcePhoto)?.sourcePhoto
+        || room?.upholstery.find(u => u.sourcePhoto)?.sourcePhoto || null;
+      setUploadedImage(firstPhoto);
+    } else {
+      setUploadedImage(null);
+    }
   };
   const compressImage = (dataUrl: string, maxWidth = 1600, quality = 0.8): Promise<string> => {
     return new Promise((resolve) => {
@@ -434,7 +454,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
 
   const analyzeImage = async () => {
-    if (!uploadedImage) return;
+    if (!uploadedImage) { console.error('analyzeImage: no uploadedImage'); return; }
+    console.log('analyzeImage: starting, photoMode=', photoMode);
     setIsAnalyzing(true);
     try {
       const endpoints: Record<string, string> = {
@@ -521,7 +542,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
           ],
         });
       }
-    } catch (err) { alert('AI analysis error: ' + (err instanceof Error ? err.message : 'Failed')); }
+    } catch (err) { console.error('analyzeImage error:', err); alert('AI analysis error: ' + (err instanceof Error ? err.message : 'Failed')); }
     finally { setIsAnalyzing(false); }
   };
 
@@ -833,7 +854,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
       `\nConfidence: ${analysisResult.confidence || 0}%\n\n` +
       `— Empire Custom Window Treatments`
     );
-    window.open(`mailto:${customer.email || ''}?subject=${subject}&body=${body}`, '_self');
+    const mailto = `mailto:${customer.email || ''}?subject=${subject}&body=${body}`;
+    const a = document.createElement('a'); a.href = mailto; a.click();
   };
 
   // ── Save & PDF ─────────────────────────────────────────
@@ -1022,7 +1044,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     if (!savedQuote) return;
     const subject = encodeURIComponent(`Estimate ${savedQuote.quote_number} from Empire`);
     const body = encodeURIComponent(`Hi ${customer.name},\n\nPlease find attached your estimate ${savedQuote.quote_number} for $${grandTotal.toLocaleString()}.\n\nThank you,\nEmpire`);
-    window.open(`mailto:${customer.email || ''}?subject=${subject}&body=${body}`, '_self');
+    const mailto = `mailto:${customer.email || ''}?subject=${subject}&body=${body}`;
+    const a = document.createElement('a'); a.href = mailto; a.click();
     setShowShareMenu(false);
   };
 
@@ -2390,7 +2413,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
               {/* Image preview */}
               {uploadedImage && !showCamera && (
                 <div className="relative mb-3">
-                  <img src={uploadedImage} alt="Analysis" className="w-full rounded-xl" />
+                  <img src={uploadedImage} alt="Analysis" className="w-full rounded-xl" style={{ maxHeight: '40vh', objectFit: 'contain' }} />
                   {isAnalyzing && (
                     <div className="absolute inset-0 bg-black/60 rounded-xl flex flex-col items-center justify-center">
                       <Loader2 className="w-8 h-8 animate-spin mb-2" style={{ color: '#8B5CF6' }} />
@@ -2632,7 +2655,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
               <div className="flex flex-wrap gap-2">
                 {uploadedImage && !analysisResult && !isAnalyzing && (
                   <>
-                    <button onClick={() => setUploadedImage(null)} className="flex-1 py-2 rounded-lg text-[11px]" style={{ background: 'var(--raised)', color: 'var(--text-secondary)' }}>Retake</button>
+                    <button onClick={() => setUploadedImage(null)} className="flex-1 py-2 rounded-lg text-[11px]" style={{ background: 'var(--raised)', color: 'var(--text-secondary)' }}>New Photo</button>
                     <button onClick={() => {
                       if (!activeRoomId || !activeItemId || !uploadedImage) return;
                       const room = rooms.find(r => r.id === activeRoomId);
@@ -2697,92 +2720,183 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                         </button>
                       </>
                     )}
-                    {/* View standalone page — print, PDF, share */}
+                    {/* View standalone page — Empire branded, print/PDF/share */}
                     <button
                       onClick={() => {
-                        const imgUrl = analysisResult.generated_images?.[0]?.url || analysisResult.generated_image || '';
                         const isUpholstery = analysisResult.mode === 'upholstery';
                         const isMockup = analysisResult.mode === 'mockup';
-                        const title = isUpholstery ? 'Upholstery Estimate' : isMockup ? 'Design Proposals' : 'Window Analysis';
+                        const isOutline = analysisResult.mode === 'outline';
+                        const title = isUpholstery ? 'Upholstery Analysis' : isMockup ? 'Design Proposals' : 'Dimensional Plan';
                         const custName = customer.name || 'Customer';
+                        const roomName = rooms.find(r => r.id === activeRoomId)?.name || 'Room';
+                        const win0 = rooms.find(r => r.id === activeRoomId)?.windows.find(w => w.id === activeItemId);
+
+                        // Build photo comparison section
+                        let photoSection = '';
+                        if (uploadedImage) {
+                          const mockImg = analysisResult.generated_images?.[0]?.url || analysisResult.generated_image || '';
+                          if (mockImg) {
+                            photoSection = `<div class="photo-compare"><div class="photo-card"><div class="photo-label">Original Photo</div><img src="${uploadedImage}" /></div><div class="photo-card"><div class="photo-label">AI Visualization</div><img src="${mockImg}" /></div></div>`;
+                          } else {
+                            photoSection = `<div class="photo-single"><div class="photo-label">Site Photo</div><img src="${uploadedImage}" /></div>`;
+                          }
+                        }
+
+                        // Build details by mode
                         let details = '';
-                        if (isUpholstery) {
-                          details = `<table style="width:100%;border-collapse:collapse;margin:16px 0">
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600;width:40%">Furniture Type</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.furnitureType || ''}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Style</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.style || ''}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Fabric Required</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.fabricYardsPlain || 0} yd plain${analysisResult.fabricYardsPatterned ? `, ${analysisResult.fabricYardsPatterned} yd patterned` : ''}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Cushions</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.cushions?.seat || 0} seat, ${analysisResult.cushions?.back || 0} back${analysisResult.cushions?.throw_pillows ? `, ${analysisResult.cushions.throw_pillows} throw` : ''}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Welting</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.hasWelting ? 'Yes' : 'No'}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Tufting</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.hasTufting ? 'Yes' : 'No'}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Labor Type</td><td style="padding:8px 12px;border:1px solid #eee">${(analysisResult.suggestedLaborType || 'standard').charAt(0).toUpperCase() + (analysisResult.suggestedLaborType || 'standard').slice(1)}</td></tr>
-                          <tr style="background:#fffcf0"><td style="padding:10px 12px;border:1px solid #eee;font-weight:700;color:#D4AF37">Estimated Labor</td><td style="padding:10px 12px;border:1px solid #eee;font-weight:700;color:#D4AF37;font-size:1.15em">$${(analysisResult.laborCostLow || 0).toLocaleString()} – $${(analysisResult.laborCostHigh || 0).toLocaleString()}</td></tr>
-                          ${analysisResult.newFoamRecommended ? '<tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600;color:#e67e22">New Foam</td><td style="padding:8px 12px;border:1px solid #eee;color:#e67e22">Recommended</td></tr>' : ''}
-                          </table>
-                          ${(analysisResult.questions || []).length > 0 ? '<h3 style="color:#D4AF37;margin-top:20px">Questions for Client</h3><ul style="margin:8px 0;padding-left:20px">' + (analysisResult.questions || []).map((q: string) => `<li style="margin:4px 0;color:#555">${q}</li>`).join('') + '</ul>' : ''}`;
+                        if (isOutline || analysisResult.mode === 'window') {
+                          const wo = analysisResult.windowOpening || {};
+                          const mt = analysisResult.mounting || {};
+                          const cl = analysisResult.clearances || {};
+                          const obs = analysisResult.obstructions || [];
+                          details = `
+                          <div class="section"><h2>Window Dimensions</h2>
+                            <div class="stat-grid">
+                              <div class="stat"><span class="stat-val">${wo.width || analysisResult.suggestedWidth || 0}"</span><span class="stat-lbl">Width</span></div>
+                              <div class="stat"><span class="stat-val">${wo.height || analysisResult.suggestedHeight || 0}"</span><span class="stat-lbl">Height</span></div>
+                              <div class="stat"><span class="stat-val">${analysisResult.windowType || 'Standard'}</span><span class="stat-lbl">Type</span></div>
+                              <div class="stat accent"><span class="stat-val">${analysisResult.confidence || 0}%</span><span class="stat-lbl">AI Confidence</span></div>
+                            </div>
+                          </div>
+                          <div class="section"><h2>Clearances</h2>
+                            <div class="stat-grid four">
+                              <div class="stat"><span class="stat-val">${cl.above_window || 0}"</span><span class="stat-lbl">Above</span></div>
+                              <div class="stat"><span class="stat-val">${cl.below_window || 0}"</span><span class="stat-lbl">Below</span></div>
+                              <div class="stat"><span class="stat-val">${cl.left_wall || 0}"</span><span class="stat-lbl">Left</span></div>
+                              <div class="stat"><span class="stat-val">${cl.right_wall || 0}"</span><span class="stat-lbl">Right</span></div>
+                            </div>
+                          </div>
+                          ${mt.mount_type ? `<div class="highlight-box"><h3>Mounting Recommendation</h3><p>Rod: ${mt.rod_width || 0}" wide at ${mt.mounting_height || 0}" height — ${mt.mount_type} mount</p>${mt.notes ? `<p class="muted">${mt.notes}</p>` : ''}</div>` : ''}
+                          ${obs.length > 0 ? `<div class="section"><h2>Obstructions</h2>${obs.map((o: any) => `<div class="obs-item">${typeof o === 'string' ? o : `${o.type || 'Item'} — ${o.location || ''} (${o.distance || ''})`}</div>`).join('')}</div>` : ''}
+                          ${analysisResult.outlineDescription ? `<div class="section"><h2>AI Description</h2><p>${analysisResult.outlineDescription}</p></div>` : ''}
+                          ${(analysisResult.recommendations || []).length > 0 ? `<div class="section"><h2>Recommendations</h2>${analysisResult.recommendations.map((r: string) => `<p class="rec-item">${r}</p>`).join('')}</div>` : ''}`;
                         } else if (isMockup) {
-                          details = (analysisResult.proposals || []).map((p: any, i: number) => {
-                            const tc = ['#22c55e','#D4AF37','#8B5CF6'][i % 3];
-                            const isRecommended = i === 1; // Designer's Choice is the recommended option
-                            const scale = isRecommended ? 'transform:scale(1.02);box-shadow:0 8px 32px rgba(212,175,55,0.25)' : '';
-                            const imgHtml = p.generated_image ? `<img src="${p.generated_image}" style="width:100%;border-radius:8px;margin:12px 0;border:1px solid #eee" />` : '';
-                            return `<div style="margin:${isRecommended ? '24px' : '16px'} 0;padding:${isRecommended ? '20px' : '16px'};border:${isRecommended ? '3px' : '2px'} solid ${tc};border-radius:10px;${scale};page-break-inside:avoid">
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                              <div style="background:${tc};color:white;display:inline-block;padding:${isRecommended ? '5px 16px' : '3px 12px'};border-radius:4px;font-size:${isRecommended ? '0.9em' : '0.8em'};font-weight:700;text-transform:uppercase">${p.tier}</div>
-                              ${isRecommended ? '<span style="background:#fffcf0;border:1px solid #D4AF37;color:#D4AF37;padding:3px 10px;border-radius:12px;font-size:0.7em;font-weight:700">★ RECOMMENDED</span>' : ''}
-                            </div>
-                            <p style="font-weight:700;font-size:${isRecommended ? '1.2em' : '1.05em'};margin:4px 0">${p.treatment_type || ''} — ${p.style || ''}</p>
-                            ${imgHtml}
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0;font-size:0.9em">
-                              <div style="padding:8px 12px;background:#f8f8f8;border-radius:6px"><strong>Fabric:</strong> ${p.fabric}</div>
-                              <div style="padding:8px 12px;background:#f8f8f8;border-radius:6px"><strong>Lining:</strong> ${p.lining}</div>
-                              <div style="padding:8px 12px;background:#f8f8f8;border-radius:6px"><strong>Hardware:</strong> ${p.hardware}</div>
-                              <div style="padding:8px 12px;background:#f8f8f8;border-radius:6px;font-weight:700;color:${tc};font-size:1.1em">$${(p.price_range_low || 0).toLocaleString()} – $${(p.price_range_high || 0).toLocaleString()}</div>
-                            </div>
-                            ${(p.extras || []).length > 0 ? `<p style="font-size:0.85em;color:#888;margin:4px 0">Extras: ${p.extras.join(' · ')}</p>` : ''}
-                            <p style="font-style:italic;color:#666;font-size:0.9em;line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid #eee">${p.visual_description || ''}</p>
-                            ${p.design_rationale ? `<p style="color:#333;font-size:0.85em;margin-top:8px"><strong>Design rationale:</strong> ${p.design_rationale}</p>` : ''}
+                          details = `<div class="section"><h2>Design Proposals — ${roomName}</h2></div>` +
+                          (analysisResult.proposals || []).map((p: any, i: number) => {
+                            const colors = ['#22c55e','#D4AF37','#8B5CF6'];
+                            const labels = ['Budget Friendly','Designer\\'s Choice','Premium Luxe'];
+                            const tc = colors[i % 3];
+                            const isRec = i === 1;
+                            const imgHtml = p.generated_image ? `<div class="proposal-img"><img src="${p.generated_image}" /></div>` : '';
+                            return `<div class="proposal${isRec ? ' recommended' : ''}" style="--tc:${tc}">
+                              <div class="proposal-header"><span class="tier-badge" style="background:${tc}">${p.tier || labels[i]}</span>${isRec ? '<span class="rec-badge">RECOMMENDED</span>' : ''}<span class="price">$${(p.price_range_low||0).toLocaleString()} — $${(p.price_range_high||0).toLocaleString()}</span></div>
+                              <p class="proposal-title">${p.treatment_type || ''} — ${p.style || ''}</p>
+                              ${imgHtml}
+                              <div class="spec-grid"><div class="spec"><strong>Fabric</strong>${p.fabric || 'TBD'}</div><div class="spec"><strong>Lining</strong>${p.lining || 'Standard'}</div><div class="spec"><strong>Hardware</strong>${p.hardware || 'Rod'}</div>${(p.extras||[]).length > 0 ? `<div class="spec"><strong>Extras</strong>${p.extras.join(', ')}</div>` : ''}</div>
+                              ${p.visual_description ? `<p class="vis-desc">${p.visual_description}</p>` : ''}
+                              ${p.design_rationale ? `<p class="rationale">${p.design_rationale}</p>` : ''}
                             </div>`;
                           }).join('');
-                        } else {
-                          details = `<table style="width:100%;border-collapse:collapse;margin:16px 0">
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600;width:40%">Window Type</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.windowType || ''}</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Dimensions</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.suggestedWidth || 0}" × ${analysisResult.suggestedHeight || 0}"</td></tr>
-                          <tr><td style="padding:8px 12px;border:1px solid #eee;font-weight:600">Confidence</td><td style="padding:8px 12px;border:1px solid #eee">${analysisResult.confidence || 0}%</td></tr>
-                          </table>
-                          ${(analysisResult.recommendations || []).map((r: string) => `<p style="margin:4px 0;color:#555">→ ${r}</p>`).join('')}`;
-                        }
-                        const mockupImages = ''; // Images are now inline with each proposal card
-                        const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title} — Empire</title>
-                          <style>
-                          body{font-family:'Helvetica Neue',Arial,sans-serif;max-width:750px;margin:0 auto;padding:30px 20px;color:#222}
-                          h1{color:#1a1a2e;margin:0;font-size:24px}
-                          h3{color:#1a1a2e;margin:20px 0 8px}
-                          img{max-width:100%;border-radius:8px}
-                          .header{border-bottom:3px solid #D4AF37;padding-bottom:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:flex-start}
-                          .actions{display:flex;gap:8px;margin:20px 0}
-                          .btn{padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:none;display:inline-flex;align-items:center;gap:6px}
-                          .btn-gold{background:#D4AF37;color:#0a0a0a} .btn-purple{background:#8B5CF6;color:#fff} .btn-outline{background:white;border:1px solid #ddd;color:#333}
-                          @media print{.actions{display:none !important} body{padding:20px} .header{margin-bottom:16px}}
-                          </style></head><body>
-                          <div class="header"><div><h1>Empire</h1><p style="margin:4px 0 0;color:#888;font-size:0.85em">Custom Window Treatments & Upholstery</p></div>
-                          <div style="text-align:right"><div style="background:#1a1a2e;color:#D4AF37;padding:6px 14px;border-radius:6px;font-weight:700;font-size:0.9em;letter-spacing:1px;display:inline-block">${title.toUpperCase()}</div>
-                          <p style="margin:4px 0 0;color:#666;font-size:0.82em">${new Date().toLocaleDateString()}</p>
-                          ${custName !== 'Customer' ? `<p style="margin:2px 0 0;color:#333;font-weight:600">${custName}</p>` : ''}
-                          </div></div>
-                          <div class="actions">
-                            <button class="btn btn-gold" onclick="window.print()">🖨 Print / Save PDF</button>
-                            <button class="btn btn-purple" onclick="if(navigator.share){navigator.share({title:'${title}',text:document.body.innerText.substring(0,500)}).catch(()=>{})}else{navigator.clipboard.writeText(window.location.href);alert('Link copied!')}">↗ Share</button>
-                            <button class="btn btn-outline" onclick="window.close()">✕ Close</button>
+                          if (analysisResult.generalRecommendations?.length > 0) {
+                            details += `<div class="section"><h2>Design Recommendations</h2>${analysisResult.generalRecommendations.map((r: string) => `<p class="rec-item">${r}</p>`).join('')}</div>`;
+                          }
+                        } else if (isUpholstery) {
+                          details = `
+                          <div class="section"><h2>Upholstery Assessment</h2>
+                            <div class="stat-grid">
+                              <div class="stat"><span class="stat-val">${analysisResult.furnitureType || 'N/A'}</span><span class="stat-lbl">Type</span></div>
+                              <div class="stat"><span class="stat-val">${analysisResult.fabricYardsPlain || 0} yd</span><span class="stat-lbl">Fabric</span></div>
+                              <div class="stat"><span class="stat-val">${(analysisResult.cushions?.seat||0)+(analysisResult.cushions?.back||0)}</span><span class="stat-lbl">Cushions</span></div>
+                              <div class="stat accent"><span class="stat-val">$${(analysisResult.laborCostLow||0).toLocaleString()}–$${(analysisResult.laborCostHigh||0).toLocaleString()}</span><span class="stat-lbl">Est. Labor</span></div>
+                            </div>
                           </div>
-                          ${uploadedImage ? `<h3>Reference Photo</h3><img src="${uploadedImage}" style="max-height:400px;object-fit:contain;border:1px solid #ddd" />` : ''}
-                          ${imgUrl ? `<h3>AI-Generated Illustration</h3><img src="${imgUrl}" style="max-height:500px;object-fit:contain;border:1px solid #ddd" />` : ''}
-                          ${mockupImages}
-                          <h3>Analysis Details</h3>${details}
-                          <hr style="margin:30px 0;border:none;border-top:1px solid #ddd" />
-                          <p style="color:#999;font-size:0.8em;text-align:center">Empire · Custom Window Treatments & Upholstery · ${new Date().toLocaleDateString()}</p>
-                          </body></html>`;
-                        const win = window.open('', '_blank');
-                        if (win) { win.document.write(printHtml); win.document.close(); }
+                          ${analysisResult.newFoamRecommended ? '<div class="highlight-box"><h3>New Foam Recommended</h3><p>Existing foam should be replaced for best results.</p></div>' : ''}
+                          ${(analysisResult.questions||[]).length > 0 ? `<div class="section"><h2>Questions for Client</h2>${analysisResult.questions.map((q: string) => `<p class="rec-item">${q}</p>`).join('')}</div>` : ''}`;
+                        }
+
+                        const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title} — Empire</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#05050d;color:#e4e4e8;min-height:100vh}
+.wrap{max-width:900px;margin:0 auto;padding:32px 24px}
+.header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;margin-bottom:28px;border-bottom:2px solid #D4AF37}
+.brand{font-size:28px;font-weight:800;color:#D4AF37;letter-spacing:1px}
+.brand-sub{font-size:12px;color:#888;margin-top:2px}
+.badge{background:#1a1a2e;color:#D4AF37;padding:6px 16px;border-radius:8px;font-weight:700;font-size:13px;letter-spacing:1.5px;border:1px solid rgba(212,175,55,0.3)}
+.meta{text-align:right;font-size:12px;color:#888;margin-top:6px}
+.actions{display:flex;gap:10px;margin:20px 0 28px}
+.btn{padding:10px 22px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;border:none;display:inline-flex;align-items:center;gap:6px;transition:all 0.2s}
+.btn-gold{background:#D4AF37;color:#0a0a0a}.btn-gold:hover{background:#e8c547}
+.btn-purple{background:#8B5CF6;color:#fff}.btn-purple:hover{background:#9d78f7}
+.btn-dim{background:rgba(255,255,255,0.06);color:#aaa;border:1px solid rgba(255,255,255,0.1)}.btn-dim:hover{background:rgba(255,255,255,0.1)}
+.photo-compare{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0}
+.photo-single{margin:24px 0}
+.photo-card{border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,0.1)}
+.photo-card img,.photo-single img{width:100%;display:block;max-height:400px;object-fit:contain;background:#0a0a1a}
+.photo-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;padding:8px 14px;color:#888;background:rgba(255,255,255,0.03)}
+.section{margin:28px 0}
+.section h2{font-size:14px;font-weight:700;color:#8B5CF6;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:14px}
+.section p{font-size:14px;line-height:1.7;color:#ccc}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat-grid.four{grid-template-columns:repeat(4,1fr)}
+.stat{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:16px;text-align:center}
+.stat-val{display:block;font-size:22px;font-weight:800;color:#e4e4e8}
+.stat-lbl{display:block;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-top:4px}
+.stat.accent{border-color:rgba(212,175,55,0.3);background:rgba(212,175,55,0.06)}
+.stat.accent .stat-val{color:#D4AF37}
+.highlight-box{background:linear-gradient(135deg,rgba(212,175,55,0.08),rgba(139,92,246,0.08));border:1px solid rgba(212,175,55,0.25);border-radius:12px;padding:20px;margin:20px 0}
+.highlight-box h3{color:#D4AF37;font-size:13px;font-weight:700;margin-bottom:8px}
+.highlight-box p{font-size:13px;color:#ccc;line-height:1.6}
+.highlight-box .muted{color:#888;font-style:italic;margin-top:6px}
+.obs-item{padding:8px 14px;margin:4px 0;background:rgba(239,68,68,0.06);border-left:3px solid #ef4444;border-radius:0 8px 8px 0;font-size:13px;color:#f87171}
+.rec-item{padding:8px 14px;margin:4px 0;background:rgba(139,92,246,0.06);border-left:3px solid #8B5CF6;border-radius:0 8px 8px 0;font-size:13px;color:#c4b5fd}
+.proposal{border:2px solid var(--tc,#444);border-radius:14px;padding:20px;margin:16px 0;background:rgba(255,255,255,0.02);page-break-inside:avoid}
+.proposal.recommended{border-width:3px;background:rgba(212,175,55,0.04);box-shadow:0 4px 24px rgba(212,175,55,0.1)}
+.proposal-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.tier-badge{color:#fff;padding:4px 14px;border-radius:6px;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px}
+.rec-badge{background:rgba(212,175,55,0.15);border:1px solid #D4AF37;color:#D4AF37;padding:3px 12px;border-radius:20px;font-size:10px;font-weight:800}
+.price{margin-left:auto;font-size:15px;font-weight:800;color:#D4AF37;font-family:'SF Mono',monospace}
+.proposal-title{font-size:16px;font-weight:700;color:#e4e4e8;margin:6px 0 12px}
+.proposal-img{border-radius:10px;overflow:hidden;margin:12px 0;border:1px solid rgba(255,255,255,0.08)}
+.proposal-img img{width:100%;display:block}
+.spec-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:14px 0}
+.spec{background:rgba(255,255,255,0.04);border-radius:8px;padding:10px 14px;font-size:12px;color:#ccc}
+.spec strong{display:block;font-size:10px;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px}
+.vis-desc{font-style:italic;color:#999;font-size:13px;line-height:1.6;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.06)}
+.rationale{color:#a78bfa;font-size:12px;margin-top:8px}
+.footer{text-align:center;padding:28px 0 8px;margin-top:32px;border-top:1px solid rgba(255,255,255,0.06);font-size:11px;color:#555}
+@media print{
+  body{background:#fff;color:#1a1a2e;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .actions{display:none !important}
+  .wrap{padding:20px}
+  .stat{border-color:#ddd;background:#f9f9f9}
+  .stat-val{color:#1a1a2e}
+  .stat.accent{background:#fffcf0;border-color:#D4AF37}
+  .section h2{color:#8B5CF6}
+  .section p,.spec{color:#333}
+  .highlight-box{background:#fffcf0;border-color:#D4AF37}
+  .highlight-box p,.highlight-box .muted{color:#444}
+  .proposal{background:#fafafa;border-color:#ddd}
+  .proposal.recommended{background:#fffcf0;border-color:#D4AF37}
+  .proposal-title{color:#1a1a2e}
+  .vis-desc{color:#666;border-color:#eee}
+  .rec-item{background:#f3f0ff;color:#5b21b6}
+  .obs-item{background:#fef2f2;color:#b91c1c}
+  .photo-card{border-color:#ddd}
+  .photo-label{color:#666;background:#f5f5f5}
+  .footer{color:#999}
+}
+</style></head><body>
+<div class="wrap">
+  <div class="header">
+    <div><div class="brand">EMPIRE</div><div class="brand-sub">Custom Window Treatments & Upholstery</div></div>
+    <div style="text-align:right"><div class="badge">${title.toUpperCase()}</div><div class="meta">${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})}${custName !== 'Customer' ? ` · ${custName}` : ''}${roomName ? ` · ${roomName}` : ''}</div></div>
+  </div>
+  <div class="actions">
+    <button class="btn btn-gold" onclick="window.print()">Print / Save PDF</button>
+    <button class="btn btn-purple" onclick="if(navigator.share){navigator.share({title:'Empire — ${title}',text:document.body.innerText.substring(0,500)}).catch(()=>{})}else{navigator.clipboard.writeText(window.location.href).then(()=>alert('Copied!'))}">Share</button>
+    <button class="btn btn-dim" onclick="window.close()">Close</button>
+  </div>
+  ${photoSection}
+  ${details}
+  <div class="footer">Empire · Custom Window Treatments & Upholstery · Generated ${new Date().toLocaleDateString()}</div>
+</div>
+</body></html>`;
+                        const blob = new Blob([printHtml], { type: 'text/html' });
+                        const blobUrl = URL.createObjectURL(blob);
+                        const win = window.open(blobUrl, '_blank');
+                        if (!win) { alert('Popup blocked — please allow popups for localhost:3009'); }
+                        else { setTimeout(() => URL.revokeObjectURL(blobUrl), 60000); }
                       }}
                       className="py-2 px-3 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1"
                       style={{ background: 'var(--gold)', color: '#0a0a0a' }}

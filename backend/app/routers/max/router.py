@@ -114,17 +114,34 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
         response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
 
-        # Parse and execute tool blocks from response (same as streaming endpoint)
+        # Parse and execute tool blocks from response
         tool_results_list = []
         tool_calls = parse_tool_blocks(response.content)
         for tc in tool_calls:
             result = execute_tool(tc, desk=request.desk)
             tool_results_list.append({"tool": result.tool, "success": result.success, "result": result.result, "error": result.error})
 
+        # Tool loop: feed results back to AI for follow-up
+        final_content = response.content
+        if tool_results_list:
+            tool_summary_parts = []
+            for r in tool_results_list:
+                if r["success"] and r["result"]:
+                    tool_summary_parts.append(f"[{r['tool']}] Result:\n{json.dumps(r['result'], indent=2, default=str)[:3000]}")
+                else:
+                    tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
+            tool_summary = "\n\n".join(tool_summary_parts)
+            followup_messages = list(messages) + [
+                AIMessage(role="assistant", content=strip_tool_blocks(response.content)),
+                AIMessage(role="user", content=f"[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]\n\n{tool_summary}"),
+            ]
+            followup = await ai_router.chat(followup_messages, model=model, desk=request.desk, system_prompt=enriched_prompt)
+            final_content = strip_tool_blocks(response.content) + "\n\n" + followup.content
+
         # Track conversation in background
         conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
         conversation_tracker.add_message(conv_id, "user", request.message)
-        conversation_tracker.add_message(conv_id, "assistant", response.content)
+        conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(final_content))
         background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
 
         # Learning: real-time (every exchange) or batch (every N messages)
@@ -143,9 +160,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
         # Log token usage
         input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
-        token_tracker.log_chat(response.model_used, input_text, response.content, "chat", conv_id)
+        token_tracker.log_chat(response.model_used, input_text, final_content, "chat", conv_id)
 
-        resp = ChatResponse(response=sanitize_output(response.content), model_used=response.model_used, fallback_used=response.fallback_used)
+        resp = ChatResponse(response=sanitize_output(final_content), model_used=response.model_used, fallback_used=response.fallback_used)
         # Attach tool results to the response JSON (extra field, not in schema but included in dict)
         resp_dict = resp.dict()
         if tool_results_list:
@@ -216,12 +233,37 @@ async def chat_stream(request: ChatRequest):
 
             # Parse and execute tool blocks from completed response
             tool_calls = parse_tool_blocks(full_response)
+            tool_results_list = []
             for tc in tool_calls:
                 result = execute_tool(tc, desk=request.desk)
+                tool_results_list.append(result)
                 yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
 
+            # ── Tool Loop: feed results back to AI for a follow-up ──
+            if tool_results_list:
+                tool_summary_parts = []
+                for r in tool_results_list:
+                    if r.success and r.result:
+                        tool_summary_parts.append(f"[{r.tool}] Result:\n{json.dumps(r.result, indent=2, default=str)[:3000]}")
+                    else:
+                        tool_summary_parts.append(f"[{r.tool}] Error: {r.error}")
+                tool_summary = "\n\n".join(tool_summary_parts)
+
+                followup_messages = list(messages) + [
+                    AIMessage(role="assistant", content=strip_tool_blocks(full_response)),
+                    AIMessage(role="user", content=f"[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]\n\n{tool_summary}"),
+                ]
+                yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
+                followup_text = ""
+                async for chunk, m_used in ai_router.chat_stream(followup_messages, model=model, desk=request.desk, system_prompt=enriched_prompt):
+                    model_used = m_used
+                    safe_chunk = sanitize_output(chunk)
+                    followup_text += safe_chunk
+                    yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+                full_response = strip_tool_blocks(full_response) + "\n\n" + followup_text
+
             # Track assistant response — fire-and-forget background tasks
-            conversation_tracker.add_message(conv_id, "assistant", full_response)
+            conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
             asyncio.create_task(_safe_background(
                 conversation_tracker.check_and_summarize(conv_id),
                 "summarization"

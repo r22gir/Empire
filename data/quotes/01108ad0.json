@@ -18,8 +18,17 @@
           "treatmentType": "pinch-pleat",
           "liningType": "standard",
           "hardwareType": "decorative-rod",
+          "hardwareColor": "brushed-nickel",
           "motorization": "none",
-          "mountType": "wall"
+          "mountType": "wall",
+          "notes": "",
+          "fabricGrade": "B",
+          "fullness": 2.5,
+          "laborRate": 45,
+          "drawDirection": "center",
+          "fabricColor": "",
+          "price": 1061,
+          "aiAnalysis": null
         },
         {
           "name": "Center Window",
@@ -29,8 +38,17 @@
           "treatmentType": "pinch-pleat",
           "liningType": "standard",
           "hardwareType": "decorative-rod",
+          "hardwareColor": "brushed-nickel",
           "motorization": "none",
-          "mountType": "wall"
+          "mountType": "wall",
+          "notes": "",
+          "fabricGrade": "B",
+          "fullness": 2.5,
+          "laborRate": 45,
+          "drawDirection": "center",
+          "fabricColor": "",
+          "price": 697,
+          "aiAnalysis": null
         },
         {
           "name": "Right Single",
@@ -40,42 +58,46 @@
           "treatmentType": "pinch-pleat",
           "liningType": "standard",
           "hardwareType": "decorative-rod",
+          "hardwareColor": "brushed-nickel",
           "motorization": "none",
-          "mountType": "wall"
+          "mountType": "wall",
+          "notes": "",
+          "fabricGrade": "B",
+          "fullness": 2.5,
+          "laborRate": 45,
+          "drawDirection": "center",
+          "fabricColor": "",
+          "price": 546,
+          "aiAnalysis": null
         }
-      ]
+      ],
+      "upholstery": []
     }
   ],
   "line_items": [
     {
-      "room": "Music Room",
-      "description": "Pinch Pleat \u2014 144\"W \u00d7 84\"H",
-      "quantity": 1,
-      "unit_price": 4620.0,
-      "total": 4620.0,
-      "treatment_type": "pinch-pleat",
-      "width": 144,
-      "height": 84
+      "description": "Music Room \u2014 Left Bay (3-Panel) (pinch-pleat, B, 22.4yd)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 1061.0,
+      "amount": 1061.0,
+      "category": "labor"
     },
     {
-      "room": "Music Room",
-      "description": "Pinch Pleat \u2014 72\"W \u00d7 84\"H",
-      "quantity": 1,
-      "unit_price": 2310.0,
-      "total": 2310.0,
-      "treatment_type": "pinch-pleat",
-      "width": 72,
-      "height": 84
+      "description": "Music Room \u2014 Center Window (pinch-pleat, B, 12.8yd)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 697.0,
+      "amount": 697.0,
+      "category": "labor"
     },
     {
-      "room": "Music Room",
-      "description": "Pinch Pleat \u2014 42\"W \u00d7 84\"H",
-      "quantity": 1,
-      "unit_price": 1347.5,
-      "total": 1347.5,
-      "treatment_type": "pinch-pleat",
-      "width": 42,
-      "height": 84
+      "description": "Music Room \u2014 Right Single (pinch-pleat, B, 6.4yd)",
+      "quantity": 1.0,
+      "unit": "ea",
+      "rate": 546.0,
+      "amount": 546.0,
+      "category": "labor"
     }
   ],
   "ai_outlines": [],
@@ -96,13 +118,18 @@
       "generalRecommendations": []
     }
   ],
-  "subtotal": 8277.5,
-  "tax_rate": 0,
+  "subtotal": 2304.0,
+  "tax_rate": 0.08,
   "tax": 0,
-  "total": 8277.5,
+  "total": 2488.32,
   "status": "draft",
   "max_analysis": "This elegant music room features a grand piano and sophisticated decor with botanical wallpaper and a crystal chandelier. I've recommended pinch pleat drapery in a silvery-grey silk/linen blend to complement the existing aesthetic. Standard lining is sufficient given the natural light, and decorative rods enhance the high-end look. These treatments will frame the windows beautifully while maintaining functionality.",
   "created_at": "2026-03-02T14:42:44.341869",
-  "updated_at": "2026-03-02T14:42:44.341869",
-  "source": "max_quick_quote"
+  "updated_at": "2026-03-03T01:36:52.496236",
+  "source": "max_quick_quote",
+  "terms": "50% deposit required. Balance due upon completion.",
+  "valid_days": 30,
+  "business_name": "Empire",
+  "tax_amount": 184.32,
+  "expires_at": "2026-04-01T14:42:44.341869"
 }

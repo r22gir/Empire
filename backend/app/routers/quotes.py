@@ -1430,7 +1430,7 @@ def _build_line_items_html(line_items: list) -> str:
 
     for room_name in rooms_seen:
         items = rooms_items[room_name]
-        room_total = sum(i["total"] for i in items)
+        room_total = sum(i.get("total", i.get("unit_price", 0) * i.get("quantity", 1)) for i in items)
         html += f"""<tr><td colspan="5" style="padding:10px 8px 4px;font-weight:700;color:#1a1a2e;
             border-bottom:2px solid #D4AF37;font-size:0.9em">{room_name}</td></tr>"""
         for item in items:
@@ -1442,8 +1442,8 @@ def _build_line_items_html(line_items: list) -> str:
                 <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0">
                     <span style="font-size:0.85em">{item['description']}</span><br>{cat_label}</td>
                 <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:0.85em">{item['quantity']}</td>
-                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em">${item['unit_price']:,.2f}</td>
-                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item['total']:,.2f}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em">${item.get('unit_price', 0):,.2f}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item.get('total', item.get('unit_price', 0) * item.get('quantity', 1)):,.2f}</td>
             </tr>"""
         html += f"""<tr><td colspan="4" style="padding:6px 8px;text-align:right;font-size:0.82em;color:#666">
             Room Subtotal</td>
@@ -1459,10 +1459,68 @@ async def generate_pdf(quote_id: str):
     """Generate PDF for a quote with room-level detail, drawings, and mockups."""
     quote = _load_quote(quote_id)
 
+    rooms = quote.get("rooms") or []
+    ai_mockups = quote.get("ai_mockups") or []
+
+    # ── Auto-generate mockup images if none exist ──
+    xai_key = os.environ.get("XAI_API_KEY")
+    if not ai_mockups and xai_key and rooms:
+        treatment_labels = {
+            'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
+            'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
+        }
+        try:
+            for room in rooms:
+                room_name = room.get("name", "Room")
+                windows = room.get("windows", [])
+                if not windows:
+                    continue
+                gen_images = []
+                async with httpx.AsyncClient(timeout=30) as client:
+                    for win in windows[:3]:
+                        treatment = win.get("treatmentType", "ripplefold")
+                        label = treatment_labels.get(treatment, treatment.replace('-', ' ').title())
+                        w = win.get("width", 48)
+                        h = win.get("height", 60)
+                        hardware = (win.get("hardwareType") or "decorative rod").replace('-', ' ')
+                        mount = win.get("mountType", "wall")
+                        prompt = (
+                            f"Professional interior design photo: a {room_name.lower()} with a "
+                            f"{w}-inch wide by {h}-inch tall window. "
+                            f"Installed: {label} drapery panels in elegant fabric. "
+                            f"The panels hang from {hardware} hardware, {mount}-mounted. "
+                            f"Clean, bright natural light. Magazine-quality architectural photography."
+                        )
+                        try:
+                            resp = await client.post(
+                                "https://api.x.ai/v1/images/generations",
+                                headers={"Content-Type": "application/json", "Authorization": f"Bearer {xai_key}"},
+                                json={"model": "grok-imagine-image", "prompt": prompt, "n": 1, "response_format": "url"},
+                            )
+                            if resp.status_code == 200:
+                                img_url = resp.json().get("data", [{}])[0].get("url")
+                                if img_url:
+                                    gen_images.append({"tier": f"{label} — {win.get('name', 'Window')}", "url": img_url})
+                        except Exception as img_err:
+                            logger.warning(f"PDF mockup gen failed for {room_name}/{win.get('name')}: {img_err}")
+                if gen_images:
+                    ai_mockups.append({
+                        "roomName": room_name,
+                        "generated_images": gen_images,
+                        "proposals": [],
+                        "generalRecommendations": [],
+                    })
+            if ai_mockups:
+                quote["ai_mockups"] = ai_mockups
+                # Save back so next PDF doesn't regenerate
+                _save_quote(quote)
+                logger.info(f"Auto-generated {sum(len(m['generated_images']) for m in ai_mockups)} mockup images for PDF")
+        except Exception as e:
+            logger.warning(f"Auto-mockup generation failed: {e}")
+
     # Pre-download external AI images as base64 for reliable PDF embedding
     quote = _embed_external_images(quote)
 
-    rooms = quote.get("rooms") or []
     ai_outlines = quote.get("ai_outlines") or []
     ai_mockups = quote.get("ai_mockups") or []
 
