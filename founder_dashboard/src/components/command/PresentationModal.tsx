@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { X, Printer, Download, Loader2, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, Printer, Download, Loader2, ExternalLink, ChevronDown, ChevronUp, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -38,11 +38,20 @@ interface PresentationSource {
   description: string;
 }
 
+interface PresentationVideo {
+  title: string;
+  url: string;
+  thumbnail: string;
+  duration: string;
+  publisher: string;
+}
+
 interface PresentationData {
   title: string;
   subtitle: string;
   sections: PresentationSection[];
   images: PresentationImage[];
+  videos: PresentationVideo[];
   charts: PresentationChart[];
   sources: PresentationSource[];
   model_used: string;
@@ -90,6 +99,49 @@ export default function PresentationModal({ topic, sourceContent, onClose }: Pro
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
   }, [onClose]);
+
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [tgLoading, setTgLoading] = useState(false);
+  const [tgSent, setTgSent] = useState(false);
+
+  /* Download as PDF */
+  const handlePDF = useCallback(async () => {
+    if (!data) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch(API_URL + '/max/present/pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`PDF failed: ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${data.title.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error('PDF download error:', e); }
+    finally { setPdfLoading(false); }
+  }, [data]);
+
+  /* Send to Telegram */
+  const handleTelegram = useCallback(async () => {
+    if (!data) return;
+    setTgLoading(true);
+    try {
+      const res = await fetch(API_URL + '/max/present/telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error(`Telegram failed: ${res.status}`);
+      const result = await res.json();
+      if (result.telegram_sent) setTgSent(true);
+    } catch (e) { console.error('Telegram send error:', e); }
+    finally { setTgLoading(false); }
+  }, [data]);
 
   /* Print / Export */
   const handlePrint = useCallback(() => {
@@ -234,6 +286,38 @@ export default function PresentationModal({ topic, sourceContent, onClose }: Pro
                 </div>
               )}
 
+              {/* Videos */}
+              {data.videos?.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Video Clips</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {data.videos.map((vid, i) => (
+                      <a
+                        key={i}
+                        href={vid.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-xl overflow-hidden flex gap-3 transition group"
+                        style={{ background: 'var(--elevated)', border: '1px solid var(--glass-border)' }}
+                      >
+                        {vid.thumbnail && (
+                          <div className="shrink-0 w-32 h-20 relative">
+                            <img src={vid.thumbnail} alt={vid.title} className="w-full h-full object-cover" />
+                            {vid.duration && (
+                              <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded text-[9px] font-mono" style={{ background: 'rgba(0,0,0,0.8)', color: '#fff' }}>{vid.duration}</span>
+                            )}
+                          </div>
+                        )}
+                        <div className="py-2 pr-3 min-w-0 flex flex-col justify-center">
+                          <p className="text-xs font-medium truncate group-hover:underline" style={{ color: 'var(--text-primary)' }}>{vid.title}</p>
+                          {vid.publisher && <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{vid.publisher}</p>}
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Charts */}
               {data.charts.map((chart, i) => (
                 <PresentationChartBlock key={i} chart={chart} />
@@ -274,13 +358,31 @@ export default function PresentationModal({ topic, sourceContent, onClose }: Pro
             className="shrink-0 px-6 py-3 flex items-center justify-between"
             style={{ borderTop: '1px solid var(--glass-border)', background: 'var(--raised)' }}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handlePDF}
+                disabled={pdfLoading}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                style={{ background: 'linear-gradient(135deg, rgba(212,175,55,0.15), rgba(139,92,246,0.15))', color: 'var(--gold)', border: '1px solid rgba(212,175,55,0.3)' }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(212,175,55,0.3)'; }}
+              >
+                {pdfLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} PDF
+              </button>
+              <button
+                onClick={handleTelegram}
+                disabled={tgLoading || tgSent}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                style={{ background: tgSent ? 'rgba(34,197,94,0.15)' : 'rgba(34,211,238,0.1)', color: tgSent ? '#22c55e' : 'var(--cyan)', border: `1px solid ${tgSent ? 'rgba(34,197,94,0.3)' : 'rgba(34,211,238,0.2)'}` }}
+              >
+                {tgLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} {tgSent ? 'Sent' : 'Telegram'}
+              </button>
               <button
                 onClick={handlePrint}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
-                style={{ background: 'var(--elevated)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.color = 'var(--gold)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+                style={{ background: 'var(--elevated)', color: 'var(--text-secondary)', border: '1px solid var(--glass-border)' }}
+                onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
               >
                 <Printer className="w-3.5 h-3.5" /> Print
               </button>

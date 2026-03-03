@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import asyncio
 import json
+import os
 import logging
 import uuid
 from datetime import datetime
@@ -308,6 +309,44 @@ async def generate_presentation(request: PresentRequest):
         return result
     except Exception as e:
         logger.error(f"Presentation generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/present/pdf")
+async def presentation_to_pdf(data: dict):
+    """Render presentation data as PDF and return the file."""
+    from app.services.max.tool_executor import _render_presentation_pdf
+    from fastapi.responses import FileResponse
+
+    try:
+        pdf_path = _render_presentation_pdf(data)
+        filename = os.path.basename(pdf_path)
+        return FileResponse(pdf_path, media_type="application/pdf", filename=filename)
+    except Exception as e:
+        logger.error(f"Presentation PDF error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/present/telegram")
+async def presentation_to_telegram(data: dict):
+    """Render presentation as PDF and send via Telegram."""
+    from app.services.max.tool_executor import _render_presentation_pdf
+
+    try:
+        pdf_path = _render_presentation_pdf(data)
+        # Send via Telegram
+        from app.services.max.telegram_bot import TelegramBot
+        bot = TelegramBot()
+        telegram_sent = False
+        if bot.is_configured:
+            title = data.get("title", "Presentation")
+            section_count = len(data.get("sections", []))
+            caption = f"\U0001f4ca <b>{title}</b>\n{section_count} sections \u00b7 {data.get('model_used', 'AI')}"
+            await bot.send_document(pdf_path, caption=caption)
+            telegram_sent = True
+        return {"success": True, "pdf_path": pdf_path, "telegram_sent": telegram_sent}
+    except Exception as e:
+        logger.error(f"Presentation Telegram error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -956,20 +956,9 @@ def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
     num_results = min(int(params.get("num_results", 5)), 10)
 
     try:
-        resp = httpx.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers={
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            },
-            timeout=10,
-            follow_redirects=True,
-        )
-        if resp.status_code != 200:
-            return ToolResult(tool="web_search", success=False, error=f"Search failed: HTTP {resp.status_code}")
-
-        results = _parse_ddg_results(resp.text, num_results)
+        from duckduckgo_search import DDGS
+        raw = DDGS().text(query, max_results=num_results)
+        results = [{"title": r["title"], "url": r["href"], "snippet": r["body"]} for r in raw]
         return ToolResult(tool="web_search", success=True, result={
             "query": query, "results": results, "count": len(results), "source": "DuckDuckGo",
         })
@@ -977,23 +966,58 @@ def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="web_search", success=False, error=f"Web search failed: {e}")
 
 
-def _parse_ddg_results(html: str, max_results: int) -> list:
-    """Parse DuckDuckGo HTML search results into structured data."""
-    from urllib.parse import unquote
-    results = []
-    # Find result blocks
-    blocks = re.findall(r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>', html, re.DOTALL)
-    snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
+@tool("web_read")
+def _web_read(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Fetch a web page and extract its text content."""
+    url = params.get("url", "").strip()
+    if not url:
+        return ToolResult(tool="web_read", success=False, error="URL is required")
 
-    for i, (url, title_html) in enumerate(blocks[:max_results]):
-        # Unwrap DDG redirect URL
-        actual_match = re.search(r'uddg=([^&]+)', url)
-        actual_url = unquote(actual_match.group(1)) if actual_match else url
-        title = re.sub(r'<[^>]+>', '', title_html).strip()
-        snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
-        if title and actual_url:
-            results.append({"title": title, "url": actual_url, "snippet": snippet})
-    return results
+    try:
+        resp = httpx.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; EmpireBot/1.0)"},
+            timeout=15,
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return ToolResult(tool="web_read", success=False, error=f"HTTP {resp.status_code}")
+
+        content_type = resp.headers.get("content-type", "")
+        if "html" in content_type:
+            text = _html_to_text(resp.text)
+        else:
+            text = resp.text
+
+        # Truncate to avoid overwhelming the AI
+        max_chars = int(params.get("max_chars", 6000))
+        if len(text) > max_chars:
+            text = text[:max_chars] + f"\n\n[Truncated — {len(text)} chars total]"
+
+        return ToolResult(tool="web_read", success=True, result={
+            "url": url, "content": text, "length": len(text),
+        })
+    except Exception as e:
+        return ToolResult(tool="web_read", success=False, error=f"Web read failed: {e}")
+
+
+def _html_to_text(html: str) -> str:
+    """Extract readable text from HTML, stripping tags, scripts, styles."""
+    # Remove script/style blocks
+    text = re.sub(r'<(script|style|noscript)[^>]*>.*?</\1>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    # Remove nav/header/footer
+    text = re.sub(r'<(nav|header|footer)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Convert common elements to readable text
+    text = re.sub(r'<br\s*/?>', '\n', text)
+    text = re.sub(r'</(p|div|h[1-6]|li|tr)>', '\n', text)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Clean up whitespace
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    # Decode HTML entities
+    import html as html_mod
+    text = html_mod.unescape(text)
+    return text.strip()
 
 
 # ── PHOTO-TO-QUOTE PIPELINE TOOL ──────────────────────────────────
@@ -1290,6 +1314,9 @@ To call a tool, include a tool block in your response:
   `{"tool": "web_search", "query": "best fabric suppliers for drapery wholesale", "num_results": 5}`
   Use for: research, current pricing, supplier info, industry news, competitor analysis, or any factual question needing live data.
   After getting results, cite sources with markdown links: [Title](url)
+- **web_read** — Fetch and read a web page. Returns extracted text content from any URL.
+  `{"tool": "web_read", "url": "https://example.com/article", "max_chars": 6000}`
+  Use after web_search to read full articles, or when the user shares a URL. Combine with web_search for deep research.
 - **search_images** — Search for relevant images (Unsplash) to enhance your response. Embed results in markdown.
   `{"tool": "search_images", "query": "modern ripplefold drapery"}`
   After getting results, use: `![description](url)` to embed images in your response.

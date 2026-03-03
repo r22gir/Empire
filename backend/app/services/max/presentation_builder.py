@@ -12,7 +12,9 @@ import httpx
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 
-PRESENTATION_SYSTEM_PROMPT = """You are a presentation builder. Given a topic (and optionally source content), create a rich, professional presentation.
+PRESENTATION_SYSTEM_PROMPT = """You are a presentation builder. Given a topic, web research results, and optionally source content, create a rich, professional presentation grounded in REAL current data.
+
+IMPORTANT: You will receive web search results with real articles and snippets. Use this data to make your presentation factually accurate and current. Cite actual sources from the search results.
 
 Return ONLY valid JSON with this exact structure — no markdown fences, no explanation:
 {
@@ -29,16 +31,25 @@ Return ONLY valid JSON with this exact structure — no markdown fences, no expl
   "sources": [
     {"title": "Source name", "url": "https://...", "description": "Brief description"}
   ],
-  "image_queries": ["search term for relevant image 1", "search term 2"]
+  "image_queries": ["search term for relevant image 1", "search term 2"],
+  "video_queries": ["YouTube search term for relevant video 1", "search term 2"]
 }
 
 Rules:
 - Include 4-6 sections with a mix of types (text, bullets, highlight)
-- Include 1-2 charts if the topic has data worth visualizing (otherwise empty array)
-- Include 2-4 sources with real, plausible URLs
-- Include 2-3 image_queries that would find relevant professional photos
-- Make content informative, specific, and business-relevant
-- For Empire Box / custom drapery topics, include industry-specific details"""
+- Adapt chart types to the topic:
+  - Conflict/war/politics: use sentiment polls, approval ratings, casualty timelines, public opinion data
+  - Market/business: use market size, pricing, growth trends
+  - Technology: use adoption rates, benchmarks, comparisons
+  - If no meaningful data exists for charts, use empty array — don't force generic charts
+- Sources MUST come from the web search results provided — use real URLs, not made-up ones
+- Include 2-3 image_queries — choose contextually appropriate searches:
+  - News/conflict: "Iran conflict 2026 news photo", not generic stock photos
+  - Business: "custom drapery showroom professional"
+- Include 1-2 video_queries for relevant NEWS clips or explainer videos (search YouTube-style queries like "Iran war update March 2026 news")
+- Use CURRENT facts and data from the web search results — do NOT rely on training data for recent events
+- For current events: include a timeline or chronology section
+- Make content informative, specific, and data-driven"""
 
 
 async def fetch_images(queries: list[str], count_per_query: int = 1) -> list[dict]:
@@ -87,6 +98,47 @@ async def fetch_images(queries: list[str], count_per_query: int = 1) -> list[dic
     return images
 
 
+def _web_research_sync(topic: str) -> str:
+    """Synchronous web search — run via asyncio.to_thread."""
+    try:
+        from duckduckgo_search import DDGS
+        results = DDGS().text(topic, max_results=8)
+        if not results:
+            return ""
+        lines = []
+        for r in results:
+            lines.append(f"**{r['title']}**\n{r['body']}\nURL: {r['href']}\n")
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[PresentationBuilder] Web research failed: {e}")
+        return ""
+
+
+def _fetch_videos_sync(queries: list[str], max_per_query: int = 2) -> list[dict]:
+    """Synchronous video search — run via asyncio.to_thread."""
+    videos = []
+    try:
+        from duckduckgo_search import DDGS
+        for query in queries[:2]:
+            try:
+                raw = DDGS().videos(query, max_results=max_per_query)
+                for v in raw:
+                    vid = {
+                        "title": v.get("title", ""),
+                        "url": v.get("content", ""),
+                        "thumbnail": v.get("images", {}).get("large", "") or v.get("images", {}).get("medium", ""),
+                        "duration": v.get("duration", ""),
+                        "publisher": v.get("publisher", ""),
+                    }
+                    if vid["url"] and vid["title"]:
+                        videos.append(vid)
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[PresentationBuilder] Video search failed: {e}")
+    return videos
+
+
 async def build_presentation(
     topic: str,
     source_content: Optional[str] = None,
@@ -94,12 +146,18 @@ async def build_presentation(
 ) -> dict:
     """Generate a structured presentation for the given topic.
 
-    Returns a dict with title, subtitle, sections, images, charts, sources, metadata.
+    Returns a dict with title, subtitle, sections, images, charts, sources, videos, metadata.
     """
+    import asyncio
+    # Step 1: Web research for current data (run in thread to avoid blocking event loop)
+    web_data = await asyncio.to_thread(_web_research_sync, topic)
+
     # Build the user message
     user_msg = f"Create a presentation about: {topic}"
+    if web_data:
+        user_msg += f"\n\n--- WEB SEARCH RESULTS (use these for current, accurate data) ---\n{web_data[:4000]}"
     if source_content:
-        user_msg += f"\n\nSource content to incorporate:\n{source_content[:3000]}"
+        user_msg += f"\n\n--- ADDITIONAL SOURCE CONTENT ---\n{source_content[:3000]}"
 
     # Call AI (prefer Grok for web knowledge)
     response = await ai_router.chat(
@@ -133,11 +191,16 @@ async def build_presentation(
     image_queries = data.pop("image_queries", [topic])
     images = await fetch_images(image_queries, count_per_query=max(1, image_count // len(image_queries) if image_queries else 1))
 
+    # Fetch videos using AI-suggested queries (run in thread)
+    video_queries = data.pop("video_queries", [topic])
+    videos = await asyncio.to_thread(_fetch_videos_sync, video_queries)
+
     return {
         "title": data.get("title", topic),
         "subtitle": data.get("subtitle", ""),
         "sections": data.get("sections", []),
         "images": images,
+        "videos": videos,
         "charts": data.get("charts", []),
         "sources": data.get("sources", []),
         "model_used": response.model_used,
