@@ -2774,7 +2774,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                           details = `<div class="section"><h2>Design Proposals — ${roomName}</h2></div>` +
                           (analysisResult.proposals || []).map((p: any, i: number) => {
                             const colors = ['#22c55e','#D4AF37','#8B5CF6'];
-                            const labels = ['Budget Friendly','Designer\\'s Choice','Premium Luxe'];
+                            const labels = ['Budget Friendly',"Designer's Choice",'Premium Luxe'];
                             const tc = colors[i % 3];
                             const isRec = i === 1;
                             const imgHtml = p.generated_image ? `<div class="proposal-img"><img src="${p.generated_image}" /></div>` : '';
