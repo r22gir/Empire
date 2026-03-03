@@ -13,9 +13,14 @@ const STATUS_COLORS: Record<string, string> = {
 const fmt = (n: number) => '$' + n.toLocaleString();
 
 export default function ClientsDesk() {
-  const [clients] = useState<Client[]>(MOCK_CLIENTS);
+  const [clients, setClients] = useState<Client[]>(MOCK_CLIENTS);
   const [search, setSearch] = useState('');
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+
+  const handleClientUpdated = (updated: Client) => {
+    setClients(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setSelectedClient(updated);
+  };
   const searchParams = useSearchParams();
 
   // Handle cross-desk navigation: pre-filter and auto-select from query param
@@ -67,7 +72,7 @@ export default function ClientsDesk() {
       </div>
 
       <DetailPanel open={!!selectedClient} onClose={() => setSelectedClient(null)} title={selectedClient?.name || ''}>
-        {selectedClient && <ClientDetail client={selectedClient} />}
+        {selectedClient && <ClientDetail client={selectedClient} onClientUpdated={handleClientUpdated} />}
       </DetailPanel>
     </div>
   );

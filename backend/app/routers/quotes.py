@@ -387,13 +387,13 @@ def _build_window_drawing(w: dict) -> str:
     # Treatment-specific drape pattern
     is_shade = treatment.lower() in ('roman-shade', 'roller-shade', 'roman shade', 'roller shade')
 
-    # Scale: 2.5px per inch, min 100px
-    scale = 2.5
-    win_w = max(w_in * scale, 100)
-    win_h = max(h_in * scale, 120)
-    pad = 55
+    # Scale: 1.6px per inch for compact drawings
+    scale = 1.6
+    win_w = max(w_in * scale, 80)
+    win_h = max(h_in * scale, 96)
+    pad = 40
     svg_w = win_w + pad * 2
-    info_h = 30  # reduced — specs now go in HTML below
+    info_h = 24
     svg_h = win_h + pad * 2 + info_h
 
     wx = pad
@@ -1081,7 +1081,7 @@ def _build_rooms_html(rooms: list) -> str:
 
         room_total = sum(w.get("price", 0) for w in regular_windows) + sum(u.get("price", 0) for u in upholstery)
 
-        html += f'<h3 style="color:#D4AF37;margin:24px 0 8px;border-bottom:2px solid #D4AF37;padding-bottom:4px">{room["name"]}</h3>'
+        html += f'<h3 style="color:#D4AF37;margin:16px 0 6px;border-bottom:2px solid #D4AF37;padding-bottom:3px">{room["name"]}</h3>'
 
         # Regular (non-proposal) windows — standard table
         if regular_windows:
@@ -1327,9 +1327,9 @@ def _build_mockup_html(mockup: dict) -> str:
             matching = next((p for p in proposals if p.get("tier", "").lower() == tier.lower()), None)
             tier_lower = tier.lower()
             color = tier_colors.get(tier_lower, '#333')
-            html += f"""<div style="margin-bottom:20px;page-break-inside:avoid;border:2px solid {color};border-radius:10px;overflow:hidden;background:white">
-                <div style="background:{color};color:white;padding:6px 16px;font-size:0.85em;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">{tier}</div>
-                <img src="{url}" style="width:100%;max-height:500px;object-fit:contain;display:block" />"""
+            html += f"""<div style="margin-bottom:12px;page-break-inside:avoid;border:2px solid {color};border-radius:8px;overflow:hidden;background:white">
+                <div style="background:{color};color:white;padding:4px 12px;font-size:0.8em;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">{tier}</div>
+                <img src="{url}" style="width:100%;max-height:360px;object-fit:contain;display:block" />"""
             if matching:
                 price_low = matching.get("price_range_low", 0)
                 price_high = matching.get("price_range_high", 0)
@@ -1430,7 +1430,7 @@ def _build_line_items_html(line_items: list) -> str:
 
     for room_name in rooms_seen:
         items = rooms_items[room_name]
-        room_total = sum(i.get("total", i.get("unit_price", 0) * i.get("quantity", 1)) for i in items)
+        room_total = sum((i.get("total", 0) or i.get("amount", 0) or (i.get("unit_price", 0) or i.get("rate", 0)) * i.get("quantity", 1)) for i in items)
         html += f"""<tr><td colspan="5" style="padding:10px 8px 4px;font-weight:700;color:#1a1a2e;
             border-bottom:2px solid #D4AF37;font-size:0.9em">{room_name}</td></tr>"""
         for item in items:
@@ -1442,8 +1442,8 @@ def _build_line_items_html(line_items: list) -> str:
                 <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0">
                     <span style="font-size:0.85em">{item['description']}</span><br>{cat_label}</td>
                 <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:0.85em">{item['quantity']}</td>
-                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em">${item.get('unit_price', 0):,.2f}</td>
-                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item.get('total', item.get('unit_price', 0) * item.get('quantity', 1)):,.2f}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em">${item.get('unit_price', 0) or item.get('rate', 0):,.2f}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item.get('total', 0) or item.get('amount', 0) or (item.get('unit_price', 0) or item.get('rate', 0)) * item.get('quantity', 1):,.2f}</td>
             </tr>"""
         html += f"""<tr><td colspan="4" style="padding:6px 8px;text-align:right;font-size:0.82em;color:#666">
             Room Subtotal</td>
@@ -1629,8 +1629,8 @@ async def generate_pdf(quote_id: str):
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{quote_number}</title>
 <style>
-  @page {{ size: letter; margin: 0.6in 0.7in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12.5px; line-height: 1.5; }}
+  @page {{ size: letter; margin: 0.5in 0.6in; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12px; line-height: 1.45; }}
   h1 {{ color: #1a1a2e; margin: 0; font-size: 28px; letter-spacing: -0.5px; }}
   h3 {{ page-break-after: avoid; }}
   table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
@@ -1639,7 +1639,7 @@ async def generate_pdf(quote_id: str):
 </style></head><body>
 
 <!-- ═══ HEADER / LETTERHEAD ═══ -->
-<div style="border-bottom:3px solid #D4AF37;padding-bottom:20px;margin-bottom:24px">
+<div style="border-bottom:3px solid #D4AF37;padding-bottom:14px;margin-bottom:16px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
       {logo_html}
@@ -1656,7 +1656,7 @@ async def generate_pdf(quote_id: str):
 </div>
 
 <!-- ═══ CLIENT INFO ═══ -->
-<div style="display:flex;gap:24px;margin-bottom:24px">
+<div style="display:flex;gap:16px;margin-bottom:16px">
   <div style="flex:1;padding:14px 18px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
     <p style="margin:0 0 6px;font-size:0.75em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Prepared For</p>
     <p style="margin:0;font-weight:700;font-size:1.05em;color:#1a1a2e">{quote['customer_name']}</p>

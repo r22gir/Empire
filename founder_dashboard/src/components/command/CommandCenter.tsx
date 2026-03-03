@@ -20,6 +20,7 @@ import PlaceholderWorkspace from './PlaceholderWorkspace';
 import QuoteBuilder from './QuoteBuilder';
 import DocumentCanvas from './canvas/DocumentCanvas';
 import PresentationModal from './PresentationModal';
+import ResearchPanel from './ResearchPanel';
 import LiveTicker from './LiveTicker';
 
 export default function CommandCenter() {
@@ -66,6 +67,9 @@ export default function CommandCenter() {
   const [showPresentation, setShowPresentation] = useState(false);
   const [presentationTopic, setPresentationTopic] = useState('');
   const [presentationSource, setPresentationSource] = useState<string | undefined>();
+
+  /* ── Research panel ──────────────────────────────────────── */
+  const [showResearch, setShowResearch] = useState(false);
 
   /* ── Quick Quote inline PDF ─────────────────────────────── */
   const [quickQuotePdf, setQuickQuotePdf] = useState<string | null>(null);
@@ -126,7 +130,8 @@ export default function CommandCenter() {
         desk.openDesk(ctrlAltMap[e.key]);
         setShowDeskGrid(false);
       } else if (e.key === 'Escape') {
-        if (showPresentation) setShowPresentation(false);
+        if (showResearch) setShowResearch(false);
+        else if (showPresentation) setShowPresentation(false);
         else if (showQuoteBuilder) { setShowQuoteBuilder(false); setQuoteInitData(null); }
         else if (showDeskGrid) setShowDeskGrid(false);
         else if (activeWorkspace) setActiveWorkspace(null);
@@ -136,7 +141,7 @@ export default function CommandCenter() {
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
-  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces, showQuoteBuilder, showPresentation]);
+  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces, showQuoteBuilder, showPresentation, showResearch]);
 
   /* ── Detect open_quote_builder / create_quick_quote tool results ── */
   useEffect(() => {
@@ -282,6 +287,19 @@ export default function CommandCenter() {
           topic={presentationTopic}
           sourceContent={presentationSource}
           onClose={() => setShowPresentation(false)}
+        />
+      )}
+
+      {/* ════ RESEARCH PANEL ═════════════════════════════════ */}
+      {showResearch && (
+        <ResearchPanel
+          onClose={() => setShowResearch(false)}
+          onNewResearch={(topic) => {
+            setShowResearch(false);
+            setPresentationTopic(topic);
+            setPresentationSource(undefined);
+            setShowPresentation(true);
+          }}
         />
       )}
 
@@ -480,6 +498,7 @@ export default function CommandCenter() {
               onOpenWorkspaces={() => setShowWorkspaces(true)}
               onOpenWorkspace={setActiveWorkspace}
               onQuickQuote={() => { setShowQuoteBuilder(true); setShowStats(false); }}
+              onOpenResearch={() => setShowResearch(true)}
               collapsed={sidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />

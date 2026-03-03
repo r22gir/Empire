@@ -223,9 +223,12 @@ def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 @tool("open_quote_builder")
 def _open_quote_builder(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Open the inline QuoteBuilder pre-filled with customer info AND quote line items."""
+    customer_name = params.get("customer_name", "")
+    quote_number = _next_quote_number(customer_name) if customer_name else ""
     return ToolResult(tool="open_quote_builder", success=True, result={
         "action": "open_quote_builder",
-        "customer_name": params.get("customer_name", ""),
+        "quote_number": quote_number,
+        "customer_name": customer_name,
         "customer_email": params.get("customer_email", ""),
         "customer_phone": params.get("customer_phone", ""),
         "customer_address": params.get("customer_address", ""),
@@ -383,18 +386,54 @@ def _calc_window_line_items(room_name: str, win: dict) -> list[dict]:
     return items
 
 
+# ── QUOTE NUMBERING ──────────────────────────────────────────────
+
+def _next_quote_number(customer_name: str) -> str:
+    """Generate QT-CUSTOMER-DATE-NNN format quote number.
+
+    Examples: QT-NEWMAN-MAR032026-001, QT-SMITH-MAR032026-002
+    Counter is per-customer-per-date, starting at 001.
+    """
+    # Clean customer name: uppercase, first word only, alphanumeric
+    clean = customer_name.strip().split()[0].upper() if customer_name.strip() else "CUSTOMER"
+    clean = "".join(c for c in clean if c.isalnum())[:10]
+
+    date_str = datetime.utcnow().strftime("%b%d%Y").upper()  # MAR032026
+    prefix = f"QT-{clean}-{date_str}"
+
+    # Scan existing quotes for sequential counter
+    counter = 1
+    if os.path.exists(QUOTES_DIR):
+        for fname in os.listdir(QUOTES_DIR):
+            if not fname.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(QUOTES_DIR, fname)) as f:
+                    q = json.load(f)
+                qn = q.get("quote_number", "")
+                if qn.startswith(prefix):
+                    # Extract NNN from end
+                    seq = int(qn.rsplit("-", 1)[-1])
+                    counter = max(counter, seq + 1)
+            except Exception:
+                pass
+
+    return f"{prefix}-{counter:03d}"
+
+
 # ── QUICK QUOTE TOOL ──────────────────────────────────────────────
 
 @tool("create_quick_quote")
 def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Create a quick quote autonomously — no customer info required.
     Defaults to 'Customer 1' if no name provided. Saves JSON + generates PDF.
+    Now uses QT-CUSTOMER-DATE-NNN numbering and supports stacked design proposals.
     """
     quote_id = str(uuid.uuid4())[:8]
     now = datetime.utcnow().isoformat()
-    quote_number = f"EMP-Q-{datetime.utcnow().strftime('%y%m%d')}-{quote_id[:4].upper()}"
 
     customer_name = params.get("customer_name", "Customer 1") or "Customer 1"
+    quote_number = _next_quote_number(customer_name)
     rooms = params.get("rooms", [])
     max_analysis = params.get("max_analysis", "")
 
@@ -422,6 +461,55 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     deposit_amount = round(subtotal * 0.50, 2)
     expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
 
+    # Build stacked design proposals (3 options: A, B, C) if rooms have windows
+    design_proposals = params.get("design_proposals", [])
+    if not design_proposals and rooms:
+        # Auto-generate 3 tiers from the same rooms with different fabric grades
+        tier_configs = [
+            {"label": "Option A — Essential", "grade": "A", "lining": "standard"},
+            {"label": "Option B — Designer", "grade": "B", "lining": "standard"},
+            {"label": "Option C — Premium", "grade": "C", "lining": "blackout"},
+        ]
+        for tier in tier_configs:
+            tier_items = []
+            for room in rooms:
+                room_name = room.get("name", "Room")
+                for win in room.get("windows", []):
+                    win_copy = dict(win)
+                    win_copy["fabricGrade"] = tier["grade"]
+                    win_copy["liningType"] = tier["lining"]
+                    tier_items.extend(_calc_window_line_items(room_name, win_copy))
+                for uph in room.get("upholstery", []):
+                    desc = uph.get("description", "Upholstery item")
+                    price = uph.get("price", 250)
+                    tier_items.append({
+                        "room": room_name, "description": desc,
+                        "quantity": 1, "unit_price": price, "total": price, "category": "upholstery",
+                    })
+            tier_subtotal = round(sum(item["total"] for item in tier_items), 2)
+            tier_tax = round(tier_subtotal * DC_TAX_RATE, 2)
+            tier_total = round(tier_subtotal + tier_tax, 2)
+            design_proposals.append({
+                "label": tier["label"],
+                "fabric_grade": tier["grade"],
+                "lining_type": tier["lining"],
+                "line_items": tier_items,
+                "subtotal": tier_subtotal,
+                "tax_amount": tier_tax,
+                "total": tier_total,
+                "ai_comment": "",  # Filled by AI mockup generation below
+                "selected": False,
+            })
+
+    # Collect photo references (original images that were uploaded with this quote)
+    photo_refs = params.get("photos", [])
+    image_filename = params.get("image_filename")
+    if image_filename:
+        uploads_dir = os.path.expanduser("~/Empire/uploads/images")
+        img_path = os.path.join(uploads_dir, image_filename)
+        if os.path.exists(img_path):
+            photo_refs.append({"filename": image_filename, "path": img_path, "type": "original"})
+
     quote_data = {
         "id": quote_id,
         "quote_number": quote_number,
@@ -432,14 +520,22 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "project_name": params.get("project_name", "Quick Quote"),
         "rooms": rooms,
         "line_items": line_items,
+        "design_proposals": design_proposals,
+        "selected_proposal": None,  # Index of selected proposal (0, 1, 2) — null until chosen
+        "photos": photo_refs,
         "ai_outlines": params.get("ai_outlines", []),
         "ai_mockups": params.get("ai_mockups", []),
-        "subtotal": subtotal,
+        "subtotal": 0.0,  # Zero until a proposal is selected
         "tax_rate": DC_TAX_RATE,
-        "tax_amount": tax_amount,
-        "total": total,
-        "deposit": {"deposit_percent": 50, "deposit_amount": deposit_amount},
-        "status": "draft",
+        "tax_amount": 0.0,
+        "total": 0.0,  # Zero until a proposal is selected
+        "proposal_totals": {
+            "A": design_proposals[0]["total"] if len(design_proposals) > 0 else 0,
+            "B": design_proposals[1]["total"] if len(design_proposals) > 1 else 0,
+            "C": design_proposals[2]["total"] if len(design_proposals) > 2 else 0,
+        },
+        "deposit": {"deposit_percent": 50, "deposit_amount": 0},
+        "status": "proposal",  # New status: proposal → draft → sent → accepted
         "max_analysis": max_analysis,
         "created_at": now,
         "updated_at": now,
@@ -521,24 +617,108 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     # Generate PDF
     pdf_url = None
+    pdf_path = None
     try:
         _run_async(_generate_pdf_for_quote(quote_id))
         pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
         pdf_file = os.path.join(pdf_dir, f"{quote_number}.pdf")
         if os.path.exists(pdf_file):
             pdf_url = f"/api/v1/quotes/{quote_id}/pdf"
+            pdf_path = pdf_file
     except Exception as e:
         logger.warning(f"Quick quote PDF generation failed: {e}")
 
-    logger.info(f"Quick quote created: {quote_number} for {customer_name} — ${total:,.2f}")
+    # Build caption with proposal options
+    proposal_summary = ""
+    for i, dp in enumerate(design_proposals[:3]):
+        letter = chr(65 + i)  # A, B, C
+        proposal_summary += f"\n  {letter}. {dp['label']}: ${dp['total']:,.2f}"
+
+    caption = (
+        f"\U0001f4cb <b>{quote_number}</b>\n"
+        f"\U0001f464 {customer_name}\n"
+        f"\U0001f4b0 3 Design Options:{proposal_summary}\n"
+        f"\n\u2139\ufe0f Total: $0 — select an option to finalize"
+    )
+
+    logger.info(f"Quick quote created: {quote_number} for {customer_name} — 3 proposals")
     return ToolResult(tool="create_quick_quote", success=True, result={
         "quote_id": quote_id,
         "quote_number": quote_number,
         "customer_name": customer_name,
-        "total": total,
+        "total": 0,  # Zero until proposal selected
+        "proposal_totals": quote_data["proposal_totals"],
         "items_count": len(line_items),
         "pdf_url": pdf_url,
+        "pdf_path": pdf_path,
+        "caption": caption,
         "line_items": line_items,
+        "design_proposals_count": len(design_proposals),
+    })
+
+
+# ── PROPOSAL SELECTION TOOL ─────────────────────────────────────────
+
+@tool("select_proposal")
+def _select_proposal(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Select a design proposal (A/B/C) on a quote, finalizing the total.
+    Converts the quote from 'proposal' status to 'draft' with real totals.
+    """
+    quote_id = params.get("quote_id", "")
+    option = params.get("option", "").upper()  # A, B, or C
+
+    if not quote_id:
+        return ToolResult(tool="select_proposal", success=False, error="quote_id required")
+    if option not in ("A", "B", "C"):
+        return ToolResult(tool="select_proposal", success=False, error="option must be A, B, or C")
+
+    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
+    if not os.path.exists(quote_path):
+        return ToolResult(tool="select_proposal", success=False, error=f"Quote {quote_id} not found")
+
+    with open(quote_path) as f:
+        quote = json.load(f)
+
+    proposals = quote.get("design_proposals", [])
+    idx = ord(option) - 65  # A=0, B=1, C=2
+    if idx >= len(proposals):
+        return ToolResult(tool="select_proposal", success=False, error=f"Proposal {option} not found")
+
+    selected = proposals[idx]
+
+    # Update quote with selected proposal's totals
+    quote["selected_proposal"] = idx
+    quote["line_items"] = selected["line_items"]
+    quote["subtotal"] = selected["subtotal"]
+    quote["tax_amount"] = selected["tax_amount"]
+    quote["total"] = selected["total"]
+    quote["deposit"]["deposit_amount"] = round(selected["subtotal"] * 0.50, 2)
+    quote["status"] = "draft"  # Upgrade from proposal to draft
+    quote["updated_at"] = datetime.utcnow().isoformat()
+
+    with open(quote_path, "w") as f:
+        json.dump(quote, f, indent=2)
+
+    # Regenerate PDF with finalized totals
+    pdf_path = None
+    try:
+        _run_async(_generate_pdf_for_quote(quote_id))
+        pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+        pdf_file = os.path.join(pdf_dir, f"{quote['quote_number']}.pdf")
+        if os.path.exists(pdf_file):
+            pdf_path = pdf_file
+    except Exception as e:
+        logger.warning(f"PDF regen after proposal select failed: {e}")
+
+    return ToolResult(tool="select_proposal", success=True, result={
+        "quote_id": quote_id,
+        "quote_number": quote["quote_number"],
+        "selected_option": option,
+        "selected_label": selected["label"],
+        "total": selected["total"],
+        "status": "draft",
+        "pdf_path": pdf_path,
+        "caption": f"\u2705 <b>{quote['quote_number']}</b>\nOption {option} selected: {selected['label']}\nTotal: ${selected['total']:,.2f}",
     })
 
 
@@ -780,24 +960,19 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     except Exception as e:
         return ToolResult(tool="send_quote_telegram", success=False, error=f"PDF generation failed: {e}")
 
-    # Send via Telegram
-    try:
-        from app.services.max.telegram_bot import TelegramBot
-        bot = TelegramBot()
-        if not bot.is_configured:
-            return ToolResult(tool="send_quote_telegram", success=False, error="Telegram not configured")
+    # Return pdf_path — the Telegram handler detects it and sends via send_document.
+    # We do NOT send directly here to avoid duplicate delivery.
+    caption = (
+        f"\U0001f4cb <b>Estimate {quote_number}</b>\n"
+        f"\U0001f464 {customer}\n"
+        f"\U0001f4b0 Total: ${total:,.2f}"
+    )
 
-        caption = (
-            f"\U0001f4cb <b>Estimate {quote_number}</b>\n"
-            f"\U0001f464 {customer}\n"
-            f"\U0001f4b0 Total: ${total:,.2f}"
-        )
-        sent = _run_async(bot.send_document(pdf_path, caption=caption))
-        return ToolResult(tool="send_quote_telegram", success=sent, result={
-            "sent": sent, "quote_number": quote_number, "customer": customer, "total": total,
-        })
-    except Exception as e:
-        return ToolResult(tool="send_quote_telegram", success=False, error=f"Telegram send failed: {e}")
+    return ToolResult(tool="send_quote_telegram", success=True, result={
+        "quote_number": quote_number, "customer": customer, "total": total,
+        "pdf_path": pdf_path,
+        "caption": caption,
+    })
 
 
 async def _generate_pdf_for_quote(quote_id: str):
@@ -1045,6 +1220,8 @@ def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "items_count": quote_result.result.get("items_count"),
         "telegram_sent": send_result.success,
         "telegram_error": send_result.error if not send_result.success else None,
+        "pdf_path": send_result.result.get("pdf_path") if send_result.result else None,
+        "caption": send_result.result.get("caption") if send_result.result else None,
     })
 
 
@@ -1226,31 +1403,24 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         return ToolResult(tool="present", success=False, error=f"PDF rendering failed: {e}")
 
-    # Step 3: Send via Telegram
-    telegram_sent = False
-    try:
-        from app.services.max.telegram_bot import TelegramBot
-        bot = TelegramBot()
-        if bot.is_configured:
-            section_count = len(data.get("sections", []))
-            caption = (
-                f"\U0001f4ca <b>{data.get('title', topic)}</b>\n"
-                f"\U0001f4dd {section_count} sections &middot; {data.get('model_used', 'AI')}\n"
-                f"\U0001f4c5 {datetime.utcnow().strftime('%b %d, %Y')}"
-            )
-            telegram_sent = _run_async(bot.send_document(pdf_path, caption=caption))
-    except Exception as e:
-        logger.warning(f"Telegram send failed for presentation: {e}")
+    # Return pdf_path — the Telegram handler detects it and sends via send_document.
+    # We do NOT send directly here to avoid sync/async issues and duplicate delivery.
+    section_count = len(data.get("sections", []))
+    caption = (
+        f"\U0001f4ca <b>{data.get('title', topic)}</b>\n"
+        f"\U0001f4dd {section_count} sections &middot; {data.get('model_used', 'AI')}\n"
+        f"\U0001f4c5 {datetime.utcnow().strftime('%b %d, %Y')}"
+    )
 
     return ToolResult(tool="present", success=True, result={
         "title": data.get("title", topic),
         "subtitle": data.get("subtitle", ""),
-        "sections": len(data.get("sections", [])),
+        "sections": section_count,
         "charts": len(data.get("charts", [])),
         "sources": len(data.get("sources", [])),
         "model_used": data.get("model_used", "unknown"),
         "pdf_path": pdf_path,
-        "telegram_sent": telegram_sent,
+        "caption": caption,
     })
 
 
@@ -1266,7 +1436,7 @@ To call a tool, include a tool block in your response:
 
 ### Data Tools
 - **search_quotes** — Search quotes by customer or status
-  `{"tool": "search_quotes", "customer_name": "...", "status": "draft|sent|accepted"}`
+  `{"tool": "search_quotes", "customer_name": "...", "status": "proposal|draft|sent|accepted"}`
 - **get_quote** — Get full quote details by ID
   `{"tool": "get_quote", "quote_id": "..."}`
 - **search_contacts** — Search customers, contractors, vendors
@@ -1279,9 +1449,12 @@ To call a tool, include a tool block in your response:
   `{"tool": "get_desk_status"}`
 
 ### Action Tools
-- **create_quick_quote** — Create a quick quote autonomously without opening the UI. Defaults customer to "Customer 1" if unknown. Returns quote_id, PDF URL, and line items. Use this for fast estimates.
-  `{"tool": "create_quick_quote", "customer_name": "Customer 1", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold"}]}], "max_analysis": "Professional analysis here..."}`
-  After creating, you can use send_quote_telegram to deliver the PDF.
+- **create_quick_quote** — Create a quick quote with 3 stacked design proposals (Essential/Designer/Premium). Uses QT-CUSTOMER-DATE-NNN numbering. Total starts at $0 until a proposal is selected.
+  `{"tool": "create_quick_quote", "customer_name": "Newman", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold"}]}], "max_analysis": "Professional analysis here..."}`
+  Returns 3 options (A: Essential, B: Designer, C: Premium) with different fabric grades and pricing. Founder selects one to finalize.
+- **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
+  `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`
+  After selection, the quote gets real totals and can be sent via Telegram or email.
 - **open_quote_builder** — Open the QuoteBuilder right here in the dashboard (ALWAYS use this instead of linking to WorkroomForge). Pre-fills customer info AND rooms/windows from the conversation.
   `{"tool": "open_quote_builder", "customer_name": "...", "customer_email": "...", "customer_phone": "...", "customer_address": "...", "project_name": "...", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold", "liningType": "standard", "hardwareType": "track-ripplefold", "motorization": "none", "mountType": "wall"}], "upholstery": []}]}`
   treatmentType options: ripplefold, pinch-pleat, rod-pocket, grommet, roman-shade, roller-shade
@@ -1337,11 +1510,17 @@ When asked to send a quote PDF to Telegram, use send_quote_telegram with the quo
 When discussing visual topics (fabrics, designs, installations), use search_images to find relevant reference photos.
 When you need current info, pricing, or research — use web_search. Do NOT say "I can't access the web."
 When analyzing a photo of windows or furniture, use photo_to_quote to create and deliver the estimate automatically.
-When asked to present, brief, or report on a topic — use the present tool to generate a PDF and send via Telegram.
 
 ### Presentation Tools
-- **present** — Generate a professional presentation/report on any topic and send PDF via Telegram. Use for briefings, research reports, market analysis, or any topic the founder wants presented.
+- **present** — Generate a professional presentation/report on a topic and send PDF via Telegram.
   `{"tool": "present", "topic": "DC custom drapery market trends 2026"}`
   `{"tool": "present", "topic": "Competitor analysis", "source_content": "Optional context..."}`
-  Creates a multi-section PDF with data tables, images, and sources — then sends via Telegram automatically.
+  ⚠️ ONLY use this tool when the founder EXPLICITLY asks for a "presentation", "report", "briefing", or "research document". Do NOT auto-generate presentations for casual conversation topics, analogies, or keywords mentioned in passing. If unsure, ask: "Would you like me to create a presentation about X?"
+
+### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
+- NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.
+- NEVER call a tool unless the user's request clearly needs it.
+- NEVER treat casual analogies or examples as topics to research. If someone says "like Grasshopper" they mean the concept, not the software.
+- For most conversational responses, you don't need ANY tools — just answer directly from your knowledge.
+- When you DO use tools, verify the results make sense before presenting them.
 """

@@ -199,12 +199,11 @@ function QuotesTab({ quotes, onRefresh, onNewQuote }: { quotes: any[]; onRefresh
   const viewPdf = async (id: string) => {
     try {
       const res = await fetch(API_URL + `/quotes/${id}/pdf`, { method: 'POST' });
-      const data = await res.json();
-      if (data.html) {
-        const win = window.open('', '_blank');
-        if (win) { win.document.write(data.html); win.document.close(); }
-      }
-    } catch { /* */ }
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    } catch (e) { console.error('PDF preview failed:', e); }
   };
 
   const deleteQuote = async (id: string) => {

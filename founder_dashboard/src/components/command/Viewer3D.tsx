@@ -1,9 +1,43 @@
 'use client';
-import { useState, useEffect, useCallback, Suspense, useRef } from 'react';
-import { X, Ruler, Trash2, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, Suspense, useRef, Component, type ReactNode } from 'react';
+import { X, Ruler, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Html, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+/* ── Error Boundary for 3D loading failures ───────────────── */
+class ModelErrorBoundary extends Component<{ fallbackUrl: string; fileName: string; children: ReactNode }, { error: string | null }> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(error: Error) { return { error: error.message }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
+          <AlertTriangle className="w-8 h-8" style={{ color: '#f59e0b' }} />
+          <p className="text-sm text-center" style={{ color: 'var(--text-secondary)' }}>
+            Three.js could not load this 3D model.
+          </p>
+          <p className="text-[10px] font-mono text-center max-w-md" style={{ color: 'var(--text-muted)' }}>
+            {this.state.error}
+          </p>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>Using fallback viewer:</p>
+          {/* @ts-expect-error model-viewer is a web component */}
+          <model-viewer
+            src={this.props.fallbackUrl}
+            alt={this.props.fileName}
+            camera-controls
+            auto-rotate
+            shadow-intensity="1"
+            style={{ width: '100%', height: '400px', background: '#0a0a14', borderRadius: 12 }}
+          />
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface Props {
   fileUrl: string;
@@ -22,16 +56,37 @@ function GLBModel({ url, measuring, onPointClick }: {
   measuring: boolean;
   onPointClick: (point: THREE.Vector3) => void;
 }) {
-  const { scene } = useGLTF(url);
   const ref = useRef<THREE.Group>(null);
+  const [scene, setScene] = useState<THREE.Group | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  /* Load with Draco support (needed for Polycam scans) */
+  useEffect(() => {
+    const loader = new GLTFLoader();
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+    loader.setDRACOLoader(dracoLoader);
+
+    loader.load(
+      url,
+      (gltf) => { setScene(gltf.scene); setLoadError(null); },
+      undefined,
+      (err) => { setLoadError(err instanceof Error ? err.message : String(err)); },
+    );
+
+    return () => { dracoLoader.dispose(); };
+  }, [url]);
 
   /* Center and scale the model on load */
   useEffect(() => {
-    if (!ref.current) return;
+    if (!ref.current || !scene) return;
     const box = new THREE.Box3().setFromObject(ref.current);
     const center = box.getCenter(new THREE.Vector3());
     ref.current.position.sub(center);
   }, [scene]);
+
+  if (loadError) throw new Error(loadError);
+  if (!scene) return <LoadingFallback />;
 
   return (
     <group ref={ref}>
@@ -129,23 +184,6 @@ function MeasureOverlay({ points, unit }: { points: MeasurePoint[]; unit: 'm' | 
   );
 }
 
-/* ── Auto-fit camera to model ───────────────────────────────── */
-function CameraFit({ url }: { url: string }) {
-  const { scene: gltfScene } = useGLTF(url);
-  const { camera } = useThree();
-
-  useEffect(() => {
-    const box = new THREE.Box3().setFromObject(gltfScene);
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const dist = maxDim * 2;
-    camera.position.set(dist * 0.7, dist * 0.5, dist * 0.7);
-    camera.lookAt(0, 0, 0);
-  }, [gltfScene, camera]);
-
-  return null;
-}
-
 /* ── Loading fallback ───────────────────────────────────────── */
 function LoadingFallback() {
   return (
@@ -240,27 +278,28 @@ export default function Viewer3D({ fileUrl, fileName, onClose, onMeasurement }: 
               <p className="text-sm" style={{ color: '#ef4444' }}>Failed to load 3D model: {error}</p>
             </div>
           ) : (
-            <Canvas
-              camera={{ position: [3, 2, 3], fov: 50 }}
-              onCreated={({ gl }) => { gl.toneMapping = THREE.ACESFilmicToneMapping; gl.toneMappingExposure = 1.2; }}
-              style={{ background: '#0a0a14' }}
-            >
-              <ambientLight intensity={0.6} />
-              <directionalLight position={[5, 8, 5]} intensity={1} castShadow />
-              <directionalLight position={[-3, 4, -3]} intensity={0.3} />
+            <ModelErrorBoundary fallbackUrl={fileUrl} fileName={fileName}>
+              <Canvas
+                camera={{ position: [3, 2, 3], fov: 50 }}
+                onCreated={({ gl }) => { gl.toneMapping = THREE.ACESFilmicToneMapping; gl.toneMappingExposure = 1.2; }}
+                style={{ background: '#0a0a14' }}
+              >
+                <ambientLight intensity={0.6} />
+                <directionalLight position={[5, 8, 5]} intensity={1} castShadow />
+                <directionalLight position={[-3, 4, -3]} intensity={0.3} />
 
-              <Suspense fallback={<LoadingFallback />}>
-                <GLBModel url={fileUrl} measuring={measuring} onPointClick={handlePointClick} />
-                <CameraFit url={fileUrl} />
-                <MeasureOverlay points={points} unit={unit} />
-              </Suspense>
+                <Suspense fallback={<LoadingFallback />}>
+                  <GLBModel url={fileUrl} measuring={measuring} onPointClick={handlePointClick} />
+                  <MeasureOverlay points={points} unit={unit} />
+                </Suspense>
 
-              <gridHelper args={[20, 20, '#222233', '#161622']} position={[0, -0.01, 0]} />
-              <OrbitControls enableDamping dampingFactor={0.1} />
-              <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-                <GizmoViewport labelColor="white" axisHeadScale={0.8} />
-              </GizmoHelper>
-            </Canvas>
+                <gridHelper args={[20, 20, '#222233', '#161622']} position={[0, -0.01, 0]} />
+                <OrbitControls enableDamping dampingFactor={0.1} />
+                <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+                  <GizmoViewport labelColor="white" axisHeadScale={0.8} />
+                </GizmoHelper>
+              </Canvas>
+            </ModelErrorBoundary>
           )}
         </div>
 

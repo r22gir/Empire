@@ -192,6 +192,18 @@ export default function WorkroomForge() {
   const [invCategory, setInvCategory] = useState('all')
   const [invStatus, setInvStatus] = useState('all')
   const [selectedInvItem, setSelectedInvItem] = useState<InventoryItem | null>(null)
+  const [editingInv, setEditingInv] = useState<InventoryItem | null>(null)
+  const [viewer3DUrl, setViewer3DUrl] = useState<string | null>(null)
+  const [viewer3DName, setViewer3DName] = useState('')
+
+  const saveInvEdit = () => {
+    if (!editingInv) return;
+    const status = editingInv.quantity <= editingInv.minStock ? 'low' : editingInv.quantity <= editingInv.minStock * 1.5 ? 'medium' : 'good';
+    const updated = { ...editingInv, status };
+    setInventoryItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+    setSelectedInvItem(updated);
+    setEditingInv(null);
+  };
 
   // CRM State
   const [crmTab, setCrmTab] = useState<CrmTab>('customers')
@@ -319,13 +331,14 @@ export default function WorkroomForge() {
     const file = e.target.files?.[0]; if (!file) return;
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!['glb', 'gltf', 'obj', 'ply'].includes(ext || '')) { alert('Please upload a 3D file (.glb, .gltf, .obj, .ply)'); return; }
-    // Upload 3D file to backend for AI analysis
     try {
       const fd = new FormData(); fd.append('file', file);
       const res = await fetch('http://localhost:8000/api/v1/files/upload', { method: 'POST', body: fd });
       const data = await res.json();
       if (data.status === 'success') {
-        alert(`3D scan "${file.name}" uploaded successfully.\nFilename: ${data.filename}\n\nUse the AI analysis tools to process this 3D model for measurement extraction.`);
+        const fileUrl = `http://localhost:8000/api/v1/files/other/${data.filename}`;
+        setViewer3DUrl(fileUrl);
+        setViewer3DName(data.filename);
       } else { alert('Upload failed: ' + (data.detail || 'Unknown error')); }
     } catch (err) { alert('Upload failed — ensure the backend is running on port 8000'); }
     e.target.value = '';
@@ -1329,42 +1342,150 @@ export default function WorkroomForge() {
         </div>
       )}
 
-      {/* ═══ INVENTORY DETAIL MODAL ═══ */}
+      {/* ═══ INVENTORY DETAIL / EDIT MODAL ═══ */}
       {selectedInvItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70" onClick={() => setSelectedInvItem(null)} />
+          <div className="absolute inset-0 bg-black/70" onClick={() => { setSelectedInvItem(null); setEditingInv(null); }} />
           <div className="relative bg-[#12121e] rounded-2xl border border-white/[0.08] w-full max-w-md overflow-hidden">
             <div className="px-5 py-3.5 border-b border-white/[0.06] flex items-center justify-between">
-              <div><p className="font-mono text-[10px] text-gray-500">{selectedInvItem.sku}</p><h2 className="font-bold text-sm">{selectedInvItem.name}</h2></div>
-              <button onClick={() => setSelectedInvItem(null)} className="p-1 hover:bg-white/[0.06] rounded"><X className="w-4 h-4" /></button>
+              <div>
+                <p className="font-mono text-[10px] text-gray-500">{selectedInvItem.sku}</p>
+                {editingInv ? (
+                  <input value={editingInv.name} onChange={e => setEditingInv({ ...editingInv, name: e.target.value })}
+                    className="font-bold text-sm bg-[#1a1a2e] border border-white/10 rounded px-2 py-0.5 mt-0.5 w-full outline-none focus:border-[#C9A84C]" />
+                ) : (
+                  <h2 className="font-bold text-sm">{selectedInvItem.name}</h2>
+                )}
+              </div>
+              <button onClick={() => { setSelectedInvItem(null); setEditingInv(null); }} className="p-1 hover:bg-white/[0.06] rounded"><X className="w-4 h-4" /></button>
             </div>
             <div className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className={`text-xs px-2 py-0.5 rounded ${statusColor(selectedInvItem.status)}`}>{selectedInvItem.status} stock</span>
-                <span className="text-xs text-gray-500">{selectedInvItem.vendor}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-[#1a1a2e] rounded-lg p-3 text-center"><p className="text-2xl font-bold">{selectedInvItem.quantity}</p><p className="text-[10px] text-gray-500">{selectedInvItem.unit} in stock</p></div>
-                <div className="bg-[#1a1a2e] rounded-lg p-3 text-center"><p className="text-2xl font-bold text-[#C9A84C]">${selectedInvItem.price}</p><p className="text-[10px] text-gray-500">Retail Price</p></div>
-              </div>
-              {[
-                ['Cost', `$${selectedInvItem.cost.toFixed(2)} per unit`],
-                ['Min Stock', `${selectedInvItem.minStock} ${selectedInvItem.unit}`],
-                ['Max Stock', `${selectedInvItem.maxStock} ${selectedInvItem.unit}`],
-                ['Location', selectedInvItem.location],
-                ['Last Ordered', selectedInvItem.lastOrdered],
-              ].map(([l, v]) => (
-                <div key={l} className="flex justify-between text-xs"><span className="text-gray-500">{l}</span><span>{v}</span></div>
-              ))}
-              <div className="pt-2">
-                <div className="h-2 bg-[#1a1a2e] rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full ${selectedInvItem.status === 'low' ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(getStockLevel(selectedInvItem), 100)}%` }} />
-                </div>
-              </div>
+              {editingInv ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-[10px] text-gray-500">Quantity</label><input type="number" value={editingInv.quantity} onChange={e => setEditingInv({ ...editingInv, quantity: Number(e.target.value) })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                    <div><label className="text-[10px] text-gray-500">Retail Price ($)</label><input type="number" step="0.01" value={editingInv.price} onChange={e => setEditingInv({ ...editingInv, price: Number(e.target.value) })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-[10px] text-gray-500">Cost ($)</label><input type="number" step="0.01" value={editingInv.cost} onChange={e => setEditingInv({ ...editingInv, cost: Number(e.target.value) })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                    <div><label className="text-[10px] text-gray-500">Unit</label><input value={editingInv.unit} onChange={e => setEditingInv({ ...editingInv, unit: e.target.value })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-[10px] text-gray-500">Min Stock</label><input type="number" value={editingInv.minStock} onChange={e => setEditingInv({ ...editingInv, minStock: Number(e.target.value) })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                    <div><label className="text-[10px] text-gray-500">Max Stock</label><input type="number" value={editingInv.maxStock} onChange={e => setEditingInv({ ...editingInv, maxStock: Number(e.target.value) })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="text-[10px] text-gray-500">Vendor</label><input value={editingInv.vendor} onChange={e => setEditingInv({ ...editingInv, vendor: e.target.value })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                    <div><label className="text-[10px] text-gray-500">Location</label><input value={editingInv.location} onChange={e => setEditingInv({ ...editingInv, location: e.target.value })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]" /></div>
+                  </div>
+                  <div><label className="text-[10px] text-gray-500">Category</label>
+                    <select value={editingInv.category} onChange={e => setEditingInv({ ...editingInv, category: e.target.value })} className="w-full bg-[#1a1a2e] border border-white/10 rounded px-2 py-1.5 text-sm outline-none focus:border-[#C9A84C]">
+                      {['fabrics','linings','hardware','motors','trim','supplies'].map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                    </select>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs px-2 py-0.5 rounded ${statusColor(selectedInvItem.status)}`}>{selectedInvItem.status} stock</span>
+                    <span className="text-xs text-gray-500">{selectedInvItem.vendor}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-[#1a1a2e] rounded-lg p-3 text-center"><p className="text-2xl font-bold">{selectedInvItem.quantity}</p><p className="text-[10px] text-gray-500">{selectedInvItem.unit} in stock</p></div>
+                    <div className="bg-[#1a1a2e] rounded-lg p-3 text-center"><p className="text-2xl font-bold text-[#C9A84C]">${selectedInvItem.price}</p><p className="text-[10px] text-gray-500">Retail Price</p></div>
+                  </div>
+                  {[
+                    ['Cost', `$${selectedInvItem.cost.toFixed(2)} per unit`],
+                    ['Min Stock', `${selectedInvItem.minStock} ${selectedInvItem.unit}`],
+                    ['Max Stock', `${selectedInvItem.maxStock} ${selectedInvItem.unit}`],
+                    ['Location', selectedInvItem.location],
+                    ['Last Ordered', selectedInvItem.lastOrdered],
+                  ].map(([l, v]) => (
+                    <div key={l} className="flex justify-between text-xs"><span className="text-gray-500">{l}</span><span>{v}</span></div>
+                  ))}
+                  <div className="pt-2">
+                    <div className="h-2 bg-[#1a1a2e] rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${selectedInvItem.status === 'low' ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(getStockLevel(selectedInvItem), 100)}%` }} />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             <div className="px-5 py-3 border-t border-white/[0.06] flex gap-2">
-              <button className="flex-1 bg-[#1a1a2e] hover:bg-[#252540] py-2.5 rounded-lg text-xs flex items-center justify-center gap-1.5"><Edit className="w-3 h-3" /> Edit</button>
-              <button className="flex-1 bg-[#C9A84C] hover:bg-[#B8973F] text-[#0D0D0D] font-semibold py-2.5 rounded-lg text-xs flex items-center justify-center gap-1.5"><ShoppingCart className="w-3 h-3" /> Reorder</button>
+              {editingInv ? (
+                <>
+                  <button onClick={() => setEditingInv(null)} className="flex-1 bg-[#1a1a2e] hover:bg-[#252540] py-2.5 rounded-lg text-xs flex items-center justify-center gap-1.5">Cancel</button>
+                  <button onClick={saveInvEdit} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2.5 rounded-lg text-xs flex items-center justify-center gap-1.5"><Check className="w-3 h-3" /> Save</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setEditingInv({ ...selectedInvItem })} className="flex-1 bg-[#1a1a2e] hover:bg-[#252540] py-2.5 rounded-lg text-xs flex items-center justify-center gap-1.5"><Edit className="w-3 h-3" /> Edit</button>
+                  <button className="flex-1 bg-[#C9A84C] hover:bg-[#B8973F] text-[#0D0D0D] font-semibold py-2.5 rounded-lg text-xs flex items-center justify-center gap-1.5"><ShoppingCart className="w-3 h-3" /> Reorder</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ 3D VIEWER MODAL (model-viewer web component) ═══ */}
+      {viewer3DUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(5,5,13,0.95)' }}>
+          <div className="w-full h-full max-w-6xl max-h-[95vh] mx-4 my-2 flex flex-col rounded-2xl overflow-hidden"
+            style={{ background: '#0a0a1a', border: '1px solid rgba(255,255,255,0.08)' }}>
+            {/* Header */}
+            <div className="shrink-0 px-6 py-3 flex items-center justify-between"
+              style={{ background: 'linear-gradient(135deg, rgba(139,92,246,0.12), rgba(212,175,55,0.12))', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="flex items-center gap-3">
+                <Ruler className="w-4 h-4 text-purple-400" />
+                <div>
+                  <h1 className="text-sm font-bold text-purple-400">3D Scan Viewer</h1>
+                  <p className="text-[10px] text-gray-500">{viewer3DName}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[9px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(212,175,55,0.15)', color: '#C9A84C' }}>
+                  Orbit: drag &bull; Zoom: scroll &bull; Pan: right-drag
+                </span>
+                <button onClick={() => setViewer3DUrl(null)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-red-500/15 hover:text-red-400 text-gray-500 transition"
+                  style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            {/* Viewer */}
+            <div className="flex-1 relative bg-[#0a0a14]">
+              {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+              <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+              {/* @ts-expect-error model-viewer is a web component */}
+              <model-viewer
+                src={viewer3DUrl}
+                alt={viewer3DName}
+                camera-controls
+                touch-action="pan-y"
+                auto-rotate
+                shadow-intensity="1"
+                environment-image="neutral"
+                style={{ width: '100%', height: '100%', background: '#0a0a14' }}
+              />
+            </div>
+            {/* Footer */}
+            <div className="shrink-0 px-6 py-3 flex items-center justify-between"
+              style={{ borderTop: '1px solid rgba(255,255,255,0.06)', background: '#0e0e1a' }}>
+              <div className="flex items-center gap-2">
+                <a href={viewer3DUrl} download={viewer3DName}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 bg-[#1a1a2e] hover:bg-[#252540] transition"
+                  style={{ border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <Download className="w-3.5 h-3.5" /> Download
+                </a>
+                <button onClick={() => window.open(`http://localhost:3009?view3d=${encodeURIComponent(viewer3DUrl)}&name=${encodeURIComponent(viewer3DName)}`, '_blank')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
+                  style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)' }}>
+                  <Ruler className="w-3.5 h-3.5" /> Open Measure Tool
+                </button>
+              </div>
+              <span className="text-[10px] font-mono text-gray-600">3D Viewer</span>
             </div>
           </div>
         </div>

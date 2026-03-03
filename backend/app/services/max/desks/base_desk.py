@@ -176,20 +176,54 @@ class BaseDesk(ABC):
         )
         return response.content
 
+    def _task_to_dict(self, task: DeskTask) -> dict:
+        """Convert a DeskTask to a serializable dict with full details."""
+        return {
+            "id": task.id,
+            "title": task.title,
+            "description": task.description[:200] if task.description else "",
+            "priority": task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
+            "state": task.state.value if hasattr(task.state, 'value') else str(task.state),
+            "source": task.source,
+            "customer_name": task.customer_name,
+            "created_at": task.created_at,
+            "completed_at": task.completed_at,
+            "result": task.result[:500] if task.result else None,
+            "escalation_reason": task.escalation_reason,
+            "actions": [
+                {"action": a.action, "detail": a.detail[:300], "timestamp": a.timestamp, "success": a.success}
+                for a in (task.actions or [])
+            ],
+        }
+
     async def report_status(self) -> dict:
-        """Return desk status summary."""
+        """Return desk status summary with recent task details."""
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        completed_today = [
+            t for t in self.completed_tasks
+            if t.completed_at and t.completed_at[:10] == today
+        ]
+        # Recent tasks: last 10 completed (most recent first)
+        recent = sorted(self.completed_tasks, key=lambda t: t.completed_at or "", reverse=True)[:10]
+
         return {
             "desk_id": self.desk_id,
             "desk_name": self.desk_name,
             "description": self.desk_description,
             "capabilities": self.capabilities,
             "active_tasks": len(self.active_tasks),
-            "completed_today": len([
-                t for t in self.completed_tasks
-                if t.completed_at and t.completed_at[:10] == datetime.utcnow().strftime("%Y-%m-%d")
-            ]),
+            "completed_today": len(completed_today),
+            "completed_total": len(self.completed_tasks),
             "escalated": len(self.escalated_tasks),
             "status": "busy" if self.active_tasks else "idle",
+            # Detailed task lists
+            "active_task_details": [self._task_to_dict(t) for t in self.active_tasks],
+            "escalated_task_details": [self._task_to_dict(t) for t in self.escalated_tasks[-5:]],
+            "recent_completed": [self._task_to_dict(t) for t in recent],
+            "last_activity": (
+                recent[0].completed_at if recent else
+                self.active_tasks[-1].created_at if self.active_tasks else None
+            ),
         }
 
     async def escalate(self, task: DeskTask, reason: str) -> DeskTask:

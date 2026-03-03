@@ -988,12 +988,13 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
       ensureCustomerName();
       setSaving(true);
       try {
+        const lineItems = buildLineItems();
         const res = await fetch(API_URL + '/quotes', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            customer_name: customer.name, customer_email: customer.email,
+            customer_name: customer.name || 'Customer', customer_email: customer.email,
             customer_phone: customer.phone, customer_address: customer.address,
-            project_name: projectName, line_items: buildLineItems(),
+            project_name: projectName || 'Estimate', line_items: lineItems,
             subtotal: grandTotal, total: grandTotal, tax_rate: 0.08,
             business_name: 'Empire', terms: '50% deposit required. Balance due upon completion.',
             valid_days: 30,
@@ -1031,10 +1032,11 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
           setSavedQuote({ id: result.quote.id, quote_number: result.quote.quote_number });
           await loadPdfPreview(result.quote.id);
         }
-      } catch { alert('Save failed.'); setTab('build'); }
+      } catch (err) { console.error('Save/Preview error:', err); alert('Save failed — check line items.'); setTab('build'); }
       finally { setSaving(false); }
     } else {
-      await loadPdfPreview(savedQuote.id);
+      try { await loadPdfPreview(savedQuote.id); }
+      catch (err) { console.error('PDF load error:', err); }
     }
   };
 
@@ -1713,6 +1715,45 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                             </select>
                           </div>
                         </div>
+                        {/* AI Analysis summary (collapsed by default) */}
+                        {u.aiAnalysis && (
+                          <details className="mt-2">
+                            <summary className="text-[10px] font-medium cursor-pointer flex items-center gap-1" style={{ color: 'var(--gold)' }}>
+                              <Sparkles className="w-3 h-3" /> AI Analysis — {u.aiAnalysis.style || u.aiAnalysis.furnitureType} ({u.aiAnalysis.confidence || 0}% confidence)
+                            </summary>
+                            <div className="mt-1.5 p-2 rounded-lg space-y-1" style={{ background: 'rgba(212,175,55,0.05)', border: '1px solid rgba(212,175,55,0.15)' }}>
+                              {u.aiAnalysis.style && (
+                                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>Style:</span> {u.aiAnalysis.style}
+                                </p>
+                              )}
+                              {u.aiAnalysis.cushions && (
+                                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>Cushions:</span> {u.aiAnalysis.cushions.seat} seat, {u.aiAnalysis.cushions.back} back{u.aiAnalysis.cushions.throw_pillows ? `, ${u.aiAnalysis.cushions.throw_pillows} throw` : ''}
+                                </p>
+                              )}
+                              <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                                <span style={{ color: 'var(--text-muted)' }}>Fabric:</span> {u.aiAnalysis.fabricYardsPlain || u.fabricYards} yd plain{u.aiAnalysis.fabricYardsPatterned ? `, ${u.aiAnalysis.fabricYardsPatterned} yd patterned` : ''}
+                              </p>
+                              {u.aiAnalysis.laborCostLow && (
+                                <p className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                                  <span style={{ color: 'var(--text-muted)' }}>Est. labor:</span> ${u.aiAnalysis.laborCostLow?.toLocaleString()} — ${u.aiAnalysis.laborCostHigh?.toLocaleString()}
+                                </p>
+                              )}
+                              {u.aiAnalysis.newFoamRecommended && (
+                                <p className="text-[10px]" style={{ color: '#f59e0b' }}>New cushion foam recommended</p>
+                              )}
+                              {u.aiAnalysis.questions && u.aiAnalysis.questions.length > 0 && (
+                                <div className="mt-1">
+                                  <p className="text-[9px] font-semibold" style={{ color: 'var(--text-muted)' }}>Questions for customer:</p>
+                                  {u.aiAnalysis.questions.slice(0, 3).map((q: string, qi: number) => (
+                                    <p key={qi} className="text-[10px] pl-2" style={{ color: 'var(--text-secondary)' }}>• {q}</p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </details>
+                        )}
                       </div>
                     ))}
 

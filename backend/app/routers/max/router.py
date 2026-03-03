@@ -115,29 +115,45 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
         response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
 
-        # Parse and execute tool blocks from response
+        # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
         tool_results_list = []
-        tool_calls = parse_tool_blocks(response.content)
-        for tc in tool_calls:
-            result = execute_tool(tc, desk=request.desk)
-            tool_results_list.append({"tool": result.tool, "success": result.success, "result": result.result, "error": result.error})
-
-        # Tool loop: feed results back to AI for follow-up
         final_content = response.content
-        if tool_results_list:
+        loop_messages = list(messages)
+        current_response = response
+
+        for _tool_round in range(3):
+            tool_calls = parse_tool_blocks(current_response.content)
+            if not tool_calls:
+                break
+
+            round_results = []
+            for tc in tool_calls:
+                result = execute_tool(tc, desk=request.desk)
+                entry = {"tool": result.tool, "success": result.success, "result": result.result, "error": result.error}
+                round_results.append(entry)
+                tool_results_list.append(entry)
+
+            # Build tool summary and ask AI for follow-up
             tool_summary_parts = []
-            for r in tool_results_list:
+            for r in round_results:
                 if r["success"] and r["result"]:
                     tool_summary_parts.append(f"[{r['tool']}] Result:\n{json.dumps(r['result'], indent=2, default=str)[:3000]}")
                 else:
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
-            followup_messages = list(messages) + [
-                AIMessage(role="assistant", content=strip_tool_blocks(response.content)),
-                AIMessage(role="user", content=f"[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]\n\n{tool_summary}"),
-            ]
-            followup = await ai_router.chat(followup_messages, model=model, desk=request.desk, system_prompt=enriched_prompt)
-            final_content = strip_tool_blocks(response.content) + "\n\n" + followup.content
+
+            is_last_round = _tool_round >= 2
+            followup_instruction = (
+                "[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]"
+                if is_last_round else
+                "[SYSTEM: Tool results below. You may call additional tools if needed to complete the task, or give a final answer.]"
+            )
+
+            loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
+            loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
+
+            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt)
+            final_content = strip_tool_blocks(final_content) + "\n\n" + current_response.content
 
         # Track conversation in background
         conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
@@ -232,35 +248,50 @@ async def chat_stream(request: ChatRequest):
                 full_response += safe_chunk
                 yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
-            # Parse and execute tool blocks from completed response
-            tool_calls = parse_tool_blocks(full_response)
+            # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
             tool_results_list = []
-            for tc in tool_calls:
-                result = execute_tool(tc, desk=request.desk)
-                tool_results_list.append(result)
-                yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
+            loop_messages = list(messages)
+            current_text = full_response
 
-            # ── Tool Loop: feed results back to AI for a follow-up ──
-            if tool_results_list:
+            for _tool_round in range(3):
+                tool_calls = parse_tool_blocks(current_text)
+                if not tool_calls:
+                    break
+
+                round_results = []
+                for tc in tool_calls:
+                    result = execute_tool(tc, desk=request.desk)
+                    round_results.append(result)
+                    tool_results_list.append(result)
+                    yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
+
                 tool_summary_parts = []
-                for r in tool_results_list:
+                for r in round_results:
                     if r.success and r.result:
                         tool_summary_parts.append(f"[{r.tool}] Result:\n{json.dumps(r.result, indent=2, default=str)[:3000]}")
                     else:
                         tool_summary_parts.append(f"[{r.tool}] Error: {r.error}")
                 tool_summary = "\n\n".join(tool_summary_parts)
 
-                followup_messages = list(messages) + [
-                    AIMessage(role="assistant", content=strip_tool_blocks(full_response)),
-                    AIMessage(role="user", content=f"[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]\n\n{tool_summary}"),
-                ]
+                is_last_round = _tool_round >= 2
+                followup_instruction = (
+                    "[SYSTEM: Tool results below — use this data to give a complete, accurate answer. Do NOT output more tool blocks.]"
+                    if is_last_round else
+                    "[SYSTEM: Tool results below. You may call additional tools if needed to complete the task, or give a final answer.]"
+                )
+
+                loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_text)))
+                loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
+
                 yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
-                async for chunk, m_used in ai_router.chat_stream(followup_messages, model=model, desk=request.desk, system_prompt=enriched_prompt):
+                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt):
                     model_used = m_used
                     safe_chunk = sanitize_output(chunk)
                     followup_text += safe_chunk
                     yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
+
+                current_text = followup_text
                 full_response = strip_tool_blocks(full_response) + "\n\n" + followup_text
 
             # Track assistant response — fire-and-forget background tasks
@@ -325,6 +356,51 @@ async def presentation_to_pdf(data: dict):
     except Exception as e:
         logger.error(f"Presentation PDF error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/presentations")
+async def list_presentations():
+    """List all saved presentation PDFs with metadata."""
+    pres_dir = Path.home() / "Empire" / "data" / "presentations"
+    pres_dir.mkdir(parents=True, exist_ok=True)
+    presentations = []
+    for f in sorted(pres_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True):
+        stat = f.stat()
+        # Parse title from filename: YYMMDD_HHMM_slug.pdf
+        stem = f.stem
+        parts = stem.split("_", 2)
+        title_slug = parts[2] if len(parts) >= 3 else stem
+        title = title_slug.replace("-", " ").title()
+        presentations.append({
+            "filename": f.name,
+            "title": title,
+            "size": stat.st_size,
+            "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "url": f"/api/v1/max/presentations/{f.name}",
+        })
+    return {"presentations": presentations}
+
+
+@router.get("/presentations/{filename}")
+async def serve_presentation(filename: str):
+    """Serve a saved presentation PDF."""
+    from fastapi.responses import FileResponse
+    pres_dir = Path.home() / "Empire" / "data" / "presentations"
+    file_path = pres_dir / filename
+    if not file_path.exists() or not file_path.name.endswith(".pdf"):
+        raise HTTPException(404, "Presentation not found")
+    return FileResponse(file_path, media_type="application/pdf", filename=filename)
+
+
+@router.delete("/presentations/{filename}")
+async def delete_presentation(filename: str):
+    """Delete a saved presentation PDF."""
+    pres_dir = Path.home() / "Empire" / "data" / "presentations"
+    file_path = pres_dir / filename
+    if not file_path.exists():
+        raise HTTPException(404, "Presentation not found")
+    file_path.unlink()
+    return {"status": "deleted", "filename": filename}
 
 
 @router.post("/present/telegram")
@@ -448,6 +524,32 @@ async def telegram_status():
     return {"configured": telegram_bot.is_configured, "bot_token_set": bool(telegram_bot.bot_token), "chat_id_set": bool(telegram_bot.founder_chat_id)}
 
 
+@router.get("/telegram/history")
+async def get_telegram_history(chat_id: Optional[str] = None, limit: int = 50):
+    """Get Telegram conversation history (persisted to disk)."""
+    from app.services.max.telegram_bot import _TELEGRAM_CHAT_DIR, _get_history
+    target = chat_id or (telegram_bot.founder_chat_id if telegram_bot.founder_chat_id else None)
+    if not target:
+        # Return list of all chat files
+        chats = []
+        for f in sorted(_TELEGRAM_CHAT_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                import json as _j
+                data = _j.loads(f.read_text())
+                msgs = data.get("messages", [])
+                chats.append({
+                    "chat_id": f.stem,
+                    "message_count": len(msgs),
+                    "updated_at": data.get("updated_at"),
+                    "last_message": msgs[-1]["content"][:100] if msgs else "",
+                })
+            except Exception:
+                pass
+        return {"chats": chats}
+    messages = _get_history(str(target))
+    return {"chat_id": str(target), "messages": messages[-limit:], "total": len(messages)}
+
+
 @router.get("/brain/status")
 async def brain_status():
     """Get MAX Brain status — memory counts, drive status, Ollama health."""
@@ -565,6 +667,27 @@ async def get_ai_desk_statuses():
     """Get status of all AI desks."""
     statuses = await ai_desk_manager.get_all_statuses()
     return {"desks": statuses}
+
+
+@router.get("/ai-desks/{desk_id}/detail")
+async def get_ai_desk_detail(desk_id: str):
+    """Get detailed status and task history for a single AI desk."""
+    desk = ai_desk_manager.get_desk(desk_id)
+    if not desk:
+        raise HTTPException(404, f"Desk '{desk_id}' not found")
+    status = await desk.report_status()
+    # Also include brain memory logs for this desk
+    try:
+        from app.services.max.brain.memory_store import MemoryStore
+        store = MemoryStore()
+        memories = store.search(query=desk.desk_name, category="desk_action", limit=20)
+        status["brain_logs"] = [
+            {"content": m.get("content", ""), "created_at": m.get("created_at", ""), "importance": m.get("importance", 5)}
+            for m in memories
+        ]
+    except Exception:
+        status["brain_logs"] = []
+    return status
 
 
 @router.get("/ai-desks/briefing")

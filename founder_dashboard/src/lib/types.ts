@@ -208,6 +208,22 @@ export interface TokenStats {
   };
 }
 
+/** Task detail from AI desk system */
+export interface DeskTaskDetail {
+  id: string;
+  title: string;
+  description: string;
+  priority: string;
+  state: string;
+  source: string;
+  customer_name?: string;
+  created_at: string;
+  completed_at?: string;
+  result?: string;
+  escalation_reason?: string;
+  actions: { action: string; detail: string; timestamp: string; success: boolean }[];
+}
+
 /** AI Desk status from /max/ai-desks/status */
 export interface AIDeskStatus {
   desk_id: string;
@@ -216,10 +232,15 @@ export interface AIDeskStatus {
   capabilities: string[];
   active_tasks: number;
   completed_today: number;
+  completed_total: number;
   escalated: number;
   status: 'idle' | 'busy' | 'error';
   pending_followups?: number;
   pending_reminders?: number;
+  active_task_details?: DeskTaskDetail[];
+  escalated_task_details?: DeskTaskDetail[];
+  recent_completed?: DeskTaskDetail[];
+  last_activity?: string;
 }
 
 /** Legacy task shape from /max/tasks endpoint (used by useSystemData) */

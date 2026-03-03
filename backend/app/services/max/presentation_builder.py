@@ -14,7 +14,13 @@ from app.services.max.ai_router import ai_router, AIMessage, AIModel
 
 PRESENTATION_SYSTEM_PROMPT = """You are a presentation builder. Given a topic, web research results, and optionally source content, create a rich, professional presentation grounded in REAL current data.
 
-IMPORTANT: You will receive web search results with real articles and snippets. Use this data to make your presentation factually accurate and current. Cite actual sources from the search results.
+CRITICAL RULES — ACCURACY:
+1. **NEVER fabricate statistics, percentages, survey results, or numerical data.** If the web search results don't contain specific numbers, DO NOT invent them. Use qualitative descriptions instead.
+2. **NEVER fabricate chart data.** Charts MUST use real numbers from the web search results provided. If no real numerical data is available, set "charts" to an empty array []. An empty chart array is ALWAYS better than fake data.
+3. **Sources MUST come from the web search results provided** — use the exact URLs given. NEVER fabricate URLs or source names.
+4. **Do not present opinions or estimates as facts.** If you're estimating, explicitly say "estimated" or "approximate".
+
+IMPORTANT: You will receive web search results with real articles and snippets. Use this data to make your presentation factually accurate and current.
 
 Return ONLY valid JSON with this exact structure — no markdown fences, no explanation:
 {
@@ -37,19 +43,12 @@ Return ONLY valid JSON with this exact structure — no markdown fences, no expl
 
 Rules:
 - Include 4-6 sections with a mix of types (text, bullets, highlight)
-- Adapt chart types to the topic:
-  - Conflict/war/politics: use sentiment polls, approval ratings, casualty timelines, public opinion data
-  - Market/business: use market size, pricing, growth trends
-  - Technology: use adoption rates, benchmarks, comparisons
-  - If no meaningful data exists for charts, use empty array — don't force generic charts
-- Sources MUST come from the web search results provided — use real URLs, not made-up ones
-- Include 2-3 image_queries — choose contextually appropriate searches:
-  - News/conflict: "Iran conflict 2026 news photo", not generic stock photos
-  - Business: "custom drapery showroom professional"
-- Include 1-2 video_queries for relevant NEWS clips or explainer videos (search YouTube-style queries like "Iran war update March 2026 news")
+- Charts: ONLY include if you have REAL data from the web search results. If the search results contain specific numbers (market sizes, poll results, growth figures), use those exact numbers. Otherwise, use an EMPTY charts array. Never approximate or guess chart values.
+- Include 2-3 image_queries — CRITICAL: queries must be SPECIFIC and CONTEXTUALLY CORRECT. Never use single ambiguous words. For software topics, include "software" or "interface" or "screenshot" in the query. Example: "Grasshopper Rhino 3D parametric design software interface", NOT just "grasshopper" (which would return bug photos). Always disambiguate.
+- Include 1-2 video_queries for relevant clips or explainer videos — same disambiguation rules apply
 - Use CURRENT facts and data from the web search results — do NOT rely on training data for recent events
 - For current events: include a timeline or chronology section
-- Make content informative, specific, and data-driven"""
+- Make content informative, specific, and data-driven — but NEVER invent data points"""
 
 
 async def fetch_images(queries: list[str], count_per_query: int = 1) -> list[dict]:

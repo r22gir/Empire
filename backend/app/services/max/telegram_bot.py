@@ -4,6 +4,7 @@ Routes all messages through the MAX AI router (Grok primary).
 """
 
 import os
+import json as _json
 import logging
 import asyncio
 import tempfile
@@ -14,9 +15,54 @@ import httpx
 
 logger = logging.getLogger("max.telegram")
 
-# ── Per-chat conversation history for memory across messages ──
+# ── Per-chat conversation history — persisted to disk ──
+_MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
+_TELEGRAM_CHAT_DIR = Path.home() / "Empire" / "backend" / "data" / "chats" / "telegram"
+_TELEGRAM_CHAT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_telegram_history(chat_id: str) -> list[dict]:
+    """Load conversation history from disk for a chat."""
+    path = _TELEGRAM_CHAT_DIR / f"{chat_id}.json"
+    if path.exists():
+        try:
+            data = _json.loads(path.read_text())
+            return data.get("messages", [])
+        except Exception as e:
+            logger.warning(f"Failed to load telegram history for {chat_id}: {e}")
+    return []
+
+
+def _save_telegram_history(chat_id: str, messages: list[dict]):
+    """Persist conversation history to disk."""
+    path = _TELEGRAM_CHAT_DIR / f"{chat_id}.json"
+    try:
+        data = {"chat_id": chat_id, "updated_at": __import__('datetime').datetime.utcnow().isoformat(), "messages": messages}
+        path.write_text(_json.dumps(data, indent=2, default=str))
+    except Exception as e:
+        logger.warning(f"Failed to save telegram history for {chat_id}: {e}")
+
+
+# In-memory cache (loaded from disk on first access per chat)
 _telegram_history: dict[str, list[dict]] = {}
-_MAX_HISTORY = 10  # Keep last 10 exchanges per chat
+
+
+def _get_history(chat_id: str) -> list[dict]:
+    """Get history for a chat — loads from disk if not in memory."""
+    if chat_id not in _telegram_history:
+        _telegram_history[chat_id] = _load_telegram_history(chat_id)
+    return _telegram_history[chat_id]
+
+
+def _append_and_save(chat_id: str, role: str, content: str):
+    """Add a message to history and persist to disk."""
+    history = _get_history(chat_id)
+    history.append({"role": role, "content": content})
+    # Trim to bounded size
+    if len(history) > _MAX_HISTORY * 2:
+        history[:] = history[-_MAX_HISTORY * 2:]
+    _telegram_history[chat_id] = history
+    _save_telegram_history(chat_id, history)
 
 
 class TelegramBot:
@@ -241,7 +287,7 @@ class TelegramBot:
         Returns (html_response, plain_text, tool_results) — html for Telegram display, plain for TTS, tool results list.
         """
         cid = str(chat_id or self.founder_chat_id or "default")
-        history = _telegram_history.get(cid, [])[-_MAX_HISTORY:]
+        history = _get_history(cid)[-_MAX_HISTORY:]
         try:
             payload: Dict[str, Any] = {"message": text, "history": history}
             if image_filename:
@@ -253,14 +299,9 @@ class TelegramBot:
                     model = data.get("model_used", "")
                     response = data.get("response", "No response.")
                     tool_results = data.get("tool_results", [])
-                    # Store in conversation history
-                    if cid not in _telegram_history:
-                        _telegram_history[cid] = []
-                    _telegram_history[cid].append({"role": "user", "content": text})
-                    _telegram_history[cid].append({"role": "assistant", "content": response})
-                    # Trim to keep memory bounded
-                    if len(_telegram_history[cid]) > _MAX_HISTORY * 2:
-                        _telegram_history[cid] = _telegram_history[cid][-_MAX_HISTORY * 2:]
+                    # Persist to disk
+                    _append_and_save(cid, "user", text)
+                    _append_and_save(cid, "assistant", response)
                     html = f"{response}\n\n<i>— via {model}</i>"
                     return html, response, tool_results
                 else:
@@ -415,17 +456,16 @@ class TelegramBot:
                 html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
             await update.message.reply_html(html_response)
 
-            # Send any documents/files produced by tool execution
+            # Send any documents/files produced by tool execution (deduplicate by path)
+            sent_files = set()
             for tr in tool_results:
                 if tr.get("success") and tr.get("result"):
                     res = tr["result"]
-                    # send_quote_telegram tool already sends via bot, but for other tools:
-                    # Check if result has a file path
                     file_path = res.get("file_path") or res.get("pdf_path")
-                    if file_path and os.path.exists(file_path):
+                    if file_path and os.path.exists(file_path) and file_path not in sent_files:
                         caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
                         await self.send_document(file_path, caption=caption, chat_id=chat_id)
-                    # Check if result has an image URL
+                        sent_files.add(file_path)
                     image_url = res.get("image_url") or res.get("url")
                     if image_url and image_url.startswith("http"):
                         try:
@@ -537,14 +577,16 @@ class TelegramBot:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
                 await update.message.reply_html(html_response)
 
-                # Send any documents/files produced by tool execution
+                # Send any documents/files produced by tool execution (deduplicate by path)
+                sent_files = set()
                 for tr in tool_results:
                     if tr.get("success") and tr.get("result"):
                         res = tr["result"]
                         file_path = res.get("file_path") or res.get("pdf_path")
-                        if file_path and os.path.exists(file_path):
+                        if file_path and os.path.exists(file_path) and file_path not in sent_files:
                             doc_caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
                             await self.send_document(file_path, caption=doc_caption, chat_id=photo_chat_id)
+                            sent_files.add(file_path)
                         image_url = res.get("image_url") or res.get("url")
                         if image_url and isinstance(image_url, str) and image_url.startswith("http"):
                             try:

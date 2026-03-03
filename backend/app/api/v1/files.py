@@ -108,7 +108,11 @@ async def list_files(category: Optional[str] = None):
     return {"files": files, "total": len(files)}
 
 @router.get("/view/{category}/{filename}")
+@router.get("/{category}/{filename}")
 async def view_file(category: str, filename: str):
+    # Prevent matching other named routes (list, logs, browse, upload, etc.)
+    if category in ("list", "logs", "browse", "upload", "upload-from-path", "delete"):
+        raise HTTPException(404, "File not found")
     file_path = UPLOAD_DIR / category / filename
     if not file_path.exists():
         raise HTTPException(404, "File not found")

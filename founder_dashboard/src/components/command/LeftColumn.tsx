@@ -3,7 +3,7 @@ import { ChatSession } from '@/lib/types';
 import {
   LayoutGrid, Plus, ChevronDown, ChevronRight, MessageSquare, Trash2,
   Pencil, Check, X, Rocket, PanelLeftClose, PanelLeft, Zap, ListTodo,
-  FileText, CalendarDays, History, Receipt
+  FileText, CalendarDays, History, Receipt, BookOpen
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -26,6 +26,7 @@ interface Props {
   onOpenWorkspaces?: () => void;
   onOpenWorkspace?: (id: string) => void;
   onQuickQuote?: () => void;
+  onOpenResearch?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }
@@ -34,7 +35,7 @@ export default function LeftColumn({
   onOpenDeskGrid,
   conversations, activeConversationId, onSelectConversation, onNewChat,
   onDeleteConversation, onRenameConversation, onSuggest,
-  onOpenWorkspaces, onOpenWorkspace, onQuickQuote,
+  onOpenWorkspaces, onOpenWorkspace, onQuickQuote, onOpenResearch,
   collapsed = false, onToggleCollapse,
 }: Props) {
   const [showConvos, setShowConvos] = useState(false);
@@ -129,6 +130,20 @@ export default function LeftColumn({
           </button>
         )}
 
+        {/* Research & Reports */}
+        {onOpenResearch && (
+          <button
+            onClick={onOpenResearch}
+            className="w-10 h-10 rounded-xl flex items-center justify-center transition"
+            style={{ color: '#f59e0b' }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(245,158,11,0.1)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            title="Research & Reports"
+          >
+            <BookOpen className="w-5 h-5" />
+          </button>
+        )}
+
         <div className="w-8 h-px my-1" style={{ background: 'var(--glass-border)' }} />
 
         {/* Quick action icons */}
@@ -217,6 +232,12 @@ export default function LeftColumn({
           <button onClick={onQuickQuote} className="sidebar-icon-btn">
             <Receipt className="icon" style={{ color: 'var(--fuchsia)' }} />
             <span className="label" style={{ color: 'var(--fuchsia)' }}>Quick Quote</span>
+          </button>
+        )}
+        {onOpenResearch && (
+          <button onClick={onOpenResearch} className="sidebar-icon-btn">
+            <BookOpen className="icon" style={{ color: '#f59e0b' }} />
+            <span className="label" style={{ color: '#f59e0b' }}>Research</span>
           </button>
         )}
       </div>
