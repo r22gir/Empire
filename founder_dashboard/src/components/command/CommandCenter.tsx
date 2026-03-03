@@ -19,6 +19,7 @@ import WorkroomForgeWorkspace from './WorkroomForgeWorkspace';
 import PlaceholderWorkspace from './PlaceholderWorkspace';
 import QuoteBuilder from './QuoteBuilder';
 import DocumentCanvas from './canvas/DocumentCanvas';
+import PresentationModal from './PresentationModal';
 import LiveTicker from './LiveTicker';
 
 export default function CommandCenter() {
@@ -60,6 +61,11 @@ export default function CommandCenter() {
     rooms: any[];
     maxAnalysis?: string;
   } | null>(null);
+
+  /* ── Presentation modal ───────────────────────────────────── */
+  const [showPresentation, setShowPresentation] = useState(false);
+  const [presentationTopic, setPresentationTopic] = useState('');
+  const [presentationSource, setPresentationSource] = useState<string | undefined>();
 
   /* ── Quick Quote inline PDF ─────────────────────────────── */
   const [quickQuotePdf, setQuickQuotePdf] = useState<string | null>(null);
@@ -120,7 +126,8 @@ export default function CommandCenter() {
         desk.openDesk(ctrlAltMap[e.key]);
         setShowDeskGrid(false);
       } else if (e.key === 'Escape') {
-        if (showQuoteBuilder) { setShowQuoteBuilder(false); setQuoteInitData(null); }
+        if (showPresentation) setShowPresentation(false);
+        else if (showQuoteBuilder) { setShowQuoteBuilder(false); setQuoteInitData(null); }
         else if (showDeskGrid) setShowDeskGrid(false);
         else if (activeWorkspace) setActiveWorkspace(null);
         else if (showWorkspaces) setShowWorkspaces(false);
@@ -129,7 +136,7 @@ export default function CommandCenter() {
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
-  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces, showQuoteBuilder]);
+  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces, showQuoteBuilder, showPresentation]);
 
   /* ── Detect open_quote_builder / create_quick_quote tool results ── */
   useEffect(() => {
@@ -269,6 +276,15 @@ export default function CommandCenter() {
       className="flex flex-col overflow-hidden empire-ambient"
       style={{ background: 'var(--void)', color: 'var(--text-primary)', height: 'calc(100vh - 44px)' }}
     >
+      {/* ════ PRESENTATION MODAL ═════════════════════════════ */}
+      {showPresentation && (
+        <PresentationModal
+          topic={presentationTopic}
+          sourceContent={presentationSource}
+          onClose={() => setShowPresentation(false)}
+        />
+      )}
+
       {/* ════ IMAGE PREVIEW MODAL ════════════════════════════ */}
       {previewImage && (
         <div className={modalOverlay + ' bg-black/95'} onClick={() => setPreviewImage(null)}>
@@ -488,6 +504,11 @@ export default function CommandCenter() {
                   backendOnline={sys.backendOnline}
                   selectedModel={sys.selectedModel}
                   models={sys.models}
+                  onPresent={(content) => {
+                    setPresentationTopic(content.slice(0, 200));
+                    setPresentationSource(content);
+                    setShowPresentation(true);
+                  }}
                 />
                 {/* Inline PDF viewer for quick quotes */}
                 {quickQuotePdf && (
@@ -542,6 +563,11 @@ export default function CommandCenter() {
         suggestedInput={suggestedInput}
         onClearSuggestion={() => setSuggestedInput('')}
         onToggleStats={() => setShowStats(!showStats)}
+        onPresent={(topic) => {
+          setPresentationTopic(topic);
+          setPresentationSource(undefined);
+          setShowPresentation(true);
+        }}
       />}
 
       {/* ════ LIVE TICKER (crypto, news, sports) ════════════ */}

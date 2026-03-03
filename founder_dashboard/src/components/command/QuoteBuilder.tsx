@@ -8,6 +8,8 @@ import {
   Share2, Mail, Link, ExternalLink, Scissors, ImageIcon, Clock, FileText,
 } from 'lucide-react';
 import { FABRIC_GRADES, BASE_PRICES, type TreatmentType, type FabricGrade } from '@/lib/deskData';
+import dynamic from 'next/dynamic';
+const Viewer3D = dynamic(() => import('./Viewer3D'), { ssr: false });
 
 // ═══════════════════════════════════════════════════════
 // TYPES
@@ -20,6 +22,7 @@ interface WindowItem {
   fabricGrade: FabricGrade; fullness: number; laborRate: number;
   drawDirection: string; fabricColor: string;
   sourcePhoto?: string; // base64 photo used for AI analysis
+  photos?: string[]; // additional reference photos
   aiAnalysis?: { confidence: number; suggestedWidth: number; suggestedHeight: number; windowType: string; recommendations: string[] };
 }
 
@@ -38,6 +41,7 @@ interface UpholsteryItem {
     generated_image?: string | null;
   };
   sourcePhoto?: string;
+  photos?: string[]; // additional reference photos
 }
 
 interface Room {
@@ -202,6 +206,7 @@ function buildInitialRooms(incoming?: any[]): Room[] {
       fullness: w.fullness || 2.5,
       laborRate: w.laborRate || 65,
       sourcePhoto: w.sourcePhoto || undefined,
+      photos: w.photos || [],
     })),
     upholstery: (r.upholstery || []).map((u: any) => ({
       id: genId(),
@@ -215,6 +220,7 @@ function buildInitialRooms(incoming?: any[]): Room[] {
       depth: u.depth || 36,
       height: u.height || 34,
       notes: u.notes || '',
+      photos: u.photos || [],
     })),
   }));
 }
@@ -338,6 +344,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     });
   };
   const [uploaded3DFile, setUploaded3DFile] = useState<{ name: string; url: string; size: string } | null>(null);
+  const [show3DViewer, setShow3DViewer] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const THREE_D_EXTENSIONS = ['.glb', '.gltf', '.obj', '.usdz', '.ply', '.fbx', '.stl', '.dae'];
@@ -520,20 +527,33 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
 
   const applyAnalysis = () => {
     if (!analysisResult || !activeRoomId) return;
+    // Helper: demote old sourcePhoto into photos[] when replacing with new one
+    const demotePhoto = (item: WindowItem | UpholsteryItem | undefined) => {
+      if (!item || !uploadedImage) return item?.photos || [];
+      const prev = item.photos || [];
+      if (item.sourcePhoto && item.sourcePhoto !== uploadedImage && !prev.includes(item.sourcePhoto)) {
+        return [...prev, item.sourcePhoto];
+      }
+      return prev;
+    };
     if (analysisResult.mode === 'upholstery' && activeItemId) {
+      const existing = rooms.find(r => r.id === activeRoomId)?.upholstery.find(u => u.id === activeItemId);
       updateUpholstery(activeRoomId, activeItemId, {
         furnitureType: analysisResult.furnitureType, fabricYards: analysisResult.fabricYardsPlain || 0,
         cushionCount: (analysisResult.cushions?.seat || 0) + (analysisResult.cushions?.back || 0),
         laborType: analysisResult.hasTufting ? 'tufted' : 'standard',
         width: analysisResult.dimensions?.width || 0, depth: analysisResult.dimensions?.depth || 0,
         height: analysisResult.dimensions?.height || 0, aiAnalysis: analysisResult,
-        sourcePhoto: uploadedImage || undefined,
+        sourcePhoto: uploadedImage || existing?.sourcePhoto,
+        photos: demotePhoto(existing),
       });
     } else if (analysisResult.mode === 'outline' && activeItemId) {
+      const existing = rooms.find(r => r.id === activeRoomId)?.windows.find(w => w.id === activeItemId);
       updateWindow(activeRoomId, activeItemId, {
         width: analysisResult.windowOpening?.width || 0, height: analysisResult.windowOpening?.height || 0,
         mountType: analysisResult.mounting?.mount_type === 'inside' ? 'inside' : analysisResult.mounting?.mount_type === 'ceiling' ? 'ceiling' : 'wall',
-        sourcePhoto: uploadedImage || undefined,
+        sourcePhoto: uploadedImage || existing?.sourcePhoto,
+        photos: demotePhoto(existing),
         aiAnalysis: {
           confidence: analysisResult.confidence,
           suggestedWidth: analysisResult.windowOpening?.width || 0,
@@ -547,9 +567,11 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
         },
       });
     } else if (analysisResult.mode === 'window' && activeItemId) {
+      const existing = rooms.find(r => r.id === activeRoomId)?.windows.find(w => w.id === activeItemId);
       updateWindow(activeRoomId, activeItemId, {
         width: analysisResult.suggestedWidth, height: analysisResult.suggestedHeight,
-        sourcePhoto: uploadedImage || undefined, aiAnalysis: analysisResult,
+        sourcePhoto: uploadedImage || existing?.sourcePhoto, photos: demotePhoto(existing),
+        aiAnalysis: analysisResult,
       });
     }
     // Collect outline/mockup results for PDF (include uploaded photo for embedding)
@@ -585,6 +607,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
       fabricGrade: (i === 0 ? 'Standard' : i === 1 ? 'Premium' : 'Luxe') as FabricGrade,
       fullness: 2.5, laborRate: 65,
       sourcePhoto: uploadedImage || undefined,
+      photos: [],
       aiAnalysis: {
         confidence: analysisResult.confidence || 80,
         suggestedWidth: winInfo.estimated_width || 48,
@@ -856,6 +879,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                 price: y.total,
                 yardage: { panels: y.panelsNeeded, perWindow: y.yardagePerWindow, waste: y.wasteYardage, total: y.totalYardage },
                 breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
+                sourcePhoto: w.sourcePhoto || null,
+                photos: w.photos || [],
                 aiAnalysis: w.aiAnalysis || null,
               };
             }),
@@ -865,6 +890,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
               width: u.width, depth: u.depth, height: u.height, notes: u.notes,
               price: calcUpholsteryPrice(u),
               sourcePhoto: u.sourcePhoto || null,
+              photos: u.photos || [],
               aiAnalysis: u.aiAnalysis || null,
             })),
           })),
@@ -951,6 +977,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                   price: y.total,
                   yardage: { panels: y.panelsNeeded, perWindow: y.yardagePerWindow, waste: y.wasteYardage, total: y.totalYardage },
                   breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
+                  sourcePhoto: w.sourcePhoto || null, photos: w.photos || [],
                   aiAnalysis: w.aiAnalysis || null,
                 };
               }),
@@ -958,7 +985,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                 name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards,
                 fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount,
                 width: u.width, depth: u.depth, height: u.height, notes: u.notes,
-                price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, aiAnalysis: u.aiAnalysis || null,
+                price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, photos: u.photos || [], aiAnalysis: u.aiAnalysis || null,
               })),
             })),
             ai_outlines: collectedOutlines.length > 0 ? collectedOutlines : null,
@@ -1037,7 +1064,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             motorization: w.motorization || 'None', notes: w.notes || '',
             fabricGrade: w.fabricGrade || 'B', fullness: w.fullness || 2.5, laborRate: w.laborRate || 45,
             drawDirection: w.drawDirection || 'center', fabricColor: w.fabricColor || '',
-            sourcePhoto: w.sourcePhoto || undefined, aiAnalysis: w.aiAnalysis || undefined,
+            sourcePhoto: w.sourcePhoto || undefined, photos: w.photos || [], aiAnalysis: w.aiAnalysis || undefined,
           })),
           upholstery: (r.upholstery || []).map((u: any, ui: number) => ({
             id: `u-${ri}-${ui}-${Date.now()}`, name: u.name || `Piece ${ui + 1}`,
@@ -1045,7 +1072,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             fabricType: u.fabricType || 'plain', laborType: u.laborType || 'standard',
             cushionCount: u.cushionCount || 3, width: u.width || 84, depth: u.depth || 36, height: u.height || 34,
             notes: u.notes || '', fabricGrade: (u.fabricGrade as FabricGrade) || 'B',
-            sourcePhoto: u.sourcePhoto || undefined, aiAnalysis: u.aiAnalysis || undefined,
+            sourcePhoto: u.sourcePhoto || undefined, photos: u.photos || [], aiAnalysis: u.aiAnalysis || undefined,
           })),
         }));
         setRooms(loadedRooms);
@@ -1078,9 +1105,9 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             name: r.name,
             windows: r.windows.map(w => {
               const y = calcYardage(w);
-              return { name: w.name, width: w.width, height: w.height, quantity: w.quantity, treatmentType: w.treatmentType, liningType: w.liningType, hardwareType: w.hardwareType, hardwareColor: w.hardwareColor || 'brushed-nickel', motorization: w.motorization, mountType: w.mountType, notes: w.notes, fabricGrade: w.fabricGrade, fullness: w.fullness, laborRate: w.laborRate, drawDirection: w.drawDirection, fabricColor: w.fabricColor, price: y.total, aiAnalysis: w.aiAnalysis || null };
+              return { name: w.name, width: w.width, height: w.height, quantity: w.quantity, treatmentType: w.treatmentType, liningType: w.liningType, hardwareType: w.hardwareType, hardwareColor: w.hardwareColor || 'brushed-nickel', motorization: w.motorization, mountType: w.mountType, notes: w.notes, fabricGrade: w.fabricGrade, fullness: w.fullness, laborRate: w.laborRate, drawDirection: w.drawDirection, fabricColor: w.fabricColor, price: y.total, sourcePhoto: w.sourcePhoto || null, photos: w.photos || [], aiAnalysis: w.aiAnalysis || null };
             }),
-            upholstery: r.upholstery.map(u => ({ name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards, fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount, width: u.width, depth: u.depth, height: u.height, notes: u.notes, price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, aiAnalysis: u.aiAnalysis || null })),
+            upholstery: r.upholstery.map(u => ({ name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards, fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount, width: u.width, depth: u.depth, height: u.height, notes: u.notes, price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, photos: u.photos || [], aiAnalysis: u.aiAnalysis || null })),
           })),
         };
         if (savedQuote) {
@@ -1109,8 +1136,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
           customer, projectName,
           rooms: rooms.map(r => ({
             ...r,
-            windows: r.windows.map(w => ({ ...w, sourcePhoto: undefined })), // skip large base64
-            upholstery: r.upholstery.map(u => ({ ...u, sourcePhoto: undefined })),
+            windows: r.windows.map(w => ({ ...w, sourcePhoto: undefined, photos: undefined })), // skip large base64
+            upholstery: r.upholstery.map(u => ({ ...u, sourcePhoto: undefined, photos: undefined })),
           })),
           savedQuote, tab,
         };
@@ -1145,6 +1172,15 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
 
   return (
     <div className="flex flex-col h-full">
+      {/* 3D Viewer Modal */}
+      {show3DViewer && uploaded3DFile && (
+        <Viewer3D
+          fileUrl={uploaded3DFile.url}
+          fileName={uploaded3DFile.name}
+          onClose={() => setShow3DViewer(false)}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="flex items-center gap-2">
@@ -1303,16 +1339,33 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                             <Palette className="w-3 h-3" /> Mockup
                           </button>
                         </div>
-                        {/* Source photo thumbnail */}
-                        {w.sourcePhoto && (
-                          <div className="mb-2 flex items-center gap-2">
-                            <button onClick={() => { setUploadedImage(w.sourcePhoto!); setShowPhotoModal(true); setPhotoMode('window'); setActiveRoomId(room.id); setActiveItemId(w.id); setAnalysisResult(null); }}
-                              className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] transition"
-                              style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
-                              <img src={w.sourcePhoto} alt="" className="w-8 h-6 rounded object-cover" />
-                              <ImageIcon className="w-3 h-3" style={{ color: '#8B5CF6' }} />
-                              <span style={{ color: '#8B5CF6' }}>View Photo</span>
+                        {/* Photo strip */}
+                        {(w.sourcePhoto || (w.photos?.length ?? 0) > 0) && (
+                          <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-1">
+                            {w.sourcePhoto && (
+                              <button onClick={() => { setUploadedImage(w.sourcePhoto!); setShowPhotoModal(true); setPhotoMode('window'); setActiveRoomId(room.id); setActiveItemId(w.id); setAnalysisResult(w.aiAnalysis || null); }}
+                                className="shrink-0 rounded-lg overflow-hidden transition hover:opacity-80"
+                                style={{ border: '2px solid rgba(139,92,246,0.4)' }}
+                                title="Primary photo (AI analyzed)">
+                                <img src={w.sourcePhoto} alt="" className="w-10 h-7 object-cover" />
+                              </button>
+                            )}
+                            {(w.photos || []).map((photo, idx) => (
+                              <button key={idx} onClick={() => { setUploadedImage(photo); setShowPhotoModal(true); setPhotoMode('window'); setActiveRoomId(room.id); setActiveItemId(w.id); setAnalysisResult(null); }}
+                                className="shrink-0 rounded-lg overflow-hidden transition hover:opacity-80"
+                                style={{ border: '1px solid var(--glass-border)' }}>
+                                <img src={photo} alt="" className="w-10 h-7 object-cover" />
+                              </button>
+                            ))}
+                            <button onClick={() => openPhotoModal(room.id, w.id, 'window')}
+                              className="shrink-0 w-10 h-7 rounded-lg flex items-center justify-center transition hover:opacity-80"
+                              style={{ border: '1px dashed rgba(139,92,246,0.3)' }}
+                              title="Add photo">
+                              <Plus className="w-3 h-3" style={{ color: '#8B5CF6' }} />
                             </button>
+                            <span className="shrink-0 text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                              {1 + (w.photos?.length || 0)} photo{(w.photos?.length || 0) > 0 ? 's' : ''}
+                            </span>
                           </div>
                         )}
 
@@ -1540,27 +1593,41 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                             <button onClick={() => deleteUpholstery(room.id, u.id)} className="p-1 rounded" style={{ color: 'var(--text-muted)' }}><Trash2 className="w-3 h-3" /></button>
                           </div>
                         </div>
-                        {/* Source photo + AI mockup thumbnails */}
-                        {(u.sourcePhoto || u.aiAnalysis?.generated_image) && (
-                          <div className="mb-2 flex items-center gap-2 flex-wrap">
+                        {/* Photo strip + AI mockup */}
+                        {(u.sourcePhoto || (u.photos?.length ?? 0) > 0 || u.aiAnalysis?.generated_image) && (
+                          <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-1">
                             {u.sourcePhoto && (
                               <button onClick={() => { setUploadedImage(u.sourcePhoto!); setShowPhotoModal(true); setPhotoMode('upholstery'); setActiveRoomId(room.id); setActiveItemId(u.id); setAnalysisResult(u.aiAnalysis || null); }}
-                                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] transition"
-                                style={{ background: 'rgba(212,175,55,0.08)', border: '1px solid rgba(212,175,55,0.2)' }}>
-                                <img src={u.sourcePhoto} alt="" className="w-8 h-6 rounded object-cover" />
-                                <ImageIcon className="w-3 h-3" style={{ color: 'var(--gold)' }} />
-                                <span style={{ color: 'var(--gold)' }}>Source Photo</span>
+                                className="shrink-0 rounded-lg overflow-hidden transition hover:opacity-80"
+                                style={{ border: '2px solid rgba(212,175,55,0.4)' }}
+                                title="Primary photo (AI analyzed)">
+                                <img src={u.sourcePhoto} alt="" className="w-10 h-7 object-cover" />
                               </button>
                             )}
+                            {(u.photos || []).map((photo, idx) => (
+                              <button key={idx} onClick={() => { setUploadedImage(photo); setShowPhotoModal(true); setPhotoMode('upholstery'); setActiveRoomId(room.id); setActiveItemId(u.id); setAnalysisResult(null); }}
+                                className="shrink-0 rounded-lg overflow-hidden transition hover:opacity-80"
+                                style={{ border: '1px solid var(--glass-border)' }}>
+                                <img src={photo} alt="" className="w-10 h-7 object-cover" />
+                              </button>
+                            ))}
                             {u.aiAnalysis?.generated_image && (
                               <a href={u.aiAnalysis.generated_image} target="_blank" rel="noreferrer"
-                                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] transition"
-                                style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.2)' }}>
-                                <img src={u.aiAnalysis.generated_image} alt="" className="w-8 h-6 rounded object-cover" />
-                                <Sparkles className="w-3 h-3" style={{ color: '#8B5CF6' }} />
-                                <span style={{ color: '#8B5CF6' }}>AI Mockup</span>
+                                className="shrink-0 rounded-lg overflow-hidden"
+                                style={{ border: '2px solid rgba(139,92,246,0.4)' }}
+                                title="AI Generated Mockup">
+                                <img src={u.aiAnalysis.generated_image} alt="" className="w-10 h-7 object-cover" />
                               </a>
                             )}
+                            <button onClick={() => openPhotoModal(room.id, u.id, 'upholstery')}
+                              className="shrink-0 w-10 h-7 rounded-lg flex items-center justify-center transition hover:opacity-80"
+                              style={{ border: '1px dashed rgba(212,175,55,0.3)' }}
+                              title="Add photo">
+                              <Plus className="w-3 h-3" style={{ color: 'var(--gold)' }} />
+                            </button>
+                            <span className="shrink-0 text-[9px]" style={{ color: 'var(--text-muted)' }}>
+                              {(u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0)} photo{((u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0)) !== 1 ? 's' : ''}
+                            </span>
                           </div>
                         )}
                         <div className="grid grid-cols-5 gap-1.5">
@@ -1697,7 +1764,11 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                     return (
                       <div key={w.id} className="py-0.5 pl-3">
                         <div className="flex justify-between text-[10px]">
-                          <span style={{ color: 'var(--text-muted)' }}>{w.name} — {w.treatmentType} {w.width}"×{w.height}" ×{w.quantity} · {w.fabricGrade}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {w.name} — {w.treatmentType} {w.width}"×{w.height}" ×{w.quantity} · {w.fabricGrade}
+                            {w.aiAnalysis && <span className="ml-1 px-1 py-0.5 rounded-full text-[8px]" style={{ background: 'rgba(139,92,246,0.12)', color: '#8B5CF6' }}>AI {w.aiAnalysis.confidence}%</span>}
+                            {(w.sourcePhoto || (w.photos?.length ?? 0) > 0) && <span className="ml-1 text-[8px]" style={{ color: 'var(--text-muted)' }}>{(w.sourcePhoto ? 1 : 0) + (w.photos?.length || 0)} pic</span>}
+                          </span>
                           <span className="font-mono" style={{ color: 'var(--text-muted)' }}>${y.total}</span>
                         </div>
                         <div className="flex gap-3 text-[9px] pl-2" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>
@@ -1711,7 +1782,11 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                   })}
                   {r.upholstery.map(u => (
                     <div key={u.id} className="flex justify-between py-0.5 pl-3 text-[10px]">
-                      <span style={{ color: 'var(--text-muted)' }}>{u.name} — {u.furnitureType} ({u.fabricYards}yd)</span>
+                      <span style={{ color: 'var(--text-muted)' }}>
+                        {u.name} — {u.furnitureType} ({u.fabricYards}yd)
+                        {u.aiAnalysis && <span className="ml-1 px-1 py-0.5 rounded-full text-[8px]" style={{ background: 'rgba(212,175,55,0.12)', color: 'var(--gold)' }}>AI {u.aiAnalysis.confidence}%</span>}
+                        {(u.sourcePhoto || (u.photos?.length ?? 0) > 0) && <span className="ml-1 text-[8px]" style={{ color: 'var(--text-muted)' }}>{(u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0)} pic</span>}
+                      </span>
                       <span className="font-mono" style={{ color: 'var(--text-muted)' }}>${calcUpholsteryPrice(u).toLocaleString()}</span>
                     </div>
                   ))}
@@ -1748,6 +1823,42 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                 <span className="font-mono" style={{ color: '#F59E0B' }}>${(totalMaterials + totalLabor + totalHardware + totalTax).toLocaleString()}</span>
               </div>
             </div>
+
+            {/* ── AI Analysis Summary ── */}
+            {(() => {
+              const allAI = rooms.flatMap(r => [
+                ...r.windows.filter(w => w.aiAnalysis).map(w => ({ confidence: w.aiAnalysis!.confidence })),
+                ...r.upholstery.filter(u => u.aiAnalysis).map(u => ({ confidence: u.aiAnalysis!.confidence })),
+              ]);
+              const photoCount = rooms.reduce((s, r) => s +
+                r.windows.reduce((ws, w) => ws + (w.sourcePhoto ? 1 : 0) + (w.photos?.length || 0), 0) +
+                r.upholstery.reduce((us, u) => us + (u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0), 0)
+              , 0);
+              if (allAI.length === 0 && photoCount === 0) return null;
+              const avgConf = allAI.length > 0 ? Math.round(allAI.reduce((s, a) => s + a.confidence, 0) / allAI.length) : 0;
+              return (
+                <div className="rounded-xl p-3" style={{ background: 'rgba(139,92,246,0.06)', border: '1px solid rgba(139,92,246,0.15)' }}>
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Brain className="w-3.5 h-3.5" style={{ color: '#8B5CF6' }} />
+                    <span className="text-xs font-semibold" style={{ color: '#8B5CF6' }}>AI Analysis Summary</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{avgConf > 0 ? `${avgConf}%` : '—'}</p>
+                      <p style={{ color: 'var(--text-muted)' }}>Avg Confidence</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{photoCount}</p>
+                      <p style={{ color: 'var(--text-muted)' }}>Photos</p>
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>{allAI.length}</p>
+                      <p style={{ color: 'var(--text-muted)' }}>AI Estimates</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── Summary Action Buttons: Save, PDF, Share ── */}
             <div className="flex gap-2 pt-2">
@@ -2248,11 +2359,11 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                       <p className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{uploaded3DFile.name}</p>
                       <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>3D Scan — {uploaded3DFile.size}</p>
                       <div className="flex gap-2 mt-1.5">
-                        <a href={uploaded3DFile.url} target="_blank" rel="noreferrer"
+                        <button onClick={() => setShow3DViewer(true)}
                           className="text-[9px] px-2 py-0.5 rounded-full font-medium"
                           style={{ background: 'rgba(139,92,246,0.15)', color: '#8B5CF6' }}>
                           Open 3D Viewer
-                        </a>
+                        </button>
                         <button onClick={() => {
                           if (navigator.share) { navigator.share({ title: uploaded3DFile.name, url: uploaded3DFile.url }).catch(() => {}); }
                           else { navigator.clipboard.writeText(uploaded3DFile.url).then(() => alert('Link copied!')); }
@@ -2522,6 +2633,23 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                 {uploadedImage && !analysisResult && !isAnalyzing && (
                   <>
                     <button onClick={() => setUploadedImage(null)} className="flex-1 py-2 rounded-lg text-[11px]" style={{ background: 'var(--raised)', color: 'var(--text-secondary)' }}>Retake</button>
+                    <button onClick={() => {
+                      if (!activeRoomId || !activeItemId || !uploadedImage) return;
+                      const room = rooms.find(r => r.id === activeRoomId);
+                      if (photoMode === 'upholstery') {
+                        const item = room?.upholstery.find(u => u.id === activeItemId);
+                        if (item?.sourcePhoto === uploadedImage || (item?.photos || []).includes(uploadedImage)) { closePhotoModal(); return; }
+                        updateUpholstery(activeRoomId, activeItemId, { photos: [...(item?.photos || []), uploadedImage] });
+                      } else {
+                        const item = room?.windows.find(w => w.id === activeItemId);
+                        if (item?.sourcePhoto === uploadedImage || (item?.photos || []).includes(uploadedImage)) { closePhotoModal(); return; }
+                        updateWindow(activeRoomId, activeItemId, { photos: [...(item?.photos || []), uploadedImage] });
+                      }
+                      closePhotoModal();
+                    }} className="py-2 px-3 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1"
+                      style={{ background: 'rgba(34,197,94,0.12)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}>
+                      <ImageIcon className="w-3 h-3" /> Save Photo
+                    </button>
                     <button onClick={analyzeImage} className="flex-1 py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1"
                       style={{ background:
                         photoMode === 'upholstery' ? 'var(--gold)' :

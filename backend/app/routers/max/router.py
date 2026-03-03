@@ -73,6 +73,12 @@ class TelegramMessageRequest(BaseModel):
     urgent: bool = False
 
 
+class PresentRequest(BaseModel):
+    topic: str
+    source_content: Optional[str] = None
+    image_count: int = 3
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks):
     is_safe, reason = check_input(request.message)
@@ -244,6 +250,23 @@ async def chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+@router.post("/present")
+async def generate_presentation(request: PresentRequest):
+    """Generate a structured presentation for a given topic."""
+    from app.services.max.presentation_builder import build_presentation
+
+    try:
+        result = await build_presentation(
+            topic=request.topic,
+            source_content=request.source_content,
+            image_count=request.image_count,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Presentation generation error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/models")

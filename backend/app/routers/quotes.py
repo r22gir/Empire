@@ -1396,6 +1396,64 @@ def _embed_external_images(quote: dict) -> dict:
     return quote
 
 
+# ── Category icons for line item breakdown ─────────────────────────
+_CAT_ICONS = {
+    "fabric": "🧵", "lining": "🪡", "labor": "⚙️",
+    "hardware": "🔩", "installation": "📐", "product": "📦", "upholstery": "🛋️",
+}
+_CAT_ORDER = ["fabric", "lining", "labor", "hardware", "installation", "product", "upholstery"]
+
+
+def _build_line_items_html(line_items: list) -> str:
+    """Build an itemized cost breakdown table grouped by room, with category labels."""
+    if not line_items or not any(item.get("category") for item in line_items):
+        return ""  # Old-style quotes without categories — skip
+
+    rooms_seen = []
+    rooms_items = {}
+    for item in line_items:
+        r = item.get("room", "General")
+        if r not in rooms_items:
+            rooms_seen.append(r)
+            rooms_items[r] = []
+        rooms_items[r].append(item)
+
+    html = """<div style="margin-top:20px;page-break-inside:avoid">
+    <h3 style="color:#1a1a2e;margin:0 0 10px;font-size:1em;text-transform:uppercase;letter-spacing:0.5px">
+      Itemized Cost Breakdown</h3>
+    <table><thead><tr>
+      <th style="width:5%"></th><th style="width:50%">Description</th>
+      <th style="width:10%;text-align:center">Qty</th>
+      <th style="width:17%;text-align:right">Unit Price</th>
+      <th style="width:18%;text-align:right">Amount</th>
+    </tr></thead><tbody>"""
+
+    for room_name in rooms_seen:
+        items = rooms_items[room_name]
+        room_total = sum(i["total"] for i in items)
+        html += f"""<tr><td colspan="5" style="padding:10px 8px 4px;font-weight:700;color:#1a1a2e;
+            border-bottom:2px solid #D4AF37;font-size:0.9em">{room_name}</td></tr>"""
+        for item in items:
+            cat = item.get("category", "")
+            icon = _CAT_ICONS.get(cat, "")
+            cat_label = f'<span style="color:#999;font-size:0.75em;text-transform:uppercase">{cat}</span>' if cat else ""
+            html += f"""<tr>
+                <td style="padding:5px 4px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:0.9em">{icon}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0">
+                    <span style="font-size:0.85em">{item['description']}</span><br>{cat_label}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:center;font-size:0.85em">{item['quantity']}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em">${item['unit_price']:,.2f}</td>
+                <td style="padding:5px 8px;border-bottom:1px solid #f0f0f0;text-align:right;font-size:0.85em;font-weight:600">${item['total']:,.2f}</td>
+            </tr>"""
+        html += f"""<tr><td colspan="4" style="padding:6px 8px;text-align:right;font-size:0.82em;color:#666">
+            Room Subtotal</td>
+            <td style="padding:6px 8px;text-align:right;font-weight:700;font-size:0.9em;border-bottom:2px solid #eee">
+            ${room_total:,.2f}</td></tr>"""
+
+    html += "</tbody></table></div>"
+    return html
+
+
 @router.post("/{quote_id}/pdf")
 async def generate_pdf(quote_id: str):
     """Generate PDF for a quote with room-level detail, drawings, and mockups."""
@@ -1558,6 +1616,9 @@ async def generate_pdf(quote_id: str):
 
 <!-- ═══ QUOTE DETAILS ═══ -->
 {body_html}
+
+<!-- ═══ ITEMIZED COST BREAKDOWN ═══ -->
+{_build_line_items_html(quote.get("line_items", []))}
 
 <!-- ═══ TOTALS ═══ -->
 {"" if quote.get("price_range_low") and quote.get("price_range_high") else ""}

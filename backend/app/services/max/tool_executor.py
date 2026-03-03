@@ -11,7 +11,7 @@ import logging
 import psutil
 import httpx
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from app.db.database import get_db, dict_row, dict_rows
 
@@ -235,6 +235,154 @@ def _open_quote_builder(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+# ── PRICING TABLES ────────────────────────────────────────────────
+
+# Fabric cost per yard by grade
+FABRIC_GRADES = {
+    "A": {"label": "Essential", "per_yard": 25},
+    "B": {"label": "Designer", "per_yard": 45},
+    "C": {"label": "Premium", "per_yard": 75},
+    "D": {"label": "Luxury", "per_yard": 120},
+}
+
+# Lining cost per yard
+LINING_RATES = {
+    "none": 0, "standard": 8, "blackout": 14, "thermal": 12, "interlining": 18,
+}
+
+# Treatment-specific: fullness multiplier, labor hours per panel, fabric_width (inches)
+TREATMENT_SPECS = {
+    "ripplefold":   {"fullness": 2.0, "labor_hrs": 2.0,  "fabric_width": 54},
+    "pinch-pleat":  {"fullness": 2.5, "labor_hrs": 2.5,  "fabric_width": 54},
+    "rod-pocket":   {"fullness": 2.0, "labor_hrs": 1.5,  "fabric_width": 54},
+    "grommet":      {"fullness": 1.8, "labor_hrs": 1.5,  "fabric_width": 54},
+    "roman-shade":  {"fullness": 1.0, "labor_hrs": 3.0,  "fabric_width": 54},
+    "roller-shade": {"fullness": 1.0, "labor_hrs": 0.5,  "fabric_width": 0},  # no fabric calc
+}
+
+# Hardware cost per linear foot by type
+HARDWARE_RATES = {
+    "standard-track": 8, "ripplefold-track": 18, "decorative-rod": 22,
+    "traverse-rod": 28, "motorized-track": 65, "cassette": 15,
+    "roller-mechanism": 12,
+}
+
+# Default hardware per treatment
+DEFAULT_HARDWARE = {
+    "ripplefold": "ripplefold-track", "pinch-pleat": "decorative-rod",
+    "rod-pocket": "decorative-rod", "grommet": "decorative-rod",
+    "roman-shade": "cassette", "roller-shade": "roller-mechanism",
+}
+
+LABOR_RATE = 50  # $/hr fabrication
+INSTALL_PER_WINDOW = 85  # flat rate per window install
+DC_TAX_RATE = 0.06
+
+
+def _calc_window_line_items(room_name: str, win: dict) -> list[dict]:
+    """Break one window into detailed line items: fabric, lining, hardware, labor, install."""
+    w = win.get("width", 48)
+    h = win.get("height", 60)
+    qty = win.get("quantity", 1)
+    treatment = win.get("treatmentType", "ripplefold")
+    fabric_grade = win.get("fabricGrade", "B")
+    lining = win.get("liningType", "standard")
+    hardware_type = win.get("hardwareType") or DEFAULT_HARDWARE.get(treatment, "standard-track")
+    motorized = win.get("motorization", "none") != "none"
+
+    specs = TREATMENT_SPECS.get(treatment, TREATMENT_SPECS["ripplefold"])
+    label = treatment.replace("-", " ").title()
+    items = []
+
+    # ── Fabric ──
+    if specs["fabric_width"] > 0:
+        # Widths of fabric needed = (window width × fullness) / fabric width, rounded up
+        fabric_w = specs["fabric_width"]
+        widths_needed = max(1, -(-int(w * specs["fullness"]) // fabric_w))  # ceil division
+        # Cut length = height + 16" allowance (hems + headers)
+        cut_length_in = h + 16
+        yards_per_width = cut_length_in / 36.0
+        total_yards = round(widths_needed * yards_per_width * qty, 1)
+        grade_info = FABRIC_GRADES.get(fabric_grade, FABRIC_GRADES["B"])
+        fabric_cost = round(total_yards * grade_info["per_yard"], 2)
+        items.append({
+            "room": room_name,
+            "description": f"Fabric — {grade_info['label']} Grade ({total_yards} yds) for {label}",
+            "quantity": qty,
+            "unit_price": round(fabric_cost / qty, 2),
+            "total": fabric_cost,
+            "category": "fabric",
+            "treatment_type": treatment, "width": w, "height": h,
+        })
+
+        # ── Lining ──
+        lining_rate = LINING_RATES.get(lining, LINING_RATES["standard"])
+        if lining_rate > 0:
+            lining_cost = round(total_yards * lining_rate, 2)
+            items.append({
+                "room": room_name,
+                "description": f"Lining — {lining.title()} ({total_yards} yds)",
+                "quantity": qty,
+                "unit_price": round(lining_cost / qty, 2),
+                "total": lining_cost,
+                "category": "lining",
+            })
+
+        # ── Labor / Fabrication ──
+        labor_cost = round(specs["labor_hrs"] * LABOR_RATE * widths_needed * qty, 2)
+        items.append({
+            "room": room_name,
+            "description": f"Fabrication — {label} ({widths_needed} width{'s' if widths_needed > 1 else ''} × {specs['labor_hrs']}hr)",
+            "quantity": qty,
+            "unit_price": round(labor_cost / qty, 2),
+            "total": labor_cost,
+            "category": "labor",
+        })
+    else:
+        # Roller shades — flat pricing by size
+        sqft = (w * h) / 144.0
+        shade_cost = round(sqft * 40 * qty, 2)
+        items.append({
+            "room": room_name,
+            "description": f"{label} — {w}\"W × {h}\"H",
+            "quantity": qty,
+            "unit_price": round(shade_cost / qty, 2),
+            "total": shade_cost,
+            "category": "product",
+            "treatment_type": treatment, "width": w, "height": h,
+        })
+
+    # ── Hardware ──
+    hw_rate = HARDWARE_RATES.get(hardware_type, 15)
+    if motorized:
+        hardware_type = "motorized-track"
+        hw_rate = HARDWARE_RATES["motorized-track"]
+    hw_feet = max(1, w / 12.0)
+    hw_cost = round(hw_rate * hw_feet * qty, 2)
+    hw_label = hardware_type.replace("-", " ").title()
+    items.append({
+        "room": room_name,
+        "description": f"Hardware — {hw_label} ({hw_feet:.1f} ft)",
+        "quantity": qty,
+        "unit_price": round(hw_cost / qty, 2),
+        "total": hw_cost,
+        "category": "hardware",
+    })
+
+    # ── Installation ──
+    install_cost = round(INSTALL_PER_WINDOW * qty, 2)
+    items.append({
+        "room": room_name,
+        "description": "Professional Installation",
+        "quantity": qty,
+        "unit_price": INSTALL_PER_WINDOW,
+        "total": install_cost,
+        "category": "installation",
+    })
+
+    return items
+
+
 # ── QUICK QUOTE TOOL ──────────────────────────────────────────────
 
 @tool("create_quick_quote")
@@ -250,35 +398,12 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     rooms = params.get("rooms", [])
     max_analysis = params.get("max_analysis", "")
 
-    # Build line items from rooms/windows
+    # Build detailed line items from rooms/windows
     line_items = []
     for room in rooms:
         room_name = room.get("name", "Room")
         for win in room.get("windows", []):
-            w = win.get("width", 48)
-            h = win.get("height", 60)
-            qty = win.get("quantity", 1)
-            treatment = win.get("treatmentType", "ripplefold")
-
-            # Simple pricing based on treatment type + dimensions
-            sqft = (w * h) / 144.0
-            base_rates = {
-                "ripplefold": 45, "pinch-pleat": 55, "rod-pocket": 30,
-                "grommet": 35, "roman-shade": 50, "roller-shade": 40,
-            }
-            rate = base_rates.get(treatment, 45)
-            price = round(sqft * rate * qty, 2)
-
-            line_items.append({
-                "room": room_name,
-                "description": f"{treatment.replace('-', ' ').title()} — {w}\"W × {h}\"H",
-                "quantity": qty,
-                "unit_price": round(price / qty, 2) if qty else price,
-                "total": price,
-                "treatment_type": treatment,
-                "width": w,
-                "height": h,
-            })
+            line_items.extend(_calc_window_line_items(room_name, win))
         for uph in room.get("upholstery", []):
             desc = uph.get("description", "Upholstery item")
             price = uph.get("price", 250)
@@ -288,9 +413,14 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "quantity": 1,
                 "unit_price": price,
                 "total": price,
+                "category": "upholstery",
             })
 
-    total = sum(item["total"] for item in line_items)
+    subtotal = round(sum(item["total"] for item in line_items), 2)
+    tax_amount = round(subtotal * DC_TAX_RATE, 2)
+    total = round(subtotal + tax_amount, 2)
+    deposit_amount = round(subtotal * 0.50, 2)
+    expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
 
     quote_data = {
         "id": quote_id,
@@ -304,15 +434,20 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "line_items": line_items,
         "ai_outlines": params.get("ai_outlines", []),
         "ai_mockups": params.get("ai_mockups", []),
-        "subtotal": total,
-        "tax_rate": 0,
-        "tax": 0,
+        "subtotal": subtotal,
+        "tax_rate": DC_TAX_RATE,
+        "tax_amount": tax_amount,
         "total": total,
+        "deposit": {"deposit_percent": 50, "deposit_amount": deposit_amount},
         "status": "draft",
         "max_analysis": max_analysis,
         "created_at": now,
         "updated_at": now,
+        "expires_at": expires_at,
         "source": "max_quick_quote",
+        "terms": "50% deposit required to begin fabrication. Balance due upon installation. All sales final once fabric is cut. Estimate valid for 30 days.",
+        "valid_days": 30,
+        "business_name": "Empire",
     }
 
     # Generate AI mockup images for each room's windows
@@ -777,27 +912,116 @@ def _search_images(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="search_images", success=False, error="UNSPLASH_ACCESS_KEY not configured")
 
     try:
+        headers = {"Authorization": f"Client-ID {unsplash_key}"}
         resp = httpx.get(
             "https://api.unsplash.com/search/photos",
             params={"query": query, "per_page": 3, "orientation": "landscape"},
-            headers={"Authorization": f"Client-ID {unsplash_key}"},
+            headers=headers,
             timeout=10,
         )
         if resp.status_code != 200:
             return ToolResult(tool="search_images", success=False, error=f"Unsplash API error: {resp.status_code}")
 
         photos = resp.json().get("results", [])
-        images = [
-            {
+        images = []
+        for p in photos[:3]:
+            # Trigger download event (Unsplash API guideline)
+            download_url = p.get("links", {}).get("download_location")
+            if download_url:
+                try:
+                    httpx.get(download_url, headers=headers, timeout=5)
+                except Exception:
+                    pass
+            images.append({
                 "url": p["urls"]["regular"],
                 "alt": p.get("alt_description", query),
                 "credit": p["user"]["name"],
-            }
-            for p in photos[:3]
-        ]
+                "credit_url": p["user"]["links"]["html"] + "?utm_source=empirebox&utm_medium=referral",
+                "unsplash_url": p["links"]["html"] + "?utm_source=empirebox&utm_medium=referral",
+            })
         return ToolResult(tool="search_images", success=True, result={"images": images, "query": query})
     except Exception as e:
         return ToolResult(tool="search_images", success=False, error=f"Image search failed: {e}")
+
+
+# ── WEB SEARCH TOOL ───────────────────────────────────────────────
+
+@tool("web_search")
+def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Search the web via DuckDuckGo. Returns titles, URLs, and snippets."""
+    query = params.get("query", "").strip()
+    if not query:
+        return ToolResult(tool="web_search", success=False, error="Query is required")
+
+    num_results = min(int(params.get("num_results", 5)), 10)
+
+    try:
+        resp = httpx.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            },
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return ToolResult(tool="web_search", success=False, error=f"Search failed: HTTP {resp.status_code}")
+
+        results = _parse_ddg_results(resp.text, num_results)
+        return ToolResult(tool="web_search", success=True, result={
+            "query": query, "results": results, "count": len(results), "source": "DuckDuckGo",
+        })
+    except Exception as e:
+        return ToolResult(tool="web_search", success=False, error=f"Web search failed: {e}")
+
+
+def _parse_ddg_results(html: str, max_results: int) -> list:
+    """Parse DuckDuckGo HTML search results into structured data."""
+    from urllib.parse import unquote
+    results = []
+    # Find result blocks
+    blocks = re.findall(r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>', html, re.DOTALL)
+    snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
+
+    for i, (url, title_html) in enumerate(blocks[:max_results]):
+        # Unwrap DDG redirect URL
+        actual_match = re.search(r'uddg=([^&]+)', url)
+        actual_url = unquote(actual_match.group(1)) if actual_match else url
+        title = re.sub(r'<[^>]+>', '', title_html).strip()
+        snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+        if title and actual_url:
+            results.append({"title": title, "url": actual_url, "snippet": snippet})
+    return results
+
+
+# ── PHOTO-TO-QUOTE PIPELINE TOOL ──────────────────────────────────
+
+@tool("photo_to_quote")
+def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Create a quote from photo analysis and send the PDF via Telegram in one step."""
+    # Step 1: Create the quote (reuses create_quick_quote logic)
+    quote_result = _create_quick_quote(params, desk)
+    if not quote_result.success:
+        return ToolResult(tool="photo_to_quote", success=False,
+                         error=f"Quote creation failed: {quote_result.error}")
+
+    quote_id = quote_result.result.get("quote_id", "")
+    quote_number = quote_result.result.get("quote_number", "")
+
+    # Step 2: Send via Telegram (reuses send_quote_telegram logic)
+    send_result = _send_quote_telegram({"quote_id": quote_id}, desk)
+
+    return ToolResult(tool="photo_to_quote", success=True, result={
+        "quote_id": quote_id,
+        "quote_number": quote_number,
+        "customer_name": quote_result.result.get("customer_name"),
+        "total": quote_result.result.get("total"),
+        "items_count": quote_result.result.get("items_count"),
+        "telegram_sent": send_result.success,
+        "telegram_error": send_result.error if not send_result.success else None,
+    })
 
 
 # ── DESK DELEGATION TOOL ───────────────────────────────────────────
@@ -886,9 +1110,16 @@ To call a tool, include a tool block in your response:
   Use this after creating/saving a quote to email the PDF directly to a client or the founder.
 
 ### Research Tools
+- **web_search** — Search the web for current information, prices, suppliers, tutorials, or any topic. Returns titles, URLs, and snippets from DuckDuckGo.
+  `{"tool": "web_search", "query": "best fabric suppliers for drapery wholesale", "num_results": 5}`
+  Use for: research, current pricing, supplier info, industry news, competitor analysis, or any factual question needing live data.
+  After getting results, cite sources with markdown links: [Title](url)
 - **search_images** — Search for relevant images (Unsplash) to enhance your response. Embed results in markdown.
   `{"tool": "search_images", "query": "modern ripplefold drapery"}`
   After getting results, use: `![description](url)` to embed images in your response.
+- **photo_to_quote** — Create a quote from photo analysis and send the PDF via Telegram in one step. Use this when analyzing a photo of windows/furniture that needs a quote.
+  `{"tool": "photo_to_quote", "customer_name": "Customer", "rooms": [{"name": "Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold"}]}], "max_analysis": "Professional analysis..."}`
+  This automatically creates the quote, generates the PDF, and sends it via Telegram.
 
 ### System Tools
 - **get_system_stats** — Real CPU, RAM, disk, temperature
@@ -901,4 +1132,6 @@ To call a tool, include a tool block in your response:
 IMPORTANT: Always use tools for factual data. NEVER fabricate task lists, weather, system stats, quotes, or customer info. If a tool returns empty results, say so honestly.
 When asked to send a quote PDF to Telegram, use send_quote_telegram with the quote_id.
 When discussing visual topics (fabrics, designs, installations), use search_images to find relevant reference photos.
+When you need current info, pricing, or research — use web_search. Do NOT say "I can't access the web."
+When analyzing a photo of windows or furniture, use photo_to_quote to create and deliver the estimate automatically.
 """

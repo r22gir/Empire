@@ -57,7 +57,7 @@ class AIRouter:
             {"id": "grok", "name": "xAI Grok", "available": bool(self.xai_key), "primary": self.primary_model == AIModel.GROK, "type": "cloud"},
             {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud"},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
-            {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": True, "primary": self.primary_model == AIModel.OLLAMA, "type": "local"},
+            {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "type": "local"},
         ]
 
     AUDIO_EXTS = {'.m4a', '.mp3', '.wav', '.ogg', '.flac', '.wma', '.aac'}

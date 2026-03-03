@@ -10,9 +10,10 @@ interface Props {
   backendOnline: boolean;
   selectedModel: string;
   models: AIModel[];
+  onPresent?: (content: string) => void;
 }
 
-export default function MaxSection({ isStreaming, streamingContent, messages, backendOnline, selectedModel, models }: Props) {
+export default function MaxSection({ isStreaming, streamingContent, messages, backendOnline, selectedModel, models, onPresent }: Props) {
   const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
   const currentModel = models.find(m => m.id === selectedModel);
   const modelLabel = currentModel?.name || selectedModel;
@@ -70,7 +71,7 @@ export default function MaxSection({ isStreaming, streamingContent, messages, ba
       </div>
 
       {/* Response Canvas — fills all available space */}
-      <ResponseCanvas content={displayContent} isStreaming={isStreaming} />
+      <ResponseCanvas content={displayContent} isStreaming={isStreaming} onPresent={onPresent} />
     </div>
   );
 }

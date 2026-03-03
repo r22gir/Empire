@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { FolderOpen, Paperclip, Send, Square, Mic, Sparkles, BarChart3, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
+import { FolderOpen, Paperclip, Send, Square, Mic, Sparkles, BarChart3, ChevronUp, ChevronDown, GripVertical, Presentation } from 'lucide-react';
 import { AIModel } from '@/lib/types';
 import VoiceAgent from '../max/VoiceAgent';
 import ModelSelector from '../max/ModelSelector';
@@ -26,13 +26,14 @@ interface Props {
   suggestedInput?: string;
   onClearSuggestion?: () => void;
   onToggleStats?: () => void;
+  onPresent?: (topic: string) => void;
 }
 
 export default function BottomBar({
   onSend, isStreaming, onStop, onOpenBrowser, onFileUpload, uploading,
   pastedPreview, onUploadPasted, onCancelPasted, selectedImage, onClearImage,
   backendOnline, selectedModel, models, onModelChange,
-  suggestedInput, onClearSuggestion, onToggleStats,
+  suggestedInput, onClearSuggestion, onToggleStats, onPresent,
 }: Props) {
   const [input, setInput] = useState('');
   const [showVoice, setShowVoice] = useState(false);
@@ -186,6 +187,18 @@ export default function BottomBar({
                     title="Toggle stats"
                   >
                     <BarChart3 className="w-5 h-5" />
+                  </button>
+                )}
+                {onPresent && (
+                  <button
+                    onClick={() => { if (input.trim()) onPresent(input.trim()); }}
+                    className="w-11 h-11 rounded-lg flex items-center justify-center transition"
+                    style={{ color: input.trim() ? 'var(--gold)' : 'var(--text-muted)', opacity: input.trim() ? 1 : 0.4 }}
+                    onMouseEnter={e => { if (input.trim()) { e.currentTarget.style.background = 'rgba(212,175,55,0.12)'; } }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    title={input.trim() ? 'Present this topic' : 'Type a topic to present'}
+                  >
+                    <Presentation className="w-5 h-5" />
                   </button>
                 )}
               </div>

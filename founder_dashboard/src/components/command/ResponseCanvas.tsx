@@ -2,7 +2,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check, ChevronUp, ChevronDown, ExternalLink } from 'lucide-react';
+import { Copy, Check, ChevronUp, ChevronDown, ExternalLink, Presentation } from 'lucide-react';
 
 // Canvas sub-components
 import { analyzeContent, shouldReanalyze, type AnalysisResult, type CanvasMode } from './canvas/ContentAnalyzer';
@@ -159,9 +159,10 @@ function MarkdownContent({ content }: { content: string }) {
 interface Props {
   content: string;
   isStreaming: boolean;
+  onPresent?: (content: string) => void;
 }
 
-export default function ResponseCanvas({ content, isStreaming }: Props) {
+export default function ResponseCanvas({ content, isStreaming, onPresent }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
   const userScrolled = useRef(false);
@@ -356,6 +357,22 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
                 <div className="flex items-center gap-2 mb-3">
                   <AvatarDisplay state={avatarState} size="sm" />
                   <ModeBadge mode={mode} />
+                  {!isStreaming && content.length > 200 && onPresent && (
+                    <button
+                      onClick={() => onPresent(content)}
+                      className="text-[8px] px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1 transition"
+                      style={{
+                        background: 'rgba(212,175,55,0.1)',
+                        color: 'var(--gold)',
+                        border: '1px solid rgba(212,175,55,0.25)',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,175,55,0.2)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(212,175,55,0.1)'; }}
+                      title="Open as presentation"
+                    >
+                      <Presentation className="w-3 h-3" /> Present
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -398,6 +415,26 @@ export default function ResponseCanvas({ content, isStreaming }: Props) {
                   {/* Main markdown text */}
                   <MarkdownContent content={content} />
                 </>
+              )}
+
+              {/* Present button for avatar mode (no special canvas) */}
+              {mode === 'avatar' && !isStreaming && content.length > 200 && onPresent && (
+                <div className="flex justify-end mt-2">
+                  <button
+                    onClick={() => onPresent(content)}
+                    className="text-[9px] px-2 py-1 rounded-full font-medium flex items-center gap-1 transition"
+                    style={{
+                      background: 'rgba(212,175,55,0.08)',
+                      color: 'var(--gold)',
+                      border: '1px solid rgba(212,175,55,0.2)',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = 'rgba(212,175,55,0.18)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'rgba(212,175,55,0.08)'; }}
+                    title="Open as presentation"
+                  >
+                    <Presentation className="w-3 h-3" /> Present
+                  </button>
+                </div>
               )}
 
               {/* Streaming cursor */}

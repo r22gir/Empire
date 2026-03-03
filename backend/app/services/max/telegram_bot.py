@@ -511,12 +511,46 @@ class TelegramBot:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 import shutil
                 shutil.move(str(photo_path), str(dest))
-                caption = update.message.caption or "Describe this image in detail."
+                caption = update.message.caption or (
+                    "Analyze this image. If it shows a window, window treatment, curtain, drape, "
+                    "or furniture that might need upholstery or a window treatment quote, "
+                    "estimate the dimensions, identify the treatment type, and use the photo_to_quote tool "
+                    "to create a quote and send the PDF. "
+                    "If it's not related to windows or furniture, just describe what you see."
+                )
                 photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-                html_response, plain_text, _ = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id)
+
+                # Validate image file (basic magic bytes check)
+                try:
+                    with open(dest, 'rb') as img_f:
+                        header = img_f.read(8)
+                    valid_sigs = [b'\xff\xd8\xff', b'\x89PNG', b'RIFF', b'GIF8']
+                    if not any(header.startswith(sig) for sig in valid_sigs):
+                        await update.message.reply_text("⚠️ Invalid image file. Upload rejected.")
+                        dest.unlink(missing_ok=True)
+                        return
+                except Exception:
+                    pass  # If check fails, proceed anyway
+
+                html_response, plain_text, tool_results = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id)
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
                 await update.message.reply_html(html_response)
+
+                # Send any documents/files produced by tool execution
+                for tr in tool_results:
+                    if tr.get("success") and tr.get("result"):
+                        res = tr["result"]
+                        file_path = res.get("file_path") or res.get("pdf_path")
+                        if file_path and os.path.exists(file_path):
+                            doc_caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
+                            await self.send_document(file_path, caption=doc_caption, chat_id=photo_chat_id)
+                        image_url = res.get("image_url") or res.get("url")
+                        if image_url and isinstance(image_url, str) and image_url.startswith("http"):
+                            try:
+                                await update.message.reply_photo(photo=image_url, caption=res.get("caption", ""))
+                            except Exception as img_err:
+                                logger.warning(f"Failed to send image via Telegram: {img_err}")
 
                 # Send voice reply (TTS) — every response gets a voice note
                 await self._send_voice_reply(update, plain_text)
