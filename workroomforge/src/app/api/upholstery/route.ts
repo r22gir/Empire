@@ -84,7 +84,16 @@ Additional services:
 - Arm caps or headrest covers: $35-60
 - Pickup & delivery (DC metro): $75-150
 
-STEP 5 — GENERATE QUESTIONS the estimator should ask the customer before finalizing the quote.
+STEP 5 — IDENTIFY ALL FURNITURE IN THE SPACE:
+Look at the ENTIRE room/space. List every upholstered piece visible (not just the main one). For each, provide type, condition assessment, and reupholstery recommendation.
+
+STEP 6 — PROPOSE RENOVATION OPTIONS for the space:
+Based on what you see, propose 2-3 renovation tiers:
+- "Refresh": minimal work — reupholster the main piece only, keep everything else
+- "Update": reupholster 2-3 key pieces, add new throw pillows, update fabric palette
+- "Full Renovation": reupholster all pieces, new foam throughout, coordinated fabric scheme, add accent pieces
+
+STEP 7 — GENERATE QUESTIONS the estimator should ask the customer before finalizing the quote.
 
 Return JSON only — no markdown, no explanation outside the JSON:
 {
@@ -106,7 +115,13 @@ Return JSON only — no markdown, no explanation outside the JSON:
   "new_foam_recommended": boolean,
   "confidence": number,
   "notes": string,
-  "questions": string[]
+  "questions": string[],
+  "all_furniture": [{"type": string, "condition": string, "recommendation": string, "estimated_cost_low": number, "estimated_cost_high": number}],
+  "renovation_proposals": [
+    {"tier": "Refresh", "description": string, "items": string[], "estimated_total_low": number, "estimated_total_high": number},
+    {"tier": "Update", "description": string, "items": string[], "estimated_total_low": number, "estimated_total_high": number},
+    {"tier": "Full Renovation", "description": string, "items": string[], "estimated_total_low": number, "estimated_total_high": number}
+  ]
 }`;
 
 export async function POST(req: NextRequest) {

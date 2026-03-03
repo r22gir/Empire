@@ -546,6 +546,17 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     finally { setIsAnalyzing(false); }
   };
 
+  // Auto-analyze when a NEW photo is uploaded (not reused from existing item)
+  const prevImageRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (uploadedImage && uploadedImage !== prevImageRef.current && showPhotoModal && !isAnalyzing && !analysisResult) {
+      prevImageRef.current = uploadedImage;
+      // Small delay to let UI settle, then auto-analyze
+      const timer = setTimeout(() => analyzeImage(), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [uploadedImage, showPhotoModal]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const applyAnalysis = () => {
     if (!analysisResult || !activeRoomId) return;
     // Helper: demote old sourcePhoto into photos[] when replacing with new one
