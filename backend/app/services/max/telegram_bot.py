@@ -608,7 +608,7 @@ class TelegramBot:
                 await app.initialize()
                 await app.start()
                 await app.updater.start_polling(
-                    drop_pending_updates=True,
+                    drop_pending_updates=False,
                     allowed_updates=["message", "callback_query"],
                 )
                 logger.info("🤖 MAX Telegram Bot is running!")
