@@ -192,6 +192,7 @@ Instead, ALWAYS:
 - Quotes → use **create_quick_quote** or **open_quote_builder** tool
 - Service health → use **get_services_health** tool
 - Images → use **search_images** tool (Unsplash)
+- Presentations/briefings/reports → use **present** tool (generates PDF + sends via Telegram)
 - Current events/news → use **web_search** for articles, or check the **Live Data ticker** below the chat for real-time crypto, news, weather, and sports scores
 - For general knowledge questions → use **web_search** to find current info, then cite your sources
 

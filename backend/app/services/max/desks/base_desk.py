@@ -140,6 +140,42 @@ class BaseDesk(ABC):
         """
         ...
 
+    async def ai_execute_task(self, task: DeskTask) -> str:
+        """Use AI (Grok/Claude) to execute a task with the desk's system prompt.
+
+        Returns the AI-generated result text. Desks can call this from handle_task()
+        or it can be used by the standalone task worker script.
+        """
+        from app.services.max.ai_router import ai_router, AIMessage
+
+        # Load desk-specific system prompt
+        try:
+            from app.services.max.desk_prompt import get_desk_system_prompt
+            system_prompt = get_desk_system_prompt(self.desk_id)
+        except Exception:
+            system_prompt = (
+                f"You are MAX running the {self.desk_name} desk for Empire, "
+                f"a custom drapery and upholstery business in Washington DC. "
+                f"Complete the assigned task thoroughly and provide actionable results."
+            )
+
+        user_message = (
+            f"Complete this research task for the {self.desk_name} desk.\n\n"
+            f"**Task:** {task.title}\n\n"
+            f"**Details:** {task.description}\n\n"
+            f"**Priority:** {task.priority.value if hasattr(task.priority, 'value') else task.priority}\n\n"
+            f"Provide thorough, specific, actionable results. "
+            f"Include real data, numbers, and recommendations where applicable. "
+            f"Format your response with clear headings and bullet points."
+        )
+
+        response = await ai_router.chat(
+            messages=[AIMessage(role="user", content=user_message)],
+            desk=self.desk_id,
+            system_prompt=system_prompt,
+        )
+        return response.content
+
     async def report_status(self) -> dict:
         """Return desk status summary."""
         return {

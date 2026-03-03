@@ -1054,6 +1054,182 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="run_desk_task", success=False, error=f"Desk task failed: {e}")
 
 
+# ── PRESENTATION PDF + TELEGRAM TOOL ──────────────────────────────
+
+PRESENTATIONS_DIR = os.path.expanduser("~/Empire/data/presentations")
+
+
+def _render_presentation_pdf(data: dict) -> str:
+    """Render presentation data as a professional PDF. Returns the file path."""
+    import re as _re
+    from weasyprint import HTML as WeasyHTML
+
+    title = data.get("title", "Presentation")
+    subtitle = data.get("subtitle", "")
+    sections = data.get("sections", [])
+    charts = data.get("charts", [])
+    sources = data.get("sources", [])
+    images = data.get("images", [])
+    model_used = data.get("model_used", "MAX AI")
+    generated_at = data.get("generated_at", datetime.utcnow().isoformat())
+
+    # Build sections HTML
+    sections_html = ""
+    for section in sections:
+        heading = section.get("heading", "")
+        content = section.get("content", "").replace("\n", "<br>")
+        stype = section.get("type", "text")
+
+        if stype == "highlight":
+            sections_html += f"""<div style="margin:16px 0;padding:16px 20px;background:linear-gradient(135deg,#fffcf0,#f8f5ff);
+                border-left:4px solid #D4AF37;border-radius:0 8px 8px 0">
+                <h2 style="color:#D4AF37;margin:0 0 8px;font-size:1.05em">{heading}</h2>
+                <div style="font-size:0.88em;color:#333;line-height:1.6">{content}</div></div>"""
+        elif stype == "bullets":
+            # Convert - items to HTML list
+            items = [line.strip().lstrip("- ") for line in section.get("content", "").split("\n") if line.strip()]
+            li_html = "".join(f"<li style='margin:3px 0;font-size:0.88em;color:#333'>{item}</li>" for item in items)
+            sections_html += f"""<div style="margin:16px 0">
+                <h2 style="color:#8B5CF6;margin:0 0 8px;font-size:1.05em">{heading}</h2>
+                <ul style="padding-left:20px;margin:0">{li_html}</ul></div>"""
+        else:
+            sections_html += f"""<div style="margin:16px 0">
+                <h2 style="color:#1a1a2e;margin:0 0 8px;font-size:1.05em">{heading}</h2>
+                <div style="font-size:0.88em;color:#333;line-height:1.6">{content}</div></div>"""
+
+    # Build charts as HTML tables
+    charts_html = ""
+    for chart in charts:
+        headers = chart.get("headers", [])
+        rows = chart.get("rows", [])
+        if headers and rows:
+            th = "".join(f"<th style='padding:6px 10px;background:#1a1a2e;color:#D4AF37;font-size:0.78em;text-transform:uppercase'>{h}</th>" for h in headers)
+            tr = ""
+            for row in rows:
+                cells = "".join(f"<td style='padding:6px 10px;border-bottom:1px solid #eee;font-size:0.85em'>{c}</td>" for c in row)
+                tr += f"<tr>{cells}</tr>"
+            charts_html += f"""<div style="margin:16px 0">
+                <h3 style="color:#D4AF37;font-size:0.9em;margin:0 0 6px">{chart.get('title', 'Data')}</h3>
+                <table style="width:100%;border-collapse:collapse"><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table></div>"""
+
+    # Build images HTML (embedded from Unsplash URLs)
+    images_html = ""
+    if images:
+        imgs = ""
+        for img in images[:3]:
+            credit = img.get("credit", "")
+            imgs += f"""<div style="flex:1;min-width:180px">
+                <img src="{img['url']}" style="width:100%;height:140px;object-fit:cover;border-radius:6px" />
+                <p style="font-size:0.6em;color:#999;margin:2px 0">Photo by {credit} on Unsplash</p></div>"""
+        images_html = f'<div style="display:flex;gap:12px;margin:16px 0">{imgs}</div>'
+
+    # Build sources
+    sources_html = ""
+    if sources:
+        items = "".join(
+            f"<p style='margin:3px 0;font-size:0.8em;color:#555'>{i+1}. <a href=\"{s.get('url','#')}\" style=\"color:#8B5CF6\">{s.get('title','Source')}</a> — {s.get('description','')}</p>"
+            for i, s in enumerate(sources)
+        )
+        sources_html = f"""<div style="margin:20px 0;padding:12px 16px;background:#fafafa;border-radius:8px;border:1px solid #eee">
+            <p style="margin:0 0 6px;font-size:0.72em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Sources</p>
+            {items}</div>"""
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+  @page {{ size: letter; margin: 0.6in 0.7in; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12.5px; line-height: 1.5; }}
+</style></head><body>
+
+<!-- Header -->
+<div style="border-bottom:3px solid #D4AF37;padding-bottom:16px;margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <h1 style="margin:0;color:#1a1a2e;font-size:24px;letter-spacing:-0.5px">{title}</h1>
+      <p style="margin:4px 0 0;color:#888;font-size:0.9em">{subtitle}</p>
+    </div>
+    <div style="text-align:right;padding-top:4px">
+      <div style="background:linear-gradient(135deg,#D4AF37,#8B5CF6);color:white;padding:6px 14px;border-radius:6px;font-weight:700;font-size:0.85em;letter-spacing:1px;display:inline-block">PRESENTATION</div>
+      <p style="margin:4px 0 0;color:#999;font-size:0.75em">{generated_at[:10]}</p>
+    </div>
+  </div>
+</div>
+
+{sections_html}
+{charts_html}
+{images_html}
+{sources_html}
+
+<!-- Footer -->
+<div style="margin-top:28px;padding-top:12px;border-top:1px solid #eee;text-align:center">
+  <p style="margin:0;color:#aaa;font-size:0.72em">Empire &middot; Generated by MAX AI ({model_used})</p>
+  <p style="margin:2px 0 0;color:#ccc;font-size:0.65em">{generated_at[:10]}</p>
+</div>
+</body></html>"""
+
+    pdf_bytes = WeasyHTML(string=html).write_pdf()
+
+    os.makedirs(PRESENTATIONS_DIR, exist_ok=True)
+    slug = _re.sub(r'[^a-z0-9]+', '-', title.lower())[:40].strip('-')
+    ts = datetime.utcnow().strftime("%y%m%d_%H%M")
+    filename = f"{ts}_{slug}.pdf"
+    pdf_path = os.path.join(PRESENTATIONS_DIR, filename)
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+
+    return pdf_path
+
+
+@tool("present")
+def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate a presentation on a topic, render as PDF, and send via Telegram."""
+    topic = params.get("topic", "").strip()
+    if not topic:
+        return ToolResult(tool="present", success=False, error="Topic is required")
+
+    source_content = params.get("source_content")
+
+    # Step 1: Generate presentation via AI
+    try:
+        from app.services.max.presentation_builder import build_presentation
+        data = _run_async(build_presentation(topic, source_content))
+    except Exception as e:
+        return ToolResult(tool="present", success=False, error=f"Presentation generation failed: {e}")
+
+    # Step 2: Render PDF
+    try:
+        pdf_path = _render_presentation_pdf(data)
+    except Exception as e:
+        return ToolResult(tool="present", success=False, error=f"PDF rendering failed: {e}")
+
+    # Step 3: Send via Telegram
+    telegram_sent = False
+    try:
+        from app.services.max.telegram_bot import TelegramBot
+        bot = TelegramBot()
+        if bot.is_configured:
+            section_count = len(data.get("sections", []))
+            caption = (
+                f"\U0001f4ca <b>{data.get('title', topic)}</b>\n"
+                f"\U0001f4dd {section_count} sections &middot; {data.get('model_used', 'AI')}\n"
+                f"\U0001f4c5 {datetime.utcnow().strftime('%b %d, %Y')}"
+            )
+            telegram_sent = _run_async(bot.send_document(pdf_path, caption=caption))
+    except Exception as e:
+        logger.warning(f"Telegram send failed for presentation: {e}")
+
+    return ToolResult(tool="present", success=True, result={
+        "title": data.get("title", topic),
+        "subtitle": data.get("subtitle", ""),
+        "sections": len(data.get("sections", [])),
+        "charts": len(data.get("charts", [])),
+        "sources": len(data.get("sources", [])),
+        "model_used": data.get("model_used", "unknown"),
+        "pdf_path": pdf_path,
+        "telegram_sent": telegram_sent,
+    })
+
+
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
 TOOLS_DOC = """## Available Tools
@@ -1134,4 +1310,11 @@ When asked to send a quote PDF to Telegram, use send_quote_telegram with the quo
 When discussing visual topics (fabrics, designs, installations), use search_images to find relevant reference photos.
 When you need current info, pricing, or research — use web_search. Do NOT say "I can't access the web."
 When analyzing a photo of windows or furniture, use photo_to_quote to create and deliver the estimate automatically.
+When asked to present, brief, or report on a topic — use the present tool to generate a PDF and send via Telegram.
+
+### Presentation Tools
+- **present** — Generate a professional presentation/report on any topic and send PDF via Telegram. Use for briefings, research reports, market analysis, or any topic the founder wants presented.
+  `{"tool": "present", "topic": "DC custom drapery market trends 2026"}`
+  `{"tool": "present", "topic": "Competitor analysis", "source_content": "Optional context..."}`
+  Creates a multi-section PDF with data tables, images, and sources — then sends via Telegram automatically.
 """
