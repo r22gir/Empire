@@ -48,7 +48,18 @@ Rules:
 - Include 1-2 video_queries for relevant clips or explainer videos — same disambiguation rules apply
 - Use CURRENT facts and data from the web search results — do NOT rely on training data for recent events
 - For current events: include a timeline or chronology section
-- Make content informative, specific, and data-driven — but NEVER invent data points"""
+- Make content informative, specific, and data-driven — but NEVER invent data points
+
+WINDOW TREATMENT / DRAPERY TOPICS:
+When the topic involves window treatments, drapery, curtains, or upholstery:
+- Include SPECIFIC pricing per linear/square foot or per panel based on market rates
+- Break down costs: fabric ($25-150/yd by grade), lining ($8-14/yd), fabrication ($50/hr), hardware ($15-75/ft), installation ($85-150/window)
+- Include a pricing comparison chart with 3 tiers: Essential, Designer, Premium
+- Recommend specific fabric types (linen, velvet, silk blend, performance polyester) with trade-offs
+- Include a "What's Included" section listing all components
+- Include installation timeline and process steps
+- Be specific about measurements, fullness ratios (2-2.5x), and stackback calculations
+- Image queries should include "luxury drapery interior design" and specific treatment types"""
 
 
 async def fetch_images(queries: list[str], count_per_query: int = 1) -> list[dict]:

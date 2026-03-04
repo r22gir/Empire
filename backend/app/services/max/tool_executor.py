@@ -1317,6 +1317,15 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
 PRESENTATIONS_DIR = os.path.expanduser("~/Empire/data/presentations")
 
 
+def _md_to_html(text: str) -> str:
+    """Convert basic markdown to HTML: **bold**, *italic*, - bullets, newlines."""
+    import re as _re
+    text = _re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = _re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+    text = text.replace("\n", "<br>")
+    return text
+
+
 def _render_presentation_pdf(data: dict) -> str:
     """Render presentation data as a professional PDF. Returns the file path."""
     import re as _re
@@ -1335,7 +1344,7 @@ def _render_presentation_pdf(data: dict) -> str:
     sections_html = ""
     for section in sections:
         heading = section.get("heading", "")
-        content = section.get("content", "").replace("\n", "<br>")
+        content = _md_to_html(section.get("content", ""))
         stype = section.get("type", "text")
 
         if stype == "highlight":
@@ -1344,8 +1353,8 @@ def _render_presentation_pdf(data: dict) -> str:
                 <h2 style="color:#D4AF37;margin:0 0 8px;font-size:1.05em">{heading}</h2>
                 <div style="font-size:0.88em;color:#333;line-height:1.6">{content}</div></div>"""
         elif stype == "bullets":
-            # Convert - items to HTML list
-            items = [line.strip().lstrip("- ") for line in section.get("content", "").split("\n") if line.strip()]
+            # Convert - items to HTML list with markdown
+            items = [_md_to_html(line.strip().lstrip("- ")) for line in section.get("content", "").split("\n") if line.strip()]
             li_html = "".join(f"<li style='margin:3px 0;font-size:0.88em;color:#333'>{item}</li>" for item in items)
             sections_html += f"""<div style="margin:16px 0">
                 <h2 style="color:#8B5CF6;margin:0 0 8px;font-size:1.05em">{heading}</h2>
