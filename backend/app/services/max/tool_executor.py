@@ -497,9 +497,66 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "subtotal": tier_subtotal,
                 "tax_amount": tier_tax,
                 "total": tier_total,
-                "ai_comment": "",  # Filled by AI mockup generation below
+                "ai_comment": "",
                 "selected": False,
             })
+
+    # ── Generate AI commentary for each design tier ──
+    xai_key_for_tiers = os.environ.get("XAI_API_KEY")
+    if xai_key_for_tiers and design_proposals and rooms:
+        try:
+            project_lines = []
+            for room in rooms:
+                rn = room.get("name", "Room")
+                for win in room.get("windows", []):
+                    w = win.get("width", 48)
+                    h = win.get("height", 60)
+                    tt = win.get("treatmentType", "ripplefold").replace("-", " ").title()
+                    project_lines.append(f"  {rn}: {win.get('name', 'Window')} ({w}\"W x {h}\"H) — {tt}")
+                for uph in room.get("upholstery", []):
+                    project_lines.append(f"  {rn}: {uph.get('description', 'Upholstery')}")
+
+            tier_prompt = (
+                "You are a luxury window treatment designer writing for a client proposal. "
+                f"Customer: {customer_name}\n"
+                f"Project items:\n" + "\n".join(project_lines) + "\n\n"
+                "Write a brief, compelling 2-3 sentence description for each design tier. "
+                "Cover fabric quality, recommended style, and why a client would choose this option.\n\n"
+                f"Option A — Essential (${design_proposals[0]['total']:,.0f}): "
+                "Grade A fabrics (quality basics), standard lining\n"
+                f"Option B — Designer (${design_proposals[1]['total']:,.0f}): "
+                "Grade B fabrics (mid-range designer), standard lining\n"
+                f"Option C — Premium (${design_proposals[2]['total']:,.0f}): "
+                "Grade C fabrics (luxury), blackout lining\n\n"
+                'Respond ONLY in JSON: {"A": "...", "B": "...", "C": "..."}'
+            )
+            tier_resp = httpx.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {xai_key_for_tiers}", "Content-Type": "application/json"},
+                json={
+                    "model": "grok-3-mini-fast",
+                    "messages": [
+                        {"role": "system", "content": "You are a luxury interior design consultant. Respond only in valid JSON."},
+                        {"role": "user", "content": tier_prompt},
+                    ],
+                    "max_tokens": 500,
+                    "temperature": 0.7,
+                },
+                timeout=20,
+            )
+            if tier_resp.status_code == 200:
+                ai_text = tier_resp.json()["choices"][0]["message"]["content"]
+                # Parse JSON robustly
+                import re as _re
+                _match = _re.search(r'\{.*\}', ai_text, _re.DOTALL)
+                if _match:
+                    comments = json.loads(_match.group())
+                    for i, key in enumerate(["A", "B", "C"]):
+                        if i < len(design_proposals) and key in comments:
+                            design_proposals[i]["ai_comment"] = comments[key]
+                    logger.info("Generated AI commentary for 3 design tiers")
+        except Exception as e:
+            logger.warning(f"AI tier commentary generation failed: {e}")
 
     # Collect photo references (original images that were uploaded with this quote)
     photo_refs = params.get("photos", [])

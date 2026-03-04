@@ -1260,6 +1260,97 @@ def _build_outline_svg(outline: dict) -> str:
     return svg
 
 
+def _build_design_proposals_html(proposals: list) -> str:
+    """Build 3-tier design option cards for the PDF — Essential / Designer / Premium."""
+    if not proposals or len(proposals) < 2:
+        return ""
+
+    tier_styles = [
+        {"color": "#22c55e", "bg": "#f0fdf4", "border": "#bbf7d0", "badge": "OPTION A"},
+        {"color": "#D4AF37", "bg": "#fffcf0", "border": "#fde68a", "badge": "OPTION B"},
+        {"color": "#8B5CF6", "bg": "#f5f3ff", "border": "#c4b5fd", "badge": "OPTION C"},
+    ]
+
+    html = """<div style="margin:24px 0;page-break-inside:avoid">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;border-bottom:2px solid #D4AF37;padding-bottom:8px">
+      <div style="width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#D4AF37,#8B5CF6);display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:11px">M</div>
+      <div>
+        <strong style="color:#1a1a2e;font-size:1.05em">Design Options</strong>
+        <span style="font-size:0.75em;color:#888;margin-left:8px">AI-curated proposals tailored to your project</span>
+      </div>
+    </div>"""
+
+    for i, prop in enumerate(proposals[:3]):
+        s = tier_styles[i] if i < len(tier_styles) else tier_styles[-1]
+        label = prop.get("label", f"Option {chr(65+i)}")
+        grade = prop.get("fabric_grade", "A")
+        lining = (prop.get("lining_type") or "standard").replace("-", " ").title()
+        subtotal = prop.get("subtotal", 0)
+        tax = prop.get("tax_amount", 0)
+        total = prop.get("total", 0)
+        comment = prop.get("ai_comment", "")
+        items = prop.get("line_items", [])
+
+        grade_labels = {"A": "Grade A — Quality Basics", "B": "Grade B — Designer Collection", "C": "Grade C — Luxury Premium"}
+        grade_label = grade_labels.get(grade, f"Grade {grade}")
+
+        # Build condensed line items
+        items_rows = ""
+        for item in items[:8]:
+            desc = item.get("description", "")
+            item_total = item.get("total", 0)
+            items_rows += f"""<tr>
+              <td style="padding:3px 6px;font-size:0.78em;color:#444;border-bottom:1px solid #f0f0f0">{desc}</td>
+              <td style="padding:3px 6px;font-size:0.78em;color:#444;text-align:right;border-bottom:1px solid #f0f0f0">${item_total:,.2f}</td>
+            </tr>"""
+        if len(items) > 8:
+            items_rows += f'<tr><td colspan="2" style="padding:3px 6px;font-size:0.72em;color:#999;font-style:italic">+ {len(items)-8} more items</td></tr>'
+
+        html += f"""<div style="margin-bottom:14px;border:2px solid {s['border']};border-radius:10px;overflow:hidden;background:white;page-break-inside:avoid">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:{s['bg']}">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="background:{s['color']};color:white;padding:4px 12px;border-radius:5px;font-size:0.72em;font-weight:700;letter-spacing:0.5px">{s['badge']}</span>
+              <div>
+                <strong style="color:#1a1a2e;font-size:0.95em">{label.split('—')[-1].strip() if '—' in label else label}</strong>
+                <p style="margin:1px 0 0;font-size:0.75em;color:#888">{grade_label} · {lining} Lining</p>
+              </div>
+            </div>
+            <div style="text-align:right">
+              <strong style="font-size:1.2em;color:{s['color']}">${total:,.2f}</strong>
+              <p style="margin:1px 0 0;font-size:0.7em;color:#888">incl. tax</p>
+            </div>
+          </div>"""
+
+        if comment:
+            html += f"""<div style="padding:10px 16px;border-bottom:1px solid #f0f0f0;background:#fafbfd">
+              <p style="margin:0;font-size:0.82em;color:#444;line-height:1.5;font-style:italic">{comment}</p>
+            </div>"""
+
+        if items_rows:
+            html += f"""<div style="padding:8px 16px 10px">
+              <table style="width:100%;border-collapse:collapse;margin:0">
+                <thead><tr>
+                  <th style="padding:3px 6px;font-size:0.7em;text-transform:uppercase;letter-spacing:0.5px;color:#999;text-align:left;border-bottom:1px solid #eee;background:transparent">Item</th>
+                  <th style="padding:3px 6px;font-size:0.7em;text-transform:uppercase;letter-spacing:0.5px;color:#999;text-align:right;border-bottom:1px solid #eee;background:transparent">Price</th>
+                </tr></thead>
+                <tbody>{items_rows}</tbody>
+                <tfoot>
+                  <tr><td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">Subtotal</td>
+                    <td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">${subtotal:,.2f}</td></tr>
+                  <tr><td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">Tax</td>
+                    <td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">${tax:,.2f}</td></tr>
+                  <tr><td style="padding:4px 6px;font-size:0.85em;font-weight:700;color:#1a1a2e;text-align:right;border-top:2px solid {s['color']}">Total</td>
+                    <td style="padding:4px 6px;font-size:0.85em;font-weight:700;color:{s['color']};text-align:right;border-top:2px solid {s['color']}">${total:,.2f}</td></tr>
+                </tfoot>
+              </table>
+            </div>"""
+
+        html += "</div>"
+
+    html += "</div>"
+    return html
+
+
 def _build_mockup_html(mockup: dict) -> str:
     """Build design proposal cards from AI mockup data, with photo if available."""
     ra = mockup.get("roomAssessment") or {}
@@ -1550,6 +1641,10 @@ async def generate_pdf(quote_id: str):
     for mockup in ai_mockups:
         mockups_html += _build_mockup_html(mockup)
 
+    # Design Proposals (3-tier options: Essential / Designer / Premium)
+    design_proposals = quote.get("design_proposals") or []
+    proposals_html = _build_design_proposals_html(design_proposals)
+
     # MAX's Analysis summary — collect all AI notes into one fun section
     max_notes = []
     if rooms:
@@ -1675,25 +1770,29 @@ async def generate_pdf(quote_id: str):
 <!-- ═══ QUOTE DETAILS ═══ -->
 {body_html}
 
+<!-- ═══ DESIGN OPTIONS (3-TIER) ═══ -->
+{proposals_html}
+
 <!-- ═══ ITEMIZED COST BREAKDOWN ═══ -->
-{_build_line_items_html(quote.get("line_items", []))}
+{_build_line_items_html(quote.get("line_items", [])) if not design_proposals else ""}
 
 <!-- ═══ TOTALS ═══ -->
-{"" if quote.get("price_range_low") and quote.get("price_range_high") else ""}
-<table style="margin-top:16px"><tbody>
-  {f'''<tr><td colspan="8" style="padding:10px 8px;text-align:right;color:#666;font-style:italic">
+{f'''<table style="margin-top:16px"><tbody>
+  <tr><td colspan="8" style="padding:10px 8px;text-align:right;color:#666;font-style:italic">
     Treatment options range from</td>
-  <td style="padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.1em;white-space:nowrap">
-    ${quote["price_range_low"]:,.0f} – ${quote["price_range_high"]:,.0f}</td></tr>''' if quote.get("price_range_low") else f'''
-  <tr><td colspan="8" style="padding:8px;text-align:right;color:#666">Subtotal</td>
-  <td style="padding:8px;text-align:right;color:#666">${quote["subtotal"]:.2f}</td></tr>
+  <td style="padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.15em;white-space:nowrap">
+    ${min(p["total"] for p in design_proposals):,.0f} &ndash; ${max(p["total"] for p in design_proposals):,.0f}</td></tr>
+</tbody></table>''' if design_proposals else f'''<table style="margin-top:16px"><tbody>
+  {f"<tr><td colspan='8' style='padding:10px 8px;text-align:right;color:#666;font-style:italic'>Treatment options range from</td><td style='padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.1em;white-space:nowrap'>${quote['price_range_low']:,.0f} &ndash; ${quote['price_range_high']:,.0f}</td></tr>" if quote.get("price_range_low") else f"""
+  <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Subtotal</td>
+  <td style='padding:8px;text-align:right;color:#666'>${quote["subtotal"]:.2f}</td></tr>
   {"<tr><td colspan='8' style='padding:8px;text-align:right;color:#c00'>Discount</td><td style='padding:8px;text-align:right;color:#c00'>-$" + f"{quote['discount_amount']:.2f}</td></tr>" if quote.get('discount_amount') else ""}
-  <tr><td colspan="8" style="padding:8px;text-align:right;color:#666">Tax ({quote.get('tax_rate', 0) * 100:.1f}%)</td>
-  <td style="padding:8px;text-align:right;color:#666">${quote.get('tax_amount', 0):.2f}</td></tr>
-  <tr><td colspan="8" style="padding:14px 8px;text-align:right;border-top:3px solid #D4AF37"><strong style="font-size:1.15em;color:#1a1a2e">Total</strong></td>
-  <td style="padding:14px 8px;text-align:right;border-top:3px solid #D4AF37"><strong style="font-size:1.2em;color:#D4AF37">${quote["total"]:.2f}</strong></td></tr>'''}
+  <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Tax ({quote.get('tax_rate', 0) * 100:.1f}%)</td>
+  <td style='padding:8px;text-align:right;color:#666'>${quote.get('tax_amount', 0):.2f}</td></tr>
+  <tr><td colspan='8' style='padding:14px 8px;text-align:right;border-top:3px solid #D4AF37'><strong style='font-size:1.15em;color:#1a1a2e'>Total</strong></td>
+  <td style='padding:14px 8px;text-align:right;border-top:3px solid #D4AF37'><strong style='font-size:1.2em;color:#D4AF37'>${quote["total"]:.2f}</strong></td></tr>"""}
   {deposit_html}
-</tbody></table>
+</tbody></table>'''}
 
 {install_date}
 
