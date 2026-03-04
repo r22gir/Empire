@@ -13,6 +13,8 @@ import httpx
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from typing import Optional
+
+from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
 
 logger = logging.getLogger("max.tool_executor")
@@ -66,9 +68,15 @@ def tool(name: str):
 
 
 def execute_tool(tool_call: dict, desk: Optional[str] = None) -> ToolResult:
-    """Dispatch and execute a tool call."""
+    """Dispatch and execute a tool call (with tier gating)."""
     tool_name = tool_call.get("tool", "")
     try:
+        # Tier check
+        from app.middleware.tier_middleware import require_tool
+        tier_error = require_tool(tool_name)
+        if tier_error:
+            return ToolResult(tool=tool_name, success=False, error=tier_error)
+
         handler = TOOL_REGISTRY.get(tool_name)
         if handler:
             return handler(tool_call, desk)
@@ -277,9 +285,9 @@ DEFAULT_HARDWARE = {
     "roman-shade": "cassette", "roller-shade": "roller-mechanism",
 }
 
-LABOR_RATE = 50  # $/hr fabrication
-INSTALL_PER_WINDOW = 85  # flat rate per window install
-DC_TAX_RATE = 0.06
+LABOR_RATE = biz.labor_rate
+INSTALL_PER_WINDOW = biz.install_rate_per_window
+DC_TAX_RATE = biz.tax_rate
 
 
 def _calc_window_line_items(room_name: str, win: dict) -> list[dict]:

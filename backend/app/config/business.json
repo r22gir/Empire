@@ -1,0 +1,23 @@
+{
+  "business_name": "Empire",
+  "business_tagline": "Founder's Command Center",
+  "industry": "custom_drapery",
+  "owner_name": "rg",
+  "timezone": "America/New_York",
+  "currency": "USD",
+  "tax_rate": 0.06,
+  "labor_rate": 50.0,
+  "install_rate_per_window": 85.0,
+  "fabric_markup": 2.0,
+  "quote_escalation_threshold": 5000,
+  "followup_days_overdue": 7,
+  "tier": "empire",
+  "ai_assistant_name": "MAX",
+  "ai_assistant_role": "AI Assistant Manager",
+  "telegram_enabled": true,
+  "services": {
+    "backend_port": 8000,
+    "dashboard_port": 3009,
+    "workroom_port": 3001
+  }
+}

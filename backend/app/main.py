@@ -119,6 +119,25 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ Desk Scheduler: {e}")
 
+    # MAX Autonomous Scheduler (daily briefs, task checks, reports)
+    try:
+        from app.services.max.scheduler import max_scheduler
+        await max_scheduler.start()
+        status = max_scheduler.get_status()
+        print(f"✓ MAX Scheduler: {len(status['jobs'])} jobs scheduled")
+        for job in status['jobs']:
+            print(f"  → {job['name']} — next: {job['next_run']}")
+    except Exception as e:
+        print(f"✗ MAX Scheduler: {e}")
+
+    # MAX Proactive Monitor (overdue tasks, inbox, system health)
+    try:
+        from app.services.max.monitor import max_monitor
+        await max_monitor.start()
+        print(f"✓ MAX Monitor: checking every {max_monitor.get_status()['interval_seconds']}s")
+    except Exception as e:
+        print(f"✗ MAX Monitor: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
@@ -131,6 +150,9 @@ load_router("app.routers.notifications", "/api/v1", ["notifications"])
 load_router("app.routers.desks", "/api/v1", ["desks"])
 load_router("app.routers.tasks", "/api/v1", ["tasks"])
 load_router("app.routers.contacts", "/api/v1", ["contacts"])
+
+# Onboarding & Tier
+load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
 
 # Smart Multi-Method Analyzer
 try:

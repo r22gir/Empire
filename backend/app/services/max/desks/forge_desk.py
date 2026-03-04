@@ -7,12 +7,13 @@ import logging
 import httpx
 from datetime import datetime
 from .base_desk import BaseDesk, DeskTask, DeskAction, TaskPriority, TaskState
+from app.config.business_config import biz
 
 logger = logging.getLogger("max.desks.forge")
 
-# Thresholds for auto-escalation
-QUOTE_ESCALATION_THRESHOLD = 5000  # dollars
-FOLLOWUP_DAYS_OVERDUE = 7
+# Thresholds for auto-escalation (from business config)
+QUOTE_ESCALATION_THRESHOLD = biz.quote_escalation_threshold
+FOLLOWUP_DAYS_OVERDUE = biz.followup_days_overdue
 
 
 class ForgeDesk(BaseDesk):
@@ -41,10 +42,10 @@ class ForgeDesk(BaseDesk):
     # WorkroomForge API base (port 3001)
     WORKROOM_API = "http://localhost:3001/api"
 
-    # WorkroomForge pricing constants
-    FABRIC_MARKUP = 2.0  # 2x wholesale
-    LABOR_RATE = 50  # $/hr
-    DC_TAX_RATE = 0.06
+    # WorkroomForge pricing constants (from business config)
+    FABRIC_MARKUP = biz.fabric_markup
+    LABOR_RATE = biz.labor_rate
+    DC_TAX_RATE = biz.tax_rate
 
     def __init__(self):
         super().__init__()

@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
         CHECK (priority IN ('urgent', 'high', 'normal', 'low')),
     desk TEXT NOT NULL,
     assigned_to TEXT,
-    created_by TEXT DEFAULT 'rg',
+    created_by TEXT DEFAULT 'founder',
     due_date TEXT,
     tags TEXT,
     metadata TEXT,
