@@ -99,6 +99,10 @@ class TelegramBot:
                 if reply_markup:
                     payload["reply_markup"] = reply_markup
                 resp = await client.post(f"{self.api_base}/sendMessage", json=payload)
+                if resp.status_code == 400 and "parse entities" in resp.text.lower():
+                    # HTML parse failed (unsupported tags) — retry as plain text
+                    payload.pop("parse_mode", None)
+                    resp = await client.post(f"{self.api_base}/sendMessage", json=payload)
                 resp.raise_for_status()
                 return True
         except Exception as e:
@@ -681,7 +685,7 @@ class TelegramBot:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
                     f"{self.api_base}/deleteWebhook",
-                    json={"drop_pending_updates": True},
+                    json={"drop_pending_updates": False},
                 )
         except Exception:
             pass
