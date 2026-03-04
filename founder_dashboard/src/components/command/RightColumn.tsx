@@ -51,8 +51,8 @@ export default function RightColumn({
   const ramPct = systemStats?.memory?.percent ?? 0;
 
   return (
-    <div className="absolute right-0 top-0 bottom-0 z-20 flex items-start" style={{ pointerEvents: 'none' }}>
-      {/* Floating stat pills — always visible */}
+    <div className="right-panel shrink-0 flex items-start" style={{ pointerEvents: 'none' }}>
+      {/* Stat pills */}
       <div className="flex flex-col items-end gap-2 p-3" style={{ pointerEvents: 'auto' }}>
         {/* Quick system summary pill */}
         <div

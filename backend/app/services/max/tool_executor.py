@@ -396,37 +396,29 @@ def _calc_window_line_items(room_name: str, win: dict) -> list[dict]:
 
 # ── QUOTE NUMBERING ──────────────────────────────────────────────
 
-def _next_quote_number(customer_name: str) -> str:
-    """Generate QT-CUSTOMER-DATE-NNN format quote number.
+COUNTER_FILE = os.path.join(QUOTES_DIR, "_counter.json")
 
-    Examples: QT-NEWMAN-MAR032026-001, QT-SMITH-MAR032026-002
-    Counter is per-customer-per-date, starting at 001.
+
+def _next_quote_number(customer_name: str = "") -> str:
+    """Generate sequential quote number: EST-YYYY-NNN.
+
+    Uses the same global counter as the quotes router so all quotes
+    are numbered sequentially regardless of creation method.
     """
-    # Clean customer name: uppercase, first word only, alphanumeric
-    clean = customer_name.strip().split()[0].upper() if customer_name.strip() else "CUSTOMER"
-    clean = "".join(c for c in clean if c.isalnum())[:10]
-
-    date_str = datetime.utcnow().strftime("%b%d%Y").upper()  # MAR032026
-    prefix = f"QT-{clean}-{date_str}"
-
-    # Scan existing quotes for sequential counter
-    counter = 1
-    if os.path.exists(QUOTES_DIR):
-        for fname in os.listdir(QUOTES_DIR):
-            if not fname.endswith(".json"):
-                continue
-            try:
-                with open(os.path.join(QUOTES_DIR, fname)) as f:
-                    q = json.load(f)
-                qn = q.get("quote_number", "")
-                if qn.startswith(prefix):
-                    # Extract NNN from end
-                    seq = int(qn.rsplit("-", 1)[-1])
-                    counter = max(counter, seq + 1)
-            except Exception:
-                pass
-
-    return f"{prefix}-{counter:03d}"
+    year = datetime.utcnow().year
+    counter = {"year": year, "seq": 0}
+    if os.path.exists(COUNTER_FILE):
+        try:
+            with open(COUNTER_FILE) as f:
+                counter = json.load(f)
+            if counter.get("year") != year:
+                counter = {"year": year, "seq": 0}
+        except Exception:
+            counter = {"year": year, "seq": 0}
+    counter["seq"] += 1
+    with open(COUNTER_FILE, "w") as f:
+        json.dump(counter, f)
+    return f"EST-{year}-{counter['seq']:03d}"
 
 
 # ── QUICK QUOTE TOOL ──────────────────────────────────────────────
@@ -435,7 +427,7 @@ def _next_quote_number(customer_name: str) -> str:
 def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Create a quick quote autonomously — no customer info required.
     Defaults to 'Customer 1' if no name provided. Saves JSON + generates PDF.
-    Now uses QT-CUSTOMER-DATE-NNN numbering and supports stacked design proposals.
+    Uses global sequential EST-YYYY-NNN numbering and supports stacked design proposals.
     """
     quote_id = str(uuid.uuid4())[:8]
     now = datetime.utcnow().isoformat()

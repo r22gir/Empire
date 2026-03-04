@@ -15,6 +15,8 @@ const Viewer3D = dynamic(() => import('./Viewer3D'), { ssr: false });
 // TYPES
 // ═══════════════════════════════════════════════════════
 
+interface Scan3D { name: string; url: string; size: string; }
+
 interface WindowItem {
   id: string; name: string; width: number; height: number; quantity: number;
   treatmentType: string; mountType: string; liningType: string;
@@ -23,6 +25,7 @@ interface WindowItem {
   drawDirection: string; fabricColor: string;
   sourcePhoto?: string; // base64 photo used for AI analysis
   photos?: string[]; // additional reference photos
+  scan3D?: Scan3D; // 3D room scan attached to this item
   aiAnalysis?: { confidence: number; suggestedWidth: number; suggestedHeight: number; windowType: string; recommendations: string[] };
 }
 
@@ -42,6 +45,7 @@ interface UpholsteryItem {
   };
   sourcePhoto?: string;
   photos?: string[]; // additional reference photos
+  scan3D?: Scan3D; // 3D room scan attached to this item
 }
 
 interface Room {
@@ -370,6 +374,21 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
   const THREE_D_EXTENSIONS = ['.glb', '.gltf', '.obj', '.usdz', '.ply', '.fbx', '.stl', '.dae'];
   const is3DFile = (name: string) => THREE_D_EXTENSIONS.some(ext => name.toLowerCase().endsWith(ext));
 
+  const save3DToItem = (scan: Scan3D) => {
+    if (!activeRoomId || !activeItemId) return;
+    const room = rooms.find(r => r.id === activeRoomId);
+    if (room?.windows.find(w => w.id === activeItemId)) {
+      updateWindow(activeRoomId, activeItemId, { scan3D: scan });
+    } else if (room?.upholstery.find(u => u.id === activeItemId)) {
+      updateUpholstery(activeRoomId, activeItemId, { scan3D: scan });
+    }
+  };
+
+  const open3DFromItem = (scan: Scan3D) => {
+    setUploaded3DFile(scan);
+    setShow3DViewer(true);
+  };
+
   const processFile = async (file: File) => {
     if (is3DFile(file.name)) {
       // Upload 3D file to backend for storage
@@ -378,14 +397,16 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
       try {
         const res = await fetch(API_URL + '/files/upload', { method: 'POST', body: formData });
         const result = await res.json();
-        // Backend saves to ~/Empire/uploads/{category}/{filename}
         const downloadUrl = `${API_URL}/files/${result.category}/${result.filename}`;
-        setUploaded3DFile({ name: result.filename || file.name, url: downloadUrl, size: `${(file.size / 1024 / 1024).toFixed(1)} MB` });
+        const scan: Scan3D = { name: result.filename || file.name, url: downloadUrl, size: `${(file.size / 1024 / 1024).toFixed(1)} MB` };
+        setUploaded3DFile(scan);
+        save3DToItem(scan);
         setShowCamera(false);
       } catch {
-        // Fallback: local object URL for preview
         const url = URL.createObjectURL(file);
-        setUploaded3DFile({ name: file.name, url, size: `${(file.size / 1024 / 1024).toFixed(1)} MB` });
+        const scan: Scan3D = { name: file.name, url, size: `${(file.size / 1024 / 1024).toFixed(1)} MB` };
+        setUploaded3DFile(scan);
+        save3DToItem(scan);
         setShowCamera(false);
       }
     } else {
@@ -447,7 +468,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
     }
   };
   const stopCamera = () => { cameraStream?.getTracks().forEach(t => t.stop()); setCameraStream(null); setShowCamera(false); };
-  const closePhotoModal = () => { stopCamera(); setShowPhotoModal(false); setUploadedImage(null); setUploaded3DFile(null); setAnalysisResult(null); };
+  const closePhotoModal = () => { stopCamera(); setShowPhotoModal(false); setUploadedImage(null); setAnalysisResult(null); };
 
   const [mockupPreferences, setMockupPreferences] = useState('');
   const [designMode, setDesignMode] = useState<'new' | 'update' | 'rearrange' | 'renovate'>('new');
@@ -914,6 +935,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                 breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
                 sourcePhoto: w.sourcePhoto || null,
                 photos: w.photos || [],
+                scan3D: w.scan3D || null,
                 aiAnalysis: w.aiAnalysis || null,
               };
             }),
@@ -924,6 +946,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
               price: calcUpholsteryPrice(u),
               sourcePhoto: u.sourcePhoto || null,
               photos: u.photos || [],
+              scan3D: u.scan3D || null,
               aiAnalysis: u.aiAnalysis || null,
             })),
           })),
@@ -1012,14 +1035,15 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                   yardage: { panels: y.panelsNeeded, perWindow: y.yardagePerWindow, waste: y.wasteYardage, total: y.totalYardage },
                   breakdown: { materials: y.materialsTotal, labor: y.laborTotal, hardware: y.hardwareTotal, tax: y.tax },
                   sourcePhoto: w.sourcePhoto || null, photos: w.photos || [],
-                  aiAnalysis: w.aiAnalysis || null,
+                  scan3D: w.scan3D || null, aiAnalysis: w.aiAnalysis || null,
                 };
               }),
               upholstery: r.upholstery.map(u => ({
                 name: u.name, furnitureType: u.furnitureType, fabricYards: u.fabricYards,
                 fabricType: u.fabricType, laborType: u.laborType, cushionCount: u.cushionCount,
                 width: u.width, depth: u.depth, height: u.height, notes: u.notes,
-                price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, photos: u.photos || [], aiAnalysis: u.aiAnalysis || null,
+                price: calcUpholsteryPrice(u), sourcePhoto: u.sourcePhoto || null, photos: u.photos || [],
+                scan3D: u.scan3D || null, aiAnalysis: u.aiAnalysis || null,
               })),
             })),
             ai_outlines: collectedOutlines.length > 0 ? collectedOutlines : null,
@@ -1100,7 +1124,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             motorization: w.motorization || 'None', notes: w.notes || '',
             fabricGrade: w.fabricGrade || 'B', fullness: w.fullness || 2.5, laborRate: w.laborRate || 45,
             drawDirection: w.drawDirection || 'center', fabricColor: w.fabricColor || '',
-            sourcePhoto: w.sourcePhoto || undefined, photos: w.photos || [], aiAnalysis: w.aiAnalysis || undefined,
+            sourcePhoto: w.sourcePhoto || undefined, photos: w.photos || [],
+            scan3D: w.scan3D || undefined, aiAnalysis: w.aiAnalysis || undefined,
           })),
           upholstery: (r.upholstery || []).map((u: any, ui: number) => ({
             id: `u-${ri}-${ui}-${Date.now()}`, name: u.name || `Piece ${ui + 1}`,
@@ -1108,7 +1133,8 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
             fabricType: u.fabricType || 'plain', laborType: u.laborType || 'standard',
             cushionCount: u.cushionCount || 3, width: u.width || 84, depth: u.depth || 36, height: u.height || 34,
             notes: u.notes || '', fabricGrade: (u.fabricGrade as FabricGrade) || 'B',
-            sourcePhoto: u.sourcePhoto || undefined, photos: u.photos || [], aiAnalysis: u.aiAnalysis || undefined,
+            sourcePhoto: u.sourcePhoto || undefined, photos: u.photos || [],
+            scan3D: u.scan3D || undefined, aiAnalysis: u.aiAnalysis || undefined,
           })),
         }));
         setRooms(loadedRooms);
@@ -1375,9 +1401,19 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                             <Palette className="w-3 h-3" /> Mockup
                           </button>
                         </div>
-                        {/* Photo strip */}
-                        {(w.sourcePhoto || (w.photos?.length ?? 0) > 0) && (
+                        {/* Photo strip + 3D scan */}
+                        {(w.sourcePhoto || (w.photos?.length ?? 0) > 0 || w.scan3D) && (
                           <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-1">
+                            {w.scan3D && (
+                              <button onClick={() => open3DFromItem(w.scan3D!)}
+                                className="shrink-0 w-10 h-7 rounded-lg flex items-center justify-center transition hover:opacity-80"
+                                style={{ background: 'rgba(139,92,246,0.15)', border: '2px solid rgba(139,92,246,0.5)' }}
+                                title={`3D Scan: ${w.scan3D.name}`}>
+                                <svg viewBox="0 0 24 24" className="w-5 h-4" fill="none" stroke="#8B5CF6" strokeWidth="1.5">
+                                  <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+                                </svg>
+                              </button>
+                            )}
                             {w.sourcePhoto && (
                               <button onClick={() => { setUploadedImage(w.sourcePhoto!); setShowPhotoModal(true); setPhotoMode('window'); setActiveRoomId(room.id); setActiveItemId(w.id); setAnalysisResult(w.aiAnalysis || null); }}
                                 className="shrink-0 rounded-lg overflow-hidden transition hover:opacity-80"
@@ -1400,7 +1436,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                               <Plus className="w-3 h-3" style={{ color: '#8B5CF6' }} />
                             </button>
                             <span className="shrink-0 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-                              {1 + (w.photos?.length || 0)} photo{(w.photos?.length || 0) > 0 ? 's' : ''}
+                              {(w.sourcePhoto ? 1 : 0) + (w.photos?.length || 0)} pic{w.scan3D ? ' + 3D' : ''}
                             </span>
                           </div>
                         )}
@@ -1629,9 +1665,19 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                             <button onClick={() => deleteUpholstery(room.id, u.id)} className="p-1 rounded" style={{ color: 'var(--text-muted)' }}><Trash2 className="w-3 h-3" /></button>
                           </div>
                         </div>
-                        {/* Photo strip + AI mockup */}
-                        {(u.sourcePhoto || (u.photos?.length ?? 0) > 0 || u.aiAnalysis?.generated_image) && (
+                        {/* Photo strip + 3D scan + AI mockup */}
+                        {(u.sourcePhoto || (u.photos?.length ?? 0) > 0 || u.aiAnalysis?.generated_image || u.scan3D) && (
                           <div className="mb-2 flex items-center gap-1.5 overflow-x-auto pb-1">
+                            {u.scan3D && (
+                              <button onClick={() => open3DFromItem(u.scan3D!)}
+                                className="shrink-0 w-10 h-7 rounded-lg flex items-center justify-center transition hover:opacity-80"
+                                style={{ background: 'rgba(139,92,246,0.15)', border: '2px solid rgba(139,92,246,0.5)' }}
+                                title={`3D Scan: ${u.scan3D.name}`}>
+                                <svg viewBox="0 0 24 24" className="w-5 h-4" fill="none" stroke="#8B5CF6" strokeWidth="1.5">
+                                  <path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" />
+                                </svg>
+                              </button>
+                            )}
                             {u.sourcePhoto && (
                               <button onClick={() => { setUploadedImage(u.sourcePhoto!); setShowPhotoModal(true); setPhotoMode('upholstery'); setActiveRoomId(room.id); setActiveItemId(u.id); setAnalysisResult(u.aiAnalysis || null); }}
                                 className="shrink-0 rounded-lg overflow-hidden transition hover:opacity-80"
@@ -1662,7 +1708,7 @@ export default function QuoteBuilder({ onClose, initialCustomer, initialRooms, i
                               <Plus className="w-3 h-3" style={{ color: 'var(--gold)' }} />
                             </button>
                             <span className="shrink-0 text-[9px]" style={{ color: 'var(--text-muted)' }}>
-                              {(u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0)} photo{((u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0)) !== 1 ? 's' : ''}
+                              {(u.sourcePhoto ? 1 : 0) + (u.photos?.length || 0)} pic{u.scan3D ? ' + 3D' : ''}
                             </span>
                           </div>
                         )}

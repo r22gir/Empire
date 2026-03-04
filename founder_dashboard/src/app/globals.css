@@ -542,3 +542,45 @@ html, body {
   }
 }
 .warm-glow { animation: warm-glow 3s ease-in-out infinite; }
+
+/* ── Ultrawide 3-Column Layout ──────────────────────────────── */
+
+/* Right panel: floating overlay by default (narrow screens) */
+.right-panel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: auto;
+}
+
+/* Center content: no constraint on normal screens */
+.ultrawide-center {
+  max-width: 100%;
+}
+
+/* Ultrawide: right panel becomes a proper column, center gets max-width */
+@media (min-width: 1920px) {
+  .right-panel {
+    position: relative;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    z-index: auto;
+    width: auto;
+    border-left: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px);
+  }
+  .ultrawide-center {
+    max-width: 1400px;
+  }
+}
+
+/* Super ultrawide (3440+): more breathing room */
+@media (min-width: 3000px) {
+  .ultrawide-center {
+    max-width: 1800px;
+  }
+}

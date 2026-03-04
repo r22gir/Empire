@@ -472,7 +472,7 @@ export default function CommandCenter() {
           <ActiveDeskView activeDesk={desk.activeDesk} onClose={desk.closeDesk} />
         ) : (
           <>
-            {/* Collapsible sidebar */}
+            {/* Left nav tabs */}
             <LeftColumn
               activeView={activeView}
               onChangeView={(v) => {
@@ -490,79 +490,81 @@ export default function CommandCenter() {
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
 
-            {/* Central content area */}
-            <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
-              {/* Workroom view */}
-              {activeView === 'workroom' ? (
-                <WorkroomForgeWorkspace onBack={() => setActiveView('chat')} />
-              ) : activeView === 'files' ? (
-                <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-                  <div className="text-center">
-                    <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">Files & Documents</p>
-                    <p className="text-xs mt-1">Coming soon — browse uploads, quotes, presentations</p>
-                  </div>
-                </div>
-              ) : activeView === 'settings' ? (
-                <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-                  <div className="text-center">
-                    <Settings className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                    <p className="text-sm">Business Settings</p>
-                    <p className="text-xs mt-1">Coming soon — business config, tier management</p>
-                  </div>
-                </div>
-              ) : showQuoteBuilder ? (
-                <QuoteBuilder
-                  onClose={() => { setShowQuoteBuilder(false); setQuoteInitData(null); }}
-                  initialCustomer={quoteInitData?.customer}
-                  initialRooms={quoteInitData?.rooms}
-                  initialMaxAnalysis={quoteInitData?.maxAnalysis}
-                />
-              ) : (
-              /* MAX chat fills the space */
-              <>
-                <MaxSection
-                  isStreaming={chat.isStreaming}
-                  streamingContent={chat.streamingContent}
-                  messages={chat.messages}
-                  backendOnline={sys.backendOnline}
-                  selectedModel={sys.selectedModel}
-                  models={sys.models}
-                  onPresent={(content) => {
-                    setPresentationTopic(content.slice(0, 200));
-                    setPresentationSource(content);
-                    setShowPresentation(true);
-                  }}
-                />
-                {/* Inline PDF viewer for quick quotes */}
-                {quickQuotePdf && (
-                  <div className="px-4 pb-2">
-                    <div className="relative">
-                      <button
-                        onClick={() => setQuickQuotePdf(null)}
-                        className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-sm"
-                        style={{ background: 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
-                      >×</button>
-                      <DocumentCanvas documentUrl={quickQuotePdf} inline />
+            {/* Central content — centered with max-width on ultrawide */}
+            <div className="flex-1 flex justify-center min-w-0 min-h-0">
+              <div className="flex-1 flex flex-col min-w-0 min-h-0 relative ultrawide-center">
+                {/* Workroom view */}
+                {activeView === 'workroom' ? (
+                  <WorkroomForgeWorkspace onBack={() => setActiveView('chat')} />
+                ) : activeView === 'files' ? (
+                  <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+                    <div className="text-center">
+                      <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                      <p className="text-sm">Files & Documents</p>
+                      <p className="text-xs mt-1">Coming soon — browse uploads, quotes, presentations</p>
                     </div>
                   </div>
+                ) : activeView === 'settings' ? (
+                  <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+                    <div className="text-center">
+                      <Settings className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                      <p className="text-sm">Business Settings</p>
+                      <p className="text-xs mt-1">Coming soon — business config, tier management</p>
+                    </div>
+                  </div>
+                ) : showQuoteBuilder ? (
+                  <QuoteBuilder
+                    onClose={() => { setShowQuoteBuilder(false); setQuoteInitData(null); }}
+                    initialCustomer={quoteInitData?.customer}
+                    initialRooms={quoteInitData?.rooms}
+                    initialMaxAnalysis={quoteInitData?.maxAnalysis}
+                  />
+                ) : (
+                /* MAX chat fills the space */
+                <>
+                  <MaxSection
+                    isStreaming={chat.isStreaming}
+                    streamingContent={chat.streamingContent}
+                    messages={chat.messages}
+                    backendOnline={sys.backendOnline}
+                    selectedModel={sys.selectedModel}
+                    models={sys.models}
+                    onPresent={(content) => {
+                      setPresentationTopic(content.slice(0, 200));
+                      setPresentationSource(content);
+                      setShowPresentation(true);
+                    }}
+                  />
+                  {/* Inline PDF viewer for quick quotes */}
+                  {quickQuotePdf && (
+                    <div className="px-4 pb-2">
+                      <div className="relative">
+                        <button
+                          onClick={() => setQuickQuotePdf(null)}
+                          className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-sm"
+                          style={{ background: 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
+                        >×</button>
+                        <DocumentCanvas documentUrl={quickQuotePdf} inline />
+                      </div>
+                    </div>
+                  )}
+                </>
                 )}
-              </>
-              )}
-
-              {/* Floating stat cards — overlaid on top right */}
-              <RightColumn
-                systemStats={sys.systemStats}
-                serviceHealth={sys.serviceHealth}
-                backendOnline={sys.backendOnline}
-                models={sys.models}
-                brainStatus={sys.brainStatus}
-                tokenStats={sys.tokenStats}
-                aiDeskStatuses={sys.aiDeskStatuses}
-                visible={showStats}
-                onClose={() => setShowStats(false)}
-              />
+              </div>
             </div>
+
+            {/* Right stats panel — proper column on ultrawide, floating on narrow */}
+            <RightColumn
+              systemStats={sys.systemStats}
+              serviceHealth={sys.serviceHealth}
+              backendOnline={sys.backendOnline}
+              models={sys.models}
+              brainStatus={sys.brainStatus}
+              tokenStats={sys.tokenStats}
+              aiDeskStatuses={sys.aiDeskStatuses}
+              visible={showStats}
+              onClose={() => setShowStats(false)}
+            />
           </>
         )}
       </div>

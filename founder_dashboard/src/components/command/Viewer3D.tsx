@@ -232,7 +232,7 @@ export default function Viewer3D({ fileUrl, fileName, onClose, onMeasurement }: 
     : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(5,5,13,0.95)' }}>
+    <div className="fixed inset-0 flex items-center justify-center" style={{ background: 'rgba(5,5,13,0.95)', zIndex: 9999 }}>
       <div
         className="w-full h-full max-w-6xl max-h-[95vh] mx-4 my-2 flex flex-col rounded-2xl overflow-hidden"
         style={{ background: 'var(--glass-bg-solid, #0a0a1a)', border: '1px solid var(--glass-border)' }}
@@ -303,56 +303,64 @@ export default function Viewer3D({ fileUrl, fileName, onClose, onMeasurement }: 
           )}
         </div>
 
-        {/* Footer */}
+        {/* Floating measure toolbar — always visible over the 3D scene */}
         <div
-          className="shrink-0 px-6 py-3 flex items-center justify-between"
-          style={{ borderTop: '1px solid var(--glass-border)', background: 'var(--raised)' }}
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-3 px-5 py-3 rounded-2xl"
+          style={{
+            background: 'rgba(5,5,13,0.92)',
+            border: '1px solid var(--glass-border)',
+            backdropFilter: 'blur(16px)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            zIndex: 10,
+          }}
         >
-          <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setMeasuring(!measuring); if (measuring) clearMeasurement(); }}
+            className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition"
+            style={{
+              background: measuring ? 'rgba(212,175,55,0.25)' : 'var(--elevated)',
+              color: measuring ? '#D4AF37' : 'var(--text-primary)',
+              border: `1px solid ${measuring ? 'rgba(212,175,55,0.5)' : 'var(--glass-border)'}`,
+              boxShadow: measuring ? '0 0 12px rgba(212,175,55,0.2)' : 'none',
+            }}
+          >
+            <Ruler className="w-4 h-4" />
+            {measuring ? 'Measuring — click 2 points' : 'Measure'}
+          </button>
+
+          {points.length > 0 && (
             <button
-              onClick={() => setMeasuring(!measuring)}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
-              style={{
-                background: measuring ? 'rgba(212,175,55,0.2)' : 'var(--elevated)',
-                color: measuring ? '#D4AF37' : 'var(--text-primary)',
-                border: `1px solid ${measuring ? 'rgba(212,175,55,0.4)' : 'var(--glass-border)'}`,
-              }}
+              onClick={clearMeasurement}
+              className="px-3 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 transition"
+              style={{ background: 'var(--elevated)', color: '#ef4444', border: '1px solid var(--glass-border)' }}
             >
-              <Ruler className="w-3.5 h-3.5" />
-              {measuring ? 'Measuring...' : 'Measure'}
+              <Trash2 className="w-3.5 h-3.5" /> Clear
             </button>
+          )}
 
-            {points.length > 0 && (
-              <button
-                onClick={clearMeasurement}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition"
-                style={{ background: 'var(--elevated)', color: 'var(--text-primary)', border: '1px solid var(--glass-border)' }}
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Clear
-              </button>
-            )}
+          <button
+            onClick={() => setUnit(u => u === 'm' ? 'ft' : 'm')}
+            className="px-3 py-2 rounded-xl text-xs font-mono font-bold transition"
+            style={{ background: 'var(--elevated)', color: 'var(--cyan, #22D3EE)', border: '1px solid var(--glass-border)' }}
+          >
+            {unit === 'ft' ? 'ft' : 'm'}
+          </button>
 
-            <button
-              onClick={() => setUnit(u => u === 'm' ? 'ft' : 'm')}
-              className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition"
-              style={{ background: 'var(--elevated)', color: 'var(--cyan, #22D3EE)', border: '1px solid var(--glass-border)' }}
-            >
-              {unit === 'm' ? 'm → ft' : 'ft → m'}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {distance !== null && (
-              <span className="text-sm font-mono font-bold" style={{ color: '#D4AF37' }}>
+          {distance !== null && (
+            <div className="px-4 py-2 rounded-xl" style={{ background: 'rgba(212,175,55,0.15)', border: '1px solid rgba(212,175,55,0.4)' }}>
+              <span className="text-base font-mono font-bold" style={{ color: '#D4AF37' }}>
                 {unit === 'ft'
                   ? (distance * 3.28084).toFixed(2) + ' ft'
                   : distance.toFixed(2) + ' m'}
               </span>
-            )}
-            <span className="text-[10px] font-mono" style={{ color: 'var(--text-muted)' }}>
-              3D Viewer
+            </div>
+          )}
+
+          {!measuring && points.length === 0 && (
+            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+              Orbit: drag · Zoom: scroll · Pan: right-click
             </span>
-          </div>
+          )}
         </div>
       </div>
     </div>

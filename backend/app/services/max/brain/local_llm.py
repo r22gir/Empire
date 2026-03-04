@@ -1,7 +1,9 @@
 """
-Local LLM client for MAX Brain operations.
-Uses Ollama Mistral for summarization, classification, triage.
+LLM client for MAX Brain operations.
+Tries Ollama first (local), falls back to xAI Grok (cloud) for
+summarization, classification, fact extraction, and customer detection.
 """
+import os
 import json
 import httpx
 import logging
@@ -9,15 +11,22 @@ from .brain_config import OLLAMA_BASE_URL, REASONING_MODEL, FALLBACK_MODEL
 
 logger = logging.getLogger("max.brain.llm")
 
+XAI_API_URL = "https://api.x.ai/v1/chat/completions"
+# Use a fast, cheap model for brain ops (not the main chat model)
+XAI_BRAIN_MODEL = "grok-3-mini-fast"
+
 
 class LocalLLM:
     def __init__(self):
         self.base_url = OLLAMA_BASE_URL
         self.model = REASONING_MODEL
         self.fallback = FALLBACK_MODEL
+        self._xai_key = os.getenv("XAI_API_KEY", "")
+        self._ollama_available: bool | None = None
 
     async def generate(self, prompt: str, system: str = "", max_tokens: int = 500) -> str:
-        """Generate a response from local LLM."""
+        """Generate a response — Ollama first, Grok fallback."""
+        # Try Ollama
         for model in [self.model, self.fallback]:
             try:
                 async with httpx.AsyncClient() as client:
@@ -30,24 +39,61 @@ class LocalLLM:
                             "stream": False,
                             "options": {"num_predict": max_tokens},
                         },
-                        timeout=60.0,
+                        timeout=15.0,
                     )
                     response.raise_for_status()
                     return response.json()["response"]
-            except Exception as e:
-                logger.warning(f"Local LLM ({model}) failed: {e}")
+            except Exception:
                 continue
+
+        # Fallback to Grok cloud
+        if self._xai_key:
+            try:
+                return await self._grok_generate(prompt, system, max_tokens)
+            except Exception as e:
+                logger.warning(f"Grok brain fallback failed: {e}")
+
         return ""
 
+    async def _grok_generate(self, prompt: str, system: str = "", max_tokens: int = 500) -> str:
+        """Call xAI Grok API for brain operations."""
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                XAI_API_URL,
+                headers={
+                    "Authorization": f"Bearer {self._xai_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": XAI_BRAIN_MODEL,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.3,
+                },
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"]
+
     async def is_available(self) -> bool:
-        """Check if any local model is available."""
+        """Check if any LLM is available (Ollama or Grok)."""
+        # Check Ollama
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{self.base_url}/api/tags", timeout=5.0)
+                resp = await client.get(f"{self.base_url}/api/tags", timeout=3.0)
                 models = [m.get("name", "") for m in resp.json().get("models", [])]
-                return any(self.model in m or self.fallback in m for m in models)
+                if any(self.model in m or self.fallback in m for m in models):
+                    return True
         except Exception:
-            return False
+            pass
+
+        # Grok available?
+        return bool(self._xai_key)
 
     async def summarize_conversation(self, messages: list[dict]) -> dict:
         """Summarize a conversation and extract key information."""
