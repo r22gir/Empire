@@ -138,6 +138,7 @@ export interface StreamEvent {
   type: 'text' | 'done' | 'error' | 'tool_result';
   content?: string;
   model_used?: string;
+  conversation_id?: string;
   tool?: string;
   success?: boolean;
   result?: Record<string, unknown>;

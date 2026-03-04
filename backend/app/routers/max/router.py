@@ -53,12 +53,14 @@ class ChatRequest(BaseModel):
     history: List[Dict[str, str]] = []
     image_filename: Optional[str] = None
     desk: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
     response: str
     model_used: str
     fallback_used: bool = False
+    tool_results: Optional[List[Dict[str, Any]]] = None
 
 
 class TaskCreateRequest(BaseModel):
@@ -156,7 +158,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             final_content = strip_tool_blocks(final_content) + "\n\n" + current_response.content
 
         # Track conversation in background
-        conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
+        conv_id = request.conversation_id or str(uuid.uuid4())
         conversation_tracker.add_message(conv_id, "user", request.message)
         conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(final_content))
         background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
@@ -179,12 +181,13 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
         token_tracker.log_chat(response.model_used, input_text, final_content, "chat", conv_id)
 
-        resp = ChatResponse(response=sanitize_output(final_content), model_used=response.model_used, fallback_used=response.fallback_used)
-        # Attach tool results to the response JSON (extra field, not in schema but included in dict)
-        resp_dict = resp.dict()
-        if tool_results_list:
-            resp_dict["tool_results"] = tool_results_list
-        return resp_dict
+        resp = ChatResponse(
+            response=sanitize_output(final_content),
+            model_used=response.model_used,
+            fallback_used=response.fallback_used,
+            tool_results=tool_results_list if tool_results_list else None,
+        )
+        return resp
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -235,7 +238,7 @@ async def chat_stream(request: ChatRequest):
             logger.warning(f"Brain context failed, using base prompt: {e}")
 
     # Conversation tracking ID
-    conv_id = request.history[0].get("id", str(uuid.uuid4())) if request.history else str(uuid.uuid4())
+    conv_id = request.conversation_id or str(uuid.uuid4())
     conversation_tracker.add_message(conv_id, "user", request.message)
 
     async def event_generator():
@@ -318,7 +321,7 @@ async def chat_stream(request: ChatRequest):
             input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
             token_tracker.log_chat(model_used, input_text, full_response, "chat/stream", conv_id)
 
-            yield f"data: {json.dumps({'type': 'done', 'model_used': model_used})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': model_used, 'conversation_id': conv_id})}\n\n"
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"

@@ -8,15 +8,14 @@ import { API_URL } from '@/lib/api';
 import { AINotification, BrowseFile } from '@/lib/types';
 import { DeskId } from '@/lib/deskData';
 
+import { FolderOpen, Settings } from 'lucide-react';
 import LeftColumn from './LeftColumn';
 import RightColumn from './RightColumn';
 import BottomBar from './BottomBar';
 import MaxSection from './MaxSection';
 import DeskGrid from './DeskGrid';
 import ActiveDeskView from './ActiveDeskView';
-import WorkspaceOverview, { EMPIRE_APPS } from './WorkspaceOverview';
 import WorkroomForgeWorkspace from './WorkroomForgeWorkspace';
-import PlaceholderWorkspace from './PlaceholderWorkspace';
 import QuoteBuilder from './QuoteBuilder';
 import DocumentCanvas from './canvas/DocumentCanvas';
 import PresentationModal from './PresentationModal';
@@ -45,12 +44,12 @@ export default function CommandCenter() {
   const [uploading,      setUploading]      = useState(false);
   const [previewImage,   setPreviewImage]   = useState<string | null>(null);
 
+  /* ── View navigation (single source of truth) ──────────── */
+  type View = 'chat' | 'workroom' | 'desks' | 'research' | 'files' | 'settings';
+  const [activeView, setActiveView] = useState<View>('chat');
+
   /* ── Desk grid modal ──────────────────────────────────────── */
   const [showDeskGrid, setShowDeskGrid] = useState(false);
-
-  /* ── Workspace navigation ───────────────────────────────── */
-  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
-  const [showWorkspaces, setShowWorkspaces] = useState(false);
 
   /* ── Suggestion input ─────────────────────────────────────── */
   const [suggestedInput, setSuggestedInput] = useState('');
@@ -134,14 +133,13 @@ export default function CommandCenter() {
         else if (showPresentation) setShowPresentation(false);
         else if (showQuoteBuilder) { setShowQuoteBuilder(false); setQuoteInitData(null); }
         else if (showDeskGrid) setShowDeskGrid(false);
-        else if (activeWorkspace) setActiveWorkspace(null);
-        else if (showWorkspaces) setShowWorkspaces(false);
+        else if (activeView !== 'chat') setActiveView('chat');
         else if (desk.activeDesk) desk.closeDesk();
       }
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
-  }, [desk, showDeskGrid, activeWorkspace, showWorkspaces, showQuoteBuilder, showPresentation, showResearch]);
+  }, [desk, showDeskGrid, activeView, showQuoteBuilder, showPresentation, showResearch]);
 
   /* ── Detect open_quote_builder / create_quick_quote tool results ── */
   useEffect(() => {
@@ -279,7 +277,7 @@ export default function CommandCenter() {
   return (
     <div
       className="flex flex-col overflow-hidden empire-ambient"
-      style={{ background: 'var(--void)', color: 'var(--text-primary)', height: 'calc(100vh - 44px)' }}
+      style={{ background: 'var(--void)', color: 'var(--text-primary)', height: '100vh' }}
     >
       {/* ════ PRESENTATION MODAL ═════════════════════════════ */}
       {showPresentation && (
@@ -469,44 +467,51 @@ export default function CommandCenter() {
 
       {/* ════ MAIN CONTENT AREA ══════════════════════════════ */}
       <div className="flex-1 flex min-h-0">
-        {/* Workspace view — full width */}
-        {activeWorkspace ? (
-          activeWorkspace === 'workroomforge' ? (
-            <WorkroomForgeWorkspace onBack={() => setActiveWorkspace(null)} />
-          ) : (
-            <PlaceholderWorkspace
-              app={EMPIRE_APPS.find(a => a.id === activeWorkspace) || EMPIRE_APPS[0]}
-              onBack={() => setActiveWorkspace(null)}
-            />
-          )
-        ) : showWorkspaces ? (
-          <WorkspaceOverview onOpenWorkspace={(id) => { setActiveWorkspace(id); setShowWorkspaces(false); }} />
-        ) : desk.activeDesk ? (
+        {/* Active desk view — takes full width */}
+        {desk.activeDesk ? (
           <ActiveDeskView activeDesk={desk.activeDesk} onClose={desk.closeDesk} />
         ) : (
           <>
             {/* Collapsible sidebar */}
             <LeftColumn
-              onOpenDeskGrid={() => setShowDeskGrid(true)}
+              activeView={activeView}
+              onChangeView={(v) => {
+                if (v === 'desks') { setShowDeskGrid(true); return; }
+                if (v === 'research') { setShowResearch(true); setActiveView('chat'); return; }
+                setActiveView(v);
+              }}
               conversations={history.conversations}
               activeConversationId={history.activeId}
               onSelectConversation={handleSelectConversation}
               onNewChat={handleNewChat}
               onDeleteConversation={(id) => { history.deleteConversation(id); if (history.activeId === id) chat.loadMessages([], null); }}
               onRenameConversation={history.renameConversation}
-              onSuggest={setSuggestedInput}
-              onOpenWorkspaces={() => setShowWorkspaces(true)}
-              onOpenWorkspace={setActiveWorkspace}
-              onQuickQuote={() => { setShowQuoteBuilder(true); setShowStats(false); }}
-              onOpenResearch={() => setShowResearch(true)}
               collapsed={sidebarCollapsed}
               onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
             />
 
-            {/* Central chat area + floating stat cards */}
+            {/* Central content area */}
             <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
-              {/* QuoteBuilder (shown when triggered by MAX) */}
-              {showQuoteBuilder ? (
+              {/* Workroom view */}
+              {activeView === 'workroom' ? (
+                <WorkroomForgeWorkspace onBack={() => setActiveView('chat')} />
+              ) : activeView === 'files' ? (
+                <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+                  <div className="text-center">
+                    <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Files & Documents</p>
+                    <p className="text-xs mt-1">Coming soon — browse uploads, quotes, presentations</p>
+                  </div>
+                </div>
+              ) : activeView === 'settings' ? (
+                <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+                  <div className="text-center">
+                    <Settings className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Business Settings</p>
+                    <p className="text-xs mt-1">Coming soon — business config, tier management</p>
+                  </div>
+                </div>
+              ) : showQuoteBuilder ? (
                 <QuoteBuilder
                   onClose={() => { setShowQuoteBuilder(false); setQuoteInitData(null); }}
                   initialCustomer={quoteInitData?.customer}

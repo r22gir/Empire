@@ -1,5 +1,4 @@
 import './globals.css'
-import TopNav from '../components/TopNav'
 
 export const metadata = {
   title: 'MAX | Empire',
@@ -13,7 +12,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js" async></script>
       </head>
       <body>
-        <TopNav currentApp="MAX" currentPort={3009} />
         {children}
       </body>
     </html>

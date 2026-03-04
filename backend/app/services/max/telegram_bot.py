@@ -160,6 +160,31 @@ class TelegramBot:
             logger.error(f"Failed to send Telegram document: {e}")
             return False
 
+    # ── PDF safety net ─────────────────────────────────────────
+
+    @staticmethod
+    def _find_latest_pdf() -> Optional[str]:
+        """Find the most recently created PDF (quote or presentation)."""
+        pdf_dirs = [
+            Path.home() / "Empire" / "data" / "quotes" / "pdf",
+            Path.home() / "Empire" / "data" / "presentations",
+            Path.home() / "Empire" / "data" / "reports",
+        ]
+        latest = None
+        latest_mtime = 0
+        for d in pdf_dirs:
+            if d.exists():
+                for f in d.glob("*.pdf"):
+                    mt = f.stat().st_mtime
+                    if mt > latest_mtime:
+                        latest_mtime = mt
+                        latest = str(f)
+        # Only return if created within the last 10 minutes (likely from this conversation)
+        import time
+        if latest and (time.time() - latest_mtime) < 600:
+            return latest
+        return None
+
     # ── Voice transcription ─────────────────────────────────────
 
     def _transcribe_audio(self, audio_path: Path) -> str:
@@ -289,7 +314,7 @@ class TelegramBot:
         cid = str(chat_id or self.founder_chat_id or "default")
         history = _get_history(cid)[-_MAX_HISTORY:]
         try:
-            payload: Dict[str, Any] = {"message": text, "history": history}
+            payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}"}
             if image_filename:
                 payload["image_filename"] = image_filename
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -472,6 +497,23 @@ class TelegramBot:
                             await update.message.reply_photo(photo=image_url, caption=res.get("caption", ""))
                         except Exception as img_err:
                             logger.warning(f"Failed to send image via Telegram: {img_err}")
+
+            # Safety net: if user asked for a PDF but AI didn't use tools, find and send the latest PDF
+            if not sent_files:
+                text_lower = text.lower()
+                resp_lower = plain_text.lower()
+                wants_pdf = any(kw in text_lower for kw in ["pdf", "quote", "send me", "document", "estimate"])
+                ai_claims_sent = any(kw in resp_lower for kw in ["sent the pdf", "sending the pdf", "sent to your telegram", "delivered"])
+                if wants_pdf or ai_claims_sent:
+                    latest_pdf = self._find_latest_pdf()
+                    if latest_pdf:
+                        logger.info(f"Safety net: sending latest PDF {latest_pdf}")
+                        await self.send_document(
+                            latest_pdf,
+                            caption=f"📎 {os.path.basename(latest_pdf)}",
+                            chat_id=chat_id,
+                        )
+                        sent_files.add(latest_pdf)
 
             # Send voice reply (TTS)
             await self._send_voice_reply(update, plain_text)

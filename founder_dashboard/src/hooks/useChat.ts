@@ -73,6 +73,7 @@ export function useChat({ onSave }: UseChatOptions = {}) {
         message: input,
         model:   selectedModel,
         history: newMsgs.slice(-20).map(m => ({ role: m.role, content: m.content })),
+        conversation_id: chatIdRef.current || undefined,
       };
       if (desk) body.desk = desk;
       if (selectedImage) {
@@ -137,6 +138,9 @@ export function useChat({ onSave }: UseChatOptions = {}) {
             } else if (ev.type === 'done') {
               modelUsed = ev.model_used || '';
               setStreamingModel(modelUsed);
+              if (ev.conversation_id && !chatIdRef.current) {
+                chatIdRef.current = ev.conversation_id;
+              }
             } else if (ev.type === 'error') {
               accumulated += '\n\n*Error: ' + (ev.content || 'Unknown error') + '*';
               setStreamingContent(accumulated);

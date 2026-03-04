@@ -1523,4 +1523,19 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 - NEVER treat casual analogies or examples as topics to research. If someone says "like Grasshopper" they mean the concept, not the software.
 - For most conversational responses, you don't need ANY tools — just answer directly from your knowledge.
 - When you DO use tools, verify the results make sense before presenting them.
+
+### CRITICAL REMINDER — Tool blocks are the ONLY way to act
+If the user asks you to "send a PDF", "create a quote", "search the web", or do ANYTHING:
+1. You MUST include a ```tool ... ``` block in your response
+2. Writing "I sent the PDF" WITHOUT a tool block means NOTHING was sent — the user receives NOTHING
+3. The tool block is what triggers execution. Text alone is just words with no effect.
+
+Example — user says "send me the latest quote PDF":
+```tool
+{{"tool": "search_quotes", "status": "proposal"}}
+```
+Then after seeing results, use the quote_id:
+```tool
+{{"tool": "send_quote_telegram", "quote_id": "THE_ACTUAL_ID"}}
+```
 """
