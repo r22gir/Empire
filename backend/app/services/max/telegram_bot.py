@@ -20,7 +20,7 @@ _memory_store = MemoryStore()
 
 # ── Per-chat conversation history — persisted to disk ──
 _MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
-_TELEGRAM_CHAT_DIR = Path.home() / "Empire" / "backend" / "data" / "chats" / "telegram"
+_TELEGRAM_CHAT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "chats" / "telegram"
 _TELEGRAM_CHAT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -91,7 +91,7 @@ class TelegramBot:
         self.api_base = f"https://api.telegram.org/bot{self.bot_token}" if self.bot_token else None
         self._running = False
         self._app = None
-        self.upload_dir = Path.home() / "Empire" / "uploads"
+        self.upload_dir = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
 
     @property
     def is_configured(self) -> bool:
@@ -187,9 +187,9 @@ class TelegramBot:
     def _find_latest_pdf() -> Optional[str]:
         """Find the most recently created PDF (quote or presentation)."""
         pdf_dirs = [
-            Path.home() / "Empire" / "data" / "quotes" / "pdf",
-            Path.home() / "Empire" / "data" / "presentations",
-            Path.home() / "Empire" / "data" / "reports",
+            Path.home() / "empire-repo" / "backend" / "data" / "quotes" / "pdf",
+            Path.home() / "empire-repo" / "backend" / "data" / "presentations",
+            Path.home() / "empire-repo" / "backend" / "data" / "reports",
         ]
         latest = None
         latest_mtime = 0

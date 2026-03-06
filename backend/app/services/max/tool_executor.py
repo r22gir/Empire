@@ -21,7 +21,7 @@ logger = logging.getLogger("max.tool_executor")
 
 TOOL_BLOCK_RE = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
 
-QUOTES_DIR = os.path.expanduser("~/Empire/data/quotes")
+QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
 
 
 @dataclass
@@ -562,7 +562,7 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     photo_refs = params.get("photos", [])
     image_filename = params.get("image_filename")
     if image_filename:
-        uploads_dir = os.path.expanduser("~/Empire/uploads/images")
+        uploads_dir = os.path.expanduser("~/empire-repo/backend/data/uploads/images")
         img_path = os.path.join(uploads_dir, image_filename)
         if os.path.exists(img_path):
             photo_refs.append({"filename": image_filename, "path": img_path, "type": "original"})
@@ -677,7 +677,7 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     pdf_path = None
     try:
         _run_async(_generate_pdf_for_quote(quote_id))
-        pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+        pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
         pdf_file = os.path.join(pdf_dir, f"{quote_number}.pdf")
         if os.path.exists(pdf_file):
             pdf_url = f"/api/v1/quotes/{quote_id}/pdf"
@@ -760,7 +760,7 @@ def _select_proposal(params: dict, desk: Optional[str] = None) -> ToolResult:
     pdf_path = None
     try:
         _run_async(_generate_pdf_for_quote(quote_id))
-        pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+        pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
         pdf_file = os.path.join(pdf_dir, f"{quote['quote_number']}.pdf")
         if os.path.exists(pdf_file):
             pdf_path = pdf_file
@@ -1006,7 +1006,7 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     total = quote.get("total", 0)
 
     # Generate PDF
-    pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
 
@@ -1087,7 +1087,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     total = quote.get("total", 0)
 
     # Generate PDF
-    pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
 
@@ -1379,7 +1379,7 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── PRESENTATION PDF + TELEGRAM TOOL ──────────────────────────────
 
-PRESENTATIONS_DIR = os.path.expanduser("~/Empire/data/presentations")
+PRESENTATIONS_DIR = os.path.expanduser("~/empire-repo/backend/data/presentations")
 
 
 def _md_to_html(text: str) -> str:

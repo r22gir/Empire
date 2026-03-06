@@ -34,7 +34,7 @@ def _get_db_path() -> str:
         from app.services.max.brain.brain_config import get_brain_path
         return str(get_brain_path() / "token_usage.db")
     except Exception:
-        fallback = Path.home() / "Empire" / "backend" / "data" / "token_usage.db"
+        fallback = Path.home() / "empire-repo" / "backend" / "data" / "token_usage.db"
         fallback.parent.mkdir(parents=True, exist_ok=True)
         return str(fallback)
 

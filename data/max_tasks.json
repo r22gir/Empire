@@ -1,9 +1,0 @@
-{
-  "tasks": [
-    { "id": "task-001", "title": "Version Management System", "status": "completed" },
-    { "id": "task-002", "title": "R&D System", "status": "completed" },
-    { "id": "task-003", "title": "CRM Module", "status": "completed" },
-    { "id": "task-004", "title": "Financial Module", "status": "completed" },
-    { "id": "task-005", "title": "Inventory Management Module", "status": "completed" }
-  ]
-}

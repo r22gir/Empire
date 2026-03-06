@@ -39,5 +39,10 @@ npm-debug.log*
 # Environment files with secrets
 .env.local
 
+# Runtime data — databases, chats, quotes, inbox (never commit)
+*.db
+data/
+backend/data/
+
 # Version archives
 versions/*.tar.gz

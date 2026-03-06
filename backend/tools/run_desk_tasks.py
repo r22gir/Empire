@@ -3,7 +3,7 @@ AI Desk Task Worker — picks up 'todo' tasks from the DB, executes them via AI 
 writes results back, and sends summaries to Telegram.
 
 Usage:
-  cd ~/Empire/backend && ./venv/bin/python tools/run_desk_tasks.py
+  cd ~/empire-repo/backend && ./venv/bin/python tools/run_desk_tasks.py
   ./venv/bin/python tools/run_desk_tasks.py --desk forge --limit 2
   ./venv/bin/python tools/run_desk_tasks.py --dry-run
 """

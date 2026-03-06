@@ -3,8 +3,8 @@
 Standalone launcher for MAX Telegram Bot.
 
 Usage:
-  cd ~/Empire/backend
-  source ~/Empire/venv/bin/activate
+  cd ~/empire-repo/backend
+  source ~/empire-repo/backend/venv/bin/activate
   python run_telegram_bot.py
 
 Required env vars:

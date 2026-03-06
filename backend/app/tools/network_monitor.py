@@ -9,7 +9,7 @@ def get_active_connections():
 
 def get_api_logs(lines=20):
     try:
-        with open("/home/rg/Empire/logs/backend.log", "r") as f:
+        with open("/home/rg/empire-repo/backend/data/logs/backend.log", "r") as f:
             return "\n".join(f.readlines()[-lines:])
     except:
         return "No logs available"

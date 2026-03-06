@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
-QUOTES_DIR = os.path.expanduser("~/Empire/data/quotes")
+QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
 os.makedirs(QUOTES_DIR, exist_ok=True)
 
 COUNTER_FILE = os.path.join(QUOTES_DIR, "_counter.json")
@@ -1836,7 +1836,7 @@ async def generate_pdf(quote_id: str):
     pdf_bytes = WeasyHTML(string=html).write_pdf()
 
     # Save PDF file
-    pdf_dir = os.path.expanduser("~/Empire/data/quotes/pdf")
+    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote['quote_number']}.pdf")
     with open(pdf_path, "wb") as f:
@@ -1856,7 +1856,7 @@ async def download_pdf(quote_id: str):
     """Download a previously generated PDF."""
     quote = _load_quote(quote_id)
     pdf_path = os.path.join(
-        os.path.expanduser("~/Empire/data/quotes/pdf"),
+        os.path.expanduser("~/empire-repo/backend/data/quotes/pdf"),
         f"{quote['quote_number']}.pdf",
     )
     if not os.path.exists(pdf_path):

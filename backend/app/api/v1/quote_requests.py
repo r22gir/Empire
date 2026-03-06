@@ -8,7 +8,7 @@ import os
 
 router = APIRouter(prefix="/quote-requests", tags=["quote-requests"])
 
-REQUESTS_FILE = "/home/rg/Empire/data/quote_requests.json"
+REQUESTS_FILE = os.path.expanduser("~/empire-repo/backend/data/quote_requests.json")
 
 class QuoteRequest(BaseModel):
     name: str

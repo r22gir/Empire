@@ -121,7 +121,7 @@ class MaxMonitor:
     def _check_inbox(self) -> str | None:
         """Check for unread inbox items."""
         try:
-            inbox_dir = Path.home() / "Empire" / "data" / "inbox"
+            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
             if not inbox_dir.exists():
                 return None
             count = len(list(inbox_dir.glob("*.json")))

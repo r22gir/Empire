@@ -48,7 +48,7 @@ class AIRouter:
         else:
             self.primary_model = AIModel.OLLAMA
         self.system_prompt = get_system_prompt()
-        self.upload_dir = Path.home() / "Empire" / "uploads"
+        self.upload_dir = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
         model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.OLLAMA: "Ollama"}
         print(f"[MAX] Primary: {model_names[self.primary_model]}")
 

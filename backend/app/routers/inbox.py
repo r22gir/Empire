@@ -12,7 +12,7 @@ import os
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
 
-INBOX_DIR = os.path.expanduser("~/Empire/data/inbox")
+INBOX_DIR = os.path.expanduser("~/empire-repo/backend/data/inbox")
 os.makedirs(INBOX_DIR, exist_ok=True)
 
 

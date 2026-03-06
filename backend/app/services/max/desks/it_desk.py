@@ -83,7 +83,7 @@ class ITDesk(BaseDesk):
 
         result = (
             f"Health check initiated. Empire services: {services_summary}. "
-            f"Run 'bash ~/Empire/scripts/stability/health_check.sh' for live status. "
+            f"Run 'bash ~/empire-repo/scripts/stability/health_check.sh' for live status. "
             f"Switchboard limit: 3 concurrent servers max."
         )
         return await self.complete_task(task, result)
@@ -103,7 +103,7 @@ class ITDesk(BaseDesk):
 
         result = (
             f"Log analysis: {task.title}. "
-            f"Check: ~/Empire/logs/ for session logs, "
+            f"Check: ~/empire-repo/logs/ for session logs, "
             f"'journalctl -b -p err' for system errors, "
             f"'dmesg | tail -50' for kernel messages. "
             f"Do NOT run sensors-detect (crashes this hardware)."
@@ -137,7 +137,7 @@ class ITDesk(BaseDesk):
             f"Backup task: {task.title}. "
             f"Use BackupSync desktop shortcut or: "
             f"rsync -av --delete --exclude='node_modules' --exclude='.next' "
-            f"--exclude='venv' ~/Empire/ /media/rg/BACKUP11/EMPIRE/. "
+            f"--exclude='venv' ~/empire-repo/ /media/rg/BACKUP11/EMPIRE/. "
             f"Verify BACKUP11 is mounted first."
         )
         return await self.complete_task(task, result)

@@ -385,7 +385,7 @@ async def presentation_to_pdf(data: dict):
 @router.get("/presentations")
 async def list_presentations():
     """List all saved presentation PDFs with metadata."""
-    pres_dir = Path.home() / "Empire" / "data" / "presentations"
+    pres_dir = Path.home() / "empire-repo" / "backend" / "data" / "presentations"
     pres_dir.mkdir(parents=True, exist_ok=True)
     presentations = []
     for f in sorted(pres_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True):
@@ -409,7 +409,7 @@ async def list_presentations():
 async def serve_presentation(filename: str):
     """Serve a saved presentation PDF."""
     from fastapi.responses import FileResponse
-    pres_dir = Path.home() / "Empire" / "data" / "presentations"
+    pres_dir = Path.home() / "empire-repo" / "backend" / "data" / "presentations"
     file_path = pres_dir / filename
     if not file_path.exists() or not file_path.name.endswith(".pdf"):
         raise HTTPException(404, "Presentation not found")
@@ -419,7 +419,7 @@ async def serve_presentation(filename: str):
 @router.delete("/presentations/{filename}")
 async def delete_presentation(filename: str):
     """Delete a saved presentation PDF."""
-    pres_dir = Path.home() / "Empire" / "data" / "presentations"
+    pres_dir = Path.home() / "empire-repo" / "backend" / "data" / "presentations"
     file_path = pres_dir / filename
     if not file_path.exists():
         raise HTTPException(404, "Presentation not found")

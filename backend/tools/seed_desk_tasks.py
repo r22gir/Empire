@@ -1,7 +1,7 @@
 """
 Seed each AI desk with 2 actionable research/startup tasks.
 Idempotent: skips if seed tasks already exist.
-Run: cd ~/Empire/backend && ./venv/bin/python tools/seed_desk_tasks.py
+Run: cd ~/empire-repo/backend && ./venv/bin/python tools/seed_desk_tasks.py
 """
 import json
 import sys

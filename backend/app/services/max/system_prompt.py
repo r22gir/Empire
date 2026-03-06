@@ -15,8 +15,8 @@ _CACHE_TTL = 120  # 2 minutes (was 5 — shorter for faster iteration)
 
 
 def _load_memory() -> str:
-    """Load persistent memory from ~/Empire/max/memory.md if it exists."""
-    memory_file = Path.home() / "Empire" / "max" / "memory.md"
+    """Load persistent memory if it exists."""
+    memory_file = Path.home() / "empire-repo" / "backend" / "data" / "max" / "memory.md"
     if memory_file.exists():
         try:
             return memory_file.read_text(encoding="utf-8")[:4000]
@@ -28,7 +28,7 @@ def _load_memory() -> str:
 def _load_session_context() -> str:
     """Load today's session context from logs if available."""
     today = datetime.now().strftime("%Y-%m-%d")
-    log_file = Path.home() / "Empire" / "logs" / today / "session-log.md"
+    log_file = Path.home() / "empire-repo" / "backend" / "data" / "logs" / today / "session-log.md"
     if log_file.exists():
         try:
             return log_file.read_text(encoding="utf-8")[:3000]
@@ -155,15 +155,15 @@ Desk API: `/api/v1/max/ai-desks/tasks` (submit), `/ai-desks/status` (all statuse
 - **CryptoPay** - Cryptocurrency payment processing
 
 ### Key Directories
-- ~/Empire/ - Root of all Empire code
-- ~/Empire/backend/ - FastAPI backend (Python)
-- ~/Empire/empire-app/ - Founder Dashboard (Next.js, port 3009)
-- ~/Empire/workroomforge/ - WorkroomForge app (Next.js, port 3001)
-- ~/Empire/luxeforge_web/ - LuxeForge (Next.js 15, port 3002)
-- ~/Empire/openclaw/ - OpenClaw AI service
-- ~/Empire/uploads/ - Uploaded files (images, documents, code)
-- ~/Empire/max/ - MAX persistent memory
-- ~/Empire/logs/ - Session logs by date
+- ~/empire-repo/ - Root of all Empire code
+- ~/empire-repo/backend/ - FastAPI backend (Python)
+- ~/empire-repo/empire-app/ - Founder Dashboard (Next.js, port 3009)
+- ~/empire-repo/workroomforge/ - WorkroomForge app (Next.js, port 3001)
+- ~/empire-repo/luxeforge_web/ - LuxeForge (Next.js 15, port 3002)
+- ~/empire-repo/openclaw/ - OpenClaw AI service
+- ~/empire-repo/uploads/ - Uploaded files (images, documents, code)
+- ~/empire-repo/max/ - MAX persistent memory
+- ~/empire-repo/logs/ - Session logs by date
 
 ### Tech Stack
 - **Backend**: Python 3.12, FastAPI, SQLAlchemy, httpx

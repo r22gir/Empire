@@ -280,7 +280,7 @@ class ForgeDesk(BaseDesk):
         except httpx.ConnectError:
             return await self.fail_task(
                 task,
-                "WorkroomForge (port 3001) is not running. Start it with: cd ~/Empire/workroomforge && npm run dev"
+                "WorkroomForge (port 3001) is not running. Start it with: cd ~/empire-repo/workroomforge && npm run dev"
             )
         except Exception as e:
             return await self.fail_task(task, f"AI vision failed: {e}")

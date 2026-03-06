@@ -13,8 +13,8 @@ import pytesseract
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-UPLOAD_DIR = Path.home() / "Empire" / "uploads"
-LOG_DIR = Path.home() / "Empire" / "logs" / "file_access"
+UPLOAD_DIR = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
+LOG_DIR = Path.home() / "empire-repo" / "backend" / "data" / "logs" / "file_access"
 
 for cat in ['documents', 'code', 'images', 'audio', 'other']:
     (UPLOAD_DIR / cat).mkdir(parents=True, exist_ok=True)

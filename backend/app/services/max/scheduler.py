@@ -97,7 +97,7 @@ class MaxScheduler:
 
             # Count inbox items
             inbox_count = 0
-            inbox_dir = Path.home() / "Empire" / "data" / "inbox"
+            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
             if inbox_dir.exists():
                 inbox_count = len(list(inbox_dir.glob("*.json")))
 
@@ -165,7 +165,7 @@ class MaxScheduler:
             from pathlib import Path
             import json
 
-            quotes_dir = Path.home() / "Empire" / "data" / "quotes"
+            quotes_dir = Path.home() / "empire-repo" / "backend" / "data" / "quotes"
             if not quotes_dir.exists():
                 return
 
