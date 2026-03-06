@@ -108,46 +108,112 @@ async def fetch_images(queries: list[str], count_per_query: int = 1) -> list[dic
     return images
 
 
+def _parse_ddg_results(html: str, max_results: int) -> list:
+    """Parse DuckDuckGo HTML search results into structured data."""
+    import re
+    from urllib.parse import unquote
+    results = []
+    blocks = re.findall(r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>', html, re.DOTALL)
+    snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
+    for i, (url, title_html) in enumerate(blocks[:max_results]):
+        actual_match = re.search(r'uddg=([^&]+)', url)
+        actual_url = unquote(actual_match.group(1)) if actual_match else url
+        title = re.sub(r'<[^>]+>', '', title_html).strip()
+        snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+        if title and actual_url:
+            results.append({"title": title, "url": actual_url, "snippet": snippet})
+    return results
+
+
+def _brave_search(query: str, num_results: int = 8) -> list[dict]:
+    """Search via Brave Search API (free tier: 2000 queries/month)."""
+    brave_key = os.environ.get("BRAVE_API_KEY", "")
+    if not brave_key:
+        return []
+    resp = httpx.get(
+        "https://api.search.brave.com/res/v1/web/search",
+        params={"q": query, "count": num_results},
+        headers={"X-Subscription-Token": brave_key, "Accept": "application/json"},
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    results = []
+    for r in data.get("web", {}).get("results", []):
+        results.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("description", ""),
+        })
+    return results[:num_results]
+
+
 def _web_research_sync(topic: str) -> str:
-    """Synchronous web search — run via asyncio.to_thread."""
+    """Synchronous web search — DDG HTML endpoint with Brave fallback."""
+    results = []
+
+    # Primary: DDG HTML endpoint
     try:
-        from duckduckgo_search import DDGS
-        results = DDGS().text(topic, max_results=8)
-        if not results:
-            results = DDGS().text(topic, max_results=8, backend="html")
-        if not results:
-            return ""
-        lines = []
-        for r in results:
-            lines.append(f"**{r['title']}**\n{r['body']}\nURL: {r['href']}\n")
-        return "\n".join(lines)
+        resp = httpx.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": topic},
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            },
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            results = _parse_ddg_results(resp.text, 8)
     except Exception as e:
-        print(f"[PresentationBuilder] Web research failed: {e}")
+        print(f"[PresentationBuilder] DDG HTML failed: {e}")
+
+    # Fallback: Brave Search API
+    if not results:
+        try:
+            results = _brave_search(topic, 8)
+        except Exception as e:
+            print(f"[PresentationBuilder] Brave search failed: {e}")
+
+    if not results:
         return ""
+
+    lines = []
+    for r in results:
+        lines.append(f"**{r['title']}**\n{r['snippet']}\nURL: {r['url']}\n")
+    return "\n".join(lines)
 
 
 def _fetch_videos_sync(queries: list[str], max_per_query: int = 2) -> list[dict]:
-    """Synchronous video search — run via asyncio.to_thread."""
+    """Synchronous video search via DDG HTML."""
     videos = []
-    try:
-        from duckduckgo_search import DDGS
-        for query in queries[:2]:
-            try:
-                raw = DDGS().videos(query, max_results=max_per_query)
-                for v in raw:
-                    vid = {
-                        "title": v.get("title", ""),
-                        "url": v.get("content", ""),
-                        "thumbnail": v.get("images", {}).get("large", "") or v.get("images", {}).get("medium", ""),
-                        "duration": v.get("duration", ""),
-                        "publisher": v.get("publisher", ""),
-                    }
-                    if vid["url"] and vid["title"]:
-                        videos.append(vid)
-            except Exception:
+    for query in queries[:2]:
+        try:
+            resp = httpx.get(
+                "https://html.duckduckgo.com/html/",
+                params={"q": f"{query} site:youtube.com"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                },
+                timeout=10,
+                follow_redirects=True,
+            )
+            if resp.status_code != 200:
                 continue
-    except Exception as e:
-        print(f"[PresentationBuilder] Video search failed: {e}")
+            parsed = _parse_ddg_results(resp.text, max_per_query)
+            for r in parsed:
+                if "youtube.com" in r["url"] or "youtu.be" in r["url"]:
+                    videos.append({
+                        "title": r["title"],
+                        "url": r["url"],
+                        "thumbnail": "",
+                        "duration": "",
+                        "publisher": "",
+                    })
+        except Exception:
+            continue
     return videos
 
 
