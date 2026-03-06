@@ -71,6 +71,7 @@ load_router("app.routers.supportforge_ai", "/api/v1/ai", ["supportforge"])
 load_router("app.routers.crypto_payments", "/api/v1/crypto-payments", ["crypto"])
 load_router("app.routers.economic", "/api/v1/economic", ["economic"])
 load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
+load_router("app.routers.memory", "/api/v1", ["memory"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
 

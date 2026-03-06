@@ -12,8 +12,11 @@ import subprocess
 from typing import Optional, Dict, Any
 from pathlib import Path
 import httpx
+from app.services.max.brain.memory_store import MemoryStore
 
 logger = logging.getLogger("max.telegram")
+
+_memory_store = MemoryStore()
 
 # ── Per-chat conversation history — persisted to disk ──
 _MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
@@ -63,6 +66,20 @@ def _append_and_save(chat_id: str, role: str, content: str):
         history[:] = history[-_MAX_HISTORY * 2:]
     _telegram_history[chat_id] = history
     _save_telegram_history(chat_id, history)
+
+    # Also save to MemoryStore for long-term brain memory
+    try:
+        _memory_store.add_memory(
+            category="conversation",
+            content=content,
+            subject=f"telegram_{role}",
+            importance=5 if role == "user" else 3,
+            source="telegram",
+            tags=[role, "telegram"],
+            conversation_id=f"telegram-{chat_id}",
+        )
+    except Exception as e:
+        logger.warning(f"MemoryStore write failed: {e}")
 
 
 class TelegramBot:
@@ -318,7 +335,7 @@ class TelegramBot:
         cid = str(chat_id or self.founder_chat_id or "default")
         history = _get_history(cid)[-_MAX_HISTORY:]
         try:
-            payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}"}
+            payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}", "channel": "telegram"}
             if image_filename:
                 payload["image_filename"] = image_filename
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -487,7 +504,7 @@ class TelegramBot:
 
             # Send any documents/files produced by tool execution (deduplicate by path)
             sent_files = set()
-            for tr in tool_results:
+            for tr in (tool_results or []):
                 if tr.get("success") and tr.get("result"):
                     res = tr["result"]
                     file_path = res.get("file_path") or res.get("pdf_path")

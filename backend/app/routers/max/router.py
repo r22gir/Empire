@@ -54,6 +54,19 @@ class ChatRequest(BaseModel):
     image_filename: Optional[str] = None
     desk: Optional[str] = None
     conversation_id: Optional[str] = None
+    channel: Optional[str] = None  # "telegram", "web", etc.
+
+
+TELEGRAM_DIRECTIVE = (
+    "\n\n## CHANNEL: TELEGRAM\n"
+    "This message is from Telegram. Respond ultra-short and direct.\n"
+    "- No markdown headers, no bullet points unless specifically needed.\n"
+    "- No greetings, no filler, no sign-offs.\n"
+    "- Keep responses under 3 sentences when possible.\n"
+    "- If the answer is a single fact or number, just say it.\n"
+    "- IMPORTANT: You MUST still use ```tool blocks when actions are needed (web_search, quotes, etc). "
+    "Tool blocks are the ONLY exception to the plain text rule — they are required for execution."
+)
 
 
 class ChatResponse(BaseModel):
@@ -114,6 +127,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                 )
             except Exception as e:
                 logger.warning(f"Brain context failed, using base prompt: {e}")
+
+        # Append channel-specific directives
+        if request.channel == "telegram" and enriched_prompt:
+            enriched_prompt += TELEGRAM_DIRECTIVE
 
         response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
 
@@ -236,6 +253,10 @@ async def chat_stream(request: ChatRequest):
             )
         except Exception as e:
             logger.warning(f"Brain context failed, using base prompt: {e}")
+
+    # Append channel-specific directives
+    if request.channel == "telegram" and enriched_prompt:
+        enriched_prompt += TELEGRAM_DIRECTIVE
 
     # Conversation tracking ID
     conv_id = request.conversation_id or str(uuid.uuid4())

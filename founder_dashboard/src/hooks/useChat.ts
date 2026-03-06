@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Message, StreamEvent, ToolResult } from '@/lib/types';
 import { API_URL } from '@/lib/api';
 
@@ -14,6 +14,25 @@ const WELCOME: Message = {
   content: "Hello! I'm **MAX**, your Empire AI Assistant.\n\n_Tip: Ctrl+V to paste images · Shift+Enter for newlines_",
 };
 
+function formatContextPack(data: {
+  top_memories?: { subject?: string; content?: string }[];
+  recent_summaries?: { date?: string; summary?: string }[];
+  pending_tasks?: { title?: string; status?: string; priority?: string }[];
+}): string {
+  const parts: string[] = [];
+  if (data.recent_summaries?.length) {
+    parts.push('Recent sessions: ' + data.recent_summaries.map(s => s.summary || '').join(' | '));
+  }
+  if (data.pending_tasks?.length) {
+    parts.push('Pending tasks: ' + data.pending_tasks.map(t => t.title || '').join(', '));
+  }
+  if (data.top_memories?.length) {
+    const mems = data.top_memories.slice(0, 10).map(m => m.content || '').join(' | ');
+    parts.push('Key memories: ' + mems);
+  }
+  return parts.length ? '[Context from previous sessions]\n' + parts.join('\n') : '';
+}
+
 export function useChat({ onSave }: UseChatOptions = {}) {
   const [messages,        setMessages]        = useState<Message[]>([WELCOME]);
   const [isStreaming,     setIsStreaming]      = useState(false);
@@ -25,6 +44,17 @@ export function useChat({ onSave }: UseChatOptions = {}) {
   const messagesRef  = useRef<Message[]>([WELCOME]);
   const onSaveRef    = useRef(onSave);
   onSaveRef.current  = onSave;
+  const contextPackRef = useRef<string>('');
+
+  // Fetch context-pack on mount for session continuity
+  useEffect(() => {
+    fetch(API_URL + '/memory/context-pack')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) contextPackRef.current = formatContextPack(data);
+      })
+      .catch(() => {});  // silent fail — context is optional
+  }, []);
 
   // Keep messagesRef in sync
   const updateMessages = useCallback((msgs: Message[] | ((prev: Message[]) => Message[])) => {
@@ -69,10 +99,17 @@ export function useChat({ onSave }: UseChatOptions = {}) {
     let modelUsed   = '';
 
     try {
+      // Inject context-pack as a system context message on the first real exchange
+      const historySlice = newMsgs.slice(-20).map(m => ({ role: m.role, content: m.content }));
+      if (contextPackRef.current && historySlice.filter(m => m.role === 'user').length <= 1) {
+        historySlice.unshift({ role: 'user', content: contextPackRef.current });
+        historySlice.unshift({ role: 'assistant', content: 'Context loaded. Ready.' });
+      }
+
       const body: Record<string, unknown> = {
         message: input,
         model:   selectedModel,
-        history: newMsgs.slice(-20).map(m => ({ role: m.role, content: m.content })),
+        history: historySlice,
         conversation_id: chatIdRef.current || undefined,
       };
       if (desk) body.desk = desk;

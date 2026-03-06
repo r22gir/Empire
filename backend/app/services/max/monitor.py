@@ -19,6 +19,7 @@ class MaxMonitor:
     def __init__(self):
         self._running = False
         self._task: asyncio.Task | None = None
+        self._sent_today: dict[str, str] = {}  # alert_key -> date, dedup within same day
 
     async def start(self):
         if self._running:
@@ -69,6 +70,23 @@ class MaxMonitor:
         if not alerts:
             return
 
+        # Deduplicate: only send each alert type once per day
+        today = datetime.now().strftime("%Y-%m-%d")
+        new_alerts = []
+        for alert in alerts:
+            # Use first 40 chars as dedup key (captures the alert type)
+            key = alert.strip()[:40]
+            if self._sent_today.get(key) == today:
+                continue
+            self._sent_today[key] = today
+            new_alerts.append(alert)
+
+        # Purge stale entries from previous days
+        self._sent_today = {k: v for k, v in self._sent_today.items() if v == today}
+
+        if not new_alerts:
+            return
+
         # Send combined alert
         from app.services.max.telegram_bot import telegram_bot
         if not telegram_bot.is_configured:
@@ -76,10 +94,10 @@ class MaxMonitor:
 
         msg = f"<b>🔔 {biz.ai_assistant_name} Monitor Alert</b>\n"
         msg += f"<i>{datetime.now().strftime('%I:%M %p')}</i>\n"
-        msg += "\n".join(alerts)
+        msg += "\n".join(new_alerts)
 
         await telegram_bot.send_message(msg)
-        logger.info(f"Monitor alert sent ({len(alerts)} check(s))")
+        logger.info(f"Monitor alert sent ({len(new_alerts)} check(s))")
 
     async def _check_overdue_tasks(self) -> str | None:
         """Check for overdue tasks."""

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 # Brain location — local NVMe is primary (fast, reliable, no USB power issues)
-LOCAL_BRAIN = Path.home() / "Empire" / "backend" / "data" / "brain"
+LOCAL_BRAIN = Path.home() / "empire-repo" / "backend" / "data" / "brain"
 
 
 def get_brain_path() -> Path:

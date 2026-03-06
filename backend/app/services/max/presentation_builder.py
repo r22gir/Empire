@@ -114,6 +114,8 @@ def _web_research_sync(topic: str) -> str:
         from duckduckgo_search import DDGS
         results = DDGS().text(topic, max_results=8)
         if not results:
+            results = DDGS().text(topic, max_results=8, backend="html")
+        if not results:
             return ""
         lines = []
         for r in results:

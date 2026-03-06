@@ -1178,24 +1178,89 @@ def _search_images(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── WEB SEARCH TOOL ───────────────────────────────────────────────
 
+def _parse_ddg_results(html: str, max_results: int) -> list:
+    """Parse DuckDuckGo HTML search results into structured data."""
+    from urllib.parse import unquote
+    results = []
+    blocks = re.findall(r'class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>', html, re.DOTALL)
+    snippets = re.findall(r'class="result__snippet"[^>]*>(.*?)</a>', html, re.DOTALL)
+
+    for i, (url, title_html) in enumerate(blocks[:max_results]):
+        actual_match = re.search(r'uddg=([^&]+)', url)
+        actual_url = unquote(actual_match.group(1)) if actual_match else url
+        title = re.sub(r'<[^>]+>', '', title_html).strip()
+        snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip() if i < len(snippets) else ""
+        if title and actual_url:
+            results.append({"title": title, "url": actual_url, "snippet": snippet})
+    return results
+
+
+def _brave_search(query: str, num_results: int = 5) -> list[dict]:
+    """Search via Brave Search API (free tier: 2000 queries/month)."""
+    brave_key = os.getenv("BRAVE_API_KEY", "")
+    if not brave_key:
+        return []
+    resp = httpx.get(
+        "https://api.search.brave.com/res/v1/web/search",
+        params={"q": query, "count": num_results},
+        headers={"X-Subscription-Token": brave_key, "Accept": "application/json"},
+        timeout=10.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    results = []
+    for r in data.get("web", {}).get("results", []):
+        results.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("description", ""),
+        })
+    return results[:num_results]
+
+
 @tool("web_search")
 def _web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Search the web via DuckDuckGo. Returns titles, URLs, and snippets."""
+    """Search the web via DuckDuckGo HTML with Brave Search API fallback."""
     query = params.get("query", "").strip()
+    logger.info(f"[web_search] called with query='{query}'")
     if not query:
         return ToolResult(tool="web_search", success=False, error="Query is required")
 
     num_results = min(int(params.get("num_results", 5)), 10)
+    source = "DuckDuckGo"
+    results = []
 
+    # Primary: DDG HTML endpoint (same method that worked on Beelink)
     try:
-        from duckduckgo_search import DDGS
-        raw = DDGS().text(query, max_results=num_results)
-        results = [{"title": r["title"], "url": r["href"], "snippet": r["body"]} for r in raw]
-        return ToolResult(tool="web_search", success=True, result={
-            "query": query, "results": results, "count": len(results), "source": "DuckDuckGo",
-        })
+        resp = httpx.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            },
+            timeout=10,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            results = _parse_ddg_results(resp.text, num_results)
     except Exception as e:
-        return ToolResult(tool="web_search", success=False, error=f"Web search failed: {e}")
+        logger.warning(f"[web_search] DDG HTML failed: {e}")
+
+    # Fallback: Brave Search API
+    if not results:
+        try:
+            logger.info(f"[web_search] DDG returned 0, falling back to Brave Search")
+            results = _brave_search(query, num_results)
+            if results:
+                source = "Brave"
+        except Exception as e:
+            logger.warning(f"[web_search] Brave also failed: {type(e).__name__}: {e}")
+
+    logger.info(f"[web_search] query='{query}' returned {len(results)} results via {source}")
+    return ToolResult(tool="web_search", success=True, result={
+        "query": query, "results": results, "count": len(results), "source": source,
+    })
 
 
 @tool("web_read")
