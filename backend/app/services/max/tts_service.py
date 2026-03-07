@@ -1,85 +1,79 @@
 """
-MAX TTS Service — Text-to-Speech via edge-tts (free, no API key needed).
+MAX TTS Service — Text-to-Speech via xAI Grok TTS API.
 One voice for MAX everywhere: Telegram voice replies, Command Center audio.
 
-Uses Microsoft Edge Neural TTS — AndrewMultilingual (warm, confident, bilingual EN/ES).
+Voice: Rex (confident, professional). Supports 100+ languages including Spanish.
+Requires XAI_API_KEY (same key used for Grok chat/vision).
 """
+import os
 import logging
 import tempfile
-import asyncio
 from pathlib import Path
 from typing import Optional
+
+import httpx
 
 logger = logging.getLogger("max.tts")
 
 # MAX voice config — one voice everywhere
-TTS_VOICE = "en-US-AndrewMultilingualNeural"  # warm, confident, natural + bilingual EN/ES
-TTS_RATE = "+0%"  # normal speed
+# Available voices: ara, rex, sal, eve, leo
+TTS_VOICE = "rex"
+TTS_API_URL = "https://api.x.ai/v1/tts"
 MAX_TEXT_LENGTH = 4096
-MAX_RETRIES = 2
 
 
 class TTSService:
-    """Text-to-Speech service using edge-tts (free, no API key)."""
+    """Text-to-Speech service using xAI Grok TTS (Rex voice)."""
 
     def __init__(self):
         self.cache_dir = Path(tempfile.gettempdir()) / "max_tts_cache"
         self.cache_dir.mkdir(exist_ok=True)
-        self._available: Optional[bool] = None
 
     @property
     def is_configured(self) -> bool:
-        """edge-tts needs no API key — always configured if the package is installed."""
-        if self._available is None:
-            try:
-                import edge_tts  # noqa: F401
-                self._available = True
-            except ImportError:
-                self._available = False
-                logger.error("edge-tts not installed. Run: pip install edge-tts")
-        return self._available
-
-    async def _synthesize_with_retry(
-        self, text: str, voice: str, rate: str, output_path: Path
-    ) -> bool:
-        """Try synthesis up to MAX_RETRIES times (edge-tts WebSocket can be flaky)."""
-        import edge_tts
-
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                communicate = edge_tts.Communicate(text, voice, rate=rate)
-                await communicate.save(str(output_path))
-                if output_path.exists() and output_path.stat().st_size > 0:
-                    return True
-            except Exception as e:
-                if attempt < MAX_RETRIES:
-                    logger.warning(f"TTS attempt {attempt + 1} failed: {e}, retrying...")
-                    await asyncio.sleep(0.5)
-                else:
-                    logger.error(f"TTS failed after {MAX_RETRIES + 1} attempts: {e}")
-        return False
+        return bool(os.getenv("XAI_API_KEY"))
 
     async def synthesize(
         self,
         text: str,
         voice: str = TTS_VOICE,
-        rate: str = TTS_RATE,
         output_format: str = "mp3",
     ) -> Optional[Path]:
-        """Convert text to speech audio file."""
+        """Convert text to speech audio file via xAI TTS API."""
         if not self.is_configured or not text or not text.strip():
             return None
 
         clean_text = text.strip()[:MAX_TEXT_LENGTH]
+        api_key = os.getenv("XAI_API_KEY")
 
         try:
-            suffix = ".ogg" if output_format == "opus" else f".{output_format}"
-            audio_path = Path(tempfile.mktemp(suffix=suffix, dir=str(self.cache_dir)))
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    TTS_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "text": clean_text,
+                        "voice_id": voice,
+                    },
+                )
 
-            if await self._synthesize_with_retry(clean_text, voice, rate, audio_path):
-                logger.info(f"TTS generated: {audio_path.stat().st_size} bytes → {audio_path.name}")
-                return audio_path
-            return None
+            if resp.status_code != 200:
+                logger.error(f"xAI TTS API error {resp.status_code}: {resp.text[:300]}")
+                return None
+
+            audio_data = resp.content
+            if not audio_data or len(audio_data) < 100:
+                logger.warning("xAI TTS returned empty or tiny audio")
+                return None
+
+            suffix = f".{output_format}"
+            audio_path = Path(tempfile.mktemp(suffix=suffix, dir=str(self.cache_dir)))
+            audio_path.write_bytes(audio_data)
+            logger.info(f"TTS generated via xAI (Rex): {len(audio_data)} bytes → {audio_path.name}")
+            return audio_path
 
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
@@ -95,15 +89,31 @@ class TTSService:
             return None
 
         clean_text = text.strip()[:MAX_TEXT_LENGTH]
+        api_key = os.getenv("XAI_API_KEY")
 
         try:
-            audio_path = Path(tempfile.mktemp(suffix=".mp3", dir=str(self.cache_dir)))
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    TTS_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "text": clean_text,
+                        "voice_id": TTS_VOICE,
+                    },
+                )
 
-            if await self._synthesize_with_retry(clean_text, TTS_VOICE, TTS_RATE, audio_path):
-                data = audio_path.read_bytes()
-                audio_path.unlink(missing_ok=True)
-                return data
-            return None
+            if resp.status_code != 200:
+                logger.error(f"xAI TTS API error {resp.status_code}: {resp.text[:300]}")
+                return None
+
+            audio_data = resp.content
+            if not audio_data or len(audio_data) < 100:
+                return None
+
+            return audio_data
 
         except Exception as e:
             logger.error(f"TTS web synthesis failed: {e}")

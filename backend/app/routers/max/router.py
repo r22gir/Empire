@@ -739,17 +739,16 @@ async def get_desk_daily_report():
 
 class TTSRequest(BaseModel):
     text: str
-    voice: str = "onyx"
-    speed: float = 1.0
+    voice: str = "rex"  # Available: ara, rex, sal, eve, leo
 
 
 @router.post("/tts")
 async def text_to_speech(request: TTSRequest):
-    """Convert text to speech audio (MP3). Used by Command Center voice playback."""
+    """Convert text to speech audio (MP3) via xAI Grok TTS. Voice: Rex (default)."""
     from app.services.max.tts_service import tts_service
 
     if not tts_service.is_configured:
-        raise HTTPException(status_code=503, detail="TTS not configured — edge-tts package not installed")
+        raise HTTPException(status_code=503, detail="TTS not configured — XAI_API_KEY missing")
 
     audio_bytes = await tts_service.synthesize_for_web(request.text)
     if not audio_bytes:

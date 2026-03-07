@@ -1767,7 +1767,8 @@ async def generate_pdf(quote_id: str):
     design_proposals = quote.get("design_proposals") or []
     # If a proposal was selected, only show that one in the PDF
     selected_idx = quote.get("selected_proposal")
-    if selected_idx is not None and 0 <= selected_idx < len(design_proposals):
+    proposal_selected = selected_idx is not None and 0 <= selected_idx < len(design_proposals)
+    if proposal_selected:
         design_proposals = [design_proposals[selected_idx]]
     # Find original customer photo for "before" reference
     original_photo = ""
@@ -1917,7 +1918,7 @@ async def generate_pdf(quote_id: str):
 {proposals_html}
 
 <!-- ═══ ITEMIZED COST BREAKDOWN ═══ -->
-{_build_line_items_html(quote.get("line_items", [])) if not design_proposals else ""}
+{_build_line_items_html(quote.get("line_items", [])) if (not design_proposals or proposal_selected) else ""}
 
 <!-- ═══ TOTALS ═══ -->
 {f'''<table style="margin-top:16px"><tbody>
@@ -1925,7 +1926,7 @@ async def generate_pdf(quote_id: str):
     Treatment options range from</td>
   <td style="padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.15em;white-space:nowrap">
     ${min(p["total"] for p in design_proposals):,.0f} &ndash; ${max(p["total"] for p in design_proposals):,.0f}</td></tr>
-</tbody></table>''' if design_proposals else f'''<table style="margin-top:16px"><tbody>
+</tbody></table>''' if design_proposals and not proposal_selected else f'''<table style="margin-top:16px"><tbody>
   {f"<tr><td colspan='8' style='padding:10px 8px;text-align:right;color:#666;font-style:italic'>Treatment options range from</td><td style='padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.1em;white-space:nowrap'>${quote['price_range_low']:,.0f} &ndash; ${quote['price_range_high']:,.0f}</td></tr>" if quote.get("price_range_low") else f"""
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Subtotal</td>
   <td style='padding:8px;text-align:right;color:#666'>${quote["subtotal"]:.2f}</td></tr>

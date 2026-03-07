@@ -366,7 +366,7 @@ class TelegramBot:
         try:
             from app.services.max.tts_service import tts_service
             if not tts_service.is_configured:
-                logger.warning("TTS not configured (OPENAI_API_KEY missing) — voice reply skipped")
+                logger.warning("TTS not configured (XAI_API_KEY missing) — voice reply skipped")
                 return
             audio_path = await tts_service.synthesize_for_telegram(plain_text)
             if audio_path and audio_path.exists():

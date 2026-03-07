@@ -658,10 +658,10 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
             'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
             'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
         }
-        tier_fabric_desc = {
-            "A": "simple, clean solid-color fabric in a neutral tone (ivory or light gray)",
-            "B": "mid-range designer fabric with subtle texture and warm color (sage green or dusty blue)",
-            "C": "luxurious heavy silk fabric in a rich jewel tone (deep emerald or navy) with elegant drape",
+        tier_fabric_desc_default = {
+            "A": "simple, clean solid-color fabric in a neutral tone",
+            "B": "mid-range designer fabric with subtle texture",
+            "C": "luxurious heavy silk fabric with elegant drape",
         }
         # Use the first room's first window for the mockup scene
         first_room = rooms[0]
@@ -673,17 +673,25 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         h = first_win.get("height", 60)
         mount = first_win.get("mountType", "wall")
         hardware = (first_win.get("hardwareType") or "decorative rod").replace('-', ' ')
+        customer_color = first_win.get("fabricColor", "")
 
         ai_mockups = []
         gen_images = []
         for i, dp in enumerate(design_proposals[:3]):
             grade = dp.get("fabric_grade", chr(65 + i))
             lining = (dp.get("lining_type") or "standard").replace("-", " ")
-            fabric_desc = tier_fabric_desc.get(grade, "elegant fabric")
+            # Use customer's requested color if provided, otherwise tier defaults
+            if customer_color:
+                fabric_desc = f"{customer_color} fabric"
+                tier_quality = {"A": "solid, clean", "B": "textured, designer-quality", "C": "luxurious silk/velvet"}.get(grade, "")
+                if tier_quality:
+                    fabric_desc = f"{tier_quality} {customer_color} fabric"
+            else:
+                fabric_desc = tier_fabric_desc_default.get(grade, "elegant fabric")
             prompt = (
                 f"Professional interior design photo: a {room_name.lower()} with a "
                 f"{w}-inch wide by {h}-inch tall window. "
-                f"Installed: {label} drapery panels in {fabric_desc}. "
+                f"Installed: {label} in {fabric_desc}. "
                 f"The panels hang from {hardware} hardware, {mount}-mounted. "
                 f"{lining} lining. "
                 f"Clean, bright natural light. Magazine-quality architectural photography."
@@ -1630,14 +1638,15 @@ To call a tool, include a tool block in your response:
 
 ### Action Tools
 - **create_quick_quote** — Create a quick quote with 3 stacked design proposals (Essential/Designer/Premium). Uses QT-CUSTOMER-DATE-NNN numbering. Total starts at $0 until a proposal is selected.
-  `{"tool": "create_quick_quote", "customer_name": "Newman", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold"}]}], "max_analysis": "Professional analysis here..."}`
+  `{"tool": "create_quick_quote", "customer_name": "Newman", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "roman-shade", "fabricColor": "navy blue"}]}], "max_analysis": "Professional analysis here..."}`
+  CRITICAL: Set treatmentType to EXACTLY what the customer requested (roman-shade, pinch-pleat, ripplefold, grommet, rod-pocket, roller-shade). NEVER default to ripplefold if the customer asked for something else. Include fabricColor if the customer mentioned a color preference.
   Returns 3 options (A: Essential, B: Designer, C: Premium) with different fabric grades and pricing. Founder selects one to finalize.
 - **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
   `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`
   After selection, the quote gets real totals and can be sent via Telegram or email.
 - **open_quote_builder** — Open the QuoteBuilder right here in the dashboard (ALWAYS use this instead of linking to WorkroomForge). Pre-fills customer info AND rooms/windows from the conversation.
-  `{"tool": "open_quote_builder", "customer_name": "...", "customer_email": "...", "customer_phone": "...", "customer_address": "...", "project_name": "...", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold", "liningType": "standard", "hardwareType": "track-ripplefold", "motorization": "none", "mountType": "wall"}], "upholstery": []}]}`
-  treatmentType options: ripplefold, pinch-pleat, rod-pocket, grommet, roman-shade, roller-shade
+  `{"tool": "open_quote_builder", "customer_name": "...", "customer_email": "...", "customer_phone": "...", "customer_address": "...", "project_name": "...", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "roman-shade", "fabricColor": "ivory", "liningType": "standard", "hardwareType": "cassette", "motorization": "none", "mountType": "wall"}], "upholstery": []}]}`
+  treatmentType options: ripplefold, pinch-pleat, rod-pocket, grommet, roman-shade, roller-shade — USE THE ONE THE CUSTOMER ASKED FOR
   liningType: standard, blackout, thermal, sheer, none
   hardwareType: track-ripplefold, decorative-rod, tension-rod, hidden-track, none
   motorization: none, basic, smart
@@ -1674,7 +1683,8 @@ To call a tool, include a tool block in your response:
   `{"tool": "search_images", "query": "modern ripplefold drapery"}`
   After getting results, use: `![description](url)` to embed images in your response.
 - **photo_to_quote** — Create a quote from photo analysis and send the PDF via Telegram in one step. Use this when analyzing a photo of windows/furniture that needs a quote.
-  `{"tool": "photo_to_quote", "customer_name": "Customer", "rooms": [{"name": "Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "ripplefold"}]}], "max_analysis": "Professional analysis..."}`
+  `{"tool": "photo_to_quote", "customer_name": "Customer", "rooms": [{"name": "Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "pinch-pleat", "fabricColor": "cream"}]}], "max_analysis": "Professional analysis..."}`
+  IMPORTANT: Use the correct treatmentType from the customer's request or your photo analysis. Include fabricColor if known.
   This automatically creates the quote, generates the PDF, and sends it via Telegram.
 
 ### System Tools
