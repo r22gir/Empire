@@ -9,7 +9,6 @@ Endpoints:
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from uuid import UUID
 import math
 
 from app.database import get_db
@@ -45,9 +44,10 @@ def calibrate(request: CalibrateRequest, db: Session = Depends(get_db)):
     - reference_real:   real-world length of the object
     - reference_unit:   'inches' or 'cm'
     """
+    img_id = str(request.image_id)
     record = (
         db.query(ImageMeasurement)
-        .filter(ImageMeasurement.image_id == request.image_id)
+        .filter(ImageMeasurement.image_id == img_id)
         .first()
     )
     if record:
@@ -56,7 +56,7 @@ def calibrate(request: CalibrateRequest, db: Session = Depends(get_db)):
         record.reference_unit = request.reference_unit
     else:
         record = ImageMeasurement(
-            image_id=request.image_id,
+            image_id=img_id,
             reference_pixels=request.reference_pixels,
             reference_real=request.reference_real,
             reference_unit=request.reference_unit,
@@ -77,9 +77,10 @@ def calculate(request: CalculateRequest, db: Session = Depends(get_db)):
     Requires a prior calibration for the image.  Each supplied line has its
     ``real_length`` populated and is persisted alongside the calibration record.
     """
+    img_id = str(request.image_id)
     record = (
         db.query(ImageMeasurement)
-        .filter(ImageMeasurement.image_id == request.image_id)
+        .filter(ImageMeasurement.image_id == img_id)
         .first()
     )
     if not record:
@@ -116,7 +117,7 @@ def calculate(request: CalculateRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/{image_id}", response_model=MeasurementResponse)
-def get_measurements(image_id: UUID, db: Session = Depends(get_db)):
+def get_measurements(image_id: str, db: Session = Depends(get_db)):
     """
     Retrieve calibration and all measurements for a given image.
     """
@@ -143,9 +144,10 @@ def export_measurements(request: ExportRequest, db: Session = Depends(get_db)):
     - ``json``   – raw JSON array of measurements
     - ``csv``    – CSV-formatted string
     """
+    img_id = str(request.image_id)
     record = (
         db.query(ImageMeasurement)
-        .filter(ImageMeasurement.image_id == request.image_id)
+        .filter(ImageMeasurement.image_id == img_id)
         .first()
     )
     if not record:

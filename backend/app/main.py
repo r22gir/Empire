@@ -77,10 +77,18 @@ load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
 # LuxeForge Measurements router
 try:
+    from app.models.luxeforge_measurement import ImageMeasurement  # noqa: ensure model is registered
     from app.routers import luxeforge_measurements
     app.include_router(luxeforge_measurements.router, prefix="/api/luxeforge/measurements", tags=["luxeforge-measurements"])
 except ImportError:
     pass
+
+# Create measurement table (avoid create_all due to JSONB in other models)
+try:
+    from app.database import engine
+    ImageMeasurement.__table__.create(bind=engine, checkfirst=True)
+except Exception as e:
+    print(f"✗ Measurement table init: {e}")
 
 # Docker / System / Ollama management
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
