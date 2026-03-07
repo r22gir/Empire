@@ -614,13 +614,49 @@ class TelegramBot:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 import shutil
                 shutil.move(str(photo_path), str(dest))
+                # Call /vision/measure for structured AI measurement before sending to MAX
+                vision_context = ""
+                try:
+                    import base64 as _b64_mod
+                    with open(dest, "rb") as _img_f:
+                        _img_b64 = _b64_mod.b64encode(_img_f.read()).decode()
+                    _ext = dest.suffix.lstrip(".").lower()
+                    _mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(_ext, "image/jpeg")
+                    _data_uri = f"data:{_mime};base64,{_img_b64}"
+                    async with httpx.AsyncClient(timeout=120) as _vc:
+                        _vr = await _vc.post(
+                            "http://localhost:8000/api/v1/vision/measure",
+                            json={"image": _data_uri},
+                        )
+                    if _vr.status_code == 200:
+                        _vm = _vr.json()
+                        _w = _vm.get("width_inches", 0)
+                        _h = _vm.get("height_inches", 0)
+                        _conf = _vm.get("confidence", 0)
+                        _wtype = _vm.get("window_type", "")
+                        _refs = ", ".join(_vm.get("reference_objects_used", []))
+                        _suggestions = ", ".join(_vm.get("treatment_suggestions", []))
+                        vision_context = (
+                            f"\n\nVISION MEASUREMENT RESULTS (from reference-calibrated analysis):\n"
+                            f"- Window dimensions: {_w}\" wide x {_h}\" tall\n"
+                            f"- Window type: {_wtype}\n"
+                            f"- Confidence: {_conf}%\n"
+                            f"- Reference objects used: {_refs}\n"
+                            f"- Treatment suggestions: {_suggestions}\n"
+                            f"- Notes: {_vm.get('notes', '')}\n"
+                            f"USE THESE MEASUREMENTS for the quote (width={_w}, height={_h}).\n"
+                        )
+                        logger.info(f"Vision measurement: {_w}\"x{_h}\" ({_conf}% confidence)")
+                except Exception as _ve:
+                    logger.warning(f"Vision /measure call failed, falling back to AI estimation: {_ve}")
+
                 caption = update.message.caption or (
                     "Analyze this image. If it shows a window, window treatment, curtain, drape, "
                     "or furniture that might need upholstery or a window treatment quote, "
-                    "estimate the dimensions, identify the treatment type, and use the photo_to_quote tool "
-                    "to create a quote and send the PDF. "
+                    "use the photo_to_quote tool to create a quote and send the PDF. "
                     "If it's not related to windows or furniture, just describe what you see."
                 )
+                caption += vision_context
                 photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
 
                 # Validate image file (basic magic bytes check)

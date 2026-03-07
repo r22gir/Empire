@@ -75,6 +75,9 @@ load_router("app.routers.memory", "/api/v1", ["memory"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
+# Vision analysis (measurement, mockup, outline, upholstery, image gen)
+load_router("app.routers.vision", "", ["vision"])
+
 # LuxeForge Measurements router
 try:
     from app.models.luxeforge_measurement import ImageMeasurement  # noqa: ensure model is registered

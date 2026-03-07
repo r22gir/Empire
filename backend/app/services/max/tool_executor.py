@@ -303,6 +303,7 @@ def _calc_window_line_items(room_name: str, win: dict) -> list[dict]:
 
     specs = TREATMENT_SPECS.get(treatment, TREATMENT_SPECS["ripplefold"])
     label = treatment.replace("-", " ").title()
+    fabric_color = win.get("fabricColor", "")
     items = []
 
     # ── Fabric ──
@@ -316,9 +317,10 @@ def _calc_window_line_items(room_name: str, win: dict) -> list[dict]:
         total_yards = round(widths_needed * yards_per_width * qty, 1)
         grade_info = FABRIC_GRADES.get(fabric_grade, FABRIC_GRADES["B"])
         fabric_cost = round(total_yards * grade_info["per_yard"], 2)
+        color_note = f" in {fabric_color}" if fabric_color else ""
         items.append({
             "room": room_name,
-            "description": f"Fabric — {grade_info['label']} Grade ({total_yards} yds) for {label}",
+            "description": f"Fabric — {grade_info['label']} Grade{color_note} ({total_yards} yds) for {label}",
             "quantity": qty,
             "unit_price": round(fabric_cost / qty, 2),
             "total": fabric_cost,

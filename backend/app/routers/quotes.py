@@ -1191,9 +1191,9 @@ def _build_rooms_html(rooms: list) -> str:
 
             html += '<div style="margin:8px 0 16px;page-break-inside:avoid">'
             for w in regular_windows:
-                # Per-item photo inline with the window drawing
+                # Per-item photo inline — skip if design_proposals exist (shown in proposals section as "Current — Before")
                 src_photo = w.get("sourcePhoto", "")
-                if src_photo:
+                if src_photo and not proposal_windows:
                     html += f"""<div style="margin-bottom:10px;text-align:center;page-break-inside:avoid">
                       <p style="font-size:0.75em;color:#666;margin-bottom:4px;font-weight:600">Site Photo — {w.get('name', 'Window')}</p>
                       <img src="{src_photo}" style="max-width:100%;max-height:250px;border-radius:8px;border:1px solid #ddd;object-fit:contain" />
@@ -1765,6 +1765,10 @@ async def generate_pdf(quote_id: str):
 
     # Design Proposals (3-tier options: Essential / Designer / Premium)
     design_proposals = quote.get("design_proposals") or []
+    # If a proposal was selected, only show that one in the PDF
+    selected_idx = quote.get("selected_proposal")
+    if selected_idx is not None and 0 <= selected_idx < len(design_proposals):
+        design_proposals = [design_proposals[selected_idx]]
     # Find original customer photo for "before" reference
     original_photo = ""
     photos = quote.get("photos") or []
