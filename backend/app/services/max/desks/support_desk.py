@@ -16,6 +16,7 @@ REPEAT_COMPLAINT_THRESHOLD = 3
 class SupportDesk(BaseDesk):
     desk_id = "support"
     desk_name = "SupportDesk"
+    agent_name = "Luna"
     desk_description = (
         "Handles customer support: ticket triage, auto-responses for common issues, "
         "warranty claims, complaint resolution, service scheduling, and satisfaction tracking. "

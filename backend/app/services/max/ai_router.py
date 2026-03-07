@@ -241,7 +241,7 @@ class AIRouter:
                     resp = await self._grok_chat(full_messages, image_path)
                     return AIResponse(content=resp, model_used="grok", fallback_used=fallback)
                 except Exception as e:
-                    logger.warning(f"Grok failed: {e}")
+                    logger.warning(f"Grok failed: {type(e).__name__}: {e}")
 
             elif provider == AIModel.CLAUDE and self.anthropic_key:
                 try:
@@ -249,7 +249,7 @@ class AIRouter:
                     resp = await self._claude_chat(full_messages, image_path)
                     return AIResponse(content=resp, model_used="claude-4.6-sonnet", fallback_used=fallback)
                 except Exception as e:
-                    logger.warning(f"Claude failed: {e}")
+                    logger.warning(f"Claude failed: {type(e).__name__}: {e}")
 
             elif provider == AIModel.OPENCLAW:
                 try:

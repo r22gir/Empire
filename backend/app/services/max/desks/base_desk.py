@@ -61,6 +61,7 @@ class BaseDesk(ABC):
     desk_id: str = "base"
     desk_name: str = "Base Desk"
     desk_description: str = "Abstract base desk"
+    agent_name: str = "MAX"
     capabilities: list[str] = []
 
     def __init__(self):
@@ -108,7 +109,7 @@ class BaseDesk(ABC):
             return False
         try:
             return await self.telegram.send_message(
-                f"🏢 <b>{self.desk_name}</b>\n\n{message}"
+                f"🏢 <b>{self.agent_name} ({self.desk_name})</b>\n\n{message}"
             )
         except Exception as e:
             logger.warning(f"Telegram notification failed: {e}")
@@ -122,8 +123,8 @@ class BaseDesk(ABC):
             self.memory_store.add_memory(
                 category="desk_action",
                 subcategory=self.desk_id,
-                content=f"[{self.desk_name}] {content}",
-                subject=self.desk_name,
+                content=f"[{self.agent_name}@{self.desk_name}] {content}",
+                subject=f"{self.agent_name} ({self.desk_name})",
                 importance=importance,
                 source="desk",
                 tags=tags or ["desk", self.desk_id],
@@ -154,7 +155,7 @@ class BaseDesk(ABC):
             system_prompt = get_desk_system_prompt(self.desk_id)
         except Exception:
             system_prompt = (
-                f"You are MAX running the {self.desk_name} desk for Empire, "
+                f"You are {self.agent_name}, the AI agent running the {self.desk_name} desk for Empire, "
                 f"a custom drapery and upholstery business in Washington DC. "
                 f"Complete the assigned task thoroughly and provide actionable results."
             )
@@ -209,6 +210,7 @@ class BaseDesk(ABC):
         return {
             "desk_id": self.desk_id,
             "desk_name": self.desk_name,
+            "agent_name": self.agent_name,
             "description": self.desk_description,
             "capabilities": self.capabilities,
             "active_tasks": len(self.active_tasks),
@@ -338,3 +340,67 @@ class BaseDesk(ABC):
                     lines.append(f"  - {t.title}: {t.escalation_reason}")
 
         return "\n".join(lines)
+
+    async def generate_tasks_from_findings(
+        self,
+        findings: list[dict],
+        default_priority: str = "normal",
+    ) -> list[dict]:
+        """Create persistent SQLite tasks from desk audit findings.
+
+        Each finding dict should have:
+          - title: str (required)
+          - description: str (optional)
+          - priority: str (optional, defaults to default_priority)
+          - due_date: str (optional, YYYY-MM-DD)
+          - follow_up_date: str (optional)
+          - recurrence: str (optional)
+
+        Returns list of created task dicts.
+        """
+        from app.db.database import get_db
+        import json as _json
+
+        created = []
+        with get_db() as conn:
+            for f in findings:
+                title = f.get("title")
+                if not title:
+                    continue
+                priority = f.get("priority", default_priority)
+                conn.execute(
+                    """INSERT INTO tasks
+                       (id, title, description, status, priority, desk,
+                        assigned_to, created_by, due_date, follow_up_date,
+                        recurrence, source, tags, metadata)
+                       VALUES (lower(hex(randomblob(8))), ?, ?, 'todo', ?, ?, ?, 'max', ?, ?, ?, 'desk_audit', ?, ?)""",
+                    (
+                        title,
+                        f.get("description"),
+                        priority,
+                        self.desk_id,
+                        f.get("assigned_to"),
+                        f.get("due_date"),
+                        f.get("follow_up_date"),
+                        f.get("recurrence"),
+                        _json.dumps(f.get("tags", [self.desk_id, "auto"])),
+                        _json.dumps(f.get("metadata", {})),
+                    ),
+                )
+                row = conn.execute(
+                    "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+                if row:
+                    created.append({
+                        "id": row[0], "title": row[1], "desk": self.desk_id,
+                        "priority": priority, "status": "todo",
+                    })
+
+        if created:
+            self._log_to_brain(
+                f"Auto-generated {len(created)} tasks from audit findings",
+                importance=6,
+                tags=["desk", self.desk_id, "auto_tasks"],
+            )
+
+        return created

@@ -15,6 +15,7 @@ PLATFORMS = ["Instagram", "Facebook", "Pinterest", "LinkedIn", "Google Business"
 class MarketingDesk(BaseDesk):
     desk_id = "marketing"
     desk_name = "MarketingDesk"
+    agent_name = "Nova"
     desk_description = (
         "Manages marketing and social media: content creation, post scheduling, "
         "Instagram/Facebook/Pinterest campaigns, hashtag strategy, before/after showcases, "

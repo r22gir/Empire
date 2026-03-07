@@ -15,6 +15,7 @@ MARKETPLACE_CHANNELS = ["MarketForge", "eBay", "Facebook Marketplace", "RelistAp
 class MarketDesk(BaseDesk):
     desk_id = "market"
     desk_name = "MarketDesk"
+    agent_name = "Sofia"
     desk_description = (
         "Manages marketplace operations: product listings across eBay, Facebook Marketplace, "
         "and other channels. Handles inventory sync, pricing optimization, competitor analysis, "

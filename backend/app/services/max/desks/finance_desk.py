@@ -19,6 +19,7 @@ LARGE_INVOICE_THRESHOLD = 5000
 class FinanceDesk(BaseDesk):
     desk_id = "finance"
     desk_name = "FinanceDesk"
+    agent_name = "Sage"
     desk_description = (
         "Manages business finances: invoice creation, payment tracking, expense logging, "
         "P&L summaries, subscription management, and profitability analysis. "

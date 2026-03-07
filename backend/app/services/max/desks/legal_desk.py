@@ -12,6 +12,7 @@ logger = logging.getLogger("max.desks.legal")
 class LegalDesk(BaseDesk):
     desk_id = "legal"
     desk_name = "LegalDesk"
+    agent_name = "Raven"
     desk_description = (
         "Manages legal documents: client contracts, vendor agreements, installer "
         "subcontractor agreements, terms and conditions, warranty policies, and "

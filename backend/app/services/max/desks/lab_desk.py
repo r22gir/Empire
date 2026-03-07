@@ -12,6 +12,7 @@ logger = logging.getLogger("max.desks.lab")
 class LabDesk(BaseDesk):
     desk_id = "lab"
     desk_name = "LabDesk"
+    agent_name = "Phoenix"
     desk_description = (
         "R&D Lab for testing new AI capabilities, prototyping features, and "
         "experimenting with integrations. More creative and exploratory — "

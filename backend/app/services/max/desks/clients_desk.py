@@ -12,6 +12,7 @@ logger = logging.getLogger("max.desks.clients")
 class ClientsDesk(BaseDesk):
     desk_id = "clients"
     desk_name = "ClientsDesk"
+    agent_name = "Elena"
     desk_description = (
         "Manages client relationships: contact records, property addresses, past orders, "
         "fabric/style preferences, communication history. Prepares for meetings, drafts "

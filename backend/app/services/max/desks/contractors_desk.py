@@ -12,6 +12,7 @@ logger = logging.getLogger("max.desks.contractors")
 class ContractorsDesk(BaseDesk):
     desk_id = "contractors"
     desk_name = "ContractorsDesk"
+    agent_name = "Marcus"
     desk_description = (
         "Manages contractor relationships: installers, seamstresses, and vendors. "
         "Tracks availability, pay rates, specialties (motorization, heavy drapery), "

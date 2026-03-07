@@ -19,6 +19,7 @@ FOLLOWUP_DAYS_OVERDUE = biz.followup_days_overdue
 class ForgeDesk(BaseDesk):
     desk_id = "forge"
     desk_name = "ForgeDesk (WorkroomForge)"
+    agent_name = "Kai"
     desk_description = (
         "Handles WorkroomForge operations: quote generation, customer follow-up, "
         "appointment scheduling, measurement tracking, and production coordination. "

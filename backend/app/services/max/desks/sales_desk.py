@@ -17,6 +17,7 @@ HIGH_VALUE_LEAD_THRESHOLD = 70
 class SalesDesk(BaseDesk):
     desk_id = "sales"
     desk_name = "SalesDesk"
+    agent_name = "Aria"
     desk_description = (
         "Manages the sales pipeline: lead capture, qualification and scoring, "
         "follow-ups, proposals, consultations, deposit collection, and referral tracking. "

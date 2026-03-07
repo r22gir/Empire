@@ -193,6 +193,7 @@ class AIDeskManager:
             {
                 "id": desk.desk_id,
                 "name": desk.desk_name,
+                "agent_name": desk.agent_name,
                 "description": desk.desk_description,
                 "status": "busy" if desk.active_tasks else "idle",
                 "domains": desk.capabilities,
@@ -217,6 +218,7 @@ class AIDeskManager:
         return {
             "id": desk.desk_id,
             "name": desk.desk_name,
+            "agent_name": desk.agent_name,
             "description": desk.desk_description,
             "status": "busy" if desk.active_tasks else "idle",
             "domains": desk.capabilities,

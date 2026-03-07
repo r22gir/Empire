@@ -24,6 +24,7 @@ EMPIRE_SERVICES = {
 class ITDesk(BaseDesk):
     desk_id = "it"
     desk_name = "ITDesk"
+    agent_name = "Orion"
     desk_description = (
         "Systems administration for the Empire platform. Monitors service health "
         "across all ports, handles deployments, troubleshooting, log analysis, and "

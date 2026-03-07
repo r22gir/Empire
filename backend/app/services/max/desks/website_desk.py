@@ -12,6 +12,7 @@ logger = logging.getLogger("max.desks.website")
 class WebsiteDesk(BaseDesk):
     desk_id = "website"
     desk_name = "WebsiteDesk"
+    agent_name = "Zara"
     desk_description = (
         "Manages the company's online presence: LuxeForge storefront, homepage updates, "
         "SEO optimization, Google Business Profile, portfolio management, review responses, "
