@@ -33,11 +33,12 @@ ensure_node_modules() {
 }
 
 # ── Kill existing ────────────────────────────────────────────────
-log "Clearing ports 8000, 3009, 3000, 3001..."
+log "Clearing ports 8000, 3009, 3000, 3001, 3002..."
 fuser -k 8000/tcp 2>/dev/null
 fuser -k 3009/tcp 2>/dev/null
 fuser -k 3000/tcp 2>/dev/null
 fuser -k 3001/tcp 2>/dev/null
+fuser -k 3002/tcp 2>/dev/null
 sleep 2
 ok "Ports cleared"
 
@@ -92,18 +93,32 @@ else
     err "WorkroomForge — check $LOG_DIR/workroomforge_${TS}.log"
 fi
 
+# ── 5. LuxeForge (port 3002) ────────────────────────────────────
+ensure_node_modules "$EMPIRE/luxeforge_web"
+log "Starting LuxeForge on port 3002..."
+cd "$EMPIRE/luxeforge_web"
+nohup npx next dev -p 3002 \
+    > "$LOG_DIR/luxeforge_${TS}.log" 2>&1 &
+
+if wait_port 3002; then
+    ok "LuxeForge — http://localhost:3002"
+else
+    err "LuxeForge — check $LOG_DIR/luxeforge_${TS}.log"
+fi
+
 # ── Open browsers ────────────────────────────────────────────────
 sleep 1
 xdg-open "http://localhost:3009" 2>/dev/null &
 xdg-open "http://localhost:3000" 2>/dev/null &
 xdg-open "http://localhost:3001" 2>/dev/null &
+xdg-open "http://localhost:3002" 2>/dev/null &
 
 # ── Summary ──────────────────────────────────────────────────────
 echo ""
 echo -e "${Y}=============================================${N}"
 echo -e "${Y}         Empire Services Status              ${N}"
 echo -e "${Y}=============================================${N}"
-for pair in "Backend API:8000" "Founder Dashboard:3009" "Empire App:3000" "WorkroomForge:3001"; do
+for pair in "Backend API:8000" "Founder Dashboard:3009" "Empire App:3000" "WorkroomForge:3001" "LuxeForge:3002"; do
     name="${pair%%:*}"; port="${pair##*:}"
     if curl -sf -o /dev/null "http://localhost:$port" 2>/dev/null; then
         echo -e "  ${G}*${N} $name — :$port"
