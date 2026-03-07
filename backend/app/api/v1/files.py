@@ -9,7 +9,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from PIL import Image
-import pytesseract
 
 router = APIRouter(prefix="/files", tags=["files"])
 
