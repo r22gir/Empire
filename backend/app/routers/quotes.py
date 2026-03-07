@@ -1260,18 +1260,18 @@ def _build_outline_svg(outline: dict) -> str:
     return svg
 
 
-def _build_design_proposals_html(proposals: list) -> str:
-    """Build 3-tier design option cards for the PDF — Essential / Designer / Premium."""
+def _build_design_proposals_html(proposals: list, original_photo: str = "") -> str:
+    """Build 3-tier design option cards for the PDF with mockup images."""
     if not proposals or len(proposals) < 2:
         return ""
 
     tier_styles = [
-        {"color": "#22c55e", "bg": "#f0fdf4", "border": "#bbf7d0", "badge": "OPTION A"},
-        {"color": "#D4AF37", "bg": "#fffcf0", "border": "#fde68a", "badge": "OPTION B"},
-        {"color": "#8B5CF6", "bg": "#f5f3ff", "border": "#c4b5fd", "badge": "OPTION C"},
+        {"color": "#22c55e", "bg": "#f0fdf4", "border": "#bbf7d0", "badge": "OPTION A", "label": "Essential"},
+        {"color": "#D4AF37", "bg": "#fffcf0", "border": "#fde68a", "badge": "OPTION B", "label": "Designer"},
+        {"color": "#8B5CF6", "bg": "#f5f3ff", "border": "#c4b5fd", "badge": "OPTION C", "label": "Premium"},
     ]
 
-    html = """<div style="margin:24px 0;page-break-inside:avoid">
+    html = """<div style="margin:24px 0">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;border-bottom:2px solid #D4AF37;padding-bottom:8px">
       <div style="width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,#D4AF37,#8B5CF6);display:flex;align-items:center;justify-content:center;color:white;font-weight:900;font-size:11px">M</div>
       <div>
@@ -1279,6 +1279,13 @@ def _build_design_proposals_html(proposals: list) -> str:
         <span style="font-size:0.75em;color:#888;margin-left:8px">AI-curated proposals tailored to your project</span>
       </div>
     </div>"""
+
+    # Original photo — "Current / Before" reference
+    if original_photo:
+        html += f"""<div style="margin-bottom:18px;page-break-inside:avoid;text-align:center">
+          <p style="font-size:0.8em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Current — Before</p>
+          <img src="{original_photo}" style="max-width:100%;max-height:320px;border-radius:8px;border:2px solid #ddd;object-fit:contain;display:inline-block" />
+        </div>"""
 
     for i, prop in enumerate(proposals[:3]):
         s = tier_styles[i] if i < len(tier_styles) else tier_styles[-1]
@@ -1290,6 +1297,7 @@ def _build_design_proposals_html(proposals: list) -> str:
         total = prop.get("total", 0)
         comment = prop.get("ai_comment", "")
         items = prop.get("line_items", [])
+        mockup_img = prop.get("mockup_image", "")
 
         grade_labels = {"A": "Grade A — Quality Basics", "B": "Grade B — Designer Collection", "C": "Grade C — Luxury Premium"}
         grade_label = grade_labels.get(grade, f"Grade {grade}")
@@ -1306,7 +1314,8 @@ def _build_design_proposals_html(proposals: list) -> str:
         if len(items) > 8:
             items_rows += f'<tr><td colspan="2" style="padding:3px 6px;font-size:0.72em;color:#999;font-style:italic">+ {len(items)-8} more items</td></tr>'
 
-        html += f"""<div style="margin-bottom:14px;border:2px solid {s['border']};border-radius:10px;overflow:hidden;background:white;page-break-inside:avoid">
+        html += f"""<div style="margin-bottom:18px;border:2px solid {s['border']};border-radius:10px;overflow:hidden;background:white;page-break-inside:avoid">
+          <!-- Proposal header -->
           <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:{s['bg']}">
             <div style="display:flex;align-items:center;gap:10px">
               <span style="background:{s['color']};color:white;padding:4px 12px;border-radius:5px;font-size:0.72em;font-weight:700;letter-spacing:0.5px">{s['badge']}</span>
@@ -1321,11 +1330,20 @@ def _build_design_proposals_html(proposals: list) -> str:
             </div>
           </div>"""
 
+        # Mockup image — "Proposed" visualization
+        if mockup_img:
+            html += f"""<div style="text-align:center;padding:12px 16px;background:#fafafa;border-bottom:1px solid #f0f0f0">
+              <p style="font-size:0.72em;font-weight:700;color:{s['color']};text-transform:uppercase;letter-spacing:1px;margin:0 0 8px">Proposed — {s['label']}</p>
+              <img src="{mockup_img}" style="max-width:100%;max-height:280px;border-radius:6px;border:1px solid #eee;object-fit:contain;display:inline-block" />
+            </div>"""
+
+        # AI commentary
         if comment:
             html += f"""<div style="padding:10px 16px;border-bottom:1px solid #f0f0f0;background:#fafbfd">
               <p style="margin:0;font-size:0.82em;color:#444;line-height:1.5;font-style:italic">{comment}</p>
             </div>"""
 
+        # Line items table
         if items_rows:
             html += f"""<div style="padding:8px 16px 10px">
               <table style="width:100%;border-collapse:collapse;margin:0">
@@ -1476,6 +1494,11 @@ def _embed_external_images(quote: dict) -> dict:
         for img in (mockup.get("generated_images") or []):
             if img.get("url") and not img["url"].startswith("data:"):
                 img["url"] = _download_image_as_data_uri(img["url"])
+
+    # Design proposal mockup images
+    for dp in (quote.get("design_proposals") or []):
+        if dp.get("mockup_image") and not dp["mockup_image"].startswith("data:"):
+            dp["mockup_image"] = _download_image_as_data_uri(dp["mockup_image"])
 
     # Upholstery generated_image in rooms
     for room in (quote.get("rooms") or []):
@@ -1643,7 +1666,24 @@ async def generate_pdf(quote_id: str):
 
     # Design Proposals (3-tier options: Essential / Designer / Premium)
     design_proposals = quote.get("design_proposals") or []
-    proposals_html = _build_design_proposals_html(design_proposals)
+    # Find original customer photo for "before" reference
+    original_photo = ""
+    photos = quote.get("photos") or []
+    for p in photos:
+        if p.get("type") == "original":
+            if p.get("data_uri"):
+                original_photo = p["data_uri"]
+            elif p.get("path") and os.path.exists(p["path"]):
+                try:
+                    with open(p["path"], "rb") as _pf:
+                        _pdata = base64.b64encode(_pf.read()).decode()
+                    ext = p.get("filename", "jpg").rsplit(".", 1)[-1].lower()
+                    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+                    original_photo = f"data:{mime};base64,{_pdata}"
+                except Exception:
+                    pass
+            break
+    proposals_html = _build_design_proposals_html(design_proposals, original_photo)
 
     # MAX's Analysis summary — collect all AI notes into one fun section
     max_notes = []

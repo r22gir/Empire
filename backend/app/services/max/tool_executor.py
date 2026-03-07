@@ -565,7 +565,16 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         uploads_dir = os.path.expanduser("~/empire-repo/backend/data/uploads/images")
         img_path = os.path.join(uploads_dir, image_filename)
         if os.path.exists(img_path):
-            photo_refs.append({"filename": image_filename, "path": img_path, "type": "original"})
+            # Store base64 of original photo for PDF embedding
+            try:
+                import base64 as _b64
+                with open(img_path, "rb") as _f:
+                    _img_data = _b64.b64encode(_f.read()).decode()
+                ext = image_filename.rsplit(".", 1)[-1].lower()
+                mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/jpeg")
+                photo_refs.append({"filename": image_filename, "path": img_path, "type": "original", "data_uri": f"data:{mime};base64,{_img_data}"})
+            except Exception:
+                photo_refs.append({"filename": image_filename, "path": img_path, "type": "original"})
 
     quote_data = {
         "id": quote_id,
@@ -603,68 +612,69 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "business_name": "Empire",
     }
 
-    # Generate AI mockup images for each room's windows
+    # Generate per-tier mockup images (one for each design proposal)
     xai_key = os.environ.get("XAI_API_KEY")
-    if xai_key and rooms:
-        try:
-            ai_mockups = []
-            treatment_labels = {
-                'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
-                'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
-            }
-            for room in rooms:
-                room_name = room.get("name", "Room")
-                windows = room.get("windows", [])
-                if not windows:
-                    continue
-                # Build one mockup entry per room with generated images
-                gen_images = []
-                for win in windows[:2]:  # Max 2 windows per room
-                    treatment = win.get("treatmentType", "ripplefold")
-                    label = treatment_labels.get(treatment, treatment.replace('-', ' ').title())
-                    w = win.get("width", 48)
-                    h = win.get("height", 60)
-                    lining = win.get("liningType", "standard").replace('-', ' ')
-                    mount = win.get("mountType", "wall")
-                    hardware = win.get("hardwareType", "standard").replace('-', ' ')
+    if xai_key and rooms and design_proposals:
+        treatment_labels = {
+            'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
+            'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
+        }
+        tier_fabric_desc = {
+            "A": "simple, clean solid-color fabric in a neutral tone (ivory or light gray)",
+            "B": "mid-range designer fabric with subtle texture and warm color (sage green or dusty blue)",
+            "C": "luxurious heavy silk fabric in a rich jewel tone (deep emerald or navy) with elegant drape",
+        }
+        # Use the first room's first window for the mockup scene
+        first_room = rooms[0]
+        room_name = first_room.get("name", "Room")
+        first_win = first_room.get("windows", [{}])[0] if first_room.get("windows") else {}
+        treatment = first_win.get("treatmentType", "ripplefold")
+        label = treatment_labels.get(treatment, treatment.replace('-', ' ').title())
+        w = first_win.get("width", 48)
+        h = first_win.get("height", 60)
+        mount = first_win.get("mountType", "wall")
+        hardware = (first_win.get("hardwareType") or "decorative rod").replace('-', ' ')
 
-                    prompt = (
-                        f"Professional interior design photo: a {room_name.lower()} with a "
-                        f"{w}-inch wide by {h}-inch tall window. "
-                        f"Installed: {label} drapery panels in elegant fabric. "
-                        f"IMPORTANT: The panels are FULLY OPEN and RETRACTED to each side of the window frame, "
-                        f"gathered in neat stackback folds, showing the full window glass and view. "
-                        f"The panels hang from {hardware} hardware, {mount}-mounted. "
-                        f"{lining} lining visible at panel edges. "
-                        f"Clean, bright natural light streaming through the uncovered window. "
-                        f"Magazine-quality architectural photography, straight-on view."
-                    )
-                    try:
-                        img_resp = httpx.post(
-                            "https://api.x.ai/v1/images/generations",
-                            headers={"Content-Type": "application/json", "Authorization": f"Bearer {xai_key}"},
-                            json={"model": "grok-imagine-image", "prompt": prompt, "n": 1, "response_format": "url"},
-                            timeout=30,
-                        )
-                        if img_resp.status_code == 200:
-                            img_url = img_resp.json().get("data", [{}])[0].get("url")
-                            if img_url:
-                                gen_images.append({"tier": f"{label} — {win.get('name', 'Window')}", "url": img_url})
-                    except Exception as img_err:
-                        logger.warning(f"Quick quote image gen failed for {room_name}: {img_err}")
+        ai_mockups = []
+        gen_images = []
+        for i, dp in enumerate(design_proposals[:3]):
+            grade = dp.get("fabric_grade", chr(65 + i))
+            lining = (dp.get("lining_type") or "standard").replace("-", " ")
+            fabric_desc = tier_fabric_desc.get(grade, "elegant fabric")
+            prompt = (
+                f"Professional interior design photo: a {room_name.lower()} with a "
+                f"{w}-inch wide by {h}-inch tall window. "
+                f"Installed: {label} drapery panels in {fabric_desc}. "
+                f"The panels hang from {hardware} hardware, {mount}-mounted. "
+                f"{lining} lining. "
+                f"Clean, bright natural light. Magazine-quality architectural photography."
+            )
+            try:
+                img_resp = httpx.post(
+                    "https://api.x.ai/v1/images/generations",
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {xai_key}"},
+                    json={"model": "grok-imagine-image", "prompt": prompt, "n": 1, "response_format": "url"},
+                    timeout=30,
+                )
+                if img_resp.status_code == 200:
+                    img_url = img_resp.json().get("data", [{}])[0].get("url")
+                    if img_url:
+                        dp["mockup_image"] = img_url
+                        gen_images.append({"tier": dp.get("label", f"Option {grade}"), "url": img_url})
+                        logger.info(f"Generated mockup for tier {grade}")
+            except Exception as img_err:
+                logger.warning(f"Tier {grade} mockup gen failed: {img_err}")
 
-                if gen_images:
-                    ai_mockups.append({
-                        "roomName": room_name,
-                        "generated_images": gen_images,
-                        "proposals": [],
-                        "generalRecommendations": [],
-                    })
-            if ai_mockups:
-                quote_data["ai_mockups"] = ai_mockups
-                logger.info(f"Generated {sum(len(m['generated_images']) for m in ai_mockups)} mockup images for quick quote")
-        except Exception as e:
-            logger.warning(f"Quick quote mockup generation failed: {e}")
+        if gen_images:
+            ai_mockups.append({
+                "roomName": room_name,
+                "generated_images": gen_images,
+                "proposals": [],
+                "generalRecommendations": [],
+            })
+            quote_data["ai_mockups"] = ai_mockups
+            quote_data["design_proposals"] = design_proposals
+            logger.info(f"Generated {len(gen_images)} per-tier mockup images")
 
     # Save JSON
     os.makedirs(QUOTES_DIR, exist_ok=True)
