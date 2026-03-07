@@ -327,6 +327,72 @@ async def accept_quote(quote_id: str):
     return {"status": "accepted", "quote": quote}
 
 
+class PhotoAttach(BaseModel):
+    filename: str
+    room_index: Optional[int] = None
+    item_type: Optional[str] = None   # "window" or "upholstery"
+    item_index: Optional[int] = None
+    photo_type: str = "site"          # "original", "site", "detail", "reference"
+
+
+@router.post("/{quote_id}/photos")
+async def attach_photos(quote_id: str, photos: list[PhotoAttach]):
+    """Attach photos to specific rooms/windows/upholstery items in a quote."""
+    quote = _load_quote(quote_id)
+    uploads_dir = os.path.expanduser("~/empire-repo/backend/data/uploads/images")
+
+    if "photos" not in quote or not isinstance(quote.get("photos"), list):
+        quote["photos"] = []
+
+    rooms = quote.get("rooms") or []
+    attached = []
+
+    for photo in photos:
+        img_path = os.path.join(uploads_dir, photo.filename)
+        if not os.path.exists(img_path):
+            continue
+
+        # Build base64 data URI
+        data_uri = ""
+        try:
+            with open(img_path, "rb") as f:
+                img_data = base64.b64encode(f.read()).decode()
+            ext = photo.filename.rsplit(".", 1)[-1].lower()
+            mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+            data_uri = f"data:{mime};base64,{img_data}"
+        except Exception:
+            pass
+
+        photo_entry = {
+            "filename": photo.filename,
+            "path": img_path,
+            "type": photo.photo_type,
+            "data_uri": data_uri,
+            "room_index": photo.room_index,
+            "item_type": photo.item_type,
+            "item_index": photo.item_index,
+        }
+        quote["photos"].append(photo_entry)
+
+        # Also embed directly into the room/window/upholstery item
+        if photo.room_index is not None and photo.room_index < len(rooms):
+            room = rooms[photo.room_index]
+            if photo.item_type == "window" and photo.item_index is not None:
+                windows = room.get("windows", [])
+                if photo.item_index < len(windows):
+                    windows[photo.item_index]["sourcePhoto"] = data_uri or img_path
+            elif photo.item_type == "upholstery" and photo.item_index is not None:
+                upholstery = room.get("upholstery", [])
+                if photo.item_index < len(upholstery):
+                    upholstery[photo.item_index]["sourcePhoto"] = data_uri or img_path
+
+        attached.append(photo.filename)
+
+    quote["updated_at"] = datetime.utcnow().isoformat()
+    _save_quote(quote)
+    return {"status": "attached", "count": len(attached), "filenames": attached}
+
+
 def _detect_hardware_color(hardware_name: str, explicit_color: str = "") -> tuple:
     """Detect hardware color from name or explicit selection. Returns (color_hex, color_name)."""
     if explicit_color:
@@ -654,10 +720,12 @@ def _build_upholstery_drawing(u: dict) -> str:
 
     # ── Detect construction details from AI analysis or notes ──
     ai = u.get("aiAnalysis") or {}
-    has_welting = ai.get("hasWelting", False) or "welting" in notes.lower() or "piping" in notes.lower()
-    has_tufting = ai.get("hasTufting", False) or "tuft" in notes.lower()
+    has_welting = ai.get("hasWelting", False) or ai.get("has_welting", False) or "welting" in notes.lower() or "piping" in notes.lower()
+    has_tufting = ai.get("hasTufting", False) or ai.get("has_tufting", False) or "tuft" in notes.lower()
     has_flange = "flange" in notes.lower() or "flange" in name.lower()
     has_skirt = ai.get("has_skirt", False) or "skirt" in notes.lower()
+    has_channeling = ai.get("has_channeling", False) or "channel" in notes.lower()
+    has_nailhead = ai.get("has_nailhead", False) or "nailhead" in notes.lower()
 
     # ── Build SVG based on furniture type ──
 
@@ -794,6 +862,19 @@ def _build_upholstery_drawing(u: dict) -> str:
                     tx = bx + 40 + c * 60
                     ty = by - 8 + r * 10
                     svg_body += f'<circle cx="{tx}" cy="{ty}" r="2.5" fill="{fill_accent}" stroke="{stroke}" stroke-width="0.6"/>'
+        if has_channeling:
+            # Vertical channel lines on back
+            ch_count = 5
+            ch_spacing = (bw - 24) / ch_count
+            for ci in range(1, ch_count):
+                cx_ch = bx + 12 + ci * ch_spacing
+                svg_body += f'<line x1="{cx_ch}" y1="{by-14}" x2="{cx_ch}" y2="{by}" stroke="{fill_accent}" stroke-width="0.8" opacity="0.7"/>'
+        if has_nailhead:
+            # Nailhead dots along arm tops
+            for nx in range(bx - 8, bx + 2, 4):
+                svg_body += f'<circle cx="{nx}" cy="{by+6}" r="1.2" fill="#D4AF37" opacity="0.8"/>'
+            for nx in range(bx + bw, bx + bw + 10, 4):
+                svg_body += f'<circle cx="{nx}" cy="{by+6}" r="1.2" fill="#D4AF37" opacity="0.8"/>'
         if has_skirt:
             svg_body += f'<rect x="{bx-12}" y="{by+bh+8}" width="{bw+24}" height="8" fill="{fill}" stroke="{stroke}" stroke-width="0.8" rx="1"/>'
         dims = f'{w_in}"W×{d_in}"D×{h_in}"H'
@@ -832,6 +913,10 @@ def _build_upholstery_drawing(u: dict) -> str:
             options.append(("+ Contrast Welting", f"+$50–80"))
         if not has_tufting:
             options.append(("+ Diamond Tufting", f"+$100–150"))
+        if not has_channeling:
+            options.append(("+ Channel Back", f"+$75–120"))
+        if not has_nailhead:
+            options.append(("+ Nailhead Trim", f"+$100–200"))
         if not has_skirt:
             options.append(("+ Tailored Skirt", f"+$75–120"))
 
@@ -846,7 +931,7 @@ def _build_upholstery_drawing(u: dict) -> str:
     # AI analysis notes
     if ai:
         style = ai.get("style", "")
-        suggested = ai.get("suggestedLaborType", "")
+        suggested = ai.get("suggestedLaborType", "") or ai.get("suggested_labor_type", "")
         questions = ai.get("questions") or []
         if style or questions:
             svg += f'<div style="margin-top:4px;padding:6px 8px;background:#fffcf0;border:1px solid rgba(212,175,55,0.2);border-radius:5px;font-size:0.7em;max-width:{svg_w}px">'
@@ -855,7 +940,7 @@ def _build_upholstery_drawing(u: dict) -> str:
                 svg += f' <span style="color:#666">· {style}</span>'
             if suggested:
                 svg += f'<br><span style="color:#555">→ Suggested: {suggested} labor</span>'
-            if ai.get("newFoamRecommended"):
+            if ai.get("newFoamRecommended") or ai.get("new_foam_recommended"):
                 svg += f'<br><span style="color:#e67e22">→ New foam recommended</span>'
             for q in questions[:2]:
                 svg += f'<br><span style="color:#888;font-style:italic">? {q}</span>'
@@ -1106,6 +1191,13 @@ def _build_rooms_html(rooms: list) -> str:
 
             html += '<div style="margin:8px 0 16px;page-break-inside:avoid">'
             for w in regular_windows:
+                # Per-item photo inline with the window drawing
+                src_photo = w.get("sourcePhoto", "")
+                if src_photo:
+                    html += f"""<div style="margin-bottom:10px;text-align:center;page-break-inside:avoid">
+                      <p style="font-size:0.75em;color:#666;margin-bottom:4px;font-weight:600">Site Photo — {w.get('name', 'Window')}</p>
+                      <img src="{src_photo}" style="max-width:100%;max-height:250px;border-radius:8px;border:1px solid #ddd;object-fit:contain" />
+                    </div>"""
                 html += _build_window_drawing(w)
             html += '</div>'
 
@@ -1161,6 +1253,13 @@ def _build_rooms_html(rooms: list) -> str:
 
             html += '<div style="margin:8px 0 16px;page-break-inside:avoid">'
             for u in upholstery:
+                # Per-item photo inline with the upholstery drawing
+                src_photo = u.get("sourcePhoto", "")
+                if src_photo:
+                    html += f"""<div style="margin-bottom:10px;text-align:center;page-break-inside:avoid">
+                      <p style="font-size:0.75em;color:#666;margin-bottom:4px;font-weight:600">Reference Photo — {u.get('name', 'Piece')}</p>
+                      <img src="{src_photo}" style="max-width:100%;max-height:250px;border-radius:8px;border:1px solid #ddd;object-fit:contain" />
+                    </div>"""
                 html += _build_upholstery_drawing(u)
             html += '</div>'
 

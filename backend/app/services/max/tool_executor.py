@@ -572,7 +572,44 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                     _img_data = _b64.b64encode(_f.read()).decode()
                 ext = image_filename.rsplit(".", 1)[-1].lower()
                 mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/jpeg")
-                photo_refs.append({"filename": image_filename, "path": img_path, "type": "original", "data_uri": f"data:{mime};base64,{_img_data}"})
+                data_uri = f"data:{mime};base64,{_img_data}"
+                photo_refs.append({"filename": image_filename, "path": img_path, "type": "original", "data_uri": data_uri})
+                # Link photo to first window item for inline display in PDF
+                if rooms:
+                    first_room = rooms[0]
+                    if first_room.get("windows"):
+                        first_room["windows"][0]["sourcePhoto"] = data_uri
+                    if first_room.get("upholstery"):
+                        first_room["upholstery"][0]["sourcePhoto"] = data_uri
+                        # Call upholstery vision API to get structured AI analysis for diagrams
+                        try:
+                            uph_resp = httpx.post(
+                                "http://localhost:3001/api/upholstery",
+                                json={"image": data_uri},
+                                timeout=45,
+                            )
+                            if uph_resp.status_code == 200:
+                                uph_analysis = uph_resp.json()
+                                first_uph = first_room["upholstery"][0]
+                                first_uph["aiAnalysis"] = uph_analysis
+                                # Populate dimensions and details from AI analysis
+                                dims = uph_analysis.get("estimated_dimensions", {})
+                                if dims.get("width"):
+                                    first_uph.setdefault("width", dims["width"])
+                                if dims.get("depth"):
+                                    first_uph.setdefault("depth", dims["depth"])
+                                if dims.get("height"):
+                                    first_uph.setdefault("height", dims["height"])
+                                if uph_analysis.get("furniture_type"):
+                                    first_uph.setdefault("furnitureType", uph_analysis["furniture_type"])
+                                if uph_analysis.get("fabric_yards_plain"):
+                                    first_uph.setdefault("fabricYards", uph_analysis["fabric_yards_plain"])
+                                cushions = uph_analysis.get("cushion_count", {})
+                                if cushions.get("seat"):
+                                    first_uph.setdefault("cushionCount", cushions["seat"])
+                                logger.info(f"Upholstery AI analysis populated: {uph_analysis.get('furniture_type', 'unknown')}")
+                        except Exception as uph_err:
+                            logger.warning(f"Upholstery vision API call failed: {uph_err}")
             except Exception:
                 photo_refs.append({"filename": image_filename, "path": img_path, "type": "original"})
 

@@ -147,6 +147,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
             round_results = []
             for tc in tool_calls:
+                # Inject image_filename into quote tools so uploaded photos flow through
+                if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
+                    tc["image_filename"] = request.image_filename
                 result = execute_tool(tc, desk=request.desk)
                 entry = {"tool": result.tool, "success": result.success, "result": result.result, "error": result.error}
                 round_results.append(entry)
@@ -284,6 +287,9 @@ async def chat_stream(request: ChatRequest):
 
                 round_results = []
                 for tc in tool_calls:
+                    # Inject image_filename into quote tools so uploaded photos flow through
+                    if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
+                        tc["image_filename"] = request.image_filename
                     result = execute_tool(tc, desk=request.desk)
                     round_results.append(result)
                     tool_results_list.append(result)
