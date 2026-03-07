@@ -1148,7 +1148,7 @@ def _build_proposal_notes(w: dict) -> str:
     return html
 
 
-def _build_rooms_html(rooms: list) -> str:
+def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
     """Build rich room-by-room HTML for PDF with spec tables + dimensional drawings."""
     html = ""
     treatment_labels = {
@@ -1170,9 +1170,10 @@ def _build_rooms_html(rooms: list) -> str:
 
         # Regular (non-proposal) windows — standard table
         if regular_windows:
-            html += """<table style="margin-bottom:12px"><thead><tr>
+            price_label = "Est. Price" if not has_design_proposals else "Est. (Designer)"
+            html += f"""<table style="margin-bottom:12px"><thead><tr>
                 <th>Window</th><th>Size</th><th>Treatment</th><th>Lining</th>
-                <th>Hardware</th><th>Motor</th><th>Mount</th><th>Qty</th><th style="text-align:right">Price</th>
+                <th>Hardware</th><th>Motor</th><th>Mount</th><th>Qty</th><th style="text-align:right">{price_label}</th>
             </tr></thead><tbody>"""
             for w in regular_windows:
                 ttype = treatment_labels.get(w.get("treatmentType", ""), w.get("treatmentType", "").replace("-", " ").title())
@@ -1193,7 +1194,7 @@ def _build_rooms_html(rooms: list) -> str:
             for w in regular_windows:
                 # Per-item photo inline — skip if design_proposals exist (shown in proposals section as "Current — Before")
                 src_photo = w.get("sourcePhoto", "")
-                if src_photo and not proposal_windows:
+                if src_photo and not proposal_windows and not has_design_proposals:
                     html += f"""<div style="margin-bottom:10px;text-align:center;page-break-inside:avoid">
                       <p style="font-size:0.75em;color:#666;margin-bottom:4px;font-weight:600">Site Photo — {w.get('name', 'Window')}</p>
                       <img src="{src_photo}" style="max-width:100%;max-height:250px;border-radius:8px;border:1px solid #ddd;object-fit:contain" />
@@ -1361,7 +1362,7 @@ def _build_outline_svg(outline: dict) -> str:
 
 def _build_design_proposals_html(proposals: list, original_photo: str = "") -> str:
     """Build 3-tier design option cards for the PDF with mockup images."""
-    if not proposals or len(proposals) < 2:
+    if not proposals:
         return ""
 
     tier_styles = [
@@ -1739,7 +1740,7 @@ async def generate_pdf(quote_id: str):
 
     # Build room-level content or fallback to flat line items
     if rooms:
-        body_html = _build_rooms_html(rooms)
+        body_html = _build_rooms_html(rooms, has_design_proposals=bool(design_proposals))
     else:
         items_html = ""
         for item in quote.get("line_items", []):

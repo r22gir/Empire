@@ -181,17 +181,38 @@ async def generate_image(prompt: str) -> Optional[str]:
 
 # ── /measure — Window photo analysis ───────────────────────
 
-MEASURE_PROMPT = """Analyze this window photo for a custom drapery quote. Estimate dimensions using reference objects.
+MEASURE_PROMPT = """You are a professional window treatment installer with 30 years of experience estimating window dimensions from photos. Your estimates go directly into customer quotes — accuracy matters.
 
-REFERENCE OBJECTS (use any visible):
-- Standard door: 80" tall, 36" wide
-- Light switch: 48" from floor, plate is 4.5" tall
-- Standard outlet: 12-16" from floor, plate is 4.5" tall
-- Ceiling height: typically 96" (8ft) or 108" (9ft)
-- Standard window sill: 36" from floor
-- Sofa/couch: ~34" tall
-- Dining chair: ~34" tall
-- Door handle: ~36" from floor
+MEASUREMENT METHOD:
+1. First, identify ALL reference objects visible in the photo
+2. Use the MOST RELIABLE reference object to establish a scale ratio (pixels per inch)
+3. Apply that ratio to measure the window opening width and height
+4. Cross-check with a second reference object if available
+5. If no reference objects are visible, use architectural proportions (window aspect ratios, typical sizes for the window type)
+
+REFERENCE OBJECTS (standard US residential dimensions):
+- Interior door: 80" tall × 32-36" wide (most common: 80" × 32")
+- Door handle/knob: 36" from floor
+- Light switch plate: center at 48" from floor, plate is 4.5" × 2.75"
+- Electrical outlet plate: center at 12-16" from floor, plate is 4.5" × 2.75"
+- Baseboard: 3-5.5" tall (most common: 3.5")
+- Crown molding: 3-5" tall
+- Standard ceiling height: 96" (8ft) — older homes 108" (9ft)
+- Window sill: typically 36" from floor (bathroom: 48-60")
+- Dining chair seat: 17-18" from floor, back: 30-34" tall
+- Sofa/couch: 30-34" tall at back
+- Standard dining table: 30" tall, 60-72" long
+- Kitchen counter: 36" tall
+- Standard brick: 2.25" tall × 7.5" wide (with mortar: 2.75" × 8")
+
+COMMON WINDOW SIZES (use only as sanity check, NOT primary measurement):
+- Single-hung: 24-36" wide × 36-72" tall
+- Double-hung: 24-36" wide × 36-72" tall
+- Casement: 18-36" wide × 24-72" tall
+- Picture window: 48-96" wide × 36-72" tall
+- Sliding door: 60-72" wide × 80" tall
+
+IMPORTANT: Measure the WINDOW OPENING (glass area), not the frame or trim. Most residential windows are smaller than people assume — a window that looks "big" is often only 30-36" wide.
 
 Return JSON only:
 {
@@ -200,6 +221,7 @@ Return JSON only:
   "confidence": number (0-100),
   "window_type": string,
   "reference_objects_used": string[],
+  "scale_method": string (describe how you calculated the scale),
   "notes": string,
   "treatment_suggestions": string[]
 }"""

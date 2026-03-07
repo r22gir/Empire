@@ -615,6 +615,21 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
             except Exception:
                 photo_refs.append({"filename": image_filename, "path": img_path, "type": "original"})
 
+    # Inject per-window price from the mid-tier (B) proposal line items for display
+    if design_proposals and len(design_proposals) > 1:
+        mid_tier = design_proposals[1]  # Designer tier (B)
+        for room in rooms:
+            room_name = room.get("name", "Room")
+            for win in room.get("windows", []):
+                # Sum line items for this window's room
+                win_total = sum(
+                    item["total"] for item in mid_tier.get("line_items", [])
+                    if item.get("room") == room_name
+                )
+                # Divide by number of windows in that room if multiple
+                n_windows = len(room.get("windows", []))
+                win["price"] = round(win_total / max(n_windows, 1), 2)
+
     quote_data = {
         "id": quote_id,
         "quote_number": quote_number,
@@ -658,6 +673,34 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
             'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
             'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
         }
+        # Treatment-specific image prompt details (what TO show and what NOT to show)
+        treatment_prompt_details = {
+            'roman-shade': (
+                "a flat roman shade with clean horizontal folds, mounted inside the window frame "
+                "with a slim cassette headrail at the top. NO curtain rod, NO rings, NO drapery panels, "
+                "NO traverse rod. The shade folds up neatly when raised."
+            ),
+            'roller-shade': (
+                "a clean roller shade with slim cassette housing at the top. NO curtain rod, "
+                "NO rings, NO drapery fabric. Smooth flat shade material."
+            ),
+            'ripplefold': (
+                "ripplefold drapery panels hanging from a sleek ceiling-mounted track with evenly-spaced "
+                "S-curve folds. Smooth continuous wave pattern."
+            ),
+            'pinch-pleat': (
+                "pinch pleat drapery panels hanging from a decorative rod with rings. "
+                "Classic gathered pleats at the top of each panel."
+            ),
+            'rod-pocket': (
+                "rod pocket curtain panels threaded onto a decorative rod. "
+                "Gathered fabric at the rod with soft flowing drape."
+            ),
+            'grommet': (
+                "grommet top drapery panels with metal grommets along the top edge, "
+                "hanging from a decorative rod. Clean uniform folds."
+            ),
+        }
         tier_fabric_desc_default = {
             "A": "simple, clean solid-color fabric in a neutral tone",
             "B": "mid-range designer fabric with subtle texture",
@@ -669,32 +712,27 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         first_win = first_room.get("windows", [{}])[0] if first_room.get("windows") else {}
         treatment = first_win.get("treatmentType", "ripplefold")
         label = treatment_labels.get(treatment, treatment.replace('-', ' ').title())
+        treatment_detail = treatment_prompt_details.get(treatment, f"{label} window treatment")
         w = first_win.get("width", 48)
         h = first_win.get("height", 60)
-        mount = first_win.get("mountType", "wall")
-        hardware = (first_win.get("hardwareType") or "decorative rod").replace('-', ' ')
         customer_color = first_win.get("fabricColor", "")
 
         ai_mockups = []
         gen_images = []
         for i, dp in enumerate(design_proposals[:3]):
             grade = dp.get("fabric_grade", chr(65 + i))
-            lining = (dp.get("lining_type") or "standard").replace("-", " ")
             # Use customer's requested color if provided, otherwise tier defaults
             if customer_color:
-                fabric_desc = f"{customer_color} fabric"
-                tier_quality = {"A": "solid, clean", "B": "textured, designer-quality", "C": "luxurious silk/velvet"}.get(grade, "")
-                if tier_quality:
-                    fabric_desc = f"{tier_quality} {customer_color} fabric"
+                tier_quality = {"A": "solid, clean", "B": "textured, designer-quality", "C": "luxurious premium"}.get(grade, "")
+                fabric_desc = f"{tier_quality} {customer_color} fabric" if tier_quality else f"{customer_color} fabric"
             else:
                 fabric_desc = tier_fabric_desc_default.get(grade, "elegant fabric")
             prompt = (
-                f"Professional interior design photo: a {room_name.lower()} with a "
+                f"Professional interior design photograph of a {room_name.lower()} with a "
                 f"{w}-inch wide by {h}-inch tall window. "
-                f"Installed: {label} in {fabric_desc}. "
-                f"The panels hang from {hardware} hardware, {mount}-mounted. "
-                f"{lining} lining. "
-                f"Clean, bright natural light. Magazine-quality architectural photography."
+                f"Installed on the window: {treatment_detail} "
+                f"The fabric is {fabric_desc}. "
+                f"Photorealistic, Architectural Digest magazine quality, natural lighting."
             )
             try:
                 img_resp = httpx.post(
