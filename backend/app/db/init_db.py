@@ -72,6 +72,135 @@ CREATE TABLE IF NOT EXISTS contacts (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Customers (consolidated from quotes)
+CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    company TEXT,
+    type TEXT DEFAULT 'residential' CHECK (type IN ('residential', 'commercial', 'designer', 'contractor')),
+    tags TEXT, -- JSON array
+    notes TEXT,
+    total_revenue REAL DEFAULT 0,
+    lifetime_quotes INTEGER DEFAULT 0,
+    source TEXT DEFAULT 'direct', -- direct, referral, website, marketplace
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Invoices
+CREATE TABLE IF NOT EXISTS invoices (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    invoice_number TEXT UNIQUE,
+    customer_id TEXT,
+    quote_id TEXT,
+    status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'paid', 'partial', 'overdue', 'cancelled')),
+    subtotal REAL DEFAULT 0,
+    tax_rate REAL DEFAULT 0.06,
+    tax_amount REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    amount_paid REAL DEFAULT 0,
+    balance_due REAL DEFAULT 0,
+    line_items TEXT, -- JSON array
+    notes TEXT,
+    terms TEXT DEFAULT 'Net 30',
+    due_date TEXT,
+    sent_at TEXT,
+    paid_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+-- Payments
+CREATE TABLE IF NOT EXISTS payments (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    invoice_id TEXT,
+    customer_id TEXT,
+    amount REAL NOT NULL,
+    method TEXT DEFAULT 'check' CHECK (method IN ('cash', 'check', 'card', 'zelle', 'venmo', 'wire', 'other')),
+    reference TEXT, -- check number, transaction ID, etc.
+    notes TEXT,
+    payment_date TEXT DEFAULT (date('now')),
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
+-- Expenses
+CREATE TABLE IF NOT EXISTS expenses (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    category TEXT NOT NULL CHECK (category IN ('fabric', 'hardware', 'labor', 'shipping', 'rent', 'utilities', 'marketing', 'tools', 'vehicle', 'insurance', 'other')),
+    vendor TEXT,
+    description TEXT,
+    amount REAL NOT NULL,
+    receipt_path TEXT,
+    expense_date TEXT DEFAULT (date('now')),
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Inventory items
+CREATE TABLE IF NOT EXISTS inventory_items (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    name TEXT NOT NULL,
+    sku TEXT UNIQUE,
+    category TEXT NOT NULL CHECK (category IN ('fabric', 'hardware', 'motors', 'lining', 'thread', 'trim', 'wood', 'tools', 'other')),
+    quantity REAL DEFAULT 0,
+    unit TEXT DEFAULT 'yards',
+    min_stock REAL DEFAULT 0,
+    cost_per_unit REAL DEFAULT 0,
+    sell_price REAL DEFAULT 0,
+    vendor TEXT,
+    location TEXT,
+    notes TEXT,
+    business TEXT DEFAULT 'workroom' CHECK (business IN ('workroom', 'craftforge')),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Vendors
+CREATE TABLE IF NOT EXISTS vendors (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    name TEXT NOT NULL,
+    contact_name TEXT,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    account_number TEXT,
+    lead_time_days INTEGER DEFAULT 7,
+    notes TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Jobs / Production
+CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    title TEXT NOT NULL,
+    customer_id TEXT,
+    quote_id TEXT,
+    invoice_id TEXT,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'scheduled', 'in_progress', 'on_hold', 'completed', 'cancelled')),
+    job_type TEXT DEFAULT 'fabrication' CHECK (job_type IN ('fabrication', 'installation', 'repair', 'consultation', 'delivery')),
+    priority TEXT DEFAULT 'normal' CHECK (priority IN ('urgent', 'high', 'normal', 'low')),
+    assigned_to TEXT,
+    scheduled_date TEXT,
+    due_date TEXT,
+    completed_date TEXT,
+    estimated_hours REAL,
+    actual_hours REAL,
+    materials_cost REAL DEFAULT 0,
+    labor_cost REAL DEFAULT 0,
+    notes TEXT,
+    address TEXT,
+    metadata TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (customer_id) REFERENCES customers(id)
+);
+
 -- Indexes for fast queries
 CREATE INDEX IF NOT EXISTS idx_tasks_desk ON tasks(desk);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -79,6 +208,17 @@ CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
 CREATE INDEX IF NOT EXISTS idx_tasks_assigned ON tasks(assigned_to);
 CREATE INDEX IF NOT EXISTS idx_activity_task ON task_activity(task_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_type ON contacts(type);
+CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name);
+CREATE INDEX IF NOT EXISTS idx_invoices_customer ON invoices(customer_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
+CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
+CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category);
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
+CREATE INDEX IF NOT EXISTS idx_inventory_category ON inventory_items(category);
+CREATE INDEX IF NOT EXISTS idx_inventory_business ON inventory_items(business);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_customer ON jobs(customer_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_scheduled ON jobs(scheduled_date);
 """
 
 DESKS_JSON_PATH = Path(__file__).resolve().parent.parent / "config" / "desks.json"

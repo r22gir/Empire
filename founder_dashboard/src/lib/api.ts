@@ -52,6 +52,20 @@ export const taskApi = {
     apiFetch<TaskDashboard>('/tasks/dashboard'),
 };
 
+export const costApi = {
+  overview: (days = 30) => apiFetch<Record<string, unknown>>(`/costs/overview?days=${days}`),
+  today: () => apiFetch<Record<string, unknown>>('/costs/today'),
+  daily: (days = 30) => apiFetch<Record<string, unknown>>(`/costs/daily?days=${days}`),
+  weekly: (weeks = 12) => apiFetch<Record<string, unknown>>(`/costs/weekly?weeks=${weeks}`),
+  monthly: (months = 12) => apiFetch<Record<string, unknown>>(`/costs/monthly?months=${months}`),
+  byProvider: (days = 30) => apiFetch<Record<string, unknown>>(`/costs/by-provider?days=${days}`),
+  byFeature: (days = 30) => apiFetch<Record<string, unknown>>(`/costs/by-feature?days=${days}`),
+  byBusiness: (days = 30) => apiFetch<Record<string, unknown>>(`/costs/by-business?days=${days}`),
+  transactions: (limit = 50) => apiFetch<Record<string, unknown>>(`/costs/transactions?limit=${limit}`),
+  budget: () => apiFetch<Record<string, unknown>>('/costs/budget'),
+  rates: () => apiFetch<Record<string, unknown>>('/costs/rates'),
+};
+
 export const contactApi = {
   list: (params: {
     type?: string; search?: string;

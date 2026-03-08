@@ -1,5 +1,5 @@
-export type BusinessTab = 'max' | 'workroom' | 'craft' | 'social' | 'platform';
-export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'report';
+export type BusinessTab = 'max' | 'workroom' | 'craft' | 'social' | 'platform' | 'tickets' | 'shipping';
+export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'dashboard' | 'desks' | 'inbox' | 'report' | 'tickets' | 'shipping';
 export type SidebarIcon = 'chat' | 'dashboard' | 'desks' | 'inbox' | 'files' | 'search' | 'voice' | 'settings';
 export type RightTab = 'desks' | 'inbox' | 'system' | 'memory';
 

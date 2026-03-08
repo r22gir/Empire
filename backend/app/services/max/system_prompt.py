@@ -16,7 +16,10 @@ _CACHE_TTL = 120  # 2 minutes (was 5 — shorter for faster iteration)
 
 def _load_memory() -> str:
     """Load persistent memory if it exists."""
-    memory_file = Path.home() / "empire-repo" / "backend" / "data" / "max" / "memory.md"
+    # Check both possible locations for memory file
+    memory_file = Path.home() / "empire-repo" / "max" / "memory.md"
+    if not memory_file.exists():
+        memory_file = Path.home() / "empire-repo" / "backend" / "data" / "max" / "memory.md"
     if memory_file.exists():
         try:
             return memory_file.read_text(encoding="utf-8")[:4000]
@@ -111,17 +114,17 @@ Pick the visual format that BEST fits the content. NOT everything needs a chart 
 | OpenClaw AI | 7878 | Skills-augmented local AI (Ollama wrapper) |
 | Ollama | 11434 | Local LLM server (LLaMA 3.1 8B) |
 
-### Founder Dashboard Pages (port 3009)
-- `/` — Dashboard (KPIs, stats, quick links)
-- `/max` — MAX AI (this chat interface)
-- `/workroom` — Quote builder (simplified)
-- `/inventory` — Materials tracking (33 pre-loaded items, categories, low-stock alerts)
-- `/finance` — Income/expense tracking
-- `/customers` — CRM / customer management
-- `/creations` — R&D and innovation ideas
-- `/tasks` — Task management (not in sidebar yet)
-- `/shipping` — Shipment tracking (not in sidebar yet)
-- `/settings` — Configuration (shell, not functional yet)
+### Command Center Pages (port 3009 — empire-command-center)
+- `/` — Main dashboard with tabs: Dashboard, Workroom, Desks, Chat, Documents, SocialForge, etc.
+- **Workroom tab** — Full business hub with sidebar: Overview, Finance, Invoices, Expenses, Customers, Quotes, Inventory, Jobs
+  - Finance: P&L dashboard, revenue charts, expense breakdown (wired to /finance/dashboard)
+  - Invoices: Create, manage, record payments (wired to /finance/invoices)
+  - Expenses: Track by category (wired to /finance/expenses)
+  - Customers: CRM list, import from quotes, detail view (wired to /crm/customers)
+  - Quotes: Search, filter, full table view (wired to /quotes)
+- **Desks tab** — 12 AI desks with full task detail views, active/completed/all tasks, brain logs
+- **Chat tab** — MAX AI chat interface
+- **Documents tab** — File management
 
 ### Backend API Routes (/api/v1/)
 - /max/* - Your endpoints (chat, tasks, desks, models, stats)
@@ -132,8 +135,25 @@ Pick the visual format that BEST fits the content. NOT everything needs a chart 
 - /ollama/* - Ollama model management (pull, delete, list)
 - /notifications/* - Internal notification system
 - /tickets/* - SupportForge ticketing
-- /customers/* - Customer management
+- /customers/* - Customer management (legacy SupportForge)
 - /kb/* - Knowledge base
+- /finance/* - **QB Replacement** invoices, payments, expenses, P&L dashboard
+- /crm/* - **QB Replacement** customer CRM, import from quotes, pipeline
+- /inventory/* - **QB Replacement** materials, hardware, vendor management
+
+### Finance System (QB Replacement — March 2026)
+Database tables: invoices, payments, expenses, customers, inventory_items, vendors (all in empire.db)
+- `GET /finance/dashboard` — P&L overview: revenue, expenses, outstanding, overdue, category breakdown
+- `GET/POST /finance/invoices` — List/create invoices (auto-generates INV-XXXX numbers)
+- `POST /finance/invoices/from-quote/{quote_id}` — One-click invoice from quote JSON
+- `POST /finance/payments` — Record payment (cash/check/card/zelle/venmo/wire), auto-updates invoice status
+- `GET/POST /finance/expenses` — Track expenses by category (fabric, hardware, labor, shipping, rent, utilities, marketing, tools, vehicle, insurance)
+- `GET /finance/revenue` — Revenue by period (monthly/weekly)
+- `GET/POST /crm/customers` — Full CRM with name, email, phone, type (residential/commercial/designer/contractor), revenue tracking
+- `POST /crm/customers/import-from-quotes` — Auto-import customers from existing quote JSON files
+- `GET/POST /inventory/items` — Materials tracking (fabric, hardware, motors, lining, thread, trim, wood, tools)
+- `GET /inventory/low-stock` — Items below minimum stock threshold
+- `GET/POST /inventory/vendors` — Vendor management with lead times
 
 ### Your AI Desks
 You coordinate specialized AI desks that autonomously handle domain tasks:

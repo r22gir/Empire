@@ -42,3 +42,14 @@ async def system_stats():
         },
         "temperatures": temps,
     }
+
+
+@router.post("/system/brain-sync")
+async def trigger_brain_sync():
+    """Manually trigger a brain sync to update MAX's memory.md with current system state."""
+    try:
+        from app.services.max.scheduler import max_scheduler
+        await max_scheduler.brain_sync()
+        return {"status": "ok", "message": "Brain sync completed"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

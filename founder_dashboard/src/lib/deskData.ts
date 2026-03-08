@@ -232,7 +232,7 @@ export const DESK_PROMPTS: Record<string, string> = {
 export type DeskId =
   | 'operations' | 'finance' | 'sales' | 'design' | 'estimating'
   | 'clients' | 'contractors' | 'support' | 'marketing'
-  | 'website' | 'it' | 'legal' | 'lab';
+  | 'website' | 'it' | 'legal' | 'lab' | 'costs';
 
 export interface DeskDefinition {
   id: DeskId;
@@ -258,6 +258,7 @@ export const BUSINESS_DESKS: DeskDefinition[] = [
   { id: 'it',          name: 'IT / Systems', icon: '🖥️', lucideIcon: 'Server',         description: 'Health & monitoring',        color: '#6366F1',  shortcut: 'Ctrl+Alt+1' },
   { id: 'legal',       name: 'Legal',        icon: '⚖️', lucideIcon: 'Scale',          description: 'Contracts & compliance',     color: '#78716C',  shortcut: 'Ctrl+Alt+2' },
   { id: 'lab',         name: 'R&D Lab',      icon: '🧪', lucideIcon: 'FlaskConical',   description: 'Experiments & prototypes',   color: '#E11D48',  shortcut: 'Ctrl+Alt+3' },
+  { id: 'costs',       name: 'AI Costs',     icon: '📊', lucideIcon: 'BarChart3',      description: 'API cost tracking',          color: '#D4AF37',  shortcut: 'Ctrl+Alt+4' },
 ];
 
 // ═══════════════════════════════════════════════════════════════

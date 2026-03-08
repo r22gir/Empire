@@ -13,7 +13,7 @@ from app.services.economic_service import EconomicService
 from app.services.quality_evaluator import QualityEvaluator
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/v1/economic", tags=["economic"])
+router = APIRouter(tags=["economic"])
 
 
 class QualityEvaluationRequest(BaseModel):

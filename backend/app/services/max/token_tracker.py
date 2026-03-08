@@ -1,6 +1,8 @@
 """
 Token usage tracking and cost estimation for all LLM providers.
 Stores usage in SQLite on the brain drive (or local fallback).
+
+Tracks: provider, model, tokens, cost, feature, business, source.
 """
 import sqlite3
 import logging
@@ -9,14 +11,20 @@ from pathlib import Path
 
 logger = logging.getLogger("max.tokens")
 
-# Cost per 1M tokens (USD) — updated Feb 2026
+# Cost per 1M tokens (USD) — updated Mar 2026
 COST_RATES = {
     # xAI Grok
     "grok": {"input": 5.00, "output": 15.00},
     "grok-3-fast": {"input": 5.00, "output": 15.00},
+    "grok-vision": {"input": 5.00, "output": 15.00},
     # Anthropic Claude
     "claude-4.6-sonnet": {"input": 3.00, "output": 15.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
+    "claude-haiku-4-5": {"input": 0.80, "output": 4.00},
+    # Groq (free tier / very cheap)
+    "groq-llama-3.3-70b": {"input": 0.59, "output": 0.79},
+    "groq-whisper": {"input": 0.0, "output": 0.0},  # free STT
     # Local models (free)
     "ollama-llama3.1": {"input": 0.0, "output": 0.0},
     "ollama-llama": {"input": 0.0, "output": 0.0},
@@ -24,6 +32,28 @@ COST_RATES = {
     "mistral:7b": {"input": 0.0, "output": 0.0},
     "nomic-embed-text": {"input": 0.0, "output": 0.0},
 }
+
+# Fixed per-call costs (not token-based)
+FIXED_COSTS = {
+    "grok-tts": 0.015,        # ~$0.015 per TTS call (estimated)
+    "grok-image-gen": 0.04,   # ~$0.04 per image generation
+    "stability-inpaint": 0.04,  # ~$0.04 per inpainting
+    "pixazo": 0.0,            # free
+}
+
+# Feature labels for categorization
+FEATURES = [
+    "chat", "chat/stream", "vision", "tts", "stt",
+    "image_gen", "inpaint", "mockup", "quote",
+    "desk_task", "measurement", "web_search", "email",
+    "brain_learn", "embedding", "other",
+]
+
+# Business labels
+BUSINESSES = [
+    "workroom", "craftforge", "personal", "platform", "luxeforge",
+    "socialforge", "marketforge", "recoveryforge", "general",
+]
 
 # Default monthly budget (USD)
 DEFAULT_MONTHLY_BUDGET = 50.00
@@ -57,17 +87,16 @@ class TokenTracker:
                     output_tokens INTEGER NOT NULL DEFAULT 0,
                     cost_usd REAL NOT NULL DEFAULT 0.0,
                     endpoint TEXT DEFAULT 'chat',
-                    conversation_id TEXT
+                    conversation_id TEXT,
+                    feature TEXT DEFAULT 'chat',
+                    business TEXT DEFAULT 'general',
+                    source TEXT DEFAULT ''
                 )
             """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_token_timestamp
-                ON token_usage(timestamp)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_token_model
-                ON token_usage(model)
-            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_timestamp ON token_usage(timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_model ON token_usage(model)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_feature ON token_usage(feature)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_business ON token_usage(business)")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS budget_config (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -81,6 +110,12 @@ class TokenTracker:
                 INSERT OR IGNORE INTO budget_config (id, monthly_budget, alert_threshold, auto_switch_to_local, auto_switch_threshold)
                 VALUES (1, ?, 0.8, 0, 0.95)
             """, (DEFAULT_MONTHLY_BUDGET,))
+            # Safe migration: add columns if missing
+            for col, default in [("feature", "'chat'"), ("business", "'general'"), ("source", "''")]:
+                try:
+                    conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} TEXT DEFAULT {default}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             conn.commit()
             conn.close()
         except Exception as e:
@@ -108,20 +143,47 @@ class TokenTracker:
         output_tokens: int,
         endpoint: str = "chat",
         conversation_id: str = None,
+        feature: str = "chat",
+        business: str = "general",
+        source: str = "",
     ):
         cost = self.calculate_cost(model, input_tokens, output_tokens)
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute(
-                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (model, provider, input_tokens, output_tokens, cost, endpoint, conversation_id),
+                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id, feature, business, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (model, provider, input_tokens, output_tokens, cost, endpoint, conversation_id, feature, business, source),
             )
             conn.commit()
             conn.close()
-            logger.debug(f"Token usage logged: {model} in={input_tokens} out={output_tokens} cost=${cost:.4f}")
+            logger.debug(f"Cost logged: {model} {feature} ${cost:.4f} [{business}]")
         except Exception as e:
             logger.warning(f"Failed to log token usage: {e}")
+
+    def log_fixed_cost(
+        self,
+        cost_type: str,
+        feature: str = "other",
+        business: str = "general",
+        source: str = "",
+    ):
+        """Log a fixed-cost API call (TTS, image gen, inpainting)."""
+        cost = FIXED_COSTS.get(cost_type, 0.0)
+        model = cost_type
+        provider = "free" if cost == 0 else "cloud"
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute(
+                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, feature, business, source)
+                   VALUES (?, ?, 0, 0, ?, ?, ?, ?, ?)""",
+                (model, provider, cost, cost_type, feature, business, source),
+            )
+            conn.commit()
+            conn.close()
+            logger.debug(f"Fixed cost logged: {cost_type} ${cost:.4f} [{feature}/{business}]")
+        except Exception as e:
+            logger.warning(f"Failed to log fixed cost: {e}")
 
     def log_chat(
         self,
@@ -130,12 +192,15 @@ class TokenTracker:
         output_text: str,
         endpoint: str = "chat",
         conversation_id: str = None,
+        feature: str = "chat",
+        business: str = "general",
+        source: str = "",
     ):
         """Convenience: estimate tokens from text and log."""
         provider = "local" if model in ("ollama-llama3.1", "ollama-llama", "openclaw", "mistral:7b") else "cloud"
         input_tokens = self.estimate_tokens(input_text)
         output_tokens = self.estimate_tokens(output_text)
-        self.log_usage(model, provider, input_tokens, output_tokens, endpoint, conversation_id)
+        self.log_usage(model, provider, input_tokens, output_tokens, endpoint, conversation_id, feature, business, source)
 
     def get_stats(self, days: int = 30) -> dict:
         """Get aggregated token usage stats."""
@@ -284,6 +349,167 @@ class TokenTracker:
                     "auto_switch_threshold": 0.95,
                 },
             }
+
+    def get_daily(self, days: int = 30) -> list:
+        """Daily cost breakdown for the last N days."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            rows = conn.execute(
+                """SELECT DATE(timestamp) as day,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY DATE(timestamp) ORDER BY day""",
+                (since,),
+            ).fetchall()
+            conn.close()
+            return [{"day": r["day"], "input_tokens": r["input_tokens"],
+                     "output_tokens": r["output_tokens"],
+                     "cost": round(r["cost"], 4), "requests": r["requests"]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_daily failed: {e}")
+            return []
+
+    def get_weekly(self, weeks: int = 12) -> list:
+        """Weekly cost breakdown for the last N weeks."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(weeks=weeks)).isoformat()
+            rows = conn.execute(
+                """SELECT strftime('%Y-W%W', timestamp) as week,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY strftime('%Y-W%W', timestamp) ORDER BY week""",
+                (since,),
+            ).fetchall()
+            conn.close()
+            return [{"week": r["week"], "input_tokens": r["input_tokens"],
+                     "output_tokens": r["output_tokens"],
+                     "cost": round(r["cost"], 4), "requests": r["requests"]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_weekly failed: {e}")
+            return []
+
+    def get_monthly(self, months: int = 12) -> list:
+        """Monthly cost breakdown for the last N months."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=months * 30)).isoformat()
+            rows = conn.execute(
+                """SELECT strftime('%Y-%m', timestamp) as month,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY strftime('%Y-%m', timestamp) ORDER BY month""",
+                (since,),
+            ).fetchall()
+            conn.close()
+            return [{"month": r["month"], "input_tokens": r["input_tokens"],
+                     "output_tokens": r["output_tokens"],
+                     "cost": round(r["cost"], 4), "requests": r["requests"]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_monthly failed: {e}")
+            return []
+
+    def get_by_provider(self, days: int = 30) -> list:
+        """Cost breakdown by provider."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            rows = conn.execute(
+                """SELECT provider,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY provider ORDER BY cost DESC""",
+                (since,),
+            ).fetchall()
+            conn.close()
+            return [{"provider": r["provider"], "input_tokens": r["input_tokens"],
+                     "output_tokens": r["output_tokens"],
+                     "cost": round(r["cost"], 4), "requests": r["requests"]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_by_provider failed: {e}")
+            return []
+
+    def get_by_feature(self, days: int = 30) -> list:
+        """Cost breakdown by feature."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            rows = conn.execute(
+                """SELECT feature,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY feature ORDER BY cost DESC""",
+                (since,),
+            ).fetchall()
+            conn.close()
+            return [{"feature": r["feature"], "input_tokens": r["input_tokens"],
+                     "output_tokens": r["output_tokens"],
+                     "cost": round(r["cost"], 4), "requests": r["requests"]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_by_feature failed: {e}")
+            return []
+
+    def get_by_business(self, days: int = 30) -> list:
+        """Cost breakdown by business unit."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            rows = conn.execute(
+                """SELECT business,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE timestamp >= ?
+                   GROUP BY business ORDER BY cost DESC""",
+                (since,),
+            ).fetchall()
+            conn.close()
+            return [{"business": r["business"], "input_tokens": r["input_tokens"],
+                     "output_tokens": r["output_tokens"],
+                     "cost": round(r["cost"], 4), "requests": r["requests"]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_by_business failed: {e}")
+            return []
+
+    def get_recent_transactions(self, limit: int = 50) -> list:
+        """Get recent individual transactions for the log view."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT id, timestamp, model, provider, input_tokens, output_tokens,
+                     cost_usd, endpoint, feature, business, source
+                   FROM token_usage ORDER BY timestamp DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            conn.close()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"get_recent_transactions failed: {e}")
+            return []
 
     def update_budget(self, monthly_budget: float = None, alert_threshold: float = None,
                       auto_switch: bool = None, auto_switch_threshold: float = None):

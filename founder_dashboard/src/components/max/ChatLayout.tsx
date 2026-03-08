@@ -24,6 +24,7 @@ import WebsiteDesk from '../desks/WebsiteDesk';
 import ITDesk from '../desks/ITDesk';
 import LegalDesk from '../desks/LegalDesk';
 import LabDesk from '../desks/LabDesk';
+import CostTrackerDesk from '../desks/CostTrackerDesk';
 import DeskChat from '../desks/DeskChat';
 
 const DESK_COMPONENTS: Record<DeskId, React.ComponentType> = {
@@ -40,6 +41,7 @@ const DESK_COMPONENTS: Record<DeskId, React.ComponentType> = {
   it:          ITDesk,
   legal:       LegalDesk,
   lab:         LabDesk,
+  costs:       CostTrackerDesk,
 };
 
 export default function ChatLayout() {

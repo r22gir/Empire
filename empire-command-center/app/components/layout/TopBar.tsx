@@ -9,6 +9,8 @@ const TABS: { id: BusinessTab; label: string; dot: string; onClass: string }[] =
   { id: 'craft', label: 'CraftForge', dot: '#EAB308', onClass: 'text-[#EAB308] bg-[#2a2510]' },
   { id: 'social', label: 'SocialForge', dot: '#ec4899', onClass: 'text-[#ec4899] bg-[#2a0d1f]' },
   { id: 'platform', label: 'Platform', dot: '#3B82F6', onClass: 'text-[#3B82F6] bg-[#0d1a2a]' },
+  { id: 'tickets', label: 'Tickets', dot: '#7c3aed', onClass: 'text-[#7c3aed] bg-[#1a0d2a]' },
+  { id: 'shipping', label: 'Shipping', dot: '#06b6d4', onClass: 'text-[#06b6d4] bg-[#0d1a2a]' },
 ];
 
 const MODELS = [

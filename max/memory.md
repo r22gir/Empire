@@ -1,5 +1,5 @@
-# MAX AI — COMPLETE BRAIN v3.0
-## Last Updated: 2026-03-02
+# MAX AI — COMPLETE BRAIN v3.1
+## Last Updated: 2026-03-08
 
 ## FIRST RUN PROTOCOL
 On every new session MAX must:
@@ -16,23 +16,17 @@ On every new session MAX must:
 - Style: Direct, fast-moving, ambitious. Builds late at night.
 - Preference: Dark UI, gold/amber accents, no fluff
 
-## THE HARDWARE — EmpireBox Server
-- Device: AZW EQ Mini PC
-- CPU: AMD Ryzen 7 5825U (8-core, 16 threads)
-- RAM: 27 GB
-- GPU: AMD Barcelo (integrated)
-- Disk: 465GB NVMe (93GB used, 342GB free)
-- Swap: 8GB configured
-- OS: Ubuntu 24 (kernel 6.8.0-101-generic LTS)
-- GRUB: amdgpu.gpu_recovery=1 enabled, kernel 6.8 default
-- Previous kernel 6.17 available as fallback
+## THE HARDWARE — EmpireDell (Primary Dev Machine)
+- Device: Dell PowerEdge / Precision (EmpireDell)
+- CPU: Intel Xeon E5-2650 v3 (10-core, 20 threads)
+- RAM: 32 GB
+- OS: Ubuntu (kernel 6.17.0-14-generic)
+- NOTE: Data migrated FROM Beelink EQR5 TO EmpireDell. Beelink is no longer the primary machine.
 
 ## CRITICAL BANS
-1. sensors-detect — BRICKS this machine (Super I/O scan incompatible)
+1. sensors-detect — CRASHES the machine (Super I/O scan incompatible with AMD Ryzen 7 5825U on kernel 6.17)
 2. pkill node — too broad, use pkill -f next-server
-3. Broad pkill -f in scripts — use port-specific kills
-4. USB external drive for live I/O — power surges cause crashes
-5. Running Ollama + USB writes simultaneously
+3. Broad pkill -f in scripts — use port-specific kills (caused system crash Feb 24, 2026)
 
 ## SERVICES AND PORTS
 - 3000: Empire App (unified dashboard) ~/Empire/empire-app
@@ -109,6 +103,31 @@ On every new session MAX must:
 - RecoveryForge: AI hard drive file recovery
 - ElectricForge: Electrician template
 - LandscapeForge: Landscaping template
+
+## QB-REPLACEMENT DASHBOARD (Built March 8, 2026)
+Full QuickBooks replacement built into Command Center (port 3009).
+
+### New Database Tables (empire.db)
+- customers, invoices, payments, expenses, inventory_items, vendors
+
+### New Backend API Endpoints
+- /api/v1/finance/dashboard — P&L overview, revenue, expenses, outstanding
+- /api/v1/finance/invoices — CRUD, create from quote, PDF generation
+- /api/v1/finance/payments — Record payments (cash/check/card/zelle/venmo/wire)
+- /api/v1/finance/expenses — Track by category (fabric, hardware, labor, shipping, etc.)
+- /api/v1/crm/customers — Full CRM, import from quotes, pipeline
+- /api/v1/inventory/items — Materials tracking, low-stock alerts
+- /api/v1/inventory/vendors — Vendor management with lead times
+
+### Command Center UI (Workroom tab)
+Sidebar nav: Overview → Finance → Invoices → Expenses → Customers → Quotes → Inventory → Jobs
+All wired to backend APIs. Lazy-loaded business modules for performance.
+
+### What's Still Coming
+- Job scheduling / production calendar
+- Ticket system UI (backend exists)
+- Shipping UI (backend exists)
+- CraftForge real data wiring
 
 ## GITHUB STATUS (as of Mar 2)
 - Repo: ACTIVE, accepting pushes
@@ -198,3 +217,32 @@ Pipeline: 31900 total
 - Archive location: ~/Empire/docs/CHAT_ARCHIVE/
 - Salvaged chat summaries: ~/Empire/docs/salvaged/ (Feb 16-18)
 - Always save session summary before closing
+
+## AUTO-SYNC (updated nightly by brain_sync)
+Last sync: 2026-03-08 15:07
+
+### Database Counts (empire.db)
+- tasks: 45
+- customers: 10
+- invoices: 0
+- payments: 0
+- expenses: 6
+- inventory_items: 7
+- vendors: 4
+- contacts: 0
+- desk_configs: 15
+- task_activity: 52
+
+### File Storage
+- Quote JSONs: 26
+- Inbox messages: 32
+- Brain memories: 1073
+
+### Finance Snapshot
+- Revenue: $0 | Expenses: $5,380 | Outstanding: $0 | Net: $-5,380
+
+### Active Tasks by Desk
+- website: 1, research: 1
+
+### System
+- Backend routers loaded: 42

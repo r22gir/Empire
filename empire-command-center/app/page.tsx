@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode } from './lib/types';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
@@ -25,6 +25,9 @@ import SocialForgePage from './components/screens/SocialForgePage';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
+
+const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
+const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 
 export default function CommandCenter() {
   const [activeTab, setActiveTab] = useState<BusinessTab>('max');
@@ -55,11 +58,13 @@ export default function CommandCenter() {
   const handleTabChange = useCallback((tab: BusinessTab) => {
     setActiveTab(tab);
     if (tab === 'max') setActiveScreen('chat');
+    else if (tab === 'tickets') setActiveScreen('tickets');
+    else if (tab === 'shipping') setActiveScreen('shipping');
     else setActiveScreen('dashboard');
   }, []);
 
   const handleScreenChange = useCallback((screen: ScreenMode | string) => {
-    if (['chat', 'quote', 'docs', 'research', 'video', 'dashboard', 'desks', 'inbox'].includes(screen)) {
+    if (['chat', 'quote', 'docs', 'research', 'video', 'dashboard', 'desks', 'inbox', 'report', 'tickets', 'shipping'].includes(screen)) {
       setActiveScreen(screen as ScreenMode);
     }
   }, []);
@@ -68,6 +73,8 @@ export default function CommandCenter() {
     if (screen === 'workroom-page') { setActiveTab('workroom'); setActiveScreen('dashboard'); }
     else if (screen === 'craft-page') { setActiveTab('craft'); setActiveScreen('dashboard'); }
     else if (screen === 'platform-page') { setActiveTab('platform'); setActiveScreen('dashboard'); }
+    else if (screen === 'tickets-page') { setActiveTab('tickets'); setActiveScreen('tickets'); }
+    else if (screen === 'shipping-page') { setActiveTab('shipping'); setActiveScreen('shipping'); }
     else handleScreenChange(screen);
   }, [handleScreenChange]);
 
@@ -90,6 +97,8 @@ export default function CommandCenter() {
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox') return <InboxScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
+    if (activeScreen === 'tickets') return <Suspense fallback={<div className="flex-1 flex items-center justify-center"><div className="text-sm text-[#aaa]">Loading...</div></div>}><TicketsPage /></Suspense>;
+    if (activeScreen === 'shipping') return <Suspense fallback={<div className="flex-1 flex items-center justify-center"><div className="text-sm text-[#aaa]">Loading...</div></div>}><ShippingPage /></Suspense>;
     if (activeScreen === 'chat') {
       return (
         <ChatScreen

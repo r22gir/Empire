@@ -79,6 +79,15 @@ load_router("app.routers.inbox", "/api/v1", ["inbox"])
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
 load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
 
+# AI Cost Tracker
+load_router("app.routers.costs", "/api/v1", ["costs"])
+
+# Finance, CRM, Inventory
+load_router("app.routers.finance", "/api/v1", ["finance"])
+load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
+load_router("app.routers.inventory", "/api/v1", ["inventory"])
+load_router("app.routers.jobs", "/api/v1", ["jobs"])
+
 # LuxeForge FREE — Public intake portal
 load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 

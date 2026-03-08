@@ -56,6 +56,14 @@ class MaxScheduler:
             name="Weekly Report",
         )
 
+        # Nightly brain sync — 11:00 PM (auto-update memory.md)
+        self.scheduler.add_job(
+            self.brain_sync,
+            CronTrigger(hour=23, minute=0),
+            id="brain_sync",
+            name="Nightly Brain Sync",
+        )
+
         self.scheduler.start()
         jobs = self.scheduler.get_jobs()
         for job in jobs:
@@ -247,6 +255,175 @@ class MaxScheduler:
             logger.info("Weekly report sent")
         except Exception as e:
             logger.error(f"Weekly report failed: {e}")
+
+    async def brain_sync(self):
+        """Nightly auto-update of memory.md with current system state.
+        Catalogs all endpoints, DB table counts, desk statuses, and recent activity.
+        This keeps MAX's persistent memory current without manual edits."""
+        try:
+            from pathlib import Path
+            import json
+            import os
+            import re
+
+            now = datetime.now()
+            memory_file = Path.home() / "empire-repo" / "max" / "memory.md"
+            if not memory_file.exists():
+                logger.warning("Brain sync: memory.md not found")
+                return
+
+            content = memory_file.read_text(encoding="utf-8")
+
+            # ── Gather live system data ──────────────────────────────
+
+            # DB table counts
+            db_stats = {}
+            try:
+                from app.db.database import get_db
+                with get_db() as conn:
+                    for table in ["tasks", "customers", "invoices", "payments", "expenses",
+                                  "inventory_items", "vendors", "contacts", "desk_configs", "task_activity"]:
+                        try:
+                            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                            db_stats[table] = count
+                        except Exception:
+                            db_stats[table] = "N/A"
+            except Exception as e:
+                logger.error(f"Brain sync DB stats failed: {e}")
+
+            # Quote file count
+            quotes_dir = Path.home() / "empire-repo" / "backend" / "data" / "quotes"
+            quote_count = len(list(quotes_dir.glob("*.json"))) if quotes_dir.exists() else 0
+
+            # Inbox count
+            inbox_dir = Path.home() / "empire-repo" / "backend" / "data" / "inbox"
+            inbox_count = len(list(inbox_dir.glob("*.json"))) if inbox_dir.exists() else 0
+
+            # Brain memories count
+            brain_memories = 0
+            try:
+                import sqlite3
+                brain_db = Path.home() / "empire-repo" / "backend" / "data" / "brain" / "memories.db"
+                if brain_db.exists():
+                    bconn = sqlite3.connect(str(brain_db))
+                    brain_memories = bconn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+                    bconn.close()
+            except Exception:
+                pass
+
+            # System stats
+            sys_info = ""
+            try:
+                import psutil
+                cpu = psutil.cpu_percent(interval=0.5)
+                ram = psutil.virtual_memory()
+                disk = psutil.disk_usage("/")
+                sys_info = f"CPU: {cpu}% | RAM: {ram.percent}% ({ram.used // (1024**3)}GB/{ram.total // (1024**3)}GB) | Disk: {disk.percent}% ({disk.used // (1024**3)}GB/{disk.total // (1024**3)}GB)"
+            except Exception:
+                sys_info = "unavailable"
+
+            # Backend router count (approximate from main.py)
+            router_count = 0
+            try:
+                main_py = Path.home() / "empire-repo" / "backend" / "app" / "main.py"
+                if main_py.exists():
+                    router_count = main_py.read_text().count("load_router(")
+            except Exception:
+                pass
+
+            # Active tasks summary
+            active_tasks_summary = ""
+            try:
+                from app.db.database import get_db
+                with get_db() as conn:
+                    active = conn.execute(
+                        "SELECT desk, COUNT(*) as cnt FROM tasks WHERE status IN ('todo','in_progress') GROUP BY desk ORDER BY cnt DESC LIMIT 5"
+                    ).fetchall()
+                    if active:
+                        active_tasks_summary = ", ".join(f"{r[0]}: {r[1]}" for r in active)
+                    else:
+                        active_tasks_summary = "none"
+            except Exception:
+                active_tasks_summary = "unavailable"
+
+            # Recent finance summary
+            finance_summary = ""
+            try:
+                from app.db.database import get_db
+                with get_db() as conn:
+                    rev = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM payments").fetchone()[0]
+                    exp = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses").fetchone()[0]
+                    outstanding = conn.execute(
+                        "SELECT COALESCE(SUM(balance_due), 0) FROM invoices WHERE status IN ('sent','partial','overdue')"
+                    ).fetchone()[0]
+                    finance_summary = f"Revenue: ${rev:,.0f} | Expenses: ${exp:,.0f} | Outstanding: ${outstanding:,.0f} | Net: ${rev - exp:,.0f}"
+            except Exception:
+                finance_summary = "unavailable"
+
+            # ── Build the auto-sync block ────────────────────────────
+
+            sync_block = (
+                f"\n## AUTO-SYNC (updated nightly by brain_sync)\n"
+                f"Last sync: {now.strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"### Database Counts (empire.db)\n"
+            )
+            for table, count in db_stats.items():
+                sync_block += f"- {table}: {count}\n"
+
+            sync_block += (
+                f"\n### File Storage\n"
+                f"- Quote JSONs: {quote_count}\n"
+                f"- Inbox messages: {inbox_count}\n"
+                f"- Brain memories: {brain_memories}\n"
+                f"\n### Finance Snapshot\n"
+                f"- {finance_summary}\n"
+                f"\n### Active Tasks by Desk\n"
+                f"- {active_tasks_summary}\n"
+                f"\n### System\n"
+                f"- {sys_info}\n"
+                f"- Backend routers loaded: {router_count}\n"
+            )
+
+            # ── Replace or append the auto-sync section ──────────────
+
+            marker = "## AUTO-SYNC (updated nightly by brain_sync)"
+            if marker in content:
+                # Replace existing section (everything from marker to next ## or end)
+                pattern = re.compile(
+                    r"\n## AUTO-SYNC \(updated nightly by brain_sync\).*?(?=\n## (?!AUTO-SYNC)|\Z)",
+                    re.DOTALL
+                )
+                content = pattern.sub(sync_block, content)
+            else:
+                # Append at end
+                content = content.rstrip() + "\n" + sync_block
+
+            memory_file.write_text(content, encoding="utf-8")
+
+            # Also copy to the backup location
+            backup = Path.home() / "empire-repo" / "backend" / "data" / "max" / "memory.md"
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup.write_text(content, encoding="utf-8")
+
+            logger.info(f"Brain sync complete — {len(db_stats)} tables, {quote_count} quotes, {brain_memories} memories")
+
+            # Notify via Telegram
+            try:
+                from app.services.max.telegram_bot import telegram_bot
+                if telegram_bot.is_configured:
+                    msg = (
+                        f"<b>🧠 Brain Sync Complete</b>\n"
+                        f"<i>{now.strftime('%B %d, %Y %I:%M %p')}</i>\n\n"
+                        f"📊 DB: {', '.join(f'{k}={v}' for k, v in list(db_stats.items())[:5])}\n"
+                        f"💰 {finance_summary}\n"
+                        f"📋 Active tasks: {active_tasks_summary}"
+                    )
+                    await telegram_bot.send_message(msg)
+            except Exception:
+                pass  # Telegram notification is optional
+
+        except Exception as e:
+            logger.error(f"Brain sync failed: {e}")
 
     def get_status(self) -> dict:
         """Return scheduler status for health checks."""

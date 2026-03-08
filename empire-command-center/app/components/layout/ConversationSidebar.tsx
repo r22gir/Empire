@@ -9,6 +9,8 @@ const TAB_CONFIG: Record<BusinessTab, { label: string; color: string }> = {
   craft: { label: 'CRAFTFORGE ONLY', color: '#EAB308' },
   social: { label: 'SOCIALFORGE ONLY', color: '#ec4899' },
   platform: { label: 'PLATFORM ONLY', color: '#3B82F6' },
+  tickets: { label: 'SUPPORT', color: '#7c3aed' },
+  shipping: { label: 'SHIPPING', color: '#0891b2' },
 };
 
 const GROUP_CONFIG: Record<string, { label: string; icon: string; color: string }> = {

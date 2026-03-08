@@ -6,10 +6,10 @@ import {
   Bot, Send, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp,
   Hammer, ShoppingBag, Megaphone, Headphones, BadgeDollarSign, PieChart,
   Users, Wrench, Monitor, Globe, Scale, FlaskConical, RefreshCw,
-  Clock, AlertTriangle, CircleDot, ListTodo, Eye, X
+  Clock, AlertTriangle, CircleDot, ListTodo, Eye, X, ArrowLeft,
+  FileText, Zap, Brain
 } from 'lucide-react';
 
-// Unified Lucide icons + colors for every desk
 const DESK_CONFIG: Record<string, { bg: string; border: string; text: string; Icon: React.ComponentType<any> }> = {
   forge:       { bg: '#f0fdf4', border: '#bbf7d0', text: '#16a34a', Icon: Hammer },
   market:      { bg: '#eff6ff', border: '#93c5fd', text: '#2563eb', Icon: ShoppingBag },
@@ -45,12 +45,15 @@ interface DeskTask {
 interface DeskStatus {
   desk_id: string;
   agent_name?: string;
+  description?: string;
+  capabilities?: string[];
   active_task_details?: DeskTask[];
   recent_completed?: DeskTask[];
   escalated_task_details?: DeskTask[];
   completed_today?: number;
   completed_total?: number;
   last_activity?: string;
+  brain_logs?: { content: string; created_at: string; importance: number }[];
 }
 
 interface Props {
@@ -59,45 +62,41 @@ interface Props {
 }
 
 export default function DesksScreen({ desks, onSendTask }: Props) {
-  const [expandedDesk, setExpandedDesk] = useState<string | null>(null);
+  const [openDesk, setOpenDesk] = useState<string | null>(null);
   const [taskInput, setTaskInput] = useState('');
-  const [taskDesk, setTaskDesk] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [taskResult, setTaskResult] = useState<{ desk: string; result: string; success: boolean } | null>(null);
   const [deskStatuses, setDeskStatuses] = useState<Record<string, DeskStatus>>({});
   const [dbTasks, setDbTasks] = useState<Record<string, DeskTask[]>>({});
   const [viewingTask, setViewingTask] = useState<DeskTask | null>(null);
-  const [activeTaskTab, setActiveTaskTab] = useState<Record<string, 'active' | 'completed' | 'db'>>({});
+  const [activeTab, setActiveTab] = useState<'active' | 'completed' | 'all' | 'brain'>('active');
   const [loadingStatus, setLoadingStatus] = useState<Record<string, boolean>>({});
 
-  // Fetch desk status (in-memory tasks) when expanded
   const fetchDeskStatus = useCallback(async (deskId: string) => {
     setLoadingStatus(s => ({ ...s, [deskId]: true }));
     try {
       const [statusRes, tasksRes] = await Promise.allSettled([
         fetch(`${API}/max/ai-desks/${deskId}/detail`),
-        fetch(`${API}/tasks?desk=${deskId}&limit=20`),
+        fetch(`${API}/tasks?desk=${deskId}&limit=50`),
       ]);
       if (statusRes.status === 'fulfilled' && statusRes.value.ok) {
-        const data = await statusRes.value.json();
-        setDeskStatuses(s => ({ ...s, [deskId]: data }));
+        const statusData = await statusRes.value.json();
+        setDeskStatuses(s => ({ ...s, [deskId]: statusData }));
       }
       if (tasksRes.status === 'fulfilled' && tasksRes.value.ok) {
-        const data = await tasksRes.value.json();
-        setDbTasks(s => ({ ...s, [deskId]: data.tasks || [] }));
+        const tasksData = await tasksRes.value.json();
+        setDbTasks(s => ({ ...s, [deskId]: tasksData.tasks || [] }));
       }
     } catch { /* silent */ }
     setLoadingStatus(s => ({ ...s, [deskId]: false }));
   }, []);
 
-  const handleExpand = (deskId: string) => {
-    if (expandedDesk === deskId) {
-      setExpandedDesk(null);
-    } else {
-      setExpandedDesk(deskId);
-      if (!deskStatuses[deskId]) fetchDeskStatus(deskId);
-      if (!activeTaskTab[deskId]) setActiveTaskTab(s => ({ ...s, [deskId]: 'active' }));
-    }
+  const handleOpenDesk = (deskId: string) => {
+    setOpenDesk(deskId);
+    setActiveTab('active');
+    setTaskResult(null);
+    setTaskInput('');
+    fetchDeskStatus(deskId);
   };
 
   const submitTask = async (deskId: string) => {
@@ -117,7 +116,6 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
         success: res.ok,
       });
       setTaskInput('');
-      // Refresh task list after submission
       fetchDeskStatus(deskId);
     } catch (e: any) {
       setTaskResult({ desk: deskId, result: e.message, success: false });
@@ -125,359 +123,405 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
     setSubmitting(false);
   };
 
-  const quickTask = (deskId: string, task: string) => {
-    setTaskDesk(deskId);
-    setExpandedDesk(deskId);
-    setTaskInput(task);
-  };
+  // ── Full-page desk detail view ──────────────────────────────────────
+  if (openDesk) {
+    const desk = desks.find(d => d.id === openDesk);
+    if (!desk) { setOpenDesk(null); return null; }
+    const cfg = DESK_CONFIG[desk.id] || DESK_CONFIG.lab;
+    const DeskIcon = cfg.Icon;
+    const deskData = desk as any;
+    const status = deskStatuses[desk.id];
+    const tasks = dbTasks[desk.id] || [];
+    const isLoading = loadingStatus[desk.id];
 
-  return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="flex items-center gap-3 mb-5">
-        <div className="w-10 h-10 rounded-xl bg-[#ede9fe] flex items-center justify-center">
-          <Bot size={20} className="text-[#7c3aed]" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-[#1a1a1a]">AI Desks</h1>
-          <p className="text-xs text-[#777]">{desks.length} agents ready · Click to assign tasks</p>
-        </div>
-      </div>
+    const activeTasks = status?.active_task_details || [];
+    const completedTasks = status?.recent_completed || [];
+    const escalatedTasks = status?.escalated_task_details || [];
+    const brainLogs = (status as any)?.brain_logs || [];
 
-      {/* Task result banner */}
-      {taskResult && (
-        <div className={`mb-4 p-4 rounded-xl border-2 ${taskResult.success ? 'bg-[#f0fdf4] border-[#bbf7d0]' : 'bg-[#fef2f2] border-[#fecaca]'}`}>
-          <div className="flex items-center gap-2 mb-1">
-            {taskResult.success ? <CheckCircle size={16} className="text-[#16a34a]" /> : <XCircle size={16} className="text-[#dc2626]" />}
-            <span className="text-sm font-bold">{taskResult.success ? 'Task Completed' : 'Task Failed'}</span>
-            <button onClick={() => setTaskResult(null)} className="ml-auto text-xs text-[#aaa] hover:text-[#555] cursor-pointer">dismiss</button>
-          </div>
-          <div className="text-xs text-[#555] whitespace-pre-wrap max-h-[200px] overflow-y-auto">{taskResult.result}</div>
-        </div>
-      )}
+    const currentTasks = activeTab === 'active' ? [...activeTasks, ...escalatedTasks]
+      : activeTab === 'completed' ? completedTasks
+      : activeTab === 'all' ? tasks
+      : [];
 
-      {/* Desk Grid */}
-      <div className="grid grid-cols-2 gap-3">
-        {desks.map(d => {
-          const cfg = DESK_CONFIG[d.id] || DESK_CONFIG.lab;
-          const DeskIcon = cfg.Icon;
-          const isExpanded = expandedDesk === d.id;
-          const deskData = d as any;
-          const status = deskStatuses[d.id];
-          const tasks = dbTasks[d.id] || [];
-          const tab = activeTaskTab[d.id] || 'active';
-          const isLoading = loadingStatus[d.id];
-
-          return (
-            <div key={d.id}
-              className="rounded-xl border-2 transition-all overflow-hidden"
-              style={{ borderColor: isExpanded ? cfg.text : cfg.border, background: 'white' }}>
-
-              {/* Header */}
-              <div className="p-4 cursor-pointer flex items-start gap-3"
-                style={{ background: cfg.bg }}
-                onClick={() => handleExpand(d.id)}>
-                <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                  style={{ background: cfg.text + '18' }}>
-                  <DeskIcon size={20} style={{ color: cfg.text }} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold" style={{ color: cfg.text }}>{deskData.agent_name || d.name}</span>
-                    <span className="text-[10px] font-mono text-[#999]">{d.id}</span>
-                  </div>
-                  <div className="text-[11px] text-[#555] mt-0.5 line-clamp-2">{d.persona || (deskData.description || '').slice(0, 80)}</div>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className="flex items-center gap-1 text-[9px] font-bold">
-                      <span className={`w-2 h-2 rounded-full ${d.status === 'busy' ? 'bg-[#d97706]' : 'bg-[#16a34a]'}`} />
-                      <span style={{ color: d.status === 'busy' ? '#d97706' : '#16a34a' }}>{(d.status || 'idle').toUpperCase()}</span>
-                    </span>
-                    {deskData.stats && (
-                      <span className="text-[9px] text-[#aaa]">{deskData.stats.completed} done · {deskData.stats.failed} failed</span>
-                    )}
-                  </div>
-                </div>
-                {isExpanded ? <ChevronUp size={16} className="text-[#aaa] mt-1" /> : <ChevronDown size={16} className="text-[#aaa] mt-1" />}
+    return (
+      <div className="flex-1 overflow-y-auto">
+        {/* Desk header */}
+        <div className="px-10 pt-8 pb-6" style={{ background: cfg.bg }}>
+          <div className="max-w-5xl mx-auto">
+            <button onClick={() => setOpenDesk(null)}
+              className="flex items-center gap-1.5 text-xs font-semibold text-[#777] hover:text-[#1a1a1a] cursor-pointer mb-4 transition-colors">
+              <ArrowLeft size={14} /> Back to All Desks
+            </button>
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
+                style={{ background: cfg.text + '18' }}>
+                <DeskIcon size={28} style={{ color: cfg.text }} />
               </div>
-
-              {/* Expanded Content */}
-              {isExpanded && (
-                <div className="border-t" style={{ borderColor: cfg.border }}>
-                  {/* Domains */}
-                  {deskData.domains && (
-                    <div className="flex flex-wrap gap-1 px-4 pt-3">
-                      {(deskData.domains as string[]).slice(0, 8).map(dom => (
-                        <span key={dom} className="text-[9px] px-2 py-0.5 rounded-full font-mono"
-                          style={{ background: cfg.bg, color: cfg.text, border: `1px solid ${cfg.border}` }}>
-                          {dom.replace(/_/g, ' ')}
-                        </span>
-                      ))}
-                      {(deskData.domains as string[]).length > 8 && (
-                        <span className="text-[9px] text-[#aaa]">+{(deskData.domains as string[]).length - 8} more</span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Task tabs */}
-                  <div className="flex items-center gap-1 px-4 pt-3 pb-2">
-                    {([
-                      { key: 'active', label: 'Active', icon: CircleDot },
-                      { key: 'completed', label: 'Completed', icon: CheckCircle },
-                      { key: 'db', label: 'All Tasks', icon: ListTodo },
-                    ] as const).map(t => (
-                      <button key={t.key} onClick={() => setActiveTaskTab(s => ({ ...s, [d.id]: t.key }))}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer transition-all border ${
-                          tab === t.key
-                            ? 'text-white border-transparent'
-                            : 'bg-white text-[#777] border-[#ece8e1] hover:bg-[#f5f3ef]'
-                        }`}
-                        style={tab === t.key ? { background: cfg.text, borderColor: cfg.text } : {}}>
-                        <t.icon size={12} />
-                        {t.label}
-                      </button>
-                    ))}
-                    <button onClick={() => fetchDeskStatus(d.id)}
-                      className="ml-auto p-1.5 rounded-lg text-[#aaa] hover:text-[#555] hover:bg-[#f5f3ef] cursor-pointer transition-all"
-                      title="Refresh tasks">
-                      <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
-                    </button>
-                  </div>
-
-                  {/* Task list */}
-                  <div className="px-4 pb-3 max-h-[280px] overflow-y-auto">
-                    {isLoading && !status && (
-                      <div className="text-center py-4">
-                        <Loader2 size={16} className="text-[#aaa] mx-auto animate-spin" />
-                        <div className="text-[10px] text-[#aaa] mt-1">Loading tasks...</div>
-                      </div>
-                    )}
-
-                    {tab === 'active' && (
-                      <>
-                        {(status?.active_task_details || []).length === 0 && !isLoading && (
-                          <div className="text-center py-4 text-[10px] text-[#aaa]">No active tasks</div>
-                        )}
-                        {(status?.active_task_details || []).map(t => (
-                          <TaskCard key={t.id} task={t} color={cfg.text} onView={() => setViewingTask(t)} />
-                        ))}
-                        {(status?.escalated_task_details || []).length > 0 && (
-                          <>
-                            <div className="text-[9px] font-bold text-[#dc2626] mt-2 mb-1 flex items-center gap-1">
-                              <AlertTriangle size={10} /> ESCALATED
-                            </div>
-                            {(status?.escalated_task_details || []).map(t => (
-                              <TaskCard key={t.id} task={t} color="#dc2626" onView={() => setViewingTask(t)} />
-                            ))}
-                          </>
-                        )}
-                      </>
-                    )}
-
-                    {tab === 'completed' && (
-                      <>
-                        {(status?.recent_completed || []).length === 0 && !isLoading && (
-                          <div className="text-center py-4 text-[10px] text-[#aaa]">No completed tasks yet</div>
-                        )}
-                        {(status?.recent_completed || []).map(t => (
-                          <TaskCard key={t.id} task={t} color={cfg.text} onView={() => setViewingTask(t)} />
-                        ))}
-                      </>
-                    )}
-
-                    {tab === 'db' && (
-                      <>
-                        {tasks.length === 0 && !isLoading && (
-                          <div className="text-center py-4 text-[10px] text-[#aaa]">No tasks in database</div>
-                        )}
-                        {tasks.map(t => (
-                          <TaskCard key={t.id} task={t} color={cfg.text} onView={() => setViewingTask(t)} />
-                        ))}
-                      </>
-                    )}
-                  </div>
-
-                  {/* Quick tasks */}
-                  <div className="flex flex-wrap gap-1.5 px-4 pb-3">
-                    {getQuickTasks(d.id).map((qt, i) => (
-                      <button key={i} onClick={() => quickTask(d.id, qt.task)}
-                        className="text-[10px] px-2.5 py-1.5 rounded-lg border font-medium cursor-pointer transition-all hover:shadow-sm"
-                        style={{ borderColor: cfg.border, color: cfg.text, background: 'white' }}>
-                        {qt.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Task input */}
-                  <div className="flex gap-2 px-4 pb-4">
-                    <input
-                      value={taskDesk === d.id ? taskInput : ''}
-                      onChange={e => { setTaskDesk(d.id); setTaskInput(e.target.value); }}
-                      onFocus={() => setTaskDesk(d.id)}
-                      onKeyDown={e => e.key === 'Enter' && submitTask(d.id)}
-                      placeholder={`Assign task to ${deskData.agent_name || d.name}...`}
-                      className="flex-1 px-3 py-2.5 border rounded-lg text-xs outline-none min-h-[40px] focus:shadow-[0_0_0_3px] transition-all"
-                      style={{ borderColor: cfg.border, background: 'white' }}
-                    />
-                    <button
-                      onClick={() => submitTask(d.id)}
-                      disabled={submitting || !(taskDesk === d.id && taskInput.trim())}
-                      className="px-4 py-2.5 rounded-lg text-white text-xs font-bold min-h-[40px] flex items-center gap-1.5 disabled:opacity-40 transition-all cursor-pointer"
-                      style={{ background: cfg.text }}>
-                      {submitting && taskDesk === d.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      Go
-                    </button>
-                  </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl font-bold" style={{ color: cfg.text }}>
+                    {deskData.agent_name || desk.name}
+                  </h1>
+                  <span className="text-xs font-mono text-[#999] bg-white/60 px-2 py-0.5 rounded">{desk.id}</span>
+                  <span className="flex items-center gap-1.5 text-[10px] font-bold ml-2">
+                    <span className={`w-2.5 h-2.5 rounded-full ${desk.status === 'busy' ? 'bg-[#d97706]' : 'bg-[#16a34a]'}`} />
+                    <span style={{ color: desk.status === 'busy' ? '#d97706' : '#16a34a' }}>
+                      {(desk.status || 'idle').toUpperCase()}
+                    </span>
+                  </span>
                 </div>
-              )}
+                <p className="text-sm text-[#555] mt-1 max-w-2xl">
+                  {desk.persona || deskData.description}
+                </p>
+                {deskData.domains && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    {(deskData.domains as string[]).slice(0, 12).map(dom => (
+                      <span key={dom} className="text-[10px] px-2.5 py-1 rounded-full font-medium"
+                        style={{ background: 'white', color: cfg.text, border: `1px solid ${cfg.border}` }}>
+                        {dom.replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                    {(deskData.domains as string[]).length > 12 && (
+                      <span className="text-[10px] text-[#999] self-center">+{(deskData.domains as string[]).length - 12} more</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Stats cards */}
+              <div className="flex gap-3 shrink-0">
+                <MiniStat label="Active" value={String(activeTasks.length)} color={cfg.text} />
+                <MiniStat label="Done" value={String(status?.completed_total || deskData.stats?.completed || 0)} color="#16a34a" />
+                <MiniStat label="Escalated" value={String(escalatedTasks.length)} color="#d97706" />
+              </div>
             </div>
-          );
-        })}
-      </div>
-
-      {desks.length === 0 && (
-        <div className="text-center py-16">
-          <Bot size={48} className="text-[#d8d3cb] mx-auto mb-3" />
-          <div className="text-base font-semibold text-[#aaa]">Loading AI Desks...</div>
-          <div className="text-xs text-[#ccc] mt-1">Connecting to /api/v1/max/desks</div>
-        </div>
-      )}
-
-      {/* Task Detail Modal */}
-      {viewingTask && (
-        <TaskDetailModal task={viewingTask} onClose={() => setViewingTask(null)} />
-      )}
-    </div>
-  );
-}
-
-// ── Task Card ────────────────────────────────────────────────────────────
-
-function TaskCard({ task, color, onView }: { task: DeskTask; color: string; onView: () => void }) {
-  const state = task.state || task.status || 'pending';
-  const stateColors: Record<string, { bg: string; text: string }> = {
-    pending:     { bg: '#f5f3ef', text: '#777' },
-    todo:        { bg: '#f5f3ef', text: '#777' },
-    in_progress: { bg: '#dbeafe', text: '#2563eb' },
-    completed:   { bg: '#dcfce7', text: '#16a34a' },
-    done:        { bg: '#dcfce7', text: '#16a34a' },
-    failed:      { bg: '#fee2e2', text: '#dc2626' },
-    escalated:   { bg: '#fef3c7', text: '#d97706' },
-    waiting:     { bg: '#ede9fe', text: '#7c3aed' },
-  };
-  const sc = stateColors[state] || stateColors.pending;
-  const priority = task.priority || 'normal';
-  const priorityColors: Record<string, string> = {
-    urgent: '#dc2626', high: '#d97706', normal: '#777', low: '#aaa',
-  };
-
-  return (
-    <div className="p-2.5 rounded-lg border border-[#ece8e1] mb-1.5 hover:border-[#b8960c] transition-all bg-white group cursor-pointer"
-      onClick={onView}>
-      <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-[#1a1a1a] truncate">{task.title}</span>
-            <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
-              style={{ background: sc.bg, color: sc.text }}>
-              {state.replace('_', ' ').toUpperCase()}
-            </span>
           </div>
-          {task.description && (
-            <div className="text-[10px] text-[#777] mt-0.5 line-clamp-1">{task.description}</div>
-          )}
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[8px] font-bold" style={{ color: priorityColors[priority] || '#777' }}>
-              {priority.toUpperCase()}
-            </span>
-            {task.source && <span className="text-[8px] text-[#bbb]">via {task.source}</span>}
-            {task.created_at && (
-              <span className="text-[8px] font-mono text-[#ccc]" suppressHydrationWarning>
-                {formatRelative(task.created_at)}
-              </span>
+        </div>
+
+        {/* Task input bar */}
+        <div className="px-10 py-5 border-b border-[#ece8e1] bg-white">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex gap-3">
+              <input
+                value={taskInput}
+                onChange={e => setTaskInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submitTask(desk.id)}
+                placeholder={`Assign a task to ${deskData.agent_name || desk.name}...`}
+                className="flex-1 px-4 py-3 border-2 rounded-xl text-sm outline-none transition-all focus:shadow-[0_0_0_3px]"
+                style={{ borderColor: cfg.border }}
+              />
+              <button
+                onClick={() => submitTask(desk.id)}
+                disabled={submitting || !taskInput.trim()}
+                className="px-6 py-3 rounded-xl text-white text-sm font-bold flex items-center gap-2 disabled:opacity-40 transition-all cursor-pointer hover:opacity-90"
+                style={{ background: cfg.text }}>
+                {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                Send
+              </button>
+            </div>
+            {/* Quick tasks */}
+            <div className="flex flex-wrap gap-2 mt-3">
+              {getQuickTasks(desk.id).map((qt, i) => (
+                <button key={i} onClick={() => setTaskInput(qt.task)}
+                  className="text-[11px] px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition-all hover:shadow-sm"
+                  style={{ borderColor: cfg.border, color: cfg.text, background: cfg.bg }}>
+                  {qt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Task result banner */}
+        {taskResult && (
+          <div className="px-10 pt-4">
+            <div className={`max-w-5xl mx-auto p-4 rounded-xl border-2 ${taskResult.success ? 'bg-[#f0fdf4] border-[#bbf7d0]' : 'bg-[#fef2f2] border-[#fecaca]'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                {taskResult.success ? <CheckCircle size={16} className="text-[#16a34a]" /> : <XCircle size={16} className="text-[#dc2626]" />}
+                <span className="text-sm font-bold">{taskResult.success ? 'Task Completed' : 'Task Failed'}</span>
+                <button onClick={() => setTaskResult(null)} className="ml-auto text-xs text-[#aaa] hover:text-[#555] cursor-pointer">dismiss</button>
+              </div>
+              <div className="text-xs text-[#555] whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">{taskResult.result}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs + content */}
+        <div className="px-10 pt-6 pb-8">
+          <div className="max-w-5xl mx-auto">
+            <div className="flex items-center gap-2 mb-5 border-b border-[#ece8e1] pb-3">
+              {([
+                { key: 'active' as const, label: 'Active Tasks', icon: CircleDot, count: activeTasks.length + escalatedTasks.length },
+                { key: 'completed' as const, label: 'Completed', icon: CheckCircle, count: completedTasks.length },
+                { key: 'all' as const, label: 'All Tasks (DB)', icon: ListTodo, count: tasks.length },
+                { key: 'brain' as const, label: 'Brain Logs', icon: Brain, count: brainLogs.length },
+              ]).map(t => (
+                <button key={t.key} onClick={() => setActiveTab(t.key)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all border ${
+                    activeTab === t.key
+                      ? 'text-white border-transparent shadow-sm'
+                      : 'bg-white text-[#777] border-[#ece8e1] hover:bg-[#f5f3ef] hover:text-[#555]'
+                  }`}
+                  style={activeTab === t.key ? { background: cfg.text, borderColor: cfg.text } : {}}>
+                  <t.icon size={14} />
+                  {t.label}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                    activeTab === t.key ? 'bg-white/25 text-white' : 'bg-[#f5f3ef] text-[#999]'
+                  }`}>
+                    {t.count}
+                  </span>
+                </button>
+              ))}
+              <button onClick={() => fetchDeskStatus(desk.id)}
+                className="ml-auto p-2 rounded-lg text-[#aaa] hover:text-[#555] hover:bg-[#f5f3ef] cursor-pointer transition-all"
+                title="Refresh">
+                <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            {isLoading && !status && (
+              <div className="text-center py-16">
+                <Loader2 size={24} className="text-[#aaa] mx-auto animate-spin" />
+                <div className="text-sm text-[#aaa] mt-2">Loading desk data...</div>
+              </div>
+            )}
+
+            {/* Brain logs tab */}
+            {activeTab === 'brain' && (
+              <div className="space-y-2">
+                {brainLogs.length === 0 && !isLoading && (
+                  <div className="text-center py-16 text-sm text-[#aaa]">No brain activity logged yet</div>
+                )}
+                {brainLogs.map((log: any, i: number) => (
+                  <div key={i} className="p-4 rounded-xl border border-[#ece8e1] bg-white">
+                    <div className="flex items-start gap-3">
+                      <Brain size={16} className="text-[#7c3aed] mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs text-[#555] leading-relaxed">{log.content}</div>
+                        <div className="flex items-center gap-3 mt-2">
+                          <span className="text-[9px] font-mono text-[#ccc]" suppressHydrationWarning>{formatRelative(log.created_at)}</span>
+                          <span className="text-[9px] font-bold" style={{ color: log.importance >= 7 ? '#d97706' : '#aaa' }}>
+                            importance: {log.importance}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Task list */}
+            {activeTab !== 'brain' && (
+              <div className="space-y-2">
+                {currentTasks.length === 0 && !isLoading && (
+                  <div className="text-center py-16 text-sm text-[#aaa]">
+                    {activeTab === 'active' ? 'No active tasks' : activeTab === 'completed' ? 'No completed tasks yet' : 'No tasks in database'}
+                  </div>
+                )}
+
+                {/* Escalated section */}
+                {activeTab === 'active' && escalatedTasks.length > 0 && (
+                  <div className="mb-3 p-3 rounded-xl bg-[#fef3c7] border border-[#fde68a]">
+                    <div className="text-[10px] font-bold text-[#d97706] flex items-center gap-1 mb-1">
+                      <AlertTriangle size={12} /> {escalatedTasks.length} ESCALATED — needs your attention
+                    </div>
+                  </div>
+                )}
+
+                {currentTasks.map(t => (
+                  <TaskRow key={t.id} task={t} color={cfg.text} onView={() => setViewingTask(t)} />
+                ))}
+              </div>
             )}
           </div>
         </div>
-        <Eye size={12} className="text-[#ccc] group-hover:text-[#777] mt-1 shrink-0 transition-colors" />
+
+        {/* Task Detail Modal */}
+        {viewingTask && (
+          <TaskDetailModal task={viewingTask} onClose={() => setViewingTask(null)} />
+        )}
+      </div>
+    );
+  }
+
+  // ── Grid overview ───────────────────────────────────────────────────
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-5xl mx-auto px-10 py-8">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-[#ede9fe] flex items-center justify-center">
+            <Bot size={20} className="text-[#7c3aed]" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-[#1a1a1a]">AI Desks</h1>
+            <p className="text-xs text-[#777]">{desks.length} agents ready · Click to open</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          {desks.map(d => {
+            const cfg = DESK_CONFIG[d.id] || DESK_CONFIG.lab;
+            const DeskIcon = cfg.Icon;
+            const deskData = d as any;
+            return (
+              <div key={d.id}
+                onClick={() => handleOpenDesk(d.id)}
+                className="rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg hover:scale-[1.01] group"
+                style={{ borderColor: cfg.border, background: 'white' }}>
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors"
+                    style={{ background: cfg.bg }}>
+                    <DeskIcon size={22} style={{ color: cfg.text }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-[#1a1a1a] group-hover:underline">{deskData.agent_name || d.name}</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-[#bbb]">{d.id}</span>
+                  </div>
+                  <span className="flex items-center gap-1 text-[9px] font-bold shrink-0 mt-1">
+                    <span className={`w-2 h-2 rounded-full ${d.status === 'busy' ? 'bg-[#d97706]' : 'bg-[#16a34a]'}`} />
+                    <span style={{ color: d.status === 'busy' ? '#d97706' : '#16a34a' }}>{(d.status || 'idle').toUpperCase()}</span>
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#777] mt-2 line-clamp-2 leading-relaxed">
+                  {d.persona || (deskData.description || '').slice(0, 100)}
+                </p>
+                {deskData.stats && (
+                  <div className="flex items-center gap-3 mt-3 pt-3 border-t border-[#f0ede8]">
+                    <span className="text-[10px] text-[#16a34a] font-bold">{deskData.stats.completed} done</span>
+                    {deskData.stats.failed > 0 && (
+                      <span className="text-[10px] text-[#dc2626] font-bold">{deskData.stats.failed} failed</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {desks.length === 0 && (
+          <div className="text-center py-20">
+            <Bot size={48} className="text-[#d8d3cb] mx-auto mb-3" />
+            <div className="text-base font-semibold text-[#aaa]">Loading AI Desks...</div>
+            <div className="text-xs text-[#ccc] mt-1">Connecting to /api/v1/max/desks</div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Task Detail Modal ────────────────────────────────────────────────────
+// ── Mini stat card ──────────────────────────────────────────────────────
+
+function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="bg-white rounded-xl border border-[#ece8e1] px-4 py-2.5 text-center min-w-[72px]">
+      <div className="text-lg font-bold font-mono" style={{ color }}>{value}</div>
+      <div className="text-[9px] font-semibold text-[#999] uppercase tracking-wider">{label}</div>
+    </div>
+  );
+}
+
+// ── Task row (full-width) ───────────────────────────────────────────────
+
+function TaskRow({ task, color, onView }: { task: DeskTask; color: string; onView: () => void }) {
+  const state = task.state || task.status || 'pending';
+  const priority = task.priority || 'normal';
+  return (
+    <div className="p-4 rounded-xl border border-[#ece8e1] bg-white hover:border-[#b8960c] transition-all cursor-pointer group"
+      onClick={onView}>
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-bold text-[#1a1a1a]">{task.title}</span>
+            <StatusBadge state={state} />
+            <PriorityBadge priority={priority} />
+          </div>
+          {task.description && (
+            <p className="text-xs text-[#777] mt-1.5 line-clamp-2 leading-relaxed">{task.description}</p>
+          )}
+          <div className="flex items-center gap-4 mt-2">
+            {task.source && <span className="text-[10px] text-[#bbb]">via {task.source}</span>}
+            {task.assigned_to && <span className="text-[10px] text-[#bbb]">assigned to {task.assigned_to}</span>}
+            {task.created_at && (
+              <span className="text-[10px] font-mono text-[#ccc]" suppressHydrationWarning>{formatRelative(task.created_at)}</span>
+            )}
+          </div>
+        </div>
+        <Eye size={16} className="text-[#ddd] group-hover:text-[#777] mt-1 shrink-0 transition-colors" />
+      </div>
+    </div>
+  );
+}
+
+// ── Task Detail Modal ──────────────────────────────────────────────────
 
 function TaskDetailModal({ task, onClose }: { task: DeskTask; onClose: () => void }) {
   const state = task.state || task.status || 'pending';
-
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-6" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto"
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-8" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>
-        <div className="p-5 border-b border-[#ece8e1] flex items-start justify-between">
-          <div className="flex-1 min-w-0 pr-3">
-            <h3 className="text-base font-bold text-[#1a1a1a]">{task.title}</h3>
-            <div className="flex items-center gap-2 mt-1">
+        <div className="p-6 border-b border-[#ece8e1] flex items-start justify-between">
+          <div className="flex-1 min-w-0 pr-4">
+            <h3 className="text-lg font-bold text-[#1a1a1a]">{task.title}</h3>
+            <div className="flex items-center gap-2 mt-2">
               <StatusBadge state={state} />
               <PriorityBadge priority={task.priority || 'normal'} />
-              {task.desk && <span className="text-[9px] font-mono text-[#999]">{task.desk}</span>}
+              {task.desk && <span className="text-[10px] font-mono text-[#999]">{task.desk}</span>}
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[#f5f3ef] cursor-pointer text-[#aaa] hover:text-[#555] transition-colors">
-            <X size={18} />
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-[#f5f3ef] cursor-pointer text-[#aaa] hover:text-[#555] transition-colors">
+            <X size={20} />
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-6 space-y-5">
           {task.description && (
             <div>
-              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider">Description</label>
-              <p className="text-xs text-[#555] mt-1 leading-relaxed">{task.description}</p>
+              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider block mb-1.5">Description</label>
+              <p className="text-sm text-[#555] leading-relaxed">{task.description}</p>
             </div>
           )}
 
           {task.result && (
             <div>
-              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider">Result</label>
-              <div className="text-xs text-[#555] mt-1 p-3 rounded-lg bg-[#f5f3ef] whitespace-pre-wrap max-h-[200px] overflow-y-auto leading-relaxed">
+              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider block mb-1.5">Result</label>
+              <div className="text-sm text-[#555] p-4 rounded-xl bg-[#f5f3ef] whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
                 {task.result}
               </div>
             </div>
           )}
 
           {task.escalation_reason && (
-            <div className="p-3 rounded-lg bg-[#fef3c7] border border-[#fde68a]">
-              <div className="text-[10px] font-bold text-[#d97706] mb-1 flex items-center gap-1">
-                <AlertTriangle size={10} /> ESCALATION REASON
+            <div className="p-4 rounded-xl bg-[#fef3c7] border border-[#fde68a]">
+              <div className="text-[10px] font-bold text-[#d97706] mb-1.5 flex items-center gap-1.5">
+                <AlertTriangle size={12} /> ESCALATION REASON
               </div>
-              <div className="text-xs text-[#555]">{task.escalation_reason}</div>
+              <div className="text-sm text-[#555]">{task.escalation_reason}</div>
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            {task.source && (
-              <InfoField label="Source" value={task.source} />
-            )}
-            {task.assigned_to && (
-              <InfoField label="Assigned To" value={task.assigned_to} />
-            )}
-            {task.created_at && (
-              <InfoField label="Created" value={new Date(task.created_at).toLocaleString()} />
-            )}
-            {task.completed_at && (
-              <InfoField label="Completed" value={new Date(task.completed_at).toLocaleString()} />
-            )}
+          <div className="grid grid-cols-2 gap-4">
+            {task.source && <InfoField label="Source" value={task.source} />}
+            {task.assigned_to && <InfoField label="Assigned To" value={task.assigned_to} />}
+            {task.created_at && <InfoField label="Created" value={new Date(task.created_at).toLocaleString()} />}
+            {task.completed_at && <InfoField label="Completed" value={new Date(task.completed_at).toLocaleString()} />}
           </div>
 
-          {/* Action log */}
           {task.actions && task.actions.length > 0 && (
             <div>
-              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider">Activity Log</label>
-              <div className="mt-1 space-y-1">
+              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider block mb-2">Activity Log</label>
+              <div className="space-y-1.5">
                 {task.actions.map((a, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-[#faf9f7]">
-                    <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${a.success ? 'bg-[#16a34a]' : 'bg-[#dc2626]'}`} />
+                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-[#faf9f7]">
+                    <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${a.success ? 'bg-[#16a34a]' : 'bg-[#dc2626]'}`} />
                     <div className="flex-1 min-w-0">
-                      <span className="text-[10px] font-bold text-[#555]">{a.action}</span>
-                      <div className="text-[10px] text-[#777] line-clamp-2">{a.detail}</div>
-                      <div className="text-[8px] font-mono text-[#ccc] mt-0.5" suppressHydrationWarning>{formatRelative(a.timestamp)}</div>
+                      <span className="text-xs font-bold text-[#555]">{a.action}</span>
+                      <div className="text-xs text-[#777] mt-0.5">{a.detail}</div>
+                      <div className="text-[9px] font-mono text-[#ccc] mt-1" suppressHydrationWarning>{formatRelative(a.timestamp)}</div>
                     </div>
                   </div>
                 ))}
@@ -492,18 +536,14 @@ function TaskDetailModal({ task, onClose }: { task: DeskTask; onClose: () => voi
 
 function StatusBadge({ state }: { state: string }) {
   const colors: Record<string, { bg: string; text: string }> = {
-    pending:     { bg: '#f5f3ef', text: '#777' },
-    todo:        { bg: '#f5f3ef', text: '#777' },
-    in_progress: { bg: '#dbeafe', text: '#2563eb' },
-    completed:   { bg: '#dcfce7', text: '#16a34a' },
-    done:        { bg: '#dcfce7', text: '#16a34a' },
-    failed:      { bg: '#fee2e2', text: '#dc2626' },
-    escalated:   { bg: '#fef3c7', text: '#d97706' },
-    waiting:     { bg: '#ede9fe', text: '#7c3aed' },
+    pending: { bg: '#f5f3ef', text: '#777' }, todo: { bg: '#f5f3ef', text: '#777' },
+    in_progress: { bg: '#dbeafe', text: '#2563eb' }, completed: { bg: '#dcfce7', text: '#16a34a' },
+    done: { bg: '#dcfce7', text: '#16a34a' }, failed: { bg: '#fee2e2', text: '#dc2626' },
+    escalated: { bg: '#fef3c7', text: '#d97706' }, waiting: { bg: '#ede9fe', text: '#7c3aed' },
   };
   const c = colors[state] || colors.pending;
   return (
-    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full" style={{ background: c.bg, color: c.text }}>
+    <span className="text-[9px] font-bold px-2.5 py-1 rounded-full" style={{ background: c.bg, color: c.text }}>
       {state.replace('_', ' ').toUpperCase()}
     </span>
   );
@@ -513,7 +553,7 @@ function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = { urgent: '#dc2626', high: '#d97706', normal: '#777', low: '#aaa' };
   const c = colors[priority] || '#777';
   return (
-    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full" style={{ color: c, background: c + '15' }}>
+    <span className="text-[9px] font-bold px-2.5 py-1 rounded-full" style={{ color: c, background: c + '15' }}>
       {priority.toUpperCase()}
     </span>
   );
@@ -523,7 +563,7 @@ function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <div className="text-[9px] font-bold text-[#aaa] uppercase tracking-wider">{label}</div>
-      <div className="text-xs text-[#555] mt-0.5" suppressHydrationWarning>{value}</div>
+      <div className="text-sm text-[#555] mt-1" suppressHydrationWarning>{value}</div>
     </div>
   );
 }
