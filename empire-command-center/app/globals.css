@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg: #f5f3ef;
+  --panel: #fff;
+  --hover: #f0ede8;
+  --chat-bg: #faf9f7;
+  --border: #e5e0d8;
+  --border-l: #ece8e1;
+  --text: #1a1a1a;
+  --dim: #777;
+  --muted: #aaa;
+  --gold: #b8960c;
+  --gold-l: #f5ecd0;
+  --gold-bg: #fdf8eb;
+  --purple: #7c3aed;
+  --green: #16a34a;
+  --blue: #2563eb;
+  --red: #dc2626;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d0ccc4; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #b0aca4; }
+
+.tb-btn {
+  width: 44px; height: 44px; border-radius: 10px; border: 1.5px solid #444;
+  background: #2a2a2a; color: #bbb; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 18px; position: relative; transition: all 0.15s;
+}
+.tb-btn:hover { background: #444; color: #fff; border-color: #666; }
+.tb-btn:active { transform: scale(0.93); }
+
+.chat-ib {
+  width: 46px; height: 46px; border-radius: 10px; border: 1.5px solid var(--border);
+  background: var(--panel); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: #555; transition: all 0.12s; flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.chat-ib:hover { background: var(--hover); color: var(--text); border-color: #ccc; }
+.chat-ib:active { transform: scale(0.92); }
+
+.qa-btn {
+  padding: 11px 18px; border-radius: 9px; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit; border: 1.5px solid var(--border);
+  background: var(--panel); color: #555; min-height: 44px; transition: all 0.12s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.qa-btn:hover { background: var(--hover); border-color: #ccc; }
+.qa-btn:active { transform: scale(0.95); }
+
+.doc-btn {
+  padding: 12px; border-radius: 9px; border: 1.5px solid var(--border);
+  background: var(--panel); font-size: 13px; cursor: pointer; font-family: inherit;
+  text-align: left; min-height: 44px; transition: all 0.12s;
+  display: flex; align-items: center; gap: 9px; width: 100%; color: var(--text);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.doc-btn:hover { background: var(--gold-bg); border-color: var(--gold); }
