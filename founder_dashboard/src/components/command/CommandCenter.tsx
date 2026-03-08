@@ -72,6 +72,7 @@ export default function CommandCenter() {
 
   /* ── Quick Quote inline PDF ─────────────────────────────── */
   const [quickQuotePdf, setQuickQuotePdf] = useState<string | null>(null);
+  const [quickQuoteMockupInfo, setQuickQuoteMockupInfo] = useState<{ provider: string; cost: number; count: number } | null>(null);
 
   /* ── Browser modal ──────────────────────────────────────── */
   const [showBrowser,        setShowBrowser]        = useState(false);
@@ -171,6 +172,13 @@ export default function CommandCenter() {
       );
       if (qqTool?.result?.pdf_url) {
         setQuickQuotePdf(API_URL.replace('/api/v1', '') + qqTool.result.pdf_url);
+        if (qqTool.result.mockup_provider && qqTool.result.mockup_provider !== 'none') {
+          setQuickQuoteMockupInfo({
+            provider: qqTool.result.mockup_provider,
+            cost: qqTool.result.mockup_cost || 0,
+            count: qqTool.result.mockup_count || 0,
+          });
+        }
       }
     }
   }, [chat.messages]);
@@ -540,10 +548,22 @@ export default function CommandCenter() {
                     <div className="px-4 pb-2">
                       <div className="relative">
                         <button
-                          onClick={() => setQuickQuotePdf(null)}
+                          onClick={() => { setQuickQuotePdf(null); setQuickQuoteMockupInfo(null); }}
                           className="absolute top-2 right-2 z-10 w-7 h-7 rounded-full flex items-center justify-center text-sm"
                           style={{ background: 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}
                         >×</button>
+                        {quickQuoteMockupInfo && (
+                          <div className="flex items-center gap-2 mb-2 text-xs">
+                            <span className="px-2 py-1 rounded-full font-medium"
+                              style={{
+                                background: quickQuoteMockupInfo.provider === 'stability' ? 'rgba(139,92,246,0.15)' : 'rgba(212,175,55,0.15)',
+                                color: quickQuoteMockupInfo.provider === 'stability' ? '#a78bfa' : '#D4AF37',
+                                border: `1px solid ${quickQuoteMockupInfo.provider === 'stability' ? 'rgba(139,92,246,0.3)' : 'rgba(212,175,55,0.3)'}`,
+                              }}>
+                              {quickQuoteMockupInfo.provider === 'stability' ? 'Stability AI' : 'Grok'} · {quickQuoteMockupInfo.count} mockups · ${quickQuoteMockupInfo.cost.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
                         <DocumentCanvas documentUrl={quickQuotePdf} inline />
                       </div>
                     </div>

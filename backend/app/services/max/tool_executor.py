@@ -16,6 +16,7 @@ from typing import Optional
 
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.max.inpaint_service import inpaint_service
 
 logger = logging.getLogger("max.tool_executor")
 
@@ -464,6 +465,14 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
 
     # Build stacked design proposals (3 options: A, B, C) if rooms have windows
+    scope = params.get("scope", "full")  # full | fabric-only | hardware-upgrade
+    SCOPE_CATEGORIES = {
+        "full": None,  # None = include all
+        "fabric-only": {"fabric", "lining"},
+        "hardware-upgrade": {"hardware"},
+    }
+    scope_filter = SCOPE_CATEGORIES.get(scope)
+
     design_proposals = params.get("design_proposals", [])
     if not design_proposals and rooms:
         # Auto-generate 3 tiers from the same rooms with different fabric grades
@@ -480,7 +489,11 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                     win_copy = dict(win)
                     win_copy["fabricGrade"] = tier["grade"]
                     win_copy["liningType"] = tier["lining"]
-                    tier_items.extend(_calc_window_line_items(room_name, win_copy))
+                    all_items = _calc_window_line_items(room_name, win_copy)
+                    # Apply scope filter
+                    if scope_filter is not None:
+                        all_items = [it for it in all_items if it.get("category") in scope_filter]
+                    tier_items.extend(all_items)
                 for uph in room.get("upholstery", []):
                     desc = uph.get("description", "Upholstery item")
                     price = uph.get("price", 250)
@@ -656,6 +669,8 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         },
         "deposit": {"deposit_percent": 50, "deposit_amount": 0},
         "status": "proposal",  # New status: proposal → draft → sent → accepted
+        "scope": scope,
+        "style": params.get("style", ""),
         "max_analysis": max_analysis,
         "created_at": now,
         "updated_at": now,
@@ -666,100 +681,75 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "business_name": "Empire",
     }
 
-    # Generate per-tier mockup images (one for each design proposal)
-    xai_key = os.environ.get("XAI_API_KEY")
-    if xai_key and rooms and design_proposals:
-        treatment_labels = {
-            'ripplefold': 'Ripplefold', 'pinch-pleat': 'Pinch Pleat', 'rod-pocket': 'Rod Pocket',
-            'grommet': 'Grommet Top', 'roman-shade': 'Roman Shade', 'roller-shade': 'Roller Shade',
-        }
-        # Treatment-specific image prompt details (what TO show and what NOT to show)
-        treatment_prompt_details = {
-            'roman-shade': (
-                "a flat roman shade with clean horizontal folds, mounted inside the window frame "
-                "with a slim cassette headrail at the top. NO curtain rod, NO rings, NO drapery panels, "
-                "NO traverse rod. The shade folds up neatly when raised."
-            ),
-            'roller-shade': (
-                "a clean roller shade with slim cassette housing at the top. NO curtain rod, "
-                "NO rings, NO drapery fabric. Smooth flat shade material."
-            ),
-            'ripplefold': (
-                "ripplefold drapery panels hanging from a sleek ceiling-mounted track with evenly-spaced "
-                "S-curve folds. Smooth continuous wave pattern."
-            ),
-            'pinch-pleat': (
-                "pinch pleat drapery panels hanging from a decorative rod with rings. "
-                "Classic gathered pleats at the top of each panel."
-            ),
-            'rod-pocket': (
-                "rod pocket curtain panels threaded onto a decorative rod. "
-                "Gathered fabric at the rod with soft flowing drape."
-            ),
-            'grommet': (
-                "grommet top drapery panels with metal grommets along the top edge, "
-                "hanging from a decorative rod. Clean uniform folds."
-            ),
-        }
-        tier_fabric_desc_default = {
-            "A": "simple, clean solid-color fabric in a neutral tone",
-            "B": "mid-range designer fabric with subtle texture",
-            "C": "luxurious heavy silk fabric with elegant drape",
-        }
-        # Use the first room's first window for the mockup scene
-        first_room = rooms[0]
-        room_name = first_room.get("name", "Room")
-        first_win = first_room.get("windows", [{}])[0] if first_room.get("windows") else {}
-        treatment = first_win.get("treatmentType", "ripplefold")
-        label = treatment_labels.get(treatment, treatment.replace('-', ' ').title())
-        treatment_detail = treatment_prompt_details.get(treatment, f"{label} window treatment")
-        w = first_win.get("width", 48)
-        h = first_win.get("height", 60)
-        customer_color = first_win.get("fabricColor", "")
+    # Generate per-tier mockup images via InpaintService (Stability AI + Grok fallback)
+    style = params.get("style", "")
+    photo_b64 = None
+    if photo_refs:
+        # Prefer the data_uri from the first photo reference
+        for pr in photo_refs:
+            if pr.get("data_uri"):
+                photo_b64 = pr["data_uri"]
+                break
+            elif pr.get("path") and os.path.exists(pr["path"]):
+                import base64 as _b64mod
+                with open(pr["path"], "rb") as _pf:
+                    photo_b64 = _b64mod.b64encode(_pf.read()).decode()
+                break
 
-        ai_mockups = []
-        gen_images = []
-        for i, dp in enumerate(design_proposals[:3]):
-            grade = dp.get("fabric_grade", chr(65 + i))
-            # Use customer's requested color if provided, otherwise tier defaults
-            if customer_color:
-                tier_quality = {"A": "solid, clean", "B": "textured, designer-quality", "C": "luxurious premium"}.get(grade, "")
-                fabric_desc = f"{tier_quality} {customer_color} fabric" if tier_quality else f"{customer_color} fabric"
-            else:
-                fabric_desc = tier_fabric_desc_default.get(grade, "elegant fabric")
-            prompt = (
-                f"Professional interior design photograph of a {room_name.lower()} with a "
-                f"{w}-inch wide by {h}-inch tall window. "
-                f"Installed on the window: {treatment_detail} "
-                f"The fabric is {fabric_desc}. "
-                f"Photorealistic, Architectural Digest magazine quality, natural lighting."
-            )
-            try:
-                img_resp = httpx.post(
-                    "https://api.x.ai/v1/images/generations",
-                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {xai_key}"},
-                    json={"model": "grok-imagine-image", "prompt": prompt, "n": 1, "response_format": "url"},
-                    timeout=30,
-                )
-                if img_resp.status_code == 200:
-                    img_url = img_resp.json().get("data", [{}])[0].get("url")
-                    if img_url:
-                        dp["mockup_image"] = img_url
-                        gen_images.append({"tier": dp.get("label", f"Option {grade}"), "url": img_url})
-                        logger.info(f"Generated mockup for tier {grade}")
-            except Exception as img_err:
-                logger.warning(f"Tier {grade} mockup gen failed: {img_err}")
+    if photo_b64 and rooms and design_proposals:
+        try:
+            mockup_result = _run_async(inpaint_service.generate_all_mockups(
+                photo_b64=photo_b64,
+                rooms=rooms,
+                style=style,
+            ))
+            # Attach mockup URLs to each design proposal tier
+            window_mockups = mockup_result.get("window_mockups", {})
+            furniture_mockups = mockup_result.get("furniture_mockups", {})
+            first_room_name = rooms[0].get("name", "Room") if rooms else "Room"
 
-        if gen_images:
-            ai_mockups.append({
-                "roomName": room_name,
-                "generated_images": gen_images,
-                "proposals": [],
-                "generalRecommendations": [],
-            })
-            quote_data["ai_mockups"] = ai_mockups
-            quote_data["design_proposals"] = design_proposals
-            logger.info(f"Generated {len(gen_images)} per-tier mockup images")
+            ai_mockups = []
+            gen_images = []
+            for i, dp in enumerate(design_proposals[:3]):
+                grade = dp.get("fabric_grade", chr(65 + i))
+                wm = window_mockups.get(grade, {})
+                fm = furniture_mockups.get(grade, {})
+
+                # Attach to design proposal
+                if wm.get("inpainted_url"):
+                    dp["mockup_image"] = wm["inpainted_url"]
+                    dp["inpainted_image_url"] = wm["inpainted_url"]
+                    dp["inpainted_thumb"] = wm.get("inpainted_thumb", "")
+                    gen_images.append({"tier": dp.get("label", f"Option {grade}"), "url": wm["inpainted_url"], "type": "inpainted"})
+                if wm.get("clean_url"):
+                    dp["clean_mockup_url"] = wm["clean_url"]
+                    dp["clean_thumb"] = wm.get("clean_thumb", "")
+                    gen_images.append({"tier": dp.get("label", f"Option {grade}"), "url": wm["clean_url"], "type": "clean"})
+                if fm.get("inpainted_url"):
+                    dp["furniture_inpainted_url"] = fm["inpainted_url"]
+                if fm.get("clean_url"):
+                    dp["furniture_clean_url"] = fm["clean_url"]
+
+                dp["mockup_provider"] = wm.get("provider") or fm.get("provider") or mockup_result.get("provider", "none")
+
+            # Store mockup metadata on quote
+            quote_data["mockup_provider"] = mockup_result.get("provider", "none")
+            quote_data["mockup_cost"] = mockup_result.get("total_cost", 0)
+            quote_data["mockup_count"] = mockup_result.get("images_generated", 0)
+
+            if gen_images:
+                ai_mockups.append({
+                    "roomName": first_room_name,
+                    "generated_images": gen_images,
+                    "proposals": [],
+                    "generalRecommendations": [],
+                })
+                quote_data["ai_mockups"] = ai_mockups
+                quote_data["design_proposals"] = design_proposals
+                logger.info(f"InpaintService generated {mockup_result.get('images_generated', 0)} mockup images via {mockup_result.get('provider', 'none')}")
+
+        except Exception as inpaint_err:
+            logger.warning(f"InpaintService mockup generation failed: {inpaint_err}")
 
     # Save JSON
     os.makedirs(QUOTES_DIR, exist_ok=True)
@@ -806,6 +796,9 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "caption": caption,
         "line_items": line_items,
         "design_proposals_count": len(design_proposals),
+        "mockup_provider": quote_data.get("mockup_provider", "none"),
+        "mockup_cost": quote_data.get("mockup_cost", 0),
+        "mockup_count": quote_data.get("mockup_count", 0),
     })
 
 

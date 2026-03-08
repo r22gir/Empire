@@ -1361,7 +1361,7 @@ def _build_outline_svg(outline: dict) -> str:
 
 
 def _build_design_proposals_html(proposals: list, original_photo: str = "") -> str:
-    """Build 3-tier design option cards for the PDF with mockup images."""
+    """Build 3-tier design option cards for the PDF with side-by-side mockup images."""
     if not proposals:
         return ""
 
@@ -1383,8 +1383,8 @@ def _build_design_proposals_html(proposals: list, original_photo: str = "") -> s
     # Original photo — "Current / Before" reference
     if original_photo:
         html += f"""<div style="margin-bottom:18px;page-break-inside:avoid;text-align:center">
-          <p style="font-size:0.8em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Current — Before</p>
-          <img src="{original_photo}" style="max-width:100%;max-height:320px;border-radius:8px;border:2px solid #ddd;object-fit:contain;display:inline-block" />
+          <p style="font-size:0.8em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Your Space — Current</p>
+          <img src="{original_photo}" style="max-width:80%;max-height:260px;border-radius:8px;border:2px solid #ddd;object-fit:contain;display:inline-block" />
         </div>"""
 
     for i, prop in enumerate(proposals[:3]):
@@ -1397,7 +1397,10 @@ def _build_design_proposals_html(proposals: list, original_photo: str = "") -> s
         total = prop.get("total", 0)
         comment = prop.get("ai_comment", "")
         items = prop.get("line_items", [])
-        mockup_img = prop.get("mockup_image", "")
+        # Mockup URLs — inpainted (customer photo) + clean (aspirational)
+        inpainted_url = prop.get("inpainted_image_url") or prop.get("mockup_image", "")
+        clean_url = prop.get("clean_mockup_url", "")
+        provider = prop.get("mockup_provider", "")
 
         grade_labels = {"A": "Grade A — Quality Basics", "B": "Grade B — Designer Collection", "C": "Grade C — Luxury Premium"}
         grade_label = grade_labels.get(grade, f"Grade {grade}")
@@ -1414,51 +1417,71 @@ def _build_design_proposals_html(proposals: list, original_photo: str = "") -> s
         if len(items) > 8:
             items_rows += f'<tr><td colspan="2" style="padding:3px 6px;font-size:0.72em;color:#999;font-style:italic">+ {len(items)-8} more items</td></tr>'
 
-        html += f"""<div style="margin-bottom:18px;border:2px solid {s['border']};border-radius:10px;overflow:hidden;background:white;page-break-inside:avoid">
+        html += f"""<div style="margin-bottom:16px;border:2px solid {s['border']};border-radius:10px;overflow:hidden;background:white;page-break-inside:avoid">
           <!-- Proposal header -->
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:{s['bg']}">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 14px;background:{s['bg']}">
             <div style="display:flex;align-items:center;gap:10px">
-              <span style="background:{s['color']};color:white;padding:4px 12px;border-radius:5px;font-size:0.72em;font-weight:700;letter-spacing:0.5px">{s['badge']}</span>
+              <span style="background:{s['color']};color:white;padding:3px 10px;border-radius:5px;font-size:0.7em;font-weight:700;letter-spacing:0.5px">{s['badge']}</span>
               <div>
-                <strong style="color:#1a1a2e;font-size:0.95em">{label.split('—')[-1].strip() if '—' in label else label}</strong>
-                <p style="margin:1px 0 0;font-size:0.75em;color:#888">{grade_label} · {lining} Lining</p>
+                <strong style="color:#1a1a2e;font-size:0.92em">{label.split('—')[-1].strip() if '—' in label else label}</strong>
+                <p style="margin:1px 0 0;font-size:0.72em;color:#888">{grade_label} · {lining} Lining</p>
               </div>
             </div>
             <div style="text-align:right">
-              <strong style="font-size:1.2em;color:{s['color']}">${total:,.2f}</strong>
-              <p style="margin:1px 0 0;font-size:0.7em;color:#888">incl. tax</p>
+              <strong style="font-size:1.15em;color:{s['color']}">${total:,.2f}</strong>
+              <p style="margin:1px 0 0;font-size:0.68em;color:#888">incl. tax</p>
             </div>
           </div>"""
 
-        # Mockup image — "Proposed" visualization
-        if mockup_img:
-            html += f"""<div style="text-align:center;padding:12px 16px;background:#fafafa;border-bottom:1px solid #f0f0f0">
-              <p style="font-size:0.72em;font-weight:700;color:{s['color']};text-transform:uppercase;letter-spacing:1px;margin:0 0 8px">Proposed — {s['label']}</p>
-              <img src="{mockup_img}" style="max-width:100%;max-height:280px;border-radius:6px;border:1px solid #eee;object-fit:contain;display:inline-block" />
-            </div>"""
+        # Side-by-side mockup images: inpainted (Your Room) + clean (Inspiration)
+        has_inpainted = bool(inpainted_url)
+        has_clean = bool(clean_url)
+        if has_inpainted or has_clean:
+            html += f'<div style="display:flex;gap:8px;padding:10px 14px;background:#fafafa;border-bottom:1px solid #f0f0f0">'
+            if has_inpainted and has_clean:
+                # Both images — 50/50 side by side
+                html += f"""<div style="flex:1;text-align:center">
+                  <p style="font-size:0.68em;font-weight:700;color:{s['color']};text-transform:uppercase;letter-spacing:0.8px;margin:0 0 6px">Your Room</p>
+                  <img src="{inpainted_url}" style="max-width:100%;max-height:200px;border-radius:6px;border:1px solid #eee;object-fit:contain" />
+                </div>
+                <div style="flex:1;text-align:center">
+                  <p style="font-size:0.68em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 6px">Inspiration</p>
+                  <img src="{clean_url}" style="max-width:100%;max-height:200px;border-radius:6px;border:1px solid #eee;object-fit:contain" />
+                </div>"""
+            elif has_inpainted:
+                html += f"""<div style="flex:1;text-align:center">
+                  <p style="font-size:0.68em;font-weight:700;color:{s['color']};text-transform:uppercase;letter-spacing:0.8px;margin:0 0 6px">Your Room — {s['label']}</p>
+                  <img src="{inpainted_url}" style="max-width:100%;max-height:220px;border-radius:6px;border:1px solid #eee;object-fit:contain" />
+                </div>"""
+            else:
+                html += f"""<div style="flex:1;text-align:center">
+                  <p style="font-size:0.68em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 6px">Inspiration — {s['label']}</p>
+                  <img src="{clean_url}" style="max-width:100%;max-height:220px;border-radius:6px;border:1px solid #eee;object-fit:contain" />
+                </div>"""
+            html += '</div>'
 
         # AI commentary
         if comment:
-            html += f"""<div style="padding:10px 16px;border-bottom:1px solid #f0f0f0;background:#fafbfd">
-              <p style="margin:0;font-size:0.82em;color:#444;line-height:1.5;font-style:italic">{comment}</p>
+            html += f"""<div style="padding:8px 14px;border-bottom:1px solid #f0f0f0;background:#fafbfd">
+              <p style="margin:0;font-size:0.8em;color:#444;line-height:1.4;font-style:italic">{comment}</p>
             </div>"""
 
         # Line items table
         if items_rows:
-            html += f"""<div style="padding:8px 16px 10px">
+            html += f"""<div style="padding:6px 14px 8px">
               <table style="width:100%;border-collapse:collapse;margin:0">
                 <thead><tr>
-                  <th style="padding:3px 6px;font-size:0.7em;text-transform:uppercase;letter-spacing:0.5px;color:#999;text-align:left;border-bottom:1px solid #eee;background:transparent">Item</th>
-                  <th style="padding:3px 6px;font-size:0.7em;text-transform:uppercase;letter-spacing:0.5px;color:#999;text-align:right;border-bottom:1px solid #eee;background:transparent">Price</th>
+                  <th style="padding:3px 6px;font-size:0.68em;text-transform:uppercase;letter-spacing:0.5px;color:#999;text-align:left;border-bottom:1px solid #eee;background:transparent">Item</th>
+                  <th style="padding:3px 6px;font-size:0.68em;text-transform:uppercase;letter-spacing:0.5px;color:#999;text-align:right;border-bottom:1px solid #eee;background:transparent">Price</th>
                 </tr></thead>
                 <tbody>{items_rows}</tbody>
                 <tfoot>
-                  <tr><td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">Subtotal</td>
-                    <td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">${subtotal:,.2f}</td></tr>
-                  <tr><td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">Tax</td>
-                    <td style="padding:4px 6px;font-size:0.78em;color:#666;text-align:right">${tax:,.2f}</td></tr>
-                  <tr><td style="padding:4px 6px;font-size:0.85em;font-weight:700;color:#1a1a2e;text-align:right;border-top:2px solid {s['color']}">Total</td>
-                    <td style="padding:4px 6px;font-size:0.85em;font-weight:700;color:{s['color']};text-align:right;border-top:2px solid {s['color']}">${total:,.2f}</td></tr>
+                  <tr><td style="padding:3px 6px;font-size:0.76em;color:#666;text-align:right">Subtotal</td>
+                    <td style="padding:3px 6px;font-size:0.76em;color:#666;text-align:right">${subtotal:,.2f}</td></tr>
+                  <tr><td style="padding:3px 6px;font-size:0.76em;color:#666;text-align:right">Tax</td>
+                    <td style="padding:3px 6px;font-size:0.76em;color:#666;text-align:right">${tax:,.2f}</td></tr>
+                  <tr><td style="padding:3px 6px;font-size:0.85em;font-weight:700;color:#1a1a2e;text-align:right;border-top:2px solid {s['color']}">Total</td>
+                    <td style="padding:3px 6px;font-size:0.85em;font-weight:700;color:{s['color']};text-align:right;border-top:2px solid {s['color']}">${total:,.2f}</td></tr>
                 </tfoot>
               </table>
             </div>"""
@@ -1576,6 +1599,19 @@ def _download_image_as_data_uri(url: str) -> str:
     """Download an external image URL and return a base64 data URI for reliable PDF embedding."""
     if not url or url.startswith("data:"):
         return url
+    # Handle local API paths — read directly from disk
+    if url.startswith("/api/v1/vision/images/"):
+        fname = url.split("/")[-1]
+        local_path = os.path.expanduser(f"~/empire-repo/backend/data/generated/{fname}")
+        if os.path.exists(local_path):
+            try:
+                with open(local_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                return f"data:image/png;base64,{b64}"
+            except Exception as e:
+                logger.warning(f"Failed to read local image {fname}: {e}")
+        # Fallback to localhost fetch
+        url = f"http://localhost:8000{url}"
     try:
         resp = httpx.get(url, timeout=15, follow_redirects=True)
         resp.raise_for_status()
@@ -1595,10 +1631,11 @@ def _embed_external_images(quote: dict) -> dict:
             if img.get("url") and not img["url"].startswith("data:"):
                 img["url"] = _download_image_as_data_uri(img["url"])
 
-    # Design proposal mockup images
+    # Design proposal mockup images (legacy + new inpainted/clean)
     for dp in (quote.get("design_proposals") or []):
-        if dp.get("mockup_image") and not dp["mockup_image"].startswith("data:"):
-            dp["mockup_image"] = _download_image_as_data_uri(dp["mockup_image"])
+        for key in ("mockup_image", "inpainted_image_url", "clean_mockup_url", "furniture_inpainted_url", "furniture_clean_url"):
+            if dp.get(key) and not dp[key].startswith("data:"):
+                dp[key] = _download_image_as_data_uri(dp[key])
 
     # Upholstery generated_image in rooms
     for room in (quote.get("rooms") or []):
@@ -1737,6 +1774,8 @@ async def generate_pdf(quote_id: str):
 
     ai_outlines = quote.get("ai_outlines") or []
     ai_mockups = quote.get("ai_mockups") or []
+
+    design_proposals = quote.get("design_proposals") or []
 
     # Build room-level content or fallback to flat line items
     if rooms:
