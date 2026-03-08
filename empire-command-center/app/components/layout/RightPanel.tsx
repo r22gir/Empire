@@ -1,7 +1,22 @@
 'use client';
 import { useState } from 'react';
 import { RightTab, Desk } from '../../lib/types';
-import { Cpu, HardDrive, Database, Clock, PanelRightClose, PanelRight } from 'lucide-react';
+import {
+  Cpu, HardDrive, Database, Clock, PanelRightClose, PanelRight,
+  Hammer, ShoppingBag, Megaphone, Headphones, BadgeDollarSign, PieChart,
+  Users, Wrench, Monitor, Globe, Scale, FlaskConical
+} from 'lucide-react';
+
+const DESK_ICONS: Record<string, React.ComponentType<any>> = {
+  forge: Hammer, market: ShoppingBag, marketing: Megaphone, support: Headphones,
+  sales: BadgeDollarSign, finance: PieChart, clients: Users, contractors: Wrench,
+  it: Monitor, website: Globe, legal: Scale, lab: FlaskConical,
+};
+const DESK_COLORS: Record<string, string> = {
+  forge: '#16a34a', market: '#2563eb', marketing: '#ec4899', support: '#7c3aed',
+  sales: '#b8960c', finance: '#d97706', clients: '#0891b2', contractors: '#b45309',
+  it: '#0284c7', website: '#db2777', legal: '#555', lab: '#a16207',
+};
 
 const TABS: { id: RightTab; label: string; badge?: string }[] = [
   { id: 'desks', label: 'Desks' },
@@ -59,19 +74,23 @@ export default function RightPanel({ desks, briefing, systemStats, collapsed, on
               </div>
             )}
             <div className="grid grid-cols-2 gap-2">
-              {displayDesks.map(d => (
-                <div key={d.id} className="p-3 rounded-xl border border-[#ece8e1] cursor-pointer bg-white min-h-[72px] transition-all hover:border-[#7c3aed] hover:shadow-[0_2px_8px_rgba(124,58,237,0.1)]">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-lg">{d.icon || '🤖'}</span>
-                    <span className="text-[11px] font-bold text-[#1a1a1a]">{d.name}</span>
+              {displayDesks.map(d => {
+                const DIcon = DESK_ICONS[d.id] || Monitor;
+                const dColor = DESK_COLORS[d.id] || '#7c3aed';
+                return (
+                  <div key={d.id} className="p-3 rounded-xl border border-[#ece8e1] cursor-pointer bg-white min-h-[72px] transition-all hover:border-[#7c3aed] hover:shadow-[0_2px_8px_rgba(124,58,237,0.1)]">
+                    <div className="flex items-center gap-1.5">
+                      <DIcon size={16} style={{ color: dColor }} />
+                      <span className="text-[11px] font-bold text-[#1a1a1a]">{d.name}</span>
+                    </div>
+                    <div className="text-[9px] text-[#7c3aed] font-medium italic mt-0.5">{d.persona}</div>
+                    <div className="text-[9px] text-[#999] mt-1 flex items-center gap-1">
+                      <span className={`w-1.5 h-1.5 rounded-full ${d.status === 'busy' ? 'bg-[#d97706]' : 'bg-[#16a34a]'}`} />
+                      {d.status || 'Ready'}
+                    </div>
                   </div>
-                  <div className="text-[9px] text-[#7c3aed] font-medium italic mt-0.5">{d.persona}</div>
-                  <div className="text-[9px] text-[#999] mt-1 flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a]" />
-                    {d.status || 'Ready'}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             {desks.length > 6 && (
               <button onClick={() => setShowAll(!showAll)}

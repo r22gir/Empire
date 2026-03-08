@@ -1,48 +1,31 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AMP — Actitud Mental Positiva | Transforma Tu Mente, Transforma Tu Vida",
-  description:
-    "La plataforma #1 en español para desarrollo personal, liderazgo y bienestar mental. Meditaciones guiadas, retos de 21 días, y masterclass de liderazgo inspiradas en John Maxwell.",
-  keywords: [
-    "actitud mental positiva",
-    "desarrollo personal",
-    "liderazgo",
-    "meditación",
-    "bienestar mental",
-    "mindset",
-    "John Maxwell",
-    "coaching",
-    "crecimiento personal",
-  ],
+  title: "AMP — El Portal de la Alegría | Actitud Mental Positiva",
+  description: "Transforma tu mente, transforma tu vida. Plataforma en español para desarrollo personal, meditación guiada, bienestar y liderazgo. Tu portal de la alegría.",
+  keywords: ["actitud mental positiva", "portal de la alegría", "meditación", "bienestar", "liderazgo", "desarrollo personal", "mentalidad"],
   openGraph: {
-    title: "AMP — Actitud Mental Positiva",
-    description:
-      "Transforma tu mente, transforma tu vida. Desarrollo personal, liderazgo y bienestar mental en español.",
+    title: "AMP — El Portal de la Alegría",
+    description: "Transforma tu mente, transforma tu vida. Meditación, bienestar y liderazgo en español.",
     url: "https://www.actitudmentalpositiva.com",
-    siteName: "AMP",
+    siteName: "AMP — Actitud Mental Positiva",
     locale: "es_ES",
     type: "website",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "AMP — Actitud Mental Positiva",
-    description:
-      "Transforma tu mente, transforma tu vida. La plataforma #1 en español para desarrollo personal.",
-  },
+  manifest: "/manifest.json",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#D4A030",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className="scroll-smooth">
-      <body className="antialiased">
-        {children}
-      </body>
+      <body className="antialiased min-h-screen">{children}</body>
     </html>
   );
 }

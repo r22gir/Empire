@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Empire Command Center — Full Redesign Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f3ef;
+  --bg-panel: #ffffff;
+  --bg-hover: #f0ede8;
+  --bg-chat: #faf9f7;
+  --border: #e5e0d8;
+  --border-light: #ece8e1;
+  --text: #1a1a1a;
+  --text-dim: #777;
+  --text-muted: #aaa;
+  --gold: #b8960c;
+  --gold-light: #f5ecd0;
+  --gold-bg: #fdf8eb;
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+  --green: #16a34a;
+  --green-light: #dcfce7;
+  --blue: #2563eb;
+  --blue-light: #dbeafe;
+  --red: #dc2626;
+  --red-light: #fee2e2;
+  --cyan: #0891b2;
+  --yellow: #ca8a04;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --shadow-lg: 0 8px 30px rgba(0,0,0,0.12);
+  --radius: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ===== MASTER TOP BAR ===== */
+.master-bar {
+  height: 44px;
+  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 0;
+  z-index: 50;
+  flex-shrink: 0;
+}
+
+.master-logo {
+  font-weight: 700;
+  font-size: 13px;
+  color: #D4AF37;
+  letter-spacing: 2px;
+  margin-right: 16px;
+  padding-right: 16px;
+  border-right: 1px solid #333;
+}
+
+/* Business Tabs */
+.biz-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.biz-tab {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #999;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 6px 6px 0 0;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.biz-tab:hover { color: #ddd; background: #2a2a2a; }
+.biz-tab.active { color: #fff; background: #333; }
+.biz-tab.max-tab.active { color: #D4AF37; background: #2a2510; }
+.biz-tab.workroom-tab.active { color: #22C55E; background: #0d2a10; }
+.biz-tab.craft-tab.active { color: #EAB308; background: #2a2510; }
+.biz-tab.platform-tab.active { color: #3B82F6; background: #0d1a2a; }
+
+.biz-tab .tab-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+}
+
+.biz-tab.max-tab .tab-dot { background: #D4AF37; }
+.biz-tab.workroom-tab .tab-dot { background: #22C55E; }
+.biz-tab.craft-tab .tab-dot { background: #EAB308; }
+.biz-tab.platform-tab .tab-dot { background: #3B82F6; }
+
+/* Right side of master bar */
+.master-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.master-btn {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  background: #222;
+  color: #999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.master-btn:hover { background: #333; color: #fff; }
+.master-btn .notif-count {
+  position: absolute; top: -3px; right: -3px;
+  background: var(--red);
+  color: white;
+  font-size: 8px;
+  font-weight: 700;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.lang-toggle {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #222;
+  color: #999;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  transition: all 0.15s;
+}
+
+.lang-toggle:hover { color: #fff; border-color: #666; }
+.lang-toggle.es { color: #EAB308; border-color: #EAB308; }
+
+.status-dots {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px;
+  border-left: 1px solid #333;
+  margin-left: 4px;
+}
+
+.s-dot {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.s-dot .dot { width: 5px; height: 5px; border-radius: 50%; }
+.s-dot.ok .dot { background: #22C55E; }
+.s-dot.ok { color: #22C55E; }
+.s-dot.warn .dot { background: #EAB308; }
+.s-dot.warn { color: #EAB308; }
+
+/* ===== MAIN CONTENT AREA ===== */
+.main-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 52px 240px 1fr 300px;
+  grid-template-rows: 1fr auto;
+  overflow: hidden;
+}
+
+/* ===== ICON SIDEBAR ===== */
+.icon-sidebar {
+  grid-row: 1 / -1;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+  gap: 2px;
+}
+
+.i-btn {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  transition: all 0.12s;
+  position: relative;
+}
+
+.i-btn:hover { background: var(--bg-hover); color: var(--text); }
+.i-btn.active { background: var(--gold-bg); color: var(--gold); }
+.i-btn .i-dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+
+.i-divider { width: 22px; height: 1px; background: var(--border); margin: 6px 0; }
+
+/* ===== CONVERSATION SIDEBAR ===== */
+.conv-panel {
+  grid-row: 1;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conv-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.conv-head h3 { font-size: 12px; font-weight: 600; }
+
+.new-btn {
+  background: var(--gold); color: white; border: none;
+  padding: 4px 10px; border-radius: 6px; font-size: 10px;
+  cursor: pointer; font-family: inherit; font-weight: 600;
+}
+
+.conv-search {
+  margin: 6px 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 11px;
+  background: var(--bg);
+  width: calc(100% - 20px);
+  font-family: inherit;
+  outline: none;
+}
+
+.conv-search:focus { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-light); }
+
+.conv-list { flex: 1; overflow-y: auto; padding: 3px 6px; }
+
+.c-item {
+  padding: 9px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.1s;
+  margin-bottom: 1px;
+}
+
+.c-item:hover { background: var(--bg-hover); }
+.c-item.active { background: var(--gold-bg); }
+
+.c-item .c-title { font-size: 11px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-item .c-preview { font-size: 10px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-item .c-time { font-family: 'JetBrains Mono', monospace; font-size: 8px; color: var(--text-muted); margin-top: 2px; }
+
+/* ===== CHAT AREA ===== */
+.chat-area {
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-chat);
+  overflow: hidden;
+}
+
+/* Sub-nav for MAX features */
+.sub-nav {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-panel);
+  height: 36px;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.sn-tab {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+  border-bottom: 2px solid transparent;
+  transition: all 0.12s;
+  position: relative;
+}
+
+.sn-tab:hover { color: var(--text); }
+.sn-tab.active { color: var(--gold); border-bottom-color: var(--gold); font-weight: 600; }
+
+.sn-tab .sn-drop {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  min-width: 170px;
+  padding: 4px;
+  z-index: 80;
+}
+
+.sn-tab:hover .sn-drop { display: block; }
+
+.dd-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 10px;
+  font-size: 11px;
+  color: var(--text);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.dd-item:hover { background: var(--bg-hover); }
+.dd-item .dd-i { font-size: 13px; }
+.dd-item .dd-badge { margin-left: auto; font-size: 9px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+
+/* Quick actions */
+.quick-bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.q-btn {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text-dim);
+  transition: all 0.1s;
+}
+
+.q-btn:hover { background: var(--gold-bg); border-color: var(--gold); color: var(--gold); }
+
+/* Messages */
+.messages { flex: 1; overflow-y: auto; padding: 16px 20px; }
+
+.msg { margin-bottom: 14px; max-width: 82%; }
+.msg.user { margin-left: auto; }
+
+.msg-bbl {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.msg.user .msg-bbl { background: var(--gold); color: white; border-bottom-right-radius: 3px; }
+.msg.assistant .msg-bbl { background: var(--bg-panel); border: 1px solid var(--border-light); border-bottom-left-radius: 3px; }
+
+.msg-time { font-size: 9px; color: var(--text-muted); margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
+
+/* Proposal card */
+.prop-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 10px 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.prop-card h4 { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+
+.prop-row { display: flex; gap: 6px; margin-bottom: 6px; }
+
+.prop-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 7px;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.12s;
+  text-align: center;
+  font-family: inherit;
+}
+
+.prop-btn:hover { border-color: var(--gold); background: var(--gold-bg); }
+.prop-btn.sel { border-color: var(--gold); background: var(--gold-light); }
+
+.prop-btn .p-tier { font-size: 10px; font-weight: 600; color: var(--text-dim); }
+.prop-btn .p-price { font-size: 15px; font-weight: 700; margin: 3px 0; }
+.prop-btn .p-desc { font-size: 9px; color: var(--text-muted); }
+
+.prop-btn.ess { border-left: 3px solid var(--green); }
+.prop-btn.des { border-left: 3px solid var(--gold); }
+.prop-btn.pre { border-left: 3px solid var(--purple); }
+
+.prop-actions {
+  display: flex; gap: 4px; margin-top: 6px;
+}
+
+.pa-btn {
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  transition: all 0.1s;
+}
+
+.pa-btn:hover { background: var(--bg-hover); }
+.pa-btn.primary { background: var(--gold); color: white; border-color: var(--gold); flex: 1; }
+.pa-btn.primary:hover { background: #a08509; }
+
+/* Chat input */
+.chat-input-wrap {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.input-row { display: flex; gap: 6px; align-items: flex-end; }
+
+.chat-txt {
+  flex: 1;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 12px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  min-height: 38px;
+  background: var(--bg);
+}
+
+.chat-txt:focus { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-light); }
+
+.in-btn {
+  width: 34px; height: 34px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 15px;
+  color: var(--text-dim);
+  transition: all 0.12s;
+}
+
+.in-btn:hover { background: var(--bg-hover); color: var(--text); }
+.in-btn.send { background: var(--gold); border-color: var(--gold); color: white; }
+
+/* ===== RIGHT PANEL ===== */
+.right-panel {
+  grid-row: 1;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rp-tabs { display: flex; border-bottom: 1px solid var(--border-light); padding: 0 2px; }
+
+.rp-tab {
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+
+.rp-tab:hover { color: var(--text); }
+.rp-tab.active { color: var(--gold); border-bottom-color: var(--gold); font-weight: 600; }
+
+.rp-body { flex: 1; overflow-y: auto; padding: 10px; }
+
+/* Briefing */
+.briefing {
+  background: var(--gold-bg);
+  border: 1px solid var(--gold-light);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.briefing h4 { font-size: 11px; font-weight: 600; color: var(--gold); margin-bottom: 4px; }
+.briefing p { font-size: 10px; color: var(--text-dim); line-height: 1.5; }
+
+/* Desk grid */
+.desk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+
+.d-card {
+  padding: 8px;
+  border-radius: 7px;
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: all 0.12s;
+  background: var(--bg);
+}
+
+.d-card:hover { border-color: var(--purple); background: var(--purple-light); }
+
+.d-card .d-top { display: flex; align-items: center; gap: 5px; }
+.d-card .d-icon { font-size: 14px; }
+.d-card .d-name { font-size: 9px; font-weight: 600; }
+.d-card .d-persona { font-size: 8px; color: var(--purple); font-style: italic; }
+.d-card .d-status { font-size: 8px; color: var(--text-muted); margin-top: 3px; }
+
+.desks-expand {
+  text-align: center;
+  padding: 6px;
+  font-size: 10px;
+  color: var(--purple);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.desks-expand:hover { text-decoration: underline; }
+
+/* Inbox */
+.inb-item {
+  padding: 8px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-light);
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.inb-item:hover { background: var(--bg-hover); }
+
+.inb-item .inb-type { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--purple); }
+.inb-item .inb-title { font-size: 11px; font-weight: 500; margin-top: 1px; }
+.inb-item .inb-time { font-size: 8px; color: var(--text-muted); margin-top: 1px; font-family: 'JetBrains Mono', monospace; }
+
+/* ===== TICKER BAR ===== */
+.ticker-bar {
+  grid-column: 1 / -1;
+  height: 28px;
+  background: #1a1a1a;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.ticker-bar.expanded {
+  height: 80px;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  padding: 6px 12px;
+  gap: 8px;
+}
+
+.tick-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.tick-label {
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+}
+
+.tick-label.crypto { color: #f59e0b; }
+.tick-label.weather { color: #06b6d4; }
+.tick-label.news { color: #22c55e; }
+.tick-label.sports { color: #ef4444; }
+.tick-label.system { color: #8b5cf6; }
+
+.tick-val { color: #ccc; font-size: 10px; }
+.tick-val.up { color: #22c55e; }
+.tick-val.down { color: #ef4444; }
+
+.tick-divider { width: 1px; height: 14px; background: #333; }
+
+/* ===== VIDEO CALL POPUP ===== */
+.video-popup {
+  display: none;
+  position: fixed;
+  bottom: 40px;
+  right: 20px;
+  width: 380px;
+  height: 300px;
+  background: #111;
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  overflow: hidden;
+  border: 1px solid #333;
+  flex-direction: column;
+}
+
+.video-popup.open { display: flex; }
+
+.vp-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  gap: 8px;
+}
+
+.vp-header .vp-title { font-size: 11px; font-weight: 600; color: #fff; flex: 1; }
+.vp-header .vp-btn {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  border: none;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.1s;
+}
+
+.vp-btn.share { background: #2563eb; color: white; }
+.vp-btn.client-mode { background: #16a34a; color: white; }
+.vp-btn.close { background: #333; color: #999; }
+.vp-btn.close:hover { background: #dc2626; color: white; }
+
+.vp-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a0a;
+}
+
+.vp-placeholder {
+  text-align: center;
+  color: #555;
+}
+
+.vp-placeholder .vp-icon { font-size: 32px; margin-bottom: 8px; }
+.vp-placeholder p { font-size: 11px; }
+
+.vp-controls {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  background: #1a1a1a;
+}
+
+.vc-btn {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: none;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.15s;
+}
+
+.vc-btn.mic { background: #333; color: #fff; }
+.vc-btn.cam { background: #333; color: #fff; }
+.vc-btn.end { background: #dc2626; color: #fff; }
+.vc-btn.screen { background: #333; color: #fff; }
+.vc-btn:hover { opacity: 0.8; }
+
+/* ===== QUICK SWITCH MODAL ===== */
+.qs-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 300;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 20vh;
+}
+
+.qs-overlay.open { display: flex; }
+
+.qs-modal {
+  width: 480px;
+  background: var(--bg-panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.qs-input {
+  width: 100%;
+  padding: 14px 18px;
+  border: none;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.qs-results { padding: 6px; max-height: 300px; overflow-y: auto; }
+
+.qs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.qs-item:hover, .qs-item.selected { background: var(--gold-bg); }
+
+.qs-item .qs-icon { font-size: 18px; }
+.qs-item .qs-name { font-size: 13px; font-weight: 500; }
+.qs-item .qs-path { font-size: 10px; color: var(--text-muted); }
+.qs-item .qs-key { margin-left: auto; font-size: 9px; font-family: 'JetBrains Mono', monospace; color: var(--text-muted); background: var(--bg); padding: 2px 6px; border-radius: 3px; }
+
+/* ===== CLIENT VIEW BANNER ===== */
+.client-banner {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 32px;
+  background: var(--green);
+  color: white;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 400;
+  gap: 10px;
+}
+
+.client-banner.show { display: flex; }
+
+.client-exit {
+  padding: 3px 10px;
+  background: rgba(255,255,255,0.2);
+  border: none;
+  border-radius: 4px;
+  color: white;
+  font-size: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* MOCKUP LABEL */
+.mockup-label {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--gold);
+  color: white;
+  padding: 4px 16px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  border-radius: 6px 6px 0 0;
+  z-index: 500;
+}
+</style>
+</head>
+<body>
+
+<!-- MASTER TOP BAR -->
+<div class="master-bar">
+  <span class="master-logo">EMPIRE</span>
+  
+  <div class="biz-tabs">
+    <button class="biz-tab max-tab active"><span class="tab-dot"></span> MAX</button>
+    <button class="biz-tab workroom-tab"><span class="tab-dot"></span> Empire Workroom</button>
+    <button class="biz-tab craft-tab"><span class="tab-dot"></span> CraftForge</button>
+    <button class="biz-tab platform-tab"><span class="tab-dot"></span> Empire Platform</button>
+  </div>
+  
+  <div class="master-right">
+    <button class="master-btn" title="Video Call" onclick="toggleVideo()">📹</button>
+    <button class="master-btn" title="Notifications" onclick="this.querySelector('.notif-count').style.display='none'">
+      🔔<span class="notif-count">5</span>
+    </button>
+    <button class="master-btn" title="Quick Switch (Ctrl+K)" onclick="toggleQS()">⌘</button>
+    <button class="lang-toggle" onclick="this.classList.toggle('es');this.textContent=this.classList.contains('es')?'ES':'EN'" title="Toggle Language">EN</button>
+    <button class="master-btn" title="Client View" onclick="toggleClient()" style="font-size:11px;font-weight:700">👁</button>
+    
+    <div class="status-dots">
+      <span class="s-dot ok"><span class="dot"></span>Grok</span>
+      <span class="s-dot ok"><span class="dot"></span>TG</span>
+      <span class="s-dot warn"><span class="dot"></span>DDG</span>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div class="main-content">
+
+  <!-- ICON SIDEBAR -->
+  <div class="icon-sidebar">
+    <button class="i-btn active" title="Chat">💬</button>
+    <button class="i-btn" title="Quotes">📋</button>
+    <button class="i-btn" title="Customers">👥</button>
+    <button class="i-btn" title="Inventory">📦</button>
+    <div class="i-divider"></div>
+    <button class="i-btn" title="AI Desks">🤖<span class="i-dot"></span></button>
+    <button class="i-btn" title="Inbox">📥</button>
+    <button class="i-btn" title="Finance">💰</button>
+    <button class="i-btn" title="Files">📁</button>
+    <div class="i-divider"></div>
+    <button class="i-btn" title="Research">🔍</button>
+    <button class="i-btn" title="Shipping">🚚</button>
+    <div style="flex:1"></div>
+    <button class="i-btn" title="Settings">⚙️</button>
+  </div>
+
+  <!-- CONVERSATION SIDEBAR -->
+  <div class="conv-panel">
+    <div class="conv-head">
+      <h3>Conversations</h3>
+      <button class="new-btn">+ New</button>
+    </div>
+    <input class="conv-search" placeholder="Search..." />
+    <div class="conv-list">
+      <div class="c-item active">
+        <div class="c-title">Quick Quote — 72x96 Ripplefold</div>
+        <div class="c-preview">EST-2026-002 · 3 proposals ready</div>
+        <div class="c-time">Today 4:21 PM</div>
+      </div>
+      <div class="c-item">
+        <div class="c-title">Emily Rodriguez — Follow Up</div>
+        <div class="c-preview">Valance order ships today</div>
+        <div class="c-time">Today 2:15 PM</div>
+      </div>
+      <div class="c-item">
+        <div class="c-title">☀️ Morning Briefing</div>
+        <div class="c-preview">3 tasks done · 1 pending</div>
+        <div class="c-time">Today 8:00 AM</div>
+      </div>
+      <div class="c-item">
+        <div class="c-title">Sarah Mitchell — Quote Approved</div>
+        <div class="c-preview">Option B selected · $988.87</div>
+        <div class="c-time">Yesterday</div>
+      </div>
+      <div class="c-item">
+        <div class="c-title">CraftForge Roadmap</div>
+        <div class="c-preview">Vanguard: Phase 1 ready</div>
+        <div class="c-time">Mar 5</div>
+      </div>
+      <div class="c-item">
+        <div class="c-title">MarketForge Research</div>
+        <div class="c-preview">Competitor pricing done</div>
+        <div class="c-time">Mar 4</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CHAT AREA -->
+  <div class="chat-area">
+    <!-- Sub-nav with dropdowns -->
+    <div class="sub-nav">
+      <button class="sn-tab active">💬 Chat</button>
+      <button class="sn-tab" style="position:relative">📋 Quotes
+        <div class="sn-drop">
+          <div class="dd-item"><span class="dd-i">➕</span> New Quick Quote <span class="dd-badge">⌘Q</span></div>
+          <div class="dd-item"><span class="dd-i">📄</span> Quote History <span class="dd-badge">55</span></div>
+          <div class="dd-item"><span class="dd-i">✅</span> Select Proposal</div>
+          <div class="dd-item"><span class="dd-i">📸</span> Photo → Quote</div>
+        </div>
+      </button>
+      <button class="sn-tab" style="position:relative">📨 Comms
+        <div class="sn-drop">
+          <div class="dd-item"><span class="dd-i">📱</span> Send Telegram</div>
+          <div class="dd-item"><span class="dd-i">✉️</span> Send Email</div>
+          <div class="dd-item"><span class="dd-i">📄</span> Send Quote PDF</div>
+          <div class="dd-item"><span class="dd-i">💬</span> TG History</div>
+        </div>
+      </button>
+      <button class="sn-tab" style="position:relative">🤖 Desks
+        <div class="sn-drop">
+          <div class="dd-item"><span class="dd-i">📋</span> Assign Task</div>
+          <div class="dd-item"><span class="dd-i">📝</span> Morning Briefing</div>
+          <div class="dd-item"><span class="dd-i">📊</span> Daily Report</div>
+          <div class="dd-item"><span class="dd-i">👁</span> Desk Activity</div>
+        </div>
+      </button>
+      <button class="sn-tab" style="position:relative">🔍 Research
+        <div class="sn-drop">
+          <div class="dd-item"><span class="dd-i">🌐</span> Web Search</div>
+          <div class="dd-item"><span class="dd-i">🖼️</span> Image Search</div>
+          <div class="dd-item"><span class="dd-i">📖</span> Read URL</div>
+          <div class="dd-item"><span class="dd-i">🧠</span> Memory Search</div>
+        </div>
+      </button>
+      <button class="sn-tab" style="position:relative">⚙️ System
+        <div class="sn-drop">
+          <div class="dd-item"><span class="dd-i">💻</span> Server Health</div>
+          <div class="dd-item"><span class="dd-i">🐳</span> Docker Control</div>
+          <div class="dd-item"><span class="dd-i">🔒</span> Security Scan</div>
+          <div class="dd-item"><span class="dd-i">📁</span> File Manager</div>
+        </div>
+      </button>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="quick-bar">
+      <button class="q-btn">📸 Photo Quote</button>
+      <button class="q-btn">💰 Quick Quote</button>
+      <button class="q-btn">📊 Report</button>
+      <button class="q-btn">📋 Briefing</button>
+      <button class="q-btn">📱 Send TG</button>
+      <button class="q-btn">🔍 Search</button>
+      <button class="q-btn">📹 Video Call</button>
+    </div>
+
+    <!-- Messages -->
+    <div class="messages">
+      <div class="msg user">
+        <div class="msg-bbl">Create a quick quote for a 72x96 window, ripplefold treatment</div>
+        <div class="msg-time">4:21 PM · Dashboard</div>
+      </div>
+      
+      <div class="msg assistant">
+        <div class="msg-bbl">Quote <strong>EST-2026-002</strong> created with 3 proposals.</div>
+        
+        <div class="prop-card">
+          <h4>Select Proposal — EST-2026-002</h4>
+          <div class="prop-row">
+            <button class="prop-btn ess">
+              <div class="p-tier">A · Essential</div>
+              <div class="p-price">$642</div>
+              <div class="p-desc">Grade A · Std lining</div>
+            </button>
+            <button class="prop-btn des sel">
+              <div class="p-tier">B · Designer</div>
+              <div class="p-price">$988</div>
+              <div class="p-desc">Grade B · Std lining</div>
+            </button>
+            <button class="prop-btn pre">
+              <div class="p-tier">C · Premium</div>
+              <div class="p-price">$1,456</div>
+              <div class="p-desc">Grade C · Blackout</div>
+            </button>
+          </div>
+          <div class="prop-actions">
+            <button class="pa-btn primary">✓ Confirm Selection</button>
+            <button class="pa-btn">📄 PDF</button>
+            <button class="pa-btn">📱 TG</button>
+            <button class="pa-btn">✉️ Email</button>
+            <button class="pa-btn">📹 Share</button>
+          </div>
+        </div>
+        
+        <div class="msg-time">4:21 PM · Grok · 3.2s</div>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="chat-input-wrap">
+      <div class="input-row">
+        <button class="in-btn" title="Attach">📎</button>
+        <button class="in-btn" title="Voice">🎤</button>
+        <textarea class="chat-txt" placeholder="Message MAX... (Ctrl+K to switch)" rows="1"></textarea>
+        <button class="in-btn send">→</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="rp-tabs">
+      <button class="rp-tab active">Desks</button>
+      <button class="rp-tab">Inbox <span style="color:var(--red);font-size:9px">5</span></button>
+      <button class="rp-tab">System</button>
+      <button class="rp-tab">Memory</button>
+    </div>
+    
+    <div class="rp-body">
+      <div class="briefing">
+        <h4>☀️ Morning Briefing</h4>
+        <p>3 tasks completed overnight. Emily's valance ships today. New quote request from Maria. Aria drafted IG post — review ready.</p>
+      </div>
+      
+      <!-- Active desks (top 6) -->
+      <div style="font-size:9px;font-weight:600;color:var(--text-dim);margin-bottom:4px;letter-spacing:0.5px">ACTIVE DESKS</div>
+      <div class="desk-grid">
+        <div class="d-card">
+          <div class="d-top"><span class="d-icon">📣</span><span class="d-name">Marketing</span></div>
+          <div class="d-persona">Aria</div>
+          <div class="d-status">IG post ready for review</div>
+        </div>
+        <div class="d-card">
+          <div class="d-top"><span class="d-icon">🏗️</span><span class="d-name">Forge</span></div>
+          <div class="d-persona">Atlas</div>
+          <div class="d-status">2 quotes today</div>
+        </div>
+        <div class="d-card">
+          <div class="d-top"><span class="d-icon">💰</span><span class="d-name">Finance</span></div>
+          <div class="d-persona">Cipher</div>
+          <div class="d-status">$31.9K pipeline</div>
+        </div>
+        <div class="d-card">
+          <div class="d-top"><span class="d-icon">🔧</span><span class="d-name">IT</span></div>
+          <div class="d-persona">Sentinel</div>
+          <div class="d-status">All services ✓</div>
+        </div>
+        <div class="d-card">
+          <div class="d-top"><span class="d-icon">🎯</span><span class="d-name">Strategy</span></div>
+          <div class="d-persona">Vanguard</div>
+          <div class="d-status">CraftForge plan</div>
+        </div>
+        <div class="d-card">
+          <div class="d-top"><span class="d-icon">📦</span><span class="d-name">Operations</span></div>
+          <div class="d-persona">Phoenix</div>
+          <div class="d-status">1 shipment out</div>
+        </div>
+      </div>
+      <div class="desks-expand" onclick="this.textContent=this.textContent.includes('Show')?'▲ Hide 6 more':'▼ Show 6 more desks'">▼ Show 6 more desks</div>
+      
+      <!-- Inbox preview -->
+      <div style="font-size:9px;font-weight:600;color:var(--text-dim);margin:10px 0 4px;letter-spacing:0.5px">RECENT INBOX</div>
+      <div class="inb-item">
+        <div class="inb-type">Quote Review</div>
+        <div class="inb-title">Maria Gonzalez — New request</div>
+        <div class="inb-time">10 min ago</div>
+      </div>
+      <div class="inb-item">
+        <div class="inb-type">Desk Complete</div>
+        <div class="inb-title">Aria: Instagram post drafted</div>
+        <div class="inb-time">2h ago</div>
+      </div>
+      <div class="inb-item">
+        <div class="inb-type">System Alert</div>
+        <div class="inb-title">DDG search rate-limited</div>
+        <div class="inb-time">4h ago</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TICKER BAR -->
+  <div class="ticker-bar" onclick="this.classList.toggle('expanded')">
+    <div class="tick-section">
+      <span class="tick-label crypto">₿ CRYPTO</span>
+      <span class="tick-val">BTC $68.1K</span>
+      <span class="tick-val up">↑3.1%</span>
+      <span class="tick-val">ETH $2.0K</span>
+      <span class="tick-val down">↓1.2%</span>
+      <span class="tick-val">SOL $84</span>
+      <span class="tick-val up">↑5.4%</span>
+    </div>
+    <div class="tick-divider"></div>
+    <div class="tick-section">
+      <span class="tick-label weather">☁ WEATHER</span>
+      <span class="tick-val">DC 48°F</span>
+      <span class="tick-val">Bogotá 62°F</span>
+    </div>
+    <div class="tick-divider"></div>
+    <div class="tick-section">
+      <span class="tick-label news">📰 NEWS</span>
+      <span class="tick-val">Tech employment shifts...</span>
+    </div>
+    <div class="tick-divider"></div>
+    <div class="tick-section">
+      <span class="tick-label sports">⚽ SPORTS</span>
+      <span class="tick-val">DAL 0 — BOS 0</span>
+    </div>
+    <div class="tick-divider"></div>
+    <div class="tick-section">
+      <span class="tick-label system">⚡ EMPIRE</span>
+      <span class="tick-val">5 services ✓</span>
+      <span class="tick-val">97 memories</span>
+    </div>
+  </div>
+</div>
+
+<!-- VIDEO CALL POPUP -->
+<div class="video-popup" id="videoPopup">
+  <div class="vp-header">
+    <span class="vp-title">📹 Video Call</span>
+    <button class="vp-btn share" title="Share Document">📄</button>
+    <button class="vp-btn client-mode" title="Client View" onclick="toggleClient()">👁</button>
+    <button class="vp-btn close" onclick="toggleVideo()" title="Close">✕</button>
+  </div>
+  <div class="vp-body">
+    <div class="vp-placeholder">
+      <div class="vp-icon">📹</div>
+      <p>Click to start a call</p>
+      <p style="font-size:9px;margin-top:4px;color:#444">Share quotes · designs · docs during the call</p>
+    </div>
+  </div>
+  <div class="vp-controls">
+    <button class="vc-btn mic">🎤</button>
+    <button class="vc-btn cam">📷</button>
+    <button class="vc-btn screen">🖥</button>
+    <button class="vc-btn end">📞</button>
+  </div>
+</div>
+
+<!-- QUICK SWITCH MODAL -->
+<div class="qs-overlay" id="qsOverlay" onclick="if(event.target===this)toggleQS()">
+  <div class="qs-modal">
+    <input class="qs-input" placeholder="Switch to... (type to search)" autofocus />
+    <div class="qs-results">
+      <div class="qs-item selected">
+        <span class="qs-icon">💬</span>
+        <div><div class="qs-name">MAX Chat</div><div class="qs-path">AI Assistant</div></div>
+        <span class="qs-key">⌘1</span>
+      </div>
+      <div class="qs-item">
+        <span class="qs-icon">🏗️</span>
+        <div><div class="qs-name">Empire Workroom</div><div class="qs-path">Drapery & Upholstery</div></div>
+        <span class="qs-key">⌘2</span>
+      </div>
+      <div class="qs-item">
+        <span class="qs-icon">🪵</span>
+        <div><div class="qs-name">CraftForge</div><div class="qs-path">Woodwork & CNC</div></div>
+        <span class="qs-key">⌘3</span>
+      </div>
+      <div class="qs-item">
+        <span class="qs-icon">🚀</span>
+        <div><div class="qs-name">Empire Platform</div><div class="qs-path">SaaS Ecosystem</div></div>
+        <span class="qs-key">⌘4</span>
+      </div>
+      <div class="qs-item">
+        <span class="qs-icon">📋</span>
+        <div><div class="qs-name">Quote Builder</div><div class="qs-path">WorkroomForge</div></div>
+        <span class="qs-key">⌘Q</span>
+      </div>
+      <div class="qs-item">
+        <span class="qs-icon">👥</span>
+        <div><div class="qs-name">Customers</div><div class="qs-path">CRM</div></div>
+        <span class="qs-key">⌘C</span>
+      </div>
+      <div class="qs-item">
+        <span class="qs-icon">💰</span>
+        <div><div class="qs-name">Finance</div><div class="qs-path">Invoices · P&L</div></div>
+        <span class="qs-key">⌘F</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENT VIEW BANNER -->
+<div class="client-banner" id="clientBanner">
+  👁 CLIENT VIEW — Internal data hidden · Sharing safe
+  <button class="client-exit" onclick="toggleClient()">Exit Client View</button>
+</div>
+
+<div class="mockup-label">DESIGN MOCKUP · Empire Command Center · All Features · Lighter Theme</div>
+
+<script>
+function toggleVideo() {
+  document.getElementById('videoPopup').classList.toggle('open');
+}
+
+function toggleQS() {
+  document.getElementById('qsOverlay').classList.toggle('open');
+}
+
+function toggleClient() {
+  document.getElementById('clientBanner').classList.toggle('show');
+}
+
+// Ctrl+K shortcut
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    toggleQS();
+  }
+});
+</script>
+
+</body>
+</html>

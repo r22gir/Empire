@@ -11,7 +11,7 @@ export default function CraftForgePage() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-[#1a1a1a]">CraftForge</h1>
-          <p className="text-xs text-[#777]">AI-Designed Home Decor & Furniture · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <p className="text-xs text-[#777]" suppressHydrationWarning>AI-Designed Home Decor & Furniture · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
         </div>
       </div>
 

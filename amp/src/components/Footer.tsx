@@ -1,94 +1,44 @@
-import { Zap, Instagram, Youtube, Facebook } from "lucide-react";
-
-const footerLinks = {
-  Plataforma: [
-    { label: "Funciones", href: "#funciones" },
-    { label: "Precios", href: "#precios" },
-    { label: "Testimonios", href: "#testimonios" },
-    { label: "AMP Empresas", href: "#empieza" },
-  ],
-  Recursos: [
-    { label: "Blog", href: "#" },
-    { label: "Podcast", href: "#" },
-    { label: "Guía de Liderazgo", href: "#" },
-    { label: "FAQ", href: "#" },
-  ],
-  Legal: [
-    { label: "Términos de Uso", href: "#" },
-    { label: "Política de Privacidad", href: "#" },
-    { label: "Contacto", href: "#" },
-  ],
-};
-
-const socials = [
-  { icon: Instagram, href: "#", label: "Instagram" },
-  { icon: Youtube, href: "#", label: "YouTube" },
-  { icon: Facebook, href: "#", label: "Facebook" },
-];
+import { Sun, Heart } from 'lucide-react';
 
 export default function Footer() {
   return (
-    <footer className="bg-navy-deeper border-t border-gold/10 pt-16 pb-8">
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
-          {/* Brand */}
-          <div className="col-span-2 md:col-span-1">
-            <a href="#" className="flex items-center gap-2 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-gold to-gold-dark flex items-center justify-center">
-                <Zap className="w-5 h-5 text-navy-dark" />
-              </div>
-              <span className="text-xl font-bold font-serif text-white">
-                AMP
-              </span>
-            </a>
-            <p className="text-gray-400 text-sm leading-relaxed mb-4">
-              Actitud Mental Positiva — La plataforma #1 en español para
-              desarrollo personal, liderazgo y bienestar mental.
+    <footer className="bg-[#2D2A26] text-white/70 mt-auto">
+      <div className="max-w-5xl mx-auto px-4 py-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Sun size={20} className="text-gold" />
+              <span className="font-serif font-bold text-lg text-gold">AMP</span>
+            </div>
+            <p className="text-sm leading-relaxed text-white/50">
+              El Portal de la Alegría. Una plataforma para ayudarte a generar un cambio mental positivo,
+              manifestar bienestar y compartir herramientas de sanación.
             </p>
-            <div className="flex gap-3">
-              {socials.map((social) => (
-                <a
-                  key={social.label}
-                  href={social.href}
-                  aria-label={social.label}
-                  className="w-9 h-9 rounded-lg bg-navy-light border border-gray-700 flex items-center justify-center text-gray-400 hover:text-gold hover:border-gold/30 transition-colors"
-                >
-                  <social.icon className="w-4 h-4" />
-                </a>
-              ))}
+          </div>
+          <div>
+            <h4 className="font-bold text-white/90 text-sm mb-3">Explora</h4>
+            <div className="space-y-2 text-sm">
+              <a href="/daily" className="block hover:text-gold transition-colors">Experiencia Diaria</a>
+              <a href="/retos" className="block hover:text-gold transition-colors">Retos AMP</a>
+              <a href="/animo" className="block hover:text-gold transition-colors">Seguimiento de Ánimo</a>
+              <a href="/perfil" className="block hover:text-gold transition-colors">Mi Perfil</a>
             </div>
           </div>
-
-          {/* Link columns */}
-          {Object.entries(footerLinks).map(([heading, links]) => (
-            <div key={heading}>
-              <h4 className="text-white font-semibold text-sm mb-4">
-                {heading}
-              </h4>
-              <ul className="space-y-2">
-                {links.map((link) => (
-                  <li key={link.label}>
-                    <a
-                      href={link.href}
-                      className="text-gray-400 text-sm hover:text-gold transition-colors"
-                    >
-                      {link.label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+          <div>
+            <h4 className="font-bold text-white/90 text-sm mb-3">Los 3 Pilares</h4>
+            <div className="space-y-2 text-sm">
+              <p>🧠 Mentalidad — Transforma tu mente</p>
+              <p>🌿 Bienestar — Cuida tu ser</p>
+              <p>⭐ Liderazgo — Lidera tu vida</p>
             </div>
-          ))}
+          </div>
         </div>
-
-        {/* Bottom */}
-        <div className="border-t border-gray-800 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p className="text-gray-500 text-sm">
-            &copy; 2026 AMP — Actitud Mental Positiva. Todos los derechos
-            reservados.
+        <div className="border-t border-white/10 mt-8 pt-6 flex flex-col md:flex-row items-center justify-between gap-3">
+          <p className="text-xs text-white/40">
+            &copy; {new Date().getFullYear()} Actitud Mental Positiva. Todos los derechos reservados.
           </p>
-          <p className="text-gray-600 text-xs">
-            Inspirado en Napoleon Hill, W. Clement Stone y John Maxwell
+          <p className="text-xs text-white/40 flex items-center gap-1">
+            Hecho con <Heart size={12} className="text-sunrise" /> desde el corazón
           </p>
         </div>
       </div>

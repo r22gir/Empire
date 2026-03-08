@@ -78,10 +78,10 @@ class MarketingDesk(BaseDesk):
             return await self.fail_task(task, str(e))
 
     async def _handle_post_creation(self, task: DeskTask) -> DeskTask:
-        """Draft a social media post."""
+        """Draft a social media post using AI."""
         task.actions.append(DeskAction(
             action="post_draft",
-            detail="Drafting social media post",
+            detail="Drafting social media post with AI",
         ))
 
         # Determine platform
@@ -92,31 +92,26 @@ class MarketingDesk(BaseDesk):
                 platform = p
                 break
 
-        # Select hashtag set
-        if any(w in combined for w in ["before", "after", "reveal"]):
-            hashtags = self.HASHTAG_SETS["before_after"]
-        elif any(w in combined for w in ["fabric", "textile", "material"]):
-            hashtags = self.HASHTAG_SETS["fabric"]
-        else:
+        # Use AI to generate the actual post
+        try:
+            result = await self.ai_execute_task(task)
+        except Exception:
+            # Fallback to template
             hashtags = self.HASHTAG_SETS["general"]
+            result = (
+                f"Post drafted for {platform}. Topic: {task.title}. "
+                f"Suggested hashtags: {' '.join(hashtags[:5])}. "
+                f"Status: draft — ready for review and scheduling."
+            )
 
-        # Create draft
-        draft = {
+        # Track draft
+        self.draft_posts.append({
             "task_id": task.id,
             "platform": platform,
             "topic": task.title,
-            "hashtags": hashtags,
             "status": "draft",
             "created": datetime.utcnow().isoformat(),
-        }
-        self.draft_posts.append(draft)
-
-        result = (
-            f"Post drafted for {platform}. Topic: {task.title}. "
-            f"Suggested hashtags: {' '.join(hashtags[:5])}. "
-            f"Status: draft — ready for review and scheduling. "
-            f"Tip: Include high-quality photos with good lighting."
-        )
+        })
 
         return await self.complete_task(task, result)
 

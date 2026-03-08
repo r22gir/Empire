@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmpireBox v4.0 — Architecture</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #05050d;
+    color: #e8e8e8;
+    font-family: 'Outfit', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .header {
+    padding: 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(212, 175, 55, 0.15);
+    background: linear-gradient(180deg, rgba(212, 175, 55, 0.04) 0%, transparent 100%);
+  }
+
+  .header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #D4AF37;
+    letter-spacing: 2px;
+  }
+
+  .header h1 span {
+    color: #8B5CF6;
+    font-weight: 400;
+  }
+
+  .header .version {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: #666;
+    background: rgba(212, 175, 55, 0.08);
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid rgba(212, 175, 55, 0.15);
+  }
+
+  .tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 40px;
+    background: rgba(255,255,255,0.02);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .tab {
+    padding: 14px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #666;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+    font-family: 'Outfit', sans-serif;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+  }
+
+  .tab:hover { color: #aaa; }
+  .tab.active { color: #D4AF37; border-bottom-color: #D4AF37; }
+
+  .diagram-container {
+    padding: 30px 40px;
+    display: none;
+  }
+
+  .diagram-container.active { display: block; }
+
+  .diagram-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: #999;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .diagram-title .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #D4AF37;
+  }
+
+  .mermaid {
+    background: rgba(255,255,255,0.02);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+    padding: 24px;
+    overflow-x: auto;
+  }
+
+  .legend {
+    display: flex;
+    gap: 24px;
+    padding: 16px 40px;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: #888;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+  }
+
+  .legend-dot.live { background: #22C55E; }
+  .legend-dot.built { background: #3B82F6; }
+  .legend-dot.planned { background: #666; }
+  .legend-dot.broken { background: #EF4444; }
+  .legend-dot.warning { background: #EAB308; }
+  .legend-dot.external { background: #8B5CF6; }
+
+  .status-bar {
+    padding: 16px 40px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    margin-top: 20px;
+  }
+
+  .status-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .status-chip.ok { background: rgba(34,197,94,0.1); color: #22C55E; border: 1px solid rgba(34,197,94,0.2); }
+  .status-chip.warn { background: rgba(234,179,8,0.1); color: #EAB308; border: 1px solid rgba(234,179,8,0.2); }
+  .status-chip.err { background: rgba(239,68,68,0.1); color: #EF4444; border: 1px solid rgba(239,68,68,0.2); }
+
+  /* Mermaid theme overrides */
+  .mermaid .node rect,
+  .mermaid .node polygon,
+  .mermaid .node circle { stroke-width: 1.5px !important; }
+
+  .mermaid .edgeLabel { font-family: 'JetBrains Mono', monospace !important; font-size: 10px !important; }
+  .mermaid .label { font-family: 'Outfit', sans-serif !important; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>EMPIREBOX <span>Architecture</span></h1>
+  <div class="version">v4.0 · Empire Dell · March 2026</div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showTab('full')">Full System</button>
+  <button class="tab" onclick="showTab('services')">Services & Ports</button>
+  <button class="tab" onclick="showTab('memory')">Memory Flow</button>
+  <button class="tab" onclick="showTab('ai')">AI Routing</button>
+  <button class="tab" onclick="showTab('data')">Data Flow</button>
+  <button class="tab" onclick="showTab('products')">Products</button>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot live"></div>LIVE</div>
+  <div class="legend-item"><div class="legend-dot built"></div>BUILT</div>
+  <div class="legend-item"><div class="legend-dot planned"></div>PLANNED</div>
+  <div class="legend-item"><div class="legend-dot broken"></div>STOPPED/BROKEN</div>
+  <div class="legend-item"><div class="legend-dot warning"></div>NEEDS WORK</div>
+  <div class="legend-item"><div class="legend-dot external"></div>EXTERNAL API</div>
+</div>
+
+<!-- FULL SYSTEM -->
+<div class="diagram-container active" id="tab-full">
+  <div class="diagram-title"><div class="dot"></div>Complete System Architecture</div>
+  <div class="mermaid">
+graph TB
+    subgraph HW["🖥️ EMPIRE DELL — Precision Tower 5810"]
+        CPU["Xeon E5-2650 v3<br/>10c/20t"]
+        RAM["32GB RAM"]
+        GPU["Quadro K600<br/>Dedicated"]
+        DISK["92GB SSD"]
+        OS["Ubuntu 24.04 LTS<br/>Kernel 6.17"]
+    end
+
+    subgraph EXT["☁️ EXTERNAL"]
+        XAI["xAI Grok<br/>Primary AI + Vision"]
+        CLAUDE["Claude API<br/>Secondary AI"]
+        TGAPI["Telegram API"]
+        GH["GitHub"]
+        GD["Google Drive"]
+    end
+
+    subgraph BACK["⚙️ BACKEND :8000"]
+        FAST["FastAPI + Uvicorn"]
+        MAXR["/max/* — AI Chat"]
+        MEMR["/memory/* — Brain API"]
+        CHATR["/chats/* — History"]
+        SYSR["/system/* — Monitor"]
+        TGBOT["Telegram Bot"]
+    end
+
+    subgraph FRONT["🖼️ FRONTENDS"]
+        FD["Founder Dashboard<br/>:3009"]
+        EA["Empire App<br/>:3000"]
+        WF["WorkroomForge<br/>:3001"]
+        LF["LuxeForge<br/>:3002"]
+    end
+
+    subgraph MEM["🧠 MEMORY"]
+        MEMDB["memories.db<br/>97 entries"]
+        MEMMD["memory.md<br/>v4.0 Brain"]
+        CTXPK["context-pack<br/>Session Startup"]
+    end
+
+    subgraph AGENT["🤖 AGENTS"]
+        SAFE["Safeguards"]
+        ESTOP["Emergency Stop"]
+        DESKS["12 AI Desks"]
+        SCHED["Desk Scheduler"]
+    end
+
+    FRONT -->|"REST + SSE"| BACK
+    TGAPI --> TGBOT
+    TGBOT --> MAXR
+    MAXR --> XAI
+    MAXR -.->|"fallback"| CLAUDE
+    MAXR --> MEMR
+    MEMR --> MEMDB
+    MEMR --> MEMMD
+    FD -->|"on startup"| CTXPK
+    CTXPK --> MEMDB
+    MAXR --> AGENT
+    DESKS --> SCHED
+    BACK --> HW
+    GH -.-> HW
+    GD -.-> HW
+
+    classDef live fill:#0d2818,stroke:#22C55E,color:#22C55E
+    classDef ext fill:#1a1030,stroke:#8B5CF6,color:#8B5CF6
+    classDef warn fill:#2a2010,stroke:#EAB308,color:#EAB308
+    classDef hw fill:#0d0d1a,stroke:#D4AF37,color:#D4AF37
+
+    class FD,EA,WF,FAST,MAXR,MEMR,TGBOT,MEMDB,CTXPK,SAFE,ESTOP,DESKS,SCHED live
+    class XAI,CLAUDE,TGAPI,GH,GD ext
+    class LF,MEMMD,CHATR,SYSR warn
+    class CPU,RAM,GPU,DISK,OS hw
+  </div>
+</div>
+
+<!-- SERVICES & PORTS -->
+<div class="diagram-container" id="tab-services">
+  <div class="diagram-title"><div class="dot"></div>Services & Port Map</div>
+  <div class="mermaid">
+graph LR
+    subgraph PORTS["Empire Dell — Active Ports"]
+        direction TB
+        P8000["🟢 :8000<br/>FastAPI Backend"]
+        P3009["🟢 :3009<br/>Founder Dashboard"]
+        P3000["🟢 :3000<br/>Empire App"]
+        P3001["🟢 :3001<br/>WorkroomForge"]
+        P3002["🟡 :3002<br/>LuxeForge"]
+        P8080["⬜ :8080<br/>Homepage"]
+        P7878["🔴 :7878<br/>OpenClaw"]
+        P11434["🔴 :11434<br/>Ollama"]
+    end
+
+    subgraph DOCKER["🐳 Docker — ALL STOPPED"]
+        PG["PostgreSQL"]
+        REDIS["Redis"]
+        CONTAINERS["32 Containers"]
+    end
+
+    P8000 -->|"API calls"| P3009
+    P8000 -->|"API calls"| P3000
+    P8000 -->|"API calls"| P3001
+    P8000 -->|"API calls"| P3002
+
+    classDef live fill:#0d2818,stroke:#22C55E,color:#22C55E
+    classDef warn fill:#2a2010,stroke:#EAB308,color:#EAB308
+    classDef dead fill:#1a0d0d,stroke:#EF4444,color:#EF4444
+    classDef stopped fill:#1a1a1a,stroke:#666,color:#666
+
+    class P8000,P3009,P3000,P3001 live
+    class P3002 warn
+    class P7878,P11434 dead
+    class P8080,PG,REDIS,CONTAINERS stopped
+  </div>
+</div>
+
+<!-- MEMORY FLOW -->
+<div class="diagram-container" id="tab-memory">
+  <div class="diagram-title"><div class="dot"></div>Memory Architecture — Unified API</div>
+  <div class="mermaid">
+graph TB
+    subgraph CLIENTS["Clients"]
+        WEB["🌐 Founder Dashboard"]
+        TG["📱 Telegram Bot"]
+        API["🔧 External API"]
+        CC["💻 Claude.ai<br/>via context-bridge"]
+    end
+
+    subgraph MEMAPI["🧠 /api/v1/memory/*"]
+        SEARCH["/search"]
+        RECENT["/recent"]
+        ADD["/add"]
+        CTXPK["/context-pack"]
+        STATS["/stats"]
+        SUMMARY["/conversation-summary"]
+        KNOW["/knowledge"]
+    end
+
+    subgraph STORE["💾 Storage"]
+        MEMDB["memories.db<br/>SQLite — 97 entries"]
+        CONVS["conversation_summaries"]
+        CUST["customers"]
+        TASKS["tasks"]
+        KNOWDB["knowledge"]
+    end
+
+    subgraph MEMMD["📄 memory.md"]
+        BRAIN["MAX Brain v4.0<br/>Hardware, Products,<br/>Customers, Pricing"]
+    end
+
+    WEB -->|"GET on startup"| CTXPK
+    WEB -->|"POST after chat"| SUMMARY
+    TG -->|"auto-save every msg"| ADD
+    API --> SEARCH
+    CC -.->|"manual push"| ADD
+
+    SEARCH --> MEMDB
+    RECENT --> MEMDB
+    ADD --> MEMDB
+    CTXPK --> MEMDB
+    CTXPK --> CONVS
+    CTXPK --> TASKS
+    SUMMARY --> CONVS
+    KNOW --> KNOWDB
+    STATS --> MEMDB
+
+    BRAIN -.->|"loaded into<br/>system prompt"| SYSPROMPT["System Prompt"]
+
+    classDef live fill:#0d2818,stroke:#22C55E,color:#22C55E
+    classDef store fill:#0d1520,stroke:#3B82F6,color:#3B82F6
+    classDef client fill:#1a1030,stroke:#8B5CF6,color:#8B5CF6
+    classDef warn fill:#2a2010,stroke:#EAB308,color:#EAB308
+
+    class SEARCH,RECENT,ADD,CTXPK,STATS,SUMMARY,KNOW live
+    class MEMDB,CONVS,CUST,TASKS,KNOWDB store
+    class WEB,TG,API client
+    class CC,BRAIN,SYSPROMPT warn
+  </div>
+</div>
+
+<!-- AI ROUTING -->
+<div class="diagram-container" id="tab-ai">
+  <div class="diagram-title"><div class="dot"></div>AI Routing & Tool Execution</div>
+  <div class="mermaid">
+graph TB
+    MSG["User Message"] --> GUARD["Guardrails<br/>Input Validation"]
+    GUARD --> ROUTER["AI Router"]
+
+    ROUTER -->|"Priority 1"| GROK["xAI Grok<br/>☁️ Primary"]
+    ROUTER -.->|"Priority 2"| CLAUDE["Claude API<br/>☁️ Secondary"]
+    ROUTER -.->|"Priority 3<br/>Emergency Only"| OLLAMA["Ollama CPU<br/>🖥️ Fallback"]
+
+    GROK --> RESP["Response"]
+    RESP --> PARSE["Parse Tool Blocks"]
+
+    PARSE -->|"```tool```"| TOOLS["Tool Executor"]
+    PARSE -->|"no tools"| DELIVER["Deliver Response"]
+
+    TOOLS --> WS["🔍 Web Search<br/>DDG HTML → Brave"]
+    TOOLS --> QQ["💰 Quick Quote"]
+    TOOLS --> QR["📊 Quote Report"]
+    TOOLS --> PRES["📑 Presentation"]
+    TOOLS --> IMG["🖼️ Image Search"]
+
+    TOOLS --> FEEDBACK["Feed results back"]
+    FEEDBACK --> GROK
+
+    DELIVER -->|"web"| WEBUI["Dashboard UI"]
+    DELIVER -->|"telegram"| TGUI["Telegram<br/>+ TTS voice"]
+
+    subgraph CHANNEL["Channel Directives"]
+        WEBDIR["Web: detailed OK"]
+        TGDIR["Telegram: ultra-short<br/>plain text, no fluff"]
+    end
+
+    ROUTER --> CHANNEL
+
+    classDef live fill:#0d2818,stroke:#22C55E,color:#22C55E
+    classDef ext fill:#1a1030,stroke:#8B5CF6,color:#8B5CF6
+    classDef tool fill:#0d1520,stroke:#3B82F6,color:#3B82F6
+    classDef warn fill:#2a2010,stroke:#EAB308,color:#EAB308
+
+    class GROK,ROUTER,GUARD,PARSE,DELIVER,WEBUI,TGUI live
+    class CLAUDE,OLLAMA ext
+    class WS,QQ,QR,PRES,IMG,TOOLS tool
+    class WEBDIR,TGDIR warn
+  </div>
+</div>
+
+<!-- DATA FLOW -->
+<div class="diagram-container" id="tab-data">
+  <div class="diagram-title"><div class="dot"></div>Data & File Paths — All under ~/empire-repo/</div>
+  <div class="mermaid">
+graph TB
+    subgraph ROOT["~/empire-repo/"]
+        subgraph BACKEND["backend/"]
+            subgraph DATA["backend/data/ ⚡ ALL RUNTIME DATA"]
+                BRAIN_DIR["brain/<br/>memories.db<br/>embeddings.db"]
+                MAX_DIR["max/<br/>memory.md"]
+                CHATS["chats/<br/>founder/*.json<br/>telegram/*.json"]
+                QUOTES["quotes/<br/>*.json, pdf/"]
+                INBOX["inbox/<br/>*.json"]
+                UPLOADS["uploads/<br/>images/ docs/"]
+                LOGS["logs/<br/>YYYY-MM-DD/"]
+                PRES["presentations/<br/>*.pdf"]
+                EMPIRE_DB["empire.db<br/>Tasks, Desks"]
+            end
+            VENV["venv/<br/>Python 3.12"]
+            APP["app/<br/>FastAPI Code"]
+            ENV[".env<br/>API Keys"]
+        end
+
+        subgraph FRONTS["Frontend Apps"]
+            FD_DIR["founder_dashboard/<br/>.env.local"]
+            EA_DIR["empire-app/"]
+            WF_DIR["workroomforge/<br/>.env.local"]
+            LF_DIR["luxeforge_web/"]
+        end
+
+        subgraph DOCS["docs/"]
+            ARCHIVE["CHAT_ARCHIVE/"]
+            SALVAGED["salvaged/"]
+        end
+
+        SCRIPTS["start-empire.sh<br/>stop-empire.sh"]
+        VERSION["VERSION → 4.0"]
+        CLAUDEMD["CLAUDE.md"]
+    end
+
+    classDef data fill:#0d1520,stroke:#3B82F6,color:#3B82F6
+    classDef code fill:#0d2818,stroke:#22C55E,color:#22C55E
+    classDef config fill:#2a2010,stroke:#EAB308,color:#EAB308
+    classDef doc fill:#1a1a1a,stroke:#666,color:#999
+
+    class BRAIN_DIR,MAX_DIR,CHATS,QUOTES,INBOX,UPLOADS,LOGS,PRES,EMPIRE_DB data
+    class APP,VENV,FD_DIR,EA_DIR,WF_DIR,LF_DIR code
+    class ENV,SCRIPTS,VERSION,CLAUDEMD config
+    class ARCHIVE,SALVAGED doc
+  </div>
+</div>
+
+<!-- PRODUCTS -->
+<div class="diagram-container" id="tab-products">
+  <div class="diagram-title"><div class="dot"></div>Product Ecosystem — 27+ Products</div>
+  <div class="mermaid">
+graph TB
+    subgraph LIVE["🟢 LIVE"]
+        MAX["MAX AI Assistant<br/>12 Desks, Brain, Tools"]
+        EA2["Empire App<br/>Unified Dashboard"]
+        FD2["Founder Dashboard<br/>MAX Command Center"]
+        WF2["WorkroomForge<br/>Quote Builder + AI Photo"]
+        LF2["LuxeForge<br/>Designer Portal"]
+        TGBOT2["EmpireAssist<br/>Telegram Bot"]
+    end
+
+    subgraph BUILT["🔵 BUILT — Merged on GitHub"]
+        MKF["MarketForge<br/>28 Endpoints"]
+        CF["ContractorForge<br/>Multi-Tenant SaaS"]
+        SF["SupportForge<br/>AI Support"]
+        MF["MarketF<br/>P2P 8% Fees"]
+        SHIP["ShipForge<br/>EasyPost"]
+        WALLET["Empire Wallet<br/>Solana/USDC"]
+        SETUP["Setup Portal +<br/>License System"]
+        ECON["Economic Intel"]
+        VOICE["Voice Service"]
+    end
+
+    subgraph PLANNED["⬜ PLANNED"]
+        LEAD["LeadForge"]
+        VET["VeteranForge"]
+        CRM["ForgeCRM"]
+        SOCIAL["SocialForge"]
+        LLC["LLCFactory"]
+        APOST["ApostApp"]
+        RELIST["RelistApp"]
+        RECOVER["RecoveryForge"]
+    end
+
+    subgraph Z2H["🚀 ZERO TO HERO"]
+        Z1["1. OpenClaw Intake 30min"]
+        Z2["2. LLCFactory Formation"]
+        Z3["3. Stripe Connect"]
+        Z4["4. SocialForge Accounts"]
+        Z5["5. Tools Activation"]
+        Z6["6. EmpireAssist Setup"]
+        Z7["7. HERO STATUS"]
+        Z1 --> Z2 --> Z3 --> Z4 --> Z5 --> Z6 --> Z7
+    end
+
+    classDef live fill:#0d2818,stroke:#22C55E,color:#22C55E
+    classDef built fill:#0d1520,stroke:#3B82F6,color:#3B82F6
+    classDef planned fill:#1a1a1a,stroke:#666,color:#666
+    classDef hero fill:#1a1020,stroke:#D4AF37,color:#D4AF37
+
+    class MAX,EA2,FD2,WF2,LF2,TGBOT2 live
+    class MKF,CF,SF,MF,SHIP,WALLET,SETUP,ECON,VOICE built
+    class LEAD,VET,CRM,SOCIAL,LLC,APOST,RELIST,RECOVER planned
+    class Z1,Z2,Z3,Z4,Z5,Z6,Z7 hero
+  </div>
+</div>
+
+<div class="status-bar">
+  <div class="status-chip ok">● Backend :8000</div>
+  <div class="status-chip ok">● Grok AI Primary</div>
+  <div class="status-chip ok">● Memory API 97 entries</div>
+  <div class="status-chip ok">● Telegram Bot</div>
+  <div class="status-chip warn">● DDG rate-limited</div>
+  <div class="status-chip warn">● edge-tts installed</div>
+  <div class="status-chip err">● Docker 32 stopped</div>
+  <div class="status-chip err">● Ollama disabled</div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1a2d1a',
+      primaryTextColor: '#e8e8e8',
+      primaryBorderColor: '#D4AF37',
+      lineColor: '#555',
+      secondaryColor: '#1a1a2e',
+      tertiaryColor: '#0d0d1a',
+      fontFamily: 'Outfit, sans-serif',
+      fontSize: '13px',
+      nodeBorder: '#D4AF37',
+    },
+    flowchart: {
+      htmlLabels: true,
+      curve: 'basis',
+      padding: 16,
+      nodeSpacing: 40,
+      rankSpacing: 50,
+    }
+  });
+
+  function showTab(id) {
+    document.querySelectorAll('.diagram-container').forEach(d => d.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + id).classList.add('active');
+    event.target.classList.add('active');
+  }
+</script>
+
+</body>
+</html>

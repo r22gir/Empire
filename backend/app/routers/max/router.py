@@ -727,6 +727,47 @@ async def get_desk_briefing():
     return {"briefing": briefing}
 
 
+@router.post("/ai-desks/trigger")
+async def trigger_desk_task(request: DeskTaskRequest):
+    """Manually trigger a desk task immediately (bypasses schedule).
+    Executes with AI, stores result, sends Telegram notification."""
+    from app.services.max.desks.desk_scheduler import desk_scheduler
+    import asyncio
+
+    # Determine desk from title/description keywords, or use source as desk hint
+    desk_id = request.source if request.source in [
+        "forge", "sales", "marketing", "support", "finance", "it",
+        "market", "clients", "contractors", "website", "legal", "lab",
+    ] else None
+
+    if not desk_id:
+        # Route automatically
+        task = await ai_desk_manager.submit_task(
+            title=request.title,
+            description=request.description,
+            priority=request.priority,
+            source="manual_trigger",
+        )
+        return {
+            "task_id": task.id,
+            "title": task.title,
+            "desk": "auto-routed",
+            "state": task.state.value,
+            "result": task.result,
+        }
+
+    # Direct desk execution with AI + Telegram
+    asyncio.create_task(
+        desk_scheduler.trigger_now(desk_id, request.title, request.description)
+    )
+    return {
+        "status": "triggered",
+        "desk": desk_id,
+        "title": request.title,
+        "message": f"Task sent to {desk_id} desk. Result will be sent to Telegram.",
+    }
+
+
 @router.get("/ai-desks/report")
 async def get_desk_daily_report():
     """Get end-of-day desk report."""
@@ -809,3 +850,271 @@ async def run_security_scan():
         "high": [f for f in scanner.findings if f["severity"] == "HIGH"][:20],
         "medium": [f for f in scanner.findings if f["severity"] == "MEDIUM"][:10],
     }
+
+
+# ── Speech-to-Text (STT) ─────────────────────────────────────────────────────
+
+from fastapi import UploadFile, File
+
+@router.post("/stt")
+async def speech_to_text(file: UploadFile = File(...), language: str = "es"):
+    """
+    Transcribe uploaded audio to text using Groq Whisper.
+    Accepts: mp3, mp4, m4a, wav, ogg, flac, webm (max 25MB).
+    Default language: Spanish.
+    """
+    from app.services.max.stt_service import stt_service
+
+    if not stt_service.is_configured:
+        raise HTTPException(status_code=503, detail="STT not configured — GROQ_API_KEY missing")
+
+    # Save temp file
+    import tempfile
+    suffix = Path(file.filename or "audio.webm").suffix or ".webm"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        transcript = await stt_service.transcribe(tmp_path, language=language)
+        return {"text": transcript, "language": language, "filename": file.filename}
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+
+# ── System Report & Change Log ──────────────────────────────────────────────
+
+@router.get("/system-report")
+async def get_system_report():
+    """
+    Comprehensive system report for MAX: modules, connectivity, recent changes,
+    desk statuses, and actionable insights. Serves as a tutorial guide and
+    continuous update feed.
+    """
+    import psutil
+    import subprocess
+
+    report: Dict[str, Any] = {
+        "generated_at": datetime.utcnow().isoformat(),
+        "system": {},
+        "modules": [],
+        "recent_changes": [],
+        "desk_reports": [],
+        "connectivity": [],
+        "suggestions": [],
+        "bugs": [],
+    }
+
+    # ── System Stats ──
+    try:
+        cpu = psutil.cpu_percent(interval=0.5)
+        mem = psutil.virtual_memory()
+        disk = psutil.disk_usage("/")
+        report["system"] = {
+            "cpu_percent": cpu,
+            "memory_used_gb": round(mem.used / (1024**3), 1),
+            "memory_total_gb": round(mem.total / (1024**3), 1),
+            "memory_percent": mem.percent,
+            "disk_used_gb": round(disk.used / (1024**3), 1),
+            "disk_total_gb": round(disk.total / (1024**3), 1),
+            "disk_percent": round(disk.percent, 1),
+            "uptime": _get_uptime(),
+        }
+    except Exception as e:
+        report["system"]["error"] = str(e)
+
+    # ── Module Inventory ──
+    modules = [
+        {"name": "MAX Chat (SSE)", "endpoint": "/max/chat/stream", "frontend": True, "status": "active"},
+        {"name": "MAX Desks", "endpoint": "/max/desks", "frontend": True, "status": "active"},
+        {"name": "Chat History", "endpoint": "/chats/*", "frontend": True, "status": "active"},
+        {"name": "Quotes", "endpoint": "/quotes/*", "frontend": True, "status": "active"},
+        {"name": "Files", "endpoint": "/files/*", "frontend": True, "status": "active"},
+        {"name": "System Monitor", "endpoint": "/system/stats", "frontend": True, "status": "active"},
+        {"name": "Memory/Brain", "endpoint": "/memory/*", "frontend": True, "status": "active"},
+        {"name": "TTS (Voice)", "endpoint": "/max/tts", "frontend": True, "status": "active"},
+        {"name": "STT (Speech)", "endpoint": "/api/transcribe", "frontend": True, "status": "active"},
+        {"name": "Notifications", "endpoint": "/notifications/*", "frontend": "partial", "status": "active"},
+        {"name": "CraftForge", "endpoint": "/craftforge/*", "frontend": False, "status": "backend_only"},
+        {"name": "SupportForge", "endpoint": "/tickets/*", "frontend": False, "status": "backend_only"},
+        {"name": "Finance/Economic", "endpoint": "/economic/*", "frontend": False, "status": "backend_only"},
+        {"name": "Tasks", "endpoint": "/tasks/*", "frontend": False, "status": "backend_only"},
+        {"name": "Contacts/CRM", "endpoint": "/contacts/*", "frontend": False, "status": "backend_only"},
+        {"name": "Vision/Mockups", "endpoint": "/vision/*", "frontend": False, "status": "backend_only"},
+        {"name": "Shipping", "endpoint": "/shipping/*", "frontend": False, "status": "backend_only"},
+        {"name": "Docker Manager", "endpoint": "/docker/*", "frontend": False, "status": "backend_only"},
+        {"name": "Ollama Manager", "endpoint": "/ollama/*", "frontend": False, "status": "backend_only"},
+        {"name": "Intake Portal", "endpoint": "/intake/*", "frontend": True, "status": "active"},
+    ]
+    report["modules"] = modules
+
+    # ── Recent Git Changes ──
+    try:
+        repo_root = Path(__file__).parent.parent.parent.parent.parent
+        result = subprocess.run(
+            ["git", "log", "--oneline", "--no-decorate", "-20"],
+            cwd=str(repo_root), capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    parts = line.strip().split(" ", 1)
+                    report["recent_changes"].append({
+                        "hash": parts[0],
+                        "message": parts[1] if len(parts) > 1 else "",
+                    })
+
+        # Recent file changes (last 48h)
+        diff_result = subprocess.run(
+            ["git", "diff", "--stat", "HEAD~5", "HEAD"],
+            cwd=str(repo_root), capture_output=True, text=True, timeout=5
+        )
+        if diff_result.returncode == 0:
+            report["recent_diff_summary"] = diff_result.stdout.strip().split("\n")[-1] if diff_result.stdout.strip() else ""
+    except Exception as e:
+        report["recent_changes"].append({"error": str(e)})
+
+    # ── AI Desk Reports ──
+    try:
+        desks = ai_desk_manager.list_desks()
+        for d in desks:
+            desk_info = {
+                "id": d.get("id", ""),
+                "name": d.get("name", ""),
+                "status": d.get("status", "idle"),
+                "persona": d.get("persona", ""),
+                "domains": d.get("domains", []),
+                "can_report": [
+                    "Generate daily summary",
+                    "List pending tasks",
+                    "Report on recent activity",
+                    "Analyze performance metrics",
+                ],
+            }
+            report["desk_reports"].append(desk_info)
+    except Exception as e:
+        report["desk_reports"].append({"error": str(e)})
+
+    # ── Connectivity Check ──
+    import aiohttp
+    services_to_check = [
+        ("Backend API", "http://localhost:8000/health"),
+        ("Command Center", "http://localhost:3009"),
+        ("AMP Portal", "http://localhost:3003"),
+        ("Ollama", "http://localhost:11434/api/version"),
+    ]
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3)) as session:
+        for name, url in services_to_check:
+            try:
+                async with session.get(url) as resp:
+                    report["connectivity"].append({
+                        "service": name, "url": url,
+                        "status": "online" if resp.status < 500 else "error",
+                        "code": resp.status,
+                    })
+            except Exception:
+                report["connectivity"].append({
+                    "service": name, "url": url,
+                    "status": "offline", "code": 0,
+                })
+
+    # ── Known Bugs ──
+    env_path = Path(__file__).parent.parent.parent.parent / ".env"
+    if env_path.exists():
+        env_content = env_path.read_text()
+        if "GROQ_API_KEY=\n" in env_content or "GROQ_API_KEY=" == env_content.strip().split("\n")[-1]:
+            report["bugs"].append({"severity": "medium", "desc": "GROQ_API_KEY is empty — STT/transcription won't work"})
+    report["bugs"].append({"severity": "low", "desc": "Ollama running but no models downloaded"})
+    report["bugs"].append({"severity": "medium", "desc": "CraftForge frontend shows hardcoded data despite 15 real backend endpoints"})
+    report["bugs"].append({"severity": "low", "desc": "Video Call screen is a UI mockup only"})
+
+    # ── Suggestions ──
+    connected = sum(1 for m in modules if m["frontend"] is True)
+    backend_only = sum(1 for m in modules if m["frontend"] is False)
+    report["suggestions"] = [
+        f"{backend_only} modules have backend endpoints but no frontend wiring — biggest gaps: CraftForge, Tasks, Finance",
+        "Add a live Activity Feed to Command Center showing desk completions, quote updates, file uploads",
+        "Wire CraftForge dashboard to real /craftforge/* endpoints (designs, jobs, inventory)",
+        "Add Tasks panel to DesksScreen — show active tasks per desk from /tasks/* endpoints",
+        "Enable daily auto-reports from each AI desk via scheduler",
+    ]
+
+    return report
+
+
+def _get_uptime():
+    """Get system uptime as human-readable string."""
+    try:
+        import psutil
+        boot = datetime.fromtimestamp(psutil.boot_time())
+        delta = datetime.now() - boot
+        days = delta.days
+        hours, rem = divmod(delta.seconds, 3600)
+        mins = rem // 60
+        if days > 0:
+            return f"{days}d {hours}h {mins}m"
+        return f"{hours}h {mins}m"
+    except Exception:
+        return "--"
+
+
+@router.get("/changelog")
+async def get_changelog():
+    """Get recent system changes — git commits, file modifications, new features."""
+    import subprocess
+    repo_root = Path(__file__).parent.parent.parent.parent.parent
+
+    result = {
+        "generated_at": datetime.utcnow().isoformat(),
+        "commits": [],
+        "new_features": [],
+        "modified_files": [],
+    }
+
+    try:
+        # Last 30 commits with dates
+        log = subprocess.run(
+            ["git", "log", "--format=%H|%ai|%s", "-30"],
+            cwd=str(repo_root), capture_output=True, text=True, timeout=5
+        )
+        if log.returncode == 0:
+            for line in log.stdout.strip().split("\n"):
+                if "|" in line:
+                    parts = line.split("|", 2)
+                    result["commits"].append({
+                        "hash": parts[0][:8],
+                        "date": parts[1].strip(),
+                        "message": parts[2] if len(parts) > 2 else "",
+                    })
+
+        # Files changed in last 5 commits
+        diff = subprocess.run(
+            ["git", "diff", "--name-status", "HEAD~5", "HEAD"],
+            cwd=str(repo_root), capture_output=True, text=True, timeout=5
+        )
+        if diff.returncode == 0:
+            for line in diff.stdout.strip().split("\n"):
+                if line.strip():
+                    parts = line.strip().split("\t", 1)
+                    if len(parts) == 2:
+                        status_map = {"A": "added", "M": "modified", "D": "deleted"}
+                        result["modified_files"].append({
+                            "status": status_map.get(parts[0], parts[0]),
+                            "file": parts[1],
+                        })
+
+        # Detect new features from commit messages
+        for c in result["commits"][:10]:
+            msg = c["message"].lower()
+            if any(kw in msg for kw in ["add", "new", "feature", "build", "create", "implement"]):
+                result["new_features"].append({
+                    "date": c["date"],
+                    "description": c["message"],
+                })
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result

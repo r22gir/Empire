@@ -1,92 +1,59 @@
-"use client";
+'use client';
+import { useState } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { Menu, X, Sun } from 'lucide-react';
 
-import { useState, useEffect } from "react";
-import { Menu, X, Zap } from "lucide-react";
-
-const navLinks = [
-  { href: "#que-es-amp", label: "¿Qué es AMP?" },
-  { href: "#funciones", label: "Funciones" },
-  { href: "#como-funciona", label: "Cómo Funciona" },
-  { href: "#precios", label: "Precios" },
-  { href: "#testimonios", label: "Testimonios" },
+const NAV_ITEMS = [
+  { href: '/', label: 'Inicio' },
+  { href: '/daily', label: 'Diario' },
+  { href: '/retos', label: 'Retos' },
+  { href: '/animo', label: 'Ánimo' },
+  { href: '/perfil', label: 'Perfil' },
 ];
 
 export default function Navbar() {
-  const [scrolled, setScrolled] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 50);
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
 
   return (
-    <nav
-      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-        scrolled
-          ? "bg-navy-deeper/95 backdrop-blur-md border-b border-gold/10 py-3"
-          : "bg-transparent py-5"
-      }`}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between">
-        <a href="#" className="flex items-center gap-2 group">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-gold to-gold-dark flex items-center justify-center">
-            <Zap className="w-5 h-5 text-navy-dark" />
-          </div>
-          <span className="text-xl font-bold font-serif text-white tracking-wide">
-            AMP
-          </span>
-        </a>
+    <nav className="sticky top-0 z-50 bg-warmwhite/90 backdrop-blur-md border-b border-gold-light/50">
+      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2 no-underline">
+          <Sun size={22} className="text-gold" />
+          <span className="font-serif font-bold text-lg text-gold-dark tracking-tight">AMP</span>
+        </Link>
 
-        {/* Desktop links */}
-        <div className="hidden md:flex items-center gap-8">
-          {navLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="text-sm text-gray-300 hover:text-gold transition-colors"
-            >
-              {link.label}
-            </a>
+        {/* Desktop */}
+        <div className="hidden md:flex items-center gap-1">
+          {NAV_ITEMS.map(item => (
+            <Link key={item.href} href={item.href}
+              className={`px-3 py-2 rounded-lg text-sm font-semibold no-underline transition-all
+                ${pathname === item.href
+                  ? 'bg-gold/10 text-gold-dark'
+                  : 'text-[#5C5650] hover:text-gold-dark hover:bg-gold/5'}`}>
+              {item.label}
+            </Link>
           ))}
-          <a
-            href="#empieza"
-            className="px-5 py-2 bg-gold text-navy-dark font-semibold rounded-lg text-sm hover:bg-gold-light transition-colors"
-          >
-            Empieza Gratis
-          </a>
         </div>
 
-        {/* Mobile toggle */}
-        <button
-          className="md:hidden text-gray-300 hover:text-gold"
-          onClick={() => setMobileOpen(!mobileOpen)}
-        >
-          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        <button onClick={() => setOpen(!open)} className="md:hidden p-2 text-[#5C5650] hover:text-gold-dark">
+          {open ? <X size={22} /> : <Menu size={22} />}
         </button>
       </div>
 
       {/* Mobile menu */}
-      {mobileOpen && (
-        <div className="md:hidden bg-navy-dark/95 backdrop-blur-md border-t border-gold/10 px-4 py-4 space-y-3">
-          {navLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="block text-gray-300 hover:text-gold transition-colors py-2"
-              onClick={() => setMobileOpen(false)}
-            >
-              {link.label}
-            </a>
+      {open && (
+        <div className="md:hidden border-t border-gold-light/30 bg-warmwhite px-4 py-3 space-y-1">
+          {NAV_ITEMS.map(item => (
+            <Link key={item.href} href={item.href} onClick={() => setOpen(false)}
+              className={`block px-4 py-3 rounded-xl text-sm font-semibold no-underline transition-all
+                ${pathname === item.href
+                  ? 'bg-gold/10 text-gold-dark'
+                  : 'text-[#5C5650] hover:bg-gold/5'}`}>
+              {item.label}
+            </Link>
           ))}
-          <a
-            href="#empieza"
-            className="block text-center px-5 py-2 bg-gold text-navy-dark font-semibold rounded-lg hover:bg-gold-light transition-colors"
-            onClick={() => setMobileOpen(false)}
-          >
-            Empieza Gratis
-          </a>
         </div>
       )}
     </nav>

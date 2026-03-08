@@ -25,7 +25,7 @@ export default function PlatformPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-[#1a1a1a]">Platform</h1>
-          <p className="text-xs text-[#777]">Infrastructure & SaaS Management · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <p className="text-xs text-[#777]" suppressHydrationWarning>Infrastructure & SaaS Management · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
         </div>
       </div>
 

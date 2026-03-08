@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Empire — Multi-Screen Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#f5f3ef;--panel:#fff;--hover:#f0ede8;--chat-bg:#faf9f7;
+  --border:#e5e0d8;--border-l:#ece8e1;--text:#1a1a1a;--dim:#777;--muted:#aaa;
+  --gold:#b8960c;--gold-l:#f5ecd0;--gold-bg:#fdf8eb;
+  --purple:#7c3aed;--purple-l:#ede9fe;--green:#16a34a;--green-l:#dcfce7;
+  --blue:#2563eb;--blue-l:#dbeafe;--red:#dc2626;--red-l:#fee2e2;--cyan:#0891b2;
+  --shadow:0 4px 12px rgba(0,0,0,0.08);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+/* TOP BAR */
+.top{height:48px;background:#1a1a1a;display:flex;align-items:center;padding:0 12px;gap:4px;flex-shrink:0;z-index:50}
+.logo{font-weight:700;font-size:14px;color:#D4AF37;letter-spacing:2px;margin-right:14px;padding-right:14px;border-right:1px solid #333}
+.bt{padding:10px 16px;font-size:12px;font-weight:500;color:#888;border:none;background:none;cursor:pointer;font-family:inherit;border-radius:8px 8px 0 0;min-height:42px;display:flex;align-items:center;gap:7px;transition:all .15s}
+.bt:hover{color:#ccc;background:#2a2a2a}
+.bt.on{color:#fff;background:#333;font-weight:600}
+.bt.t1.on{color:#D4AF37;background:#2a2510}
+.bt.t2.on{color:#22C55E;background:#0d2a10}
+.bt.t3.on{color:#EAB308;background:#2a2510}
+.bt.t4.on{color:#3B82F6;background:#0d1a2a}
+.dot{width:7px;height:7px;border-radius:50%}
+.t1 .dot{background:#D4AF37}.t2 .dot{background:#22C55E}.t3 .dot{background:#EAB308}.t4 .dot{background:#3B82F6}
+.top-r{margin-left:auto;display:flex;align-items:center;gap:6px}
+.tb{width:40px;height:40px;border-radius:10px;border:1px solid #333;background:#222;color:#999;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;position:relative;transition:all .15s}
+.tb:hover{background:#333;color:#fff}
+.tb:active{transform:scale(.93)}
+.badge{position:absolute;top:-3px;right:-3px;background:var(--red);color:#fff;font-size:8px;font-weight:700;min-width:16px;height:16px;border-radius:8px;display:flex;align-items:center;justify-content:center}
+.lang{font-size:11px;font-weight:700;padding:6px 10px;border-radius:6px;border:1px solid #444;background:#222;color:#999;cursor:pointer;font-family:'JetBrains Mono',monospace;min-height:38px}
+.sdots{display:flex;gap:6px;padding-left:8px;border-left:1px solid #333;margin-left:4px}
+.sd{display:flex;align-items:center;gap:3px;font-size:9px;font-family:'JetBrains Mono',monospace}
+.sd::before{content:'';width:5px;height:5px;border-radius:50%}
+.sd.ok{color:#22C55E}.sd.ok::before{background:#22C55E}
+.sd.w{color:#EAB308}.sd.w::before{background:#EAB308}
+
+/* MAIN */
+.main{flex:1;display:flex;overflow:hidden}
+
+/* GLOBAL SIDEBAR */
+.gs{width:62px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:6px 0;gap:3px;flex-shrink:0}
+.gb{width:46px;height:46px;border-radius:11px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1px;font-size:19px;cursor:pointer;border:none;background:none;color:var(--dim);transition:all .12s;position:relative}
+.gb:hover{background:var(--hover);color:var(--text)}
+.gb:active{transform:scale(.92)}
+.gb.on{background:var(--gold-bg);color:var(--gold)}
+.gb .gl{font-size:7px;font-weight:600}
+.gb .gd{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--red)}
+.gdiv{width:28px;height:1px;background:var(--border);margin:5px 0}
+
+/* CONV SIDEBAR */
+.cs{width:240px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.cs-h{padding:10px 12px;border-bottom:1px solid var(--border-l);display:flex;align-items:center;justify-content:space-between}
+.cs-h h3{font-size:12px;font-weight:600}
+.nb{background:var(--gold);color:#fff;border:none;padding:7px 12px;border-radius:7px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600;min-height:34px}
+.cs-s{margin:6px 10px;padding:9px 10px;border:1px solid var(--border);border-radius:7px;font-size:12px;background:var(--bg);width:calc(100% - 20px);font-family:inherit;outline:none;min-height:38px}
+.cs-s:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-l)}
+.cl{flex:1;overflow-y:auto;padding:3px 6px}
+.ci{padding:10px;border-radius:7px;cursor:pointer;transition:background .1s;margin-bottom:1px;min-height:52px}
+.ci:hover{background:var(--hover)}.ci:active{background:var(--gold-l)}.ci.on{background:var(--gold-bg)}
+.ci .ct{font-size:12px;font-weight:500}.ci .cp{font-size:10px;color:var(--muted);margin-top:1px}
+.ci .cm{font-size:8px;color:var(--muted);margin-top:2px;font-family:'JetBrains Mono',monospace}
+
+/* CENTER AREA */
+.center{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--chat-bg)}
+
+/* MODE SELECTOR (demo only) */
+.mode-bar{display:flex;gap:4px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--border-l);flex-shrink:0;overflow-x:auto}
+.mb{padding:7px 12px;font-size:11px;font-weight:500;border-radius:7px;border:1px solid var(--border);background:var(--bg);cursor:pointer;font-family:inherit;color:var(--dim);min-height:36px;white-space:nowrap;transition:all .12s}
+.mb:hover{border-color:var(--gold);color:var(--gold);background:var(--gold-bg)}
+.mb.on{background:var(--gold);color:#fff;border-color:var(--gold)}
+
+/* SCREEN PANELS */
+.screen{display:none;flex:1;flex-direction:column;overflow:hidden}
+.screen.vis{display:flex}
+
+/* === CHAT SCREEN === */
+.chat-msgs{flex:1;overflow-y:auto;padding:16px 20px}
+.msg{margin-bottom:14px;max-width:80%}
+.msg.u{margin-left:auto}
+.mb2{padding:11px 15px;border-radius:13px;font-size:13px;line-height:1.55}
+.msg.u .mb2{background:var(--gold);color:#fff;border-bottom-right-radius:3px}
+.msg.a .mb2{background:var(--panel);border:1px solid var(--border-l);border-bottom-left-radius:3px}
+.mt{font-size:9px;color:var(--muted);margin-top:3px;font-family:'JetBrains Mono',monospace}
+
+.qbar{display:flex;gap:5px;padding:7px 12px;border-bottom:1px solid var(--border-l);flex-shrink:0;overflow-x:auto}
+.qb{padding:7px 12px;font-size:11px;font-weight:500;border-radius:7px;border:1px solid var(--border);background:var(--panel);cursor:pointer;font-family:inherit;color:var(--dim);min-height:36px;white-space:nowrap}
+.qb:hover{background:var(--gold-bg);border-color:var(--gold);color:var(--gold)}
+
+.cinp{padding:10px 14px;border-top:1px solid var(--border-l);background:var(--panel);flex-shrink:0;display:flex;gap:7px;align-items:flex-end}
+.cinp textarea{flex:1;padding:11px 12px;border:1px solid var(--border);border-radius:9px;font-size:13px;font-family:inherit;resize:none;outline:none;min-height:42px;background:var(--bg)}
+.cinp textarea:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-l)}
+.ib{width:42px;height:42px;border-radius:9px;border:1px solid var(--border);background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;color:var(--dim);transition:all .12s}
+.ib:hover{background:var(--hover);color:var(--text)}.ib:active{transform:scale(.92)}
+.ib.send{background:var(--gold);border-color:var(--gold);color:#fff;font-size:19px}
+
+/* === QUOTE REVIEW SCREEN === */
+.qr-wrap{flex:1;overflow-y:auto;padding:24px;max-width:800px;margin:0 auto;width:100%}
+.qr-title{font-size:18px;font-weight:700;margin-bottom:4px}
+.qr-sub{font-size:12px;color:var(--dim);margin-bottom:16px}
+.qr-photo{width:100%;max-height:300px;object-fit:cover;border-radius:12px;border:1px solid var(--border);margin-bottom:16px}
+.qr-proposals{display:flex;gap:10px;margin-bottom:16px}
+.qp{flex:1;padding:16px;border-radius:12px;border:2px solid var(--border);background:var(--panel);cursor:pointer;text-align:center;min-height:120px;transition:all .15s}
+.qp:hover{border-color:var(--gold);background:var(--gold-bg)}
+.qp:active{transform:scale(.97)}
+.qp.sel{border-color:var(--gold);background:var(--gold-l)}
+.qp .tier{font-size:11px;font-weight:600;color:var(--dim)}
+.qp .price{font-size:22px;font-weight:700;margin:6px 0}
+.qp .desc{font-size:10px;color:var(--muted)}
+.qp .mockup{width:100%;height:80px;background:var(--bg);border-radius:8px;margin-top:8px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted)}
+.qp.ess{border-left:4px solid var(--green)}.qp.des{border-left:4px solid var(--gold)}.qp.pre{border-left:4px solid var(--purple)}
+.qr-actions{display:flex;gap:8px;flex-wrap:wrap}
+.qa{padding:10px 16px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;border:1px solid var(--border);background:var(--panel);color:var(--dim);min-height:42px;transition:all .12s}
+.qa:hover{background:var(--hover)}.qa:active{transform:scale(.95)}
+.qa.pri{background:var(--gold);color:#fff;border-color:var(--gold);flex:1}
+.qa.pri:hover{background:#a08509}
+
+/* === DOCUMENT VIEWER SCREEN === */
+.dv-wrap{flex:1;display:flex;overflow:hidden}
+.dv-main{flex:1;display:flex;align-items:center;justify-content:center;background:#f0ede8;padding:20px}
+.dv-doc{background:#fff;width:595px;height:842px;box-shadow:0 4px 20px rgba(0,0,0,.1);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-direction:column;color:var(--dim)}
+.dv-doc .icon{font-size:48px;margin-bottom:12px}
+.dv-doc .name{font-size:14px;font-weight:600;color:var(--text)}
+.dv-doc .info{font-size:11px;margin-top:4px}
+.dv-side{width:280px;background:var(--panel);border-left:1px solid var(--border);padding:16px;overflow-y:auto}
+.dv-side h4{font-size:13px;font-weight:600;margin-bottom:8px}
+.dv-meta{font-size:11px;color:var(--dim);margin-bottom:6px}
+.dv-actions{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.dv-btn{padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);font-size:12px;cursor:pointer;font-family:inherit;text-align:left;min-height:40px;transition:all .12s;display:flex;align-items:center;gap:8px}
+.dv-btn:hover{background:var(--gold-bg);border-color:var(--gold)}
+
+/* === RESEARCH SCREEN === */
+.rs-wrap{flex:1;display:flex;overflow:hidden}
+.rs-search{flex:1;display:flex;flex-direction:column;padding:20px}
+.rs-input-row{display:flex;gap:8px;margin-bottom:16px}
+.rs-input{flex:1;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;font-family:inherit;outline:none;min-height:44px;background:var(--panel)}
+.rs-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold-l)}
+.rs-go{padding:10px 20px;background:var(--gold);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;min-height:44px}
+.rs-results{flex:1;overflow-y:auto}
+.rs-item{padding:14px;border-radius:10px;border:1px solid var(--border-l);margin-bottom:8px;cursor:pointer;transition:background .1s;background:var(--panel)}
+.rs-item:hover{background:var(--hover)}
+.rs-item .rs-t{font-size:14px;font-weight:600;color:var(--blue)}
+.rs-item .rs-u{font-size:10px;color:var(--green);margin-top:2px;font-family:'JetBrains Mono',monospace}
+.rs-item .rs-d{font-size:12px;color:var(--dim);margin-top:4px;line-height:1.5}
+.rs-notes{width:300px;background:var(--panel);border-left:1px solid var(--border);padding:16px;display:flex;flex-direction:column}
+.rs-notes h4{font-size:13px;font-weight:600;margin-bottom:8px}
+.rs-notes textarea{flex:1;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:12px;font-family:inherit;resize:none;outline:none;background:var(--bg)}
+
+/* === VIDEO CALL SCREEN === */
+.vc-wrap{flex:1;display:flex;flex-direction:column;background:#0a0a0a}
+.vc-main{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
+.vc-placeholder{text-align:center;color:#555}
+.vc-placeholder .vci{font-size:64px;margin-bottom:16px}
+.vc-placeholder p{font-size:14px}
+.vc-placeholder .sub{font-size:11px;color:#444;margin-top:6px}
+.vc-self{position:absolute;bottom:16px;right:16px;width:160px;height:120px;background:#222;border-radius:10px;border:2px solid #333;display:flex;align-items:center;justify-content:center;color:#666;font-size:12px}
+.vc-bar{display:flex;justify-content:center;gap:12px;padding:16px;background:#111}
+.vcb{width:52px;height:52px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:22px;transition:all .15s}
+.vcb.mic{background:#333;color:#fff}.vcb.cam{background:#333;color:#fff}.vcb.scr{background:#333;color:#fff}
+.vcb.end{background:#dc2626;color:#fff}.vcb.share{background:#2563eb;color:#fff}.vcb.cv{background:#16a34a;color:#fff}
+.vcb:active{transform:scale(.88)}
+.vc-docs{position:absolute;top:16px;right:16px;background:rgba(0,0,0,.7);border-radius:10px;padding:12px;color:#ccc;font-size:11px;display:flex;flex-direction:column;gap:6px}
+.vc-docs div{padding:6px 10px;background:rgba(255,255,255,.1);border-radius:6px;cursor:pointer;transition:background .1s}
+.vc-docs div:hover{background:rgba(255,255,255,.2)}
+
+/* === DASHBOARD SCREEN === */
+.db-wrap{flex:1;overflow-y:auto;padding:24px}
+.db-title{font-size:20px;font-weight:700;margin-bottom:4px}
+.db-sub{font-size:12px;color:var(--dim);margin-bottom:20px}
+.db-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-bottom:24px}
+.dc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px;cursor:pointer;transition:all .12s;min-height:100px}
+.dc:hover{box-shadow:var(--shadow);border-color:var(--gold)}.dc:active{transform:scale(.98)}
+.dc .dct{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.dc .dci{font-size:22px}.dc .dcn{font-size:13px;font-weight:600}
+.dc .dcv{font-size:24px;font-weight:700;color:var(--gold)}
+.dc .dcd{font-size:10px;color:var(--muted);margin-top:4px}
+.db-chart{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;min-height:200px;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+
+/* RIGHT PANEL */
+.rp{width:300px;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.rpt{display:flex;border-bottom:1px solid var(--border-l);padding:0 4px}
+.rt{padding:9px 11px;font-size:11px;font-weight:500;color:var(--dim);cursor:pointer;border:none;border-bottom:2px solid transparent;background:none;font-family:inherit;min-height:40px;display:flex;align-items:center;gap:3px}
+.rt:hover{color:var(--text)}.rt.on{color:var(--gold);border-bottom-color:var(--gold);font-weight:600}
+.rpb{flex:1;overflow-y:auto;padding:10px}
+.brief{background:var(--gold-bg);border:1px solid var(--gold-l);border-radius:9px;padding:12px;margin-bottom:8px}
+.brief h4{font-size:12px;font-weight:600;color:var(--gold);margin-bottom:4px}
+.brief p{font-size:11px;color:var(--dim);line-height:1.5}
+.dg{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.dk{padding:10px;border-radius:9px;border:1px solid var(--border-l);cursor:pointer;background:var(--bg);min-height:64px;transition:all .12s}
+.dk:hover{border-color:var(--purple);background:var(--purple-l)}.dk:active{transform:scale(.96)}
+.dk .dt{display:flex;align-items:center;gap:5px}.dk .di{font-size:16px}.dk .dn{font-size:10px;font-weight:600}
+.dk .dp{font-size:9px;color:var(--purple);font-style:italic}.dk .ds{font-size:9px;color:var(--muted);margin-top:3px}
+.exp{text-align:center;padding:8px;font-size:11px;color:var(--purple);cursor:pointer;font-weight:600;border-radius:7px;min-height:36px}
+.exp:hover{background:var(--purple-l)}
+
+/* TICKER */
+.tick{height:30px;background:#1a1a1a;display:flex;align-items:center;padding:0 14px;gap:16px;overflow-x:auto;flex-shrink:0}
+.ts{display:flex;align-items:center;gap:7px;font-size:10px;font-family:'JetBrains Mono',monospace;white-space:nowrap}
+.tl{font-weight:600;font-size:9px}.tl.cr{color:#f59e0b}.tl.we{color:#06b6d4}.tl.nw{color:#22c55e}.tl.sp{color:#ef4444}.tl.em{color:#8b5cf6}
+.tv{color:#ccc}.tv.up{color:#22c55e}.tv.dn{color:#ef4444}
+.td{width:1px;height:14px;background:#333}
+
+.mock{position:fixed;bottom:0;left:50%;transform:translateX(-50%);background:var(--gold);color:#fff;padding:4px 18px;font-size:9px;font-weight:700;letter-spacing:1.5px;border-radius:7px 7px 0 0;z-index:500}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="top">
+  <span class="logo">EMPIRE</span>
+  <button class="bt t1 on" onclick="switchBiz('max')"><span class="dot"></span>MAX</button>
+  <button class="bt t2" onclick="switchBiz('workroom')"><span class="dot"></span>Workroom</button>
+  <button class="bt t3" onclick="switchBiz('craft')"><span class="dot"></span>CraftForge</button>
+  <button class="bt t4" onclick="switchBiz('platform')"><span class="dot"></span>Platform</button>
+  <div class="top-r">
+    <button class="tb" title="Video Call" onclick="showScreen('video')">📹</button>
+    <button class="tb">🔔<span class="badge">5</span></button>
+    <button class="tb" title="Ctrl+K">⌘</button>
+    <button class="lang" onclick="this.textContent=this.textContent==='EN'?'ES':'EN'">EN</button>
+    <button class="tb" title="Client View">👁</button>
+    <div class="sdots"><span class="sd ok">Grok</span><span class="sd ok">TG</span><span class="sd w">DDG</span></div>
+  </div>
+</div>
+
+<div class="main">
+  <!-- GLOBAL SIDEBAR -->
+  <div class="gs">
+    <button class="gb on" onclick="showScreen('chat')"><span>💬</span><span class="gl">Chat</span></button>
+    <button class="gb" onclick="showScreen('dashboard')"><span>📊</span><span class="gl">Dash</span></button>
+    <button class="gb"><span>🤖</span><span class="gl">Desks</span><span class="gd"></span></button>
+    <button class="gb"><span>📥</span><span class="gl">Inbox</span></button>
+    <div class="gdiv"></div>
+    <button class="gb" onclick="showScreen('docs')"><span>📁</span><span class="gl">Files</span></button>
+    <button class="gb" onclick="showScreen('research')"><span>🔍</span><span class="gl">Search</span></button>
+    <div style="flex:1"></div>
+    <button class="gb"><span>🎤</span><span class="gl">Voice</span></button>
+    <button class="gb"><span>⚙️</span><span class="gl">Settings</span></button>
+  </div>
+
+  <!-- CONV SIDEBAR -->
+  <div class="cs">
+    <div class="cs-h"><h3>History</h3><button class="nb">+ New</button></div>
+    <input class="cs-s" placeholder="Search..." />
+    <div class="cl">
+      <div class="ci on"><div class="ct">Quick Quote — Ripplefold</div><div class="cp">EST-2026-002 · 3 proposals</div><div class="cm">4:21 PM</div></div>
+      <div class="ci"><div class="ct">Emily — Follow Up</div><div class="cp">Valance ships today</div><div class="cm">2:15 PM</div></div>
+      <div class="ci"><div class="ct">☀️ Morning Briefing</div><div class="cp">3 done · 1 pending</div><div class="cm">8:00 AM</div></div>
+      <div class="ci"><div class="ct">Sarah — Approved</div><div class="cp">Option B · $988</div><div class="cm">Yesterday</div></div>
+      <div class="ci"><div class="ct">CraftForge Roadmap</div><div class="cp">Phase 1 planning</div><div class="cm">Mar 5</div></div>
+    </div>
+  </div>
+
+  <!-- CENTER CANVAS -->
+  <div class="center">
+    <!-- MODE SELECTOR (mockup demo) -->
+    <div class="mode-bar">
+      <button class="mb on" onclick="showScreen('chat')">💬 Chat</button>
+      <button class="mb" onclick="showScreen('quote')">📋 Quote Review</button>
+      <button class="mb" onclick="showScreen('docs')">📄 Document</button>
+      <button class="mb" onclick="showScreen('research')">🔍 Research</button>
+      <button class="mb" onclick="showScreen('video')">📹 Video Call</button>
+      <button class="mb" onclick="showScreen('dashboard')">📊 Dashboard</button>
+    </div>
+
+    <!-- CHAT SCREEN -->
+    <div class="screen vis" id="s-chat">
+      <div class="qbar">
+        <button class="qb">📸 Photo Quote</button>
+        <button class="qb">💰 Quick Quote</button>
+        <button class="qb">📊 Report</button>
+        <button class="qb">📋 Briefing</button>
+        <button class="qb">📱 TG</button>
+        <button class="qb">🔍 Search</button>
+      </div>
+      <div class="chat-msgs">
+        <div class="msg u"><div class="mb2">Create a quick quote for a 72x96 window, ripplefold</div><div class="mt">4:21 PM</div></div>
+        <div class="msg a"><div class="mb2">Quote <strong>EST-2026-002</strong> created. 3 proposals ready. <a href="#" onclick="showScreen('quote');return false" style="color:var(--gold)">→ Review proposals</a></div><div class="mt">4:21 PM · Grok · 3.2s</div></div>
+        <div class="msg u"><div class="mb2">What's Emily's order status?</div><div class="mt">4:25 PM</div></div>
+        <div class="msg a"><div class="mb2">Emily Rodriguez's valance order ships today. Tracking will be sent to her email once picked up. Pipeline: $22,600 total.</div><div class="mt">4:25 PM · Grok · 1.8s · 🔊</div></div>
+      </div>
+      <div class="cinp">
+        <button class="ib">📎</button>
+        <button class="ib" title="Send voice message to MAX">🎤</button>
+        <textarea placeholder="Message MAX..." rows="1"></textarea>
+        <button class="ib send">→</button>
+      </div>
+    </div>
+
+    <!-- QUOTE REVIEW SCREEN -->
+    <div class="screen" id="s-quote">
+      <div class="qr-wrap">
+        <div class="qr-title">EST-2026-002 · Ripplefold Treatment</div>
+        <div class="qr-sub">72" × 96" window · Created today 4:21 PM · Emily Rodriguez</div>
+        <div style="background:var(--bg);border-radius:12px;height:200px;display:flex;align-items:center;justify-content:center;margin-bottom:16px;border:1px solid var(--border)">
+          <span style="font-size:48px">🪟</span>
+          <span style="margin-left:12px;color:var(--dim)">Customer window photo · 72" × 96"</span>
+        </div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">Select a Proposal</div>
+        <div class="qr-proposals">
+          <div class="qp ess">
+            <div class="tier">A · Essential</div>
+            <div class="price" style="color:var(--green)">$642</div>
+            <div class="desc">Grade A fabric · Standard lining</div>
+            <div class="mockup">🎨 AI Mockup — Essential</div>
+          </div>
+          <div class="qp des sel">
+            <div class="tier">B · Designer</div>
+            <div class="price" style="color:var(--gold)">$988</div>
+            <div class="desc">Grade B fabric · Standard lining</div>
+            <div class="mockup">🎨 AI Mockup — Designer</div>
+          </div>
+          <div class="qp pre">
+            <div class="tier">C · Premium</div>
+            <div class="price" style="color:var(--purple)">$1,456</div>
+            <div class="desc">Grade C fabric · Blackout lining</div>
+            <div class="mockup">🎨 AI Mockup — Premium</div>
+          </div>
+        </div>
+        <div class="qr-actions">
+          <button class="qa pri">✓ Confirm Selection</button>
+          <button class="qa">📄 View PDF</button>
+          <button class="qa">📱 Send via Telegram</button>
+          <button class="qa">✉️ Email to Client</button>
+          <button class="qa">📹 Share on Call</button>
+          <button class="qa">🖨 Print</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOCUMENT VIEWER SCREEN -->
+    <div class="screen" id="s-docs">
+      <div class="dv-wrap">
+        <div class="dv-main">
+          <div class="dv-doc">
+            <div class="icon">📄</div>
+            <div class="name">EST-2026-002.pdf</div>
+            <div class="info">316 KB · Generated today 4:21 PM</div>
+            <div class="info" style="margin-top:8px;color:var(--gold)">3-tier proposal · Ripplefold · 72×96</div>
+          </div>
+        </div>
+        <div class="dv-side">
+          <h4>Document Details</h4>
+          <div class="dv-meta">Type: Quote PDF</div>
+          <div class="dv-meta">Customer: Emily Rodriguez</div>
+          <div class="dv-meta">Created: Mar 7, 2026 4:21 PM</div>
+          <div class="dv-meta">Size: 316 KB</div>
+          <div class="dv-meta">Status: Proposal B selected</div>
+          <div class="dv-actions">
+            <button class="dv-btn">📱 Send via Telegram</button>
+            <button class="dv-btn">✉️ Email to Client</button>
+            <button class="dv-btn">📹 Share on Video Call</button>
+            <button class="dv-btn">🖨 Print</button>
+            <button class="dv-btn">⬇️ Download</button>
+            <button class="dv-btn">📋 Compare with Other Quotes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESEARCH SCREEN -->
+    <div class="screen" id="s-research">
+      <div class="rs-wrap">
+        <div class="rs-search">
+          <div class="rs-input-row">
+            <input class="rs-input" placeholder="Search the web, memory, knowledge base..." value="ripplefold track pricing competitors 2026" />
+            <button class="rs-go">🔍 Search</button>
+          </div>
+          <div class="rs-results">
+            <div class="rs-item">
+              <div class="rs-t">Ripplefold Drapery Hardware Guide 2026</div>
+              <div class="rs-u">windowcoverings.com/ripplefold-guide</div>
+              <div class="rs-d">Comprehensive pricing for ripplefold track systems. Standard tracks $8-12/ft, motorized $45-65/ft. Somfy motors from $285...</div>
+            </div>
+            <div class="rs-item">
+              <div class="rs-t">Custom Drapery Pricing — Industry Report</div>
+              <div class="rs-u">draperyindustry.org/pricing-2026</div>
+              <div class="rs-d">Average custom drapery installation costs $35-85 per square foot depending on fabric grade, lining, and hardware choices...</div>
+            </div>
+            <div class="rs-item">
+              <div class="rs-t">Somfy vs Lutron — Smart Motor Comparison</div>
+              <div class="rs-u">smarthome.reviews/motors-2026</div>
+              <div class="rs-d">Somfy ($285) offers better value for residential. Lutron ($425) preferred for commercial integrations with Crestron/Control4...</div>
+            </div>
+            <div class="rs-item" style="background:var(--purple-l);border-color:var(--purple)">
+              <div class="rs-t" style="color:var(--purple)">🧠 From Memory: WorkroomForge Pricing</div>
+              <div class="rs-u" style="color:var(--purple)">empire-memory · last updated Mar 6</div>
+              <div class="rs-d">Your pricing: Ripplefold $45/sqft, Pinch Pleat $38, Rod Pocket $28. Hardware: Std Track $8/ft, Ripplefold Track $18/ft...</div>
+            </div>
+          </div>
+        </div>
+        <div class="rs-notes">
+          <h4>📝 Research Notes</h4>
+          <textarea placeholder="Type notes here...&#10;&#10;Competitor pricing insights:&#10;- Average market: $35-85/sqft&#10;- Our pricing: $28-55/sqft&#10;- We're competitively priced&#10;- Somfy motors good value at $285"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- VIDEO CALL SCREEN -->
+    <div class="screen" id="s-video">
+      <div class="vc-wrap">
+        <div class="vc-main">
+          <div class="vc-placeholder">
+            <div class="vci">📹</div>
+            <p>Ready to start a call</p>
+            <div class="sub">Share quotes · designs · documents during the call</div>
+          </div>
+          <div class="vc-self">📷 You</div>
+          <div class="vc-docs">
+            <div style="font-weight:600;font-size:10px;margin-bottom:2px">📄 Share Document</div>
+            <div>EST-2026-002.pdf</div>
+            <div>Emily Valance Quote</div>
+            <div>Mockup — Designer B</div>
+          </div>
+        </div>
+        <div class="vc-bar">
+          <button class="vcb mic">🎤</button>
+          <button class="vcb cam">📷</button>
+          <button class="vcb scr">🖥</button>
+          <button class="vcb share">📄</button>
+          <button class="vcb cv">👁</button>
+          <button class="vcb end">📞</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD SCREEN -->
+    <div class="screen" id="s-dashboard">
+      <div class="db-wrap">
+        <div class="db-title">🏗️ Empire Workroom — Dashboard</div>
+        <div class="db-sub">Custom Drapery & Upholstery · March 7, 2026</div>
+        <div class="db-grid">
+          <div class="dc"><div class="dct"><span class="dci">💰</span><span class="dcn">Pipeline</span></div><div class="dcv">$31,900</div><div class="dcd">5 active customers</div></div>
+          <div class="dc"><div class="dct"><span class="dci">📋</span><span class="dcn">Open Quotes</span></div><div class="dcv">3</div><div class="dcd">EST-001 through 003</div></div>
+          <div class="dc"><div class="dct"><span class="dci">📦</span><span class="dcn">Inventory</span></div><div class="dcv">142</div><div class="dcd">Fabrics · Hardware · Motors</div></div>
+          <div class="dc"><div class="dct"><span class="dci">🚚</span><span class="dcn">Shipments</span></div><div class="dcv">1</div><div class="dcd">Emily valance — ships today</div></div>
+          <div class="dc"><div class="dct"><span class="dci">📣</span><span class="dcn">Social</span></div><div class="dcv">Draft</div><div class="dcd">IG post ready for review</div></div>
+          <div class="dc"><div class="dct"><span class="dci">🎧</span><span class="dcn">Support</span></div><div class="dcv">0</div><div class="dcd">No open tickets</div></div>
+          <div class="dc"><div class="dct"><span class="dci">💰</span><span class="dcn">Revenue MTD</span></div><div class="dcv">$8,400</div><div class="dcd">↑12% from Feb</div></div>
+          <div class="dc"><div class="dct"><span class="dci">👥</span><span class="dcn">New Leads</span></div><div class="dcv">2</div><div class="dcd">Maria + 1 referral</div></div>
+        </div>
+        <div class="db-chart">📊 Revenue Chart · Monthly Trend · Click to expand</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="rp">
+    <div class="rpt">
+      <button class="rt on">Desks</button>
+      <button class="rt">Inbox <span style="color:var(--red);font-size:9px">5</span></button>
+      <button class="rt">System</button>
+      <button class="rt">Memory</button>
+    </div>
+    <div class="rpb">
+      <div class="brief">
+        <h4>☀️ Morning Briefing</h4>
+        <p>3 tasks done. Emily valance ships today. Maria new request. Aria: IG post ready.</p>
+      </div>
+      <div class="dg">
+        <div class="dk"><div class="dt"><span class="di">📣</span><span class="dn">Marketing</span></div><div class="dp">Aria</div><div class="ds">IG post ready</div></div>
+        <div class="dk"><div class="dt"><span class="di">🏗️</span><span class="dn">Forge</span></div><div class="dp">Atlas</div><div class="ds">2 quotes today</div></div>
+        <div class="dk"><div class="dt"><span class="di">💰</span><span class="dn">Finance</span></div><div class="dp">Cipher</div><div class="ds">$31.9K pipeline</div></div>
+        <div class="dk"><div class="dt"><span class="di">🔧</span><span class="dn">IT</span></div><div class="dp">Sentinel</div><div class="ds">All services ✓</div></div>
+        <div class="dk"><div class="dt"><span class="di">🎯</span><span class="dn">Strategy</span></div><div class="dp">Vanguard</div><div class="ds">CraftForge plan</div></div>
+        <div class="dk"><div class="dt"><span class="di">📦</span><span class="dn">Ops</span></div><div class="dp">Phoenix</div><div class="ds">1 shipment out</div></div>
+      </div>
+      <div class="exp">▼ Show 6 more desks</div>
+    </div>
+  </div>
+</div>
+
+<!-- TICKER -->
+<div class="tick">
+  <div class="ts"><span class="tl cr">₿</span><span class="tv">BTC $68.1K</span><span class="tv up">↑3.1%</span><span class="tv">ETH $2.0K</span><span class="tv">SOL $84</span><span class="tv up">↑5.4%</span></div>
+  <div class="td"></div>
+  <div class="ts"><span class="tl we">☁</span><span class="tv">DC 48°F</span><span class="tv">Bogotá 62°F</span></div>
+  <div class="td"></div>
+  <div class="ts"><span class="tl nw">📰</span><span class="tv">Tech shifts accelerate...</span></div>
+  <div class="td"></div>
+  <div class="ts"><span class="tl sp">⚽</span><span class="tv">DAL 0 — BOS 0</span></div>
+  <div class="td"></div>
+  <div class="ts"><span class="tl em">⚡</span><span class="tv">5 services ✓ · 97 memories</span></div>
+</div>
+
+<div class="mock">MOCKUP v3 · Multi-Screen · Click mode buttons to switch views</div>
+
+<script>
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('vis'));
+  document.querySelectorAll('.mb').forEach(b => b.classList.remove('on'));
+  document.getElementById('s-' + id).classList.add('vis');
+  event.target.classList.add('on');
+}
+
+function switchBiz(tab) {
+  document.querySelectorAll('.bt').forEach(b => b.classList.remove('on'));
+  event.target.closest('.bt').classList.add('on');
+  if (tab === 'workroom' || tab === 'craft' || tab === 'platform') {
+    showScreen('dashboard');
+  } else {
+    showScreen('chat');
+  }
+}
+</script>
+
+</body>
+</html>

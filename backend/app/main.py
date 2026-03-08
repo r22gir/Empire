@@ -75,6 +75,13 @@ load_router("app.routers.memory", "/api/v1", ["memory"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
+# CraftForge — CNC & 3D print business
+load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
+load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
+
+# LuxeForge FREE — Public intake portal
+load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
+
 # Vision analysis (measurement, mockup, outline, upholstery, image gen)
 load_router("app.routers.vision", "", ["vision"])
 
@@ -98,6 +105,12 @@ load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])
 load_router("app.routers.ollama_manager", "/api/v1", ["ollama"])
 
+# Serve intake uploads as static files
+from fastapi.staticfiles import StaticFiles
+_intake_uploads = os.path.expanduser("~/empire-repo/backend/data/intake_uploads")
+os.makedirs(_intake_uploads, exist_ok=True)
+app.mount("/intake_uploads", StaticFiles(directory=_intake_uploads), name="intake_uploads")
+
 @app.get("/")
 async def root():
     return {"message": "EmpireBox API", "version": "1.0.0", "status": "operational"}
@@ -105,6 +118,33 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "empirebox-backend"}
+
+
+# ── STT endpoint (top-level for frontend compatibility) ──
+from fastapi import UploadFile, File as FileParam
+
+@app.post("/api/transcribe")
+async def api_transcribe(file: UploadFile = FileParam(...), language: str = "es"):
+    """Transcribe uploaded audio via Groq Whisper. Used by Command Center mic button."""
+    from app.services.max.stt_service import stt_service
+    from fastapi import HTTPException as _HTTPException
+    import tempfile
+    from pathlib import Path as _Path
+
+    if not stt_service.is_configured:
+        raise _HTTPException(status_code=503, detail="STT not configured — GROQ_API_KEY missing")
+
+    suffix = _Path(file.filename or "audio.webm").suffix or ".webm"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = _Path(tmp.name)
+
+    try:
+        transcript = await stt_service.transcribe(tmp_path, language=language)
+        return {"text": transcript, "language": language, "filename": file.filename}
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 # Telegram Bot + Desk Scheduler auto-start

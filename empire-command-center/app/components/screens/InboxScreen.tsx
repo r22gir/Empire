@@ -153,7 +153,7 @@ export default function InboxScreen() {
                   <div className="mt-2 p-3 rounded-lg bg-[#f5f3ef] text-xs text-[#555]">{item.body}</div>
                 )}
                 <div className="flex items-center gap-3 mt-2">
-                  <span className="text-[9px] font-mono text-[#bbb]">{formatTimestamp(item.timestamp)}</span>
+                  <span className="text-[9px] font-mono text-[#bbb]" suppressHydrationWarning>{formatTimestamp(item.timestamp)}</span>
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: priorityColors[item.priority || 'normal'], background: (priorityColors[item.priority || 'normal']) + '15' }}>
                     {(item.priority || 'normal').toUpperCase()}
                   </span>

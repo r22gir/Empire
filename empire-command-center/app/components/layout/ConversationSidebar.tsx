@@ -7,6 +7,7 @@ const TAB_CONFIG: Record<BusinessTab, { label: string; color: string }> = {
   max: { label: 'ALL (God View)', color: '#D4AF37' },
   workroom: { label: 'WORKROOM ONLY', color: '#22C55E' },
   craft: { label: 'CRAFTFORGE ONLY', color: '#EAB308' },
+  social: { label: 'SOCIALFORGE ONLY', color: '#ec4899' },
   platform: { label: 'PLATFORM ONLY', color: '#3B82F6' },
 };
 
@@ -92,7 +93,7 @@ export default function ConversationSidebar({ activeTab, conversations, activeCo
                     ${activeConvId === c.id ? 'bg-[#fdf8eb] border-[#e8d89c]' : 'border-transparent hover:bg-[#f0ede8] hover:border-[#e5e0d8]'}`}>
                   <div className="text-[12px] font-semibold text-[#1a1a1a] truncate">{c.title}</div>
                   <div className="text-[10px] text-[#888] mt-0.5 truncate">{c.preview}</div>
-                  <div className="text-[9px] text-[#bbb] mt-0.5 font-mono">{formatTime(c.timestamp)}</div>
+                  <div className="text-[9px] text-[#bbb] mt-0.5 font-mono" suppressHydrationWarning>{formatTime(c.timestamp)}</div>
                 </div>
               ))}
             </div>

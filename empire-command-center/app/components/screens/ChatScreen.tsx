@@ -137,7 +137,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                 : 'bg-white border border-[#ece8e1] rounded-bl-[3px] text-[#1a1a1a]'}`}>
               {renderContent(msg.content, onScreenChange)}
             </div>
-            <div className="text-[9px] text-[#aaa] mt-[3px] font-mono flex items-center gap-2">
+            <div className="text-[9px] text-[#aaa] mt-[3px] font-mono flex items-center gap-2" suppressHydrationWarning>
               {msg.timestamp}
               {msg.model && <span>· {msg.model}</span>}
               {msg.role === 'assistant' && msg.content.length > 20 && (

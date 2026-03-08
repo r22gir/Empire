@@ -25,7 +25,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
         </div>
         <div>
           <h1 className="text-xl font-bold text-[#1a1a1a]">Empire Command Center</h1>
-          <p className="text-xs text-[#777]">All Businesses Overview · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <p className="text-xs text-[#777]" suppressHydrationWarning>All Businesses Overview · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
         </div>
       </div>
 

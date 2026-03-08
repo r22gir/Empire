@@ -21,8 +21,10 @@ import DashboardScreen from './components/screens/DashboardScreen';
 import WorkroomPage from './components/screens/WorkroomPage';
 import CraftForgePage from './components/screens/CraftForgePage';
 import PlatformPage from './components/screens/PlatformPage';
+import SocialForgePage from './components/screens/SocialForgePage';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
+import SystemReportScreen from './components/screens/SystemReportScreen';
 
 export default function CommandCenter() {
   const [activeTab, setActiveTab] = useState<BusinessTab>('max');
@@ -80,12 +82,14 @@ export default function CommandCenter() {
       switch (activeTab) {
         case 'workroom': return <WorkroomPage />;
         case 'craft': return <CraftForgePage />;
+        case 'social': return <SocialForgePage />;
         case 'platform': return <PlatformPage />;
         default: return <DashboardScreen activeTab={activeTab} />;
       }
     }
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox') return <InboxScreen />;
+    if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'chat') {
       return (
         <ChatScreen

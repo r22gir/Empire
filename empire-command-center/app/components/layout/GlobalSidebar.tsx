@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { ScreenMode } from '../../lib/types';
-import { MessageSquare, BarChart3, Bot, Inbox, FolderOpen, Search, Mic, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MessageSquare, BarChart3, Bot, Inbox, FolderOpen, Search, Mic, Settings, ChevronLeft, ChevronRight, Monitor } from 'lucide-react';
 
 const ITEMS: { id: ScreenMode | string; icon: any; label: string; badge?: boolean }[] = [
   { id: 'chat', icon: MessageSquare, label: 'Chat' },
@@ -11,6 +11,7 @@ const ITEMS: { id: ScreenMode | string; icon: any; label: string; badge?: boolea
   { id: '_divider', icon: null, label: '' },
   { id: 'docs', icon: FolderOpen, label: 'Files' },
   { id: 'research', icon: Search, label: 'Search' },
+  { id: 'report', icon: Monitor, label: 'Report' },
   { id: '_spacer', icon: null, label: '' },
   { id: 'voice', icon: Mic, label: 'Voice' },
   { id: 'settings', icon: Settings, label: 'Settings' },

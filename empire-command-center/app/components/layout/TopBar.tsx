@@ -7,6 +7,7 @@ const TABS: { id: BusinessTab; label: string; dot: string; onClass: string }[] =
   { id: 'max', label: 'MAX', dot: '#D4AF37', onClass: 'text-[#D4AF37] bg-[#2a2510]' },
   { id: 'workroom', label: 'Workroom', dot: '#22C55E', onClass: 'text-[#22C55E] bg-[#0d2a10]' },
   { id: 'craft', label: 'CraftForge', dot: '#EAB308', onClass: 'text-[#EAB308] bg-[#2a2510]' },
+  { id: 'social', label: 'SocialForge', dot: '#ec4899', onClass: 'text-[#ec4899] bg-[#2a0d1f]' },
   { id: 'platform', label: 'Platform', dot: '#3B82F6', onClass: 'text-[#3B82F6] bg-[#0d1a2a]' },
 ];
 
@@ -14,6 +15,7 @@ const MODELS = [
   { id: 'grok-3-fast', label: 'xAI Grok', desc: 'Primary · Fast', color: '#D4AF37' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Anthropic · Balanced', color: '#7c3aed' },
   { id: 'claude-opus-4-6', label: 'Claude Opus', desc: 'Anthropic · Advanced', color: '#9333ea' },
+  { id: 'groq', label: 'Groq Llama 3.3', desc: 'Groq · 70B · Ultra-fast', color: '#f97316' },
   { id: 'llama3.1:8b', label: 'Llama 3.1 (Ollama)', desc: 'Local · 8B', color: '#06b6d4' },
   { id: 'auto', label: 'Auto', desc: 'Best available', color: '#16a34a' },
 ];

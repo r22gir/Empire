@@ -7,7 +7,7 @@ const WELCOME: Message = {
   id: 'welcome',
   role: 'assistant',
   content: "Hello! I'm **MAX**, your Empire AI Assistant.\n\n_Tip: Ctrl+V to paste images · Shift+Enter for newlines_",
-  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  timestamp: '',
 };
 
 function formatContextPack(data: any): string {
@@ -31,6 +31,13 @@ export function useChat() {
   const streamingRef = useRef(false);
   const messagesRef = useRef<Message[]>([WELCOME]);
   const contextPackRef = useRef<string>('');
+
+  // Set welcome timestamp on client only (avoids hydration mismatch)
+  useEffect(() => {
+    const ts = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setMessages(prev => prev.map(m => m.id === 'welcome' && !m.timestamp ? { ...m, timestamp: ts } : m));
+    messagesRef.current = messagesRef.current.map(m => m.id === 'welcome' && !m.timestamp ? { ...m, timestamp: ts } : m);
+  }, []);
 
   useEffect(() => {
     fetch(API + '/memory/context-pack')

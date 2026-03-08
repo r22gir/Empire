@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAX Command Center — Redesign Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f3ef;
+  --bg-panel: #ffffff;
+  --bg-hover: #f0ede8;
+  --bg-chat: #faf9f7;
+  --border: #e5e0d8;
+  --border-light: #ece8e1;
+  --text: #1a1a1a;
+  --text-dim: #777;
+  --text-muted: #aaa;
+  --gold: #b8960c;
+  --gold-light: #f5ecd0;
+  --gold-bg: #fdf8eb;
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+  --green: #16a34a;
+  --green-light: #dcfce7;
+  --blue: #2563eb;
+  --blue-light: #dbeafe;
+  --red: #dc2626;
+  --red-light: #fee2e2;
+  --cyan: #0891b2;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
+  --radius: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 56px 260px 1fr 320px;
+  grid-template-rows: 52px 1fr;
+  overflow: hidden;
+}
+
+/* ===== TOP NAV ===== */
+.topnav {
+  grid-column: 1 / -1;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+}
+
+.topnav .logo {
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--gold);
+  letter-spacing: 1.5px;
+  margin-right: 8px;
+}
+
+.topnav .nav-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+
+.nav-tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  background: none;
+  font-family: inherit;
+  position: relative;
+}
+
+.nav-tab:hover { background: var(--bg-hover); color: var(--text); }
+.nav-tab.active { background: var(--gold-bg); color: var(--gold); font-weight: 600; }
+
+.nav-tab .badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--red);
+}
+
+/* Dropdown */
+.nav-tab .dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  min-width: 180px;
+  padding: 4px;
+  z-index: 100;
+}
+
+.nav-tab:hover .dropdown { display: block; }
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.dropdown-item:hover { background: var(--bg-hover); }
+.dropdown-item .di-icon { font-size: 14px; }
+.dropdown-item .di-badge { margin-left: auto; font-size: 10px; font-weight: 600; color: var(--text-muted); }
+
+.topnav .status-pills {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.status-pill {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pill-ok { background: var(--green-light); color: var(--green); }
+.pill-warn { background: var(--gold-light); color: var(--gold); }
+
+/* ===== ICON SIDEBAR ===== */
+.icon-sidebar {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  position: relative;
+}
+
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.icon-btn.active { background: var(--purple-light); color: var(--purple); }
+.icon-btn .dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--red); }
+
+.sidebar-divider { width: 24px; height: 1px; background: var(--border); margin: 8px 0; }
+
+/* ===== CONVERSATION SIDEBAR ===== */
+.conv-sidebar {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conv-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.conv-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.conv-search {
+  margin: 8px 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12px;
+  background: var(--bg);
+  color: var(--text);
+  width: calc(100% - 28px);
+  font-family: inherit;
+  outline: none;
+}
+
+.conv-search:focus { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-light); }
+
+.conv-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+
+.conv-item {
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+  margin-bottom: 2px;
+}
+
+.conv-item:hover { background: var(--bg-hover); }
+.conv-item.active { background: var(--gold-bg); }
+
+.conv-item .ci-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-item .ci-preview {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conv-item .ci-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* ===== MAIN CHAT AREA ===== */
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-chat);
+  overflow: hidden;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+
+.message {
+  margin-bottom: 16px;
+  max-width: 85%;
+}
+
+.message.user {
+  margin-left: auto;
+}
+
+.msg-bubble {
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message.user .msg-bubble {
+  background: var(--gold);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message.assistant .msg-bubble {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-bottom-left-radius: 4px;
+}
+
+.msg-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Quote card in chat */
+.quote-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 12px 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.quote-card h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+.proposal-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.proposal-btn {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+  font-family: inherit;
+}
+
+.proposal-btn:hover { border-color: var(--gold); background: var(--gold-bg); }
+.proposal-btn.selected { border-color: var(--gold); background: var(--gold-light); }
+
+.proposal-btn .pb-tier { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.proposal-btn .pb-price { font-size: 16px; font-weight: 700; color: var(--text); margin: 4px 0; }
+.proposal-btn .pb-desc { font-size: 10px; color: var(--text-muted); }
+
+.proposal-btn.essential { border-left: 3px solid var(--green); }
+.proposal-btn.designer { border-left: 3px solid var(--gold); }
+.proposal-btn.premium { border-left: 3px solid var(--purple); }
+
+/* Chat input */
+.chat-input-area {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border-light);
+  background: var(--bg-panel);
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.chat-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  min-height: 42px;
+  max-height: 120px;
+  background: var(--bg);
+}
+
+.chat-input:focus { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-light); }
+
+.input-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.input-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.15s;
+  color: var(--text-dim);
+}
+
+.input-btn:hover { background: var(--bg-hover); color: var(--text); }
+.input-btn.send { background: var(--gold); border-color: var(--gold); color: white; }
+.input-btn.send:hover { background: #a08509; }
+
+/* ===== RIGHT PANEL ===== */
+.right-panel {
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-light);
+  padding: 0 4px;
+}
+
+.rp-tab {
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  border-top: none; border-left: none; border-right: none;
+  background: none;
+  font-family: inherit;
+}
+
+.rp-tab:hover { color: var(--text); }
+.rp-tab.active { color: var(--gold); border-bottom-color: var(--gold); font-weight: 600; }
+
+.rp-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Desk cards */
+.desk-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.desk-card {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: all 0.15s;
+  background: var(--bg);
+}
+
+.desk-card:hover { border-color: var(--purple); background: var(--purple-light); }
+
+.desk-card .dc-icon { font-size: 16px; }
+.desk-card .dc-name { font-size: 10px; font-weight: 600; color: var(--text); margin-top: 3px; }
+.desk-card .dc-status { font-size: 9px; color: var(--text-muted); margin-top: 2px; }
+.desk-card .dc-persona { font-size: 8px; color: var(--purple); font-style: italic; }
+
+/* Inbox items */
+.inbox-item {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.inbox-item:hover { background: var(--bg-hover); }
+
+.inbox-item .ii-type {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--purple);
+}
+
+.inbox-item .ii-title { font-size: 12px; font-weight: 500; margin-top: 2px; }
+.inbox-item .ii-time { font-size: 9px; color: var(--text-muted); margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+
+/* Quick action buttons */
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.qa-btn {
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: all 0.1s;
+  font-family: inherit;
+  color: var(--text-dim);
+}
+
+.qa-btn:hover { background: var(--gold-bg); border-color: var(--gold); color: var(--gold); }
+
+/* System stats */
+.sys-stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.sys-stat .ss-label { color: var(--text-dim); }
+.sys-stat .ss-value { font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+
+/* Briefing */
+.briefing-card {
+  background: var(--gold-bg);
+  border: 1px solid var(--gold-light);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.briefing-card h4 { font-size: 12px; font-weight: 600; color: var(--gold); margin-bottom: 6px; }
+.briefing-card p { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+
+/* Footer */
+.mockup-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--gold);
+  color: white;
+  text-align: center;
+  padding: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  z-index: 100;
+}
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="topnav">
+  <span class="logo">EMPIRE</span>
+  
+  <div class="nav-tabs">
+    <button class="nav-tab active">💬 Chat</button>
+    
+    <button class="nav-tab" style="position:relative">
+      📋 Quotes
+      <div class="dropdown">
+        <div class="dropdown-item"><span class="di-icon">➕</span> New Quick Quote <span class="di-badge">⌘Q</span></div>
+        <div class="dropdown-item"><span class="di-icon">📄</span> Quote History <span class="di-badge">55</span></div>
+        <div class="dropdown-item"><span class="di-icon">✅</span> Select Proposal</div>
+        <div class="dropdown-item"><span class="di-icon">📸</span> Photo → Quote</div>
+      </div>
+    </button>
+    
+    <button class="nav-tab" style="position:relative">
+      📨 Comms
+      <div class="dropdown">
+        <div class="dropdown-item"><span class="di-icon">📱</span> Send Telegram</div>
+        <div class="dropdown-item"><span class="di-icon">✉️</span> Send Email</div>
+        <div class="dropdown-item"><span class="di-icon">📄</span> Send Quote PDF</div>
+        <div class="dropdown-item"><span class="di-icon">💬</span> Telegram History</div>
+      </div>
+    </button>
+    
+    <button class="nav-tab" style="position:relative">
+      🤖 Desks
+      <span class="badge"></span>
+      <div class="dropdown">
+        <div class="dropdown-item"><span class="di-icon">📣</span> Marketing — Aria</div>
+        <div class="dropdown-item"><span class="di-icon">💰</span> Finance — Cipher</div>
+        <div class="dropdown-item"><span class="di-icon">🔧</span> IT — Sentinel</div>
+        <div class="dropdown-item"><span class="di-icon">🏗️</span> Forge — Atlas</div>
+        <div class="dropdown-item"><span class="di-icon">📊</span> Analytics — Nova</div>
+        <div class="dropdown-item"><span class="di-icon">🎯</span> Strategy — Vanguard</div>
+        <div class="dropdown-item"><span class="di-icon">📋</span> Assign Task to Desk</div>
+        <div class="dropdown-item"><span class="di-icon">📝</span> Morning Briefing</div>
+        <div class="dropdown-item"><span class="di-icon">📊</span> Daily Report</div>
+      </div>
+    </button>
+    
+    <button class="nav-tab" style="position:relative">
+      🔍 Research
+      <div class="dropdown">
+        <div class="dropdown-item"><span class="di-icon">🌐</span> Web Search</div>
+        <div class="dropdown-item"><span class="di-icon">🖼️</span> Image Search</div>
+        <div class="dropdown-item"><span class="di-icon">📖</span> Read URL</div>
+        <div class="dropdown-item"><span class="di-icon">🧠</span> Memory Search</div>
+        <div class="dropdown-item"><span class="di-icon">📚</span> Knowledge Base</div>
+      </div>
+    </button>
+    
+    <button class="nav-tab" style="position:relative">
+      ⚙️ System
+      <div class="dropdown">
+        <div class="dropdown-item"><span class="di-icon">💻</span> Server Health</div>
+        <div class="dropdown-item"><span class="di-icon">🐳</span> Docker Control</div>
+        <div class="dropdown-item"><span class="di-icon">🔒</span> Security Scan</div>
+        <div class="dropdown-item"><span class="di-icon">📁</span> File Manager</div>
+        <div class="dropdown-item"><span class="di-icon">🗄️</span> Backup Status</div>
+      </div>
+    </button>
+  </div>
+  
+  <div class="status-pills">
+    <span class="status-pill pill-ok">● Grok</span>
+    <span class="status-pill pill-ok">● TG</span>
+    <span class="status-pill pill-warn">● DDG</span>
+  </div>
+</nav>
+
+<!-- ICON SIDEBAR -->
+<div class="icon-sidebar">
+  <button class="icon-btn active" title="Chat">💬</button>
+  <button class="icon-btn" title="Quotes">📋</button>
+  <button class="icon-btn" title="Customers">👥</button>
+  <button class="icon-btn" title="Inventory">📦</button>
+  <div class="sidebar-divider"></div>
+  <button class="icon-btn" title="AI Desks">🤖<span class="dot"></span></button>
+  <button class="icon-btn" title="Inbox">📥</button>
+  <button class="icon-btn" title="Finance">💰</button>
+  <button class="icon-btn" title="Files">📁</button>
+  <div class="sidebar-divider"></div>
+  <button class="icon-btn" title="Settings" style="margin-top:auto">⚙️</button>
+</div>
+
+<!-- CONVERSATION SIDEBAR -->
+<div class="conv-sidebar">
+  <div class="conv-header">
+    <h3>Conversations</h3>
+    <button style="background:var(--gold);color:white;border:none;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:500">+ New</button>
+  </div>
+  <input class="conv-search" placeholder="Search conversations..." />
+  <div class="conv-list">
+    <div class="conv-item active">
+      <div class="ci-title">Quick Quote — 72x96 Ripplefold</div>
+      <div class="ci-preview">EST-2026-002 · 3 proposals ready</div>
+      <div class="ci-time">Today 4:21 PM</div>
+    </div>
+    <div class="conv-item">
+      <div class="ci-title">Emily Rodriguez — Follow Up</div>
+      <div class="ci-preview">Check on valance order status</div>
+      <div class="ci-time">Today 2:15 PM</div>
+    </div>
+    <div class="conv-item">
+      <div class="ci-title">Morning Briefing</div>
+      <div class="ci-preview">3 tasks completed · 1 pending</div>
+      <div class="ci-time">Today 8:00 AM</div>
+    </div>
+    <div class="conv-item">
+      <div class="ci-title">Sarah Mitchell — Quote Approved</div>
+      <div class="ci-preview">Selected Option B · $988.87</div>
+      <div class="ci-time">Yesterday</div>
+    </div>
+    <div class="conv-item">
+      <div class="ci-title">MarketForge Research</div>
+      <div class="ci-preview">Competitor pricing analysis</div>
+      <div class="ci-time">Mar 5</div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN CHAT -->
+<div class="chat-area">
+  <div class="quick-actions">
+    <button class="qa-btn">📸 Photo Quote</button>
+    <button class="qa-btn">💰 Quick Quote</button>
+    <button class="qa-btn">📊 Daily Report</button>
+    <button class="qa-btn">🔍 Search</button>
+    <button class="qa-btn">📋 Briefing</button>
+    <button class="qa-btn">📱 Send TG</button>
+  </div>
+  
+  <div class="chat-messages">
+    <div class="message user">
+      <div class="msg-bubble">Create a quick quote for a 72x96 window, ripplefold treatment</div>
+      <div class="msg-meta">4:21 PM · via Dashboard</div>
+    </div>
+    
+    <div class="message assistant">
+      <div class="msg-bubble">
+        Quote <strong>EST-2026-002</strong> created. 3 proposals ready for review.
+      </div>
+      
+      <!-- PROPOSAL SELECTION CARD -->
+      <div class="quote-card">
+        <h4>Select a Proposal — EST-2026-002</h4>
+        <div class="proposal-row">
+          <button class="proposal-btn essential">
+            <div class="pb-tier">A · Essential</div>
+            <div class="pb-price">$642</div>
+            <div class="pb-desc">Grade A fabric · Std lining</div>
+          </button>
+          <button class="proposal-btn designer selected">
+            <div class="pb-tier">B · Designer</div>
+            <div class="pb-price">$988</div>
+            <div class="pb-desc">Grade B fabric · Std lining</div>
+          </button>
+          <button class="proposal-btn premium">
+            <div class="pb-tier">C · Premium</div>
+            <div class="pb-price">$1,456</div>
+            <div class="pb-desc">Grade C · Blackout lining</div>
+          </button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button style="flex:1;padding:8px;background:var(--gold);color:white;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">✓ Confirm Selection</button>
+          <button style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--text-dim)">📄 View PDF</button>
+          <button style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--text-dim)">📱 Send TG</button>
+          <button style="padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--text-dim)">✉️ Email</button>
+        </div>
+      </div>
+      
+      <div class="msg-meta">4:21 PM · Grok · 3.2s</div>
+    </div>
+  </div>
+  
+  <!-- CHAT INPUT -->
+  <div class="chat-input-area">
+    <div class="chat-input-row">
+      <div class="input-actions">
+        <button class="input-btn" title="Attach Photo">📎</button>
+        <button class="input-btn" title="Voice">🎤</button>
+      </div>
+      <textarea class="chat-input" placeholder="Message MAX..." rows="1"></textarea>
+      <button class="input-btn send" title="Send">→</button>
+    </div>
+  </div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div class="right-panel">
+  <div class="rp-tabs">
+    <button class="rp-tab active">AI Desks</button>
+    <button class="rp-tab">Inbox<span style="color:var(--red);font-size:10px;margin-left:3px">3</span></button>
+    <button class="rp-tab">System</button>
+    <button class="rp-tab">Memory</button>
+  </div>
+  
+  <div class="rp-content">
+    <!-- Morning Briefing -->
+    <div class="briefing-card">
+      <h4>☀️ Morning Briefing</h4>
+      <p>3 tasks completed overnight. Emily's valance order ships today. 1 new quote request from Maria. Marketing desk drafted Instagram post — ready for review.</p>
+    </div>
+    
+    <!-- Desk Grid -->
+    <div class="desk-grid">
+      <div class="desk-card">
+        <div class="dc-icon">📣</div>
+        <div class="dc-name">Marketing</div>
+        <div class="dc-persona">Aria</div>
+        <div class="dc-status">1 task done · IG post ready</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">💰</div>
+        <div class="dc-name">Finance</div>
+        <div class="dc-persona">Cipher</div>
+        <div class="dc-status">Revenue: $31.9K pipeline</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">🔧</div>
+        <div class="dc-name">IT</div>
+        <div class="dc-persona">Sentinel</div>
+        <div class="dc-status">All services healthy</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">🏗️</div>
+        <div class="dc-name">Forge</div>
+        <div class="dc-persona">Atlas</div>
+        <div class="dc-status">2 quotes generated today</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">📊</div>
+        <div class="dc-name">Analytics</div>
+        <div class="dc-persona">Nova</div>
+        <div class="dc-status">Weekly report pending</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">🎯</div>
+        <div class="dc-name">Strategy</div>
+        <div class="dc-persona">Vanguard</div>
+        <div class="dc-status">CraftForge roadmap draft</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">🎧</div>
+        <div class="dc-name">Support</div>
+        <div class="dc-persona">Echo</div>
+        <div class="dc-status">0 open tickets</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">📦</div>
+        <div class="dc-name">Operations</div>
+        <div class="dc-persona">Phoenix</div>
+        <div class="dc-status">1 shipment out today</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">⚖️</div>
+        <div class="dc-name">Legal</div>
+        <div class="dc-persona">Sage</div>
+        <div class="dc-status">No pending reviews</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">🛒</div>
+        <div class="dc-name">Commerce</div>
+        <div class="dc-persona">Rex</div>
+        <div class="dc-status">3 active listings</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">✍️</div>
+        <div class="dc-name">Content</div>
+        <div class="dc-persona">Ora</div>
+        <div class="dc-status">Blog draft in progress</div>
+      </div>
+      <div class="desk-card">
+        <div class="dc-icon">🔬</div>
+        <div class="dc-name">Research</div>
+        <div class="dc-persona">Nexus</div>
+        <div class="dc-status">Competitor scan done</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mockup-banner">DESIGN MOCKUP — MAX Command Center Redesign · Lighter Theme · Drop-downs · All Features Surfaced</div>
+
+</body>
+</html>

@@ -18,6 +18,7 @@ logger = logging.getLogger("max.ai_router")
 class AIModel(Enum):
     GROK = "grok"
     CLAUDE = "claude"
+    GROQ = "groq"
     OPENCLAW = "openclaw"
     OLLAMA = "ollama-llama"
 
@@ -40,22 +41,26 @@ class AIRouter:
     def __init__(self):
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
         self.xai_key = os.getenv("XAI_API_KEY", "")
-        # Priority: xAI Grok > Claude > Ollama
+        self.groq_key = os.getenv("GROQ_API_KEY", "")
+        # Priority: xAI Grok > Claude > Groq > Ollama
         if self.xai_key:
             self.primary_model = AIModel.GROK
         elif self.anthropic_key:
             self.primary_model = AIModel.CLAUDE
+        elif self.groq_key:
+            self.primary_model = AIModel.GROQ
         else:
             self.primary_model = AIModel.OLLAMA
         self.system_prompt = get_system_prompt()
         self.upload_dir = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
-        model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.OLLAMA: "Ollama"}
+        model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama"}
         print(f"[MAX] Primary: {model_names[self.primary_model]}")
 
     def get_available_models(self):
         return [
             {"id": "grok", "name": "xAI Grok", "available": bool(self.xai_key), "primary": self.primary_model == AIModel.GROK, "type": "cloud"},
             {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud"},
+            {"id": "groq", "name": "Groq Llama 3.3 70B", "available": bool(self.groq_key), "primary": self.primary_model == AIModel.GROQ, "type": "cloud"},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
             {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "type": "local"},
         ]
@@ -200,15 +205,9 @@ class AIRouter:
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
 
         # Build ordered provider chain: requested model first, then full fallback
-        providers = []
-        if use_model == AIModel.GROK:
-            providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.OPENCLAW, AIModel.OLLAMA]
-        elif use_model == AIModel.CLAUDE:
-            providers = [AIModel.CLAUDE, AIModel.GROK, AIModel.OPENCLAW, AIModel.OLLAMA]
-        elif use_model == AIModel.OPENCLAW:
-            providers = [AIModel.OPENCLAW, AIModel.GROK, AIModel.CLAUDE, AIModel.OLLAMA]
-        else:
-            providers = [AIModel.OLLAMA, AIModel.GROK, AIModel.CLAUDE, AIModel.OPENCLAW]
+        # Chain: Grok → Claude → Groq → OpenClaw → Ollama
+        all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
+        providers = [use_model] + [p for p in all_providers if p != use_model]
 
         is_first = True
         for provider in providers:
@@ -230,6 +229,14 @@ class AIRouter:
                     return AIResponse(content=resp, model_used="claude-4.6-sonnet", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Claude failed: {type(e).__name__}: {e}")
+
+            elif provider == AIModel.GROQ and self.groq_key:
+                try:
+                    logger.info(f"[MAX] Chat via Groq{' (fallback)' if fallback else ''}")
+                    resp = await self._groq_chat(full_messages)
+                    return AIResponse(content=resp, model_used="groq-llama-3.3-70b", fallback_used=fallback)
+                except Exception as e:
+                    logger.warning(f"Groq failed: {type(e).__name__}: {e}")
 
             elif provider == AIModel.OPENCLAW:
                 try:
@@ -266,15 +273,8 @@ class AIRouter:
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
 
         # Build ordered provider chain: requested model first, then full fallback
-        providers = []
-        if use_model == AIModel.GROK:
-            providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.OPENCLAW, AIModel.OLLAMA]
-        elif use_model == AIModel.CLAUDE:
-            providers = [AIModel.CLAUDE, AIModel.GROK, AIModel.OPENCLAW, AIModel.OLLAMA]
-        elif use_model == AIModel.OPENCLAW:
-            providers = [AIModel.OPENCLAW, AIModel.GROK, AIModel.CLAUDE, AIModel.OLLAMA]
-        else:
-            providers = [AIModel.OLLAMA, AIModel.GROK, AIModel.CLAUDE, AIModel.OPENCLAW]
+        all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
+        providers = [use_model] + [p for p in all_providers if p != use_model]
 
         for provider in providers:
             if provider == AIModel.GROK and self.xai_key:
@@ -294,6 +294,15 @@ class AIRouter:
                     return
                 except Exception as e:
                     logger.warning(f"Claude stream failed: {e}")
+
+            elif provider == AIModel.GROQ and self.groq_key:
+                try:
+                    logger.info("[MAX] Streaming via Groq")
+                    async for chunk in self._groq_chat_stream(full_messages):
+                        yield chunk, "groq-llama-3.3-70b"
+                    return
+                except Exception as e:
+                    logger.warning(f"Groq stream failed: {e}")
 
             elif provider == AIModel.OPENCLAW:
                 try:
@@ -395,6 +404,47 @@ class AIRouter:
                             yield text
                     elif data.get("type") == "message_stop":
                         return
+
+    # ── Groq (OpenAI-compatible, Llama 3.3 70B) ──────────────────────
+
+    async def _groq_chat(self, messages: List[AIMessage]) -> str:
+        api_messages = self._prepare_openai_messages(messages)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 8192}
+            )
+            if resp.status_code != 200:
+                raise Exception(f"Groq HTTP {resp.status_code}: {resp.text}")
+            return resp.json()["choices"][0]["message"]["content"]
+
+    async def _groq_chat_stream(self, messages: List[AIMessage]) -> AsyncGenerator[str, None]:
+        api_messages = self._prepare_openai_messages(messages)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream(
+                "POST",
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
+                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 8192, "stream": True}
+            ) as response:
+                if response.status_code != 200:
+                    error_body = await response.aread()
+                    raise Exception(f"Groq HTTP {response.status_code}: {error_body.decode()}")
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    text = delta.get("content", "")
+                    if text:
+                        yield text
 
     # ── OpenClaw ──────────────────────────────────────────────────────
 

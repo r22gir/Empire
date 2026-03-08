@@ -28,7 +28,7 @@ export default function WorkroomPage() {
         </div>
         <div>
           <h1 className="text-xl font-bold text-[#1a1a1a]">Empire Workroom</h1>
-          <p className="text-xs text-[#777]">Custom Drapery & Upholstery · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+          <p className="text-xs text-[#777]" suppressHydrationWarning>Custom Drapery & Upholstery · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
         </div>
       </div>
 

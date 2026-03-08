@@ -1,0 +1,186 @@
+graph TB
+    subgraph HARDWARE["🖥️ EMPIRE DELL — Dell Precision Tower 5810"]
+        direction TB
+        HW_CPU["Intel Xeon E5-2650 v3<br/>10-core / 20 threads @ 2.30GHz"]
+        HW_RAM["32 GB RAM"]
+        HW_DISK["92GB SSD<br/>24GB used / 64GB free"]
+        HW_GPU["NVIDIA Quadro K600<br/>Dedicated GPU"]
+        HW_OS["Ubuntu 24.04.4 LTS<br/>Kernel 6.17.0-14-generic"]
+    end
+
+    subgraph FUTURE_HW["🔮 FUTURE — Beelink Mini PC"]
+        BEELINK["Beelink<br/>Light Modules Only<br/>Testing Later"]
+    end
+
+    subgraph EXTERNAL["☁️ EXTERNAL SERVICES"]
+        direction TB
+        XAI["xAI Grok API<br/>Primary AI"]
+        CLAUDE_API["Claude API<br/>Secondary AI"]
+        GITHUB["GitHub<br/>r22gir/Empire"]
+        GDRIVE["Google Drive<br/>Backup"]
+        EASYPOST["EasyPost<br/>ShipForge"]
+        STRIPE["Stripe Connect<br/>Payments"]
+        SOLANA["Solana / USDC<br/>Empire Wallet"]
+        TELEGRAM_API["Telegram API<br/>EmpireAssist"]
+        NW_AGENTS["Northwest Agents<br/>LLCFactory"]
+    end
+
+    subgraph BACKEND["⚙️ FASTAPI BACKEND — Port 8000"]
+        direction TB
+        MAIN["app/main.py<br/>Dynamic Router Loading"]
+
+        subgraph API_ROUTES["API Routes /api/v1/*"]
+            MAX_API["/max/* — AI Chat + Desks + Tasks"]
+            CHAT_API["/chats/* — Chat History CRUD"]
+            FILE_API["/files/* — File Management"]
+            SYS_API["/system/* — CPU/RAM/Disk"]
+            OLLAMA_API["/ollama/* — Local Models"]
+            NOTIFY_API["/notifications/*"]
+        end
+
+        subgraph AI_LAYER["🤖 AI Routing Layer"]
+            AI_ROUTER["ai_router.py<br/>Provider Selection"]
+            SYS_PROMPT["system_prompt.py<br/>Loads memory.md + session log"]
+            GUARDRAILS["guardrails.py<br/>Input Validation"]
+        end
+
+        subgraph DATA_LAYER["💾 Data Layer"]
+            SQLITE_BRAIN["memories.db<br/>205 entries — LEARNING DISABLED"]
+            ALEMBIC["Alembic Migrations"]
+            POSTGRES["PostgreSQL 14+<br/>🔴 STOPPED in Docker"]
+            REDIS["Redis 6+<br/>🔴 STOPPED in Docker"]
+        end
+
+        TGBOT["run_telegram_bot.py<br/>⚠️ Standalone Script<br/>Not in App Lifecycle"]
+    end
+
+    subgraph MEMORY["🧠 MEMORY SYSTEMS — ❌ FRAGMENTED"]
+        direction TB
+
+        subgraph MEM_CURRENT["Current State — Broken"]
+            MEM_MD["max/memory.md<br/>Flat Markdown<br/>⚠️ OUTDATED — Still says AZW Mini PC"]
+            MEM_DB["memories.db<br/>SQLite 156KB<br/>Learning OFF"]
+            MEM_TG["_telegram_history<br/>In-Memory Dict<br/>Lost on Restart"]
+            MEM_CLAUDE["Claude.ai Context<br/>No Persistence<br/>Manual Push Only"]
+        end
+
+        subgraph MEM_NEEDED["Needed: Unified Memory API"]
+            UMEM["Single /api/v1/memory/* endpoint<br/>All clients read/write here<br/>Search by topic, date, customer"]
+        end
+
+        MEM_MD -.->|"should feed"| UMEM
+        MEM_DB -.->|"should be core"| UMEM
+        MEM_TG -.->|"should persist"| UMEM
+        MEM_CLAUDE -.->|"should sync"| UMEM
+    end
+
+    subgraph FRONTENDS["🖼️ FRONTEND APPS"]
+        direction TB
+
+        subgraph LIVE_APPS["✅ LIVE"]
+            FD["Founder Dashboard<br/>Port 3009<br/>Next.js 14"]
+            EA["Empire App<br/>Port 3000<br/>Next.js 14"]
+            WF["WorkroomForge<br/>Port 3001<br/>Next.js"]
+            LF["LuxeForge<br/>Port 3002<br/>Next.js 15"]
+            HP["Homepage<br/>Port 8080<br/>Static HTML"]
+        end
+
+        subgraph BUILT_APPS["🔵 BUILT — Merged but Not Running"]
+            MKF["MarketForge<br/>28 Endpoints"]
+            CF["ContractorForge<br/>Multi-Tenant"]
+            SF["SupportForge<br/>AI Support"]
+            MF["MarketF P2P<br/>8% Fees"]
+            SHIP["ShipForge<br/>EasyPost"]
+            WALLET["Empire Wallet<br/>Crypto"]
+            SETUP["Setup Portal +<br/>License System"]
+        end
+
+        subgraph PLANNED_APPS["⬜ PLANNED — Spec Only"]
+            LEAD["LeadForge"]
+            VET["VeteranForge"]
+            CRM["ForgeCRM"]
+            SOCIAL["SocialForge"]
+            LLC["LLCFactory"]
+            APOST["ApostApp"]
+            RELIST["RelistApp"]
+            RECOVER["RecoveryForge"]
+        end
+    end
+
+    subgraph AGENTS["🤖 AGENT SYSTEM"]
+        direction TB
+        BASE["base_agent.py"]
+        ROUTER["request_router.py"]
+        SAFEGUARD["safeguards.py"]
+        ESTOP["emergency_stop.py<br/>Kill Switch"]
+        TOKEN["token_manager.py"]
+        MSG["message + email services"]
+    end
+
+    subgraph OPENCLAW["🧪 OPENCLAW — Port 7878"]
+        OC["Local AI Brain<br/>Ollama Wrapper<br/>⚠️ Ollama Disabled by Default"]
+    end
+
+    subgraph DOCKER["🐳 DOCKER — 32 Containers"]
+        D_STATUS["🔴 ALL STOPPED<br/>No Control Panel"]
+    end
+
+    subgraph USERS["👥 USER TOUCHPOINTS"]
+        direction LR
+        BROWSER["🌐 Browser<br/>localhost:3000-8080"]
+        TG_USER["📱 Telegram<br/>EmpireAssist Bot"]
+        MOBILE["📱 Flutter App<br/>MarketForge Mobile"]
+        USB_SETUP["💾 Founders USB<br/>Installer"]
+    end
+
+    %% User Connections
+    BROWSER --> LIVE_APPS
+    TG_USER --> TELEGRAM_API --> TGBOT
+    USB_SETUP --> SETUP
+
+    %% Frontend to Backend
+    LIVE_APPS -->|"SSE /max/chat/stream"| MAX_API
+    LIVE_APPS -->|"REST /api/v1/*"| API_ROUTES
+    BUILT_APPS -.->|"Endpoints exist"| API_ROUTES
+
+    %% AI Routing
+    AI_ROUTER -->|"Priority 1"| XAI
+    AI_ROUTER -->|"Priority 2"| CLAUDE_API
+    AI_ROUTER -.->|"Priority 3 — disabled"| OC
+
+    %% Memory flows
+    SYS_PROMPT -->|"loads at runtime"| MEM_MD
+    TGBOT -->|"writes to"| MEM_TG
+    AI_LAYER -->|"should write to"| MEM_DB
+
+    %% Agent routing
+    MAX_API --> GUARDRAILS --> AI_ROUTER
+    ROUTER --> BASE
+    SAFEGUARD --> ROUTER
+
+    %% External integrations
+    SHIP -.-> EASYPOST
+    WALLET -.-> SOLANA
+    SETUP -.-> STRIPE
+    LLC -.-> NW_AGENTS
+    GITHUB -.->|"git push/pull"| HARDWARE
+    GDRIVE -.->|"rclone sync"| HARDWARE
+
+    %% Styling
+    classDef live fill:#1a4d1a,stroke:#22C55E,color:#fff
+    classDef built fill:#1a2d4d,stroke:#3B82F6,color:#fff
+    classDef planned fill:#2a2a2a,stroke:#666,color:#aaa
+    classDef broken fill:#4d1a1a,stroke:#EF4444,color:#fff
+    classDef warning fill:#4d3d1a,stroke:#EAB308,color:#fff
+    classDef external fill:#2d1a4d,stroke:#8B5CF6,color:#fff
+    classDef hardware fill:#1a1a2e,stroke:#D4AF37,color:#D4AF37
+    classDef future fill:#1a2a1a,stroke:#4ade80,color:#4ade80,stroke-dasharray: 5 5
+
+    class FD,EA,WF,LF,HP live
+    class MKF,CF,SF,MF,SHIP,WALLET,SETUP built
+    class LEAD,VET,CRM,SOCIAL,LLC,APOST,RELIST,RECOVER planned
+    class D_STATUS,POSTGRES,REDIS broken
+    class SQLITE_BRAIN,MEM_TG,TGBOT,MEM_MD,OC warning
+    class XAI,CLAUDE_API,GITHUB,GDRIVE,EASYPOST,STRIPE,SOLANA,TELEGRAM_API,NW_AGENTS external
+    class HW_CPU,HW_RAM,HW_DISK,HW_OS,HW_GPU hardware
+    class BEELINK future

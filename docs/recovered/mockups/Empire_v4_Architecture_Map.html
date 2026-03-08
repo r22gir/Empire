@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmpireBox v4.0 — Architectural Map</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #05050d;
+    color: #e8e8e8;
+    font-family: 'Outfit', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .title-bar {
+    width: 100%;
+    padding: 20px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid rgba(212,175,55,0.1);
+  }
+
+  .title-bar h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #D4AF37;
+    letter-spacing: 3px;
+  }
+
+  .title-bar .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #555;
+  }
+
+  /* ===== THE MAP ===== */
+  .map {
+    position: relative;
+    width: 1100px;
+    height: 1500px;
+    margin: 30px auto;
+  }
+
+  /* ===== LAYERS ===== */
+  .layer {
+    position: absolute;
+    border-radius: 20px;
+    padding: 20px;
+  }
+
+  .layer-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .layer-label .pip {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+
+  /* ===== RG LAYER ===== */
+  .layer-rg {
+    top: 0; left: 350px; width: 400px;
+    background: linear-gradient(135deg, rgba(212,175,55,0.08), rgba(212,175,55,0.02));
+    border: 1px solid rgba(212,175,55,0.25);
+    text-align: center;
+    padding: 24px;
+  }
+
+  .rg-name {
+    font-size: 28px;
+    font-weight: 700;
+    color: #D4AF37;
+  }
+
+  .rg-role {
+    font-size: 13px;
+    color: #888;
+    margin-top: 4px;
+  }
+
+  .rg-channels {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+
+  .channel-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    background: rgba(212,175,55,0.1);
+    border: 1px solid rgba(212,175,55,0.2);
+    color: #D4AF37;
+  }
+
+  /* ===== CONNECTOR LINES ===== */
+  .connector {
+    position: absolute;
+    background: rgba(212,175,55,0.3);
+  }
+
+  .connector-v {
+    width: 2px;
+  }
+
+  .connector-h {
+    height: 2px;
+  }
+
+  .connector-dot {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #D4AF37;
+    transform: translate(-50%, -50%);
+  }
+
+  /* ===== MAX LAYER ===== */
+  .layer-max {
+    top: 140px; left: 250px; width: 600px;
+    background: linear-gradient(135deg, rgba(139,92,246,0.1), rgba(139,92,246,0.03));
+    border: 2px solid rgba(139,92,246,0.4);
+    padding: 24px;
+    z-index: 2;
+  }
+
+  .max-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #8B5CF6;
+    text-align: center;
+  }
+
+  .max-sub {
+    font-size: 12px;
+    color: #888;
+    text-align: center;
+    margin-top: 4px;
+  }
+
+  .max-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .max-feature {
+    background: rgba(139,92,246,0.08);
+    border: 1px solid rgba(139,92,246,0.15);
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+  }
+
+  .max-feature .icon { font-size: 18px; }
+  .max-feature .name { font-size: 11px; font-weight: 500; color: #c4b5fd; margin-top: 4px; }
+  .max-feature .detail { font-size: 9px; color: #666; margin-top: 2px; font-family: 'JetBrains Mono', monospace; }
+
+  /* ===== DOMAIN LAYERS ===== */
+  .layer-workroom {
+    top: 400px; left: 0; width: 520px;
+    background: linear-gradient(135deg, rgba(34,197,94,0.06), transparent);
+    border: 1px solid rgba(34,197,94,0.2);
+  }
+
+  .layer-platform {
+    top: 400px; right: 0; width: 520px;
+    background: linear-gradient(135deg, rgba(59,130,246,0.06), transparent);
+    border: 1px solid rgba(59,130,246,0.2);
+  }
+
+  .layer-personal {
+    top: 920px; left: 300px; width: 500px;
+    background: linear-gradient(135deg, rgba(234,179,8,0.06), transparent);
+    border: 1px solid rgba(234,179,8,0.15);
+  }
+
+  .layer-infra {
+    top: 1080px; left: 100px; width: 900px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.03), transparent);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .layer-broken {
+    top: 1320px; left: 200px; width: 700px;
+    background: linear-gradient(135deg, rgba(239,68,68,0.06), transparent);
+    border: 1px solid rgba(239,68,68,0.2);
+  }
+
+  /* ===== NODES ===== */
+  .node-grid {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .node-grid-2 { grid-template-columns: 1fr 1fr; }
+  .node-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .node-grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+
+  .node {
+    border-radius: 10px;
+    padding: 12px;
+    position: relative;
+    transition: transform 0.15s, box-shadow 0.15s;
+    cursor: default;
+  }
+
+  .node:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+
+  .node .emoji { font-size: 16px; }
+  .node .node-name { font-size: 12px; font-weight: 600; margin-top: 4px; }
+  .node .node-detail { font-size: 10px; color: #888; margin-top: 2px; }
+  .node .node-port { font-family: 'JetBrains Mono', monospace; font-size: 9px; margin-top: 4px; padding: 2px 6px; border-radius: 4px; display: inline-block; }
+
+  /* Node colors */
+  .node-green {
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.25);
+  }
+  .node-green .node-name { color: #22C55E; }
+  .node-green .node-port { background: rgba(34,197,94,0.15); color: #22C55E; }
+
+  .node-blue {
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.25);
+  }
+  .node-blue .node-name { color: #3B82F6; }
+  .node-blue .node-port { background: rgba(59,130,246,0.15); color: #3B82F6; }
+
+  .node-yellow {
+    background: rgba(234,179,8,0.08);
+    border: 1px solid rgba(234,179,8,0.2);
+  }
+  .node-yellow .node-name { color: #EAB308; }
+
+  .node-red {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.2);
+  }
+  .node-red .node-name { color: #EF4444; }
+  .node-red .node-detail { color: #f87171; }
+
+  .node-gray {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .node-gray .node-name { color: #666; }
+
+  .node-purple {
+    background: rgba(139,92,246,0.08);
+    border: 1px solid rgba(139,92,246,0.2);
+  }
+  .node-purple .node-name { color: #8B5CF6; }
+
+  .node-gold {
+    background: rgba(212,175,55,0.08);
+    border: 1px solid rgba(212,175,55,0.2);
+  }
+  .node-gold .node-name { color: #D4AF37; }
+
+  /* Status badges */
+  .badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .badge-live { background: rgba(34,197,94,0.2); color: #22C55E; }
+  .badge-built { background: rgba(59,130,246,0.2); color: #3B82F6; }
+  .badge-broken { background: rgba(239,68,68,0.2); color: #EF4444; }
+  .badge-planned { background: rgba(255,255,255,0.08); color: #666; }
+
+  /* Section dividers */
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #555;
+    margin-top: 16px;
+    margin-bottom: 8px;
+    padding-left: 4px;
+  }
+
+  /* Arrows between layers */
+  .arrow-group {
+    position: absolute;
+    z-index: 3;
+  }
+
+  .arrow-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #555;
+    background: #05050d;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  /* Desks mini grid */
+  .desks-wrap {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(139,92,246,0.12);
+  }
+
+  .desks-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .desk-mini {
+    background: rgba(139,92,246,0.06);
+    border: 1px solid rgba(139,92,246,0.1);
+    border-radius: 6px;
+    padding: 6px 4px;
+    text-align: center;
+    font-size: 9px;
+    color: #a78bfa;
+    transition: background 0.15s;
+  }
+
+  .desk-mini:hover {
+    background: rgba(139,92,246,0.15);
+  }
+
+  .desk-mini .desk-icon { font-size: 14px; display: block; margin-bottom: 2px; }
+
+  /* Connection paths */
+  svg.connections {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  svg.connections line {
+    stroke-dasharray: 6, 4;
+    animation: dashFlow 1.5s linear infinite;
+  }
+
+  @keyframes dashFlow {
+    to { stroke-dashoffset: -20; }
+  }
+
+  svg.connections .flow-solid {
+    stroke-dasharray: none;
+    animation: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="title-bar">
+  <h1>EMPIREBOX v4.0</h1>
+  <div class="sub">Architectural Map · Empire Dell · March 2026</div>
+</div>
+
+<div class="map">
+
+  <!-- SVG CONNECTION LINES -->
+  <svg class="connections" viewBox="0 0 1100 1500">
+    <!-- RG to MAX -->
+    <line x1="550" y1="95" x2="550" y2="140" stroke="#D4AF37" stroke-width="2" class="flow-solid"/>
+    
+    <!-- MAX to Workroom -->
+    <line x1="400" y1="370" x2="260" y2="400" stroke="#22C55E" stroke-width="1.5"/>
+    <text x="310" y="378" fill="#555" font-size="9" font-family="JetBrains Mono">controls</text>
+
+    <!-- MAX to Platform -->
+    <line x1="700" y1="370" x2="840" y2="400" stroke="#3B82F6" stroke-width="1.5"/>
+    <text x="740" y="378" fill="#555" font-size="9" font-family="JetBrains Mono">powers</text>
+
+    <!-- MAX to Personal -->
+    <line x1="550" y1="370" x2="550" y2="920" stroke="#EAB308" stroke-width="1" stroke-dasharray="6,6"/>
+    <text x="560" y="900" fill="#555" font-size="9" font-family="JetBrains Mono">side projects</text>
+
+    <!-- Workroom to Infra -->
+    <line x1="260" y1="900" x2="350" y2="1080" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+
+    <!-- Platform to Infra -->
+    <line x1="840" y1="900" x2="750" y2="1080" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+
+    <!-- Infra to Broken -->
+    <line x1="550" y1="1280" x2="550" y2="1320" stroke="#EF4444" stroke-width="1" stroke-dasharray="4,4"/>
+  </svg>
+
+  <!-- ===== LAYER 0: RG ===== -->
+  <div class="layer layer-rg">
+    <div class="rg-name">👑 RG</div>
+    <div class="rg-role">Founder · Builder · Operator</div>
+    <div class="rg-channels">
+      <span class="channel-chip">🖥️ Dashboard</span>
+      <span class="channel-chip">📱 Telegram</span>
+      <span class="channel-chip">💻 Claude.ai</span>
+      <span class="channel-chip">⌨️ Terminal</span>
+    </div>
+  </div>
+
+  <!-- ===== LAYER 1: MAX ===== -->
+  <div class="layer layer-max">
+    <div class="max-title">🤖 MAX</div>
+    <div class="max-sub">Founder's Personal AI Assistant · The Brain Layer</div>
+
+    <div class="max-grid">
+      <div class="max-feature">
+        <div class="icon">🧠</div>
+        <div class="name">Memory</div>
+        <div class="detail">97 memories · context-pack</div>
+      </div>
+      <div class="max-feature">
+        <div class="icon">🔍</div>
+        <div class="name">Tools</div>
+        <div class="detail">search · quote · ship</div>
+      </div>
+      <div class="max-feature">
+        <div class="icon">🛡️</div>
+        <div class="name">Guardrails</div>
+        <div class="detail">input validation · e-stop</div>
+      </div>
+    </div>
+
+    <div class="desks-wrap">
+      <div class="section-label" style="color: #8B5CF6;">12 AI Desks — Each a Specialist</div>
+      <div class="desks-grid">
+        <div class="desk-mini"><span class="desk-icon">📣</span>Marketing</div>
+        <div class="desk-mini"><span class="desk-icon">💰</span>Finance</div>
+        <div class="desk-mini"><span class="desk-icon">⚖️</span>Legal</div>
+        <div class="desk-mini"><span class="desk-icon">🔧</span>IT</div>
+        <div class="desk-mini"><span class="desk-icon">🎧</span>Support</div>
+        <div class="desk-mini"><span class="desk-icon">📦</span>Operations</div>
+        <div class="desk-mini"><span class="desk-icon">🏗️</span>Forge</div>
+        <div class="desk-mini"><span class="desk-icon">📊</span>Analytics</div>
+        <div class="desk-mini"><span class="desk-icon">🛒</span>Commerce</div>
+        <div class="desk-mini"><span class="desk-icon">✍️</span>Content</div>
+        <div class="desk-mini"><span class="desk-icon">🔬</span>Research</div>
+        <div class="desk-mini"><span class="desk-icon">🎯</span>Strategy</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LAYER 2A: WORKROOM (Left) ===== -->
+  <div class="layer layer-workroom">
+    <div class="layer-label" style="color: #22C55E;">
+      <div class="pip" style="background: #22C55E;"></div>
+      EMPIRE WORKROOM — RG's Drapery Business
+    </div>
+
+    <div class="node-grid node-grid-2">
+      <div class="node node-green">
+        <span class="badge badge-live">LIVE</span>
+        <div class="emoji">🏗️</div>
+        <div class="node-name">WorkroomForge</div>
+        <div class="node-detail">Quote Builder · Customer Portal</div>
+        <div class="node-port">:3001</div>
+      </div>
+      <div class="node node-green">
+        <span class="badge badge-live">LIVE</span>
+        <div class="emoji">🪟</div>
+        <div class="node-name">LuxeForge</div>
+        <div class="node-detail">Designer Portal · Camera</div>
+        <div class="node-port">:3002</div>
+      </div>
+    </div>
+
+    <div class="section-label">AI Measurement Tools</div>
+    <div class="node-grid node-grid-3">
+      <div class="node node-red">
+        <span class="badge badge-broken">BROKEN</span>
+        <div class="emoji">📸</div>
+        <div class="node-name">Photo Analysis</div>
+        <div class="node-detail">Upload not working</div>
+      </div>
+      <div class="node node-red">
+        <span class="badge badge-broken">BROKEN</span>
+        <div class="emoji">📏</div>
+        <div class="node-name">AI Measure</div>
+        <div class="node-detail">Dimensions tool</div>
+      </div>
+      <div class="node node-red">
+        <span class="badge badge-broken">BROKEN</span>
+        <div class="emoji">🎨</div>
+        <div class="node-name">AI Mockup</div>
+        <div class="node-detail">Before/after overlay</div>
+      </div>
+      <div class="node node-red">
+        <span class="badge badge-broken">BROKEN</span>
+        <div class="emoji">📐</div>
+        <div class="node-name">AI Outline</div>
+        <div class="node-detail">Auto-dimensions</div>
+      </div>
+      <div class="node node-red">
+        <span class="badge badge-broken">BROKEN</span>
+        <div class="emoji">🛋️</div>
+        <div class="node-name">AI Upholstery</div>
+        <div class="node-detail">Fabric analysis</div>
+      </div>
+      <div class="node node-red">
+        <span class="badge badge-broken">BROKEN</span>
+        <div class="emoji">✨</div>
+        <div class="node-name">AI Imagine</div>
+        <div class="node-detail">Redesign generator</div>
+      </div>
+    </div>
+
+    <div class="section-label">Pricing Engine</div>
+    <div class="node-grid node-grid-2">
+      <div class="node node-green">
+        <div class="emoji">💰</div>
+        <div class="node-name">Auto-Calculator</div>
+        <div class="node-detail">Base × SqFt + Lining + HW + Motor</div>
+      </div>
+      <div class="node node-green">
+        <div class="emoji">👥</div>
+        <div class="node-name">Customers</div>
+        <div class="node-detail">5 active · $31,900 pipeline</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LAYER 2B: PLATFORM (Right) ===== -->
+  <div class="layer layer-platform">
+    <div class="layer-label" style="color: #3B82F6;">
+      <div class="pip" style="background: #3B82F6;"></div>
+      EMPIRE PLATFORM — SaaS for Resellers
+    </div>
+
+    <div class="section-label">Subscription Tiers</div>
+    <div class="node-grid node-grid-3">
+      <div class="node node-blue">
+        <div class="node-name">LITE $29/mo</div>
+        <div class="node-detail">1 App · 5 Listings</div>
+      </div>
+      <div class="node node-blue">
+        <div class="node-name">PRO $79/mo</div>
+        <div class="node-detail">3 Apps · 50 Listings</div>
+      </div>
+      <div class="node node-gold">
+        <div class="node-name">EMPIRE $199/mo</div>
+        <div class="node-detail">All Apps · Unlimited</div>
+      </div>
+    </div>
+
+    <div class="section-label">Built Products</div>
+    <div class="node-grid node-grid-2">
+      <div class="node node-blue">
+        <span class="badge badge-built">BUILT</span>
+        <div class="emoji">🛒</div>
+        <div class="node-name">MarketForge</div>
+        <div class="node-detail">28 endpoints · Multi-channel</div>
+      </div>
+      <div class="node node-blue">
+        <span class="badge badge-built">BUILT</span>
+        <div class="emoji">🏗️</div>
+        <div class="node-name">ContractorForge</div>
+        <div class="node-detail">Multi-tenant SaaS</div>
+      </div>
+      <div class="node node-blue">
+        <span class="badge badge-built">BUILT</span>
+        <div class="emoji">🎧</div>
+        <div class="node-name">SupportForge</div>
+        <div class="node-detail">AI customer support</div>
+      </div>
+      <div class="node node-blue">
+        <span class="badge badge-built">BUILT</span>
+        <div class="emoji">📦</div>
+        <div class="node-name">ShipForge</div>
+        <div class="node-detail">EasyPost labels</div>
+      </div>
+      <div class="node node-blue">
+        <span class="badge badge-built">BUILT</span>
+        <div class="emoji">💎</div>
+        <div class="node-name">Empire Wallet</div>
+        <div class="node-detail">Solana · USDC · EMPIRE</div>
+      </div>
+      <div class="node node-blue">
+        <span class="badge badge-built">BUILT</span>
+        <div class="emoji">🏪</div>
+        <div class="node-name">MarketF</div>
+        <div class="node-detail">P2P marketplace · 8% fees</div>
+      </div>
+    </div>
+
+    <div class="section-label">Planned</div>
+    <div class="node-grid node-grid-4">
+      <div class="node node-gray"><div class="node-name">LeadForge</div></div>
+      <div class="node node-gray"><div class="node-name">ForgeCRM</div></div>
+      <div class="node node-gray"><div class="node-name">SocialForge</div></div>
+      <div class="node node-gray"><div class="node-name">RelistApp</div></div>
+    </div>
+
+    <div class="section-label">Zero to Hero Pipeline</div>
+    <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-top: 6px;">
+      <span style="font-size: 10px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); padding: 4px 8px; border-radius: 6px; color: #93c5fd;">Intake</span>
+      <span style="color: #555; font-size: 10px;">→</span>
+      <span style="font-size: 10px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); padding: 4px 8px; border-radius: 6px; color: #93c5fd;">LLC</span>
+      <span style="color: #555; font-size: 10px;">→</span>
+      <span style="font-size: 10px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); padding: 4px 8px; border-radius: 6px; color: #93c5fd;">Stripe</span>
+      <span style="color: #555; font-size: 10px;">→</span>
+      <span style="font-size: 10px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); padding: 4px 8px; border-radius: 6px; color: #93c5fd;">Social</span>
+      <span style="color: #555; font-size: 10px;">→</span>
+      <span style="font-size: 10px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); padding: 4px 8px; border-radius: 6px; color: #93c5fd;">Tools</span>
+      <span style="color: #555; font-size: 10px;">→</span>
+      <span style="font-size: 10px; background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); padding: 4px 8px; border-radius: 6px; color: #93c5fd;">Bot</span>
+      <span style="color: #555; font-size: 10px;">→</span>
+      <span style="font-size: 10px; background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); padding: 4px 8px; border-radius: 6px; color: #22C55E; font-weight: 600;">HERO 🚀</span>
+    </div>
+  </div>
+
+  <!-- ===== LAYER 3: PERSONAL ===== -->
+  <div class="layer layer-personal">
+    <div class="layer-label" style="color: #EAB308;">
+      <div class="pip" style="background: #EAB308;"></div>
+      PERSONAL PROJECTS — Side Ventures
+    </div>
+    <div class="node-grid node-grid-4">
+      <div class="node node-yellow">
+        <span class="badge badge-planned">SPEC</span>
+        <div class="emoji">🎖️</div>
+        <div class="node-name">VeteranForge</div>
+        <div class="node-detail">VA telehealth</div>
+      </div>
+      <div class="node node-yellow">
+        <span class="badge badge-planned">FILES</span>
+        <div class="emoji">🧠</div>
+        <div class="node-name">AMP</div>
+        <div class="node-detail">Actitud Mental Positiva</div>
+      </div>
+      <div class="node node-yellow">
+        <span class="badge badge-planned">SPEC</span>
+        <div class="emoji">🏢</div>
+        <div class="node-name">LLCFactory</div>
+        <div class="node-detail">Business formation</div>
+      </div>
+      <div class="node node-yellow">
+        <span class="badge badge-planned">IDEA</span>
+        <div class="emoji">💾</div>
+        <div class="node-name">RecoveryForge</div>
+        <div class="node-detail">AI file recovery</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LAYER 4: INFRASTRUCTURE ===== -->
+  <div class="layer layer-infra">
+    <div class="layer-label" style="color: #888;">
+      <div class="pip" style="background: #666;"></div>
+      INFRASTRUCTURE — What Powers Everything
+    </div>
+    <div class="node-grid node-grid-4">
+      <div class="node node-gold">
+        <div class="emoji">🖥️</div>
+        <div class="node-name">Empire Dell</div>
+        <div class="node-detail">Xeon 10c/20t · 32GB<br/>Precision 5810</div>
+      </div>
+      <div class="node node-purple">
+        <div class="emoji">🤖</div>
+        <div class="node-name">xAI Grok</div>
+        <div class="node-detail">Primary AI<br/>Chat + Vision</div>
+      </div>
+      <div class="node node-purple">
+        <div class="emoji">🧠</div>
+        <div class="node-name">Claude API</div>
+        <div class="node-detail">Secondary AI<br/>Fallback</div>
+      </div>
+      <div class="node node-green">
+        <div class="emoji">📱</div>
+        <div class="node-name">Telegram</div>
+        <div class="node-detail">@Empire_Max_Bot<br/>Voice + Text</div>
+      </div>
+      <div class="node node-gray">
+        <div class="emoji">🐳</div>
+        <div class="node-name">Docker</div>
+        <div class="node-detail">32 containers<br/>ALL STOPPED</div>
+      </div>
+      <div class="node node-gray">
+        <div class="emoji">🔮</div>
+        <div class="node-name">Beelink</div>
+        <div class="node-detail">Future · Light modules<br/>Ships with bundles</div>
+      </div>
+      <div class="node node-green">
+        <div class="emoji">📂</div>
+        <div class="node-name">GitHub</div>
+        <div class="node-detail">r22gir/Empire<br/>main branch</div>
+      </div>
+      <div class="node node-green">
+        <div class="emoji">☁️</div>
+        <div class="node-name">Google Drive</div>
+        <div class="node-detail">Full backup<br/>rclone sync</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== LAYER 5: BROKEN ===== -->
+  <div class="layer layer-broken">
+    <div class="layer-label" style="color: #EF4444;">
+      <div class="pip" style="background: #EF4444;"></div>
+      FIX LIST — Priority Order
+    </div>
+    <div class="node-grid node-grid-3">
+      <div class="node node-red">
+        <div class="node-name">1. Launch Script</div>
+        <div class="node-detail">start-empire.sh broken</div>
+      </div>
+      <div class="node node-red">
+        <div class="node-name">2. AI Tools</div>
+        <div class="node-detail">6 WorkroomForge tools down</div>
+      </div>
+      <div class="node node-red">
+        <div class="node-name">3. Web Search</div>
+        <div class="node-detail">DDG blocked · Need Brave key</div>
+      </div>
+      <div class="node node-red">
+        <div class="node-name">4. Missing Packages</div>
+        <div class="node-detail">apscheduler · pytesseract</div>
+      </div>
+      <div class="node node-red">
+        <div class="node-name">5. TTS Voice</div>
+        <div class="node-detail">edge-tts installed · untested</div>
+      </div>
+      <div class="node node-red">
+        <div class="node-name">6. Docker</div>
+        <div class="node-detail">32 containers · no panel</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
