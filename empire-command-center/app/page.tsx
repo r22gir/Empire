@@ -21,6 +21,8 @@ import DashboardScreen from './components/screens/DashboardScreen';
 import WorkroomPage from './components/screens/WorkroomPage';
 import CraftForgePage from './components/screens/CraftForgePage';
 import PlatformPage from './components/screens/PlatformPage';
+import DesksScreen from './components/screens/DesksScreen';
+import InboxScreen from './components/screens/InboxScreen';
 
 export default function CommandCenter() {
   const [activeTab, setActiveTab] = useState<BusinessTab>('max');
@@ -28,6 +30,9 @@ export default function CommandCenter() {
   const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [clientView, setClientView] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const chat = useChat();
   const sys = useSystemData();
@@ -52,7 +57,7 @@ export default function CommandCenter() {
   }, []);
 
   const handleScreenChange = useCallback((screen: ScreenMode | string) => {
-    if (['chat', 'quote', 'docs', 'research', 'video', 'dashboard'].includes(screen)) {
+    if (['chat', 'quote', 'docs', 'research', 'video', 'dashboard', 'desks', 'inbox'].includes(screen)) {
       setActiveScreen(screen as ScreenMode);
     }
   }, []);
@@ -70,9 +75,7 @@ export default function CommandCenter() {
 
   const filteredConvs = history.filterByBusiness(activeTab);
 
-  // Determine which dashboard to render based on active business tab
   const renderCenterContent = () => {
-    // Business-specific dashboards when on dashboard screen
     if (activeScreen === 'dashboard') {
       switch (activeTab) {
         case 'workroom': return <WorkroomPage />;
@@ -81,31 +84,30 @@ export default function CommandCenter() {
         default: return <DashboardScreen activeTab={activeTab} />;
       }
     }
-
-    switch (activeScreen) {
-      case 'chat':
-        return (
-          <ChatScreen
-            messages={chat.messages}
-            isStreaming={chat.isStreaming}
-            streamingContent={chat.streamingContent}
-            streamingModel={chat.streamingModel}
-            onSend={handleSendMessage}
-            onStop={chat.stopStreaming}
-            onScreenChange={handleScreenChange}
-          />
-        );
-      case 'quote': return <QuoteReviewScreen />;
-      case 'docs': return <DocumentScreen />;
-      case 'research': return <ResearchScreen />;
-      case 'video': return <VideoCallScreen />;
-      default: return null;
+    if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
+    if (activeScreen === 'inbox') return <InboxScreen />;
+    if (activeScreen === 'chat') {
+      return (
+        <ChatScreen
+          messages={chat.messages}
+          isStreaming={chat.isStreaming}
+          streamingContent={chat.streamingContent}
+          streamingModel={chat.streamingModel}
+          onSend={handleSendMessage}
+          onStop={chat.stopStreaming}
+          onScreenChange={handleScreenChange}
+        />
+      );
     }
+    if (activeScreen === 'quote') return <QuoteReviewScreen />;
+    if (activeScreen === 'docs') return <DocumentScreen />;
+    if (activeScreen === 'research') return <ResearchScreen />;
+    if (activeScreen === 'video') return <VideoCallScreen />;
+    return null;
   };
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Client view banner */}
       {clientView && (
         <div className="bg-[#16a34a] text-white text-center py-2 text-xs font-bold tracking-widest flex items-center justify-center gap-3 shadow-[0_2px_8px_rgba(22,163,74,0.3)]">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
@@ -127,9 +129,13 @@ export default function CommandCenter() {
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <GlobalSidebar activeScreen={activeScreen} onScreenChange={handleScreenChange} />
+        <GlobalSidebar
+          activeScreen={activeScreen}
+          onScreenChange={handleScreenChange}
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+        />
 
-        {/* Hide conversation sidebar in client view */}
         {!clientView && (
           <ConversationSidebar
             activeTab={activeTab}
@@ -137,17 +143,23 @@ export default function CommandCenter() {
             activeConvId={activeConvId}
             onSelect={setActiveConvId}
             onNew={() => history.createConversation()}
+            collapsed={leftCollapsed}
+            onToggle={() => setLeftCollapsed(!leftCollapsed)}
           />
         )}
 
-        {/* Center Canvas */}
         <div className="flex-1 flex flex-col overflow-hidden bg-[#faf9f7]">
           {renderCenterContent()}
         </div>
 
-        {/* Hide right panel in client view */}
         {!clientView && (
-          <RightPanel desks={sys.desks} briefing={sys.briefing} systemStats={sys.systemStats} />
+          <RightPanel
+            desks={sys.desks}
+            briefing={sys.briefing}
+            systemStats={sys.systemStats}
+            collapsed={rightCollapsed}
+            onToggle={() => setRightCollapsed(!rightCollapsed)}
+          />
         )}
       </div>
 

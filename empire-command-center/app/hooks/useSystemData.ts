@@ -11,7 +11,7 @@ export function useSystemData() {
 
   const fetchDesks = useCallback(async () => {
     try {
-      const res = await fetch(API + '/max/ai-desks');
+      const res = await fetch(API + '/max/desks');
       if (res.ok) {
         const data = await res.json();
         setDesks(data.desks || data || []);

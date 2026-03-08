@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { RightTab, Desk } from '../../lib/types';
-import { Cpu, HardDrive, Database, Clock } from 'lucide-react';
+import { Cpu, HardDrive, Database, Clock, PanelRightClose, PanelRight } from 'lucide-react';
 
 const TABS: { id: RightTab; label: string; badge?: string }[] = [
   { id: 'desks', label: 'Desks' },
@@ -14,17 +14,31 @@ interface Props {
   desks: Desk[];
   briefing: string;
   systemStats?: any;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
-export default function RightPanel({ desks, briefing, systemStats }: Props) {
+export default function RightPanel({ desks, briefing, systemStats, collapsed, onToggle }: Props) {
   const [activeTab, setActiveTab] = useState<RightTab>('desks');
   const [showAll, setShowAll] = useState(false);
 
   const displayDesks = showAll ? desks : desks.slice(0, 6);
 
+  if (collapsed) {
+    return (
+      <aside className="w-[24px] bg-white border-l border-[#e5e0d8] flex items-start justify-center pt-2 shrink-0 cursor-pointer hover:bg-[#f5f3ef] transition-colors"
+        onClick={onToggle}>
+        <PanelRight size={14} className="text-[#aaa]" />
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-[300px] bg-white border-l border-[#e5e0d8] flex flex-col shrink-0">
       <div className="flex border-b border-[#ece8e1] px-1">
+        <button onClick={onToggle} className="px-1.5 py-2.5 text-[#ccc] hover:text-[#888] cursor-pointer" title="Collapse">
+          <PanelRightClose size={14} />
+        </button>
         {TABS.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
             className={`px-3 py-2.5 text-[12px] font-semibold cursor-pointer border-b-2 bg-transparent min-h-[42px] flex items-center gap-1 transition-colors

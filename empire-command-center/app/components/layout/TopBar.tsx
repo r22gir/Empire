@@ -1,7 +1,7 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
 import { BusinessTab } from '../../lib/types';
-import { MessageSquare, Video, Bell, Command, Eye, Globe } from 'lucide-react';
+import { MessageSquare, Video, Bell, Command, Eye, Globe, ChevronDown } from 'lucide-react';
 
 const TABS: { id: BusinessTab; label: string; dot: string; onClass: string }[] = [
   { id: 'max', label: 'MAX', dot: '#D4AF37', onClass: 'text-[#D4AF37] bg-[#2a2510]' },
@@ -9,6 +9,15 @@ const TABS: { id: BusinessTab; label: string; dot: string; onClass: string }[] =
   { id: 'craft', label: 'CraftForge', dot: '#EAB308', onClass: 'text-[#EAB308] bg-[#2a2510]' },
   { id: 'platform', label: 'Platform', dot: '#3B82F6', onClass: 'text-[#3B82F6] bg-[#0d1a2a]' },
 ];
+
+const MODELS = [
+  { id: 'grok-3-fast', label: 'xAI Grok', desc: 'Primary · Fast', color: '#D4AF37' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Anthropic · Balanced', color: '#7c3aed' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus', desc: 'Anthropic · Advanced', color: '#9333ea' },
+  { id: 'llama3.1:8b', label: 'Llama 3.1 (Ollama)', desc: 'Local · 8B', color: '#06b6d4' },
+  { id: 'auto', label: 'Auto', desc: 'Best available', color: '#16a34a' },
+];
+const MODEL_LABELS: Record<string, string> = Object.fromEntries(MODELS.map(m => [m.id, m.label]));
 
 interface Props {
   activeTab: BusinessTab;
@@ -21,8 +30,11 @@ interface Props {
 
 export default function TopBar({ activeTab, onTabChange, onVideoCall, onQuickSwitch, onClientView, services }: Props) {
   const [showNotifs, setShowNotifs] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+  const [selectedModel, setSelectedModel] = useState('grok-3-fast');
   const [lang, setLang] = useState('EN');
   const notifRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -46,6 +58,30 @@ export default function TopBar({ activeTab, onTabChange, onVideoCall, onQuickSwi
       ))}
 
       <div className="ml-auto flex items-center gap-1.5">
+        {/* Model selector */}
+        <div ref={modelRef} className="relative">
+          <button onClick={() => setShowModelPicker(!showModelPicker)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#444] bg-[#222] text-[11px] font-bold font-mono cursor-pointer min-h-[38px] hover:bg-[#333] transition-colors">
+            <span className="w-2 h-2 rounded-full bg-[#D4AF37]" />
+            <span className="text-[#D4AF37]">{MODEL_LABELS[selectedModel] || selectedModel}</span>
+            <ChevronDown size={12} className="text-[#666]" />
+          </button>
+          {showModelPicker && (
+            <div className="absolute top-[44px] right-0 w-[220px] bg-[#1a1a1a] border border-[#444] rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.4)] z-[200] overflow-hidden py-1">
+              {MODELS.map(m => (
+                <button key={m.id} onClick={() => { setSelectedModel(m.id); setShowModelPicker(false); }}
+                  className={`w-full text-left px-3 py-2.5 text-[11px] flex items-center gap-2 transition-colors ${selectedModel === m.id ? 'bg-[#333]' : 'hover:bg-[#252525]'}`}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: m.color }} />
+                  <div>
+                    <div className="font-bold" style={{ color: m.color }}>{m.label}</div>
+                    <div className="text-[9px] text-[#666]">{m.desc}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button onClick={onVideoCall} title="Video Call" className="tb-btn"><Video size={17} /></button>
 
         <div ref={notifRef} className="relative">

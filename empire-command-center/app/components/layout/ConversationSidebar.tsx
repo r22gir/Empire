@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { BusinessTab, Conversation } from '../../lib/types';
-import { Plus } from 'lucide-react';
+import { Plus, PanelLeftClose, PanelLeft } from 'lucide-react';
 
 const TAB_CONFIG: Record<BusinessTab, { label: string; color: string }> = {
   max: { label: 'ALL (God View)', color: '#D4AF37' },
@@ -23,9 +23,11 @@ interface Props {
   activeConvId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
-export default function ConversationSidebar({ activeTab, conversations, activeConvId, onSelect, onNew }: Props) {
+export default function ConversationSidebar({ activeTab, conversations, activeConvId, onSelect, onNew, collapsed, onToggle }: Props) {
   const [search, setSearch] = useState('');
   const config = TAB_CONFIG[activeTab];
 
@@ -49,11 +51,23 @@ export default function ConversationSidebar({ activeTab, conversations, activeCo
     groups.push({ key: activeTab, items: filtered });
   }
 
+  if (collapsed) {
+    return (
+      <aside className="w-[24px] bg-white border-r border-[#e5e0d8] flex items-start justify-center pt-2 shrink-0 cursor-pointer hover:bg-[#f5f3ef] transition-colors"
+        onClick={onToggle}>
+        <PanelLeft size={14} className="text-[#aaa]" />
+      </aside>
+    );
+  }
+
   return (
     <aside className="w-60 bg-white border-r border-[#e5e0d8] flex flex-col shrink-0">
-      <div className="px-3 py-2.5 border-b border-[#ece8e1] flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-[#1a1a1a]">
-          History · <span className="text-[10px]" style={{ color: config.color }}>{config.label}</span>
+      <div className="px-3 py-2.5 border-b border-[#ece8e1] flex items-center justify-between gap-1">
+        <button onClick={onToggle} className="text-[#ccc] hover:text-[#888] cursor-pointer shrink-0" title="Collapse">
+          <PanelLeftClose size={14} />
+        </button>
+        <h3 className="text-xs font-semibold text-[#1a1a1a] flex-1 min-w-0 truncate">
+          <span className="text-[10px]" style={{ color: config.color }}>{config.label}</span>
         </h3>
         <button onClick={onNew} className="bg-[#b8960c] text-white border-none px-3.5 py-2 rounded-lg text-[12px] font-bold cursor-pointer min-h-[38px] hover:bg-[#a08509] flex items-center gap-1.5 shadow-[0_2px_6px_rgba(184,150,12,0.25)] transition-all active:scale-95">
           <Plus size={14} strokeWidth={2.5} /> New
