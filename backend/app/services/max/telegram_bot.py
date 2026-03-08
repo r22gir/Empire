@@ -209,24 +209,9 @@ class TelegramBot:
     # ── Voice transcription ─────────────────────────────────────
 
     def _transcribe_audio(self, audio_path: Path) -> str:
-        """Transcribe audio using Whisper."""
-        try:
-            result = subprocess.run(
-                ["whisper", str(audio_path), "--model", "base", "--output_format", "txt",
-                 "--output_dir", str(audio_path.parent)],
-                capture_output=True, text=True, timeout=120,
-            )
-            out_file = audio_path.with_suffix(".txt")
-            if out_file.exists():
-                text = out_file.read_text().strip()
-                out_file.unlink(missing_ok=True)
-                return text
-            return result.stdout.strip() or "Could not transcribe audio."
-        except subprocess.TimeoutExpired:
-            return "[Transcription timed out]"
-        except Exception as e:
-            logger.error(f"Whisper error: {e}")
-            return f"[Transcription failed: {e}]"
+        """Transcribe audio using Groq Whisper API."""
+        from app.services.max.stt_service import stt_service
+        return stt_service.transcribe_sync(audio_path)
 
     # ── Download file from Telegram ─────────────────────────────
 

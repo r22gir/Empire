@@ -3,42 +3,35 @@ from fastapi.responses import JSONResponse
 import tempfile
 import os
 
+from app.services.max.stt_service import stt_service
+
 router = APIRouter()
 
-# Intentar cargar Whisper
-try:
-    import whisper
-    model = whisper.load_model("base")
-    WHISPER_OK = True
-    print("✅ Whisper cargado")
-except:
-    WHISPER_OK = False
-    model = None
-    print("⚠️ Whisper no disponible")
 
 @router.post("/transcribe")
 async def transcribe_audio(audio: UploadFile = File(...)):
-    if not WHISPER_OK:
-        raise HTTPException(status_code=503, detail="Whisper no instalado")
-    
+    if not stt_service.is_configured:
+        raise HTTPException(status_code=503, detail="STT not configured — set GROQ_API_KEY")
+
     contents = await audio.read()
     if len(contents) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Archivo muy grande (max 25MB)")
-    
+        raise HTTPException(status_code=413, detail="File too large (max 25MB)")
+
     suffix = os.path.splitext(audio.filename or ".webm")[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(contents)
         tmp_path = tmp.name
-    
+
     try:
-        result = model.transcribe(tmp_path, language="es", fp16=False)
-        return JSONResponse({"success": True, "text": result["text"]})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        text = await stt_service.transcribe(tmp_path)
+        if text.startswith("["):
+            raise HTTPException(status_code=500, detail=text)
+        return JSONResponse({"success": True, "text": text})
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
+
 @router.get("/transcribe/status")
 async def status():
-    return {"available": WHISPER_OK}
+    return {"available": stt_service.is_configured, "provider": "groq-whisper-large-v3-turbo"}

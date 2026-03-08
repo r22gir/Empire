@@ -87,29 +87,9 @@ class AIRouter:
         return path.suffix.lower() == '.pdf'
 
     def _transcribe_audio(self, path: Path) -> str:
-        """Transcribe audio using Whisper CLI. Caches result as .transcript.txt."""
-        transcript_path = path.with_suffix(path.suffix + '.transcript.txt')
-        if transcript_path.exists():
-            return transcript_path.read_text().strip()
-        try:
-            result = subprocess.run(
-                ['whisper', str(path), '--model', 'base', '--output_format', 'txt',
-                 '--output_dir', str(path.parent)],
-                capture_output=True, text=True, timeout=300
-            )
-            # Whisper saves as filename_without_ext.txt
-            whisper_out = path.with_suffix('.txt')
-            if whisper_out.exists():
-                transcript = whisper_out.read_text().strip()
-                # Rename to .transcript.txt to avoid conflicts
-                whisper_out.rename(transcript_path)
-                return transcript
-            return result.stdout.strip() or "Transcription produced no output."
-        except subprocess.TimeoutExpired:
-            return "[Transcription timed out — audio file may be too long]"
-        except Exception as e:
-            logger.error(f"Whisper transcription failed: {e}")
-            return f"[Transcription failed: {e}]"
+        """Transcribe audio using Groq Whisper API."""
+        from app.services.max.stt_service import stt_service
+        return stt_service.transcribe_sync(path)
 
     def _read_text_file(self, path: Path, max_chars: int = 50000) -> str:
         """Read text content from a file, truncating if too large."""

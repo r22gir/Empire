@@ -1,6 +1,6 @@
 'use client';
-import { useState, useRef, useEffect } from 'react';
-import { Paperclip, Mic, ArrowRight, Volume2 } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Paperclip, Mic, MicOff, ArrowRight, Volume2 } from 'lucide-react';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 
@@ -26,6 +26,8 @@ interface Props {
 export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,6 +68,37 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       if (data.status === 'success') setAttachedImage(data.filename);
     } catch { /* silent */ }
   };
+
+  const toggleRecording = useCallback(async () => {
+    if (recording) {
+      mediaRecorderRef.current?.stop();
+      setRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const fd = new FormData();
+        fd.append('audio', blob, 'recording.webm');
+        try {
+          const res = await fetch(API.replace('/api/v1', '') + '/api/transcribe', { method: 'POST', body: fd });
+          const data = await res.json();
+          if (data.success && data.text) {
+            setInput(prev => prev + (prev ? ' ' : '') + data.text);
+            textareaRef.current?.focus();
+          }
+        } catch { /* silent */ }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch { /* mic permission denied */ }
+  }, [recording]);
 
   const playTTS = async (text: string) => {
     try {
@@ -155,7 +188,10 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       <div className="px-3.5 py-2.5 border-t border-[#ece8e1] bg-white shrink-0 flex gap-[7px] items-end">
         <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
         <button onClick={() => fileInputRef.current?.click()} className="chat-ib"><Paperclip size={17} /></button>
-        <button className="chat-ib"><Mic size={17} /></button>
+        <button onClick={toggleRecording}
+          className={`chat-ib ${recording ? '!bg-red-500 !border-red-500 !text-white animate-pulse' : ''}`}>
+          {recording ? <MicOff size={17} /> : <Mic size={17} />}
+        </button>
         {attachedImage && (
           <div className="px-2 py-1 bg-[#fdf8eb] border border-[#b8960c] rounded text-[10px] text-[#b8960c] flex items-center gap-1">
             📎 {attachedImage}
