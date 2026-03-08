@@ -13,6 +13,8 @@ from typing import Optional
 
 import httpx
 
+from .token_tracker import token_tracker
+
 logger = logging.getLogger("max.tts")
 
 # MAX voice config — one voice everywhere
@@ -73,6 +75,7 @@ class TTSService:
             audio_path = Path(tempfile.mktemp(suffix=suffix, dir=str(self.cache_dir)))
             audio_path.write_bytes(audio_data)
             logger.info(f"TTS generated via xAI (Rex): {len(audio_data)} bytes → {audio_path.name}")
+            token_tracker.log_fixed_cost("grok-tts", feature="tts", source="tts_service")
             return audio_path
 
         except Exception as e:
@@ -113,6 +116,7 @@ class TTSService:
             if not audio_data or len(audio_data) < 100:
                 return None
 
+            token_tracker.log_fixed_cost("grok-tts", feature="tts", source="tts_service")
             return audio_data
 
         except Exception as e:

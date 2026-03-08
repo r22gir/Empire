@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+from app.services.max.token_tracker import token_tracker
 
 logger = logging.getLogger("max.inpaint")
 
@@ -394,12 +395,14 @@ class InpaintService:
         if stability_key and mask_bytes:
             result = await self._try_stability(photo_bytes, mask_bytes, prompt, negative_prompt, stability_key)
             if result:
+                token_tracker.log_fixed_cost("stability-inpaint", feature="inpaint", source="inpaint_service")
                 return {"image": result, "provider": "stability", "cost": 0.0}
 
         # Fallback: Grok image generation (no inpainting, new image)
         if xai_key:
             result = await self._try_grok(fallback_prompt, xai_key)
             if result:
+                token_tracker.log_fixed_cost("grok-image-gen", feature="image_gen", source="inpaint_service")
                 return {"image": result, "provider": "grok", "cost": 0.0}
 
         return None
@@ -491,6 +494,7 @@ class InpaintService:
         """Generate aspirational mockup (NOT using customer photo)."""
         result = await self._try_grok(prompt, xai_key)
         if result:
+            token_tracker.log_fixed_cost("grok-image-gen", feature="mockup", source="inpaint_service")
             return {"image": result, "provider": "grok", "cost": 0.0}
         return None
 

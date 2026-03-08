@@ -198,7 +198,7 @@ export default function CostTrackerDesk() {
                 <XAxis dataKey="label" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }} />
                 <YAxis tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }} tickFormatter={v => `$${v}`} />
                 <Tooltip contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }}
-                  labelStyle={{ color: '#fff' }} formatter={(v: number) => [`$${v.toFixed(4)}`, 'Cost']} />
+                  labelStyle={{ color: '#fff' }} formatter={(v: unknown) => [`$${Number(v).toFixed(4)}`, 'Cost']} />
                 <Bar dataKey="cost" fill="#D4AF37" radius={[4,4,0,0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -241,10 +241,10 @@ export default function CostTrackerDesk() {
             <span className="text-sm text-white/60 flex items-center gap-1 mb-3"><PieChartIcon size={14} /> By Provider</span>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={byProvider} dataKey="cost" nameKey="provider" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}>
+                <Pie data={byProvider} dataKey="cost" nameKey="provider" cx="50%" cy="50%" outerRadius={70} label={((entry: Record<string, unknown>) => `${entry.name} ${(((entry.percent as number) ?? 0)*100).toFixed(0)}%`) as unknown as boolean}>
                   {byProvider.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
-                <Tooltip formatter={(v: number) => fmt(v)} />
+                <Tooltip formatter={(v: unknown) => fmt(Number(v))} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-1 mt-2">
@@ -262,10 +262,10 @@ export default function CostTrackerDesk() {
             <span className="text-sm text-white/60 flex items-center gap-1 mb-3"><Zap size={14} /> By Feature</span>
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
-                <Pie data={byFeature} dataKey="cost" nameKey="feature" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}>
+                <Pie data={byFeature} dataKey="cost" nameKey="feature" cx="50%" cy="50%" outerRadius={70} label={((entry: Record<string, unknown>) => `${entry.name} ${(((entry.percent as number) ?? 0)*100).toFixed(0)}%`) as unknown as boolean}>
                   {byFeature.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
-                <Tooltip formatter={(v: number) => fmt(v)} />
+                <Tooltip formatter={(v: unknown) => fmt(Number(v))} />
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-1 mt-2">
@@ -286,7 +286,7 @@ export default function CostTrackerDesk() {
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                 <XAxis type="number" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} tickFormatter={v => `$${v}`} />
                 <YAxis type="category" dataKey="business" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} width={80} />
-                <Tooltip formatter={(v: number) => fmt(v)} contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
+                <Tooltip formatter={(v: unknown) => fmt(Number(v))} contentStyle={{ background: '#1a1a2e', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8 }} />
                 <Bar dataKey="cost" fill="#8B5CF6" radius={[0,4,4,0]} />
               </BarChart>
             </ResponsiveContainer>

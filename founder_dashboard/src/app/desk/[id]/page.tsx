@@ -16,6 +16,7 @@ import WebsiteDesk from '@/components/desks/WebsiteDesk';
 import ITDesk from '@/components/desks/ITDesk';
 import LegalDesk from '@/components/desks/LegalDesk';
 import LabDesk from '@/components/desks/LabDesk';
+import CostTrackerDesk from '@/components/desks/CostTrackerDesk';
 import DeskChat from '@/components/desks/DeskChat';
 
 const DESK_COMPONENTS: Record<DeskId, React.ComponentType> = {
@@ -32,6 +33,7 @@ const DESK_COMPONENTS: Record<DeskId, React.ComponentType> = {
   it:          ITDesk,
   legal:       LegalDesk,
   lab:         LabDesk,
+  costs:       CostTrackerDesk,
 };
 
 export default function DeskPage({ params }: { params: Promise<{ id: string }> }) {

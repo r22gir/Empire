@@ -7,6 +7,8 @@ import os
 import logging
 from pathlib import Path
 
+from .token_tracker import token_tracker
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +65,7 @@ class STTService:
             if result and not result.startswith("["):
                 cache_path.write_text(result)
                 logger.info(f"Transcribed {audio_path.name}: {len(result)} chars")
+                token_tracker.log_fixed_cost("groq-whisper", feature="stt", source="stt_service")
             return result
         except Exception as e:
             logger.error(f"STT error: {e}")
