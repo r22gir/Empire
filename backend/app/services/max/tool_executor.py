@@ -1105,13 +1105,19 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     except Exception as e:
         return ToolResult(tool="send_quote_telegram", success=False, error=f"PDF generation failed: {e}")
 
-    # Return pdf_path — the Telegram handler detects it and sends via send_document.
-    # We do NOT send directly here to avoid duplicate delivery.
     caption = (
         f"\U0001f4cb <b>Estimate {quote_number}</b>\n"
         f"\U0001f464 {customer}\n"
         f"\U0001f4b0 Total: ${total:,.2f}"
     )
+
+    # Send directly to Telegram
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if telegram_bot.is_configured:
+            _run_async(telegram_bot.send_document(pdf_path, caption=caption))
+    except Exception as tg_err:
+        logger.warning(f"Telegram document send failed: {tg_err}")
 
     return ToolResult(tool="send_quote_telegram", success=True, result={
         "quote_number": quote_number, "customer": customer, "total": total,

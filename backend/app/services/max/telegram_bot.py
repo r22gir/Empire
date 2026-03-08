@@ -389,7 +389,7 @@ class TelegramBot:
 
         try:
             from telegram import Update
-            from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+            from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
         except ImportError:
             logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
             return
@@ -720,11 +720,25 @@ class TelegramBot:
             .get_updates_request(get_updates_request)
             .build()
         )
+        async def handle_callback(update, context: ContextTypes.DEFAULT_TYPE):
+            query = update.callback_query
+            await query.answer()
+            data = query.data or ""
+            if data == "monitor_details":
+                from app.services.max.monitor import max_monitor
+                report = await max_monitor.get_full_report()
+                await query.message.reply_text(report, parse_mode="HTML")
+            elif data == "monitor_dismiss":
+                await query.message.edit_reply_markup(reply_markup=None)
+            elif data == "ack_alert":
+                await query.message.edit_text(query.message.text + "\n\n✅ Acknowledged", parse_mode="HTML")
+
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("desks", cmd_desks))
         app.add_handler(CommandHandler("tasks", cmd_tasks))
         app.add_handler(CommandHandler("help", cmd_help))
+        app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
         app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
         app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
