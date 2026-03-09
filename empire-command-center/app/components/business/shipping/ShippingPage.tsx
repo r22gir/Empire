@@ -12,42 +12,39 @@ const SHIP_API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').re
 type ShipTab = 'history' | 'rates' | 'track';
 
 const SHIPPING_STATUS_MAP: Record<string, { bg: string; text: string }> = {
-  delivered: { bg: 'bg-green-50', text: 'text-green-700' },
-  in_transit: { bg: 'bg-blue-50', text: 'text-blue-700' },
-  shipped: { bg: 'bg-blue-50', text: 'text-blue-700' },
-  pending: { bg: 'bg-amber-50', text: 'text-amber-700' },
-  label_created: { bg: 'bg-purple-50', text: 'text-purple-700' },
-  cancelled: { bg: 'bg-gray-100', text: 'text-gray-500' },
-  exception: { bg: 'bg-red-50', text: 'text-red-700' },
+  delivered:     { bg: '#f0fdf4', text: '#22c55e' },
+  in_transit:    { bg: '#eff6ff', text: '#2563eb' },
+  shipped:       { bg: '#eff6ff', text: '#2563eb' },
+  pending:       { bg: '#fffbeb', text: '#d97706' },
+  label_created: { bg: '#faf5ff', text: '#7c3aed' },
+  cancelled:     { bg: '#f0ede8', text: '#999' },
+  exception:     { bg: '#fef2f2', text: '#dc2626' },
 };
 
 export default function ShippingPage() {
   const [tab, setTab] = useState<ShipTab>('history');
 
   return (
-    <div className="max-w-5xl mx-auto px-8 py-6">
+    <div className="max-w-5xl mx-auto" style={{ padding: '24px 36px' }}>
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-          <Truck size={20} className="text-blue-600" />
+        <div className="w-10 h-10 rounded-xl bg-[#eff6ff] flex items-center justify-center">
+          <Truck size={20} className="text-[#2563eb]" />
         </div>
         <div>
           <h1 className="text-xl font-bold text-[#1a1a1a]">Shipping</h1>
-          <p className="text-xs text-gray-400">Labels, tracking, and rate calculations</p>
+          <p className="text-[11px] text-[#999]">Labels, tracking, and rate calculations</p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-6 border-b border-[#ece8e1]">
+      <div className="flex items-center gap-1 mb-6 empire-card flat" style={{ padding: 4, width: 'fit-content' }}>
         {(['history', 'rates', 'track'] as ShipTab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2 text-xs font-medium capitalize transition-colors border-b-2 ${
-              tab === t
-                ? 'text-blue-600 border-blue-600'
-                : 'text-gray-400 border-transparent hover:text-gray-600'
-            }`}
+            className={`filter-tab ${tab === t ? 'active' : ''}`}
+            style={{ textTransform: 'capitalize' }}
           >
             {t === 'rates' ? 'Rate Calculator' : t === 'track' ? 'Track Package' : 'History'}
           </button>
@@ -89,7 +86,7 @@ function HistoryTab() {
     {
       key: 'ship_date', label: 'Ship Date', sortable: true,
       render: (row: any) => (
-        <span className="text-xs text-gray-500" suppressHydrationWarning>
+        <span className="text-xs text-[#999]" suppressHydrationWarning>
           {row.ship_date ? new Date(row.ship_date).toLocaleDateString() : '--'}
         </span>
       ),
@@ -97,7 +94,7 @@ function HistoryTab() {
     {
       key: 'delivery_date', label: 'Delivery Date', sortable: true,
       render: (row: any) => (
-        <span className="text-xs text-gray-500" suppressHydrationWarning>
+        <span className="text-xs text-[#999]" suppressHydrationWarning>
           {row.delivery_date ? new Date(row.delivery_date).toLocaleDateString() : '--'}
         </span>
       ),
@@ -105,7 +102,7 @@ function HistoryTab() {
     {
       key: 'cost', label: 'Cost', sortable: true,
       render: (row: any) => (
-        <span className="text-xs font-semibold text-gray-700">
+        <span className="text-xs font-bold text-[#b8960c]">
           {row.cost != null ? `$${Number(row.cost).toFixed(2)}` : '--'}
         </span>
       ),
@@ -204,86 +201,52 @@ function RateCalculatorTab() {
     }
   };
 
+  const inputClass = "w-full px-3.5 py-2.5 text-sm border border-[#ece8e0] rounded-[14px] bg-[#faf9f7] outline-none focus:border-[#b8960c] transition-colors";
+
   return (
     <div>
       {/* Toast */}
       {toast && (
-        <div className={`mb-4 px-4 py-2 rounded-lg text-sm font-medium ${toast.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+        <div className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-medium ${toast.includes('Failed') ? 'bg-[#fef2f2] text-red-700' : 'bg-[#f0fdf4] text-[#22c55e]'}`}>
           {toast}
         </div>
       )}
 
       {/* Form */}
-      <div className="bg-white border border-[#ece8e1] rounded-lg p-5 mb-6">
+      <div className="empire-card flat" style={{ padding: 20, marginBottom: 24 }}>
         <div className="grid grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Origin ZIP</label>
-            <input
-              type="text"
-              value={form.origin_zip}
-              onChange={e => handleChange('origin_zip', e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
-              placeholder="e.g. 90210"
-            />
+            <label className="section-label" style={{ fontSize: 10 }}>Origin ZIP</label>
+            <input type="text" value={form.origin_zip} onChange={e => handleChange('origin_zip', e.target.value)} className={inputClass} placeholder="e.g. 90210" />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Destination ZIP</label>
-            <input
-              type="text"
-              value={form.destination_zip}
-              onChange={e => handleChange('destination_zip', e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
-              placeholder="e.g. 10001"
-            />
+            <label className="section-label" style={{ fontSize: 10 }}>Destination ZIP</label>
+            <input type="text" value={form.destination_zip} onChange={e => handleChange('destination_zip', e.target.value)} className={inputClass} placeholder="e.g. 10001" />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Weight (lbs)</label>
-            <input
-              type="number"
-              value={form.weight}
-              onChange={e => handleChange('weight', e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
-              placeholder="e.g. 5"
-            />
+            <label className="section-label" style={{ fontSize: 10 }}>Weight (lbs)</label>
+            <input type="number" value={form.weight} onChange={e => handleChange('weight', e.target.value)} className={inputClass} placeholder="e.g. 5" />
           </div>
         </div>
         <div className="grid grid-cols-3 gap-4 mb-4">
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Length (in)</label>
-            <input
-              type="number"
-              value={form.length}
-              onChange={e => handleChange('length', e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
-              placeholder="Optional"
-            />
+            <label className="section-label" style={{ fontSize: 10 }}>Length (in)</label>
+            <input type="number" value={form.length} onChange={e => handleChange('length', e.target.value)} className={inputClass} placeholder="Optional" />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Width (in)</label>
-            <input
-              type="number"
-              value={form.width}
-              onChange={e => handleChange('width', e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
-              placeholder="Optional"
-            />
+            <label className="section-label" style={{ fontSize: 10 }}>Width (in)</label>
+            <input type="number" value={form.width} onChange={e => handleChange('width', e.target.value)} className={inputClass} placeholder="Optional" />
           </div>
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Height (in)</label>
-            <input
-              type="number"
-              value={form.height}
-              onChange={e => handleChange('height', e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
-              placeholder="Optional"
-            />
+            <label className="section-label" style={{ fontSize: 10 }}>Height (in)</label>
+            <input type="number" value={form.height} onChange={e => handleChange('height', e.target.value)} className={inputClass} placeholder="Optional" />
           </div>
         </div>
         {error && <p className="text-xs text-red-600 mb-3">{error}</p>}
         <button
           onClick={getRates}
           disabled={loading}
-          className="flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-[#b8960c] rounded-lg hover:bg-[#a68500] disabled:opacity-50 transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-[#b8960c] rounded-xl hover:bg-[#a68500] disabled:opacity-50 transition-colors cursor-pointer"
         >
           {loading ? <Loader2 size={14} className="animate-spin" /> : <DollarSign size={14} />}
           {loading ? 'Getting Rates...' : 'Get Rates'}
@@ -294,21 +257,21 @@ function RateCalculatorTab() {
       {rates.length > 0 && (
         <div className="grid grid-cols-2 gap-4">
           {rates.map((rate, i) => (
-            <div key={i} className="bg-white border border-[#ece8e1] rounded-lg p-4 hover:border-[#b8960c] transition-colors">
-              <div className="flex items-center justify-between mb-2">
+            <div key={i} className="empire-card" style={{ padding: 20 }}>
+              <div className="flex items-center justify-between mb-3">
                 <div>
                   <div className="text-sm font-bold text-[#1a1a1a]">{rate.carrier || 'Carrier'}</div>
-                  <div className="text-xs text-gray-500">{rate.service || 'Standard'}</div>
+                  <div className="text-[11px] text-[#999]">{rate.service || 'Standard'}</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-bold text-[#b8960c]">${Number(rate.rate || rate.price || 0).toFixed(2)}</div>
-                  <div className="text-[10px] text-gray-400">{rate.estimated_days || rate.days || '?'} days</div>
+                  <div className="kpi-value gold">${Number(rate.rate || rate.price || 0).toFixed(2)}</div>
+                  <div className="text-[11px] text-[#999]">{rate.estimated_days || rate.days || '?'} days</div>
                 </div>
               </div>
               <button
                 onClick={() => createLabel(rate)}
                 disabled={creating === (rate.rate_id || rate.id || JSON.stringify(rate))}
-                className="w-full mt-2 px-3 py-2 text-xs font-medium text-white bg-[#16a34a] rounded-lg hover:bg-[#15803d] disabled:opacity-50 transition-colors"
+                className="w-full mt-1 px-3 py-2.5 text-xs font-bold text-white bg-[#22c55e] rounded-xl hover:bg-[#16a34a] disabled:opacity-50 transition-colors cursor-pointer"
               >
                 {creating === (rate.rate_id || rate.id || JSON.stringify(rate)) ? 'Creating...' : 'Create Label'}
               </button>
@@ -348,21 +311,21 @@ function TrackPackageTab() {
   return (
     <div>
       {/* Search */}
-      <div className="bg-white border border-[#ece8e1] rounded-lg p-5 mb-6">
-        <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">Tracking Number</label>
+      <div className="empire-card flat" style={{ padding: 20, marginBottom: 24 }}>
+        <label className="section-label" style={{ fontSize: 10 }}>Tracking Number</label>
         <div className="flex items-center gap-3">
           <input
             type="text"
             value={trackingNumber}
             onChange={e => setTrackingNumber(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleTrack()}
-            className="flex-1 px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white outline-none focus:border-[#b8960c]"
+            className="flex-1 px-3.5 py-2.5 text-sm border border-[#ece8e0] rounded-[14px] bg-[#faf9f7] outline-none focus:border-[#b8960c] transition-colors"
             placeholder="Enter tracking number..."
           />
           <button
             onClick={handleTrack}
             disabled={tracking || !trackingNumber.trim()}
-            className="flex items-center gap-2 px-5 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-[#2563eb] rounded-xl hover:bg-[#1d4ed8] disabled:opacity-50 transition-colors cursor-pointer"
           >
             {tracking ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
             Track
@@ -380,22 +343,22 @@ function TrackPackageTab() {
             description="This tracking number has no events yet."
           />
         ) : (
-          <div className="bg-white border border-[#ece8e1] rounded-lg p-5">
+          <div className="empire-card flat" style={{ padding: 20 }}>
             <div className="relative pl-6">
               {/* Vertical line */}
-              <div className="absolute left-[9px] top-2 bottom-2 w-px bg-[#ece8e1]" />
+              <div className="absolute left-[9px] top-2 bottom-2 w-px bg-[#ece8e0]" />
               <div className="space-y-4">
                 {events.map((evt, i) => (
                   <div key={i} className="relative flex items-start gap-3">
                     <div className={`absolute left-[-15px] w-[18px] h-[18px] rounded-full border-2 flex items-center justify-center ${
-                      i === 0 ? 'bg-blue-600 border-blue-600' : 'bg-white border-[#ece8e1]'
+                      i === 0 ? 'bg-[#2563eb] border-[#2563eb]' : 'bg-[#faf9f7] border-[#ece8e0]'
                     }`}>
                       {i === 0 && <div className="w-2 h-2 rounded-full bg-white" />}
                     </div>
                     <div className="ml-2">
                       <div className="text-sm font-medium text-[#1a1a1a]">{evt.status || evt.description || 'Event'}</div>
-                      <div className="text-xs text-gray-500">{evt.location || ''}</div>
-                      <div className="text-[10px] text-gray-400 font-mono" suppressHydrationWarning>
+                      <div className="text-xs text-[#999]">{evt.location || ''}</div>
+                      <div className="text-[10px] text-[#bbb] font-mono" suppressHydrationWarning>
                         {evt.date || evt.timestamp ? new Date(evt.date || evt.timestamp).toLocaleString() : ''}
                       </div>
                     </div>

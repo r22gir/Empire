@@ -86,29 +86,29 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   const quoteColumns: Column[] = [
     { key: 'quote_number', label: 'Quote #', sortable: true },
     { key: 'description', label: 'Description' },
-    { key: 'amount', label: 'Amount', sortable: true, render: (r) => fmt(r.amount || r.total || 0) },
+    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="font-bold text-[#1a1a1a]">{fmt(r.amount || r.total || 0)}</span> },
     { key: 'date', label: 'Date', sortable: true, render: (r) => (
-      <span suppressHydrationWarning>{(r.date || r.created_at) ? new Date(r.date || r.created_at).toLocaleDateString() : '—'}</span>
+      <span className="text-xs text-[#999]" suppressHydrationWarning>{(r.date || r.created_at) ? new Date(r.date || r.created_at).toLocaleDateString() : '\u2014'}</span>
     )},
     { key: 'status', label: 'Status', render: (r) => <StatusBadge status={r.status || 'draft'} /> },
   ];
 
   const invoiceColumns: Column[] = [
     { key: 'invoice_number', label: 'Invoice #', sortable: true },
-    { key: 'amount', label: 'Amount', sortable: true, render: (r) => fmt(r.amount || 0) },
-    { key: 'balance', label: 'Balance', sortable: true, render: (r) => fmt(r.balance ?? r.amount ?? 0) },
+    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="font-bold">{fmt(r.amount || 0)}</span> },
+    { key: 'balance', label: 'Balance', sortable: true, render: (r) => <span className="font-bold text-[#b8960c]">{fmt(r.balance ?? r.amount ?? 0)}</span> },
     { key: 'due_date', label: 'Due Date', sortable: true, render: (r) => (
-      <span suppressHydrationWarning>{r.due_date ? new Date(r.due_date).toLocaleDateString() : '—'}</span>
+      <span className="text-xs text-[#999]" suppressHydrationWarning>{r.due_date ? new Date(r.due_date).toLocaleDateString() : '\u2014'}</span>
     )},
     { key: 'status', label: 'Status', render: (r) => <StatusBadge status={r.status || 'draft'} /> },
   ];
 
   const paymentColumns: Column[] = [
     { key: 'payment_date', label: 'Date', sortable: true, render: (r) => (
-      <span suppressHydrationWarning>{(r.payment_date || r.date) ? new Date(r.payment_date || r.date).toLocaleDateString() : '—'}</span>
+      <span className="text-xs text-[#999]" suppressHydrationWarning>{(r.payment_date || r.date) ? new Date(r.payment_date || r.date).toLocaleDateString() : '\u2014'}</span>
     )},
     { key: 'amount', label: 'Amount', sortable: true, render: (r) => (
-      <span className="text-green-600 font-medium">{fmt(r.amount || 0)}</span>
+      <span className="text-[#22c55e] font-bold">{fmt(r.amount || 0)}</span>
     )},
     { key: 'method', label: 'Method' },
     { key: 'reference', label: 'Reference' },
@@ -124,14 +124,14 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   if (loading) {
     return (
       <div className="bg-[#faf9f7] min-h-screen">
-        <div className="max-w-6xl mx-auto px-8 py-6">
+        <div className="max-w-6xl mx-auto" style={{ padding: '24px 36px' }}>
           <div className="animate-pulse space-y-4">
-            <div className="h-6 bg-gray-200 rounded w-48" />
-            <div className="h-4 bg-gray-200 rounded w-64" />
+            <div className="h-6 bg-[#ece8e0] rounded-xl w-48" />
+            <div className="h-4 bg-[#ece8e0] rounded-xl w-64" />
             <div className="grid grid-cols-4 gap-4">
-              {[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-gray-200 rounded-lg" />)}
+              {[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-[#ece8e0] rounded-[14px]" />)}
             </div>
-            <div className="h-64 bg-gray-200 rounded-lg" />
+            <div className="h-64 bg-[#ece8e0] rounded-[14px]" />
           </div>
         </div>
       </div>
@@ -141,14 +141,16 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   if (error || !customer) {
     return (
       <div className="bg-[#faf9f7] min-h-screen">
-        <div className="max-w-6xl mx-auto px-8 py-6">
+        <div className="max-w-6xl mx-auto" style={{ padding: '24px 36px' }}>
           {onBack && (
-            <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4">
+            <button onClick={onBack} className="flex items-center gap-1 text-sm text-[#999] hover:text-[#555] mb-4 cursor-pointer transition-colors">
               <ArrowLeft size={16} /> Back to Customers
             </button>
           )}
-          <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
-            <AlertCircle size={16} /> {error || 'Customer not found'}
+          <div className="empire-card flat" style={{ padding: 16, borderColor: '#fca5a5', background: '#fef2f2' }}>
+            <div className="flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle size={16} /> {error || 'Customer not found'}
+            </div>
           </div>
         </div>
       </div>
@@ -157,21 +159,21 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
   return (
     <div className="bg-[#faf9f7] min-h-screen">
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="max-w-6xl mx-auto" style={{ padding: '24px 36px' }}>
         {/* Back + Header */}
         {onBack && (
-          <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4">
+          <button onClick={onBack} className="flex items-center gap-1 text-sm text-[#999] hover:text-[#555] mb-4 cursor-pointer transition-colors">
             <ArrowLeft size={16} /> Back to Customers
           </button>
         )}
 
         <div className="flex items-start gap-4 mb-6">
-          <div className="w-12 h-12 rounded-full bg-[#b8960c]/10 flex items-center justify-center shrink-0">
+          <div className="w-12 h-12 rounded-full bg-[#fdf8eb] flex items-center justify-center shrink-0">
             <User size={24} className="text-[#b8960c]" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-800">{customer.name}</h1>
-            <div className="flex flex-wrap gap-4 mt-1 text-sm text-gray-500">
+            <h1 className="text-xl font-bold text-[#1a1a1a]">{customer.name}</h1>
+            <div className="flex flex-wrap gap-4 mt-1 text-sm text-[#999]">
               {customer.email && <span>{customer.email}</span>}
               {customer.phone && <span>{customer.phone}</span>}
               {customer.address && <span>{customer.address}</span>}
@@ -181,55 +183,30 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
         {/* Stats Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <KPICard
-            icon={<DollarSign size={20} />}
-            label="Total Revenue"
-            value={fmt(customer.total_revenue || 0)}
-            color="#16a34a"
-          />
-          <KPICard
-            icon={<FileText size={20} />}
-            label="Quotes"
-            value={String(customer.quote_count ?? 0)}
-            color="#2563eb"
-          />
-          <KPICard
-            icon={<FileText size={20} />}
-            label="Invoices"
-            value={String(customer.invoice_count ?? 0)}
-            color="#b8960c"
-          />
-          <KPICard
-            icon={<MessageSquare size={20} />}
-            label="Last Activity"
-            value={customer.last_activity ? new Date(customer.last_activity).toLocaleDateString() : 'N/A'}
-            color="#6b7280"
-          />
+          <KPICard icon={<DollarSign size={20} />} label="Total Revenue" value={fmt(customer.total_revenue || 0)} color="#22c55e" />
+          <KPICard icon={<FileText size={20} />} label="Quotes" value={String(customer.quote_count ?? 0)} color="#2563eb" />
+          <KPICard icon={<FileText size={20} />} label="Invoices" value={String(customer.invoice_count ?? 0)} color="#b8960c" />
+          <KPICard icon={<MessageSquare size={20} />} label="Last Activity" value={customer.last_activity ? new Date(customer.last_activity).toLocaleDateString() : 'N/A'} color="#6b7280" />
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-[#ece8e1] mb-4">
-          <div className="flex gap-1">
-            {TABS.map(t => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-                  tab === t.key
-                    ? 'border-[#b8960c] text-[#b8960c]'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {t.icon} {t.label}
-              </button>
-            ))}
-          </div>
+        <div className="flex items-center gap-1 mb-5 empire-card flat" style={{ padding: 4, width: 'fit-content' }}>
+          {TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`filter-tab ${tab === t.key ? 'active' : ''}`}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {t.icon} {t.label}
+            </button>
+          ))}
         </div>
 
         {/* Tab Content */}
         {tab === 'notes' ? (
-          <div className="bg-white border border-[#ece8e1] rounded-lg p-4">
-            <p className="text-sm text-gray-600 whitespace-pre-wrap">{customer.notes || 'No notes for this customer.'}</p>
+          <div className="empire-card flat" style={{ padding: 20 }}>
+            <p className="text-sm text-[#555] whitespace-pre-wrap">{customer.notes || 'No notes for this customer.'}</p>
           </div>
         ) : (
           tabData.length === 0 && !tabLoading ? (

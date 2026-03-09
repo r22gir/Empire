@@ -1,0 +1,288 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #faf9f7;
+  --panel: #ffffff;
+  --border: #ece8e0;
+  --text: #1a1a1a;
+  --text-secondary: #555;
+  --muted: #999;
+  --gold: #b8960c;
+  --gold-light: #fdf8eb;
+  --gold-border: #f0e6c0;
+  --green: #16a34a;
+  --blue: #2563eb;
+  --purple: #7c3aed;
+  --red: #dc2626;
+  --orange: #d97706;
+  --teal: #06b6d4;
+  --teal-light: #ecfeff;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.empire-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.empire-card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.status-pill.active { background: #dcfce7; color: #16a34a; }
+.status-pill.draft { background: #f3f4f6; color: #6b7280; }
+.status-pill.sold { background: #dbeafe; color: #2563eb; }
+.status-pill.archived { background: #f3f4f6; color: #999; }
+.status-pill.error { background: #fef2f2; color: #dc2626; }
+.status-pill.pending { background: #fff7ed; color: #d97706; }
+.status-pill.listed { background: #dcfce7; color: #16a34a; }
+.status-pill.delisted { background: #f3f4f6; color: #6b7280; }
+
+.filter-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.filter-tab:hover {
+  background: var(--gold-light);
+  color: var(--gold);
+}
+
+.filter-tab.active {
+  background: var(--gold-light);
+  color: var(--gold);
+  border-color: var(--gold-border);
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel);
+  transition: border-color 0.15s ease;
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.1);
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.kpi-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.kpi-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.empire-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.empire-table th {
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.empire-table td {
+  padding: 10px 12px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.empire-table tr:last-child td {
+  border-bottom: none;
+}
+
+.empire-table tr:hover td {
+  background: var(--gold-light);
+}
+
+/* Buttons */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--teal);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-primary:hover {
+  background: #0891b2;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.3);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary:hover {
+  border-color: var(--gold-border);
+  background: var(--gold-light);
+}
+
+.btn-gold {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: var(--gold);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-gold:hover {
+  background: #a0820a;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(184, 150, 12, 0.3);
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: white;
+  color: var(--red);
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-danger:hover {
+  background: #fef2f2;
+  border-color: var(--red);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Platform colors */
+.platform-ebay { color: #e53238; }
+.platform-etsy { color: #f1641e; }
+.platform-shopify { color: #96bf48; }
+.platform-poshmark { color: #7f0353; }
+.platform-mercari { color: #4dc4e0; }
+.platform-amazon { color: #ff9900; }
+.platform-facebook { color: #1877f2; }
+.platform-depop { color: #ff2300; }
+.platform-internal { color: var(--gold); }
+
+.platform-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.platform-dot.ebay { background: #e53238; }
+.platform-dot.etsy { background: #f1641e; }
+.platform-dot.shopify { background: #96bf48; }
+.platform-dot.poshmark { background: #7f0353; }
+.platform-dot.mercari { background: #4dc4e0; }
+.platform-dot.amazon { background: #ff9900; }
+.platform-dot.facebook { background: #1877f2; }
+.platform-dot.depop { background: #ff2300; }
+.platform-dot.internal { background: var(--gold); }
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}

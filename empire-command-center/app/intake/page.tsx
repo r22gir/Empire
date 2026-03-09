@@ -1,56 +1,57 @@
 'use client';
-import { Zap, ArrowRight, Ruler, Camera, MessageSquare } from 'lucide-react';
+import { Crown, ArrowRight, Ruler, Camera, MessageSquare } from 'lucide-react';
 import Link from 'next/link';
 
 export default function IntakeLanding() {
   return (
-    <div className="min-h-screen bg-[#faf9f7]">
-      <nav className="bg-white border-b border-[#e5e0d8]">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[#c9a84c] flex items-center justify-center">
-              <Zap size={16} className="text-white" />
+    <div className="min-h-screen bg-[#f5f2ed]">
+      <nav className="bg-[#1a1a1a] border-b border-[#2a2a2a]">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-12">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-[#b8960c] flex items-center justify-center">
+              <Crown size={13} className="text-white" />
             </div>
-            <span className="font-bold text-[14px]">Empire</span>
-            <span className="text-[10px] text-[#aaa] ml-1">Design Portal</span>
+            <span className="font-bold text-[13px] text-white tracking-wide">Empire</span>
+            <span className="text-[9px] text-[#888] font-medium tracking-wider uppercase">LuxeForge</span>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/intake/login" className="text-xs text-[#777] hover:text-[#c9a84c] transition-colors font-medium">Sign In</Link>
-            <Link href="/intake/signup" className="px-4 py-2 text-xs font-semibold bg-[#c9a84c] text-white rounded-lg hover:bg-[#b8960c] transition-colors">Get Started</Link>
+            <Link href="/intake/login" className="text-[11px] text-[#aaa] hover:text-[#b8960c] transition-colors font-medium">Sign In</Link>
+            <Link href="/intake/signup" className="px-4 py-1.5 text-[11px] font-semibold bg-[#b8960c] text-white rounded-lg hover:bg-[#a3850b] transition-colors">Get Started</Link>
           </div>
         </div>
       </nav>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
         <div className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#fdf8eb] border border-[#c9a84c]/20 text-[#c9a84c] text-xs font-medium mb-6">
-            <Zap size={12} /> Free for designers & clients
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#fdf8eb] border border-[#b8960c]/20 text-[#b8960c] text-[11px] font-semibold mb-6">
+            <Crown size={12} /> Free for designers & clients
           </div>
           <h1 className="text-3xl sm:text-5xl font-bold text-[#1a1a1a] mb-4 leading-tight">
             Submit Your Project.<br />Get a Quote in 24 Hours.
           </h1>
-          <p className="text-lg text-[#777] max-w-xl mx-auto mb-8">
+          <p className="text-base text-[#777] max-w-xl mx-auto mb-8">
             Upload photos, add measurements, describe your vision. We handle the rest — custom drapery, upholstery, blinds, and more.
           </p>
-          <Link href="/intake/signup" className="inline-flex items-center gap-2 px-8 py-4 text-base font-semibold bg-[#c9a84c] text-white rounded-xl hover:bg-[#b8960c] transition-all hover:shadow-lg group">
-            Start Your Project <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+          <Link href="/intake/signup" className="inline-flex items-center gap-2 px-8 py-3.5 text-sm font-bold bg-[#1a1a1a] text-white rounded-xl hover:bg-[#333] transition-all hover:shadow-lg group">
+            Start Your Project <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-16">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mt-16">
           {[
-            { icon: Camera, title: 'Upload Photos', desc: 'Snap photos of your rooms and windows. We analyze them with AI.', step: '1' },
-            { icon: Ruler, title: 'Add Measurements', desc: 'Enter window sizes or let us measure. Use a credit card for scale.', step: '2' },
-            { icon: MessageSquare, title: 'Get Your Quote', desc: '3-tier proposals with mockups. Choose your favorite and approve.', step: '3' },
+            { icon: Camera, title: 'Upload Photos', desc: 'Snap photos of your rooms and windows. We analyze them with AI.', step: '1', color: '#7c3aed' },
+            { icon: Ruler, title: 'Add Measurements', desc: 'Enter window sizes or let us measure. Use a credit card for scale.', step: '2', color: '#b8960c' },
+            { icon: MessageSquare, title: 'Get Your Quote', desc: '3-tier proposals with mockups. Choose your favorite and approve.', step: '3', color: '#16a34a' },
           ].map((item, i) => (
             <Link key={i} href="/intake/signup">
-              <div className="bg-white rounded-xl border border-[#e5e0d8] p-6 text-center hover:border-[#c9a84c] hover:shadow-[0_4px_16px_rgba(0,0,0,0.06)] transition-all cursor-pointer">
-                <div className="text-[10px] font-bold text-[#c9a84c] mb-3">STEP {item.step}</div>
-                <div className="w-12 h-12 rounded-xl bg-[#fdf8eb] flex items-center justify-center mx-auto mb-4">
-                  <item.icon size={22} className="text-[#c9a84c]" />
+              <div className="bg-[#faf9f7] rounded-[14px] border border-[#ece8e0] p-6 text-center hover:border-[#d5d0c8] hover:shadow-[0_2px_12px_rgba(0,0,0,0.04)] hover:-translate-y-[1px] transition-all cursor-pointer">
+                <div className="text-[9px] font-bold tracking-[1.5px] text-[#c5c0b8] uppercase mb-3">Step {item.step}</div>
+                <div className="w-11 h-11 rounded-xl flex items-center justify-center mx-auto mb-4"
+                  style={{ background: item.color + '12', border: `1px solid ${item.color}25` }}>
+                  <item.icon size={20} style={{ color: item.color }} />
                 </div>
-                <h3 className="font-semibold text-[#1a1a1a] mb-2">{item.title}</h3>
-                <p className="text-sm text-[#777]">{item.desc}</p>
+                <h3 className="font-semibold text-[14px] text-[#1a1a1a] mb-2">{item.title}</h3>
+                <p className="text-[12px] text-[#888] leading-relaxed">{item.desc}</p>
               </div>
             </Link>
           ))}

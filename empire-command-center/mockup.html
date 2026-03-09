@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Empire Command Center — Multi-Page Mockup</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #f5f2ed; color: #1a1a1a; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  .card {
+    background: #faf9f7;
+    border: 1px solid #ece8e0;
+    border-radius: 14px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .card:hover {
+    border-color: #d5d0c8;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+    transform: translateY(-1px);
+  }
+  .card.active {
+    background: #fdf8eb;
+    border-color: #d4b84a;
+    box-shadow: 0 2px 12px rgba(184,150,12,0.08);
+  }
+  .card.flat { cursor: default; transform: none; }
+  .card.flat:hover { transform: none; }
+  .card-title { font-size: 13px; font-weight: 600; color: #1a1a1a; }
+  .card-sub { font-size: 11px; color: #999; margin-top: 3px; }
+
+  /* TOP BAR */
+  .topbar {
+    height: 56px; background: #fff; border-bottom: 1px solid #ece8e0;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 24px; flex-shrink: 0;
+  }
+  .topbar-logo { font-size: 16px; font-weight: 700; letter-spacing: 3px; color: #1a1a1a; }
+  .topbar-logo span { color: #b8960c; }
+  .topbar-search {
+    display: flex; align-items: center; gap: 8px; background: #f5f3ef;
+    border: 1px solid #ece8e0; border-radius: 14px; padding: 10px 20px; width: 320px; color: #bbb; font-size: 13px;
+  }
+  .topbar-right { display: flex; align-items: center; gap: 14px; }
+  .topbar-icon-btn {
+    width: 36px; height: 36px; border-radius: 12px; background: #f5f3ef;
+    border: 1px solid #ece8e0; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 14px; color: #888; transition: all 0.2s;
+  }
+  .topbar-icon-btn:hover { border-color: #d5d0c8; color: #555; }
+  .topbar-avatar {
+    width: 36px; height: 36px; border-radius: 12px; background: #b8960c; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  }
+
+  /* PAGE SWITCHER — floating bar at top */
+  .page-switcher {
+    display: flex; gap: 4px; padding: 10px 24px; background: #f5f2ed; flex-shrink: 0;
+  }
+  .page-tab {
+    padding: 8px 18px; border-radius: 12px; font-size: 12px; font-weight: 600;
+    color: #999; background: #fff; border: 1px solid #ece8e0; cursor: pointer; transition: all 0.15s;
+  }
+  .page-tab:hover { color: #555; border-color: #d5d0c8; }
+  .page-tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+  .main { flex: 1; display: flex; overflow: hidden; }
+
+  /* LEFT NAV */
+  .nav {
+    width: 160px; background: #fff; border-right: 1px solid #ece8e0;
+    display: flex; flex-direction: column; padding: 20px 12px; gap: 4px; overflow-y: auto; flex-shrink: 0;
+  }
+  .nav-label {
+    font-size: 9px; font-weight: 600; letter-spacing: 1.5px; color: #c5c0b8;
+    text-transform: uppercase; padding: 8px 12px 6px;
+  }
+  .nav-item {
+    display: flex; align-items: center; padding: 10px 12px; border-radius: 12px;
+    font-size: 13px; font-weight: 500; color: #777; cursor: pointer; transition: all 0.15s; border: 1px solid transparent;
+  }
+  .nav-item:hover { background: #faf9f7; border-color: #ece8e0; color: #1a1a1a; }
+  .nav-item.active { background: #fdf8eb; border-color: #d4b84a; color: #96750a; font-weight: 600; }
+  .nav-badge { margin-left: auto; background: #b8960c; color: #fff; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 8px; }
+  .nav-sep { height: 1px; background: #f0ede8; margin: 8px 12px; }
+
+  /* CENTER */
+  .center { flex: 1; display: flex; flex-direction: column; background: #f5f2ed; min-width: 0; overflow-y: auto; }
+
+  /* RIGHT */
+  .right {
+    width: 320px; background: #fff; border-left: 1px solid #ece8e0;
+    display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; padding: 20px 16px; gap: 20px;
+  }
+  .right-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .right-label { font-size: 10px; font-weight: 600; letter-spacing: 1.5px; color: #c5c0b8; text-transform: uppercase; }
+  .right-link { font-size: 11px; color: #b8960c; font-weight: 600; cursor: pointer; }
+  .right-stack { display: flex; flex-direction: column; gap: 8px; }
+  .mod-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .desk-row { display: flex; align-items: center; gap: 10px; }
+  .desk-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .desk-dot.on { background: #22c55e; }
+  .desk-dot.busy { background: #f59e0b; animation: pulse 2s infinite; }
+  .desk-dot.off { background: #ddd; }
+  @keyframes pulse { 0%,100%{opacity:1;}50%{opacity:0.4;} }
+  .desk-meta { flex: 1; min-width: 0; }
+  .desk-time { font-size: 10px; color: #ccc; font-weight: 500; }
+
+  .task-row { display: flex; align-items: center; gap: 10px; }
+  .task-check { width: 18px; height: 18px; border-radius: 8px; border: 2px solid #ddd; flex-shrink: 0; }
+  .task-check.done { background: #b8960c; border-color: #b8960c; }
+  .task-text { font-size: 13px; color: #555; }
+  .task-text.done { color: #ccc; text-decoration: line-through; }
+
+  /* ═══ CHAT STYLES ═══ */
+  .max-header { padding: 28px 36px 0; }
+  .max-title { font-size: 26px; font-weight: 300; letter-spacing: 6px; color: #1a1a1a; margin-bottom: 4px; }
+  .max-subtitle { font-size: 13px; color: #aaa; }
+  .max-chat { flex: 1; padding: 24px 36px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+  .chat-bubble { max-width: 75%; padding: 14px 18px; font-size: 14px; line-height: 1.65; border: 1px solid #ece8e0; border-radius: 14px; }
+  .chat-bubble.user { align-self: flex-end; background: #1a1a1a; border-color: #1a1a1a; color: #fff; border-bottom-right-radius: 6px; }
+  .chat-bubble.assistant { align-self: flex-start; background: #fff; color: #333; border-bottom-left-radius: 6px; }
+  .chat-bubble .meta { font-size: 10px; color: #aaa; margin-top: 8px; }
+  .chat-bubble.user .meta { color: rgba(255,255,255,0.45); }
+  .max-input-wrap { padding: 16px 36px 8px; }
+  .max-input {
+    display: flex; align-items: center; background: #fff; border: 1px solid #ece8e0;
+    border-radius: 14px; padding: 12px 16px; gap: 12px; transition: border-color 0.2s;
+  }
+  .max-input:focus-within { border-color: #b8960c; }
+  .max-input input { flex: 1; border: none; outline: none; font-size: 14px; font-family: 'Inter', sans-serif; color: #1a1a1a; background: transparent; }
+  .max-input input::placeholder { color: #ccc; }
+  .attach-btn {
+    width: 32px; height: 32px; border-radius: 10px; background: #f5f3ef; border: 1px solid #ece8e0;
+    color: #999; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .send-btn {
+    width: 36px; height: 36px; border-radius: 12px; background: #1a1a1a; border: none; color: #fff;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 15px; transition: background 0.15s;
+  }
+  .send-btn:hover { background: #b8960c; }
+  .quick-row { display: flex; gap: 8px; padding: 8px 36px 20px; flex-wrap: wrap; }
+  .quick-pill {
+    padding: 8px 16px; border-radius: 12px; font-size: 12px; font-weight: 500; color: #888;
+    background: #fff; border: 1px solid #ece8e0; cursor: pointer; transition: all 0.2s;
+  }
+  .quick-pill:hover { border-color: #d5d0c8; color: #1a1a1a; transform: translateY(-1px); }
+
+  /* ═══ PAGE-SPECIFIC CENTER STYLES ═══ */
+  .page-content { display: none; flex-direction: column; flex: 1; overflow-y: auto; }
+  .page-content.visible { display: flex; }
+
+  .section-header {
+    padding: 28px 36px 20px;
+  }
+  .section-title { font-size: 22px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+  .section-sub { font-size: 13px; color: #aaa; }
+
+  .content-body { padding: 0 36px 36px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* KPI row */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .kpi-card { text-align: center; padding: 20px 16px; }
+  .kpi-value { font-size: 28px; font-weight: 700; color: #1a1a1a; margin-bottom: 4px; }
+  .kpi-label { font-size: 11px; color: #999; font-weight: 500; }
+  .kpi-value.gold { color: #b8960c; }
+  .kpi-value.green { color: #16a34a; }
+  .kpi-value.red { color: #dc2626; }
+
+  /* Table */
+  .data-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  .data-table th {
+    text-align: left; padding: 12px 16px; font-size: 10px; font-weight: 600;
+    letter-spacing: 1px; color: #bbb; text-transform: uppercase; border-bottom: 1px solid #ece8e0;
+  }
+  .data-table td {
+    padding: 14px 16px; font-size: 13px; color: #555; border-bottom: 1px solid #f5f2ed;
+  }
+  .data-table tr:hover td { background: #faf9f7; }
+  .status-pill {
+    display: inline-block; padding: 4px 10px; border-radius: 8px; font-size: 11px; font-weight: 600;
+  }
+  .status-pill.open { background: #fdf8eb; color: #b8960c; }
+  .status-pill.paid { background: #f0fdf4; color: #16a34a; }
+  .status-pill.overdue { background: #fef2f2; color: #dc2626; }
+  .status-pill.draft { background: #f5f3ef; color: #888; }
+  .status-pill.transit { background: #eff6ff; color: #2563eb; }
+  .status-pill.delivered { background: #f0fdf4; color: #16a34a; }
+  .status-pill.active { background: #fdf8eb; color: #b8960c; }
+  .status-pill.vip { background: #faf5ff; color: #9333ea; }
+
+  /* Filter tabs */
+  .filter-row { display: flex; gap: 6px; margin-bottom: 4px; }
+  .filter-tab {
+    padding: 7px 14px; border-radius: 10px; font-size: 12px; font-weight: 500;
+    color: #999; background: #fff; border: 1px solid #ece8e0; cursor: pointer; transition: all 0.15s;
+  }
+  .filter-tab:hover { color: #555; border-color: #d5d0c8; }
+  .filter-tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+  /* Chart placeholder */
+  .chart-placeholder {
+    height: 200px; border-radius: 14px; background: #fff; border: 1px solid #ece8e0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    color: #ccc; position: relative; overflow: hidden;
+  }
+  .chart-bars {
+    display: flex; align-items: flex-end; gap: 8px; height: 120px; padding: 0 40px;
+  }
+  .chart-bar {
+    width: 32px; border-radius: 6px 6px 0 0; transition: height 0.3s;
+  }
+  .chart-bar.gold { background: #b8960c; }
+  .chart-bar.light { background: #ece8e0; }
+  .chart-bar.green { background: #22c55e; }
+  .chart-label { font-size: 10px; color: #bbb; margin-top: 4px; }
+
+  /* Costs specific */
+  .cost-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .cost-ring {
+    width: 100px; height: 100px; border-radius: 50%; margin: 0 auto 12px;
+    background: conic-gradient(#b8960c 0% 45%, #22c55e 45% 72%, #2563eb 72% 88%, #ece8e0 88% 100%);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cost-ring-inner {
+    width: 70px; height: 70px; border-radius: 50%; background: #faf9f7;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: #1a1a1a;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #666; margin-bottom: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 4px; flex-shrink: 0; }
+
+  /* Inventory grid */
+  .inv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .inv-card { padding: 18px; text-align: center; }
+  .inv-icon { font-size: 28px; margin-bottom: 8px; }
+  .inv-count { font-size: 22px; font-weight: 700; color: #1a1a1a; }
+  .inv-label { font-size: 11px; color: #999; margin-top: 2px; }
+
+  .bottombar {
+    height: 32px; background: #fff; border-top: 1px solid #ece8e0;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 24px;
+    font-size: 10px; color: #ccc; flex-shrink: 0;
+  }
+  .status-group { display: flex; gap: 18px; align-items: center; }
+  .status-item { display: flex; align-items: center; gap: 5px; }
+  .sdot { width: 5px; height: 5px; border-radius: 50%; background: #22c55e; }
+  .sdot.warn { background: #f59e0b; }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="topbar-logo"><span>E</span>MPIRE</div>
+  <div class="topbar-search">⌘K &nbsp; Search anything...</div>
+  <div class="topbar-right">
+    <div class="topbar-icon-btn">🔔</div>
+    <div class="topbar-icon-btn">⚙</div>
+    <div class="topbar-avatar">RG</div>
+  </div>
+</div>
+
+<!-- PAGE SWITCHER -->
+<div class="page-switcher">
+  <div class="page-tab active" onclick="switchPage('max')">MAX Chat</div>
+  <div class="page-tab" onclick="switchPage('quotes')">Quotes</div>
+  <div class="page-tab" onclick="switchPage('crm')">CRM</div>
+  <div class="page-tab" onclick="switchPage('shipping')">Shipping</div>
+  <div class="page-tab" onclick="switchPage('costs')">Costs & Tokens</div>
+  <div class="page-tab" onclick="switchPage('inventory')">Inventory</div>
+  <div class="page-tab" onclick="switchPage('craftforge')">CraftForge</div>
+</div>
+
+<div class="main">
+
+  <!-- LEFT NAV -->
+  <div class="nav">
+    <div class="nav-label">Command</div>
+    <div class="nav-item active" id="nav-owner">Owner's Desk</div>
+    <div class="nav-sep"></div>
+    <div class="nav-label">Businesses</div>
+    <div class="nav-item" id="nav-workroom">Workroom</div>
+    <div class="nav-item" id="nav-craft">CraftForge</div>
+    <div class="nav-item">SocialForge <span class="nav-badge">3</span></div>
+    <div class="nav-item">PlatformForge</div>
+    <div class="nav-item">OpenClaw</div>
+    <div class="nav-item">RecoveryForge</div>
+    <div class="nav-item">LuxeForge</div>
+    <div class="nav-sep"></div>
+    <div class="nav-label">Infrastructure</div>
+    <div class="nav-item">Hardware</div>
+    <div class="nav-item">System</div>
+    <div class="nav-item">Tokens & Costs</div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center">
+
+    <!-- ═══ PAGE: MAX CHAT ═══ -->
+    <div class="page-content visible" id="page-max">
+      <div class="max-header">
+        <div class="max-title">M A X</div>
+        <div class="max-subtitle">Your empire. One voice.</div>
+      </div>
+      <div class="max-chat">
+        <div class="chat-bubble user">Show me today's open quotes and any overdue invoices<div class="meta">2:38 PM</div></div>
+        <div class="chat-bubble assistant">You have <strong>3 open quotes</strong> totaling $14,200 and <strong>1 overdue invoice</strong> for $3,800 (Client: Meridian Design, 4 days past due).<br><br>Want me to send a payment reminder to Meridian, or open the quotes for review?<div class="meta">MAX · Grok · 1.2s</div></div>
+        <div class="chat-bubble user">Send the reminder and pull up the quotes<div class="meta">2:39 PM</div></div>
+        <div class="chat-bubble assistant">Done. Payment reminder sent to Meridian Design at accounting@meridian.com.<br><br>Opening your 3 open quotes in the Quotes module →<div class="meta">MAX · Claude · 0.8s</div></div>
+      </div>
+      <div class="max-input-wrap">
+        <div class="max-input">
+          <button class="attach-btn">📎</button>
+          <input type="text" placeholder="Message MAX..." />
+          <button class="send-btn">➤</button>
+        </div>
+      </div>
+      <div class="quick-row">
+        <div class="quick-pill">Mail</div>
+        <div class="quick-pill">Tasks</div>
+        <div class="quick-pill">Research</div>
+        <div class="quick-pill">Documents</div>
+        <div class="quick-pill">Calendar</div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: QUOTES ═══ -->
+    <div class="page-content" id="page-quotes">
+      <div class="section-header">
+        <div class="section-title">Quotes</div>
+        <div class="section-sub">Manage proposals and estimates across all businesses</div>
+      </div>
+      <div class="content-body">
+        <div class="kpi-row">
+          <div class="card flat"><div class="kpi-value gold">12</div><div class="kpi-label">Open Quotes</div></div>
+          <div class="card flat"><div class="kpi-value">$47,850</div><div class="kpi-label">Total Pipeline</div></div>
+          <div class="card flat"><div class="kpi-value green">68%</div><div class="kpi-label">Win Rate</div></div>
+          <div class="card flat"><div class="kpi-value">3.2d</div><div class="kpi-label">Avg Response</div></div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-tab active">All</div>
+          <div class="filter-tab">Open</div>
+          <div class="filter-tab">Sent</div>
+          <div class="filter-tab">Accepted</div>
+          <div class="filter-tab">Expired</div>
+        </div>
+        <div class="card flat" style="padding:0;overflow:hidden;">
+          <table class="data-table">
+            <thead><tr><th>Quote #</th><th>Client</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Q-1847</strong></td><td>Meridian Design Co.</td><td>$6,400</td><td><span class="status-pill open">Open</span></td><td>Mar 7</td></tr>
+              <tr><td><strong>Q-1846</strong></td><td>Bloom Interiors</td><td>$4,200</td><td><span class="status-pill open">Open</span></td><td>Mar 6</td></tr>
+              <tr><td><strong>Q-1845</strong></td><td>Hartwell & Sons</td><td>$3,600</td><td><span class="status-pill open">Open</span></td><td>Mar 6</td></tr>
+              <tr><td><strong>Q-1842</strong></td><td>Nova Architects</td><td>$8,900</td><td><span class="status-pill paid">Accepted</span></td><td>Mar 4</td></tr>
+              <tr><td><strong>Q-1839</strong></td><td>Lakeside Partners</td><td>$2,150</td><td><span class="status-pill overdue">Expired</span></td><td>Feb 28</td></tr>
+              <tr><td><strong>Q-1836</strong></td><td>Urban Workshop LLC</td><td>$5,700</td><td><span class="status-pill paid">Accepted</span></td><td>Feb 25</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: CRM ═══ -->
+    <div class="page-content" id="page-crm">
+      <div class="section-header">
+        <div class="section-title">Customers</div>
+        <div class="section-sub">Client relationships across the empire</div>
+      </div>
+      <div class="content-body">
+        <div class="kpi-row">
+          <div class="card flat"><div class="kpi-value">48</div><div class="kpi-label">Total Clients</div></div>
+          <div class="card flat"><div class="kpi-value gold">12</div><div class="kpi-label">Active Projects</div></div>
+          <div class="card flat"><div class="kpi-value green">$184k</div><div class="kpi-label">Lifetime Revenue</div></div>
+          <div class="card flat"><div class="kpi-value">4.8</div><div class="kpi-label">Avg Rating</div></div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-tab active">All</div>
+          <div class="filter-tab">VIP</div>
+          <div class="filter-tab">Active</div>
+          <div class="filter-tab">Leads</div>
+        </div>
+        <div class="card flat" style="padding:0;overflow:hidden;">
+          <table class="data-table">
+            <thead><tr><th>Client</th><th>Business</th><th>Quotes</th><th>Revenue</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>Meridian Design Co.</strong></td><td>Workroom</td><td>8</td><td>$32,400</td><td><span class="status-pill vip">VIP</span></td></tr>
+              <tr><td><strong>Bloom Interiors</strong></td><td>Workroom</td><td>5</td><td>$18,600</td><td><span class="status-pill active">Active</span></td></tr>
+              <tr><td><strong>Hartwell & Sons</strong></td><td>CraftForge</td><td>3</td><td>$12,800</td><td><span class="status-pill active">Active</span></td></tr>
+              <tr><td><strong>Nova Architects</strong></td><td>Workroom</td><td>6</td><td>$24,100</td><td><span class="status-pill vip">VIP</span></td></tr>
+              <tr><td><strong>GreenLeaf Studios</strong></td><td>SocialForge</td><td>2</td><td>$4,200</td><td><span class="status-pill draft">Lead</span></td></tr>
+              <tr><td><strong>Urban Workshop LLC</strong></td><td>CraftForge</td><td>4</td><td>$15,900</td><td><span class="status-pill active">Active</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: SHIPPING ═══ -->
+    <div class="page-content" id="page-shipping">
+      <div class="section-header">
+        <div class="section-title">Shipping</div>
+        <div class="section-sub">Track packages, manage deliveries</div>
+      </div>
+      <div class="content-body">
+        <div class="kpi-row">
+          <div class="card flat"><div class="kpi-value gold">5</div><div class="kpi-label">In Transit</div></div>
+          <div class="card flat"><div class="kpi-value green">23</div><div class="kpi-label">Delivered (30d)</div></div>
+          <div class="card flat"><div class="kpi-value">2.1d</div><div class="kpi-label">Avg Delivery</div></div>
+          <div class="card flat"><div class="kpi-value red">1</div><div class="kpi-label">Delayed</div></div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-tab active">All</div>
+          <div class="filter-tab">In Transit</div>
+          <div class="filter-tab">Delivered</div>
+          <div class="filter-tab">Delayed</div>
+        </div>
+        <div class="card flat" style="padding:0;overflow:hidden;">
+          <table class="data-table">
+            <thead><tr><th>Tracking</th><th>Client</th><th>Carrier</th><th>Status</th><th>ETA</th></tr></thead>
+            <tbody>
+              <tr><td><strong>EMP-4821</strong></td><td>Meridian Design</td><td>UPS Ground</td><td><span class="status-pill transit">In Transit</span></td><td>Mar 10</td></tr>
+              <tr><td><strong>EMP-4819</strong></td><td>Bloom Interiors</td><td>FedEx</td><td><span class="status-pill transit">In Transit</span></td><td>Mar 9</td></tr>
+              <tr><td><strong>EMP-4815</strong></td><td>Hartwell & Sons</td><td>UPS Ground</td><td><span class="status-pill overdue">Delayed</span></td><td>Mar 7</td></tr>
+              <tr><td><strong>EMP-4812</strong></td><td>Nova Architects</td><td>USPS Priority</td><td><span class="status-pill delivered">Delivered</span></td><td>Mar 5</td></tr>
+              <tr><td><strong>EMP-4808</strong></td><td>GreenLeaf Studios</td><td>FedEx</td><td><span class="status-pill delivered">Delivered</span></td><td>Mar 3</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: COSTS & TOKENS ═══ -->
+    <div class="page-content" id="page-costs">
+      <div class="section-header">
+        <div class="section-title">Costs & Token Usage</div>
+        <div class="section-sub">AI spend tracking across all providers</div>
+      </div>
+      <div class="content-body">
+        <div class="kpi-row">
+          <div class="card flat"><div class="kpi-value gold">$127.40</div><div class="kpi-label">This Month</div></div>
+          <div class="card flat"><div class="kpi-value">$4.18</div><div class="kpi-label">Today</div></div>
+          <div class="card flat"><div class="kpi-value">2,847</div><div class="kpi-label">API Calls (30d)</div></div>
+          <div class="card flat"><div class="kpi-value green">$200</div><div class="kpi-label">Monthly Budget</div></div>
+        </div>
+
+        <div class="cost-breakdown">
+          <div class="card flat" style="text-align:center;">
+            <div class="card-title" style="margin-bottom:16px;">Spend by Provider</div>
+            <div class="cost-ring"><div class="cost-ring-inner">$127</div></div>
+            <div style="text-align:left;padding-left:20px;">
+              <div class="legend-item"><div class="legend-dot" style="background:#b8960c;"></div>Grok — $57.20 (45%)</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#22c55e;"></div>Claude — $34.40 (27%)</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#2563eb;"></div>Ollama — $20.30 (16%)</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#ece8e0;"></div>Other — $15.50 (12%)</div>
+            </div>
+          </div>
+          <div class="card flat">
+            <div class="card-title" style="margin-bottom:16px;">Daily Trend (7 days)</div>
+            <div class="chart-bars">
+              <div style="text-align:center;"><div class="chart-bar gold" style="height:60px;"></div><div class="chart-label">Mon</div></div>
+              <div style="text-align:center;"><div class="chart-bar gold" style="height:45px;"></div><div class="chart-label">Tue</div></div>
+              <div style="text-align:center;"><div class="chart-bar gold" style="height:80px;"></div><div class="chart-label">Wed</div></div>
+              <div style="text-align:center;"><div class="chart-bar gold" style="height:55px;"></div><div class="chart-label">Thu</div></div>
+              <div style="text-align:center;"><div class="chart-bar gold" style="height:90px;"></div><div class="chart-label">Fri</div></div>
+              <div style="text-align:center;"><div class="chart-bar gold" style="height:35px;"></div><div class="chart-label">Sat</div></div>
+              <div style="text-align:center;"><div class="chart-bar light" style="height:20px;"></div><div class="chart-label">Sun</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card flat" style="padding:0;overflow:hidden;">
+          <table class="data-table">
+            <thead><tr><th>Time</th><th>Provider</th><th>Model</th><th>Tokens</th><th>Cost</th></tr></thead>
+            <tbody>
+              <tr><td>3:41 PM</td><td>xAI</td><td>Grok-2</td><td>1,240</td><td>$0.018</td></tr>
+              <tr><td>3:38 PM</td><td>Anthropic</td><td>Claude Opus</td><td>3,420</td><td>$0.082</td></tr>
+              <tr><td>2:55 PM</td><td>xAI</td><td>Grok-2</td><td>890</td><td>$0.012</td></tr>
+              <tr><td>2:40 PM</td><td>Anthropic</td><td>Claude Sonnet</td><td>2,100</td><td>$0.031</td></tr>
+              <tr><td>1:15 PM</td><td>Ollama</td><td>Llama 3.1</td><td>4,800</td><td>$0.000</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: INVENTORY ═══ -->
+    <div class="page-content" id="page-inventory">
+      <div class="section-header">
+        <div class="section-title">Inventory</div>
+        <div class="section-sub">Materials, products, and stock levels</div>
+      </div>
+      <div class="content-body">
+        <div class="kpi-row">
+          <div class="card flat"><div class="kpi-value">124</div><div class="kpi-label">Total Items</div></div>
+          <div class="card flat"><div class="kpi-value red">8</div><div class="kpi-label">Low Stock</div></div>
+          <div class="card flat"><div class="kpi-value gold">$18,420</div><div class="kpi-label">Total Value</div></div>
+          <div class="card flat"><div class="kpi-value green">3</div><div class="kpi-label">Incoming Orders</div></div>
+        </div>
+        <div class="inv-grid">
+          <div class="card flat inv-card"><div class="inv-icon">🪵</div><div class="inv-count">42</div><div class="inv-label">Raw Materials</div></div>
+          <div class="card flat inv-card"><div class="inv-icon">🔩</div><div class="inv-count">35</div><div class="inv-label">Hardware</div></div>
+          <div class="card flat inv-card"><div class="inv-icon">🎨</div><div class="inv-count">18</div><div class="inv-label">Finishes</div></div>
+          <div class="card flat inv-card"><div class="inv-icon">📦</div><div class="inv-count">14</div><div class="inv-label">Finished Goods</div></div>
+          <div class="card flat inv-card"><div class="inv-icon">🧰</div><div class="inv-count">9</div><div class="inv-label">Tools</div></div>
+          <div class="card flat inv-card"><div class="inv-icon">📐</div><div class="inv-count">6</div><div class="inv-label">Templates</div></div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-tab active">All</div>
+          <div class="filter-tab">Low Stock</div>
+          <div class="filter-tab">On Order</div>
+        </div>
+        <div class="card flat" style="padding:0;overflow:hidden;">
+          <table class="data-table">
+            <thead><tr><th>Item</th><th>Category</th><th>Qty</th><th>Min</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>White Oak 4/4</strong></td><td>Raw Materials</td><td>12 bf</td><td>20 bf</td><td><span class="status-pill overdue">Low</span></td></tr>
+              <tr><td><strong>Walnut 8/4</strong></td><td>Raw Materials</td><td>45 bf</td><td>15 bf</td><td><span class="status-pill paid">OK</span></td></tr>
+              <tr><td><strong>Brass Pulls — 4"</strong></td><td>Hardware</td><td>6</td><td>10</td><td><span class="status-pill overdue">Low</span></td></tr>
+              <tr><td><strong>Osmo Polyx Oil</strong></td><td>Finishes</td><td>3 qt</td><td>2 qt</td><td><span class="status-pill paid">OK</span></td></tr>
+              <tr><td><strong>Domino Tenons 8mm</strong></td><td>Hardware</td><td>240</td><td>100</td><td><span class="status-pill paid">OK</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ PAGE: CRAFTFORGE ═══ -->
+    <div class="page-content" id="page-craftforge">
+      <div class="section-header">
+        <div class="section-title">CraftForge</div>
+        <div class="section-sub">Design, fabrication, and project management</div>
+      </div>
+      <div class="content-body">
+        <div class="kpi-row">
+          <div class="card flat"><div class="kpi-value gold">6</div><div class="kpi-label">Active Jobs</div></div>
+          <div class="card flat"><div class="kpi-value">$28,400</div><div class="kpi-label">In Production</div></div>
+          <div class="card flat"><div class="kpi-value green">3</div><div class="kpi-label">Ready to Ship</div></div>
+          <div class="card flat"><div class="kpi-value">14d</div><div class="kpi-label">Avg Lead Time</div></div>
+        </div>
+        <div class="filter-row">
+          <div class="filter-tab active">Jobs</div>
+          <div class="filter-tab">Designs</div>
+          <div class="filter-tab">Materials</div>
+          <div class="filter-tab">Templates</div>
+        </div>
+        <div class="card flat" style="padding:0;overflow:hidden;">
+          <table class="data-table">
+            <thead><tr><th>Job</th><th>Client</th><th>Type</th><th>Due</th><th>Status</th></tr></thead>
+            <tbody>
+              <tr><td><strong>J-0247</strong></td><td>Meridian Design</td><td>Custom Table</td><td>Mar 15</td><td><span class="status-pill transit">In Progress</span></td></tr>
+              <tr><td><strong>J-0245</strong></td><td>Hartwell & Sons</td><td>Cabinet Set</td><td>Mar 18</td><td><span class="status-pill transit">In Progress</span></td></tr>
+              <tr><td><strong>J-0243</strong></td><td>Bloom Interiors</td><td>Shelving Unit</td><td>Mar 12</td><td><span class="status-pill open">Finishing</span></td></tr>
+              <tr><td><strong>J-0241</strong></td><td>Nova Architects</td><td>Reception Desk</td><td>Mar 10</td><td><span class="status-pill paid">Ready</span></td></tr>
+              <tr><td><strong>J-0238</strong></td><td>Urban Workshop</td><td>Workbench</td><td>Mar 8</td><td><span class="status-pill delivered">Shipped</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right">
+    <div>
+      <div class="right-header">
+        <div class="right-label">Active Desks</div>
+        <div class="right-link">Manage →</div>
+      </div>
+      <div class="right-stack">
+        <div class="card"><div class="desk-row"><div class="desk-dot on"></div><div class="desk-meta"><div class="card-title">Operations</div><div class="card-sub">Processing quote #1847</div></div><div class="desk-time">2:41</div></div></div>
+        <div class="card"><div class="desk-row"><div class="desk-dot busy"></div><div class="desk-meta"><div class="card-title">Finance</div><div class="card-sub">Syncing invoices</div></div><div class="desk-time">2:40</div></div></div>
+        <div class="card"><div class="desk-row"><div class="desk-dot off"></div><div class="desk-meta"><div class="card-title">CRM</div><div class="card-sub">Standing by</div></div></div></div>
+        <div class="card"><div class="desk-row"><div class="desk-dot off"></div><div class="desk-meta"><div class="card-title">Research</div><div class="card-sub">Standing by</div></div></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="right-header">
+        <div class="right-label">Tasks</div>
+        <div class="right-link">View all →</div>
+      </div>
+      <div class="right-stack">
+        <div class="card"><div class="task-row"><div class="task-check"></div><div class="task-text">Follow up with Client B</div></div></div>
+        <div class="card" style="opacity:0.55;"><div class="task-row"><div class="task-check done"></div><div class="task-text done">Send quote #1842</div></div></div>
+        <div class="card"><div class="task-row"><div class="task-check"></div><div class="task-text">Review inventory levels</div></div></div>
+        <div class="card"><div class="task-row"><div class="task-check"></div><div class="task-text">Schedule delivery Thu</div></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="right-header"><div class="right-label">Modules</div></div>
+      <div class="mod-grid">
+        <div class="card"><div class="card-title">Quotes</div><div class="card-sub">3 open</div></div>
+        <div class="card"><div class="card-title">Invoices</div><div class="card-sub">1 overdue</div></div>
+        <div class="card"><div class="card-title">CRM</div><div class="card-sub">48 contacts</div></div>
+        <div class="card"><div class="card-title">Inventory</div><div class="card-sub">124 items</div></div>
+        <div class="card"><div class="card-title">Shipping</div><div class="card-sub">2 in transit</div></div>
+        <div class="card"><div class="card-title">Tickets</div><div class="card-sub">5 open</div></div>
+        <div class="card"><div class="card-title">Costs</div><div class="card-sub">Token tracking</div></div>
+        <div class="card"><div class="card-title">Reports</div><div class="card-sub">Weekly ready</div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- BOTTOM BAR -->
+<div class="bottombar">
+  <div class="status-group">
+    <div class="status-item"><div class="sdot"></div> backend</div>
+    <div class="status-item"><div class="sdot"></div> db</div>
+    <div class="status-item"><div class="sdot"></div> grok</div>
+    <div class="status-item"><div class="sdot"></div> claude</div>
+    <div class="status-item"><div class="sdot warn"></div> ollama</div>
+  </div>
+  <div>3:41 PM</div>
+</div>
+
+<script>
+function switchPage(page) {
+  document.querySelectorAll('.page-content').forEach(el => el.classList.remove('visible'));
+  document.querySelectorAll('.page-tab').forEach(el => el.classList.remove('active'));
+  document.getElementById('page-' + page).classList.add('visible');
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

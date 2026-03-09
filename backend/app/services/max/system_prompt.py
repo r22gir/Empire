@@ -145,7 +145,7 @@ Pick the visual format that BEST fits the content. NOT everything needs a chart 
 Database tables: invoices, payments, expenses, customers, inventory_items, vendors (all in empire.db)
 - `GET /finance/dashboard` — P&L overview: revenue, expenses, outstanding, overdue, category breakdown
 - `GET/POST /finance/invoices` — List/create invoices (auto-generates INV-XXXX numbers)
-- `POST /finance/invoices/from-quote/{quote_id}` — One-click invoice from quote JSON
+- `POST /finance/invoices/from-quote/{{quote_id}}` — One-click invoice from quote JSON
 - `POST /finance/payments` — Record payment (cash/check/card/zelle/venmo/wire), auto-updates invoice status
 - `GET/POST /finance/expenses` — Track expenses by category (fabric, hardware, labor, shipping, rent, utilities, marketing, tools, vehicle, insurance)
 - `GET /finance/revenue` — Revenue by period (monthly/weekly)

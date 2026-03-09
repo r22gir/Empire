@@ -12,11 +12,11 @@ import StatusBadge from '../shared/StatusBadge';
 const STATUS_TABS = ['all', 'pending', 'scheduled', 'in_progress', 'completed'] as const;
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  pending:     { bg: 'bg-gray-100',   text: 'text-gray-600' },
-  scheduled:   { bg: 'bg-blue-50',    text: 'text-blue-700' },
-  in_progress: { bg: 'bg-amber-50',   text: 'text-amber-700' },
-  completed:   { bg: 'bg-green-50',   text: 'text-green-700' },
-  cancelled:   { bg: 'bg-red-50',     text: 'text-red-700' },
+  pending:     { bg: '#f0ede8', text: '#777' },
+  scheduled:   { bg: '#eff6ff', text: '#2563eb' },
+  in_progress: { bg: '#fffbeb', text: '#d97706' },
+  completed:   { bg: '#f0fdf4', text: '#22c55e' },
+  cancelled:   { bg: '#fef2f2', text: '#dc2626' },
 };
 
 export default function JobBoard() {
@@ -72,37 +72,46 @@ export default function JobBoard() {
   };
 
   const columns: Column[] = [
-    { key: 'title', label: 'Title', sortable: true, render: (row) => <span className="text-sm font-semibold text-[#1a1a1a]">{row.title || '--'}</span> },
+    { key: 'title', label: 'Title', sortable: true, render: (row) => <span className="text-sm font-bold text-[#1a1a1a]">{row.title || '--'}</span> },
     { key: 'customer_name', label: 'Customer', sortable: true },
     { key: 'type', label: 'Type', sortable: true, render: (row) => <span className="text-xs text-[#555] capitalize">{row.type || row.job_type || '--'}</span> },
     {
       key: 'priority', label: 'Priority', sortable: true,
       render: (row) => {
         const p = (row.priority || 'normal').toLowerCase();
-        const colors: Record<string, string> = { high: 'text-red-600 bg-red-50', urgent: 'text-red-700 bg-red-100', normal: 'text-gray-600 bg-gray-100', low: 'text-blue-600 bg-blue-50' };
-        return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${colors[p] || colors.normal}`}>{p}</span>;
+        const colorMap: Record<string, { bg: string; text: string }> = {
+          high: { bg: '#fef2f2', text: '#dc2626' },
+          urgent: { bg: '#fef2f2', text: '#dc2626' },
+          normal: { bg: '#f0ede8', text: '#777' },
+          low: { bg: '#eff6ff', text: '#2563eb' },
+        };
+        const c = colorMap[p] || colorMap.normal;
+        return <span className="status-pill capitalize" style={{ backgroundColor: c.bg, color: c.text }}>{p}</span>;
       },
     },
     { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status || 'pending'} colorMap={STATUS_COLORS} /> },
     {
       key: 'scheduled_date', label: 'Scheduled', sortable: true,
-      render: (row) => <span className="text-xs text-[#777]" suppressHydrationWarning>{row.scheduled_date ? new Date(row.scheduled_date).toLocaleDateString() : '--'}</span>,
+      render: (row) => <span className="text-xs text-[#999]" suppressHydrationWarning>{row.scheduled_date ? new Date(row.scheduled_date).toLocaleDateString() : '--'}</span>,
     },
     {
       key: 'due_date', label: 'Due Date', sortable: true,
-      render: (row) => <span className="text-xs text-[#777]" suppressHydrationWarning>{row.due_date ? new Date(row.due_date).toLocaleDateString() : '--'}</span>,
+      render: (row) => <span className="text-xs text-[#999]" suppressHydrationWarning>{row.due_date ? new Date(row.due_date).toLocaleDateString() : '--'}</span>,
     },
   ];
 
   return (
-    <div className="max-w-5xl mx-auto px-8 py-6">
+    <div className="max-w-5xl mx-auto" style={{ padding: '24px 36px' }}>
       <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-bold text-[#1a1a1a] flex items-center gap-2">
-          <ClipboardList size={20} className="text-[#16a34a]" /> Job Board
+        <h2 className="text-xl font-bold text-[#1a1a1a] flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-[#f0fdf4] flex items-center justify-center">
+            <ClipboardList size={18} className="text-[#22c55e]" />
+          </div>
+          Job Board
         </h2>
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-[#16a34a] rounded-lg hover:bg-[#15803d] transition-colors cursor-pointer"
+          className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-white bg-[#22c55e] rounded-xl hover:bg-[#16a34a] transition-colors cursor-pointer"
         >
           <Plus size={14} /> Create from Quote
         </button>
@@ -110,23 +119,20 @@ export default function JobBoard() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPICard icon={<ClipboardList size={18} />} label="Total Jobs" value={loading ? '...' : String(totalJobs)} color="#16a34a" />
+        <KPICard icon={<ClipboardList size={18} />} label="Total Jobs" value={loading ? '...' : String(totalJobs)} color="#22c55e" />
         <KPICard icon={<Clock size={18} />} label="Scheduled" value={loading ? '...' : String(scheduled)} color="#2563eb" />
         <KPICard icon={<Play size={18} />} label="In Progress" value={loading ? '...' : String(inProgress)} color="#d97706" />
-        <KPICard icon={<CheckCircle2 size={18} />} label="Completed" value={loading ? '...' : String(completed)} color="#16a34a" />
+        <KPICard icon={<CheckCircle2 size={18} />} label="Completed" value={loading ? '...' : String(completed)} color="#22c55e" />
       </div>
 
       {/* Status filter tabs */}
-      <div className="flex items-center gap-1 mb-4 bg-white border border-[#ece8e1] rounded-lg p-1 w-fit">
+      <div className="flex items-center gap-1 mb-5 empire-card flat" style={{ padding: 4, width: 'fit-content' }}>
         {STATUS_TABS.map(tab => (
           <button
             key={tab}
             onClick={() => setStatusFilter(tab)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer capitalize ${
-              statusFilter === tab
-                ? 'bg-[#16a34a] text-white'
-                : 'text-[#777] hover:bg-[#f5f3ef] hover:text-[#1a1a1a]'
-            }`}
+            className={`filter-tab ${statusFilter === tab ? 'active' : ''}`}
+            style={{ textTransform: 'capitalize' }}
           >
             {tab === 'in_progress' ? 'In Progress' : tab}
           </button>
@@ -147,34 +153,34 @@ export default function JobBoard() {
         const job = filtered.find(j => (j.id || j._id) === expandedId);
         if (!job) return null;
         return (
-          <div className="mt-2 bg-white border border-[#ece8e1] rounded-lg p-5 animate-in slide-in-from-top-2">
+          <div className="mt-3 empire-card flat" style={{ padding: 20 }}>
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-bold text-[#1a1a1a]">{job.title} - Details</h4>
-              <button onClick={() => setExpandedId(null)} className="text-[#999] hover:text-[#555] cursor-pointer">
+              <button onClick={() => setExpandedId(null)} className="text-[#bbb] hover:text-[#555] cursor-pointer transition-colors">
                 <X size={16} />
               </button>
             </div>
             <div className="grid grid-cols-2 gap-4 text-xs">
               <div>
-                <div className="text-[10px] font-bold text-[#999] uppercase mb-1">Notes</div>
-                <div className="text-[#555] p-2 bg-[#faf9f7] rounded border border-[#ece8e1] min-h-[40px]">{job.notes || 'No notes.'}</div>
+                <div className="section-label" style={{ fontSize: 10 }}>Notes</div>
+                <div className="text-[#555] p-3 bg-[#faf9f7] rounded-xl border border-[#ece8e0] min-h-[40px]">{job.notes || 'No notes.'}</div>
               </div>
               <div className="space-y-2">
-                <div className="flex justify-between p-2 bg-[#faf9f7] rounded border border-[#ece8e1]">
-                  <span className="text-[#777]">Hours Estimated</span>
+                <div className="flex justify-between p-3 bg-[#faf9f7] rounded-xl border border-[#ece8e0]">
+                  <span className="text-[#999]">Hours Estimated</span>
                   <span className="font-bold text-[#1a1a1a]">{job.estimated_hours ?? '--'}</span>
                 </div>
-                <div className="flex justify-between p-2 bg-[#faf9f7] rounded border border-[#ece8e1]">
-                  <span className="text-[#777]">Hours Logged</span>
+                <div className="flex justify-between p-3 bg-[#faf9f7] rounded-xl border border-[#ece8e0]">
+                  <span className="text-[#999]">Hours Logged</span>
                   <span className="font-bold text-[#1a1a1a]">{job.actual_hours ?? '--'}</span>
                 </div>
-                <div className="flex justify-between p-2 bg-[#faf9f7] rounded border border-[#ece8e1]">
-                  <span className="text-[#777]">Total Cost</span>
+                <div className="flex justify-between p-3 bg-[#faf9f7] rounded-xl border border-[#ece8e0]">
+                  <span className="text-[#999]">Total Cost</span>
                   <span className="font-bold text-[#b8960c]">{job.total_cost != null ? `$${Number(job.total_cost).toLocaleString()}` : '--'}</span>
                 </div>
                 {job.address && (
-                  <div className="flex justify-between p-2 bg-[#faf9f7] rounded border border-[#ece8e1]">
-                    <span className="text-[#777]">Address</span>
+                  <div className="flex justify-between p-3 bg-[#faf9f7] rounded-xl border border-[#ece8e0]">
+                    <span className="text-[#999]">Address</span>
                     <span className="font-medium text-[#555]">{job.address}</span>
                   </div>
                 )}
@@ -187,37 +193,37 @@ export default function JobBoard() {
       {/* Create from Quote Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-xl border border-[#e5e0d8] shadow-xl w-full max-w-sm p-6">
+          <div className="empire-card" style={{ padding: 24, width: '100%', maxWidth: 384, boxShadow: '0 20px 60px rgba(0,0,0,0.12)' }}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-bold text-[#1a1a1a]">Create Job from Quote</h3>
-              <button onClick={() => { setShowModal(false); setCreateError(''); }} className="text-[#999] hover:text-[#555] cursor-pointer">
+              <button onClick={() => { setShowModal(false); setCreateError(''); }} className="text-[#bbb] hover:text-[#555] cursor-pointer transition-colors">
                 <X size={18} />
               </button>
             </div>
             <div className="mb-4">
-              <label className="block text-xs font-medium text-[#555] mb-1">Quote ID</label>
+              <label className="section-label" style={{ fontSize: 10 }}>Quote ID</label>
               <input
                 type="text"
                 value={quoteId}
                 onChange={e => setQuoteId(e.target.value)}
                 placeholder="Enter quote ID..."
-                className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#16a34a]/30 focus:border-[#16a34a] transition-colors"
+                className="w-full px-3.5 py-2.5 text-sm border border-[#ece8e0] rounded-[14px] bg-[#faf9f7] text-[#1a1a1a] placeholder-[#bbb] focus:outline-none focus:border-[#22c55e] transition-colors"
               />
             </div>
             {createError && (
-              <div className="mb-3 flex items-center gap-2 p-2 rounded-lg bg-red-50 border border-red-200">
+              <div className="mb-3 flex items-center gap-2 p-3 rounded-xl" style={{ background: '#fef2f2', border: '1px solid #fca5a5' }}>
                 <AlertCircle size={14} className="text-red-500 shrink-0" />
                 <span className="text-xs text-red-600">{createError}</span>
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <button onClick={() => { setShowModal(false); setCreateError(''); }} className="px-3 py-2 text-xs font-medium text-[#555] border border-[#ece8e1] rounded-lg hover:bg-[#f5f3ef] transition-colors cursor-pointer">
+              <button onClick={() => { setShowModal(false); setCreateError(''); }} className="px-3.5 py-2.5 text-xs font-medium text-[#999] border border-[#ece8e0] rounded-xl hover:bg-[#faf9f7] transition-colors cursor-pointer">
                 Cancel
               </button>
               <button
                 onClick={handleCreateFromQuote}
                 disabled={creating || !quoteId.trim()}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-[#16a34a] rounded-lg hover:bg-[#15803d] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-white bg-[#22c55e] rounded-xl hover:bg-[#16a34a] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {creating && <Loader2 size={12} className="animate-spin" />}
                 Create Job

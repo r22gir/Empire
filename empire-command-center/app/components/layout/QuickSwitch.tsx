@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server } from 'lucide-react';
+import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle } from 'lucide-react';
 
 const SECTIONS = [
   { label: 'Chat', shortcut: 'C', screen: 'chat', icon: MessageSquare, color: '#b8960c' },
@@ -10,8 +10,9 @@ const SECTIONS = [
   { label: 'Research', shortcut: 'R', screen: 'research', icon: Globe, color: '#2563eb' },
   { label: 'Video Call', shortcut: 'V', screen: 'video', icon: Video, color: '#16a34a' },
   { label: 'Workroom', shortcut: 'W', screen: 'workroom-page', icon: Scissors, color: '#16a34a' },
-  { label: 'CraftForge', shortcut: 'G', screen: 'craft-page', icon: Hammer, color: '#ca8a04' },
+  { label: 'WoodCraft', shortcut: 'G', screen: 'craft-page', icon: Hammer, color: '#ca8a04' },
   { label: 'Platform', shortcut: 'P', screen: 'platform-page', icon: Server, color: '#2563eb' },
+  { label: 'Telegram', shortcut: 'T', screen: 'telegram', icon: MessageCircle, color: '#2563eb' },
 ];
 
 interface Props {

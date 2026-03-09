@@ -66,7 +66,18 @@ export default function FinanceDashboard() {
 
       if (dashRes.status === 'fulfilled' && dashRes.value.ok) {
         const data = await dashRes.value.json();
-        setDashboard(data);
+        setDashboard({
+          revenue_mtd: 0, revenue_trend: 0, expenses_mtd: 0, expenses_trend: 0,
+          net_profit: 0, profit_trend: 0, outstanding: 0,
+          aging: [
+            { label: '0-30 days', amount: 0 },
+            { label: '31-60 days', amount: 0 },
+            { label: '61-90 days', amount: 0 },
+            { label: '90+ days', amount: 0 },
+          ],
+          top_customers: [],
+          ...data,
+        });
       } else {
         setDashboard({
           revenue_mtd: 0, revenue_trend: 0, expenses_mtd: 0, expenses_trend: 0,
@@ -112,14 +123,14 @@ export default function FinanceDashboard() {
 
   const txnColumns: Column[] = [
     { key: 'date', label: 'Date', sortable: true, render: (r) => (
-      <span suppressHydrationWarning>{r.date ? new Date(r.date).toLocaleDateString() : '—'}</span>
+      <span suppressHydrationWarning>{r.date ? new Date(r.date).toLocaleDateString() : '\u2014'}</span>
     )},
     { key: 'description', label: 'Description', sortable: true },
     { key: 'type', label: 'Type', sortable: true, render: (r) => (
-      <StatusBadge status={r.type} colorMap={{ payment: { bg: 'bg-green-50', text: 'text-green-700' }, expense: { bg: 'bg-red-50', text: 'text-red-700' } }} />
+      <StatusBadge status={r.type} colorMap={{ payment: { bg: '#f0fdf4', text: '#22c55e' }, expense: { bg: '#fef2f2', text: '#dc2626' } }} />
     )},
     { key: 'amount', label: 'Amount', sortable: true, render: (r) => (
-      <span className={r.type === 'expense' ? 'text-red-600' : 'text-green-600'}>
+      <span className={r.type === 'expense' ? 'text-red-600 font-bold' : 'text-[#22c55e] font-bold'}>
         {r.type === 'expense' ? '-' : '+'}{fmt(r.amount)}
       </span>
     )},
@@ -127,27 +138,25 @@ export default function FinanceDashboard() {
   ];
 
   const d = dashboard;
-  const maxAging = d ? Math.max(...d.aging.map(a => a.amount), 1) : 1;
+  const maxAging = d?.aging?.length ? Math.max(...d.aging.map(a => a.amount), 1) : 1;
 
   return (
     <div className="bg-[#faf9f7] min-h-screen">
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="max-w-6xl mx-auto" style={{ padding: '24px 36px' }}>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <PieChart size={24} className="text-[#b8960c]" />
-            <h1 className="text-xl font-bold text-gray-800">Finance</h1>
+            <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
+              <PieChart size={20} className="text-[#b8960c]" />
+            </div>
+            <h1 className="text-xl font-bold text-[#1a1a1a]">Finance</h1>
           </div>
-          <div className="flex gap-1 bg-white border border-[#ece8e1] rounded-lg p-1">
+          <div className="flex gap-1 empire-card flat" style={{ padding: 4 }}>
             {DATE_RANGES.map(dr => (
               <button
                 key={dr.value}
                 onClick={() => setRange(dr.value)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  range === dr.value
-                    ? 'bg-[#b8960c] text-white'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                }`}
+                className={`filter-tab ${range === dr.value ? 'active' : ''}`}
               >
                 {dr.label}
               </button>
@@ -156,8 +165,10 @@ export default function FinanceDashboard() {
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
-            <AlertCircle size={16} /> {error}
+          <div className="mb-4 empire-card flat" style={{ padding: 12, borderColor: '#fca5a5', background: '#fef2f2' }}>
+            <div className="flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle size={16} /> {error}
+            </div>
           </div>
         )}
 
@@ -169,7 +180,7 @@ export default function FinanceDashboard() {
             value={loading ? '...' : fmt(d?.revenue_mtd ?? 0)}
             trend={d ? fmtTrend(d.revenue_trend) : undefined}
             trendUp={d ? d.revenue_trend >= 0 : undefined}
-            color="#16a34a"
+            color="#22c55e"
           />
           <KPICard
             icon={<ArrowDownCircle size={20} />}
@@ -196,30 +207,30 @@ export default function FinanceDashboard() {
         </div>
 
         {/* Accounts Receivable Aging */}
-        <div className="bg-white border border-[#ece8e1] rounded-lg p-4 mb-6">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">Accounts Receivable Aging</h2>
+        <div className="empire-card flat" style={{ padding: 20, marginBottom: 24 }}>
+          <div className="section-label">Accounts Receivable Aging</div>
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3, 4].map(i => (
-                <div key={i} className="h-6 bg-gray-100 rounded animate-pulse" />
+                <div key={i} className="h-6 bg-[#ece8e0] rounded-lg animate-pulse" />
               ))}
             </div>
           ) : (
             <div className="space-y-3">
               {(d?.aging ?? []).map((bucket) => (
                 <div key={bucket.label} className="flex items-center gap-3">
-                  <span className="text-xs text-gray-500 w-20 shrink-0">{bucket.label}</span>
-                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                  <span className="text-xs text-[#999] w-20 shrink-0">{bucket.label}</span>
+                  <div className="flex-1 bg-[#ece8e0] rounded-full h-5 overflow-hidden">
                     <div
                       className="h-full bg-[#b8960c] rounded-full transition-all duration-500 flex items-center justify-end pr-2"
                       style={{ width: `${Math.max((bucket.amount / maxAging) * 100, 2)}%` }}
                     >
                       {bucket.amount > 0 && (
-                        <span className="text-[10px] font-medium text-white whitespace-nowrap">{fmt(bucket.amount)}</span>
+                        <span className="text-[10px] font-bold text-white whitespace-nowrap">{fmt(bucket.amount)}</span>
                       )}
                     </div>
                   </div>
-                  <span className="text-xs font-medium text-gray-600 w-20 text-right">{fmt(bucket.amount)}</span>
+                  <span className="text-xs font-bold text-[#555] w-20 text-right">{fmt(bucket.amount)}</span>
                 </div>
               ))}
             </div>
@@ -229,30 +240,30 @@ export default function FinanceDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           {/* Recent Transactions */}
           <div className="lg:col-span-2">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Recent Transactions</h2>
+            <div className="section-label">Recent Transactions</div>
             <DataTable columns={txnColumns} data={transactions} loading={loading} emptyMessage="No recent transactions." />
           </div>
 
           {/* Revenue by Customer */}
           <div>
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Top Customers by Revenue</h2>
+            <div className="section-label">Top Customers by Revenue</div>
             {loading ? (
               <div className="space-y-2">
                 {[1, 2, 3, 4, 5].map(i => (
-                  <div key={i} className="h-10 bg-gray-100 rounded animate-pulse" />
+                  <div key={i} className="h-10 bg-[#ece8e0] rounded-xl animate-pulse" />
                 ))}
               </div>
             ) : (d?.top_customers ?? []).length === 0 ? (
               <EmptyState icon={<DollarSign size={32} />} title="No customer data" />
             ) : (
-              <div className="bg-white border border-[#ece8e1] rounded-lg divide-y divide-[#ece8e1]">
+              <div className="empire-card flat" style={{ padding: 0, overflow: 'hidden' }}>
                 {(d?.top_customers ?? []).slice(0, 5).map((c, i) => (
-                  <div key={c.name} className="flex items-center justify-between px-4 py-3">
+                  <div key={c.name} className="flex items-center justify-between" style={{ padding: '12px 20px', borderBottom: i < 4 ? '1px solid #ece8e0' : 'none' }}>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-400 w-5">{i + 1}</span>
-                      <span className="text-sm text-gray-700">{c.name}</span>
+                      <span className="text-xs font-bold text-[#bbb] w-5">{i + 1}</span>
+                      <span className="text-sm text-[#555]">{c.name}</span>
                     </div>
-                    <span className="text-sm font-semibold text-gray-800">{fmt(c.revenue)}</span>
+                    <span className="text-sm font-bold text-[#1a1a1a]">{fmt(c.revenue)}</span>
                   </div>
                 ))}
               </div>

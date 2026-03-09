@@ -11,14 +11,14 @@ interface EmptyStateProps {
 
 export default function EmptyState({ icon, title, description, action }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-4">
-      <div className="text-gray-300 mb-4">{icon}</div>
-      <h3 className="text-sm font-semibold text-gray-500 mb-1">{title}</h3>
-      {description && <p className="text-xs text-gray-400 mb-4 text-center max-w-xs">{description}</p>}
+    <div className="empire-card" style={{ padding: '48px 20px', textAlign: 'center' }}>
+      <div className="text-[#d8d3cb] mb-4 flex justify-center">{icon}</div>
+      <h3 className="text-sm font-semibold text-[#777] mb-1">{title}</h3>
+      {description && <p className="text-[11px] text-[#999] mb-5 max-w-xs mx-auto">{description}</p>}
       {action && (
         <button
           onClick={action.onClick}
-          className="px-4 py-2 text-xs font-medium text-white bg-[#b8960c] rounded-lg hover:bg-[#a68500] transition-colors"
+          className="px-4 py-2.5 text-xs font-bold text-white bg-[#b8960c] rounded-[10px] hover:bg-[#a68500] transition-colors cursor-pointer"
         >
           {action.label}
         </button>

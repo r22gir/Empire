@@ -59,8 +59,8 @@ export default function SystemReportScreen() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw size={32} className="text-[#b8960c] mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[#888]">Generating system report...</p>
+          <RefreshCw size={32} style={{ color: 'var(--gold)' }} className="mx-auto mb-3 animate-spin" />
+          <p style={{ fontSize: 14, color: 'var(--muted)' }}>Generating system report...</p>
         </div>
       </div>
     );
@@ -70,9 +70,10 @@ export default function SystemReportScreen() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center">
-          <XCircle size={32} className="text-red-400 mx-auto mb-3" />
-          <p className="text-sm text-[#888]">Failed to load report. Is the backend running?</p>
-          <button onClick={fetchReport} className="mt-3 px-4 py-2 bg-[#b8960c] text-white rounded-lg text-sm font-bold">
+          <XCircle size={32} style={{ color: 'var(--red)' }} className="mx-auto mb-3" />
+          <p style={{ fontSize: 14, color: 'var(--muted)' }}>Failed to load report. Is the backend running?</p>
+          <button onClick={fetchReport}
+            className="filter-tab active" style={{ marginTop: 12 }}>
             Retry
           </button>
         </div>
@@ -85,83 +86,88 @@ export default function SystemReportScreen() {
   const onlineServices = report.connectivity.filter(c => c.status === 'online').length;
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
+    <div className="flex-1 overflow-y-auto" style={{ padding: '28px 36px' }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-[#1a1a1a] flex items-center gap-2">
-            <Monitor size={24} className="text-[#b8960c]" />
+          <h1 className="flex items-center gap-2" style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)' }}>
+            <Monitor size={22} style={{ color: 'var(--gold)' }} />
             MAX System Report
           </h1>
-          <p className="text-xs text-[#999] mt-1" suppressHydrationWarning>
+          <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }} suppressHydrationWarning>
             Generated {new Date(report.generated_at).toLocaleString()}
-            {autoRefresh && <span className="ml-2 text-[#16a34a]">● Auto-refresh every 60s</span>}
+            {autoRefresh && <span style={{ marginLeft: 8, color: 'var(--green)' }}>● Auto-refresh every 60s</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setAutoRefresh(!autoRefresh)}
-            className={`px-3 py-2 rounded-lg text-xs font-bold border transition-all ${
-              autoRefresh ? 'bg-[#f0fdf4] border-[#bbf7d0] text-[#16a34a]' : 'bg-white border-[#ddd] text-[#999]'
-            }`}>
+            className="filter-tab"
+            style={autoRefresh ? { background: 'var(--green-bg)', color: '#16a34a', borderColor: '#bbf7d0' } : {}}>
             {autoRefresh ? '● Live' : '○ Paused'}
           </button>
           <button onClick={() => { setLoading(true); fetchReport(); }}
-            className="px-3 py-2 rounded-lg bg-[#b8960c] text-white text-xs font-bold flex items-center gap-1.5 hover:bg-[#a08509]">
+            className="filter-tab active"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <RefreshCw size={12} /> Refresh
           </button>
         </div>
       </div>
 
       {/* Quick Stats Bar */}
+      <div className="section-label" style={{ marginBottom: 10 }}>System Overview</div>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <StatCard icon={<Cpu size={18} />} label="CPU" value={`${report.system.cpu_percent || 0}%`}
-          color={report.system.cpu_percent > 80 ? '#dc2626' : '#16a34a'} />
+          color={report.system.cpu_percent > 80 ? 'var(--red)' : 'var(--green)'} />
         <StatCard icon={<HardDrive size={18} />} label="RAM" value={`${report.system.memory_percent || 0}%`}
-          color={report.system.memory_percent > 80 ? '#dc2626' : '#2563eb'} />
+          color={report.system.memory_percent > 80 ? 'var(--red)' : 'var(--blue)'} />
         <StatCard icon={<Database size={18} />} label="Disk" value={`${report.system.disk_percent || 0}%`}
-          color={report.system.disk_percent > 80 ? '#dc2626' : '#7c3aed'} />
+          color={report.system.disk_percent > 80 ? 'var(--red)' : 'var(--purple)'} />
         <StatCard icon={<Plug size={18} />} label="Connected" value={`${connectedModules}/${report.modules.length}`}
-          color="#16a34a" />
+          color="var(--green)" />
         <StatCard icon={<Clock size={18} />} label="Uptime" value={report.system.uptime || '--'}
-          color="#b8960c" />
+          color="var(--gold)" />
       </div>
 
-      {/* ── Connectivity ── */}
+      {/* Connectivity */}
       <Section title="Service Connectivity" icon={<Activity size={18} />} sectionKey="connectivity"
         expanded={expandedSections.connectivity} onToggle={() => toggle('connectivity')}
         badge={`${onlineServices}/${report.connectivity.length} online`} badgeColor="#16a34a">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {report.connectivity.map(c => (
-            <div key={c.service} className={`p-3 rounded-xl border ${c.status === 'online' ? 'bg-[#f0fdf4] border-[#bbf7d0]' : 'bg-red-50 border-red-200'}`}>
+            <div key={c.service} className="empire-card flat" style={{
+              background: c.status === 'online' ? 'var(--green-bg)' : 'var(--red-bg)',
+              borderColor: c.status === 'online' ? '#bbf7d0' : '#fecaca',
+            }}>
               <div className="flex items-center gap-2">
-                {c.status === 'online' ? <CheckCircle2 size={14} className="text-[#16a34a]" /> : <XCircle size={14} className="text-red-500" />}
-                <span className="text-sm font-bold text-[#1a1a1a]">{c.service}</span>
+                {c.status === 'online' ? <CheckCircle2 size={14} style={{ color: 'var(--green)' }} /> : <XCircle size={14} style={{ color: 'var(--red)' }} />}
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{c.service}</span>
               </div>
-              <p className="text-[10px] text-[#999] mt-1 font-mono">{c.url}</p>
+              <p style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, fontFamily: 'monospace' }}>{c.url}</p>
             </div>
           ))}
         </div>
       </Section>
 
-      {/* ── Modules ── */}
+      {/* Modules */}
       <Section title="Module Inventory" icon={<Plug size={18} />} sectionKey="modules"
         expanded={expandedSections.modules} onToggle={() => toggle('modules')}
         badge={`${disconnectedModules} not wired`} badgeColor="#d97706">
         <div className="space-y-1">
           {report.modules.map(m => (
-            <div key={m.name} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-[#f5f3ef]">
-              <div className={`w-2 h-2 rounded-full shrink-0 ${
-                m.frontend === true ? 'bg-[#16a34a]' : m.frontend === 'partial' ? 'bg-[#d97706]' : 'bg-[#ddd]'
-              }`} />
-              <span className="text-sm font-semibold text-[#1a1a1a] w-40 truncate">{m.name}</span>
-              <span className="text-[10px] font-mono text-[#999] flex-1">{m.endpoint}</span>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                m.frontend === true
-                  ? 'bg-[#f0fdf4] text-[#16a34a]'
+            <div key={m.name} className="flex items-center gap-3 px-4 py-2.5 rounded-[var(--radius-sm)] hover:bg-[var(--hover)] transition-colors">
+              <div className="w-2 h-2 rounded-full shrink-0" style={{
+                background: m.frontend === true ? 'var(--green)' : m.frontend === 'partial' ? '#d97706' : 'var(--border)',
+              }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', width: 160 }} className="truncate">{m.name}</span>
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--muted)' }} className="flex-1">{m.endpoint}</span>
+              <span className="status-pill" style={{
+                ...(m.frontend === true
+                  ? { background: 'var(--green-bg)', color: '#16a34a' }
                   : m.frontend === 'partial'
-                    ? 'bg-[#fffbeb] text-[#d97706]'
-                    : 'bg-[#f5f5f5] text-[#999]'
-              }`}>
+                    ? { background: 'var(--orange-bg)', color: '#d97706' }
+                    : { background: '#f5f5f5', color: 'var(--muted)' }),
+                fontSize: 10, padding: '3px 10px', borderRadius: 20,
+              }}>
                 {m.frontend === true ? 'Connected' : m.frontend === 'partial' ? 'Partial' : 'Backend Only'}
               </span>
             </div>
@@ -169,27 +175,27 @@ export default function SystemReportScreen() {
         </div>
       </Section>
 
-      {/* ── AI Desks ── */}
+      {/* AI Desks */}
       <Section title="AI Desk Status" icon={<Sparkles size={18} />} sectionKey="desks"
         expanded={expandedSections.desks} onToggle={() => toggle('desks')}
         badge={`${report.desk_reports.length} desks`} badgeColor="#7c3aed">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {report.desk_reports.map(d => (
-            <div key={d.id} className="p-3 rounded-xl border border-[#ece8e1] bg-white">
+            <div key={d.id} className="empire-card flat">
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-2 h-2 rounded-full bg-[#16a34a]" />
-                <span className="text-sm font-bold text-[#1a1a1a]">{d.name}</span>
-                <span className="text-[10px] text-[#999] ml-auto">{d.status}</span>
+                <span className="w-2 h-2 rounded-full" style={{ background: 'var(--green)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{d.name}</span>
+                <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>{d.status}</span>
               </div>
-              <p className="text-[10px] text-[#7c3aed] italic mb-2">{d.persona}</p>
+              <p style={{ fontSize: 10, color: 'var(--purple)', fontStyle: 'italic', marginBottom: 8 }}>{d.persona}</p>
               {d.domains && d.domains.length > 0 && (
                 <div className="flex gap-1 flex-wrap mb-2">
                   {d.domains.slice(0, 4).map((dm: string) => (
-                    <span key={dm} className="text-[9px] bg-[#f5f3ef] text-[#777] px-1.5 py-0.5 rounded">{dm}</span>
+                    <span key={dm} style={{ fontSize: 9, background: 'var(--hover)', color: 'var(--dim)', padding: '2px 8px', borderRadius: 6 }}>{dm}</span>
                   ))}
                 </div>
               )}
-              <div className="text-[10px] text-[#999]">
+              <div style={{ fontSize: 10, color: 'var(--muted)' }}>
                 Can: {d.can_report?.slice(0, 2).join(', ')}
               </div>
             </div>
@@ -197,71 +203,75 @@ export default function SystemReportScreen() {
         </div>
       </Section>
 
-      {/* ── Recent Changes ── */}
+      {/* Recent Changes */}
       <Section title="Recent Changes" icon={<GitCommit size={18} />} sectionKey="changes"
         expanded={expandedSections.changes} onToggle={() => toggle('changes')}
         badge={report.recent_diff_summary || `${report.recent_changes.length} commits`} badgeColor="#2563eb">
         <div className="space-y-1">
           {report.recent_changes.slice(0, 15).map((c, i) => (
-            <div key={i} className="flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-[#f5f3ef]">
-              <span className="text-[10px] font-mono text-[#b8960c] w-16 shrink-0">{c.hash}</span>
-              <span className="text-xs text-[#555] truncate">{c.message}</span>
+            <div key={i} className="flex items-center gap-3 px-4 py-2 rounded-[var(--radius-sm)] hover:bg-[var(--hover)] transition-colors">
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--gold)', width: 60 }} className="shrink-0">{c.hash}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }} className="truncate">{c.message}</span>
             </div>
           ))}
         </div>
         {changelog?.new_features && changelog.new_features.length > 0 && (
-          <div className="mt-4 p-3 rounded-xl bg-[#ede9fe] border border-[#c4b5fd]">
-            <p className="text-[10px] font-bold text-[#7c3aed] mb-2">NEW FEATURES DETECTED</p>
+          <div className="empire-card flat" style={{ marginTop: 14, background: 'var(--purple-bg)', borderColor: '#c4b5fd' }}>
+            <p className="section-label" style={{ color: 'var(--purple)', marginBottom: 8 }}>New Features Detected</p>
             {changelog.new_features.slice(0, 5).map((f: any, i: number) => (
-              <div key={i} className="text-xs text-[#555] mb-1">
-                <span className="text-[10px] text-[#999] font-mono">{f.date?.split(' ')[0]}</span> — {f.description}
+              <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>{f.date?.split(' ')[0]}</span> — {f.description}
               </div>
             ))}
           </div>
         )}
       </Section>
 
-      {/* ── Bugs ── */}
+      {/* Bugs */}
       <Section title="Known Issues" icon={<Bug size={18} />} sectionKey="bugs"
         expanded={expandedSections.bugs} onToggle={() => toggle('bugs')}
         badge={`${report.bugs.length} issues`} badgeColor={report.bugs.some(b => b.severity === 'high') ? '#dc2626' : '#d97706'}>
         <div className="space-y-2">
           {report.bugs.map((b, i) => (
-            <div key={i} className={`flex items-start gap-2 p-3 rounded-xl border ${
-              b.severity === 'high' ? 'bg-red-50 border-red-200' :
-              b.severity === 'medium' ? 'bg-[#fffbeb] border-[#fde68a]' :
-              'bg-[#f5f5f5] border-[#e5e5e5]'
-            }`}>
-              <AlertTriangle size={14} className={`mt-0.5 shrink-0 ${
-                b.severity === 'high' ? 'text-red-500' : b.severity === 'medium' ? 'text-[#d97706]' : 'text-[#999]'
-              }`} />
+            <div key={i} className="empire-card flat" style={{
+              display: 'flex', alignItems: 'flex-start', gap: 8,
+              background: b.severity === 'high' ? 'var(--red-bg)' : b.severity === 'medium' ? 'var(--orange-bg)' : '#f5f5f5',
+              borderColor: b.severity === 'high' ? '#fecaca' : b.severity === 'medium' ? '#fde68a' : '#e5e5e5',
+            }}>
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" style={{
+                color: b.severity === 'high' ? 'var(--red)' : b.severity === 'medium' ? '#d97706' : 'var(--muted)',
+              }} />
               <div>
-                <span className="text-[10px] font-bold uppercase mr-2" style={{
-                  color: b.severity === 'high' ? '#dc2626' : b.severity === 'medium' ? '#d97706' : '#999'
+                <span style={{
+                  fontSize: 10, fontWeight: 700, textTransform: 'uppercase' as const, marginRight: 8,
+                  color: b.severity === 'high' ? 'var(--red)' : b.severity === 'medium' ? '#d97706' : 'var(--muted)',
                 }}>{b.severity}</span>
-                <span className="text-xs text-[#555]">{b.desc}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{b.desc}</span>
               </div>
             </div>
           ))}
         </div>
       </Section>
 
-      {/* ── Suggestions ── */}
+      {/* Suggestions */}
       <Section title="MAX Suggestions" icon={<Lightbulb size={18} />} sectionKey="suggestions"
         expanded={expandedSections.suggestions} onToggle={() => toggle('suggestions')}
         badge={`${report.suggestions.length} ideas`} badgeColor="#16a34a">
         <div className="space-y-2">
           {report.suggestions.map((s, i) => (
-            <div key={i} className="flex items-start gap-2 p-3 rounded-xl bg-[#f0fdf4] border border-[#bbf7d0]">
-              <ArrowRight size={14} className="text-[#16a34a] mt-0.5 shrink-0" />
-              <span className="text-xs text-[#555]">{s}</span>
+            <div key={i} className="empire-card flat" style={{
+              display: 'flex', alignItems: 'flex-start', gap: 8,
+              background: 'var(--green-bg)', borderColor: '#bbf7d0',
+            }}>
+              <ArrowRight size={14} style={{ color: 'var(--green)' }} className="mt-0.5 shrink-0" />
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{s}</span>
             </div>
           ))}
         </div>
       </Section>
 
       <div className="text-center py-6">
-        <p className="text-[10px] text-[#ccc]">MAX System Report v1.0 — Updates every 60 seconds when Live mode is enabled</p>
+        <p style={{ fontSize: 10, color: 'var(--faint)' }}>MAX System Report v1.0 — Updates every 60 seconds when Live mode is enabled</p>
       </div>
     </div>
   );
@@ -269,12 +279,12 @@ export default function SystemReportScreen() {
 
 function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
   return (
-    <div className="p-3 rounded-xl border border-[#ece8e1] bg-white">
+    <div className="empire-card flat" style={{ padding: '12px 16px' }}>
       <div className="flex items-center gap-2 mb-1">
         <span style={{ color }}>{icon}</span>
-        <span className="text-[10px] text-[#999] font-semibold">{label}</span>
+        <span className="section-label" style={{ letterSpacing: 1 }}>{label}</span>
       </div>
-      <span className="text-lg font-bold font-mono" style={{ color }}>{value}</span>
+      <span style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color }}>{value}</span>
     </div>
   );
 }
@@ -285,15 +295,20 @@ function Section({ title, icon, sectionKey, expanded, onToggle, badge, badgeColo
   badge?: string; badgeColor?: string; children: React.ReactNode;
 }) {
   return (
-    <div className="mb-4">
+    <div style={{ marginBottom: 16 }}>
       <button onClick={onToggle}
-        className="w-full flex items-center gap-2 p-3 rounded-xl bg-white border border-[#ece8e1] hover:border-[#b8960c] transition-all cursor-pointer">
-        <span className="text-[#b8960c]">{icon}</span>
-        <span className="text-sm font-bold text-[#1a1a1a] flex-1 text-left">{title}</span>
-        {badge && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ color: badgeColor, background: badgeColor + '15' }}>{badge}</span>}
-        {expanded ? <ChevronDown size={14} className="text-[#999]" /> : <ChevronRight size={14} className="text-[#999]" />}
+        className="empire-card"
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px' }}>
+        <span style={{ color: 'var(--gold)' }}>{icon}</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', flex: 1, textAlign: 'left' }}>{title}</span>
+        {badge && (
+          <span className="status-pill" style={{ color: badgeColor, background: badgeColor + '15', fontSize: 10, padding: '3px 10px', borderRadius: 20 }}>
+            {badge}
+          </span>
+        )}
+        {expanded ? <ChevronDown size={14} style={{ color: 'var(--muted)' }} /> : <ChevronRight size={14} style={{ color: 'var(--muted)' }} />}
       </button>
-      {expanded && <div className="mt-2 pl-1">{children}</div>}
+      {expanded && <div style={{ marginTop: 8, paddingLeft: 4 }}>{children}</div>}
     </div>
   );
 }

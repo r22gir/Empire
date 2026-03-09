@@ -22,7 +22,18 @@ export function useSystemData() {
   const fetchServices = useCallback(async () => {
     try {
       const res = await fetch(API + '/max/services');
-      if (res.ok) setServices(await res.json());
+      if (res.ok) {
+        const svcData = await res.json();
+        // Also fetch Telegram bot status and merge into services
+        try {
+          const tgRes = await fetch(API + '/max/telegram/status');
+          if (tgRes.ok) {
+            const tg = await tgRes.json();
+            svcData.tg = { status: tg.configured ? 'online' : 'offline' };
+          }
+        } catch { /* silent */ }
+        setServices(svcData);
+      }
     } catch { /* silent */ }
   }, []);
 

@@ -18,6 +18,18 @@ from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.max.inpaint_service import inpaint_service
 
+# QIS — Quote Intelligence System (real pricing engine)
+try:
+    from app.services.quote_engine import (
+        assemble_quote as qis_assemble_quote,
+        analyze_photo_items_sync as qis_analyze_photo,
+        generate_all_item_mockups as qis_generate_mockups,
+        manual_item as qis_manual_item,
+    )
+    QIS_AVAILABLE = True
+except ImportError:
+    QIS_AVAILABLE = False
+
 logger = logging.getLogger("max.tool_executor")
 
 TOOL_BLOCK_RE = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
@@ -426,6 +438,101 @@ def _next_quote_number(customer_name: str = "") -> str:
 
 # ── QUICK QUOTE TOOL ──────────────────────────────────────────────
 
+# ── QIS HELPERS ─────────────────────────────────────────────────
+# Map MAX tool treatmentType strings to QIS item_analyzer types
+_TREATMENT_TO_QIS_TYPE = {
+    "ripplefold": "drapery_panel",
+    "pinch-pleat": "drapery_panel",
+    "rod-pocket": "drapery_panel",
+    "grommet": "drapery_panel",
+    "roman-shade": "roman_shade",
+    "roller-shade": "roller_shade",
+    "valance": "valance",
+    "cornice": "cornice",
+    "swag": "swag",
+}
+
+
+def _rooms_to_qis_items(rooms: list) -> list:
+    """Convert MAX rooms/windows format to QIS analyzed_items format."""
+    items = []
+    for room in rooms:
+        room_name = room.get("name", "Room")
+        for win in room.get("windows", []):
+            treatment = win.get("treatmentType", "ripplefold")
+            qis_type = _TREATMENT_TO_QIS_TYPE.get(treatment, "drapery_panel")
+            name = win.get("name", "Window")
+            items.append({
+                "name": f"{room_name} — {name}",
+                "type": qis_type,
+                "quantity": win.get("quantity", 1),
+                "dimensions": {
+                    "width": win.get("width", 48),
+                    "height": win.get("height", 60),
+                },
+                "construction": "plain",
+                "condition": "new_construction",
+                "special_features": [],
+                "cushion_count": 0,
+            })
+        for uph in room.get("upholstery", []):
+            uph_type = uph.get("type", "accent_chair")
+            items.append({
+                "name": f"{room_name} — {uph.get('description', 'Upholstery')}",
+                "type": uph_type,
+                "quantity": uph.get("quantity", 1),
+                "dimensions": {
+                    "width": uph.get("width", 36),
+                    "height": uph.get("height", 36),
+                    "depth": uph.get("depth", 24),
+                },
+                "construction": uph.get("construction", "plain"),
+                "condition": uph.get("condition", "good"),
+                "special_features": uph.get("special_features", []),
+                "cushion_count": uph.get("cushion_count", 0),
+            })
+    return items
+
+
+def _qis_tiers_to_design_proposals(qis_tiers: dict, rooms: list) -> list:
+    """Convert QIS tier output to the design_proposals format used by the quote JSON."""
+    proposals = []
+    tier_labels = {
+        "A": "Option A — Essential",
+        "B": "Option B — Designer",
+        "C": "Option C — Premium",
+    }
+    lining_map = {"A": "standard", "B": "standard", "C": "blackout"}
+
+    for key in ("A", "B", "C"):
+        tier = qis_tiers.get(key, {})
+        # Convert QIS line items to tool executor format
+        line_items = []
+        for tier_item in tier.get("items", []):
+            for li in tier_item.get("line_items", []):
+                line_items.append({
+                    "room": tier_item.get("name", "").split(" — ")[0] if " — " in tier_item.get("name", "") else "Room",
+                    "description": li.get("description", ""),
+                    "quantity": li.get("quantity", 1),
+                    "unit_price": li.get("unit_price", li.get("amount", 0)),
+                    "total": li.get("amount", 0),
+                    "category": li.get("category", "other"),
+                })
+
+        proposals.append({
+            "label": tier_labels.get(key, f"Option {key}"),
+            "fabric_grade": key,
+            "lining_type": lining_map.get(key, "standard"),
+            "line_items": line_items,
+            "subtotal": tier.get("subtotal", 0),
+            "tax_amount": tier.get("tax", 0),
+            "total": tier.get("total", 0),
+            "ai_comment": "",
+            "selected": False,
+        })
+    return proposals
+
+
 @tool("create_quick_quote")
 def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Create a quick quote autonomously — no customer info required.
@@ -474,47 +581,70 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     scope_filter = SCOPE_CATEGORIES.get(scope)
 
     design_proposals = params.get("design_proposals", [])
+    qis_quote_data = None  # Will hold QIS result if successful
     if not design_proposals and rooms:
-        # Auto-generate 3 tiers from the same rooms with different fabric grades
-        tier_configs = [
-            {"label": "Option A — Essential", "grade": "A", "lining": "standard"},
-            {"label": "Option B — Designer", "grade": "B", "lining": "standard"},
-            {"label": "Option C — Premium", "grade": "C", "lining": "blackout"},
-        ]
-        for tier in tier_configs:
-            tier_items = []
-            for room in rooms:
-                room_name = room.get("name", "Room")
-                for win in room.get("windows", []):
-                    win_copy = dict(win)
-                    win_copy["fabricGrade"] = tier["grade"]
-                    win_copy["liningType"] = tier["lining"]
-                    all_items = _calc_window_line_items(room_name, win_copy)
-                    # Apply scope filter
-                    if scope_filter is not None:
-                        all_items = [it for it in all_items if it.get("category") in scope_filter]
-                    tier_items.extend(all_items)
-                for uph in room.get("upholstery", []):
-                    desc = uph.get("description", "Upholstery item")
-                    price = uph.get("price", 250)
-                    tier_items.append({
-                        "room": room_name, "description": desc,
-                        "quantity": 1, "unit_price": price, "total": price, "category": "upholstery",
-                    })
-            tier_subtotal = round(sum(item["total"] for item in tier_items), 2)
-            tier_tax = round(tier_subtotal * DC_TAX_RATE, 2)
-            tier_total = round(tier_subtotal + tier_tax, 2)
-            design_proposals.append({
-                "label": tier["label"],
-                "fabric_grade": tier["grade"],
-                "lining_type": tier["lining"],
-                "line_items": tier_items,
-                "subtotal": tier_subtotal,
-                "tax_amount": tier_tax,
-                "total": tier_total,
-                "ai_comment": "",
-                "selected": False,
-            })
+        # ── Try QIS pricing engine first ──
+        if QIS_AVAILABLE:
+            try:
+                qis_items = _rooms_to_qis_items(rooms)
+                if qis_items:
+                    location = params.get("location", "DC")
+                    lining = params.get("lining", "standard")
+                    qis_quote_data = qis_assemble_quote(
+                        analyzed_items=qis_items,
+                        customer_name=customer_name,
+                        location=location,
+                        lining=lining,
+                    )
+                    qis_tiers = qis_quote_data.get("tiers", {})
+                    if qis_tiers:
+                        design_proposals = _qis_tiers_to_design_proposals(qis_tiers, rooms)
+                        logger.info("QIS pricing engine generated %d design proposals", len(design_proposals))
+            except Exception as qis_err:
+                logger.warning("QIS pricing engine failed, falling back to legacy pricing: %s", qis_err)
+                design_proposals = []  # Reset so legacy path runs
+
+        # ── Legacy fallback: hardcoded tier pricing ──
+        if not design_proposals:
+            tier_configs = [
+                {"label": "Option A — Essential", "grade": "A", "lining": "standard"},
+                {"label": "Option B — Designer", "grade": "B", "lining": "standard"},
+                {"label": "Option C — Premium", "grade": "C", "lining": "blackout"},
+            ]
+            for tier in tier_configs:
+                tier_items = []
+                for room in rooms:
+                    room_name = room.get("name", "Room")
+                    for win in room.get("windows", []):
+                        win_copy = dict(win)
+                        win_copy["fabricGrade"] = tier["grade"]
+                        win_copy["liningType"] = tier["lining"]
+                        all_items = _calc_window_line_items(room_name, win_copy)
+                        # Apply scope filter
+                        if scope_filter is not None:
+                            all_items = [it for it in all_items if it.get("category") in scope_filter]
+                        tier_items.extend(all_items)
+                    for uph in room.get("upholstery", []):
+                        desc = uph.get("description", "Upholstery item")
+                        price = uph.get("price", 250)
+                        tier_items.append({
+                            "room": room_name, "description": desc,
+                            "quantity": 1, "unit_price": price, "total": price, "category": "upholstery",
+                        })
+                tier_subtotal = round(sum(item["total"] for item in tier_items), 2)
+                tier_tax = round(tier_subtotal * DC_TAX_RATE, 2)
+                tier_total = round(tier_subtotal + tier_tax, 2)
+                design_proposals.append({
+                    "label": tier["label"],
+                    "fabric_grade": tier["grade"],
+                    "lining_type": tier["lining"],
+                    "line_items": tier_items,
+                    "subtotal": tier_subtotal,
+                    "tax_amount": tier_tax,
+                    "total": tier_total,
+                    "ai_comment": "",
+                    "selected": False,
+                })
 
     # ── Generate AI commentary for each design tier ──
     xai_key_for_tiers = os.environ.get("XAI_API_KEY")
@@ -676,6 +806,9 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "updated_at": now,
         "expires_at": expires_at,
         "source": "max_quick_quote",
+        "pricing_engine": "qis" if qis_quote_data else "legacy",
+        "qis_quote_id": qis_quote_data.get("id") if qis_quote_data else None,
+        "qis_quote_number": qis_quote_data.get("quote_number") if qis_quote_data else None,
         "terms": "50% deposit required to begin fabrication. Balance due upon installation. All sales final once fabric is cut. Estimate valid for 30 days.",
         "valid_days": 30,
         "business_name": "Empire",
@@ -1415,30 +1548,210 @@ def _html_to_text(html: str) -> str:
 
 @tool("photo_to_quote")
 def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Create a quote from photo analysis and send the PDF via Telegram in one step."""
-    # Step 1: Create the quote (reuses create_quick_quote logic)
-    quote_result = _create_quick_quote(params, desk)
-    if not quote_result.success:
-        return ToolResult(tool="photo_to_quote", success=False,
-                         error=f"Quote creation failed: {quote_result.error}")
+    """Create a quote from photo analysis and send the PDF via Telegram in one step.
 
-    quote_id = quote_result.result.get("quote_id", "")
-    quote_number = quote_result.result.get("quote_number", "")
+    When QIS is available and an image is provided, uses the full QIS pipeline:
+    1. analyze_photo_items() — AI vision extracts structured items from photo
+    2. assemble_quote() — real pricing engine with 3-tier pricing
+    3. generate_all_item_mockups() — per-item AI mockups (optional)
+    Falls back to create_quick_quote legacy path if QIS fails.
+    """
+    image_data = params.get("image_data") or params.get("image_b64")
+    customer_name = params.get("customer_name", "Customer 1") or "Customer 1"
+    customer_notes = params.get("customer_notes", params.get("max_analysis", ""))
+    qis_used = False
 
-    # Step 2: Send via Telegram (reuses send_quote_telegram logic)
-    send_result = _send_quote_telegram({"quote_id": quote_id}, desk)
+    # ── Try full QIS pipeline if we have a photo and QIS is available ──
+    if QIS_AVAILABLE and image_data:
+        try:
+            # Step 1: AI vision analysis — extract structured items from photo
+            logger.info("QIS photo_to_quote: analyzing photo for %s", customer_name)
+            analysis = qis_analyze_photo(image_data, customer_notes)
+            qis_items = analysis.get("items", [])
 
-    return ToolResult(tool="photo_to_quote", success=True, result={
-        "quote_id": quote_id,
-        "quote_number": quote_number,
-        "customer_name": quote_result.result.get("customer_name"),
-        "total": quote_result.result.get("total"),
-        "items_count": quote_result.result.get("items_count"),
-        "telegram_sent": send_result.success,
-        "telegram_error": send_result.error if not send_result.success else None,
-        "pdf_path": send_result.result.get("pdf_path") if send_result.result else None,
-        "caption": send_result.result.get("caption") if send_result.result else None,
-    })
+            if qis_items:
+                # Step 2: Assemble quote with real pricing engine
+                location = params.get("location", "DC")
+                lining = params.get("lining", "standard")
+                qis_quote = qis_assemble_quote(
+                    analyzed_items=qis_items,
+                    customer_name=customer_name,
+                    location=location,
+                    lining=lining,
+                )
+                qis_tiers = qis_quote.get("tiers", {})
+
+                if qis_tiers:
+                    # Step 3: Generate per-item mockups (best-effort, non-blocking)
+                    mockup_results = {}
+                    try:
+                        mockup_results = _run_async(qis_generate_mockups(
+                            items=qis_items,
+                            original_photo_b64=image_data,
+                            fabric_grade="B",
+                            fabric_color=params.get("fabric_color", ""),
+                            style=analysis.get("style", params.get("style", "")),
+                        ))
+                        logger.info("QIS generated %d item mockups", len(mockup_results))
+                    except Exception as mockup_err:
+                        logger.warning("QIS mockup generation failed (non-fatal): %s", mockup_err)
+
+                    # Convert QIS tiers to design_proposals format
+                    design_proposals = _qis_tiers_to_design_proposals(qis_tiers, params.get("rooms", []))
+
+                    # Build the quote in the standard MAX format for compatibility
+                    quote_id = qis_quote.get("id", str(uuid.uuid4())[:8])
+                    quote_number = qis_quote.get("quote_number", _next_quote_number(customer_name))
+                    now = datetime.utcnow().isoformat()
+                    expires_at = (datetime.utcnow() + timedelta(days=30)).isoformat()
+
+                    # Build rooms from analysis if not provided
+                    rooms = params.get("rooms", [])
+                    if not rooms:
+                        rooms = [{
+                            "name": analysis.get("room_type", "Room").replace("_", " ").title(),
+                            "windows": [],
+                            "upholstery": [],
+                        }]
+
+                    # Build line items from mid-tier (B) for default display
+                    mid_tier = design_proposals[1] if len(design_proposals) > 1 else design_proposals[0]
+                    line_items = mid_tier.get("line_items", [])
+
+                    quote_data = {
+                        "id": quote_id,
+                        "quote_number": quote_number,
+                        "customer_name": customer_name,
+                        "customer_email": params.get("customer_email", ""),
+                        "customer_phone": params.get("customer_phone", ""),
+                        "customer_address": params.get("customer_address", ""),
+                        "project_name": params.get("project_name", f"Photo Quote for {customer_name}"),
+                        "rooms": rooms,
+                        "line_items": line_items,
+                        "design_proposals": design_proposals,
+                        "selected_proposal": None,
+                        "photos": [],
+                        "ai_outlines": [],
+                        "ai_mockups": [],
+                        "subtotal": 0.0,
+                        "tax_rate": DC_TAX_RATE,
+                        "tax_amount": 0.0,
+                        "total": 0.0,
+                        "proposal_totals": {
+                            "A": design_proposals[0]["total"] if len(design_proposals) > 0 else 0,
+                            "B": design_proposals[1]["total"] if len(design_proposals) > 1 else 0,
+                            "C": design_proposals[2]["total"] if len(design_proposals) > 2 else 0,
+                        },
+                        "deposit": {"deposit_percent": 50, "deposit_amount": 0},
+                        "status": "proposal",
+                        "scope": params.get("scope", "full"),
+                        "style": analysis.get("style", params.get("style", "")),
+                        "max_analysis": customer_notes,
+                        "pricing_engine": "qis",
+                        "qis_quote_id": qis_quote.get("id"),
+                        "qis_quote_number": qis_quote.get("quote_number"),
+                        "qis_analysis": {
+                            "room_type": analysis.get("room_type"),
+                            "style": analysis.get("style"),
+                            "items_detected": len(qis_items),
+                            "overall_notes": analysis.get("overall_notes"),
+                            "questions": analysis.get("questions", []),
+                        },
+                        "created_at": now,
+                        "updated_at": now,
+                        "expires_at": expires_at,
+                        "source": "max_photo_to_quote_qis",
+                        "terms": "50% deposit required to begin fabrication. Balance due upon installation. All sales final once fabric is cut. Estimate valid for 30 days.",
+                        "valid_days": 30,
+                        "business_name": "Empire",
+                    }
+
+                    # Save JSON
+                    os.makedirs(QUOTES_DIR, exist_ok=True)
+                    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
+                    with open(quote_path, "w") as f:
+                        json.dump(quote_data, f, indent=2, default=str)
+
+                    # Generate PDF
+                    pdf_url = None
+                    try:
+                        _run_async(_generate_pdf_for_quote(quote_id))
+                        pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+                        pdf_file = os.path.join(pdf_dir, f"{quote_number}.pdf")
+                        if os.path.exists(pdf_file):
+                            pdf_url = f"/api/v1/quotes/{quote_id}/pdf"
+                    except Exception as pdf_err:
+                        logger.warning("QIS photo_to_quote PDF generation failed: %s", pdf_err)
+
+                    # Send via Telegram
+                    send_result = _send_quote_telegram({"quote_id": quote_id}, desk)
+
+                    # Build caption
+                    proposal_summary = ""
+                    for i, dp in enumerate(design_proposals[:3]):
+                        letter = chr(65 + i)
+                        proposal_summary += f"\n  {letter}. {dp['label']}: ${dp['total']:,.2f}"
+
+                    caption = (
+                        f"\U0001f4cb <b>{quote_number}</b> (QIS)\n"
+                        f"\U0001f464 {customer_name}\n"
+                        f"\U0001f50d {len(qis_items)} items detected from photo\n"
+                        f"\U0001f4b0 3 Design Options:{proposal_summary}\n"
+                        f"\n\u2139\ufe0f Total: $0 — select an option to finalize"
+                    )
+
+                    qis_used = True
+                    logger.info("QIS photo_to_quote complete: %s — %d items, 3 tiers", quote_number, len(qis_items))
+
+                    return ToolResult(tool="photo_to_quote", success=True, result={
+                        "quote_id": quote_id,
+                        "quote_number": quote_number,
+                        "customer_name": customer_name,
+                        "total": 0,
+                        "proposal_totals": quote_data["proposal_totals"],
+                        "items_count": len(qis_items),
+                        "items_detected": len(qis_items),
+                        "pricing_engine": "qis",
+                        "mockups_generated": len(mockup_results),
+                        "room_type": analysis.get("room_type"),
+                        "style": analysis.get("style"),
+                        "questions": analysis.get("questions", []),
+                        "telegram_sent": send_result.success,
+                        "telegram_error": send_result.error if not send_result.success else None,
+                        "pdf_url": pdf_url,
+                        "pdf_path": send_result.result.get("pdf_path") if send_result.result else None,
+                        "caption": caption,
+                        "design_proposals_count": len(design_proposals),
+                    })
+
+        except Exception as qis_err:
+            logger.warning("QIS photo_to_quote pipeline failed, falling back to legacy: %s", qis_err)
+
+    # ── Fallback: legacy create_quick_quote path ──
+    if not qis_used:
+        quote_result = _create_quick_quote(params, desk)
+        if not quote_result.success:
+            return ToolResult(tool="photo_to_quote", success=False,
+                             error=f"Quote creation failed: {quote_result.error}")
+
+        quote_id = quote_result.result.get("quote_id", "")
+        quote_number = quote_result.result.get("quote_number", "")
+
+        # Send via Telegram
+        send_result = _send_quote_telegram({"quote_id": quote_id}, desk)
+
+        return ToolResult(tool="photo_to_quote", success=True, result={
+            "quote_id": quote_id,
+            "quote_number": quote_number,
+            "customer_name": quote_result.result.get("customer_name"),
+            "total": quote_result.result.get("total"),
+            "items_count": quote_result.result.get("items_count"),
+            "pricing_engine": "legacy",
+            "telegram_sent": send_result.success,
+            "telegram_error": send_result.error if not send_result.success else None,
+            "pdf_path": send_result.result.get("pdf_path") if send_result.result else None,
+            "caption": send_result.result.get("caption") if send_result.result else None,
+        })
 
 
 # ── DESK DELEGATION TOOL ───────────────────────────────────────────

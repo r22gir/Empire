@@ -554,6 +554,21 @@ async def telegram_status():
     return {"configured": telegram_bot.is_configured, "bot_token_set": bool(telegram_bot.bot_token), "chat_id_set": bool(telegram_bot.founder_chat_id)}
 
 
+@router.get("/telegram/image/{filename}")
+async def serve_telegram_image(filename: str):
+    """Serve a Telegram-uploaded image."""
+    from fastapi.responses import FileResponse
+    img_path = Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "images" / filename
+    if not img_path.exists() or not img_path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    # Prevent path traversal
+    if ".." in filename or "/" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    ext = img_path.suffix.lower()
+    media_types = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    return FileResponse(str(img_path), media_type=media_types.get(ext, "image/jpeg"))
+
+
 @router.get("/telegram/history")
 async def get_telegram_history(chat_id: Optional[str] = None, limit: int = 50):
     """Get Telegram conversation history (persisted to disk)."""

@@ -145,45 +145,48 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
       : [];
 
     return (
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
         {/* Desk header */}
-        <div className="px-10 pt-8 pb-6" style={{ background: cfg.bg }}>
+        <div style={{ padding: '32px 36px 24px', background: cfg.bg }}>
           <div className="max-w-5xl mx-auto">
             <button onClick={() => setOpenDesk(null)}
-              className="flex items-center gap-1.5 text-xs font-semibold text-[#777] hover:text-[#1a1a1a] cursor-pointer mb-4 transition-colors">
+              className="flex items-center gap-1.5 cursor-pointer mb-4 transition-colors"
+              style={{ fontSize: 12, fontWeight: 600, color: 'var(--dim)', background: 'none', border: 'none' }}>
               <ArrowLeft size={14} /> Back to All Desks
             </button>
             <div className="flex items-start gap-4">
-              <div className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
+              <div className="w-14 h-14 rounded-[var(--radius)] flex items-center justify-center shrink-0"
                 style={{ background: cfg.text + '18' }}>
                 <DeskIcon size={28} style={{ color: cfg.text }} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold" style={{ color: cfg.text }}>
+                  <h1 style={{ fontSize: 22, fontWeight: 600, color: cfg.text }}>
                     {deskData.agent_name || desk.name}
                   </h1>
-                  <span className="text-xs font-mono text-[#999] bg-white/60 px-2 py-0.5 rounded">{desk.id}</span>
-                  <span className="flex items-center gap-1.5 text-[10px] font-bold ml-2">
-                    <span className={`w-2.5 h-2.5 rounded-full ${desk.status === 'busy' ? 'bg-[#d97706]' : 'bg-[#16a34a]'}`} />
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted)', background: 'rgba(255,255,255,0.6)', padding: '2px 8px', borderRadius: 6 }}>{desk.id}</span>
+                  <span className="flex items-center gap-1.5" style={{ fontSize: 10, fontWeight: 700, marginLeft: 8 }}>
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ background: desk.status === 'busy' ? '#d97706' : 'var(--green)' }} />
                     <span style={{ color: desk.status === 'busy' ? '#d97706' : '#16a34a' }}>
                       {(desk.status || 'idle').toUpperCase()}
                     </span>
                   </span>
                 </div>
-                <p className="text-sm text-[#555] mt-1 max-w-2xl">
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4, maxWidth: '42rem' }}>
                   {desk.persona || deskData.description}
                 </p>
                 {deskData.domains && (
                   <div className="flex flex-wrap gap-1.5 mt-3">
                     {(deskData.domains as string[]).slice(0, 12).map(dom => (
-                      <span key={dom} className="text-[10px] px-2.5 py-1 rounded-full font-medium"
-                        style={{ background: 'white', color: cfg.text, border: `1px solid ${cfg.border}` }}>
+                      <span key={dom} style={{
+                        fontSize: 10, padding: '4px 10px', borderRadius: 20, fontWeight: 500,
+                        background: 'white', color: cfg.text, border: `1px solid ${cfg.border}`,
+                      }}>
                         {dom.replace(/_/g, ' ')}
                       </span>
                     ))}
                     {(deskData.domains as string[]).length > 12 && (
-                      <span className="text-[10px] text-[#999] self-center">+{(deskData.domains as string[]).length - 12} more</span>
+                      <span style={{ fontSize: 10, color: 'var(--muted)', alignSelf: 'center' }}>+{(deskData.domains as string[]).length - 12} more</span>
                     )}
                   </div>
                 )}
@@ -199,22 +202,27 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
         </div>
 
         {/* Task input bar */}
-        <div className="px-10 py-5 border-b border-[#ece8e1] bg-white">
+        <div style={{ padding: '20px 36px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
           <div className="max-w-5xl mx-auto">
-            <div className="flex gap-3">
+            <div className="empire-card flat" style={{ display: 'flex', gap: 12, padding: '12px 16px', alignItems: 'center' }}>
               <input
                 value={taskInput}
                 onChange={e => setTaskInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && submitTask(desk.id)}
                 placeholder={`Assign a task to ${deskData.agent_name || desk.name}...`}
-                className="flex-1 px-4 py-3 border-2 rounded-xl text-sm outline-none transition-all focus:shadow-[0_0_0_3px]"
-                style={{ borderColor: cfg.border }}
+                style={{
+                  flex: 1, padding: '10px 14px', border: `1px solid var(--border)`, borderRadius: 'var(--radius-sm)',
+                  fontSize: 13, outline: 'none', background: 'white',
+                }}
               />
               <button
                 onClick={() => submitTask(desk.id)}
                 disabled={submitting || !taskInput.trim()}
-                className="px-6 py-3 rounded-xl text-white text-sm font-bold flex items-center gap-2 disabled:opacity-40 transition-all cursor-pointer hover:opacity-90"
-                style={{ background: cfg.text }}>
+                className="flex items-center gap-2 transition-all"
+                style={{
+                  padding: '10px 20px', borderRadius: 'var(--radius-sm)', background: cfg.text, color: 'white',
+                  fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer', opacity: submitting || !taskInput.trim() ? 0.4 : 1,
+                }}>
                 {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                 Send
               </button>
@@ -223,8 +231,8 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
             <div className="flex flex-wrap gap-2 mt-3">
               {getQuickTasks(desk.id).map((qt, i) => (
                 <button key={i} onClick={() => setTaskInput(qt.task)}
-                  className="text-[11px] px-3 py-1.5 rounded-lg border font-medium cursor-pointer transition-all hover:shadow-sm"
-                  style={{ borderColor: cfg.border, color: cfg.text, background: cfg.bg }}>
+                  className="filter-tab"
+                  style={{ fontSize: 11, padding: '5px 12px', borderColor: cfg.border, color: cfg.text, background: cfg.bg }}>
                   {qt.label}
                 </button>
               ))}
@@ -234,22 +242,25 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
 
         {/* Task result banner */}
         {taskResult && (
-          <div className="px-10 pt-4">
-            <div className={`max-w-5xl mx-auto p-4 rounded-xl border-2 ${taskResult.success ? 'bg-[#f0fdf4] border-[#bbf7d0]' : 'bg-[#fef2f2] border-[#fecaca]'}`}>
+          <div style={{ padding: '16px 36px 0' }}>
+            <div className="max-w-5xl mx-auto empire-card flat" style={{
+              background: taskResult.success ? 'var(--green-bg)' : 'var(--red-bg)',
+              borderColor: taskResult.success ? '#bbf7d0' : '#fecaca',
+            }}>
               <div className="flex items-center gap-2 mb-2">
-                {taskResult.success ? <CheckCircle size={16} className="text-[#16a34a]" /> : <XCircle size={16} className="text-[#dc2626]" />}
-                <span className="text-sm font-bold">{taskResult.success ? 'Task Completed' : 'Task Failed'}</span>
-                <button onClick={() => setTaskResult(null)} className="ml-auto text-xs text-[#aaa] hover:text-[#555] cursor-pointer">dismiss</button>
+                {taskResult.success ? <CheckCircle size={16} style={{ color: 'var(--green)' }} /> : <XCircle size={16} style={{ color: 'var(--red)' }} />}
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{taskResult.success ? 'Task Completed' : 'Task Failed'}</span>
+                <button onClick={() => setTaskResult(null)} style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}>dismiss</button>
               </div>
-              <div className="text-xs text-[#555] whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">{taskResult.result}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto', lineHeight: 1.6 }}>{taskResult.result}</div>
             </div>
           </div>
         )}
 
         {/* Tabs + content */}
-        <div className="px-10 pt-6 pb-8">
+        <div style={{ padding: '24px 36px 32px' }}>
           <div className="max-w-5xl mx-auto">
-            <div className="flex items-center gap-2 mb-5 border-b border-[#ece8e1] pb-3">
+            <div className="flex items-center gap-2 mb-5" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
               {([
                 { key: 'active' as const, label: 'Active Tasks', icon: CircleDot, count: activeTasks.length + escalatedTasks.length },
                 { key: 'completed' as const, label: 'Completed', icon: CheckCircle, count: completedTasks.length },
@@ -257,23 +268,26 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
                 { key: 'brain' as const, label: 'Brain Logs', icon: Brain, count: brainLogs.length },
               ]).map(t => (
                 <button key={t.key} onClick={() => setActiveTab(t.key)}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold cursor-pointer transition-all border ${
-                    activeTab === t.key
-                      ? 'text-white border-transparent shadow-sm'
-                      : 'bg-white text-[#777] border-[#ece8e1] hover:bg-[#f5f3ef] hover:text-[#555]'
-                  }`}
-                  style={activeTab === t.key ? { background: cfg.text, borderColor: cfg.text } : {}}>
+                  className={`filter-tab ${activeTab === t.key ? 'active' : ''}`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    ...(activeTab === t.key ? { background: cfg.text, borderColor: cfg.text } : {}),
+                  }}>
                   <t.icon size={14} />
                   {t.label}
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                    activeTab === t.key ? 'bg-white/25 text-white' : 'bg-[#f5f3ef] text-[#999]'
-                  }`}>
+                  <span style={{
+                    fontSize: 10, padding: '2px 8px', borderRadius: 20, fontWeight: 600,
+                    ...(activeTab === t.key
+                      ? { background: 'rgba(255,255,255,0.25)', color: 'white' }
+                      : { background: 'var(--hover)', color: 'var(--muted)' }),
+                  }}>
                     {t.count}
                   </span>
                 </button>
               ))}
               <button onClick={() => fetchDeskStatus(desk.id)}
-                className="ml-auto p-2 rounded-lg text-[#aaa] hover:text-[#555] hover:bg-[#f5f3ef] cursor-pointer transition-all"
+                style={{ marginLeft: 'auto', padding: 8, borderRadius: 'var(--radius-sm)', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+                className="hover:bg-[var(--hover)] transition-all"
                 title="Refresh">
                 <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
               </button>
@@ -281,8 +295,8 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
 
             {isLoading && !status && (
               <div className="text-center py-16">
-                <Loader2 size={24} className="text-[#aaa] mx-auto animate-spin" />
-                <div className="text-sm text-[#aaa] mt-2">Loading desk data...</div>
+                <Loader2 size={24} style={{ color: 'var(--muted)' }} className="mx-auto animate-spin" />
+                <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 8 }}>Loading desk data...</div>
               </div>
             )}
 
@@ -290,17 +304,17 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
             {activeTab === 'brain' && (
               <div className="space-y-2">
                 {brainLogs.length === 0 && !isLoading && (
-                  <div className="text-center py-16 text-sm text-[#aaa]">No brain activity logged yet</div>
+                  <div className="text-center py-16" style={{ fontSize: 14, color: 'var(--muted)' }}>No brain activity logged yet</div>
                 )}
                 {brainLogs.map((log: any, i: number) => (
-                  <div key={i} className="p-4 rounded-xl border border-[#ece8e1] bg-white">
+                  <div key={i} className="empire-card flat">
                     <div className="flex items-start gap-3">
-                      <Brain size={16} className="text-[#7c3aed] mt-0.5 shrink-0" />
+                      <Brain size={16} style={{ color: 'var(--purple)' }} className="mt-0.5 shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <div className="text-xs text-[#555] leading-relaxed">{log.content}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{log.content}</div>
                         <div className="flex items-center gap-3 mt-2">
-                          <span className="text-[9px] font-mono text-[#ccc]" suppressHydrationWarning>{formatRelative(log.created_at)}</span>
-                          <span className="text-[9px] font-bold" style={{ color: log.importance >= 7 ? '#d97706' : '#aaa' }}>
+                          <span style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--faint)' }} suppressHydrationWarning>{formatRelative(log.created_at)}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: log.importance >= 7 ? '#d97706' : 'var(--muted)' }}>
                             importance: {log.importance}
                           </span>
                         </div>
@@ -315,15 +329,15 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
             {activeTab !== 'brain' && (
               <div className="space-y-2">
                 {currentTasks.length === 0 && !isLoading && (
-                  <div className="text-center py-16 text-sm text-[#aaa]">
+                  <div className="text-center py-16" style={{ fontSize: 14, color: 'var(--muted)' }}>
                     {activeTab === 'active' ? 'No active tasks' : activeTab === 'completed' ? 'No completed tasks yet' : 'No tasks in database'}
                   </div>
                 )}
 
                 {/* Escalated section */}
                 {activeTab === 'active' && escalatedTasks.length > 0 && (
-                  <div className="mb-3 p-3 rounded-xl bg-[#fef3c7] border border-[#fde68a]">
-                    <div className="text-[10px] font-bold text-[#d97706] flex items-center gap-1 mb-1">
+                  <div className="empire-card flat" style={{ background: 'var(--orange-bg)', borderColor: '#fde68a', marginBottom: 12 }}>
+                    <div className="flex items-center gap-1" style={{ fontSize: 10, fontWeight: 700, color: '#d97706' }}>
                       <AlertTriangle size={12} /> {escalatedTasks.length} ESCALATED — needs your attention
                     </div>
                   </div>
@@ -347,17 +361,19 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
 
   // ── Grid overview ───────────────────────────────────────────────────
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-5xl mx-auto px-10 py-8">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-[#ede9fe] flex items-center justify-center">
-            <Bot size={20} className="text-[#7c3aed]" />
+    <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
+      <div className="max-w-5xl mx-auto" style={{ padding: '28px 36px' }}>
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 rounded-[var(--radius)] flex items-center justify-center" style={{ background: 'var(--purple-bg)' }}>
+            <Bot size={20} style={{ color: 'var(--purple)' }} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-[#1a1a1a]">AI Desks</h1>
-            <p className="text-xs text-[#777]">{desks.length} agents ready · Click to open</p>
+            <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)' }}>AI Desks</h1>
+            <p style={{ fontSize: 13, color: 'var(--dim)' }}>{desks.length} agents ready · Click to open</p>
           </div>
         </div>
+
+        <div className="section-label" style={{ marginBottom: 12, marginTop: 20 }}>All Desks</div>
 
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           {desks.map(d => {
@@ -367,32 +383,32 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
             return (
               <div key={d.id}
                 onClick={() => handleOpenDesk(d.id)}
-                className="rounded-xl border-2 p-5 cursor-pointer transition-all hover:shadow-lg hover:scale-[1.01] group"
-                style={{ borderColor: cfg.border, background: 'white' }}>
+                className="empire-card group"
+                style={{ padding: '18px 20px' }}>
                 <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-colors"
+                  <div className="w-11 h-11 rounded-[var(--radius-sm)] flex items-center justify-center shrink-0 transition-colors"
                     style={{ background: cfg.bg }}>
                     <DeskIcon size={22} style={{ color: cfg.text }} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-[#1a1a1a] group-hover:underline">{deskData.agent_name || d.name}</span>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }} className="group-hover:underline">{deskData.agent_name || d.name}</span>
                     </div>
-                    <span className="text-[10px] font-mono text-[#bbb]">{d.id}</span>
+                    <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--faint)' }}>{d.id}</span>
                   </div>
-                  <span className="flex items-center gap-1 text-[9px] font-bold shrink-0 mt-1">
-                    <span className={`w-2 h-2 rounded-full ${d.status === 'busy' ? 'bg-[#d97706]' : 'bg-[#16a34a]'}`} />
+                  <span className="flex items-center gap-1 shrink-0 mt-1" style={{ fontSize: 9, fontWeight: 700 }}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: d.status === 'busy' ? '#d97706' : 'var(--green)' }} />
                     <span style={{ color: d.status === 'busy' ? '#d97706' : '#16a34a' }}>{(d.status || 'idle').toUpperCase()}</span>
                   </span>
                 </div>
-                <p className="text-[11px] text-[#777] mt-2 line-clamp-2 leading-relaxed">
+                <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8, lineHeight: 1.5 }} className="line-clamp-2">
                   {d.persona || (deskData.description || '').slice(0, 100)}
                 </p>
                 {deskData.stats && (
-                  <div className="flex items-center gap-3 mt-3 pt-3 border-t border-[#f0ede8]">
-                    <span className="text-[10px] text-[#16a34a] font-bold">{deskData.stats.completed} done</span>
+                  <div className="flex items-center gap-3 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600 }}>{deskData.stats.completed} done</span>
                     {deskData.stats.failed > 0 && (
-                      <span className="text-[10px] text-[#dc2626] font-bold">{deskData.stats.failed} failed</span>
+                      <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>{deskData.stats.failed} failed</span>
                     )}
                   </div>
                 )}
@@ -403,9 +419,9 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
 
         {desks.length === 0 && (
           <div className="text-center py-20">
-            <Bot size={48} className="text-[#d8d3cb] mx-auto mb-3" />
-            <div className="text-base font-semibold text-[#aaa]">Loading AI Desks...</div>
-            <div className="text-xs text-[#ccc] mt-1">Connecting to /api/v1/max/desks</div>
+            <Bot size={48} style={{ color: 'var(--faint)' }} className="mx-auto mb-3" />
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--muted)' }}>Loading AI Desks...</div>
+            <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 4 }}>Connecting to /api/v1/max/desks</div>
           </div>
         )}
       </div>
@@ -417,9 +433,9 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
 
 function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="bg-white rounded-xl border border-[#ece8e1] px-4 py-2.5 text-center min-w-[72px]">
-      <div className="text-lg font-bold font-mono" style={{ color }}>{value}</div>
-      <div className="text-[9px] font-semibold text-[#999] uppercase tracking-wider">{label}</div>
+    <div className="empire-card flat" style={{ padding: '10px 16px', textAlign: 'center', minWidth: 72 }}>
+      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color }}>{value}</div>
+      <div className="section-label" style={{ letterSpacing: 1 }}>{label}</div>
     </div>
   );
 }
@@ -430,27 +446,26 @@ function TaskRow({ task, color, onView }: { task: DeskTask; color: string; onVie
   const state = task.state || task.status || 'pending';
   const priority = task.priority || 'normal';
   return (
-    <div className="p-4 rounded-xl border border-[#ece8e1] bg-white hover:border-[#b8960c] transition-all cursor-pointer group"
-      onClick={onView}>
+    <div className="empire-card group" onClick={onView} style={{ padding: '14px 18px' }}>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-bold text-[#1a1a1a]">{task.title}</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{task.title}</span>
             <StatusBadge state={state} />
             <PriorityBadge priority={priority} />
           </div>
           {task.description && (
-            <p className="text-xs text-[#777] mt-1.5 line-clamp-2 leading-relaxed">{task.description}</p>
+            <p style={{ fontSize: 12, color: 'var(--dim)', marginTop: 6, lineHeight: 1.6 }} className="line-clamp-2">{task.description}</p>
           )}
           <div className="flex items-center gap-4 mt-2">
-            {task.source && <span className="text-[10px] text-[#bbb]">via {task.source}</span>}
-            {task.assigned_to && <span className="text-[10px] text-[#bbb]">assigned to {task.assigned_to}</span>}
+            {task.source && <span style={{ fontSize: 10, color: 'var(--faint)' }}>via {task.source}</span>}
+            {task.assigned_to && <span style={{ fontSize: 10, color: 'var(--faint)' }}>assigned to {task.assigned_to}</span>}
             {task.created_at && (
-              <span className="text-[10px] font-mono text-[#ccc]" suppressHydrationWarning>{formatRelative(task.created_at)}</span>
+              <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--faint)' }} suppressHydrationWarning>{formatRelative(task.created_at)}</span>
             )}
           </div>
         </div>
-        <Eye size={16} className="text-[#ddd] group-hover:text-[#777] mt-1 shrink-0 transition-colors" />
+        <Eye size={16} className="mt-1 shrink-0 transition-colors" style={{ color: 'var(--border)' }} />
       </div>
     </div>
   );
@@ -461,46 +476,47 @@ function TaskRow({ task, color, onView }: { task: DeskTask; color: string; onVie
 function TaskDetailModal({ task, onClose }: { task: DeskTask; onClose: () => void }) {
   const state = task.state || task.status || 'pending';
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-8" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-8" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={onClose}>
+      <div style={{ background: 'var(--panel)', borderRadius: 'var(--radius-lg)', maxWidth: '42rem', width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}
         onClick={e => e.stopPropagation()}>
-        <div className="p-6 border-b border-[#ece8e1] flex items-start justify-between">
+        <div className="flex items-start justify-between" style={{ padding: '24px 24px 20px', borderBottom: '1px solid var(--border)' }}>
           <div className="flex-1 min-w-0 pr-4">
-            <h3 className="text-lg font-bold text-[#1a1a1a]">{task.title}</h3>
+            <h3 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>{task.title}</h3>
             <div className="flex items-center gap-2 mt-2">
               <StatusBadge state={state} />
               <PriorityBadge priority={task.priority || 'normal'} />
-              {task.desk && <span className="text-[10px] font-mono text-[#999]">{task.desk}</span>}
+              {task.desk && <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--muted)' }}>{task.desk}</span>}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-[#f5f3ef] cursor-pointer text-[#aaa] hover:text-[#555] transition-colors">
+          <button onClick={onClose} style={{ padding: 8, borderRadius: 'var(--radius-sm)', color: 'var(--muted)', background: 'none', border: 'none', cursor: 'pointer' }}
+            className="hover:bg-[var(--hover)] transition-colors">
             <X size={20} />
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="space-y-5" style={{ padding: 24 }}>
           {task.description && (
             <div>
-              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider block mb-1.5">Description</label>
-              <p className="text-sm text-[#555] leading-relaxed">{task.description}</p>
+              <label className="section-label" style={{ display: 'block', marginBottom: 6 }}>Description</label>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{task.description}</p>
             </div>
           )}
 
           {task.result && (
             <div>
-              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider block mb-1.5">Result</label>
-              <div className="text-sm text-[#555] p-4 rounded-xl bg-[#f5f3ef] whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
+              <label className="section-label" style={{ display: 'block', marginBottom: 6 }}>Result</label>
+              <div className="empire-card flat" style={{ fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto', lineHeight: 1.6, cursor: 'default' }}>
                 {task.result}
               </div>
             </div>
           )}
 
           {task.escalation_reason && (
-            <div className="p-4 rounded-xl bg-[#fef3c7] border border-[#fde68a]">
-              <div className="text-[10px] font-bold text-[#d97706] mb-1.5 flex items-center gap-1.5">
-                <AlertTriangle size={12} /> ESCALATION REASON
+            <div className="empire-card flat" style={{ background: 'var(--orange-bg)', borderColor: '#fde68a' }}>
+              <div className="section-label flex items-center gap-1.5" style={{ color: '#d97706', marginBottom: 6 }}>
+                <AlertTriangle size={12} /> Escalation Reason
               </div>
-              <div className="text-sm text-[#555]">{task.escalation_reason}</div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{task.escalation_reason}</div>
             </div>
           )}
 
@@ -513,15 +529,15 @@ function TaskDetailModal({ task, onClose }: { task: DeskTask; onClose: () => voi
 
           {task.actions && task.actions.length > 0 && (
             <div>
-              <label className="text-[10px] font-bold text-[#aaa] uppercase tracking-wider block mb-2">Activity Log</label>
+              <label className="section-label" style={{ display: 'block', marginBottom: 8 }}>Activity Log</label>
               <div className="space-y-1.5">
                 {task.actions.map((a, i) => (
-                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-[#faf9f7]">
-                    <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${a.success ? 'bg-[#16a34a]' : 'bg-[#dc2626]'}`} />
+                  <div key={i} className="empire-card flat" style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                    <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: a.success ? 'var(--green)' : 'var(--red)' }} />
                     <div className="flex-1 min-w-0">
-                      <span className="text-xs font-bold text-[#555]">{a.action}</span>
-                      <div className="text-xs text-[#777] mt-0.5">{a.detail}</div>
-                      <div className="text-[9px] font-mono text-[#ccc] mt-1" suppressHydrationWarning>{formatRelative(a.timestamp)}</div>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{a.action}</span>
+                      <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 2 }}>{a.detail}</div>
+                      <div style={{ fontSize: 9, fontFamily: 'monospace', color: 'var(--faint)', marginTop: 4 }} suppressHydrationWarning>{formatRelative(a.timestamp)}</div>
                     </div>
                   </div>
                 ))}
@@ -537,13 +553,13 @@ function TaskDetailModal({ task, onClose }: { task: DeskTask; onClose: () => voi
 function StatusBadge({ state }: { state: string }) {
   const colors: Record<string, { bg: string; text: string }> = {
     pending: { bg: '#f5f3ef', text: '#777' }, todo: { bg: '#f5f3ef', text: '#777' },
-    in_progress: { bg: '#dbeafe', text: '#2563eb' }, completed: { bg: '#dcfce7', text: '#16a34a' },
-    done: { bg: '#dcfce7', text: '#16a34a' }, failed: { bg: '#fee2e2', text: '#dc2626' },
-    escalated: { bg: '#fef3c7', text: '#d97706' }, waiting: { bg: '#ede9fe', text: '#7c3aed' },
+    in_progress: { bg: 'var(--blue-bg)', text: 'var(--blue)' }, completed: { bg: 'var(--green-bg)', text: '#16a34a' },
+    done: { bg: 'var(--green-bg)', text: '#16a34a' }, failed: { bg: 'var(--red-bg)', text: 'var(--red)' },
+    escalated: { bg: 'var(--orange-bg)', text: '#d97706' }, waiting: { bg: 'var(--purple-bg)', text: 'var(--purple)' },
   };
   const c = colors[state] || colors.pending;
   return (
-    <span className="text-[9px] font-bold px-2.5 py-1 rounded-full" style={{ background: c.bg, color: c.text }}>
+    <span className="status-pill" style={{ background: c.bg, color: c.text, fontSize: 9, padding: '3px 10px', borderRadius: 20 }}>
       {state.replace('_', ' ').toUpperCase()}
     </span>
   );
@@ -553,7 +569,7 @@ function PriorityBadge({ priority }: { priority: string }) {
   const colors: Record<string, string> = { urgent: '#dc2626', high: '#d97706', normal: '#777', low: '#aaa' };
   const c = colors[priority] || '#777';
   return (
-    <span className="text-[9px] font-bold px-2.5 py-1 rounded-full" style={{ color: c, background: c + '15' }}>
+    <span className="status-pill" style={{ color: c, background: c + '15', fontSize: 9, padding: '3px 10px', borderRadius: 20 }}>
       {priority.toUpperCase()}
     </span>
   );
@@ -562,8 +578,8 @@ function PriorityBadge({ priority }: { priority: string }) {
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[9px] font-bold text-[#aaa] uppercase tracking-wider">{label}</div>
-      <div className="text-sm text-[#555] mt-1" suppressHydrationWarning>{value}</div>
+      <div className="section-label">{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }} suppressHydrationWarning>{value}</div>
     </div>
   );
 }

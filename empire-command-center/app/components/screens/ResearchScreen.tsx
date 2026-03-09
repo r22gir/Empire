@@ -40,69 +40,81 @@ export default function ResearchScreen() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      <div className="flex-1 flex flex-col p-5">
-        <div className="flex gap-2.5 mb-4">
+      <div className="flex-1 flex flex-col" style={{ padding: '24px 36px' }}>
+        {/* Search bar */}
+        <div className="flex gap-3 mb-5">
           <div className="flex-1 relative">
-            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#b8960c] opacity-50" />
+            <Search size={16} className="absolute top-1/2 -translate-y-1/2" style={{ left: 14, color: 'var(--gold)', opacity: 0.5 }} />
             <input value={query} onChange={e => setQuery(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              className="w-full pl-10 pr-4 py-3.5 border-1.5 border-[#d8d3cb] rounded-xl text-[14px] outline-none min-h-[48px] bg-white focus:border-[#b8960c] focus:shadow-[0_0_0_3px_#f5ecd0] placeholder:text-[#bbb] font-medium"
+              style={{
+                width: '100%', paddingLeft: 40, paddingRight: 16, paddingTop: 12, paddingBottom: 12,
+                border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14,
+                outline: 'none', minHeight: 48, background: 'white', fontWeight: 500,
+              }}
+              className="focus:border-[var(--gold)] focus:shadow-[0_0_0_3px_var(--gold-light)]"
               placeholder="Search the web, memory, knowledge base..." />
           </div>
           <button onClick={handleSearch} disabled={loading}
-            className="px-7 py-3 bg-[#b8960c] text-white border-2 border-[#a08509] rounded-xl text-[14px] font-bold cursor-pointer min-h-[48px] hover:bg-[#a08509] flex items-center gap-2 disabled:opacity-50 shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.97]">
+            className="filter-tab active flex items-center gap-2"
+            style={{ padding: '12px 24px', fontSize: 14, minHeight: 48, opacity: loading ? 0.5 : 1 }}>
             <Search size={16} /> Search
           </button>
         </div>
 
+        {/* Results */}
         <div className="flex-1 overflow-y-auto space-y-2.5">
           {loading && (
             <div className="text-center py-10">
-              <div className="w-8 h-8 border-3 border-[#e5e0d8] border-t-[#b8960c] rounded-full animate-spin mx-auto mb-3" />
-              <div className="text-sm text-[#888]">Searching...</div>
+              <div className="w-8 h-8 rounded-full animate-spin mx-auto mb-3" style={{ border: '3px solid var(--border)', borderTopColor: 'var(--gold)' }} />
+              <div style={{ fontSize: 14, color: 'var(--muted)' }}>Searching...</div>
             </div>
           )}
 
           {memoryResults.map((m: any, i: number) => (
-            <div key={'m' + i} className="p-4 rounded-xl border-2 border-[#7c3aed] bg-[#faf5ff] cursor-pointer hover:bg-[#f3ecff] transition-all shadow-[0_1px_4px_rgba(124,58,237,0.08)]">
+            <div key={'m' + i} className="empire-card" style={{ borderColor: 'var(--purple)', background: 'var(--purple-bg)' }}>
               <div className="flex items-center gap-2 mb-1">
-                <Brain size={14} className="text-[#7c3aed]" />
-                <span className="text-sm font-bold text-[#7c3aed]">From Memory: {m.subject || m.title || 'Memory'}</span>
+                <Brain size={14} style={{ color: 'var(--purple)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--purple)' }}>From Memory: {m.subject || m.title || 'Memory'}</span>
               </div>
-              <div className="text-[10px] text-[#7c3aed] font-mono opacity-60">empire-memory</div>
-              <div className="text-xs text-[#555] mt-1.5 leading-relaxed">{m.content || m.summary || JSON.stringify(m).slice(0, 200)}</div>
+              <div style={{ fontSize: 10, color: 'var(--purple)', fontFamily: 'monospace', opacity: 0.6 }}>empire-memory</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.6 }}>{m.content || m.summary || JSON.stringify(m).slice(0, 200)}</div>
             </div>
           ))}
 
           {results.map((r: any, i: number) => (
-            <div key={i} className="p-4 rounded-xl border border-[#e5e0d8] bg-white cursor-pointer hover:bg-[#fdf8eb] hover:border-[#b8960c] transition-all shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <div key={i} className="empire-card">
               <div className="flex items-center gap-2 mb-1">
-                <Globe size={14} className="text-[#2563eb]" />
-                <span className="text-sm font-bold text-[#2563eb]">{r.title}</span>
+                <Globe size={14} style={{ color: 'var(--blue)' }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue)' }}>{r.title}</span>
               </div>
-              <div className="text-[10px] text-[#16a34a] font-mono">{r.url}</div>
-              <div className="text-xs text-[#555] mt-1.5 leading-relaxed">{r.snippet}</div>
+              <div style={{ fontSize: 10, color: 'var(--green)', fontFamily: 'monospace' }}>{r.url}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.6 }}>{r.snippet}</div>
             </div>
           ))}
 
           {!loading && results.length === 0 && memoryResults.length === 0 && (
             <div className="text-center py-12">
-              <Search size={36} className="text-[#d8d3cb] mx-auto mb-3" />
-              <div className="text-sm font-semibold text-[#aaa]">Enter a query and search</div>
-              <div className="text-xs text-[#ccc] mt-1">Searches web + memory simultaneously</div>
+              <Search size={36} style={{ color: 'var(--faint)' }} className="mx-auto mb-3" />
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--muted)' }}>Enter a query and search</div>
+              <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 4 }}>Searches web + memory simultaneously</div>
             </div>
           )}
         </div>
       </div>
 
       {/* Notes panel */}
-      <div className="w-[300px] bg-white border-l border-[#e5e0d8] p-4 flex flex-col">
+      <div style={{ width: 300, background: 'var(--panel)', borderLeft: '1px solid var(--border)', padding: '20px 16px' }} className="flex flex-col">
         <div className="flex items-center gap-2 mb-3">
-          <StickyNote size={15} className="text-[#b8960c]" />
-          <h4 className="text-sm font-bold text-[#1a1a1a]">Research Notes</h4>
+          <StickyNote size={15} style={{ color: 'var(--gold)' }} />
+          <span className="section-label">Research Notes</span>
         </div>
         <textarea value={notes} onChange={e => setNotes(e.target.value)}
-          className="flex-1 border-1.5 border-[#d8d3cb] rounded-xl p-3 text-sm outline-none resize-none bg-[#faf9f7] focus:border-[#b8960c] focus:shadow-[0_0_0_3px_#f5ecd0] placeholder:text-[#bbb]"
+          style={{
+            flex: 1, border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12,
+            fontSize: 13, outline: 'none', resize: 'none', background: 'var(--card-bg)',
+          }}
+          className="focus:border-[var(--gold)] focus:shadow-[0_0_0_3px_var(--gold-light)]"
           placeholder="Type research notes here..." />
       </div>
     </div>

@@ -80,7 +80,7 @@ export default function CustomerList({ onSelectCustomer }: CustomerListProps = {
       key: 'name', label: 'Name', sortable: true,
       render: (r) => (
         <div className="flex items-center gap-2">
-          <span className="font-medium text-gray-800">{r.name}</span>
+          <span className="font-medium text-[#1a1a1a]">{r.name}</span>
           {(r.total_revenue || 0) > 10000 && (
             <span title="VIP Customer"><Crown size={14} className="text-[#b8960c]" /></span>
           )}
@@ -90,7 +90,7 @@ export default function CustomerList({ onSelectCustomer }: CustomerListProps = {
     { key: 'email', label: 'Email', sortable: true },
     { key: 'phone', label: 'Phone' },
     { key: 'total_revenue', label: 'Revenue', sortable: true, render: (r) => (
-      <span className="font-medium text-green-700">{fmt(r.total_revenue || 0)}</span>
+      <span className="font-bold text-[#22c55e]">{fmt(r.total_revenue || 0)}</span>
     )},
     { key: 'quote_count', label: 'Quotes', sortable: true, render: (r) => r.quote_count ?? 0 },
     { key: 'status', label: 'Status', sortable: true, render: (r) => <StatusBadge status={r.status || 'active'} /> },
@@ -98,35 +98,39 @@ export default function CustomerList({ onSelectCustomer }: CustomerListProps = {
 
   return (
     <div className="bg-[#faf9f7] min-h-screen">
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="max-w-6xl mx-auto" style={{ padding: '24px 36px' }}>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <Users size={24} className="text-[#b8960c]" />
-            <h1 className="text-xl font-bold text-gray-800">Customers</h1>
+            <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
+              <Users size={20} className="text-[#b8960c]" />
+            </div>
+            <h1 className="text-xl font-bold text-[#1a1a1a]">Customers</h1>
           </div>
           <div className="flex gap-2">
             <button
               onClick={handleImport}
               disabled={importing}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-[#ece8e1] hover:bg-gray-50 rounded-lg transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-[#555] bg-[#faf9f7] border border-[#ece8e0] hover:bg-white rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
             >
               <Upload size={16} /> {importing ? 'Importing...' : 'Import from Quotes'}
             </button>
-            <button className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-[#b8960c] hover:bg-[#a68500] rounded-lg transition-colors">
+            <button className="flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-[#b8960c] hover:bg-[#a68500] rounded-xl transition-colors cursor-pointer">
               <Plus size={16} /> Add Customer
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
-            <AlertCircle size={16} /> {error}
+          <div className="mb-4 empire-card flat" style={{ padding: 12, borderColor: '#fca5a5', background: '#fef2f2' }}>
+            <div className="flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle size={16} /> {error}
+            </div>
           </div>
         )}
 
         {/* Search */}
-        <div className="mb-4 max-w-sm">
+        <div className="mb-5 max-w-sm">
           <SearchBar value={search} onChange={setSearch} placeholder="Search customers..." />
         </div>
 
@@ -153,25 +157,25 @@ export default function CustomerList({ onSelectCustomer }: CustomerListProps = {
           const cust = customers.find(c => c.id === expanded);
           if (!cust) return null;
           return (
-            <div className="mt-2 bg-white border border-[#ece8e1] rounded-lg p-4">
+            <div className="mt-3 empire-card flat" style={{ padding: 20 }}>
               <div className="flex items-center gap-2 mb-3">
-                <h3 className="text-sm font-semibold text-gray-700">{cust.name}</h3>
+                <h3 className="text-sm font-bold text-[#1a1a1a]">{cust.name}</h3>
                 {(cust.total_revenue || 0) > 10000 && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-[#b8960c]">
+                  <span className="status-pill" style={{ backgroundColor: '#fdf8eb', color: '#b8960c', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <Crown size={10} /> VIP
                   </span>
                 )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                <div><span className="text-xs text-gray-500 block">Email</span>{cust.email || '—'}</div>
-                <div><span className="text-xs text-gray-500 block">Phone</span>{cust.phone || '—'}</div>
-                <div><span className="text-xs text-gray-500 block">Revenue</span>{fmt(cust.total_revenue || 0)}</div>
-                <div><span className="text-xs text-gray-500 block">Quotes</span>{cust.quote_count ?? 0}</div>
+                <div><span className="section-label" style={{ fontSize: 10 }}>Email</span><span className="text-[#555] block">{cust.email || '\u2014'}</span></div>
+                <div><span className="section-label" style={{ fontSize: 10 }}>Phone</span><span className="text-[#555] block">{cust.phone || '\u2014'}</span></div>
+                <div><span className="section-label" style={{ fontSize: 10 }}>Revenue</span><span className="text-[#555] block">{fmt(cust.total_revenue || 0)}</span></div>
+                <div><span className="section-label" style={{ fontSize: 10 }}>Quotes</span><span className="text-[#555] block">{cust.quote_count ?? 0}</span></div>
               </div>
               <div className="mt-3">
                 <a
                   href={`?customer=${cust.id}`}
-                  className="text-xs text-[#b8960c] hover:underline font-medium"
+                  className="text-xs text-[#b8960c] hover:underline font-bold"
                 >
                   View Full Profile
                 </a>

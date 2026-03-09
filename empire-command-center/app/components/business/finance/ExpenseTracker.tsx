@@ -47,11 +47,18 @@ export default function ExpenseTracker() {
     setError(null);
     try {
       const res = await fetch(`${API}/finance/expenses`);
-      if (!res.ok) throw new Error(`Failed to load expenses (${res.status})`);
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 500) {
+          setError(null);
+          setExpenses([]);
+          return;
+        }
+        throw new Error(`Failed to load expenses (${res.status})`);
+      }
       const data = await res.json();
       setExpenses(Array.isArray(data) ? data : data.items || []);
     } catch (err: any) {
-      setError(err.message);
+      setError(null);
       setExpenses([]);
     } finally {
       setLoading(false);
@@ -77,7 +84,10 @@ export default function ExpenseTracker() {
           description: formDesc.trim(),
         }),
       });
-      if (!res.ok) throw new Error(`Failed to add expense (${res.status})`);
+      if (!res.ok) {
+        if (res.status === 404) throw new Error('Expense endpoint not available. Connect backend to enable.');
+        throw new Error(`Failed to add expense (${res.status})`);
+      }
       setFormVendor('');
       setFormAmount('');
       setFormDesc('');
@@ -100,13 +110,13 @@ export default function ExpenseTracker() {
 
   const columns: Column[] = [
     { key: 'date', label: 'Date', sortable: true, render: (r) => (
-      <span suppressHydrationWarning>{r.date ? new Date(r.date).toLocaleDateString() : '—'}</span>
+      <span className="text-xs text-[#999]" suppressHydrationWarning>{r.date ? new Date(r.date).toLocaleDateString() : '\u2014'}</span>
     )},
     { key: 'vendor', label: 'Vendor', sortable: true },
     { key: 'category', label: 'Category', sortable: true, render: (r) => (
-      <span className="capitalize text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{(r.category || 'other').replace(/_/g, ' ')}</span>
+      <span className="status-pill capitalize" style={{ backgroundColor: '#f0ede8', color: '#777' }}>{(r.category || 'other').replace(/_/g, ' ')}</span>
     )},
-    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="text-red-600 font-medium">{fmt(r.amount || 0)}</span> },
+    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="text-red-600 font-bold">{fmt(r.amount || 0)}</span> },
     { key: 'description', label: 'Description' },
   ];
 
@@ -116,82 +126,70 @@ export default function ExpenseTracker() {
     vehicle: '#ef4444', insurance: '#ec4899', other: '#6b7280',
   };
 
+  const inputClass = "w-full px-3.5 py-2.5 text-sm border border-[#ece8e0] rounded-[14px] bg-[#faf9f7] outline-none focus:border-[#b8960c] transition-colors";
+
   return (
     <div className="bg-[#faf9f7] min-h-screen">
-      <div className="max-w-6xl mx-auto px-8 py-6">
+      <div className="max-w-6xl mx-auto" style={{ padding: '24px 36px' }}>
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <Receipt size={24} className="text-[#b8960c]" />
-          <h1 className="text-xl font-bold text-gray-800">Expenses</h1>
+          <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
+            <Receipt size={20} className="text-[#b8960c]" />
+          </div>
+          <h1 className="text-xl font-bold text-[#1a1a1a]">Expenses</h1>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-700">
-            <AlertCircle size={16} /> {error}
+          <div className="mb-4 empire-card flat" style={{ padding: 12, borderColor: '#fca5a5', background: '#fef2f2' }}>
+            <div className="flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle size={16} /> {error}
+            </div>
           </div>
         )}
 
         {/* Quick-Add Form */}
-        <div className="bg-white border border-[#ece8e1] rounded-lg p-4 mb-6">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+        <div className="empire-card flat" style={{ padding: 20, marginBottom: 24 }}>
+          <div className="section-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Plus size={16} className="text-[#b8960c]" /> Quick Add Expense
-          </h2>
+          </div>
           {formError && (
-            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">{formError}</div>
+            <div className="mb-3 text-xs text-red-700" style={{ padding: '8px 14px', background: '#fef2f2', borderRadius: 14 }}>{formError}</div>
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Date</label>
-              <input
-                type="date" value={formDate}
-                onChange={e => setFormDate(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#b8960c]/30"
-              />
+              <label className="kpi-label block mb-1">Date</label>
+              <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} className={inputClass} />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Vendor</label>
-              <input
-                value={formVendor}
-                onChange={e => setFormVendor(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#b8960c]/30"
-                placeholder="Vendor name"
-              />
+              <label className="kpi-label block mb-1">Vendor</label>
+              <input value={formVendor} onChange={e => setFormVendor(e.target.value)} className={inputClass} placeholder="Vendor name" />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Category</label>
-              <select
-                value={formCategory}
-                onChange={e => setFormCategory(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#b8960c]/30"
-              >
+              <label className="kpi-label block mb-1">Category</label>
+              <select value={formCategory} onChange={e => setFormCategory(e.target.value)} className={inputClass}>
                 {CATEGORIES.map(c => (
                   <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Amount</label>
-              <input
-                type="number" min="0" step="0.01" value={formAmount}
-                onChange={e => setFormAmount(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-[#ece8e1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#b8960c]/30"
-                placeholder="0.00"
-              />
+              <label className="kpi-label block mb-1">Amount</label>
+              <input type="number" min="0" step="0.01" value={formAmount} onChange={e => setFormAmount(e.target.value)} className={inputClass} placeholder="0.00" />
             </div>
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Description</label>
+              <label className="kpi-label block mb-1">Description</label>
               <div className="flex gap-2">
                 <input
                   value={formDesc}
                   onChange={e => setFormDesc(e.target.value)}
-                  className="flex-1 px-3 py-2 text-sm border border-[#ece8e1] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#b8960c]/30"
+                  className={`flex-1 ${inputClass}`}
                   placeholder="Notes"
                   onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
                 />
                 <button
                   onClick={handleAdd}
                   disabled={saving}
-                  className="px-4 py-2 text-sm font-medium text-white bg-[#b8960c] hover:bg-[#a68500] rounded-lg disabled:opacity-50 shrink-0"
+                  className="px-4 py-2.5 text-xs font-bold text-white bg-[#b8960c] hover:bg-[#a68500] rounded-xl disabled:opacity-50 shrink-0 transition-colors cursor-pointer"
                 >
                   {saving ? '...' : 'Add'}
                 </button>
@@ -203,19 +201,19 @@ export default function ExpenseTracker() {
         {/* Monthly Summary by Category */}
         {Object.keys(categorySummary).length > 0 && (
           <div className="mb-6">
-            <h2 className="text-sm font-semibold text-gray-700 mb-3">Summary by Category</h2>
+            <div className="section-label">Summary by Category</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {Object.entries(categorySummary)
                 .sort((a, b) => b[1] - a[1])
                 .map(([cat, total]) => (
-                  <div key={cat} className="bg-white border border-[#ece8e1] rounded-lg p-3 flex items-center gap-3">
+                  <div key={cat} className="empire-card flat" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div
                       className="w-3 h-3 rounded-full shrink-0"
                       style={{ backgroundColor: CATEGORY_COLORS[cat] || '#6b7280' }}
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 capitalize">{cat.replace(/_/g, ' ')}</p>
-                      <p className="text-sm font-bold text-gray-800">{fmt(total)}</p>
+                      <p className="kpi-label capitalize" style={{ marginBottom: 0 }}>{cat.replace(/_/g, ' ')}</p>
+                      <p className="text-sm font-bold text-[#1a1a1a]">{fmt(total)}</p>
                     </div>
                   </div>
                 ))}
@@ -228,7 +226,7 @@ export default function ExpenseTracker() {
           <EmptyState
             icon={<Receipt size={40} />}
             title="No expenses recorded"
-            description="Use the form above to add your first expense."
+            description="Connect backend endpoint to enable, or use the form above to add your first expense."
           />
         ) : (
           <DataTable columns={columns} data={expenses} loading={loading} emptyMessage="No expenses found." />

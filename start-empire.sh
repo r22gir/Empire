@@ -54,17 +54,17 @@ else
     err "Backend — check $LOG_DIR/backend_${TS}.log"
 fi
 
-# ── 2. Founder Dashboard (port 3009) ─────────────────────────────
-ensure_node_modules "$EMPIRE/founder_dashboard"
-log "Starting Founder Dashboard on port 3009..."
-cd "$EMPIRE/founder_dashboard"
+# ── 2. Empire Command Center (port 3009) ─────────────────────────
+ensure_node_modules "$EMPIRE/empire-command-center"
+log "Starting Empire Command Center on port 3009..."
+cd "$EMPIRE/empire-command-center"
 nohup npx next dev -p 3009 \
-    > "$LOG_DIR/founder_dashboard_${TS}.log" 2>&1 &
+    > "$LOG_DIR/command_center_${TS}.log" 2>&1 &
 
 if wait_port 3009; then
-    ok "Founder Dashboard — http://localhost:3009"
+    ok "Empire Command Center — http://localhost:3009"
 else
-    err "Founder Dashboard — check $LOG_DIR/founder_dashboard_${TS}.log"
+    err "Empire Command Center — check $LOG_DIR/command_center_${TS}.log"
 fi
 
 # ── 3. Empire App (port 3000) ────────────────────────────────────
@@ -118,7 +118,7 @@ echo ""
 echo -e "${Y}=============================================${N}"
 echo -e "${Y}         Empire Services Status              ${N}"
 echo -e "${Y}=============================================${N}"
-for pair in "Backend API:8000" "Founder Dashboard:3009" "Empire App:3000" "WorkroomForge:3001" "LuxeForge:3002"; do
+for pair in "Backend API:8000" "Command Center:3009" "Empire App:3000" "WorkroomForge:3001" "LuxeForge:3002"; do
     name="${pair%%:*}"; port="${pair##*:}"
     if curl -sf -o /dev/null "http://localhost:$port" 2>/dev/null; then
         echo -e "  ${G}*${N} $name — :$port"

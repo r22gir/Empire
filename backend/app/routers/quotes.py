@@ -248,6 +248,116 @@ async def list_quotes(status: Optional[str] = None):
     return {"quotes": quotes, "count": len(quotes)}
 
 
+# ── QIS (Quote Intelligence System) endpoints ──────────────────
+# These MUST be above /{quote_id} catch-all route
+
+@router.post("/analyze-photo")
+async def analyze_photo_for_quote(body: dict):
+    """Run full QIS pipeline on a photo. Returns analyzed items with pricing for all 3 tiers."""
+    from app.services.quote_engine.item_analyzer import analyze_photo_items
+    from app.services.quote_engine.quote_assembler import assemble_quote
+
+    image = body.get("image", "")
+    customer_name = body.get("customer_name", "Customer")
+    customer_notes = body.get("notes", "")
+    location = body.get("location", "DC")
+    lining = body.get("lining", "standard")
+
+    if not image:
+        raise HTTPException(400, "Image data required")
+
+    analysis = await analyze_photo_items(image, customer_notes)
+
+    quote = assemble_quote(
+        analyzed_items=analysis.get("items", []),
+        customer_name=customer_name,
+        location=location,
+        lining=lining,
+        room_info={
+            "type": analysis.get("room_type"),
+            "style": analysis.get("style"),
+        },
+    )
+
+    # ── GATE 1: Post-analysis verification ──
+    from app.services.quote_engine.verification import verify_quote, save_verification
+
+    verification = verify_quote(quote)
+    save_verification(quote.get("id", ""), verification)
+
+    return {
+        "analysis": analysis,
+        "quote": quote,
+        "verification": verification,
+    }
+
+
+@router.get("/pricing-tables")
+async def get_pricing_tables():
+    """Get all pricing tables for the founder pricing editor."""
+    from app.services.quote_engine.pricing_tables import get_all_tables
+
+    return get_all_tables()
+
+
+@router.put("/pricing-tables/{table_name}")
+async def update_pricing_table(table_name: str, body: dict):
+    """Update a pricing table entry."""
+    from app.services.quote_engine.pricing_tables import update_table
+
+    key = body.get("key")
+    value = body.get("value")
+    if not key:
+        raise HTTPException(400, "key required")
+    success = update_table(table_name, key, value)
+    if not success:
+        raise HTTPException(404, f"Table {table_name} or key {key} not found")
+    return {"status": "updated", "table": table_name, "key": key}
+
+
+@router.post("/recalculate/{quote_id}")
+async def recalculate_quote_endpoint(quote_id: str):
+    """Recalculate an existing quote with current pricing tables."""
+    from app.services.quote_engine.quote_assembler import recalculate_quote as recalc
+
+    result = recalc(quote_id)
+    if not result:
+        raise HTTPException(404, "Quote not found")
+    return result
+
+
+# ── Quote Verification endpoints ──────────────────────────────
+
+@router.post("/verify/{quote_id}")
+async def verify_quote_endpoint(quote_id: str):
+    """Run verification checks on a quote. Returns score, errors, warnings."""
+    from app.services.quote_engine.verification import verify_quote, save_verification
+
+    quote = _load_quote(quote_id)
+    result = verify_quote(quote)
+    save_verification(quote_id, result)
+    return result
+
+
+@router.get("/verify/{quote_id}")
+async def get_verification(quote_id: str):
+    """Get the last verification result for a quote."""
+    from app.services.quote_engine.verification import load_verification
+
+    result = load_verification(quote_id)
+    if not result:
+        raise HTTPException(404, "No verification found. Run POST /verify/{id} first.")
+    return result
+
+
+@router.get("/market-ranges")
+async def get_market_ranges():
+    """Get market price ranges per item type (for reference)."""
+    from app.services.quote_engine.verification import MARKET_RANGES
+
+    return {"market_ranges": MARKET_RANGES}
+
+
 @router.get("/{quote_id}")
 async def get_quote(quote_id: str):
     """Get a single quote by ID."""
@@ -1706,9 +1816,35 @@ def _build_line_items_html(line_items: list) -> str:
 
 
 @router.post("/{quote_id}/pdf")
-async def generate_pdf(quote_id: str):
-    """Generate PDF for a quote with room-level detail, drawings, and mockups."""
+async def generate_pdf(quote_id: str, skip_verification: bool = False):
+    """Generate PDF for a quote with room-level detail, drawings, and mockups.
+
+    Gate 2: Runs verification before PDF generation.
+    If errors exist, blocks PDF unless skip_verification=True.
+    """
     quote = _load_quote(quote_id)
+
+    # ── GATE 2: Pre-PDF verification ──
+    if not skip_verification:
+        from app.services.quote_engine.verification import verify_quote, save_verification
+
+        verification = verify_quote(quote)
+        save_verification(quote_id, verification)
+
+        if not verification["passed"]:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "Quote failed verification — fix errors before generating PDF",
+                    "score": verification["score"],
+                    "grade": verification["grade"],
+                    "errors": verification["errors"],
+                    "warnings": verification["warnings"],
+                    "summary": verification["summary"],
+                    "hint": "Fix errors and re-verify, or pass ?skip_verification=true to override",
+                },
+            )
 
     rooms = quote.get("rooms") or []
     ai_mockups = quote.get("ai_mockups") or []
@@ -2056,3 +2192,5 @@ async def download_pdf(quote_id: str):
             "Content-Disposition": f'attachment; filename="{quote["quote_number"]}.pdf"'
         },
     )
+
+

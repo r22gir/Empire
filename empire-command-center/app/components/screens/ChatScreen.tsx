@@ -1,16 +1,47 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowRight, Volume2 } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2 } from 'lucide-react';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
+import QuoteCard from '../business/quotes/QuoteCard';
+
+// Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
+function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
+  const toolCalls: any[] = [];
+  // Match ```tool ... ``` or ``` {"tool": ...} ```
+  const cleaned = content.replace(/```(?:tool)?\s*\n?\s*(\{[\s\S]*?\})\s*\n?```/g, (_, json) => {
+    try {
+      const parsed = JSON.parse(json);
+      if (parsed.tool) {
+        toolCalls.push(parsed);
+        return ''; // Remove from display
+      }
+    } catch { /* not valid JSON, leave as-is */ }
+    return _;
+  });
+  return { cleanContent: cleaned.trim(), toolCalls };
+}
+
+// Check if content has a tool block being streamed (incomplete)
+function hasStreamingToolBlock(content: string): boolean {
+  // Detect an open ```tool block that hasn't closed yet
+  const lastToolStart = content.lastIndexOf('```tool');
+  const lastCodeStart = Math.max(content.lastIndexOf('```\n{"tool"'), content.lastIndexOf('```{"tool"'));
+  const start = Math.max(lastToolStart, lastCodeStart);
+  if (start === -1) return false;
+  const afterStart = content.slice(start + 3);
+  // Count closing ``` after the opening
+  const closingMatch = afterStart.match(/```/);
+  return !closingMatch;
+}
 
 const QUICK_ACTIONS = [
-  { label: '📸 Photo Quote', action: 'photo-quote' },
-  { label: '💰 Quick Quote', action: 'quick-quote' },
-  { label: '📊 Report', action: 'report' },
-  { label: '📋 Briefing', action: 'briefing' },
-  { label: '📱 TG', action: 'telegram' },
-  { label: '🔍 Search', action: 'search' },
+  { label: 'Quick Quote', icon: ClipboardList, action: 'quick-quote', highlight: true },
+  { label: 'Mail', icon: Mail, action: 'briefing' },
+  { label: 'Tasks', icon: CheckSquare, action: 'tasks' },
+  { label: 'Research', icon: Search, action: 'research' },
+  { label: 'Documents', icon: FileText, action: 'documents' },
+  { label: 'Calendar', icon: Calendar, action: 'calendar' },
 ];
 
 interface Props {
@@ -27,6 +58,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -49,10 +81,20 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
   const handleQuickAction = (action: string) => {
     switch (action) {
-      case 'briefing': onSend('Give me today\'s briefing'); break;
-      case 'telegram': onSend('Check Telegram messages'); break;
-      case 'search': onScreenChange?.('research'); break;
-      case 'report': onSend('Generate a daily report'); break;
+      case 'quick-quote':
+        if (attachedImage) {
+          onSend('Create a quick quote from this photo. Measure the window, suggest treatments, and generate a quote with pricing.', attachedImage);
+          setAttachedImage(null);
+        } else {
+          // Prompt to attach image first, or just start quote flow
+          onSend('I need to create a new quote. Help me start a quick quote — ask me for the customer name, room, and window details.');
+        }
+        break;
+      case 'briefing': onScreenChange?.('inbox'); break;
+      case 'tasks': onSend('Show my tasks for today'); break;
+      case 'research': onScreenChange?.('research'); break;
+      case 'documents': onScreenChange?.('docs'); break;
+      case 'calendar': onSend('Show my calendar for today'); break;
       default: break;
     }
   };
@@ -116,52 +158,163 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   };
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
-      {/* Quick actions */}
-      <div className="flex gap-[5px] px-3 py-[7px] border-b border-[#ece8e1] shrink-0 overflow-x-auto">
-        {QUICK_ACTIONS.map(qa => (
-          <button key={qa.action} onClick={() => handleQuickAction(qa.action)}
-            className="px-4 py-2 text-[12px] font-semibold rounded-[8px] border border-[#d8d3cb] bg-white cursor-pointer text-[#555] min-h-[40px] whitespace-nowrap hover:bg-[#fdf8eb] hover:border-[#b8960c] hover:text-[#b8960c] shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-all">
-            {qa.label}
-          </button>
-        ))}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--chat-bg)' }}>
+
+      {/* MAX Header */}
+      <div style={{
+        padding: '28px 36px 20px',
+        textAlign: 'center',
+        flexShrink: 0,
+        borderBottom: '1px solid var(--border)',
+        background: 'var(--card-bg)',
+      }}>
+        <h1 style={{
+          fontSize: 26,
+          fontWeight: 300,
+          letterSpacing: 6,
+          color: 'var(--text)',
+          margin: 0,
+          fontFamily: "'Inter', sans-serif",
+        }}>
+          M A X
+        </h1>
+        <p style={{
+          fontSize: 13,
+          color: '#aaa',
+          marginTop: 4,
+          fontWeight: 400,
+        }}>
+          Your empire. One voice.
+        </p>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '24px 36px',
+      }}>
         {messages.map((msg, i) => (
-          <div key={msg.id || i} className={`mb-3.5 max-w-[80%] ${msg.role === 'user' ? 'ml-auto' : ''}`}>
-            <div className={`px-[15px] py-[11px] rounded-[13px] text-[13px] leading-[1.55] whitespace-pre-wrap
-              ${msg.role === 'user'
-                ? 'bg-[#b8960c] text-white rounded-br-[3px]'
-                : 'bg-white border border-[#ece8e1] rounded-bl-[3px] text-[#1a1a1a]'}`}>
-              {renderContent(msg.content, onScreenChange)}
-            </div>
-            <div className="text-[9px] text-[#aaa] mt-[3px] font-mono flex items-center gap-2" suppressHydrationWarning>
+          <div key={msg.id || i} style={{
+            marginBottom: 16,
+            maxWidth: '75%',
+            marginLeft: msg.role === 'user' ? 'auto' : undefined,
+            marginRight: msg.role === 'user' ? 0 : 'auto',
+          }}>
+            {(() => {
+              const { cleanContent, toolCalls } = msg.role === 'assistant'
+                ? parseToolBlocks(msg.content)
+                : { cleanContent: msg.content, toolCalls: [] };
+              return (
+                <>
+                  {cleanContent && (
+                    <div style={{
+                      padding: '14px 18px',
+                      fontSize: 14,
+                      lineHeight: 1.65,
+                      whiteSpace: 'pre-wrap',
+                      ...(msg.role === 'user' ? {
+                        background: 'var(--text)',
+                        color: '#fff',
+                        borderRadius: '14px 14px 6px 14px',
+                      } : {
+                        background: '#fff',
+                        color: 'var(--text)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '14px 14px 14px 6px',
+                      }),
+                    }}>
+                      {renderContent(cleanContent, onScreenChange)}
+                    </div>
+                  )}
+                  {/* Inline tool call cards (from message content) */}
+                  {toolCalls.map((tc, k) => {
+                    const isQuoteTool = tc.tool === 'create_quick_quote' || tc.tool === 'photo_to_quote';
+                    if (isQuoteTool) {
+                      return (
+                        <div key={`tc-${k}`} style={{
+                          marginTop: 10, padding: '14px 18px',
+                          borderRadius: 14, border: '1.5px solid #f0e6c0',
+                          background: '#fffdf7',
+                        }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#b8960c', marginBottom: 4 }}>
+                            Generating Quote...
+                          </div>
+                          <div style={{ fontSize: 13, color: '#555' }}>
+                            {tc.customer_name && <span><strong>Customer:</strong> {tc.customer_name}</span>}
+                            {tc.rooms?.[0]?.name && <span> · <strong>Room:</strong> {tc.rooms[0].name}</span>}
+                            {tc.rooms?.[0]?.windows?.length && <span> · {tc.rooms[0].windows.length} window{tc.rooms[0].windows.length > 1 ? 's' : ''}</span>}
+                          </div>
+                          {tc.rooms?.[0]?.windows && (
+                            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                              {tc.rooms[0].windows.slice(0, 6).map((w: any, wi: number) => (
+                                <span key={wi} style={{
+                                  fontSize: 10, padding: '3px 8px', borderRadius: 6,
+                                  background: '#fdf8eb', border: '1px solid #f0e6c0', color: '#96750a',
+                                }}>
+                                  {w.name}: {w.width}&quot;×{w.height}&quot; · {w.treatmentType}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    // Generic tool call display
+                    return (
+                      <div key={`tc-${k}`} style={{
+                        marginTop: 10, padding: '12px 16px', borderRadius: 14,
+                        border: '1px solid var(--border)', background: '#faf9f7', fontSize: 12,
+                      }}>
+                        <strong style={{ color: '#555' }}>Tool: {tc.tool}</strong>
+                      </div>
+                    );
+                  })}
+                </>
+              );
+            })()}
+            <div style={{
+              fontSize: 10,
+              color: 'var(--muted)',
+              marginTop: 4,
+              fontFamily: "'Inter', monospace",
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              ...(msg.role === 'user' ? { justifyContent: 'flex-end' } : {}),
+            }} suppressHydrationWarning>
               {msg.timestamp}
-              {msg.model && <span>· {msg.model}</span>}
+              {msg.model && <span style={{ opacity: 0.7 }}>{msg.model}</span>}
               {msg.role === 'assistant' && msg.content.length > 20 && (
-                <button onClick={() => playTTS(msg.content)} className="hover:text-[#b8960c] cursor-pointer"><Volume2 size={10} /></button>
+                <button
+                  onClick={() => playTTS(msg.content)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--muted)',
+                    cursor: 'pointer',
+                    padding: 2,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    transition: 'color 0.15s',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.color = 'var(--gold)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--muted)')}
+                >
+                  <Volume2 size={12} />
+                </button>
               )}
             </div>
-            {/* Tool results */}
+            {/* Tool results from SSE stream */}
             {msg.toolResults?.map((tr, j) => {
-              if (tr.tool === 'create_quick_quote' && tr.success && tr.result?.pdf_url) {
+              if ((tr.tool === 'create_quick_quote' || tr.tool === 'photo_to_quote') && tr.success && tr.result) {
                 return (
-                  <div key={j} className="mt-2 p-2.5 rounded-lg border border-[#ece8e1] bg-[#fdf8eb] text-xs">
-                    <strong>Quote {tr.result.quote_number}</strong> — {tr.result.customer_name}
-                    <div className="flex gap-2 mt-1.5">
-                      {tr.result.proposal_totals && Object.entries(tr.result.proposal_totals).map(([k, v]) => (
-                        <span key={k} className="px-2 py-1 rounded bg-white border border-[#e5e0d8] text-[10px] font-mono">
-                          {k}: ${Number(v).toLocaleString()}
-                        </span>
-                      ))}
-                    </div>
-                    <button onClick={() => onScreenChange?.('quote')}
-                      className="mt-2 text-[#b8960c] font-semibold text-[11px] hover:underline cursor-pointer">
-                      → Review Proposals
-                    </button>
-                  </div>
+                  <QuoteCard
+                    key={j}
+                    result={tr.result}
+                    onScreenChange={onScreenChange}
+                    onSend={onSend}
+                  />
                 );
               }
               return null;
@@ -171,56 +324,324 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
         {/* Streaming indicator */}
         {isStreaming && (
-          <div className="mb-3.5 max-w-[80%]">
-            <div className="px-[15px] py-[11px] rounded-[13px] rounded-bl-[3px] text-[13px] leading-[1.55] bg-white border border-[#ece8e1] text-[#1a1a1a] whitespace-pre-wrap">
+          <div style={{ marginBottom: 16, maxWidth: '75%' }}>
+            <div style={{
+              padding: '14px 18px',
+              fontSize: 14,
+              lineHeight: 1.65,
+              whiteSpace: 'pre-wrap',
+              background: '#fff',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+              borderRadius: '14px 14px 14px 6px',
+            }}>
               {streamingContent || '...'}
             </div>
-            <div className="text-[9px] text-[#aaa] mt-[3px] font-mono">
-              {streamingModel && `${streamingModel} · `}typing...
-              <button onClick={onStop} className="ml-2 text-red-500 hover:underline cursor-pointer">Stop</button>
+            <div style={{
+              fontSize: 10,
+              color: 'var(--muted)',
+              marginTop: 4,
+              fontFamily: "'Inter', monospace",
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}>
+              {streamingModel && <span>{streamingModel}</span>}
+              <span style={{ opacity: 0.6 }}>typing...</span>
+              <button
+                onClick={onStop}
+                style={{
+                  marginLeft: 4,
+                  color: 'var(--red)',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: 0,
+                }}
+              >
+                Stop
+              </button>
             </div>
           </div>
         )}
         <div ref={msgsEndRef} />
       </div>
 
-      {/* Input */}
-      <div className="px-3.5 py-2.5 border-t border-[#ece8e1] bg-white shrink-0 flex gap-[7px] items-end">
-        <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
-        <button onClick={() => fileInputRef.current?.click()} className="chat-ib"><Paperclip size={17} /></button>
-        <button onClick={toggleRecording}
-          className={`chat-ib ${recording ? '!bg-red-500 !border-red-500 !text-white animate-pulse' : ''}`}>
-          {recording ? <MicOff size={17} /> : <Mic size={17} />}
-        </button>
+      {/* Input area */}
+      <div style={{
+        padding: '16px 36px 12px',
+        flexShrink: 0,
+        background: 'var(--chat-bg)',
+      }}>
+        <input ref={fileInputRef} type="file" style={{ display: 'none' }} accept="image/*" onChange={handleFileUpload} />
+
+        {/* Attached image indicator */}
         {attachedImage && (
-          <div className="px-2 py-1 bg-[#fdf8eb] border border-[#b8960c] rounded text-[10px] text-[#b8960c] flex items-center gap-1">
-            📎 {attachedImage}
-            <button onClick={() => setAttachedImage(null)} className="ml-1 font-bold cursor-pointer">×</button>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            background: 'var(--gold-light)',
+            border: '1px solid var(--gold)',
+            borderRadius: 10,
+            fontSize: 11,
+            color: 'var(--gold)',
+            fontWeight: 500,
+            marginBottom: 10,
+          }}>
+            <Paperclip size={12} />
+            {attachedImage}
+            <button
+              onClick={() => setAttachedImage(null)}
+              style={{
+                marginLeft: 4,
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: 'none',
+                border: 'none',
+                color: 'var(--gold)',
+                fontSize: 13,
+                lineHeight: 1,
+              }}
+            >
+              x
+            </button>
           </div>
         )}
-        <textarea ref={textareaRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
-          className="flex-1 px-3 py-[11px] border border-[#e5e0d8] rounded-[9px] text-[13px] resize-none outline-none min-h-[42px] bg-[#f5f3ef] focus:border-[#b8960c] focus:shadow-[0_0_0_3px_#f5ecd0]"
-          placeholder="Message MAX..." rows={1} />
-        <button onClick={handleSend} disabled={isStreaming}
-          className="w-[46px] h-[46px] rounded-[10px] bg-[#b8960c] border-[#b8960c] border-2 text-white flex items-center justify-center cursor-pointer text-lg hover:bg-[#a08509] active:scale-[0.92] disabled:opacity-50 shadow-[0_2px_6px_rgba(184,150,12,0.3)]">
-          <ArrowRight size={20} />
-        </button>
+
+        {/* Input row */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: 10,
+        }}>
+          {/* Attach button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: 'var(--card-bg)',
+              border: '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: 'var(--dim)',
+              flexShrink: 0,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.borderColor = 'var(--border-h)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.borderColor = 'var(--border)';
+              e.currentTarget.style.transform = 'none';
+            }}
+          >
+            <Paperclip size={17} />
+          </button>
+
+          {/* Mic button */}
+          <button
+            onClick={toggleRecording}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: recording ? 'var(--red)' : 'var(--card-bg)',
+              border: `1px solid ${recording ? 'var(--red)' : 'var(--border)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: recording ? '#fff' : 'var(--dim)',
+              flexShrink: 0,
+              transition: 'all 0.2s',
+              animation: recording ? 'pulse 1.5s infinite' : 'none',
+            }}
+            onMouseEnter={e => {
+              if (!recording) {
+                e.currentTarget.style.borderColor = 'var(--border-h)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }
+            }}
+            onMouseLeave={e => {
+              if (!recording) {
+                e.currentTarget.style.borderColor = 'var(--border)';
+                e.currentTarget.style.transform = 'none';
+              }
+            }}
+          >
+            {recording ? <MicOff size={17} /> : <Mic size={17} />}
+          </button>
+
+          {/* Text input */}
+          <div style={{
+            flex: 1,
+            background: '#fff',
+            border: `1px solid ${inputFocused ? 'var(--gold)' : 'var(--border)'}`,
+            borderRadius: 14,
+            transition: 'border-color 0.2s, box-shadow 0.2s',
+            boxShadow: inputFocused ? '0 0 0 3px rgba(184,150,12,0.1)' : 'none',
+            display: 'flex',
+            alignItems: 'flex-end',
+          }}>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              placeholder="Message MAX..."
+              rows={1}
+              style={{
+                flex: 1,
+                padding: '13px 18px',
+                border: 'none',
+                outline: 'none',
+                fontSize: 14,
+                fontFamily: "'Inter', sans-serif",
+                resize: 'none',
+                minHeight: 44,
+                maxHeight: 120,
+                background: 'transparent',
+                color: 'var(--text)',
+                lineHeight: 1.5,
+              }}
+            />
+          </div>
+
+          {/* Send button */}
+          <button
+            onClick={handleSend}
+            disabled={isStreaming}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: 'var(--text)',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: isStreaming ? 'not-allowed' : 'pointer',
+              color: '#fff',
+              flexShrink: 0,
+              opacity: isStreaming ? 0.5 : 1,
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={e => {
+              if (!isStreaming) e.currentTarget.style.background = 'var(--gold)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.background = 'var(--text)';
+            }}
+          >
+            <ArrowUp size={20} />
+          </button>
+        </div>
+
+        {/* Quick actions */}
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          marginTop: 14,
+          paddingBottom: 4,
+          overflowX: 'auto',
+        }}>
+          {QUICK_ACTIONS.map(qa => {
+            const Icon = qa.icon;
+            const isHighlight = (qa as any).highlight;
+            return (
+              <button
+                key={qa.action}
+                onClick={() => handleQuickAction(qa.action)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  padding: '8px 16px',
+                  background: isHighlight ? '#fdf8eb' : '#fff',
+                  border: isHighlight ? '1.5px solid #b8960c' : '1px solid var(--border)',
+                  borderRadius: 12,
+                  fontSize: 13,
+                  fontWeight: isHighlight ? 700 : 500,
+                  color: isHighlight ? '#b8960c' : 'var(--dim)',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.2s',
+                  fontFamily: "'Inter', sans-serif",
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.borderColor = 'var(--gold)';
+                  e.currentTarget.style.color = 'var(--gold)';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(184,150,12,0.12)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.borderColor = isHighlight ? '#b8960c' : 'var(--border)';
+                  e.currentTarget.style.color = isHighlight ? '#b8960c' : 'var(--dim)';
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <Icon size={15} />
+                {qa.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Pulse animation for recording */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+      `}</style>
     </div>
   );
 }
 
 function renderContent(content: string, onScreenChange?: (s: string) => void) {
-  // Simple markdown-ish rendering
   return content.split('\n').map((line, i) => {
     // Bold
     let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     // Italic
     processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    // Links to quote review
-    if (processed.includes('Review proposals') || processed.includes('→ Review')) {
-      return <span key={i} dangerouslySetInnerHTML={{ __html: processed }} />;
+    // Detect QuoteBuilder / quote references and make them clickable
+    const hasQuoteRef = /QuoteBuilder|quote.*interface/i.test(processed);
+    if (hasQuoteRef && onScreenChange) {
+      processed = processed.replace(
+        /(QuoteBuilder\s*interface|QuoteBuilder)/gi,
+        '<a class="quote-link" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
+      );
     }
-    return <span key={i} dangerouslySetInnerHTML={{ __html: processed + (i < content.split('\n').length - 1 ? '<br/>' : '') }} />;
+    // Detect quote numbers like EST-2026-027 and make clickable
+    processed = processed.replace(
+      /(EST-\d{4}-\d{3})/g,
+      '<a class="quote-link" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
+    );
+    const html = processed + (i < content.split('\n').length - 1 ? '<br/>' : '');
+    return (
+      <span
+        key={i}
+        dangerouslySetInnerHTML={{ __html: html }}
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.classList.contains('quote-link')) {
+            onScreenChange?.('quote');
+          }
+        }}
+      />
+    );
   });
 }

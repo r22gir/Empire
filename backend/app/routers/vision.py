@@ -28,6 +28,11 @@ class ImageRequest(BaseModel):
     preferences: Optional[str] = None
 
 
+class AnalyzeItemsRequest(BaseModel):
+    image: str
+    prompt: str
+
+
 class ImagineRequest(BaseModel):
     prompt: str
 
@@ -177,6 +182,14 @@ async def generate_image(prompt: str) -> Optional[str]:
 
     log.warning("All image generation providers failed")
     return None
+
+
+# ── /analyze-items — QIS item detection for quote builder ──
+
+@router.post("/analyze-items")
+async def analyze_items(req: AnalyzeItemsRequest):
+    """Run AI vision with a custom prompt (used by QIS item analyzer)."""
+    return await call_vision(req.prompt, req.image, max_tokens=6000)
 
 
 # ── /measure — Window photo analysis ───────────────────────

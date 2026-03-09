@@ -50,23 +50,21 @@ export default function DataTable({ columns, data, onRowClick, loading, emptyMes
 
   if (loading) {
     return (
-      <div className="border border-[#ece8e1] rounded-lg overflow-hidden">
-        <table className="w-full">
+      <div className="empire-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <table className="empire-table">
           <thead>
-            <tr className="bg-[#f5f3ef] border-b border-[#ece8e1]">
+            <tr>
               {columns.map(col => (
-                <th key={col.key} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  {col.label}
-                </th>
+                <th key={col.key}>{col.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {Array.from({ length: 5 }).map((_, i) => (
-              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-[#faf9f7]'}>
+              <tr key={i}>
                 {columns.map(col => (
-                  <td key={col.key} className="px-4 py-3">
-                    <div className="h-4 bg-gray-200 rounded animate-pulse" style={{ width: `${60 + Math.random() * 30}%` }} />
+                  <td key={col.key}>
+                    <div className="h-4 bg-[#ece8e0] rounded animate-pulse" style={{ width: `${60 + Math.random() * 30}%` }} />
                   </td>
                 ))}
               </tr>
@@ -79,25 +77,23 @@ export default function DataTable({ columns, data, onRowClick, loading, emptyMes
 
   if (!data || data.length === 0) {
     return (
-      <div className="border border-[#ece8e1] rounded-lg py-12 text-center">
-        <p className="text-sm text-gray-400">{emptyMessage}</p>
+      <div className="empire-card" style={{ padding: '48px 20px', textAlign: 'center' }}>
+        <p className="text-sm text-[#999]">{emptyMessage}</p>
       </div>
     );
   }
 
   return (
-    <div className="border border-[#ece8e1] rounded-lg overflow-hidden">
+    <div className="empire-card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="overflow-x-auto">
-        <table className="w-full">
+        <table className="empire-table">
           <thead>
-            <tr className="bg-[#f5f3ef] border-b border-[#ece8e1]">
+            <tr>
               {columns.map(col => (
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key, col.sortable)}
-                  className={`px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider ${
-                    col.sortable ? 'cursor-pointer select-none hover:text-gray-700' : ''
-                  }`}
+                  className={col.sortable ? 'cursor-pointer select-none hover:text-[#555]' : ''}
                 >
                   <span className="inline-flex items-center gap-1">
                     {col.label}
@@ -114,13 +110,11 @@ export default function DataTable({ columns, data, onRowClick, loading, emptyMes
               <tr
                 key={row.id ?? i}
                 onClick={() => onRowClick?.(row)}
-                className={`${i % 2 === 0 ? 'bg-white' : 'bg-[#faf9f7]'} ${
-                  onRowClick ? 'cursor-pointer hover:bg-[#f0ede6]' : ''
-                } border-b border-[#ece8e1] last:border-b-0 transition-colors`}
+                className={onRowClick ? 'cursor-pointer' : ''}
               >
                 {columns.map(col => (
-                  <td key={col.key} className="px-4 py-3 text-sm text-gray-700">
-                    {col.render ? col.render(row) : (row[col.key] ?? '—')}
+                  <td key={col.key}>
+                    {col.render ? col.render(row) : (row[col.key] ?? '\u2014')}
                   </td>
                 ))}
               </tr>

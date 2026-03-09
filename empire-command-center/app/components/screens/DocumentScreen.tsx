@@ -16,34 +16,33 @@ export default function DocumentScreen() {
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Main viewer */}
-      <div className="flex-1 flex items-center justify-center bg-[#eae7e2] p-6">
+      <div className="flex-1 flex items-center justify-center p-6" style={{ background: 'var(--bg)' }}>
         {selected ? (
           <iframe src={API.replace('/api/v1', '') + '/api/v1/files/view/' + selected.name}
-            className="w-[595px] h-[842px] bg-white shadow-[0_6px_24px_rgba(0,0,0,0.12)] rounded-lg border border-[#d8d3cb]" />
+            style={{ width: 595, height: 842, background: 'white', borderRadius: 'var(--radius)', border: '1px solid var(--border)', boxShadow: '0 6px 24px rgba(0,0,0,0.08)' }} />
         ) : (
-          <div className="bg-white w-[595px] h-[842px] shadow-[0_6px_24px_rgba(0,0,0,0.12)] rounded-lg border border-[#d8d3cb] flex flex-col items-center justify-center">
-            <FileText size={48} className="text-[#d8d3cb] mb-3" />
-            <div className="text-base font-bold text-[#1a1a1a]">Select a document</div>
-            <div className="text-sm text-[#888] mt-1">Choose from the sidebar to preview</div>
+          <div style={{ width: 595, height: 842, background: 'white', borderRadius: 'var(--radius)', border: '1px solid var(--border)', boxShadow: '0 6px 24px rgba(0,0,0,0.08)' }}
+            className="flex flex-col items-center justify-center">
+            <FileText size={48} style={{ color: 'var(--faint)' }} className="mb-3" />
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>Select a document</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Choose from the sidebar to preview</div>
           </div>
         )}
       </div>
 
       {/* Sidebar */}
-      <div className="w-[290px] bg-white border-l border-[#e5e0d8] p-4 overflow-y-auto">
-        <h4 className="text-sm font-bold mb-3 text-[#1a1a1a]">Documents</h4>
-        {files.length === 0 && <div className="text-xs text-[#aaa] text-center py-4">No files found</div>}
+      <div style={{ width: 290, background: 'var(--panel)', borderLeft: '1px solid var(--border)', padding: '20px 16px' }} className="overflow-y-auto">
+        <div className="section-label" style={{ marginBottom: 12 }}>Documents</div>
+        {files.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center', padding: '16px 0' }}>No files found</div>}
         <div className="space-y-1.5">
           {files.slice(0, 20).map((f: any, i: number) => (
             <button key={i} onClick={() => setSelected(f)}
-              className={`w-full text-left p-3 rounded-xl border text-xs cursor-pointer transition-all flex items-center gap-2.5 min-h-[48px]
-                ${selected?.name === f.name
-                  ? 'border-[#b8960c] bg-[#fdf8eb] shadow-[0_2px_6px_rgba(184,150,12,0.12)]'
-                  : 'border-[#e5e0d8] bg-white hover:border-[#b8960c] hover:bg-[#fdf8eb]'}`}>
-              <FileText size={16} className="text-[#b8960c] shrink-0" />
+              className={`empire-card ${selected?.name === f.name ? 'active' : ''}`}
+              style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10, minHeight: 48, padding: '10px 14px' }}>
+              <FileText size={16} style={{ color: 'var(--gold)' }} className="shrink-0" />
               <div className="truncate flex-1">
-                <div className="font-semibold text-[#1a1a1a] truncate text-[12px]">{f.name || f.filename}</div>
-                <div className="text-[10px] text-[#999] mt-0.5">{f.size ? `${(f.size / 1024).toFixed(0)} KB` : ''}</div>
+                <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 12 }} className="truncate">{f.name || f.filename}</div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{f.size ? `${(f.size / 1024).toFixed(0)} KB` : ''}</div>
               </div>
             </button>
           ))}
@@ -51,13 +50,13 @@ export default function DocumentScreen() {
 
         {selected && (
           <>
-            <h4 className="text-sm font-bold mt-5 mb-3 text-[#1a1a1a]">Actions</h4>
+            <div className="section-label" style={{ marginTop: 20, marginBottom: 12 }}>Actions</div>
             <div className="flex flex-col gap-2">
-              <ActionBtn icon={<Send size={15} />} label="Send via Telegram" color="#2563eb" />
-              <ActionBtn icon={<Mail size={15} />} label="Email to Client" color="#b8960c" />
-              <ActionBtn icon={<Video size={15} />} label="Share on Video Call" color="#16a34a" />
-              <ActionBtn icon={<Printer size={15} />} label="Print" color="#7c3aed" />
-              <ActionBtn icon={<Download size={15} />} label="Download" color="#555" />
+              <ActionBtn icon={<Send size={15} />} label="Send via Telegram" color="var(--blue)" />
+              <ActionBtn icon={<Mail size={15} />} label="Email to Client" color="var(--gold)" />
+              <ActionBtn icon={<Video size={15} />} label="Share on Video Call" color="var(--green)" />
+              <ActionBtn icon={<Printer size={15} />} label="Print" color="var(--purple)" />
+              <ActionBtn icon={<Download size={15} />} label="Download" color="var(--text-secondary)" />
             </div>
           </>
         )}
@@ -68,8 +67,8 @@ export default function DocumentScreen() {
 
 function ActionBtn({ icon, label, color }: { icon: React.ReactNode; label: string; color: string }) {
   return (
-    <button className="flex items-center gap-2.5 p-3 rounded-xl border-1.5 border-[#e5e0d8] bg-white text-[13px] font-semibold cursor-pointer text-left min-h-[46px] transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c] active:scale-[0.98]"
-      style={{ color }}>
+    <button className="empire-card"
+      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, color, minHeight: 46, width: '100%', textAlign: 'left' }}>
       {icon}
       <span>{label}</span>
     </button>

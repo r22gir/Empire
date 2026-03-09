@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef } from 'react';
-import { Camera, Upload, X, Image as ImageIcon } from 'lucide-react';
+import { Camera, Upload, Image as ImageIcon } from 'lucide-react';
 import { intakeUpload } from '../../lib/intake-auth';
 
 export default function PhotoUploader({
@@ -18,7 +18,6 @@ export default function PhotoUploader({
   const cameraRef = useRef<HTMLInputElement>(null);
 
   const compressAndUpload = async (file: File) => {
-    // Client-side compression for images
     let toUpload = file;
     if (file.type.startsWith('image/') && file.size > 500_000) {
       try {
@@ -64,15 +63,15 @@ export default function PhotoUploader({
   return (
     <div>
       <div
-        className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors ${
-          dragOver ? 'border-[#c9a84c] bg-[#fdf8eb]' : 'border-[#e5e0d8] hover:border-[#c9a84c]'
+        className={`border-2 border-dashed rounded-[14px] p-6 text-center transition-colors ${
+          dragOver ? 'border-[#b8960c] bg-[#fdf8eb]' : 'border-[#ece8e0] hover:border-[#d5d0c8]'
         }`}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
       >
-        <Upload size={24} className="mx-auto text-[#aaa] mb-2" />
-        <p className="text-sm text-[#777] mb-3">
+        <Upload size={22} className="mx-auto text-[#c5c0b8] mb-2" />
+        <p className="text-[12px] text-[#888] mb-3">
           {uploading ? 'Uploading...' : 'Drag photos here or'}
         </p>
         <div className="flex items-center justify-center gap-3">
@@ -80,17 +79,17 @@ export default function PhotoUploader({
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="px-4 py-2.5 text-xs font-semibold bg-[#c9a84c] text-white rounded-lg hover:bg-[#b8960c] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            className="px-4 py-2 text-[11px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50 flex items-center gap-1.5"
           >
-            <ImageIcon size={14} /> Browse Files
+            <ImageIcon size={13} /> Browse Files
           </button>
           <button
             type="button"
             onClick={() => cameraRef.current?.click()}
             disabled={uploading}
-            className="px-4 py-2.5 text-xs font-semibold border border-[#e5e0d8] text-[#777] rounded-lg hover:border-[#c9a84c] hover:text-[#c9a84c] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            className="px-4 py-2 text-[11px] font-semibold border border-[#ece8e0] text-[#888] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors disabled:opacity-50 flex items-center gap-1.5 bg-[#faf9f7]"
           >
-            <Camera size={14} /> Take Photo
+            <Camera size={13} /> Take Photo
           </button>
         </div>
         <input ref={fileRef} type="file" accept="image/*" multiple onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
@@ -100,13 +99,13 @@ export default function PhotoUploader({
       {photos.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-4">
           {photos.map((p: any, i: number) => (
-            <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-[#f5f3ef] border border-[#e5e0d8]">
+            <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
               <img
                 src={`http://localhost:8000${p.path}`}
                 alt={p.original_name}
                 className="w-full h-full object-cover"
               />
-              <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] px-1.5 py-0.5 truncate">
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent text-white text-[8px] px-1.5 py-1 pt-3 truncate">
                 {p.original_name}
               </div>
             </div>

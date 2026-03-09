@@ -2,13 +2,15 @@
 import { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
 import { Quote } from '../../lib/types';
-import { Check, FileText, Send, Mail, Video, Printer, Image } from 'lucide-react';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink } from 'lucide-react';
+import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 
 interface Props {
   quoteId?: string;
+  onOpenBuilder?: () => void;
 }
 
-export default function QuoteReviewScreen({ quoteId }: Props) {
+export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [selected, setSelected] = useState<number>(1);
   const [loading, setLoading] = useState(false);
@@ -54,15 +56,47 @@ export default function QuoteReviewScreen({ quoteId }: Props) {
     { label: 'Premium', key: 'C', color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
   ];
 
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+
+  const showFeedback = (msg: string) => {
+    setActionFeedback(msg);
+    setTimeout(() => setActionFeedback(null), 3000);
+  };
+
   const handleAction = async (action: string) => {
     if (action === 'pdf') {
       window.open(API.replace('/api/v1', '') + `/api/v1/quotes/${quote.id}/pdf`, '_blank');
+      showFeedback('Opening PDF...');
     } else if (action === 'telegram') {
-      await fetch(API + '/max/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `Send quote ${quote.id} to Telegram`, model: 'auto', history: [] }),
-      });
+      showFeedback('Sending to Telegram...');
+      try {
+        await fetch(API + '/max/chat/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `Send quote ${quote.quote_number} for ${quote.customer_name} ($${quote.total}) to Telegram`, model: 'auto', history: [] }),
+        });
+        showFeedback('Sent to Telegram!');
+      } catch { showFeedback('Failed to send'); }
+    } else if (action === 'email') {
+      const subject = encodeURIComponent(`Quote ${quote.quote_number} - ${quote.customer_name}`);
+      const body = encodeURIComponent(`Hi ${quote.customer_name},\n\nPlease find your quote ${quote.quote_number} attached.\n\nTotal: $${(quote.total || 0).toLocaleString()}\n\nThank you,\nEmpire Workroom`);
+      window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
+      showFeedback('Opening email client...');
+    } else if (action === 'print') {
+      window.print();
+    } else if (action === 'confirm') {
+      showFeedback('Confirming selection...');
+      try {
+        await fetch(API + `/quotes/${quote.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'accepted', selected_tier: selected }),
+        });
+        setQuote({ ...quote, status: 'accepted' });
+        showFeedback('Quote accepted!');
+      } catch { showFeedback('Failed to update'); }
+    } else if (action === 'video') {
+      showFeedback('Video call feature coming soon');
     }
   };
 
@@ -78,10 +112,37 @@ export default function QuoteReviewScreen({ quoteId }: Props) {
         </div>
       </div>
 
-      {/* Customer photo placeholder */}
-      <div className="bg-[#eae7e2] border border-[#d8d3cb] rounded-xl h-[200px] flex items-center justify-center mt-4 mb-5">
-        <Image size={36} className="text-[#c0bbb3] mr-3" />
-        <span className="text-[#888] font-medium">Customer photo</span>
+      {/* Customer photo */}
+      {quote.photos && quote.photos.length > 0 ? (
+        <div className="empire-card" style={{ padding: 0, marginTop: 16, marginBottom: 20, overflow: 'hidden', borderRadius: 14 }}>
+          <div style={{ display: 'flex', gap: 2, overflowX: 'auto' }}>
+            {quote.photos.map((photo, pi) => (
+              <img
+                key={pi}
+                src={`${API}/files/images/${photo.filename}`}
+                alt={`Customer photo ${pi + 1}`}
+                style={{
+                  height: 220,
+                  objectFit: 'cover',
+                  flex: quote.photos!.length === 1 ? '1' : 'none',
+                  width: quote.photos!.length === 1 ? '100%' : 'auto',
+                  minWidth: 200,
+                  borderRadius: quote.photos!.length > 1 ? 4 : 0,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="empire-card" style={{ padding: 0, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 20, background: '#eae7e2' }}>
+          <Image size={36} className="text-[#c0bbb3] mr-3" />
+          <span className="text-[#888] font-medium">No photo uploaded</span>
+        </div>
+      )}
+
+      {/* Quote Quality Verification */}
+      <div style={{ marginBottom: 16 }}>
+        <QuoteVerificationPanel quoteId={quote.id} />
       </div>
 
       <div className="text-sm font-bold mb-3 text-[#1a1a1a]">Select a Proposal</div>
@@ -92,13 +153,15 @@ export default function QuoteReviewScreen({ quoteId }: Props) {
           const isSelected = selected === i;
           return (
             <div key={t.key} onClick={() => setSelected(i)}
-              className={`flex-1 p-5 rounded-xl cursor-pointer text-center min-h-[140px] transition-all border-2
+              className={`empire-card flex-1 cursor-pointer text-center min-h-[140px] transition-all
                 ${isSelected
                   ? 'shadow-[0_4px_16px_rgba(0,0,0,0.1)]'
                   : 'hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]'}`}
               style={{
-                background: isSelected ? t.bg : 'white',
-                borderColor: isSelected ? t.color : '#e5e0d8',
+                padding: 20,
+                background: isSelected ? t.bg : '#faf9f7',
+                borderColor: isSelected ? t.color : '#ece8e0',
+                borderWidth: 2,
                 borderLeftWidth: '4px',
                 borderLeftColor: t.color,
               }}>
@@ -132,11 +195,27 @@ export default function QuoteReviewScreen({ quoteId }: Props) {
         })}
       </div>
 
+      {/* Feedback toast */}
+      {actionFeedback && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 999,
+          padding: '10px 20px', borderRadius: 12, background: '#1a1a1a', color: '#fff',
+          fontSize: 13, fontWeight: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+          animation: 'fadeIn 0.2s ease',
+        }}>
+          {actionFeedback}
+        </div>
+      )}
+
       <div className="flex gap-2.5 flex-wrap">
         <button onClick={() => handleAction('confirm')}
-          className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-[#b8960c] text-white border-2 border-[#a08509] rounded-xl text-[14px] font-bold cursor-pointer min-h-[48px] hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98]">
+          className="flex-1 flex items-center justify-center gap-2 bg-[#b8960c] text-white border-2 border-[#a08509] text-[13px] font-bold cursor-pointer hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98]"
+          style={{ height: 44, padding: '0 20px', borderRadius: 12 }}>
           <Check size={18} /> Confirm Selection
         </button>
+        <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
+          if (onOpenBuilder) { onOpenBuilder(); } else { window.open(`http://localhost:3001${quote?.id ? `?quote=${quote.id}` : ''}`, '_blank'); }
+        }} />
         <ActionBtn icon={<FileText size={16} />} label="PDF" onClick={() => handleAction('pdf')} />
         <ActionBtn icon={<Send size={16} />} label="Telegram" onClick={() => handleAction('telegram')} />
         <ActionBtn icon={<Mail size={16} />} label="Email" onClick={() => handleAction('email')} />
@@ -150,7 +229,15 @@ export default function QuoteReviewScreen({ quoteId }: Props) {
 function ActionBtn({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick?: () => void }) {
   return (
     <button onClick={onClick}
-      className="flex items-center gap-1.5 px-4 py-3 rounded-xl border-1.5 border-[#d8d3cb] bg-white text-[13px] font-semibold text-[#555] cursor-pointer min-h-[48px] hover:bg-[#fdf8eb] hover:border-[#b8960c] hover:text-[#b8960c] transition-all active:scale-[0.97] shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+      className="flex items-center gap-1.5 font-bold text-[#555] cursor-pointer hover:bg-[#fdf8eb] hover:border-[#b8960c] hover:text-[#b8960c] transition-all active:scale-[0.97]"
+      style={{
+        height: 44,
+        padding: '0 16px',
+        borderRadius: 12,
+        border: '1.5px solid #ece8e0',
+        background: '#faf9f7',
+        fontSize: 12,
+      }}>
       {icon} {label}
     </button>
   );

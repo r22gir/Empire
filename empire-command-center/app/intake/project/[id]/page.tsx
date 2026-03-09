@@ -10,9 +10,9 @@ import PhotoUploader from '../../../components/intake/PhotoUploader';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
 const statusConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
-  draft: { label: 'Draft', color: '#777', bg: '#f5f3ef', icon: Clock },
+  draft: { label: 'Draft', color: '#888', bg: '#f5f3ef', icon: Clock },
   submitted: { label: 'Submitted — Under Review', color: '#2563eb', bg: '#dbeafe', icon: Clock },
-  'quote-ready': { label: 'Quote Ready', color: '#c9a84c', bg: '#fdf8eb', icon: FileText },
+  'quote-ready': { label: 'Quote Ready', color: '#b8960c', bg: '#fdf8eb', icon: FileText },
   approved: { label: 'Approved', color: '#16a34a', bg: '#dcfce7', icon: CheckCircle },
   'in-production': { label: 'In Production', color: '#7c3aed', bg: '#ede9fe', icon: Clock },
   installed: { label: 'Installed', color: '#16a34a', bg: '#dcfce7', icon: CheckCircle },
@@ -74,8 +74,8 @@ export default function ProjectDetail() {
 
   if (loading || !project) {
     return (
-      <div className="min-h-screen bg-[#faf9f7] flex items-center justify-center">
-        <div className="text-sm text-[#aaa]">Loading...</div>
+      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
+        <div className="text-[12px] text-[#999]">Loading...</div>
       </div>
     );
   }
@@ -87,99 +87,99 @@ export default function ProjectDetail() {
   const messages = project.messages || [];
 
   return (
-    <div className="min-h-screen bg-[#faf9f7]">
+    <div className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav user={user} />
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         {/* Header */}
         <button
           onClick={() => router.push('/intake/dashboard')}
-          className="flex items-center gap-1.5 text-xs text-[#777] hover:text-[#c9a84c] transition-colors mb-4"
+          className="flex items-center gap-1.5 text-[11px] text-[#999] hover:text-[#b8960c] transition-colors mb-4"
         >
-          <ArrowLeft size={14} /> Back to Projects
+          <ArrowLeft size={13} /> Back to Projects
         </button>
 
         <div className="flex items-start justify-between mb-6">
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span
-                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded"
+                className="inline-flex items-center gap-1 text-[9px] font-bold px-2.5 py-0.5 rounded-md"
                 style={{ color: status.color, background: status.bg }}
               >
                 <StatusIcon size={10} /> {status.label}
               </span>
-              <span className="text-[10px] text-[#aaa]">{project.intake_code}</span>
+              <span className="text-[9px] text-[#c5c0b8] font-medium">{project.intake_code}</span>
             </div>
-            <h1 className="text-xl font-bold text-[#1a1a1a]">{project.name}</h1>
+            <h1 className="text-lg font-bold text-[#1a1a1a]">{project.name}</h1>
             {project.address && (
-              <div className="flex items-center gap-1 text-xs text-[#777] mt-1">
-                <MapPin size={12} /> {project.address}
+              <div className="flex items-center gap-1 text-[11px] text-[#888] mt-1">
+                <MapPin size={11} /> {project.address}
               </div>
             )}
           </div>
         </div>
 
         {/* Details grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           {project.treatment && (
-            <div className="bg-white border border-[#e5e0d8] rounded-lg p-3">
-              <div className="text-[10px] text-[#aaa] mb-0.5">Treatment</div>
-              <div className="text-xs font-semibold text-[#1a1a1a] capitalize">{project.treatment}</div>
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[10px] p-3">
+              <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Treatment</div>
+              <div className="text-[12px] font-semibold text-[#1a1a1a] capitalize">{project.treatment}</div>
             </div>
           )}
           {project.style && (
-            <div className="bg-white border border-[#e5e0d8] rounded-lg p-3">
-              <div className="text-[10px] text-[#aaa] mb-0.5">Style</div>
-              <div className="text-xs font-semibold text-[#1a1a1a] capitalize">{project.style}</div>
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[10px] p-3">
+              <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Style</div>
+              <div className="text-[12px] font-semibold text-[#1a1a1a] capitalize">{project.style}</div>
             </div>
           )}
           {project.scope && (
-            <div className="bg-white border border-[#e5e0d8] rounded-lg p-3">
-              <div className="text-[10px] text-[#aaa] mb-0.5">Scope</div>
-              <div className="text-xs font-semibold text-[#1a1a1a] capitalize">{project.scope.replace(/-/g, ' ')}</div>
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[10px] p-3">
+              <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Scope</div>
+              <div className="text-[12px] font-semibold text-[#1a1a1a] capitalize">{project.scope.replace(/-/g, ' ')}</div>
             </div>
           )}
-          <div className="bg-white border border-[#e5e0d8] rounded-lg p-3">
-            <div className="text-[10px] text-[#aaa] mb-0.5">Photos</div>
-            <div className="text-xs font-semibold text-[#1a1a1a]">{photos.length}</div>
+          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[10px] p-3">
+            <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Photos</div>
+            <div className="text-[12px] font-semibold text-[#1a1a1a]">{photos.length}</div>
           </div>
         </div>
 
         {/* Quote PDF */}
         {project.quote_pdf && (
-          <div className="bg-[#fdf8eb] border border-[#c9a84c]/20 rounded-xl p-4 mb-6">
+          <div className="bg-[#fdf8eb] border border-[#b8960c]/20 rounded-[14px] p-4 mb-5">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileText size={18} className="text-[#c9a84c]" />
+              <div className="flex items-center gap-2.5">
+                <FileText size={16} className="text-[#b8960c]" />
                 <div>
-                  <div className="text-sm font-semibold text-[#1a1a1a]">Your Quote is Ready</div>
-                  <div className="text-[10px] text-[#777]">Review your 3-tier proposal and choose an option</div>
+                  <div className="text-[13px] font-semibold text-[#1a1a1a]">Your Quote is Ready</div>
+                  <div className="text-[10px] text-[#888]">Review your 3-tier proposal and choose an option</div>
                 </div>
               </div>
               <a
                 href={`http://localhost:8000${project.quote_pdf}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-4 py-2 text-xs font-semibold bg-[#c9a84c] text-white rounded-lg hover:bg-[#b8960c] transition-colors flex items-center gap-1.5"
+                className="px-4 py-2 text-[11px] font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors flex items-center gap-1.5"
               >
-                <Download size={14} /> View Quote
+                <Download size={13} /> View Quote
               </a>
             </div>
           </div>
         )}
 
         {/* Photos section */}
-        <div className="bg-white border border-[#e5e0d8] rounded-xl p-5 mb-4">
+        <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
           <div className="flex items-center gap-2 mb-4">
-            <Camera size={16} className="text-[#c9a84c]" />
-            <h2 className="text-sm font-bold text-[#1a1a1a]">Photos</h2>
+            <Camera size={14} className="text-[#b8960c]" />
+            <h2 className="text-[13px] font-bold text-[#1a1a1a]">Photos</h2>
           </div>
           {project.status === 'draft' ? (
             <PhotoUploader projectId={projectId} photos={photos} onUpload={loadProject} />
           ) : photos.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               {photos.map((p: any, i: number) => (
-                <div key={i} className="relative aspect-square rounded-lg overflow-hidden bg-[#f5f3ef] border border-[#e5e0d8]">
+                <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
                   <img
                     src={`http://localhost:8000${p.path}`}
                     alt={p.original_name}
@@ -189,24 +189,24 @@ export default function ProjectDetail() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-[#aaa]">No photos uploaded.</p>
+            <p className="text-[11px] text-[#c5c0b8]">No photos uploaded.</p>
           )}
         </div>
 
         {/* Measurements section */}
         {measurements.length > 0 && (
-          <div className="bg-white border border-[#e5e0d8] rounded-xl p-5 mb-4">
+          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
             <div className="flex items-center gap-2 mb-4">
-              <Ruler size={16} className="text-[#c9a84c]" />
-              <h2 className="text-sm font-bold text-[#1a1a1a]">Measurements</h2>
+              <Ruler size={14} className="text-[#b8960c]" />
+              <h2 className="text-[13px] font-bold text-[#1a1a1a]">Measurements</h2>
             </div>
             <div className="space-y-2">
               {measurements.map((m: any, i: number) => (
-                <div key={i} className="flex items-center gap-3 text-xs p-2.5 rounded-lg bg-[#faf9f7] border border-[#e5e0d8]">
+                <div key={i} className="flex items-center gap-3 text-[12px] p-2.5 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
                   <span className="font-semibold text-[#1a1a1a] min-w-[100px]">{m.room || `Window ${i + 1}`}</span>
-                  <span className="text-[#777]">{m.width}&quot; W &times; {m.height}&quot; H</span>
+                  <span className="text-[#888]">{m.width}&quot; W &times; {m.height}&quot; H</span>
                   {m.reference && m.reference !== 'none' && (
-                    <span className="text-[10px] text-[#aaa] px-1.5 py-0.5 bg-[#f5f3ef] rounded">
+                    <span className="text-[9px] text-[#c5c0b8] px-1.5 py-0.5 bg-[#faf9f7] rounded-md border border-[#ece8e0] font-medium">
                       ref: {m.reference}
                     </span>
                   )}
@@ -218,17 +218,17 @@ export default function ProjectDetail() {
 
         {/* Notes */}
         {project.notes && (
-          <div className="bg-white border border-[#e5e0d8] rounded-xl p-5 mb-4">
-            <h2 className="text-sm font-bold text-[#1a1a1a] mb-2">Notes</h2>
-            <p className="text-xs text-[#777] whitespace-pre-wrap">{project.notes}</p>
+          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
+            <h2 className="text-[13px] font-bold text-[#1a1a1a] mb-2">Notes</h2>
+            <p className="text-[12px] text-[#888] whitespace-pre-wrap leading-relaxed">{project.notes}</p>
           </div>
         )}
 
         {/* Messages */}
-        <div className="bg-white border border-[#e5e0d8] rounded-xl p-5">
+        <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5">
           <div className="flex items-center gap-2 mb-4">
-            <MessageSquare size={16} className="text-[#c9a84c]" />
-            <h2 className="text-sm font-bold text-[#1a1a1a]">Messages</h2>
+            <MessageSquare size={14} className="text-[#b8960c]" />
+            <h2 className="text-[13px] font-bold text-[#1a1a1a]">Messages</h2>
           </div>
 
           {messages.length > 0 ? (
@@ -236,10 +236,10 @@ export default function ProjectDetail() {
               {messages.map((msg: any, i: number) => (
                 <div
                   key={i}
-                  className={`p-3 rounded-lg text-xs ${
+                  className={`p-3 rounded-[10px] text-[12px] ${
                     msg.from === 'client'
-                      ? 'bg-[#fdf8eb] border border-[#c9a84c]/20 ml-8'
-                      : 'bg-[#f5f3ef] border border-[#e5e0d8] mr-8'
+                      ? 'bg-[#fdf8eb] border border-[#b8960c]/15 ml-8'
+                      : 'bg-[#f5f2ed] border border-[#ece8e0] mr-8'
                   }`}
                 >
                   <div className="font-semibold text-[#1a1a1a] mb-1">
@@ -247,7 +247,7 @@ export default function ProjectDetail() {
                   </div>
                   <div className="text-[#555]">{msg.text}</div>
                   {msg.timestamp && (
-                    <div className="text-[9px] text-[#aaa] mt-1">
+                    <div className="text-[9px] text-[#c5c0b8] mt-1">
                       {new Date(msg.timestamp).toLocaleString()}
                     </div>
                   )}
@@ -255,7 +255,7 @@ export default function ProjectDetail() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-[#aaa] mb-4">No messages yet. Send one to start the conversation.</p>
+            <p className="text-[11px] text-[#c5c0b8] mb-4">No messages yet. Send one to start the conversation.</p>
           )}
 
           <div className="flex items-center gap-2">
@@ -265,14 +265,14 @@ export default function ProjectDetail() {
               onChange={e => setMessage(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && sendMessage()}
               placeholder="Type a message..."
-              className="flex-1 px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
+              className="form-input flex-1"
             />
             <button
               onClick={sendMessage}
               disabled={sending || !message.trim()}
-              className="px-4 py-2.5 bg-[#c9a84c] text-white rounded-lg hover:bg-[#b8960c] transition-colors disabled:opacity-50"
+              className="px-3.5 py-2 bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
             >
-              <Send size={14} />
+              <Send size={13} />
             </button>
           </div>
         </div>

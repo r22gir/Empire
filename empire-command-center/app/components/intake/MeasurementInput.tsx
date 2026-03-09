@@ -30,13 +30,13 @@ export default function MeasurementInput({
   return (
     <div className="space-y-3">
       {measurements.map((m, i) => (
-        <div key={i} className="flex items-start gap-2 p-3 rounded-lg bg-[#faf9f7] border border-[#e5e0d8]">
+        <div key={i} className="flex items-start gap-2 p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
           <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <input
               placeholder="Room / Window"
               value={m.room}
               onChange={e => update(i, 'room', e.target.value)}
-              className="text-sm px-3 py-2.5 border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none col-span-2 sm:col-span-1"
+              className="form-input col-span-2 sm:col-span-1"
             />
             <input
               placeholder='Width (")'
@@ -44,7 +44,7 @@ export default function MeasurementInput({
               step="0.25"
               value={m.width}
               onChange={e => update(i, 'width', e.target.value)}
-              className="text-sm px-3 py-2.5 border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
+              className="form-input"
             />
             <input
               placeholder='Height (")'
@@ -52,12 +52,12 @@ export default function MeasurementInput({
               step="0.25"
               value={m.height}
               onChange={e => update(i, 'height', e.target.value)}
-              className="text-sm px-3 py-2.5 border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
+              className="form-input"
             />
             <select
               value={m.reference}
               onChange={e => update(i, 'reference', e.target.value)}
-              className="text-sm px-3 py-2.5 border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
+              className="form-input"
             >
               <option value="none">No reference</option>
               <option value="credit-card">Credit Card</option>
@@ -66,17 +66,17 @@ export default function MeasurementInput({
               <option value="tape-measure">Tape Measure</option>
             </select>
           </div>
-          <button type="button" onClick={() => removeWindow(i)} className="mt-2 text-[#ccc] hover:text-[#dc2626] transition-colors">
-            <Trash2 size={14} />
+          <button type="button" onClick={() => removeWindow(i)} className="mt-2 text-[#d5d0c8] hover:text-[#dc2626] transition-colors">
+            <Trash2 size={13} />
           </button>
         </div>
       ))}
       <button
         type="button"
         onClick={addWindow}
-        className="w-full py-2.5 text-xs font-semibold text-[#c9a84c] border border-dashed border-[#c9a84c]/40 rounded-lg hover:bg-[#fdf8eb] transition-colors flex items-center justify-center gap-1.5"
+        className="w-full py-2 text-[11px] font-semibold text-[#b8960c] border border-dashed border-[#b8960c]/30 rounded-[10px] hover:bg-[#fdf8eb] transition-colors flex items-center justify-center gap-1.5"
       >
-        <Plus size={14} /> Add Window / Area
+        <Plus size={13} /> Add Window / Area
       </button>
     </div>
   );

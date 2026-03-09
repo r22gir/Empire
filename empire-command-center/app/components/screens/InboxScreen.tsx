@@ -109,55 +109,68 @@ export default function InboxScreen() {
   const priorityColors: Record<string, string> = { high: '#dc2626', normal: '#b8960c', low: '#aaa' };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6">
-      <div className="flex items-center justify-between mb-5">
+    <div className="flex-1 overflow-y-auto" style={{ padding: '28px 36px' }}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
-            <Inbox size={20} className="text-[#b8960c]" />
+          <div className="w-10 h-10 rounded-[var(--radius)] flex items-center justify-center" style={{ background: 'var(--gold-light)' }}>
+            <Inbox size={20} style={{ color: 'var(--gold)' }} />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-[#1a1a1a]">Inbox</h1>
-            <p className="text-xs text-[#777]">{items.filter(i => !i.read).length} unread · {items.length} total</p>
+            <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)' }}>Inbox</h1>
+            <p style={{ fontSize: 13, color: 'var(--dim)' }}>{items.filter(i => !i.read).length} unread · {items.length} total</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg border border-[#e5e0d8] overflow-hidden">
+          <div className="flex items-center gap-1.5">
             {(['all', 'unread', 'high'] as const).map(f => (
               <button key={f} onClick={() => setFilter(f)}
-                className={`px-3 py-2 text-[11px] font-semibold cursor-pointer transition-colors ${filter === f ? 'bg-[#b8960c] text-white' : 'bg-white text-[#777] hover:bg-[#f5f3ef]'}`}>
+                className={`filter-tab ${filter === f ? 'active' : ''}`}>
                 {f === 'high' ? 'Priority' : f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
             ))}
           </div>
           <button onClick={loadInbox}
-            className="w-10 h-10 rounded-lg border border-[#e5e0d8] bg-white flex items-center justify-center text-[#777] hover:bg-[#f5f3ef] cursor-pointer transition-colors">
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            className="empire-card flat"
+            style={{ padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, height: 38, cursor: 'pointer' }}>
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} style={{ color: 'var(--dim)' }} />
           </button>
         </div>
       </div>
 
+      {/* Section label */}
+      <div className="section-label" style={{ marginBottom: 12 }}>Messages</div>
+
+      {/* Inbox items */}
       <div className="space-y-2">
         {filtered.map(item => (
           <div key={item.id}
             onClick={() => setExpanded(expanded === item.id ? null : item.id)}
-            className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${!item.read ? 'bg-white border-[#e5e0d8] hover:border-[#b8960c]' : 'bg-[#faf9f7] border-[#ece8e1] hover:border-[#d8d3cb]'}`}>
+            className={`empire-card ${!item.read ? 'active' : ''}`}
+            style={{ padding: '14px 18px' }}>
             <div className="flex items-start gap-3">
               <span className="text-lg mt-0.5">{typeIcons[item.type] || '📌'}</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-bold ${!item.read ? 'text-[#1a1a1a]' : 'text-[#777]'}`}>{item.title}</span>
-                  {!item.read && <span className="w-2 h-2 rounded-full bg-[#b8960c]" />}
+                  <span style={{ fontSize: 14, fontWeight: 600, color: !item.read ? 'var(--text)' : 'var(--dim)' }}>{item.title}</span>
+                  {!item.read && <span className="w-2 h-2 rounded-full" style={{ background: 'var(--gold)' }} />}
                 </div>
-                <div className="text-xs text-[#777] mt-0.5">{item.body}</div>
+                <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 3 }}>{item.body}</div>
                 {expanded === item.id && item.body.length > 50 && (
-                  <div className="mt-2 p-3 rounded-lg bg-[#f5f3ef] text-xs text-[#555]">{item.body}</div>
+                  <div className="empire-card flat" style={{ marginTop: 10, padding: '10px 14px', fontSize: 12, color: 'var(--text-secondary)', cursor: 'default' }}>
+                    {item.body}
+                  </div>
                 )}
                 <div className="flex items-center gap-3 mt-2">
-                  <span className="text-[9px] font-mono text-[#bbb]" suppressHydrationWarning>{formatTimestamp(item.timestamp)}</span>
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ color: priorityColors[item.priority || 'normal'], background: (priorityColors[item.priority || 'normal']) + '15' }}>
+                  <span style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--faint)' }} suppressHydrationWarning>{formatTimestamp(item.timestamp)}</span>
+                  <span className="status-pill" style={{
+                    color: priorityColors[item.priority || 'normal'],
+                    background: (priorityColors[item.priority || 'normal']) + '15',
+                    padding: '2px 8px', fontSize: 10
+                  }}>
                     {(item.priority || 'normal').toUpperCase()}
                   </span>
-                  {item.source && <span className="text-[9px] text-[#aaa]">via {item.source}</span>}
+                  {item.source && <span style={{ fontSize: 10, color: 'var(--muted)' }}>via {item.source}</span>}
                 </div>
               </div>
             </div>
@@ -166,16 +179,16 @@ export default function InboxScreen() {
 
         {filtered.length === 0 && !loading && (
           <div className="text-center py-16">
-            <CheckCircle size={36} className="text-[#d8d3cb] mx-auto mb-3" />
-            <div className="text-sm font-semibold text-[#aaa]">All caught up</div>
-            <div className="text-xs text-[#ccc] mt-1">No {filter === 'all' ? '' : filter + ' '}items</div>
+            <CheckCircle size={36} style={{ color: 'var(--faint)' }} className="mx-auto mb-3" />
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--muted)' }}>All caught up</div>
+            <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 4 }}>No {filter === 'all' ? '' : filter + ' '}items</div>
           </div>
         )}
 
         {loading && (
           <div className="text-center py-10">
-            <RefreshCw size={24} className="text-[#d8d3cb] mx-auto mb-2 animate-spin" />
-            <div className="text-sm text-[#aaa]">Loading inbox...</div>
+            <RefreshCw size={24} style={{ color: 'var(--faint)' }} className="mx-auto mb-2 animate-spin" />
+            <div style={{ fontSize: 14, color: 'var(--muted)' }}>Loading inbox...</div>
           </div>
         )}
       </div>

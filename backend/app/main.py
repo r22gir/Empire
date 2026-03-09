@@ -91,6 +91,15 @@ load_router("app.routers.jobs", "/api/v1", ["jobs"])
 # LuxeForge FREE — Public intake portal
 load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 
+# AMP — Actitud Mental Positiva platform
+load_router("app.routers.amp", "/api/v1/amp", ["amp"])
+
+# LLC Factory — Business formation services (DC/MD/VA)
+load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
+
+# ApostApp — Document apostille & authentication service (DC/MD/VA)
+load_router("app.routers.apostapp", "/api/v1", ["apostapp"])
+
 # Vision analysis (measurement, mockup, outline, upholstery, image gen)
 load_router("app.routers.vision", "", ["vision"])
 

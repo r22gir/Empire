@@ -167,6 +167,21 @@ class MessageCreate(BaseModel):
     content: str
 
 
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    password: Optional[str] = None
+
+
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    company: Optional[str] = None
+    role: Optional[str] = None
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  AUTH ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -218,6 +233,33 @@ async def get_me(user=Depends(get_current_user)):
         "role": user["role"],
         "created_at": user["created_at"],
     }
+
+
+@router.put("/me")
+async def update_profile(update: ProfileUpdate, user=Depends(get_current_user)):
+    """User self-service profile update."""
+    conn = get_db()
+    fields = []
+    values = []
+    data = update.model_dump(exclude_unset=True)
+    if "name" in data and data["name"]:
+        fields.append("name = ?")
+        values.append(data["name"].strip())
+    if "phone" in data:
+        fields.append("phone = ?")
+        values.append(data["phone"])
+    if "company" in data:
+        fields.append("company = ?")
+        values.append(data["company"])
+    if "password" in data and data["password"]:
+        fields.append("password_hash = ?")
+        values.append(pwd_context.hash(data["password"]))
+    if fields:
+        values.append(user["id"])
+        conn.execute(f"UPDATE intake_users SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+    conn.close()
+    return await get_me(user)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -462,3 +504,179 @@ async def upload_scan(
     conn.close()
 
     return {"filename": filename, "total_scans": len(scans)}
+
+
+# ── Admin endpoints (for Command Center) ─────────────────────
+@router.get("/admin/projects")
+async def admin_list_all_projects():
+    """List all intake projects with user info (for founder dashboard)."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT p.*, u.name as user_name, u.email as user_email,
+               u.company as user_company, u.role as user_role
+        FROM intake_projects p
+        LEFT JOIN intake_users u ON p.user_id = u.id
+        ORDER BY p.created_at DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.get("/admin/users")
+async def admin_list_all_users():
+    """List all registered intake users (for founder dashboard)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, name, email, phone, company, role, created_at FROM intake_users ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.get("/admin/projects/{project_id}")
+async def admin_get_project(project_id: str):
+    """Get single project with full details (for founder dashboard)."""
+    conn = get_db()
+    row = conn.execute("""
+        SELECT p.*, u.name as user_name, u.email as user_email,
+               u.company as user_company, u.role as user_role
+        FROM intake_projects p
+        LEFT JOIN intake_users u ON p.user_id = u.id
+        WHERE p.id = ?
+    """, (project_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return dict(row)
+
+
+@router.put("/admin/users/{user_id}")
+async def admin_update_user(user_id: str, update: AdminUserUpdate):
+    """Admin: update any user's info."""
+    conn = get_db()
+    row = conn.execute("SELECT id FROM intake_users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    fields = []
+    values = []
+    data = update.model_dump(exclude_unset=True)
+    for key, val in data.items():
+        if val is not None:
+            fields.append(f"{key} = ?")
+            values.append(val)
+    if fields:
+        values.append(user_id)
+        conn.execute(f"UPDATE intake_users SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+    updated = conn.execute("SELECT id, name, email, phone, company, role, created_at FROM intake_users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(updated)
+
+
+@router.delete("/admin/users/{user_id}")
+async def admin_delete_user(user_id: str):
+    """Admin: delete a user and their projects."""
+    conn = get_db()
+    row = conn.execute("SELECT id FROM intake_users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+    conn.execute("DELETE FROM intake_projects WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM intake_users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "deleted", "user_id": user_id}
+
+
+@router.post("/admin/projects/{project_id}/to-quote")
+async def convert_to_quote(project_id: str):
+    """Convert an intake project into an Empire Workroom quote."""
+    import importlib
+    conn = get_db()
+    row = conn.execute("""
+        SELECT p.*, u.name as user_name, u.email as user_email,
+               u.phone as user_phone, u.company as user_company
+        FROM intake_projects p
+        LEFT JOIN intake_users u ON p.user_id = u.id
+        WHERE p.id = ?
+    """, (project_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = dict(row)
+    measurements_raw = json.loads(project.get("measurements") or "[]")
+    rooms_raw = json.loads(project.get("rooms") or "[]")
+    photos_raw = json.loads(project.get("photos") or "[]")
+
+    # Build rooms list for the quote from measurements + treatment info
+    rooms = []
+    for m in measurements_raw:
+        rooms.append({
+            "room_name": m.get("room", "Window"),
+            "windows": [{
+                "name": m.get("room", "Window"),
+                "width": float(m.get("width", 0)),
+                "height": float(m.get("height", 0)),
+                "quantity": 1,
+                "treatment_type": project.get("treatment", "drapery"),
+            }],
+        })
+
+    # If rooms_raw has items (multi-item projects), use those too
+    for r in rooms_raw:
+        if isinstance(r, dict) and r.get("name"):
+            rooms.append({
+                "room_name": r.get("name", "Room"),
+                "windows": [{
+                    "name": r.get("name", "Item"),
+                    "width": 0,
+                    "height": 0,
+                    "quantity": 1,
+                    "treatment_type": r.get("treatment", project.get("treatment", "")),
+                    "description": r.get("description", ""),
+                }],
+            })
+
+    # Build quote payload
+    quote_data = {
+        "customer_name": project.get("user_name") or "Intake Client",
+        "customer_email": project.get("user_email") or "",
+        "customer_phone": project.get("user_phone") or "",
+        "customer_address": project.get("address") or "",
+        "project_name": project.get("name") or "Intake Project",
+        "project_description": f"From LuxeForge intake {project.get('intake_code', '')}. "
+                               f"Treatment: {project.get('treatment', 'N/A')}. "
+                               f"Style: {project.get('style', 'N/A')}. "
+                               f"Scope: {project.get('scope', 'N/A')}.",
+        "notes": project.get("notes") or "",
+        "rooms": rooms,
+        "line_items": [],
+        "valid_days": 30,
+    }
+
+    # Create the quote via the quotes router
+    try:
+        quotes_mod = importlib.import_module("app.routers.quotes")
+        payload = quotes_mod.QuoteCreate(**quote_data)
+        result = await quotes_mod.create_quote(payload)
+
+        # Update intake project status
+        conn2 = get_db()
+        conn2.execute(
+            "UPDATE intake_projects SET status = 'quote-ready', updated_at = datetime('now') WHERE id = ?",
+            (project_id,),
+        )
+        conn2.commit()
+        conn2.close()
+
+        return {
+            "status": "created",
+            "quote_id": result.get("quote", {}).get("id"),
+            "quote_number": result.get("quote", {}).get("quote_number"),
+            "intake_code": project.get("intake_code"),
+        }
+    except Exception as e:
+        logger.error(f"Failed to convert intake to quote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -57,10 +57,13 @@ def _get_history(chat_id: str) -> list[dict]:
     return _telegram_history[chat_id]
 
 
-def _append_and_save(chat_id: str, role: str, content: str):
+def _append_and_save(chat_id: str, role: str, content: str, **meta):
     """Add a message to history and persist to disk."""
     history = _get_history(chat_id)
-    history.append({"role": role, "content": content})
+    msg = {"role": role, "content": content, "timestamp": __import__('datetime').datetime.utcnow().isoformat()}
+    if meta:
+        msg.update(meta)
+    history.append(msg)
     # Trim to bounded size
     if len(history) > _MAX_HISTORY * 2:
         history[:] = history[-_MAX_HISTORY * 2:]
@@ -312,6 +315,7 @@ class TelegramBot:
 
     async def _chat_with_max(
         self, text: str, image_filename: Optional[str] = None, chat_id: Optional[str] = None,
+        user_meta: Optional[Dict[str, Any]] = None,
     ) -> tuple[str, str, list]:
         """Send message to MAX via the backend API with conversation memory.
 
@@ -331,7 +335,7 @@ class TelegramBot:
                     response = data.get("response", "No response.")
                     tool_results = data.get("tool_results", [])
                     # Persist to disk
-                    _append_and_save(cid, "user", text)
+                    _append_and_save(cid, "user", text, **(user_meta or {}))
                     _append_and_save(cid, "assistant", response)
                     html = f"{response}\n\n<i>— via {model}</i>"
                     return html, response, tool_results
@@ -562,7 +566,7 @@ class TelegramBot:
                 # 4. Send transcript TEXT to Grok (same as if user typed it)
                 await update.message.reply_chat_action("typing")
                 voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-                html_response, plain_text, _ = await self._chat_with_max(transcript, chat_id=voice_chat_id)
+                html_response, plain_text, _ = await self._chat_with_max(transcript, chat_id=voice_chat_id, user_meta={"type": "voice"})
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
 
@@ -656,7 +660,7 @@ class TelegramBot:
                 except Exception:
                     pass  # If check fails, proceed anyway
 
-                html_response, plain_text, tool_results = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id)
+                html_response, plain_text, tool_results = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id, user_meta={"type": "photo", "image": dest.name})
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
                 await update.message.reply_html(html_response)

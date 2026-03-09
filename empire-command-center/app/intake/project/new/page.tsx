@@ -1,13 +1,41 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Check, Send } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Send, Plus, Trash2 } from 'lucide-react';
 import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import MeasurementInput, { Measurement } from '../../../components/intake/MeasurementInput';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
 const steps = ['Project Info', 'Photos & Scans', 'Measurements', 'Notes & Submit'];
+
+interface LineItem {
+  id: string;
+  treatment: string;
+  room: string;
+  description: string;
+  style: string;
+}
+
+const TREATMENTS = [
+  { value: 'drapery', label: 'Drapery' },
+  { value: 'blinds', label: 'Blinds' },
+  { value: 'shades', label: 'Shades' },
+  { value: 'shutters', label: 'Shutters' },
+  { value: 'upholstery', label: 'Upholstery' },
+  { value: 'bedding', label: 'Bedding' },
+  { value: 'other', label: 'Other' },
+];
+
+const STYLES = [
+  { value: 'modern', label: 'Modern / Minimalist' },
+  { value: 'traditional', label: 'Traditional / Classic' },
+  { value: 'transitional', label: 'Transitional' },
+  { value: 'bohemian', label: 'Bohemian' },
+  { value: 'coastal', label: 'Coastal' },
+  { value: 'farmhouse', label: 'Farmhouse' },
+  { value: 'not-sure', label: 'Not Sure' },
+];
 
 export default function NewProject() {
   const router = useRouter();
@@ -17,19 +45,15 @@ export default function NewProject() {
   const [photos, setPhotos] = useState<any[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  // Step 1 fields
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
-  const [treatment, setTreatment] = useState('');
-  const [style, setStyle] = useState('');
   const [scope, setScope] = useState('');
-
-  // Step 3 fields
+  const [items, setItems] = useState<LineItem[]>([
+    { id: crypto.randomUUID(), treatment: '', room: '', description: '', style: '' },
+  ]);
   const [measurements, setMeasurements] = useState<Measurement[]>([
     { room: '', width: '', height: '', reference: 'none' },
   ]);
-
-  // Step 4 fields
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -37,11 +61,43 @@ export default function NewProject() {
     intakeFetch('/me').then(setUser).catch(() => router.push('/intake/login'));
   }, [router]);
 
+  const addItem = () => {
+    setItems(prev => [...prev, { id: crypto.randomUUID(), treatment: '', room: '', description: '', style: '' }]);
+  };
+
+  const removeItem = (id: string) => {
+    if (items.length <= 1) return;
+    setItems(prev => prev.filter(i => i.id !== id));
+  };
+
+  const updateItem = (id: string, field: keyof LineItem, value: string) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, [field]: value } : i));
+  };
+
+  // Combine items into treatment/rooms/notes for the API
+  const buildProjectData = () => {
+    const treatments = [...new Set(items.map(i => i.treatment).filter(Boolean))];
+    const rooms = items.filter(i => i.room || i.treatment).map(i => ({
+      name: i.room || 'Unspecified',
+      treatment: i.treatment,
+      style: i.style,
+      description: i.description,
+    }));
+    return {
+      name,
+      address,
+      treatment: treatments.join(', '),
+      style: items[0]?.style || '',
+      scope,
+      rooms: JSON.stringify(rooms),
+    };
+  };
+
   const createProject = async () => {
     const proj = await intakeFetch('/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, address, treatment, style, scope }),
+      body: JSON.stringify(buildProjectData()),
     });
     setProjectId(proj.id);
     return proj.id;
@@ -53,6 +109,7 @@ export default function NewProject() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        ...buildProjectData(),
         measurements: measurements.filter(m => m.room || m.width || m.height),
         notes,
       }),
@@ -67,7 +124,7 @@ export default function NewProject() {
         await intakeFetch(`/projects/${projectId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, address, treatment, style, scope }),
+          body: JSON.stringify(buildProjectData()),
         });
       }
     }
@@ -93,7 +150,7 @@ export default function NewProject() {
   };
 
   return (
-    <div className="min-h-screen bg-[#faf9f7]">
+    <div className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav user={user} />
 
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
@@ -101,95 +158,134 @@ export default function NewProject() {
         <div className="flex items-center gap-1 mb-8">
           {steps.map((label, i) => (
             <div key={i} className="flex-1 flex flex-col items-center">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mb-1 transition-colors ${
+              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold mb-1 transition-colors ${
                 i < step ? 'bg-[#16a34a] text-white' :
-                i === step ? 'bg-[#c9a84c] text-white' :
-                'bg-[#e5e0d8] text-[#aaa]'
+                i === step ? 'bg-[#1a1a1a] text-white' :
+                'bg-[#ece8e0] text-[#c5c0b8]'
               }`}>
-                {i < step ? <Check size={14} /> : i + 1}
+                {i < step ? <Check size={12} /> : i + 1}
               </div>
-              <span className={`text-[10px] font-medium ${i <= step ? 'text-[#1a1a1a]' : 'text-[#aaa]'}`}>
+              <span className={`text-[9px] font-medium ${i <= step ? 'text-[#1a1a1a]' : 'text-[#c5c0b8]'}`}>
                 {label}
               </span>
             </div>
           ))}
         </div>
 
-        <div className="bg-white border border-[#e5e0d8] rounded-xl p-6">
-          {/* Step 1: Project Info */}
+        <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-6">
+          {/* Step 1: Project Info + Line Items */}
           {step === 0 && (
             <div className="space-y-4">
-              <h2 className="text-lg font-bold text-[#1a1a1a] mb-4">Tell Us About Your Project</h2>
+              <h2 className="text-base font-bold text-[#1a1a1a] mb-4">Tell Us About Your Project</h2>
               <div>
-                <label className="block text-xs font-medium text-[#555] mb-1.5">Project Name *</label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
-                  placeholder="e.g., Living Room Drapes"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[#555] mb-1.5">Address</label>
-                <input
-                  type="text"
-                  value={address}
-                  onChange={e => setAddress(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
-                  placeholder="123 Main St, City, ST"
-                />
+                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Project Name *</label>
+                <input type="text" required value={name} onChange={e => setName(e.target.value)}
+                  className="form-input" placeholder="e.g., Johnson Residence - Full Home" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-[#555] mb-1.5">Treatment Type</label>
-                  <select
-                    value={treatment}
-                    onChange={e => setTreatment(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
-                  >
-                    <option value="">Select...</option>
-                    <option value="drapery">Drapery</option>
-                    <option value="blinds">Blinds</option>
-                    <option value="shades">Shades</option>
-                    <option value="shutters">Shutters</option>
-                    <option value="upholstery">Upholstery</option>
-                    <option value="bedding">Bedding</option>
-                    <option value="other">Other / Not Sure</option>
-                  </select>
+                  <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Address</label>
+                  <input type="text" value={address} onChange={e => setAddress(e.target.value)}
+                    className="form-input" placeholder="123 Main St, City, ST" />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-[#555] mb-1.5">Style Preference</label>
-                  <select
-                    value={style}
-                    onChange={e => setStyle(e.target.value)}
-                    className="w-full px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
-                  >
+                  <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Scope</label>
+                  <select value={scope} onChange={e => setScope(e.target.value)} className="form-input">
                     <option value="">Select...</option>
-                    <option value="modern">Modern / Minimalist</option>
-                    <option value="traditional">Traditional / Classic</option>
-                    <option value="transitional">Transitional</option>
-                    <option value="bohemian">Bohemian</option>
-                    <option value="coastal">Coastal</option>
-                    <option value="farmhouse">Farmhouse</option>
-                    <option value="not-sure">Not Sure — Surprise Me</option>
+                    <option value="single-window">Single Window</option>
+                    <option value="single-room">Single Room</option>
+                    <option value="multiple-rooms">Multiple Rooms</option>
+                    <option value="whole-home">Whole Home</option>
                   </select>
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-[#555] mb-1.5">Scope</label>
-                <select
-                  value={scope}
-                  onChange={e => setScope(e.target.value)}
-                  className="w-full px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none"
+
+              {/* Line Items */}
+              <div style={{ marginTop: 20 }}>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px]">
+                    Items / Rooms ({items.length})
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="flex items-center gap-1 text-[11px] font-bold text-[#b8960c] hover:text-[#a3850b] transition-colors cursor-pointer"
+                    style={{ background: 'none', border: 'none', padding: 0 }}
+                  >
+                    <Plus size={13} /> Add Item
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {items.map((item, idx) => (
+                    <div key={item.id} className="p-3.5 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="text-[10px] font-bold text-[#b8960c]">ITEM {idx + 1}</span>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem(item.id)}
+                            className="text-[#d5d0c8] hover:text-[#dc2626] transition-colors cursor-pointer"
+                            style={{ background: 'none', border: 'none', padding: 0 }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5 mb-2.5">
+                        <div>
+                          <select
+                            value={item.treatment}
+                            onChange={e => updateItem(item.id, 'treatment', e.target.value)}
+                            className="form-input"
+                          >
+                            <option value="">Treatment type...</option>
+                            {TREATMENTS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={item.room}
+                            onChange={e => updateItem(item.id, 'room', e.target.value)}
+                            className="form-input"
+                            placeholder="Room (e.g., Living Room)"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <select
+                            value={item.style}
+                            onChange={e => updateItem(item.id, 'style', e.target.value)}
+                            className="form-input"
+                          >
+                            <option value="">Style...</option>
+                            {STYLES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <input
+                            type="text"
+                            value={item.description}
+                            onChange={e => updateItem(item.id, 'description', e.target.value)}
+                            className="form-input"
+                            placeholder="Details (e.g., 6 dining chairs)"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="w-full mt-3 py-2 text-[11px] font-semibold text-[#b8960c] border border-dashed border-[#b8960c]/30 rounded-[10px] hover:bg-[#fdf8eb] transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  style={{ background: 'none' }}
                 >
-                  <option value="">Select...</option>
-                  <option value="single-window">Single Window</option>
-                  <option value="single-room">Single Room</option>
-                  <option value="multiple-rooms">Multiple Rooms</option>
-                  <option value="whole-home">Whole Home</option>
-                </select>
+                  <Plus size={13} /> Add Another Item
+                </button>
               </div>
             </div>
           )}
@@ -197,8 +293,8 @@ export default function NewProject() {
           {/* Step 2: Photos & Scans */}
           {step === 1 && projectId && (
             <div>
-              <h2 className="text-lg font-bold text-[#1a1a1a] mb-2">Upload Photos</h2>
-              <p className="text-xs text-[#777] mb-4">
+              <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Upload Photos</h2>
+              <p className="text-[11px] text-[#888] mb-4">
                 Take photos of your windows, rooms, or any inspiration images. We&apos;ll use AI to help analyze them.
               </p>
               <PhotoUploader projectId={projectId} photos={photos} onUpload={refreshPhotos} />
@@ -208,8 +304,8 @@ export default function NewProject() {
           {/* Step 3: Measurements */}
           {step === 2 && (
             <div>
-              <h2 className="text-lg font-bold text-[#1a1a1a] mb-2">Window Measurements</h2>
-              <p className="text-xs text-[#777] mb-4">
+              <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Window Measurements</h2>
+              <p className="text-[11px] text-[#888] mb-4">
                 Enter approximate measurements. Don&apos;t worry about being exact — we&apos;ll verify everything before production.
               </p>
               <MeasurementInput measurements={measurements} onChange={setMeasurements} />
@@ -219,20 +315,36 @@ export default function NewProject() {
           {/* Step 4: Notes & Submit */}
           {step === 3 && (
             <div>
-              <h2 className="text-lg font-bold text-[#1a1a1a] mb-2">Additional Notes</h2>
-              <p className="text-xs text-[#777] mb-4">
+              <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Additional Notes</h2>
+              <p className="text-[11px] text-[#888] mb-4">
                 Anything else we should know? Special requests, fabric preferences, budget range, timeline?
               </p>
               <textarea
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 rows={5}
-                className="w-full px-3 py-2.5 text-sm border border-[#e5e0d8] rounded-lg focus:border-[#c9a84c] outline-none resize-none"
+                className="form-input resize-none"
                 placeholder="Tell us anything that helps us create the perfect proposal for you..."
               />
-              <div className="mt-6 p-4 rounded-lg bg-[#fdf8eb] border border-[#c9a84c]/20">
-                <h3 className="text-sm font-semibold text-[#1a1a1a] mb-1">Ready to submit?</h3>
-                <p className="text-xs text-[#777]">
+
+              {/* Summary of items */}
+              {items.filter(i => i.treatment || i.room).length > 0 && (
+                <div className="mt-4 p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
+                  <div className="text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-2">Project Summary</div>
+                  {items.filter(i => i.treatment || i.room).map((item, idx) => (
+                    <div key={item.id} className="flex items-center gap-2 text-[12px] py-1">
+                      <span className="text-[#b8960c] font-bold">{idx + 1}.</span>
+                      <span className="font-semibold text-[#333] capitalize">{item.treatment || 'TBD'}</span>
+                      {item.room && <span className="text-[#888]">— {item.room}</span>}
+                      {item.description && <span className="text-[#aaa]">({item.description})</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 p-4 rounded-[10px] bg-[#fdf8eb] border border-[#b8960c]/20">
+                <h3 className="text-[13px] font-semibold text-[#1a1a1a] mb-1">Ready to submit?</h3>
+                <p className="text-[11px] text-[#888]">
                   We&apos;ll review your project and send you a 3-tier proposal within 24 hours. You can always add more photos or details later.
                 </p>
               </div>
@@ -245,16 +357,16 @@ export default function NewProject() {
           {step > 0 ? (
             <button
               onClick={() => setStep(s => s - 1)}
-              className="px-4 py-2.5 text-xs font-semibold text-[#777] border border-[#e5e0d8] rounded-lg hover:border-[#c9a84c] hover:text-[#c9a84c] transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 text-[11px] font-semibold text-[#888] border border-[#ece8e0] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors flex items-center gap-1.5 bg-[#faf9f7] cursor-pointer"
             >
-              <ArrowLeft size={14} /> Back
+              <ArrowLeft size={13} /> Back
             </button>
           ) : (
             <button
               onClick={() => router.push('/intake/dashboard')}
-              className="px-4 py-2.5 text-xs font-semibold text-[#777] border border-[#e5e0d8] rounded-lg hover:border-[#c9a84c] hover:text-[#c9a84c] transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 text-[11px] font-semibold text-[#888] border border-[#ece8e0] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors flex items-center gap-1.5 bg-[#faf9f7] cursor-pointer"
             >
-              <ArrowLeft size={14} /> Dashboard
+              <ArrowLeft size={13} /> Dashboard
             </button>
           )}
 
@@ -262,17 +374,17 @@ export default function NewProject() {
             <button
               onClick={handleNext}
               disabled={step === 0 && !name.trim()}
-              className="px-6 py-2.5 text-xs font-semibold bg-[#c9a84c] text-white rounded-lg hover:bg-[#b8960c] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="px-6 py-2 text-[11px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
             >
-              Next <ArrowRight size={14} />
+              Next <ArrowRight size={13} />
             </button>
           ) : (
             <button
               onClick={handleSubmit}
               disabled={submitting}
-              className="px-6 py-2.5 text-xs font-semibold bg-[#16a34a] text-white rounded-lg hover:bg-[#15803d] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              className="px-6 py-2 text-[11px] font-bold bg-[#16a34a] text-white rounded-[10px] hover:bg-[#15803d] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
             >
-              {submitting ? 'Submitting...' : (<><Send size={14} /> Submit Project</>)}
+              {submitting ? 'Submitting...' : (<><Send size={13} /> Submit Project</>)}
             </button>
           )}
         </div>
