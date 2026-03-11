@@ -38,6 +38,17 @@ from .verification import (
     save_verification,
     load_verification,
 )
+from .quote_phases import (
+    quick_quote,
+    init_phase_pipeline,
+    advance_phase,
+    approve_phase,
+    reject_phase,
+    retry_phase,
+    get_phase_status,
+    promote_quick_to_full,
+    PHASE_NAMES,
+)
 
 __all__ = [
     # Pricing tables & constants
@@ -79,4 +90,14 @@ __all__ = [
     "verify_quote",
     "save_verification",
     "load_verification",
+    # Phase pipeline (v6.0)
+    "quick_quote",
+    "init_phase_pipeline",
+    "advance_phase",
+    "approve_phase",
+    "reject_phase",
+    "retry_phase",
+    "get_phase_status",
+    "promote_quick_to_full",
+    "PHASE_NAMES",
 ]

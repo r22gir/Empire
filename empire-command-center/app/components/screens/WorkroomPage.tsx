@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import QuoteActions from '../business/quotes/QuoteActions';
 import QuickQuoteBuilder from '../business/quotes/QuickQuoteBuilder';
+import { QuickQuotePanel, QuotePhasePipeline } from '../business/quotes/QuotePipeline';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
 
@@ -98,7 +99,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
       case 'customers':
         return (
           <Suspense fallback={<Loading />}>
-            <CustomerList onSelectCustomer={(id) => setSelectedCustomer(id)} />
+            <CustomerList onSelectCustomer={(id) => setSelectedCustomer(id)} business="workroom" />
           </Suspense>
         );
       case 'quotes':
@@ -277,6 +278,8 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [showQuickQuote, setShowQuickQuote] = useState(false);
+  const [showQuickCalc, setShowQuickCalc] = useState(false);
+  const [pipelineQuoteId, setPipelineQuoteId] = useState<string | null>(null);
   const [analyzingQuoteId, setAnalyzingQuoteId] = useState<string | null>(null);
   const [viewingQuoteId, setViewingQuoteId] = useState<string | null>(initialQuoteId || null);
 
@@ -345,6 +348,13 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
           >
             <Zap size={14} /> Quick Quote
           </button>
+          <button
+            onClick={() => setShowQuickCalc(!showQuickCalc)}
+            className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:border-[#16a34a] hover:text-[#16a34a]"
+            style={{ height: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
+          >
+            <DollarSign size={14} /> Calculator
+          </button>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search quotes..."
             style={{ padding: '8px 12px', border: '1px solid #ece8e0', borderRadius: 10, fontSize: 12, background: '#fff', outline: 'none', width: 200 }}
@@ -352,10 +362,46 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
         </div>
       </div>
 
-      {/* Quick Quote Builder */}
+      {/* Quick Quote Builder (photo-based) */}
       {showQuickQuote && (
         <div style={{ marginBottom: 20 }}>
           <QuickQuoteBuilder onClose={() => setShowQuickQuote(false)} />
+        </div>
+      )}
+
+      {/* Quick Quote Calculator (dimensions-based ballpark) */}
+      {showQuickCalc && (
+        <div style={{ marginBottom: 20 }}>
+          <QuickQuotePanel onPromote={async (data) => {
+            const name = prompt('Customer name for full quote:');
+            if (!name) return;
+            try {
+              const res = await fetch(API + '/quotes/quick/promote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ customer_name: name, quick_quote_data: data }),
+              });
+              const result = await res.json();
+              if (result.quote?.id) {
+                setPipelineQuoteId(result.quote.id);
+                setShowQuickCalc(false);
+              }
+            } catch (e) { console.error(e); }
+          }} />
+        </div>
+      )}
+
+      {/* Phase Pipeline (when a quote is selected for pipeline review) */}
+      {pipelineQuoteId && (
+        <div style={{ marginBottom: 20 }}>
+          <div className="flex items-center justify-between mb-2">
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#777' }}>Phase Pipeline</span>
+            <button onClick={() => setPipelineQuoteId(null)}
+              className="cursor-pointer" style={{ background: 'none', border: 'none', fontSize: 11, color: '#999' }}>
+              <X size={14} /> Close
+            </button>
+          </div>
+          <QuotePhasePipeline quoteId={pipelineQuoteId} />
         </div>
       )}
 
@@ -404,6 +450,13 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
                       <Eye size={14} />
                     </button>
                     <QuoteActions quoteId={q.id} status={q.status || 'draft'} compact />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setPipelineQuoteId(pipelineQuoteId === q.id ? null : q.id); }}
+                      title="Phase Pipeline"
+                      className="inline-flex items-center justify-center w-8 h-8 rounded-[10px] border border-[#ece8e0] hover:border-[#16a34a] hover:bg-[#f0fdf4] transition-all cursor-pointer"
+                    >
+                      <TrendingUp size={14} className="text-[#16a34a]" />
+                    </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); setAnalyzingQuoteId(analyzingQuoteId === q.id ? null : q.id); }}
                       title="AI Photo Analysis"
@@ -472,6 +525,7 @@ function TasksSection() {
   const [newDesk, setNewDesk] = useState('');
   const [newDue, setNewDue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [viewingTask, setViewingTask] = useState<any>(null);
 
   const fetchTasks = async () => {
     try {
@@ -487,14 +541,26 @@ function TasksSection() {
   useEffect(() => { fetchTasks(); }, []);
 
   const toggleTask = async (task: any) => {
-    const newStatus = task.status === 'done' ? 'pending' : 'done';
+    const newStatus = task.status === 'done' ? 'todo' : 'done';
     try {
-      await fetch(`${API}/tasks/${task.id}`, {
+      const res = await fetch(`${API}/tasks/${task.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       });
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+      if (res.ok) {
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+      }
+    } catch { /* */ }
+  };
+
+  const fetchTaskDetail = async (taskId: string) => {
+    try {
+      const res = await fetch(`${API}/tasks/${taskId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setViewingTask(data.task || data);
+      }
     } catch { /* */ }
   };
 
@@ -527,8 +593,9 @@ function TasksSection() {
   };
 
   const filtered = tasks.filter(t => {
-    if (filter === 'pending' && t.status === 'done') return false;
-    if (filter === 'done' && t.status !== 'done') return false;
+    const isDone = t.status === 'done';
+    if (filter === 'pending' && isDone) return false;
+    if (filter === 'done' && !isDone) return false;
     if (deskFilter && t.desk !== deskFilter) return false;
     if (search && !(t.title || '').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
@@ -682,10 +749,11 @@ function TasksSection() {
             const isDone = task.status === 'done';
             const pc = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.normal;
             return (
-              <div key={task.id} className="empire-card transition-all hover:border-[#f0e6c0]"
+              <div key={task.id} className="empire-card transition-all hover:border-[#f0e6c0] cursor-pointer"
+                onClick={() => fetchTaskDetail(task.id)}
                 style={{ opacity: isDone ? 0.6 : 1, borderLeftWidth: 3, borderLeftColor: pc.text }}>
                 <div className="flex items-center gap-3">
-                  <button onClick={() => toggleTask(task)} className="cursor-pointer shrink-0" style={{ background: 'none', border: 'none', padding: 0 }}>
+                  <button onClick={(e) => { e.stopPropagation(); toggleTask(task); }} className="cursor-pointer shrink-0" style={{ background: 'none', border: 'none', padding: 0 }}>
                     {isDone
                       ? <CheckCircle2 size={20} className="text-[#16a34a]" />
                       : <Circle size={20} style={{ color: pc.text }} />
@@ -734,6 +802,144 @@ function TasksSection() {
           </div>
           <div style={{ fontSize: 12, color: '#ccc', marginTop: 4 }}>
             {filter === 'all' ? 'Create your first task to get started' : 'Try a different filter'}
+          </div>
+        </div>
+      )}
+
+      {/* Task Detail Modal */}
+      {viewingTask && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-8" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setViewingTask(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, maxWidth: '38rem', width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between" style={{ padding: '24px 24px 16px', borderBottom: '1px solid #ece8e0' }}>
+              <div className="flex-1 min-w-0 pr-4">
+                <h3 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>{viewingTask.title}</h3>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  {viewingTask.priority && (() => {
+                    const pc = PRIORITY_COLORS[viewingTask.priority] || PRIORITY_COLORS.normal;
+                    return <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px', borderRadius: 6, background: pc.bg, color: pc.text, border: `1px solid ${pc.border}` }}>{viewingTask.priority}</span>;
+                  })()}
+                  <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px', borderRadius: 6, background: viewingTask.status === 'done' ? '#f0fdf4' : '#fdf8eb', color: viewingTask.status === 'done' ? '#16a34a' : '#b8960c', border: `1px solid ${viewingTask.status === 'done' ? '#bbf7d0' : '#f0e6c0'}` }}>
+                    {(viewingTask.status || 'todo').replace('_', ' ')}
+                  </span>
+                  {viewingTask.desk && (
+                    <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', padding: '3px 8px', borderRadius: 6, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>{viewingTask.desk}</span>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => setViewingTask(null)} className="cursor-pointer hover:bg-[#f5f3ef] transition-colors" style={{ padding: 8, borderRadius: 8, color: '#999', background: 'none', border: 'none' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4" style={{ padding: 24 }}>
+              {viewingTask.description && (
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Description</div>
+                  <p style={{ fontSize: 13, color: '#555', lineHeight: 1.6, margin: 0 }}>{viewingTask.description}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                {viewingTask.assigned_to && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Assigned To</div>
+                    <div style={{ fontSize: 13, color: '#555' }}>{viewingTask.assigned_to}</div>
+                  </div>
+                )}
+                {viewingTask.created_by && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Created By</div>
+                    <div style={{ fontSize: 13, color: '#555' }}>{viewingTask.created_by}</div>
+                  </div>
+                )}
+                {viewingTask.due_date && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Due Date</div>
+                    <div style={{ fontSize: 13, color: '#555' }}>{new Date(viewingTask.due_date).toLocaleDateString()}</div>
+                  </div>
+                )}
+                {viewingTask.created_at && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Created</div>
+                    <div style={{ fontSize: 13, color: '#555' }} suppressHydrationWarning>{new Date(viewingTask.created_at).toLocaleString()}</div>
+                  </div>
+                )}
+                {viewingTask.completed_at && (
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Completed</div>
+                    <div style={{ fontSize: 13, color: '#555' }} suppressHydrationWarning>{new Date(viewingTask.completed_at).toLocaleString()}</div>
+                  </div>
+                )}
+              </div>
+
+              {viewingTask.tags && viewingTask.tags.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Tags</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {viewingTask.tags.map((tag: string) => (
+                      <span key={tag} style={{ fontSize: 10, padding: '3px 8px', borderRadius: 6, background: '#f5f3ef', color: '#777', border: '1px solid #ece8e0' }}>{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Activity log */}
+              {viewingTask.activity && viewingTask.activity.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Activity</div>
+                  <div className="flex flex-col gap-1.5">
+                    {viewingTask.activity.map((a: any, i: number) => (
+                      <div key={i} className="flex items-start gap-3" style={{ padding: '8px 12px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
+                        <span className="w-2 h-2 rounded-full mt-1.5 shrink-0" style={{ background: a.action === 'completed' ? '#16a34a' : a.action === 'created' ? '#2563eb' : '#b8960c' }} />
+                        <div className="flex-1 min-w-0">
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>{a.action}</span>
+                          {a.detail && <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{a.detail}</div>}
+                          <div style={{ fontSize: 9, fontFamily: 'monospace', color: '#ccc', marginTop: 4 }} suppressHydrationWarning>
+                            {a.created_at ? new Date(a.created_at).toLocaleString() : ''}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Subtasks */}
+              {viewingTask.subtasks && viewingTask.subtasks.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Subtasks</div>
+                  <div className="flex flex-col gap-1">
+                    {viewingTask.subtasks.map((st: any) => (
+                      <div key={st.id} className="flex items-center gap-2" style={{ padding: '6px 10px', borderRadius: 8, background: '#faf9f7', border: '1px solid #ece8e0' }}>
+                        {st.status === 'done'
+                          ? <CheckCircle2 size={14} className="text-[#16a34a] shrink-0" />
+                          : <Circle size={14} className="text-[#ccc] shrink-0" />
+                        }
+                        <span style={{ fontSize: 12, color: st.status === 'done' ? '#999' : '#555', textDecoration: st.status === 'done' ? 'line-through' : 'none' }}>{st.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Toggle status button */}
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={() => {
+                    toggleTask(viewingTask);
+                    setViewingTask((prev: any) => prev ? { ...prev, status: prev.status === 'done' ? 'todo' : 'done' } : null);
+                  }}
+                  className="cursor-pointer transition-all hover:brightness-95"
+                  style={{
+                    padding: '10px 20px', borderRadius: 10, fontSize: 13, fontWeight: 600, border: 'none',
+                    background: viewingTask.status === 'done' ? '#fdf8eb' : '#f0fdf4',
+                    color: viewingTask.status === 'done' ? '#b8960c' : '#16a34a',
+                  }}>
+                  {viewingTask.status === 'done' ? 'Mark as To Do' : 'Mark as Done'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

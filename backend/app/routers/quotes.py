@@ -358,6 +358,136 @@ async def get_market_ranges():
     return {"market_ranges": MARKET_RANGES}
 
 
+# ── v6.0 Quick Quote & Phase Pipeline ────────────────────────
+
+class QuickQuoteRequest(BaseModel):
+    item_type: str = "accent_chair"
+    width: float = 0
+    height: float = 0
+    depth: float = 0
+    material_grade: str = "B"
+    complexity: str = "moderate"    # simple, moderate, complex, luxury
+    quantity: int = 1
+    notes: str = ""
+
+class PromoteQuickQuoteRequest(BaseModel):
+    customer_name: str
+    quick_quote_data: dict
+
+class PhaseApprovalRequest(BaseModel):
+    notes: str = ""
+
+class PhaseRejectionRequest(BaseModel):
+    reason: str = ""
+
+
+@router.post("/quick")
+async def quick_quote_endpoint(payload: QuickQuoteRequest):
+    """Track 1 — Instant ballpark quote from dimensions + material + complexity.
+    Founder-only. Returns price ranges for 3 tiers."""
+    from app.services.quote_engine.quote_phases import quick_quote
+
+    result = quick_quote(
+        item_type=payload.item_type,
+        width=payload.width,
+        height=payload.height,
+        depth=payload.depth,
+        material_grade=payload.material_grade,
+        complexity=payload.complexity,
+        quantity=payload.quantity,
+        notes=payload.notes,
+    )
+    return result
+
+
+@router.post("/quick/promote")
+async def promote_quick_quote(payload: PromoteQuickQuoteRequest):
+    """Promote a quick quote to a full phase-pipeline quote."""
+    from app.services.quote_engine.quote_phases import promote_quick_to_full
+
+    quote = promote_quick_to_full(payload.quick_quote_data, payload.customer_name)
+    return {"status": "promoted", "quote": quote}
+
+
+@router.post("/phase/init/{quote_id}")
+async def init_phase_pipeline_endpoint(quote_id: str):
+    """Initialize the multi-phase pipeline on an existing quote."""
+    from app.services.quote_engine.quote_phases import init_phase_pipeline
+
+    try:
+        quote = init_phase_pipeline(quote_id)
+        return {"status": "initialized", "quote": quote}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+
+
+@router.post("/phase/advance/{quote_id}")
+async def advance_phase_endpoint(quote_id: str):
+    """Advance to the next phase. Auto-populates phase data for founder review."""
+    from app.services.quote_engine.quote_phases import advance_phase
+
+    try:
+        quote = advance_phase(quote_id)
+        return {"status": "advanced", "quote": quote}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/phase/approve/{quote_id}")
+async def approve_phase_endpoint(quote_id: str, payload: PhaseApprovalRequest = PhaseApprovalRequest()):
+    """Founder approves the current phase."""
+    from app.services.quote_engine.quote_phases import approve_phase
+
+    try:
+        quote = approve_phase(quote_id, founder_notes=payload.notes)
+        return {"status": "approved", "quote": quote}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/phase/reject/{quote_id}")
+async def reject_phase_endpoint(quote_id: str, payload: PhaseRejectionRequest = PhaseRejectionRequest()):
+    """Founder rejects the current phase — stays for revision."""
+    from app.services.quote_engine.quote_phases import reject_phase
+
+    try:
+        quote = reject_phase(quote_id, reason=payload.reason)
+        return {"status": "rejected", "quote": quote}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/phase/retry/{quote_id}")
+async def retry_phase_endpoint(quote_id: str):
+    """Re-run current phase after revision."""
+    from app.services.quote_engine.quote_phases import retry_phase
+
+    try:
+        quote = retry_phase(quote_id)
+        return {"status": "retried", "quote": quote}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/phase/status/{quote_id}")
+async def get_phase_status_endpoint(quote_id: str):
+    """Get phase pipeline status for a quote."""
+    from app.services.quote_engine.quote_phases import get_phase_status
+
+    try:
+        return get_phase_status(quote_id)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+
+
 @router.get("/{quote_id}")
 async def get_quote(quote_id: str):
     """Get a single quote by ID."""
