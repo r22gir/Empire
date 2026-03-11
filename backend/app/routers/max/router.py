@@ -581,6 +581,20 @@ async def get_review_tasks():
     return {"tasks": pipeline_engine.get_review_tasks()}
 
 
+@router.get("/pipeline/precheck")
+async def pipeline_precheck():
+    """Check API key dependencies and notify of blockers."""
+    from app.services.max.pipeline import pipeline_engine
+    return await pipeline_engine.pre_check_dependencies()
+
+
+@router.get("/pipeline/audit")
+async def pipeline_audit():
+    """Audit ecosystem for unwired endpoints, missing frontends, and backlog items."""
+    from app.services.max.pipeline import pipeline_engine
+    return await pipeline_engine.audit_ecosystem()
+
+
 @router.get("/pipeline/{pipeline_id}")
 async def get_pipeline(pipeline_id: str):
     """Get a pipeline with all subtasks and progress."""
@@ -619,20 +633,6 @@ async def reject_pipeline_task(task_id: str, request: PipelineApprovalRequest = 
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result
-
-
-@router.get("/pipeline/precheck")
-async def pipeline_precheck():
-    """Check API key dependencies and notify of blockers."""
-    from app.services.max.pipeline import pipeline_engine
-    return await pipeline_engine.pre_check_dependencies()
-
-
-@router.get("/pipeline/audit")
-async def pipeline_audit():
-    """Audit ecosystem for unwired endpoints, missing frontends, and backlog items."""
-    from app.services.max.pipeline import pipeline_engine
-    return await pipeline_engine.audit_ecosystem()
 
 
 @router.get("/health")
