@@ -524,6 +524,76 @@ class TelegramBot:
             except Exception as e:
                 await update.message.reply_text(f"Review error: {e}")
 
+        # /voiceprint command — enroll or check voice profile
+        async def cmd_voiceprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            from app.services.max.security.voiceprint import voiceprint_verifier
+            user_id = str(update.effective_chat.id)
+
+            if not voiceprint_verifier.available:
+                await update.message.reply_text(
+                    "Voiceprint verification requires resemblyzer.\n"
+                    "Install: pip install resemblyzer"
+                )
+                return
+
+            # If replying to a voice message, use it to enroll
+            if update.message.reply_to_message and (
+                update.message.reply_to_message.voice or update.message.reply_to_message.audio
+            ):
+                voice = update.message.reply_to_message.voice or update.message.reply_to_message.audio
+                audio_path = await self._download_telegram_file(voice.file_id, suffix=".ogg")
+                if not audio_path:
+                    await update.message.reply_text("Failed to download audio for enrollment.")
+                    return
+                try:
+                    result = voiceprint_verifier.enroll(user_id, audio_path)
+                    await update.message.reply_text(result["message"])
+                finally:
+                    audio_path.unlink(missing_ok=True)
+                return
+
+            # Status check
+            if voiceprint_verifier.is_enrolled(user_id):
+                await update.message.reply_html(
+                    "🔊 <b>Voiceprint Status:</b> Enrolled\n\n"
+                    "Your voice is verified on every voice message.\n"
+                    "To re-enroll: reply to a voice note with /voiceprint\n"
+                    "To delete: /voiceprint delete"
+                )
+            else:
+                await update.message.reply_html(
+                    "🔊 <b>Voiceprint Not Enrolled</b>\n\n"
+                    "To enroll: send a voice note (5-10 sec of clear speech), "
+                    "then reply to it with /voiceprint"
+                )
+
+            # Handle delete
+            args = context.args
+            if args and args[0].lower() == "delete":
+                deleted = voiceprint_verifier.delete_profile(user_id)
+                await update.message.reply_text(
+                    "Voiceprint deleted." if deleted else "No voiceprint to delete."
+                )
+
+        # /security command — view security stats
+        async def cmd_security(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            from app.services.max.security.sanitizer import sanitizer as _sanitizer
+            stats = _sanitizer.get_stats()
+            lines = [
+                "🛡 <b>Security Stats</b>\n",
+                f"Total checks: {stats['total_checks']}",
+                f"Blocked injections: {stats['blocked_injection']}",
+                f"Blocked topics: {stats['blocked_topic']}",
+                f"Blocked SQL: {stats['blocked_sql']}",
+                f"Blocked XSS: {stats['blocked_xss']}",
+                f"Rate limited: {stats['blocked_rate']}",
+            ]
+            await update.message.reply_html("\n".join(lines))
+
         # /help command
         async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
@@ -536,6 +606,8 @@ class TelegramBot:
                 "/tasks — Show open tasks\n"
                 "/pipeline — View/create pipelines\n"
                 "/review — Review pending approvals\n"
+                "/voiceprint — Enroll/check voice ID\n"
+                "/security — Security stats\n"
                 "/help — Show this message\n\n"
                 "You can also send:\n"
                 "💬 <b>Text</b> — Chat with MAX\n"
@@ -549,6 +621,13 @@ class TelegramBot:
                 return
             text = update.message.text
             msg_id = update.message.message_id
+
+            # v6.0 — unified sanitizer check
+            from app.services.max.security.sanitizer import sanitizer as _sanitizer
+            sec = _sanitizer.check(text, channel="telegram", session_id=str(update.effective_chat.id))
+            if not sec["safe"]:
+                await update.message.reply_text(f"Blocked: {sec['reason']}")
+                return
 
             await update.message.reply_chat_action("typing")
 
@@ -619,6 +698,21 @@ class TelegramBot:
                 return
 
             try:
+                # v6.0 — voiceprint verification (before transcription)
+                try:
+                    from app.services.max.security.voiceprint import voiceprint_verifier
+                    user_id = str(update.effective_chat.id)
+                    if voiceprint_verifier.is_enrolled(user_id):
+                        vp_result = voiceprint_verifier.verify(user_id, audio_path)
+                        if not vp_result["verified"] and vp_result["available"]:
+                            await update.message.reply_text(
+                                f"Voice verification FAILED (similarity: {vp_result['similarity']:.2f}). "
+                                f"Message blocked. If this is you, re-enroll with /voiceprint"
+                            )
+                            return
+                except Exception as vp_err:
+                    logger.debug(f"Voiceprint check skipped: {vp_err}")
+
                 # 2. Transcribe audio → text (run in thread to avoid blocking event loop)
                 loop = asyncio.get_event_loop()
                 transcript = await loop.run_in_executor(None, self._transcribe_audio, audio_path)
@@ -824,6 +918,8 @@ class TelegramBot:
         app.add_handler(CommandHandler("tasks", cmd_tasks))
         app.add_handler(CommandHandler("pipeline", cmd_pipeline))
         app.add_handler(CommandHandler("review", cmd_review))
+        app.add_handler(CommandHandler("voiceprint", cmd_voiceprint))
+        app.add_handler(CommandHandler("security", cmd_security))
         app.add_handler(CommandHandler("help", cmd_help))
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

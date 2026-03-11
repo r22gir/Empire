@@ -17,6 +17,7 @@ from pathlib import Path
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
+from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
@@ -100,6 +101,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
     is_safe, reason = check_input(request.message)
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
+        return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    # v6.0 unified sanitizer — audit logging + SQL/XSS checks
+    sec_result = input_sanitizer.check(request.message, channel="chat", session_id=request.conversation_id or "")
+    if not sec_result["safe"]:
+        logger.warning(f"Sanitizer blocked ({sec_result['threat_type']}): {request.message[:100]}")
         return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
     for msg in request.history[-3:]:
@@ -219,6 +226,15 @@ async def chat_stream(request: ChatRequest):
     is_safe, reason = check_input(request.message)
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
+        async def refusal_gen():
+            yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
+        return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    # v6.0 — unified sanitizer check on streaming endpoint
+    sec_result = input_sanitizer.check(request.message, channel="chat", session_id=request.conversation_id or "")
+    if not sec_result["safe"]:
+        logger.warning(f"Sanitizer blocked stream ({sec_result['threat_type']}): {request.message[:100]}")
         async def refusal_gen():
             yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
@@ -633,6 +649,40 @@ async def reject_pipeline_task(task_id: str, request: PipelineApprovalRequest = 
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@router.get("/security/stats")
+async def security_stats():
+    """Get security layer stats — blocked inputs, rate limits, audit counts."""
+    stats = input_sanitizer.get_stats()
+    # Count audit log entries
+    audit_path = Path.home() / "empire-repo" / "backend" / "data" / "security" / "audit_log.jsonl"
+    audit_count = 0
+    if audit_path.exists():
+        with open(audit_path) as f:
+            audit_count = sum(1 for _ in f)
+    stats["audit_log_entries"] = audit_count
+    return stats
+
+
+@router.get("/security/audit")
+async def security_audit(limit: int = 50):
+    """Get recent security audit log entries."""
+    audit_path = Path.home() / "empire-repo" / "backend" / "data" / "security" / "audit_log.jsonl"
+    if not audit_path.exists():
+        return {"entries": [], "total": 0}
+    entries = []
+    with open(audit_path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    entries.append(__import__("json").loads(line))
+                except Exception:
+                    pass
+    # Return most recent first
+    entries.reverse()
+    return {"entries": entries[:limit], "total": len(entries)}
 
 
 @router.get("/health")
