@@ -104,6 +104,20 @@ class DeskScheduler:
                         self._last_run["health_monitor_tick"] = f"{today}:{now.hour}:{now.minute}"
                         asyncio.create_task(self._check_service_health())
 
+                # v6.0 Morning brief: 7:30 AM daily
+                if now.hour == 7 and now.minute == 30:
+                    brief_key = f"morning_brief:{today}"
+                    if self._last_run.get("morning_brief") != brief_key:
+                        self._last_run["morning_brief"] = brief_key
+                        asyncio.create_task(self._generate_morning_brief())
+
+                # v6.0 Weekly report: Monday 8:00 AM
+                if now.weekday() == 0 and now.hour == 8 and now.minute == 0:
+                    week_key = f"weekly_report:{today}"
+                    if self._last_run.get("weekly_report") != week_key:
+                        self._last_run["weekly_report"] = week_key
+                        asyncio.create_task(self._generate_weekly_report())
+
                 # v6.0 Pipeline executor: process pending subtasks (every 2 min)
                 if now.minute % 2 == 0:
                     pl_tick = f"{today}:{now.hour}:{now.minute}"
@@ -274,6 +288,197 @@ class DeskScheduler:
                            + ", ".join(f"{r['desk']}:{r['status']}" for r in results))
         except Exception as e:
             logger.warning(f"[Pipeline] Executor tick failed: {e}")
+
+    # ── v6.0 Morning Brief & Weekly Report ──────────────────────────────
+
+    async def _generate_morning_brief(self):
+        """Generate and send morning briefing — all desk statuses, pipeline summary,
+        key metrics, and priority actions. Sent to Telegram + stored for CC dashboard."""
+        logger.info("[Scheduler] Generating morning brief")
+        try:
+            from app.services.max.telegram_bot import telegram_bot
+            from app.services.max.pipeline import pipeline_engine
+            from app.services.max.security.sanitizer import sanitizer as input_sanitizer
+
+            # 1. Desk statuses
+            statuses = await self.manager.get_all_statuses()
+            desk_lines = []
+            for s in statuses:
+                desk_id = s.get("desk_id", "?")
+                completed = s.get("completed_today", 0)
+                active = len(s.get("active_task_details", []))
+                escalated = s.get("escalated", 0)
+                icon = "🟢" if not escalated else "🟡"
+                desk_lines.append(f"{icon} <b>{desk_id}</b>: {completed} done, {active} active{f', {escalated} escalated' if escalated else ''}")
+
+            # 2. Pipeline summary
+            active_pipelines = pipeline_engine.get_active_pipelines()
+            review_tasks = pipeline_engine.get_review_tasks()
+
+            # 3. Service health
+            health_lines = []
+            for name, port in EMPIRE_SERVICES.items():
+                up = self._port_open(port)
+                health_lines.append(f"{'🟢' if up else '🔴'} {name} (:{port})")
+
+            # 4. Security stats
+            sec_stats = input_sanitizer.get_stats()
+
+            # 5. Quotes summary
+            quote_info = ""
+            try:
+                import json, os
+                quotes_dir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+                open_quotes = 0
+                total_pipeline = 0
+                for f in os.listdir(quotes_dir):
+                    if f.endswith(".json") and not f.startswith("_"):
+                        with open(os.path.join(quotes_dir, f)) as qf:
+                            q = json.load(qf)
+                        if q.get("status") in ("draft", "sent"):
+                            open_quotes += 1
+                            total_pipeline += q.get("total", 0)
+                quote_info = f"💰 <b>Quotes:</b> {open_quotes} open (${total_pipeline:,.0f} pipeline)"
+            except Exception:
+                quote_info = "💰 <b>Quotes:</b> (unavailable)"
+
+            # Build brief
+            now = datetime.now()
+            brief = (
+                f"🌅 <b>Morning Brief — {now.strftime('%A, %B %d')}</b>\n\n"
+                f"<b>AI Desks ({len(statuses)})</b>\n"
+                + "\n".join(desk_lines) + "\n\n"
+                f"<b>Pipelines</b>\n"
+                f"📊 {len(active_pipelines)} active, {len(review_tasks)} awaiting review\n\n"
+                f"{quote_info}\n\n"
+                f"<b>Services</b>\n"
+                + "\n".join(health_lines) + "\n\n"
+                f"🛡 <b>Security:</b> {sec_stats['total_checks']} checks, "
+                f"{sec_stats['blocked_injection'] + sec_stats['blocked_sql'] + sec_stats['blocked_xss']} blocked"
+            )
+
+            # Send via Telegram
+            if telegram_bot.is_configured:
+                await telegram_bot.send_message(brief)
+
+            # Store for CC dashboard
+            try:
+                import json as _json
+                brief_path = os.path.expanduser("~/empire-repo/backend/data/reports/morning_brief.json")
+                os.makedirs(os.path.dirname(brief_path), exist_ok=True)
+                with open(brief_path, "w") as f:
+                    _json.dump({
+                        "date": now.strftime("%Y-%m-%d"),
+                        "generated_at": now.isoformat(),
+                        "html": brief,
+                        "desk_count": len(statuses),
+                        "active_pipelines": len(active_pipelines),
+                        "review_tasks": len(review_tasks),
+                        "security_stats": sec_stats,
+                    }, f, indent=2)
+            except Exception as e:
+                logger.warning(f"Failed to save morning brief: {e}")
+
+            logger.info("[Scheduler] Morning brief sent")
+
+        except Exception as e:
+            logger.error(f"[Scheduler] Morning brief failed: {e}")
+
+    async def _generate_weekly_report(self):
+        """Generate weekly business intelligence report with monetization suggestions.
+        Sent every Monday at 8AM."""
+        logger.info("[Scheduler] Generating weekly report")
+        try:
+            from app.services.max.telegram_bot import telegram_bot
+            from app.services.max.pipeline import pipeline_engine
+            import json, os
+
+            now = datetime.now()
+
+            # Gather weekly data
+            # Quote stats
+            quotes_dir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+            total_quotes = 0
+            accepted = 0
+            total_value = 0
+            try:
+                for f in os.listdir(quotes_dir):
+                    if f.endswith(".json") and not f.startswith("_"):
+                        with open(os.path.join(quotes_dir, f)) as qf:
+                            q = json.load(qf)
+                        total_quotes += 1
+                        if q.get("status") == "accepted":
+                            accepted += 1
+                        total_value += q.get("total", 0)
+            except Exception:
+                pass
+
+            # Pipeline stats
+            all_pipelines = pipeline_engine.get_all_pipelines()
+
+            # Ecosystem audit
+            try:
+                audit = await pipeline_engine.audit_ecosystem()
+                findings_count = len(audit.get("findings", []))
+            except Exception:
+                findings_count = 0
+
+            # Cost stats (from token tracker)
+            cost_info = ""
+            try:
+                from app.services.max.token_tracker import token_tracker
+                stats = token_tracker.get_stats(7)
+                weekly_cost = stats.get("total", {}).get("cost_usd", 0)
+                cost_info = f"💸 <b>AI Costs (7d):</b> ${weekly_cost:.2f}"
+            except Exception:
+                cost_info = "💸 <b>AI Costs:</b> (unavailable)"
+
+            # Build report
+            report = (
+                f"📊 <b>Weekly Report — Week of {now.strftime('%B %d, %Y')}</b>\n\n"
+                f"<b>Business Metrics</b>\n"
+                f"📋 Total quotes: {total_quotes} (${total_value:,.0f})\n"
+                f"✅ Accepted: {accepted}\n"
+                f"📈 Win rate: {(accepted/total_quotes*100):.0f}%\n\n" if total_quotes > 0 else
+                f"📊 <b>Weekly Report — Week of {now.strftime('%B %d, %Y')}</b>\n\n"
+                f"<b>Business Metrics</b>\n"
+                f"📋 No quotes this period\n\n"
+            )
+
+            report += (
+                f"<b>Pipelines</b>\n"
+                f"🔄 Total pipelines: {len(all_pipelines)}\n\n"
+                f"{cost_info}\n\n"
+                f"<b>Ecosystem Health</b>\n"
+                f"🔍 Audit findings: {findings_count}\n\n"
+                f"<b>Monetization Suggestions</b>\n"
+                f"💡 CraftForge frontend (15 endpoints, 0 UI) — biggest gap\n"
+                f"💡 Review stale quotes for follow-up revenue\n"
+                f"💡 Consider SaaS pricing tiers for new signups"
+            )
+
+            # Send + store
+            if telegram_bot.is_configured:
+                await telegram_bot.send_message(report)
+
+            report_path = os.path.expanduser("~/empire-repo/backend/data/reports/weekly_report.json")
+            os.makedirs(os.path.dirname(report_path), exist_ok=True)
+            with open(report_path, "w") as f:
+                json.dump({
+                    "week_of": now.strftime("%Y-%m-%d"),
+                    "generated_at": now.isoformat(),
+                    "html": report,
+                    "total_quotes": total_quotes,
+                    "accepted_quotes": accepted,
+                    "total_value": total_value,
+                    "pipelines": len(all_pipelines),
+                    "audit_findings": findings_count,
+                }, f, indent=2)
+
+            logger.info("[Scheduler] Weekly report sent")
+
+        except Exception as e:
+            logger.error(f"[Scheduler] Weekly report failed: {e}")
 
     # ── Event triggers (called by other parts of the system) ──────────
 

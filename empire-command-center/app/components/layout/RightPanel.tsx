@@ -6,6 +6,8 @@ import {
   Plus, Check, X, Loader2, ChevronDown, ChevronUp, Package, AlertTriangle,
   DollarSign, Users, TrendingUp, ClipboardList, FileText, Flag, Calendar,
   Zap, Sparkles, Send, BookOpen, Camera, CheckCircle2, Eye, ArrowRight,
+  Bot, Hammer, ShoppingBag, Megaphone, Headphones, BadgeDollarSign, PieChart,
+  Wrench, Monitor, Globe, Scale, FlaskConical, Shield, Sun, BarChart3,
 } from 'lucide-react';
 
 interface Props {
@@ -17,9 +19,10 @@ interface Props {
   activeSection?: string | null;
   onScreenChange: (screen: ScreenMode) => void;
   onModuleClick: (module: string) => void;
+  onDeskSelect?: (deskId: string) => void;
 }
 
-export default function RightPanel({ desks, briefing, systemStats, activeScreen, activeProduct, activeSection, onScreenChange, onModuleClick }: Props) {
+export default function RightPanel({ desks, briefing, systemStats, activeScreen, activeProduct, activeSection, onScreenChange, onModuleClick, onDeskSelect }: Props) {
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [moduleStats, setModuleStats] = useState<Record<string, string>>({});
   const [tgStatus, setTgStatus] = useState<{ configured: boolean } | null>(null);
@@ -116,17 +119,16 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
     }
     if (activeProduct === 'craft') {
       return [
+        { id: 'craft-crm', label: 'CRM', stat: moduleStats.crm || '...' },
         { id: 'inventory', label: 'Materials', stat: moduleStats.inventory || '...' },
         { id: 'quotes', label: 'Orders', stat: moduleStats.quotes || '...' },
         { id: 'costs', label: 'Costs', stat: moduleStats.costs || '...' },
       ];
     }
-    // Owner/global view
+    // MAX Desk / Owner — empire-wide overview
     return [
-      { id: 'quotes', label: 'Quotes', stat: moduleStats.quotes || '...' },
-      { id: 'invoices', label: 'Invoices', stat: moduleStats.invoices || '...' },
-      { id: 'crm', label: 'CRM', stat: moduleStats.crm || '...' },
-      { id: 'inventory', label: 'Inventory', stat: moduleStats.inventory || '...' },
+      { id: 'empire-crm', label: 'CRM', stat: moduleStats.crm || '...' },
+      { id: 'costs', label: 'AI Costs', stat: moduleStats.costs || '...' },
       { id: 'tickets', label: 'Tickets', stat: moduleStats.tickets || '...' },
       { id: 'reports', label: 'Reports', stat: moduleStats.reports || '...' },
     ];
@@ -134,6 +136,9 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
 
   return (
     <aside className="w-[320px] bg-[var(--panel)] border-l border-[var(--border)] flex flex-col shrink-0 overflow-y-auto p-4 gap-3">
+
+      {/* ── v6.0 INTELLIGENCE CARDS ── */}
+      <IntelligenceCards collapsed={!!collapsed.intelligence} onToggle={() => toggle('intelligence')} />
 
       {/* ── CONTEXT-AWARE SECTION ── */}
       {contextData?.type === 'inventory' && contextData.data && (
@@ -154,6 +159,15 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
 
       {/* ── NAVIGATION HELPERS (context-aware) ── */}
       <NavigationHelper activeProduct={activeProduct} activeSection={activeSection} onScreenChange={onScreenChange} onModuleClick={onModuleClick} />
+
+      {/* ── AI DESKS (collapsible) ── */}
+      <AIDesksPanel
+        desks={desks}
+        collapsed={!!collapsed.aidesks}
+        onToggle={() => toggle('aidesks')}
+        onScreenChange={onScreenChange}
+        onDeskSelect={onDeskSelect}
+      />
 
       {/* ── TELEGRAM (collapsible) ── */}
       <div>
@@ -188,7 +202,7 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
       <div>
         <button onClick={() => toggle('modules')} className="flex items-center justify-between w-full mb-2 cursor-pointer">
           <span className="section-label">
-            {activeProduct === 'workroom' ? 'Workroom Modules' : activeProduct === 'craft' ? 'WoodCraft Modules' : 'Quick Access'}
+            {activeProduct === 'workroom' ? 'Workroom' : activeProduct === 'craft' ? 'WoodCraft' : 'MAX Desk'}
           </span>
           {collapsed.modules ? <ChevronDown size={12} className="text-[#ccc]" /> : <ChevronUp size={12} className="text-[#ccc]" />}
         </button>
@@ -462,6 +476,106 @@ function NavigationHelper({ activeProduct, activeSection, onScreenChange, onModu
   return null;
 }
 
+/* ═══════════════════════════════════════════
+   AI Desks — Sidebar Navigator
+   Compact list, clicks open detail in center screen
+   ═══════════════════════════════════════════ */
+
+const SIDEBAR_DESK_ICONS: Record<string, { text: string; Icon: React.ComponentType<any> }> = {
+  forge:       { text: '#16a34a', Icon: Hammer },
+  market:      { text: '#2563eb', Icon: ShoppingBag },
+  marketing:   { text: '#ec4899', Icon: Megaphone },
+  support:     { text: '#7c3aed', Icon: Headphones },
+  sales:       { text: '#b8960c', Icon: BadgeDollarSign },
+  finance:     { text: '#d97706', Icon: PieChart },
+  clients:     { text: '#0891b2', Icon: Users },
+  contractors: { text: '#b45309', Icon: Wrench },
+  it:          { text: '#0284c7', Icon: Monitor },
+  website:     { text: '#db2777', Icon: Globe },
+  legal:       { text: '#64748b', Icon: Scale },
+  lab:         { text: '#a16207', Icon: FlaskConical },
+};
+
+function AIDesksPanel({ desks, collapsed, onToggle, onScreenChange, onDeskSelect }: {
+  desks: Desk[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onScreenChange: (screen: ScreenMode) => void;
+  onDeskSelect?: (deskId: string) => void;
+}) {
+  const [listExpanded, setListExpanded] = useState(false);
+  const busyCount = desks.filter(d => d.status === 'busy').length;
+
+  const handleDeskClick = (deskId: string) => {
+    if (onDeskSelect) onDeskSelect(deskId);
+    else onScreenChange('desks');
+  };
+
+  return (
+    <div>
+      <button onClick={onToggle} className="flex items-center justify-between w-full mb-2 cursor-pointer">
+        <span className="section-label">AI Desks</span>
+        <div className="flex items-center gap-2">
+          {!collapsed && (
+            <span onClick={(e) => { e.stopPropagation(); onScreenChange('desks'); }}
+              className="text-[11px] text-[var(--gold)] font-semibold hover:underline cursor-pointer">Open →</span>
+          )}
+          {collapsed ? <ChevronDown size={12} className="text-[#ccc]" /> : <ChevronUp size={12} className="text-[#ccc]" />}
+        </div>
+      </button>
+      {!collapsed && (
+        <>
+          {/* Summary card */}
+          <div className="empire-card" onClick={() => onScreenChange('desks')} style={{ cursor: 'pointer' }}>
+            <div className="flex items-center gap-[10px]">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${busyCount > 0 ? 'bg-[#d97706]' : 'bg-[var(--green)]'}`} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-semibold text-[var(--text)]">{desks.length} AI Agents</div>
+                <div className="text-[10px] text-[var(--muted)] truncate">
+                  {busyCount > 0 ? `${busyCount} busy` : 'All idle'}
+                </div>
+              </div>
+              <span className={`status-pill ${busyCount > 0 ? 'transit' : 'ok'}`} style={{ fontSize: 9 }}>
+                {busyCount > 0 ? 'BUSY' : 'READY'}
+              </span>
+            </div>
+          </div>
+
+          {/* Collapsible agent list */}
+          <button onClick={() => setListExpanded(!listExpanded)}
+            className="flex items-center justify-between w-full cursor-pointer mt-1 px-1"
+            style={{ background: 'none', border: 'none', padding: '4px 4px' }}>
+            <span style={{ fontSize: 10, fontWeight: 600, color: '#999' }}>{listExpanded ? 'Hide agents' : 'Show agents'}</span>
+            {listExpanded ? <ChevronUp size={10} className="text-[#ccc]" /> : <ChevronDown size={10} className="text-[#ccc]" />}
+          </button>
+
+          {listExpanded && (
+            <div className="flex flex-col gap-0.5">
+              {desks.map(d => {
+                const cfg = SIDEBAR_DESK_ICONS[d.id] || SIDEBAR_DESK_ICONS.lab;
+                const DIcon = cfg.Icon;
+                const deskData = d as any;
+                return (
+                  <div key={d.id}
+                    onClick={() => handleDeskClick(d.id)}
+                    className="flex items-center gap-2.5 cursor-pointer rounded-lg px-2 transition-colors hover:bg-[var(--hover)]"
+                    style={{ height: 34 }}>
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: d.status === 'busy' ? '#d97706' : 'var(--green)' }} />
+                    <DIcon size={14} style={{ color: cfg.text }} className="shrink-0" />
+                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)' }} className="truncate flex-1">
+                      {deskData.agent_name || d.name}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function SidebarAction({ label, icon, color, onClick }: { label: string; icon: React.ReactNode; color: string; onClick?: () => void }) {
   return (
     <button onClick={onClick} className="w-full flex items-center gap-2 cursor-pointer transition-all hover:bg-[#f5f3ef]"
@@ -469,5 +583,189 @@ function SidebarAction({ label, icon, color, onClick }: { label: string; icon: R
       <span style={{ color }}>{icon}</span>
       {label}
     </button>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   v6.0 Intelligence Cards
+   Morning brief, weekly report, security, cost-per-desk
+   ═══════════════════════════════════════════ */
+
+function IntelligenceCards({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const [brief, setBrief] = useState<any>(null);
+  const [weekly, setWeekly] = useState<any>(null);
+  const [security, setSecurity] = useState<any>(null);
+  const [costPerDesk, setCostPerDesk] = useState<any>(null);
+  const [generating, setGenerating] = useState(false);
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    const [b, w, s, c] = await Promise.allSettled([
+      fetch(`${API}/max/intelligence/brief`).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/max/intelligence/weekly`).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/max/security/stats`).then(r => r.ok ? r.json() : null),
+      fetch(`${API}/max/intelligence/cost-per-desk`).then(r => r.ok ? r.json() : null),
+    ]);
+    if (b.status === 'fulfilled') setBrief(b.value);
+    if (w.status === 'fulfilled') setWeekly(w.value);
+    if (s.status === 'fulfilled') setSecurity(s.value);
+    if (c.status === 'fulfilled') setCostPerDesk(c.value);
+  }, []);
+
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  const generateBrief = async () => {
+    setGenerating(true);
+    try {
+      const r = await fetch(`${API}/max/intelligence/brief/generate`, { method: 'POST' });
+      if (r.ok) { setTimeout(fetchAll, 1000); }
+    } catch { /* silent */ }
+    setGenerating(false);
+  };
+
+  const toggleCard = (key: string) => setExpandedCard(expandedCard === key ? null : key);
+
+  const briefDate = brief?.generated_at ? new Date(brief.generated_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : null;
+  const weeklyDate = weekly?.generated_at ? new Date(weekly.generated_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : null;
+  const desks = costPerDesk?.desks || [];
+  const totalCost = costPerDesk?.total_cost_30d ?? desks.reduce((s: number, d: any) => s + (d.cost_usd || 0), 0);
+
+  return (
+    <div>
+      <button onClick={onToggle} className="flex items-center justify-between w-full mb-2 cursor-pointer">
+        <span className="section-label">Intelligence</span>
+        <div className="flex items-center gap-2">
+          {!collapsed && (
+            <span onClick={(e) => { e.stopPropagation(); generateBrief(); }}
+              className="text-[11px] text-[var(--gold)] font-semibold hover:underline cursor-pointer">
+              {generating ? 'Generating...' : 'Refresh'}
+            </span>
+          )}
+          {collapsed ? <ChevronDown size={12} className="text-[#ccc]" /> : <ChevronUp size={12} className="text-[#ccc]" />}
+        </div>
+      </button>
+
+      {!collapsed && (
+        <div className="flex flex-col gap-2">
+
+          {/* Morning Brief */}
+          <div className="empire-card" style={{ padding: '10px 12px', cursor: 'pointer' }} onClick={() => toggleCard('brief')}>
+            <div className="flex items-center gap-2">
+              <Sun size={14} style={{ color: '#d97706' }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flex: 1 }}>Morning Brief</span>
+              {briefDate && <span style={{ fontSize: 9, color: 'var(--faint)', fontFamily: 'monospace' }}>{briefDate}</span>}
+            </div>
+            {expandedCard === 'brief' && brief && (
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {brief.sections ? (
+                  Object.entries(brief.sections).map(([key, val]: [string, any]) => (
+                    <div key={key} style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase' }}>{key.replace(/_/g, ' ')}</div>
+                      <div style={{ fontSize: 10, color: '#555' }}>
+                        {typeof val === 'string' ? val : typeof val === 'object' ? JSON.stringify(val, null, 1).slice(0, 200) : String(val)}
+                      </div>
+                    </div>
+                  ))
+                ) : brief.message ? (
+                  <div style={{ fontSize: 10, color: '#555' }}>{String(brief.message).slice(0, 300)}</div>
+                ) : (
+                  <div style={{ fontSize: 10, color: '#999' }}>No brief data. Click Refresh to generate.</div>
+                )}
+              </div>
+            )}
+            {expandedCard !== 'brief' && brief?.sections && (
+              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>
+                {Object.keys(brief.sections).length} sections
+              </div>
+            )}
+            {!brief && (
+              <div style={{ fontSize: 10, color: 'var(--faint)', marginTop: 4 }}>Not generated yet</div>
+            )}
+          </div>
+
+          {/* Weekly Report */}
+          <div className="empire-card" style={{ padding: '10px 12px', cursor: 'pointer' }} onClick={() => toggleCard('weekly')}>
+            <div className="flex items-center gap-2">
+              <BarChart3 size={14} style={{ color: '#2563eb' }} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flex: 1 }}>Weekly Report</span>
+              {weeklyDate && <span style={{ fontSize: 9, color: 'var(--faint)', fontFamily: 'monospace' }}>{weeklyDate}</span>}
+            </div>
+            {expandedCard === 'weekly' && weekly && (
+              <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                {weekly.sections ? (
+                  Object.entries(weekly.sections).slice(0, 4).map(([key, val]: [string, any]) => (
+                    <div key={key} style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase' }}>{key.replace(/_/g, ' ')}</div>
+                      <div style={{ fontSize: 10, color: '#555' }}>
+                        {typeof val === 'string' ? val.slice(0, 150) : typeof val === 'object' ? JSON.stringify(val, null, 1).slice(0, 150) : String(val)}
+                      </div>
+                    </div>
+                  ))
+                ) : weekly.message ? (
+                  <div style={{ fontSize: 10, color: '#555' }}>{String(weekly.message).slice(0, 300)}</div>
+                ) : (
+                  <div style={{ fontSize: 10, color: '#999' }}>No report data yet.</div>
+                )}
+              </div>
+            )}
+            {!weekly && (
+              <div style={{ fontSize: 10, color: 'var(--faint)', marginTop: 4 }}>Next: Monday 8:00 AM</div>
+            )}
+          </div>
+
+          {/* Security Stats */}
+          {security && (
+            <div className="empire-card" style={{ padding: '10px 12px', cursor: 'pointer' }} onClick={() => toggleCard('security')}>
+              <div className="flex items-center gap-2">
+                <Shield size={14} style={{ color: security.threats_blocked > 0 ? '#dc2626' : '#16a34a' }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flex: 1 }}>Security</span>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 9,
+                  background: security.threats_blocked > 0 ? '#fef2f2' : '#f0fdf4',
+                  color: security.threats_blocked > 0 ? '#dc2626' : '#16a34a',
+                }}>
+                  {security.threats_blocked > 0 ? `${security.threats_blocked} blocked` : 'Clear'}
+                </span>
+              </div>
+              {expandedCard === 'security' && (
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <MiniKPI label="Scanned" value={String(security.total_scanned || 0)} color="#2563eb" />
+                  <MiniKPI label="Blocked" value={String(security.threats_blocked || 0)} color="#dc2626" />
+                  <MiniKPI label="Sessions" value={String(security.active_sessions || 0)} color="#7c3aed" />
+                  <MiniKPI label="Rate Limits" value={String(security.rate_limited || 0)} color="#d97706" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Cost Per Desk */}
+          {desks.length > 0 && (
+            <div className="empire-card" style={{ padding: '10px 12px', cursor: 'pointer' }} onClick={() => toggleCard('costs')}>
+              <div className="flex items-center gap-2">
+                <DollarSign size={14} style={{ color: '#b8960c' }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', flex: 1 }}>AI Costs (30d)</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#b8960c' }}>${totalCost.toFixed(2)}</span>
+              </div>
+              {expandedCard === 'costs' && (
+                <div className="flex flex-col gap-1 mt-2">
+                  {desks.filter((d: any) => d.cost_usd > 0).sort((a: any, b: any) => b.cost_usd - a.cost_usd).map((d: any) => (
+                    <div key={d.desk} className="flex items-center justify-between" style={{ padding: '4px 8px', borderRadius: 6, background: '#faf9f7' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: '#555', textTransform: 'capitalize' }}>{d.desk}</span>
+                      <div className="flex items-center gap-2">
+                        <span style={{ fontSize: 9, color: '#999' }}>{d.calls} calls</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#b8960c' }}>${d.cost_usd.toFixed(3)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {desks.filter((d: any) => d.cost_usd > 0).length === 0 && (
+                    <div style={{ fontSize: 10, color: '#999', textAlign: 'center', padding: 4 }}>No desk costs recorded</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

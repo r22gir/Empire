@@ -685,6 +685,97 @@ async def security_audit(limit: int = 50):
     return {"entries": entries[:limit], "total": len(entries)}
 
 
+@router.get("/intelligence/brief")
+async def get_morning_brief():
+    """Get the latest morning brief (or generate on-demand)."""
+    import json as _json
+    brief_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "morning_brief.json"
+    if brief_path.exists():
+        with open(brief_path) as f:
+            return _json.load(f)
+    # Generate on-demand if none exists
+    from app.services.max.desks.desk_scheduler import desk_scheduler
+    await desk_scheduler._generate_morning_brief()
+    if brief_path.exists():
+        with open(brief_path) as f:
+            return _json.load(f)
+    return {"date": None, "html": "No brief available yet.", "generated_at": None}
+
+
+@router.get("/intelligence/weekly")
+async def get_weekly_report():
+    """Get the latest weekly report."""
+    import json as _json
+    report_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "weekly_report.json"
+    if report_path.exists():
+        with open(report_path) as f:
+            return _json.load(f)
+    return {"week_of": None, "html": "No weekly report available yet.", "generated_at": None}
+
+
+@router.post("/intelligence/brief/generate")
+async def generate_morning_brief():
+    """Force-generate a fresh morning brief now."""
+    from app.services.max.desks.desk_scheduler import desk_scheduler
+    await desk_scheduler._generate_morning_brief()
+    import json as _json
+    brief_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "morning_brief.json"
+    if brief_path.exists():
+        with open(brief_path) as f:
+            return _json.load(f)
+    return {"status": "generated"}
+
+
+@router.post("/intelligence/weekly/generate")
+async def generate_weekly_report():
+    """Force-generate a fresh weekly report now."""
+    from app.services.max.desks.desk_scheduler import desk_scheduler
+    await desk_scheduler._generate_weekly_report()
+    import json as _json
+    report_path = Path.home() / "empire-repo" / "backend" / "data" / "reports" / "weekly_report.json"
+    if report_path.exists():
+        with open(report_path) as f:
+            return _json.load(f)
+    return {"status": "generated"}
+
+
+@router.get("/intelligence/cost-per-desk")
+async def cost_per_desk():
+    """Get AI cost breakdown per desk from token tracker logs."""
+    try:
+        from app.services.max.token_tracker import token_tracker
+        from app.db.database import get_db
+        import json as _json
+
+        # Query token usage grouped by desk/caller
+        costs_by_desk = {}
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT metadata, cost_usd FROM token_usage
+                   WHERE date(timestamp) >= date('now', '-30 days')"""
+            ).fetchall()
+            for row in rows:
+                cost = row[1] if len(row) > 1 else 0
+                meta = {}
+                try:
+                    meta = _json.loads(row[0]) if row[0] else {}
+                except Exception:
+                    pass
+                desk = meta.get("desk_id") or meta.get("caller") or "general"
+                costs_by_desk[desk] = costs_by_desk.get(desk, 0) + (cost or 0)
+
+        # Sort by cost descending
+        sorted_desks = sorted(costs_by_desk.items(), key=lambda x: x[1], reverse=True)
+        return {
+            "period": "30d",
+            "desks": [{"desk_id": d, "cost_usd": round(c, 4)} for d, c in sorted_desks],
+            "total_usd": round(sum(c for _, c in sorted_desks), 4),
+        }
+    except Exception as e:
+        # Fallback: return empty if token_usage table doesn't have the right columns
+        return {"period": "30d", "desks": [], "total_usd": 0, "note": str(e)}
+
+
 @router.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "MAX AI Assistant Manager", "desks_online": len(desk_manager.get_all_desks()), "telegram_configured": telegram_bot.is_configured}

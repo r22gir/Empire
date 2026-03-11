@@ -81,6 +81,9 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
   const [creatingPipeline, setCreatingPipeline] = useState(false);
   const [showPipelines, setShowPipelines] = useState(true);
 
+  // v6.0 Cost per desk
+  const [deskCosts, setDeskCosts] = useState<Record<string, { cost_usd: number; calls: number }>>({});
+
   const fetchPipelines = useCallback(async () => {
     try {
       const res = await fetch(`${API}/max/pipeline?limit=10`);
@@ -91,7 +94,19 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => { fetchPipelines(); }, [fetchPipelines]);
+  const fetchDeskCosts = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/max/intelligence/cost-per-desk`);
+      if (res.ok) {
+        const data = await res.json();
+        const map: Record<string, { cost_usd: number; calls: number }> = {};
+        (data.desks || []).forEach((d: any) => { map[d.desk] = { cost_usd: d.cost_usd || 0, calls: d.calls || 0 }; });
+        setDeskCosts(map);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { fetchPipelines(); fetchDeskCosts(); }, [fetchPipelines, fetchDeskCosts]);
 
   const submitPipeline = async () => {
     if (!pipelineInput.trim()) return;
@@ -560,11 +575,16 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
                 <p style={{ fontSize: 11, color: 'var(--dim)', marginTop: 8, lineHeight: 1.5 }} className="line-clamp-2">
                   {d.persona || (deskData.description || '').slice(0, 100)}
                 </p>
-                {deskData.stats && (
+                {(deskData.stats || deskCosts[d.id]) && (
                   <div className="flex items-center gap-3 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-                    <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600 }}>{deskData.stats.completed} done</span>
-                    {deskData.stats.failed > 0 && (
+                    {deskData.stats && <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600 }}>{deskData.stats.completed} done</span>}
+                    {deskData.stats?.failed > 0 && (
                       <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>{deskData.stats.failed} failed</span>
+                    )}
+                    {deskCosts[d.id] && deskCosts[d.id].cost_usd > 0 && (
+                      <span style={{ fontSize: 10, color: '#b8960c', fontWeight: 600, marginLeft: 'auto' }}>
+                        ${deskCosts[d.id].cost_usd.toFixed(3)}
+                      </span>
                     )}
                   </div>
                 )}
