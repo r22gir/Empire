@@ -194,13 +194,23 @@ class MarketDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_pricing(self, task: DeskTask) -> DeskTask:
-        """Handle pricing and competitor analysis."""
+        """Handle pricing and competitor analysis — AI-enhanced."""
         task.actions.append(DeskAction(
             action="pricing_analysis",
             detail="Analyzing pricing and competitor data",
         ))
 
-        result = (
+        # v6.0: AI-powered pricing analysis
+        ai_result = await self.ai_call(
+            f"Marketplace pricing analysis needed:\n\n"
+            f"Item/Task: {task.title}\n"
+            f"Details: {task.description[:500]}\n"
+            f"Channels: {', '.join(MARKETPLACE_CHANNELS)}\n\n"
+            f"Analyze: competitor pricing, optimal price point, shipping cost impact, "
+            f"seasonal demand factors. Provide specific price recommendation with reasoning."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 50 else (
             f"Pricing analysis for: {task.title}. "
             f"Recommendation: Review competitor listings on eBay and Facebook Marketplace. "
             f"Consider: shipping costs, condition, brand value, seasonal demand. "
@@ -253,13 +263,22 @@ class MarketDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_general(self, task: DeskTask) -> DeskTask:
-        """Handle general marketplace tasks."""
+        """Handle general marketplace tasks — AI-enhanced."""
         task.actions.append(DeskAction(
             action="general_market",
             detail="Processing general marketplace task",
         ))
 
-        result = f"Marketplace task processed: {task.title}. {task.description[:200]}"
+        ai_result = await self.ai_call(
+            f"Marketplace task for Empire:\n\n"
+            f"Title: {task.title}\n"
+            f"Details: {task.description[:500]}\n\n"
+            f"Provide actionable marketplace advice."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 30 else (
+            f"Marketplace task processed: {task.title}. {task.description[:200]}"
+        )
         return await self.complete_task(task, result)
 
     async def report_status(self) -> dict:

@@ -1,13 +1,17 @@
 """
 BaseDesk — abstract base class for all AI desks.
 All desks inherit from this to get: task handling, status reporting,
-escalation, and automatic brain memory logging.
+escalation, automatic brain memory logging, AI calls with cost tracking,
+and scoped file/git operations (v6.0).
 """
 import logging
+import os
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("max.desks")
@@ -176,6 +180,185 @@ class BaseDesk(ABC):
             system_prompt=system_prompt,
         )
         return response.content
+
+    # ── v6.0: AI Call with Cost Tracking ───────────────────────────
+
+    async def ai_call(self, prompt: str, model_preference: Optional[str] = None) -> str:
+        """Call AI router with automatic cost tracking per desk.
+
+        Use this instead of raw ai_router.chat() — it logs costs to the desk
+        and falls back gracefully if all providers are down.
+
+        Args:
+            prompt: The user/task prompt to send to AI.
+            model_preference: Optional model ID ("grok", "claude", "ollama-llama").
+
+        Returns: AI response text, or empty string on failure.
+        """
+        from app.services.max.ai_router import ai_router, AIMessage, AIModel
+
+        model = None
+        if model_preference:
+            try:
+                model = AIModel(model_preference)
+            except ValueError:
+                pass
+
+        try:
+            from app.services.max.desk_prompt import get_desk_system_prompt
+            system_prompt = get_desk_system_prompt(self.desk_id)
+        except Exception:
+            system_prompt = (
+                f"You are {self.agent_name}, the AI agent running the {self.desk_name} desk "
+                f"for Empire, a custom drapery and upholstery business in Washington DC."
+            )
+
+        try:
+            response = await ai_router.chat(
+                messages=[AIMessage(role="user", content=prompt)],
+                model=model,
+                desk=self.desk_id,
+                system_prompt=system_prompt,
+            )
+            return response.content
+        except Exception as e:
+            logger.warning(f"[{self.desk_name}] ai_call failed: {e}")
+            return ""
+
+    # ── v6.0: Scoped File Operations ────────────────────────────
+
+    # All file ops are scoped to ~/empire-repo/ — desks cannot escape this boundary
+    _REPO_ROOT = Path.home() / "empire-repo"
+
+    def write_file(self, relative_path: str, content: str) -> dict:
+        """Write a file within the empire-repo directory (scoped).
+
+        Args:
+            relative_path: Path relative to ~/empire-repo/ (e.g., "backend/data/reports/daily.md")
+            content: File content to write.
+
+        Returns: {"success": bool, "path": str, "error": str | None}
+        """
+        try:
+            target = (self._REPO_ROOT / relative_path).resolve()
+
+            # Security: ensure path stays within repo
+            if not str(target).startswith(str(self._REPO_ROOT.resolve())):
+                return {"success": False, "path": str(target), "error": "Path traversal blocked"}
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+
+            self._log_to_brain(
+                f"Wrote file: {relative_path} ({len(content)} chars)",
+                importance=5,
+                tags=["desk", self.desk_id, "file_write"],
+            )
+
+            # Log to task_activity
+            try:
+                from app.db.database import get_db
+                with get_db() as conn:
+                    conn.execute(
+                        """INSERT INTO task_activity (task_id, actor, action, detail)
+                           VALUES (?, ?, 'file_write', ?)""",
+                        (f"desk_{self.desk_id}", self.agent_name, f"Wrote {relative_path}"),
+                    )
+            except Exception:
+                pass
+
+            return {"success": True, "path": str(target), "error": None}
+        except Exception as e:
+            logger.error(f"[{self.desk_name}] write_file failed: {e}")
+            return {"success": False, "path": relative_path, "error": str(e)}
+
+    def git_commit(self, message: str, files: list[str] = None) -> dict:
+        """Create a git commit within empire-repo (scoped, non-destructive).
+
+        Args:
+            message: Commit message. Will be auto-tagged with desk name.
+            files: List of relative paths to stage. If None, stages all changes.
+
+        Returns: {"success": bool, "commit_hash": str | None, "error": str | None}
+        """
+        repo = str(self._REPO_ROOT)
+        tagged_msg = f"[{self.desk_id}/{self.agent_name}] {message}"
+
+        try:
+            # Stage files
+            if files:
+                for f in files:
+                    target = (self._REPO_ROOT / f).resolve()
+                    if not str(target).startswith(str(self._REPO_ROOT.resolve())):
+                        continue
+                    subprocess.run(
+                        ["git", "add", f], cwd=repo,
+                        capture_output=True, text=True, timeout=10,
+                    )
+            else:
+                subprocess.run(
+                    ["git", "add", "-A"], cwd=repo,
+                    capture_output=True, text=True, timeout=10,
+                )
+
+            # Commit
+            result = subprocess.run(
+                ["git", "commit", "-m", tagged_msg],
+                cwd=repo, capture_output=True, text=True, timeout=30,
+            )
+
+            if result.returncode == 0:
+                # Extract commit hash
+                log_result = subprocess.run(
+                    ["git", "log", "--oneline", "-1"],
+                    cwd=repo, capture_output=True, text=True, timeout=5,
+                )
+                commit_hash = log_result.stdout.strip().split()[0] if log_result.stdout else "unknown"
+
+                self._log_to_brain(
+                    f"Git commit: {commit_hash} — {message}",
+                    importance=6,
+                    tags=["desk", self.desk_id, "git_commit"],
+                )
+
+                return {"success": True, "commit_hash": commit_hash, "error": None}
+            else:
+                error = result.stderr.strip() or result.stdout.strip()
+                if "nothing to commit" in error.lower():
+                    return {"success": True, "commit_hash": None, "error": "Nothing to commit"}
+                return {"success": False, "commit_hash": None, "error": error}
+
+        except subprocess.TimeoutExpired:
+            return {"success": False, "commit_hash": None, "error": "Git command timed out"}
+        except Exception as e:
+            logger.error(f"[{self.desk_name}] git_commit failed: {e}")
+            return {"success": False, "commit_hash": None, "error": str(e)}
+
+    # ── v6.0: Cross-Desk Delegation ─────────────────────────────
+
+    async def delegate_to_pipeline(self, title: str, description: str) -> dict:
+        """Submit a multi-step task to the pipeline engine for cross-desk execution.
+
+        Use when a task requires work from multiple desks.
+        Returns: pipeline submission result dict.
+        """
+        try:
+            from app.services.max.pipeline import pipeline_engine
+            result = await pipeline_engine.submit_pipeline(
+                title=title,
+                description=description,
+                source=f"desk:{self.desk_id}",
+                channel="desk",
+            )
+            self._log_to_brain(
+                f"Delegated to pipeline: {title} ({result.get('pipeline_id', '?')})",
+                importance=6,
+                tags=["desk", self.desk_id, "pipeline_delegation"],
+            )
+            return result
+        except Exception as e:
+            logger.error(f"[{self.desk_name}] Pipeline delegation failed: {e}")
+            return {"error": str(e)}
 
     def _task_to_dict(self, task: DeskTask) -> dict:
         """Convert a DeskTask to a serializable dict with full details."""

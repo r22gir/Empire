@@ -176,7 +176,7 @@ class FinanceDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_pnl(self, task: DeskTask) -> DeskTask:
-        """Generate P&L summary."""
+        """Generate P&L summary — AI-enhanced with template fallback."""
         task.actions.append(DeskAction(
             action="pnl_report",
             detail="Generating P&L summary",
@@ -186,14 +186,29 @@ class FinanceDesk(BaseDesk):
         total_expenses = sum(e.get("amount", 0) or 0 for e in self.expenses)
         net = total_revenue - total_expenses
 
-        result = (
-            f"P&L Summary (session): "
-            f"Revenue: ${total_revenue:,.2f}, "
-            f"Expenses: ${total_expenses:,.2f}, "
-            f"Net: ${net:,.2f}. "
-            f"Target margins: {TYPICAL_MATERIAL_MARGIN_LOW*100:.0f}-{TYPICAL_MATERIAL_MARGIN_HIGH*100:.0f}% on materials. "
-            f"Note: This reflects in-session data only — connect to accounting system for full financials."
+        # v6.0: Try AI-enhanced analysis
+        ai_result = await self.ai_call(
+            f"Generate a P&L analysis for Empire Workroom (drapery/upholstery business).\n\n"
+            f"Session data:\n"
+            f"- Revenue: ${total_revenue:,.2f} ({len(self.payments)} payments)\n"
+            f"- Expenses: ${total_expenses:,.2f} ({len(self.expenses)} entries)\n"
+            f"- Net: ${net:,.2f}\n"
+            f"- Outstanding invoices: {len([i for i in self.invoices if i.get('status') in ('draft', 'sent')])}\n"
+            f"- Target material margins: {TYPICAL_MATERIAL_MARGIN_LOW*100:.0f}-{TYPICAL_MATERIAL_MARGIN_HIGH*100:.0f}%\n\n"
+            f"Provide: margin analysis, cash flow observations, and 2-3 actionable recommendations."
         )
+
+        if ai_result and len(ai_result) > 50:
+            result = ai_result
+        else:
+            result = (
+                f"P&L Summary (session): "
+                f"Revenue: ${total_revenue:,.2f}, "
+                f"Expenses: ${total_expenses:,.2f}, "
+                f"Net: ${net:,.2f}. "
+                f"Target margins: {TYPICAL_MATERIAL_MARGIN_LOW*100:.0f}-{TYPICAL_MATERIAL_MARGIN_HIGH*100:.0f}% on materials. "
+                f"Note: This reflects in-session data only — connect to accounting system for full financials."
+            )
 
         return await self.complete_task(task, result)
 
@@ -256,13 +271,23 @@ class FinanceDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_general(self, task: DeskTask) -> DeskTask:
-        """Handle general finance tasks."""
+        """Handle general finance tasks — AI-enhanced with template fallback."""
         task.actions.append(DeskAction(
             action="general_finance",
             detail="Processing general finance task",
         ))
 
-        result = f"Finance task processed: {task.title}. {task.description[:200]}"
+        # v6.0: Try AI for better responses
+        ai_result = await self.ai_call(
+            f"Finance task for Empire Workroom:\n\n"
+            f"Title: {task.title}\n"
+            f"Details: {task.description[:500]}\n\n"
+            f"Provide a thorough, actionable response."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 30 else (
+            f"Finance task processed: {task.title}. {task.description[:200]}"
+        )
         return await self.complete_task(task, result)
 
     def _extract_dollar_amount(self, text: str) -> float | None:

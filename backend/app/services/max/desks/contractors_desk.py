@@ -56,9 +56,19 @@ class ContractorsDesk(BaseDesk):
             return await self.fail_task(task, str(e))
 
     async def _handle_availability(self, task: DeskTask) -> DeskTask:
+        """AI-enhanced availability check."""
         task.actions.append(DeskAction(action="availability_check", detail="Checking contractor availability"))
 
-        result = (
+        ai_result = await self.ai_call(
+            f"Check contractor/installer availability for a drapery business.\n\n"
+            f"Request: {task.description[:500]}\n"
+            f"Current active assignments: {len(self.assignments)}\n"
+            f"Pending payments: {len(self.pending_payments)}\n\n"
+            f"Consider: travel distance, job complexity, installer specialties "
+            f"(motorization, heavy drapery, blinds/shades). Suggest optimal scheduling."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 50 else (
             f"Availability check: {task.description[:200]}. "
             f"Check calendar for open slots. Consider: travel distance, job complexity, "
             f"installer specialties. Current assignments: {len(self.assignments)}."
@@ -147,8 +157,19 @@ class ContractorsDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_general(self, task: DeskTask) -> DeskTask:
+        """AI-enhanced general contractor task."""
         task.actions.append(DeskAction(action="general_contractors", detail="Processing contractor task"))
-        result = f"Contractor task processed: {task.title}. {task.description[:200]}"
+
+        ai_result = await self.ai_call(
+            f"Contractor management task for Empire Workroom:\n\n"
+            f"Title: {task.title}\n"
+            f"Details: {task.description[:500]}\n\n"
+            f"Provide actionable response."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 30 else (
+            f"Contractor task processed: {task.title}. {task.description[:200]}"
+        )
         return await self.complete_task(task, result)
 
     async def report_status(self) -> dict:

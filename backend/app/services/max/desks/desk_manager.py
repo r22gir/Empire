@@ -24,6 +24,7 @@ from .it_desk import ITDesk
 from .website_desk import WebsiteDesk
 from .legal_desk import LegalDesk
 from .lab_desk import LabDesk
+from .innovation_desk import InnovationDesk
 
 logger = logging.getLogger("max.desks.manager")
 
@@ -56,6 +57,7 @@ class AIDeskManager:
             SupportDesk(), SalesDesk(), FinanceDesk(),
             ClientsDesk(), ContractorsDesk(), ITDesk(),
             WebsiteDesk(), LegalDesk(), LabDesk(),
+            InnovationDesk(),
         ]
         for desk in desks:
             self.router.register_desk(desk)

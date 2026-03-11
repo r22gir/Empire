@@ -112,6 +112,7 @@ class ClientsDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_meeting_prep(self, task: DeskTask) -> DeskTask:
+        """AI-enhanced meeting preparation briefing."""
         task.actions.append(DeskAction(action="meeting_prep", detail="Preparing client meeting briefing"))
 
         context = ""
@@ -123,18 +124,40 @@ class ClientsDesk(BaseDesk):
             except Exception:
                 pass
 
-        result = (
-            f"Meeting prep for {task.customer_name or 'client'}: "
-            f"{'Prior history: ' + context + '. ' if context else 'No prior history. '}"
-            f"Bring: measurement tools, fabric samples, portfolio. "
-            f"Review: past quotes, fabric preferences, property details."
+        # v6.0: AI-enhanced meeting brief
+        ai_result = await self.ai_call(
+            f"Prepare a client meeting briefing for a drapery/upholstery consultation.\n\n"
+            f"Client: {task.customer_name or 'Unknown'}\n"
+            f"Meeting details: {task.description[:500]}\n"
+            f"{'Prior history: ' + context if context else 'No prior history — new client.'}\n\n"
+            f"Include: talking points, questions to ask, what to bring, upsell opportunities, "
+            f"estimated time. Keep it concise and actionable."
         )
+
+        if ai_result and len(ai_result) > 50:
+            result = ai_result
+        else:
+            result = (
+                f"Meeting prep for {task.customer_name or 'client'}: "
+                f"{'Prior history: ' + context + '. ' if context else 'No prior history. '}"
+                f"Bring: measurement tools, fabric samples, portfolio. "
+                f"Review: past quotes, fabric preferences, property details."
+            )
         return await self.complete_task(task, result)
 
     async def _handle_thank_you(self, task: DeskTask) -> DeskTask:
+        """AI-generated thank-you note."""
         task.actions.append(DeskAction(action="thank_you_note", detail="Drafting thank-you note"))
 
-        result = (
+        ai_result = await self.ai_call(
+            f"Write a warm, professional thank-you note for a drapery/upholstery client.\n\n"
+            f"Client: {task.customer_name or 'valued client'}\n"
+            f"Context: {task.description[:300]}\n\n"
+            f"Tone: warm, personal, not corporate. Mention their specific project. "
+            f"Include a subtle referral ask. Keep under 150 words."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 30 else (
             f"Thank-you note prepared for {task.customer_name or 'client'}. "
             f"Tone: warm, personal, professional. "
             f"Include: appreciation for their business, mention specific project details, "
@@ -143,9 +166,19 @@ class ClientsDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_communication(self, task: DeskTask) -> DeskTask:
+        """AI-drafted client communication."""
         task.actions.append(DeskAction(action="communication_draft", detail="Drafting client communication"))
 
-        result = (
+        ai_result = await self.ai_call(
+            f"Draft a professional client communication for Empire Workroom.\n\n"
+            f"Client: {task.customer_name or 'client'}\n"
+            f"Subject: {task.title}\n"
+            f"Context: {task.description[:500]}\n\n"
+            f"Business: custom drapery and upholstery in Washington DC. "
+            f"Tone: professional yet warm. Ready to send."
+        )
+
+        result = ai_result if ai_result and len(ai_result) > 30 else (
             f"Communication drafted for {task.customer_name or 'client'}. "
             f"Topic: {task.title}. Details: {task.description[:200]}. "
             f"Ready for review and send."

@@ -96,6 +96,15 @@ KEYWORD_MAP = {
             "sandbox", "r&d", "brainstorm",
         ],
     },
+    "innovation": {
+        "keywords": [
+            "competitor", "competition", "market scan", "trend", "monetize",
+            "monetization", "revenue strategy", "pricing intelligence",
+            "product idea", "feature idea", "backlog priority", "roadmap",
+            "opportunity", "growth", "market research", "industry analysis",
+            "upsell", "new product", "vetforge", "petforge",
+        ],
+    },
 }
 
 

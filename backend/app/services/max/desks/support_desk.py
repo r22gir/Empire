@@ -83,7 +83,7 @@ class SupportDesk(BaseDesk):
             return await self.fail_task(task, str(e))
 
     async def _handle_ticket(self, task: DeskTask) -> DeskTask:
-        """Triage and process a support ticket."""
+        """Triage and process a support ticket — AI-enhanced with template fallback."""
         task.actions.append(DeskAction(
             action="ticket_triage",
             detail=f"Triaging ticket from {task.customer_name or 'customer'}",
@@ -116,12 +116,27 @@ class SupportDesk(BaseDesk):
                 f"Support queue at {len(self.open_tickets)} open tickets — may need attention"
             )
 
-        result = (
-            f"Ticket created for {task.customer_name or 'customer'}: {task.title}. "
-            f"{'Suggestion: ' + drapery_advice + ' ' if drapery_advice else ''}"
-            f"Priority: {task.priority.value}. Status: open. "
-            f"Open tickets: {len(self.open_tickets)}."
+        # v6.0: Try AI-enhanced response
+        ai_result = await self.ai_call(
+            f"A customer support ticket needs your help.\n\n"
+            f"Customer: {task.customer_name or 'Unknown'}\n"
+            f"Subject: {task.title}\n"
+            f"Details: {task.description[:500]}\n"
+            f"Priority: {task.priority.value}\n"
+            f"{'Known issue match: ' + drapery_advice if drapery_advice else ''}\n\n"
+            f"Provide a professional support response. Include: diagnosis, next steps, timeline."
         )
+
+        if ai_result and len(ai_result) > 50:
+            result = ai_result
+        else:
+            # Template fallback
+            result = (
+                f"Ticket created for {task.customer_name or 'customer'}: {task.title}. "
+                f"{'Suggestion: ' + drapery_advice + ' ' if drapery_advice else ''}"
+                f"Priority: {task.priority.value}. Status: open. "
+                f"Open tickets: {len(self.open_tickets)}."
+            )
 
         self._log_to_brain(
             f"Support ticket: {task.title} from {task.customer_name or 'Unknown'}",

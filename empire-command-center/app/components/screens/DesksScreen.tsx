@@ -23,6 +23,7 @@ const DESK_CONFIG: Record<string, { bg: string; border: string; text: string; Ic
   website:     { bg: '#fdf2f8', border: '#fbcfe8', text: '#db2777', Icon: Globe },
   legal:       { bg: '#f8fafc', border: '#cbd5e1', text: '#64748b', Icon: Scale },
   lab:         { bg: '#fef9c3', border: '#fde047', text: '#a16207', Icon: FlaskConical },
+  innovation:  { bg: '#f0f9ff', border: '#93c5fd', text: '#1d4ed8', Icon: Zap },
 };
 
 interface DeskTask {
