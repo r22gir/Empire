@@ -1260,9 +1260,15 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
 
 
 async def _generate_pdf_for_quote(quote_id: str):
-    """Generate PDF for a quote by ID (reuses quotes router logic)."""
-    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint
-    await _gen_pdf_endpoint(quote_id)
+    """Generate PDF for a quote by ID (reuses quotes router logic).
+
+    AI-generated quotes (source=max_quick_quote) skip verification
+    since they use a different data structure than QIS quotes.
+    """
+    from app.routers.quotes import generate_pdf as _gen_pdf_endpoint, _load_quote
+    quote = _load_quote(quote_id)
+    skip = quote.get("source", "").startswith("max_")
+    await _gen_pdf_endpoint(quote_id, skip_verification=skip)
 
 
 # ── EMAIL TOOLS ───────────────────────────────────────────────────

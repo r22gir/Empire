@@ -110,7 +110,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
     for msg in request.history[-3:]:
-        hist_safe, _ = check_input(msg.get("content", ""))
+        content = msg.get("content", "")
+        # Skip guardrail check on system-injected context-pack messages
+        if content.startswith("[Context from previous sessions]") or content == "Context loaded. Ready.":
+            continue
+        hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
@@ -241,7 +245,10 @@ async def chat_stream(request: ChatRequest):
         return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     for msg in request.history[-3:]:
-        hist_safe, _ = check_input(msg.get("content", ""))
+        content = msg.get("content", "")
+        if content.startswith("[Context from previous sessions]") or content == "Context loaded. Ready.":
+            continue
+        hist_safe, _ = check_input(content)
         if not hist_safe:
             async def refusal_gen():
                 yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"

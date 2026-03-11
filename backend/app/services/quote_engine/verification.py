@@ -125,8 +125,37 @@ class QuoteVerifier:
         }
     """
 
+    @staticmethod
+    def _normalize(quote: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize AI-generated quote format to match verification expectations.
+
+        AI quotes use design_proposals + proposal_totals; verification expects tiers + items.
+        """
+        q = dict(quote)  # shallow copy
+
+        # Build tiers from proposal_totals if tiers missing
+        if not q.get("tiers") and q.get("proposal_totals"):
+            pt = q["proposal_totals"]
+            q["tiers"] = {
+                k: {"total": v} for k, v in pt.items() if k in ("A", "B", "C")
+            }
+
+        # Build items from line_items or design_proposals if items missing
+        if not q.get("items"):
+            if q.get("line_items"):
+                q["items"] = q["line_items"]
+            elif q.get("design_proposals"):
+                # Use the first proposal's line items as a representative
+                for dp in q["design_proposals"]:
+                    if dp.get("line_items"):
+                        q["items"] = dp["line_items"]
+                        break
+
+        return q
+
     def verify_quote(self, quote_data: Dict[str, Any]) -> Dict[str, Any]:
         """Run ALL verification checks on a quote."""
+        quote_data = self._normalize(quote_data)
         checks: List[CheckResult] = []
 
         checks.append(self.check_tier_pricing(quote_data))

@@ -125,7 +125,15 @@ def memory_stats():
 
 @router.get("/memory/context-pack")
 def context_pack():
-    top_memories = _store.search_memories(limit=20)
+    raw_memories = _store.search_memories(limit=30)
+    # Filter out security audit entries — they contain injection test strings
+    # that trigger guardrails when injected back into chat history
+    SECURITY_SKIP = {"security", "voiceprint_alert", "sanitizer", "audit"}
+    top_memories = [
+        m for m in raw_memories
+        if not any(tag in str(m.get("category", "")) + " " + str(m.get("subcategory", "")) + " " + " ".join(m.get("tags", []) if isinstance(m.get("tags"), list) else [])
+                    for tag in SECURITY_SKIP)
+    ][:20]
     conn = _store._conn()
     summaries = conn.execute(
         "SELECT * FROM conversation_summaries ORDER BY created_at DESC LIMIT 5"

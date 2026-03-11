@@ -28,6 +28,9 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
+  const [showAddMeasurement, setShowAddMeasurement] = useState(false);
+  const [newMeasurement, setNewMeasurement] = useState({ room: '', width: '', height: '', reference: '' });
+  const [savingMeasurement, setSavingMeasurement] = useState(false);
 
   const loadProject = async () => {
     try {
@@ -70,6 +73,42 @@ export default function ProjectDetail() {
     } finally {
       setSending(false);
     }
+  };
+
+  const canEdit = ['draft', 'submitted', 'quote-ready'].includes(project?.status || '');
+
+  const addMeasurement = async () => {
+    if (!newMeasurement.width || !newMeasurement.height) return;
+    setSavingMeasurement(true);
+    try {
+      const updated = [...measurements, {
+        room: newMeasurement.room || `Window ${measurements.length + 1}`,
+        width: newMeasurement.width,
+        height: newMeasurement.height,
+        reference: newMeasurement.reference || 'none',
+      }];
+      await intakeFetch(`/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ measurements: updated }),
+      });
+      setNewMeasurement({ room: '', width: '', height: '', reference: '' });
+      setShowAddMeasurement(false);
+      await loadProject();
+    } catch (_err) { /* ignore */ }
+    setSavingMeasurement(false);
+  };
+
+  const removeMeasurement = async (index: number) => {
+    const updated = measurements.filter((_: any, i: number) => i !== index);
+    try {
+      await intakeFetch(`/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ measurements: updated }),
+      });
+      await loadProject();
+    } catch (_err) { /* ignore */ }
   };
 
   if (loading || !project) {
@@ -174,7 +213,7 @@ export default function ProjectDetail() {
             <Camera size={14} className="text-[#b8960c]" />
             <h2 className="text-[13px] font-bold text-[#1a1a1a]">Photos</h2>
           </div>
-          {project.status === 'draft' ? (
+          {canEdit ? (
             <PhotoUploader projectId={projectId} photos={photos} onUpload={loadProject} />
           ) : photos.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -193,14 +232,30 @@ export default function ProjectDetail() {
           )}
         </div>
 
-        {/* Measurements section */}
-        {measurements.length > 0 && (
-          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
-            <div className="flex items-center gap-2 mb-4">
+        {/* Measurements / Dimensions section */}
+        <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
               <Ruler size={14} className="text-[#b8960c]" />
-              <h2 className="text-[13px] font-bold text-[#1a1a1a]">Measurements</h2>
+              <h2 className="text-[13px] font-bold text-[#1a1a1a]">Dimensions</h2>
+              {measurements.length > 0 && (
+                <span className="text-[9px] font-bold text-[#b8960c] bg-[#fdf8eb] px-2 py-0.5 rounded-md">
+                  {measurements.length}
+                </span>
+              )}
             </div>
-            <div className="space-y-2">
+            {canEdit && !showAddMeasurement && (
+              <button
+                onClick={() => setShowAddMeasurement(true)}
+                className="text-[10px] font-bold text-[#b8960c] hover:text-[#a3850b] transition-colors"
+              >
+                + Add Window
+              </button>
+            )}
+          </div>
+
+          {measurements.length > 0 && (
+            <div className="space-y-2 mb-3">
               {measurements.map((m: any, i: number) => (
                 <div key={i} className="flex items-center gap-3 text-[12px] p-2.5 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
                   <span className="font-semibold text-[#1a1a1a] min-w-[100px]">{m.room || `Window ${i + 1}`}</span>
@@ -210,11 +265,91 @@ export default function ProjectDetail() {
                       ref: {m.reference}
                     </span>
                   )}
+                  {canEdit && (
+                    <button
+                      onClick={() => removeMeasurement(i)}
+                      className="ml-auto text-[9px] text-[#ccc] hover:text-[#dc2626] transition-colors"
+                    >
+                      remove
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+
+          {measurements.length === 0 && !showAddMeasurement && (
+            <p className="text-[11px] text-[#c5c0b8] mb-2">
+              No dimensions added yet.{canEdit ? ' Add window measurements for an accurate quote.' : ''}
+            </p>
+          )}
+
+          {showAddMeasurement && (
+            <div className="bg-[#f5f2ed] border border-[#ece8e0] rounded-[10px] p-4">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-[9px] text-[#999] font-semibold uppercase tracking-[0.5px] block mb-1">Room / Location</label>
+                  <input
+                    type="text"
+                    value={newMeasurement.room}
+                    onChange={e => setNewMeasurement(p => ({ ...p, room: e.target.value }))}
+                    placeholder="e.g. Living Room"
+                    className="form-input w-full text-[12px]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] text-[#999] font-semibold uppercase tracking-[0.5px] block mb-1">Reference</label>
+                  <input
+                    type="text"
+                    value={newMeasurement.reference}
+                    onChange={e => setNewMeasurement(p => ({ ...p, reference: e.target.value }))}
+                    placeholder="e.g. Bay window left"
+                    className="form-input w-full text-[12px]"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-[9px] text-[#999] font-semibold uppercase tracking-[0.5px] block mb-1">Width (inches)</label>
+                  <input
+                    type="number"
+                    value={newMeasurement.width}
+                    onChange={e => setNewMeasurement(p => ({ ...p, width: e.target.value }))}
+                    placeholder='72'
+                    className="form-input w-full text-[12px]"
+                    min="1"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] text-[#999] font-semibold uppercase tracking-[0.5px] block mb-1">Height (inches)</label>
+                  <input
+                    type="number"
+                    value={newMeasurement.height}
+                    onChange={e => setNewMeasurement(p => ({ ...p, height: e.target.value }))}
+                    placeholder='84'
+                    className="form-input w-full text-[12px]"
+                    min="1"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={addMeasurement}
+                  disabled={savingMeasurement || !newMeasurement.width || !newMeasurement.height}
+                  className="px-4 py-2 text-[11px] font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors disabled:opacity-50"
+                >
+                  {savingMeasurement ? 'Saving...' : 'Add Dimension'}
+                </button>
+                <button
+                  onClick={() => { setShowAddMeasurement(false); setNewMeasurement({ room: '', width: '', height: '', reference: '' }); }}
+                  className="px-4 py-2 text-[11px] text-[#888] hover:text-[#555] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Notes */}
         {project.notes && (
