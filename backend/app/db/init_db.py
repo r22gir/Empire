@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS customers (
     total_revenue REAL DEFAULT 0,
     lifetime_quotes INTEGER DEFAULT 0,
     source TEXT DEFAULT 'direct', -- direct, referral, website, marketplace
+    business TEXT DEFAULT 'empire', -- empire, workroom, woodcraft
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -233,10 +234,35 @@ def init_database():
         conn.executescript(SCHEMA_SQL)
         print(f"✓ Task Engine database initialized at {DB_PATH}")
 
+        # v6.0 Pipeline columns (additive migration — safe to re-run)
+        _migrate_pipeline_columns(conn)
+
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
             _seed_desks(conn)
+
+
+def _migrate_pipeline_columns(conn):
+    """Add pipeline columns to tasks table (v6.0). Safe to re-run."""
+    migrations = [
+        ("pipeline_id", "TEXT"),
+        ("subtask_order", "INTEGER DEFAULT 0"),
+        ("acceptance_criteria", "TEXT"),
+        ("channel", "TEXT DEFAULT 'system'"),
+        ("result_summary", "TEXT"),
+        ("resume_state", "TEXT"),
+    ]
+    added = 0
+    for col_name, col_type in migrations:
+        try:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {col_name} {col_type}")
+            added += 1
+        except Exception:
+            pass  # Column already exists
+    if added:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_pipeline ON tasks(pipeline_id)")
+        print(f"✓ Pipeline migration: added {added} column(s) to tasks table")
 
 
 def _seed_desks(conn):

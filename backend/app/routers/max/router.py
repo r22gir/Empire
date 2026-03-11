@@ -533,6 +533,108 @@ async def get_stats():
     return {"stats": desk_manager.get_stats(), "telegram_connected": telegram_bot.is_configured}
 
 
+# ── v6.0 Pipeline Endpoints ─────────────────────────────────────────
+
+class PipelineCreateRequest(BaseModel):
+    title: str
+    description: str = ""
+    source: str = "api"
+    channel: str = "web"
+
+
+class PipelineApprovalRequest(BaseModel):
+    reason: str = ""
+
+
+@router.post("/pipeline")
+async def create_pipeline(request: PipelineCreateRequest, background_tasks: BackgroundTasks):
+    """Create a new pipeline — AI decomposes task into ordered subtasks."""
+    from app.services.max.pipeline import pipeline_engine
+    result = await pipeline_engine.submit_pipeline(
+        title=request.title,
+        description=request.description or request.title,
+        source=request.source,
+        channel=request.channel,
+    )
+    if telegram_bot.is_configured:
+        count = len(result.get("subtasks", []))
+        background_tasks.add_task(
+            telegram_bot.send_message,
+            f"🚀 <b>New Pipeline</b>\n\n<b>{request.title}</b>\n{count} subtask(s) created\nSource: {request.source}",
+        )
+    return result
+
+
+@router.get("/pipeline")
+async def list_pipelines(active_only: bool = False, limit: int = 20):
+    """List pipelines with progress summaries."""
+    from app.services.max.pipeline import pipeline_engine
+    if active_only:
+        return {"pipelines": pipeline_engine.get_active_pipelines()}
+    return {"pipelines": pipeline_engine.get_all_pipelines(limit=limit)}
+
+
+@router.get("/pipeline/review")
+async def get_review_tasks():
+    """Get all subtasks awaiting founder approval."""
+    from app.services.max.pipeline import pipeline_engine
+    return {"tasks": pipeline_engine.get_review_tasks()}
+
+
+@router.get("/pipeline/{pipeline_id}")
+async def get_pipeline(pipeline_id: str):
+    """Get a pipeline with all subtasks and progress."""
+    from app.services.max.pipeline import pipeline_engine
+    result = pipeline_engine.get_pipeline(pipeline_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    return result
+
+
+@router.post("/pipeline/{pipeline_id}/cancel")
+async def cancel_pipeline(pipeline_id: str):
+    """Cancel an active pipeline and all pending subtasks."""
+    from app.services.max.pipeline import pipeline_engine
+    result = await pipeline_engine.cancel_pipeline(pipeline_id)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/pipeline/task/{task_id}/approve")
+async def approve_pipeline_task(task_id: str):
+    """Founder approves a subtask in review state."""
+    from app.services.max.pipeline import pipeline_engine
+    result = await pipeline_engine.approve_subtask(task_id)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/pipeline/task/{task_id}/reject")
+async def reject_pipeline_task(task_id: str, request: PipelineApprovalRequest = PipelineApprovalRequest()):
+    """Founder rejects a subtask — sends back for re-execution."""
+    from app.services.max.pipeline import pipeline_engine
+    result = await pipeline_engine.reject_subtask(task_id, request.reason)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.get("/pipeline/precheck")
+async def pipeline_precheck():
+    """Check API key dependencies and notify of blockers."""
+    from app.services.max.pipeline import pipeline_engine
+    return await pipeline_engine.pre_check_dependencies()
+
+
+@router.get("/pipeline/audit")
+async def pipeline_audit():
+    """Audit ecosystem for unwired endpoints, missing frontends, and backlog items."""
+    from app.services.max.pipeline import pipeline_engine
+    return await pipeline_engine.audit_ecosystem()
+
+
 @router.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "MAX AI Assistant Manager", "desks_online": len(desk_manager.get_all_desks()), "telegram_configured": telegram_bot.is_configured}

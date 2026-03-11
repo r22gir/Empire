@@ -104,6 +104,13 @@ class DeskScheduler:
                         self._last_run["health_monitor_tick"] = f"{today}:{now.hour}:{now.minute}"
                         asyncio.create_task(self._check_service_health())
 
+                # v6.0 Pipeline executor: process pending subtasks (every 2 min)
+                if now.minute % 2 == 0:
+                    pl_tick = f"{today}:{now.hour}:{now.minute}"
+                    if self._last_run.get("pipeline_tick") != pl_tick:
+                        self._last_run["pipeline_tick"] = pl_tick
+                        asyncio.create_task(self._run_pipeline_executor())
+
             except Exception as e:
                 logger.warning(f"Scheduler tick error: {e}")
 
@@ -254,6 +261,19 @@ class DeskScheduler:
                 return True
         except (ConnectionRefusedError, TimeoutError, OSError):
             return False
+
+    # ── v6.0 Pipeline Executor ─────────────────────────────────────────
+
+    async def _run_pipeline_executor(self):
+        """Execute next ready subtasks from all active pipelines."""
+        try:
+            from app.services.max.pipeline import pipeline_engine
+            results = await pipeline_engine.execute_next_subtasks()
+            if results:
+                logger.info(f"[Pipeline] Executed {len(results)} subtask(s): "
+                           + ", ".join(f"{r['desk']}:{r['status']}" for r in results))
+        except Exception as e:
+            logger.warning(f"[Pipeline] Executor tick failed: {e}")
 
     # ── Event triggers (called by other parts of the system) ──────────
 

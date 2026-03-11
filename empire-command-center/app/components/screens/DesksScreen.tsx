@@ -7,7 +7,7 @@ import {
   Hammer, ShoppingBag, Megaphone, Headphones, BadgeDollarSign, PieChart,
   Users, Wrench, Monitor, Globe, Scale, FlaskConical, RefreshCw,
   Clock, AlertTriangle, CircleDot, ListTodo, Eye, X, ArrowLeft,
-  FileText, Zap, Brain
+  FileText, Zap, Brain, GitBranch, Play, Check, Ban
 } from 'lucide-react';
 
 const DESK_CONFIG: Record<string, { bg: string; border: string; text: string; Icon: React.ComponentType<any> }> = {
@@ -21,7 +21,7 @@ const DESK_CONFIG: Record<string, { bg: string; border: string; text: string; Ic
   contractors: { bg: '#fef3c7', border: '#fcd34d', text: '#b45309', Icon: Wrench },
   it:          { bg: '#f0f9ff', border: '#7dd3fc', text: '#0284c7', Icon: Monitor },
   website:     { bg: '#fdf2f8', border: '#fbcfe8', text: '#db2777', Icon: Globe },
-  legal:       { bg: '#f5f3ef', border: '#d8d3cb', text: '#555',    Icon: Scale },
+  legal:       { bg: '#f8fafc', border: '#cbd5e1', text: '#64748b', Icon: Scale },
   lab:         { bg: '#fef9c3', border: '#fde047', text: '#a16207', Icon: FlaskConical },
 };
 
@@ -59,10 +59,12 @@ interface DeskStatus {
 interface Props {
   desks: Desk[];
   onSendTask: (msg: string) => void;
+  initialDeskId?: string | null;
+  onDeskChanged?: (deskId: string | null) => void;
 }
 
-export default function DesksScreen({ desks, onSendTask }: Props) {
-  const [openDesk, setOpenDesk] = useState<string | null>(null);
+export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskChanged }: Props) {
+  const [openDesk, setOpenDesk] = useState<string | null>(initialDeskId || null);
   const [taskInput, setTaskInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [taskResult, setTaskResult] = useState<{ desk: string; result: string; success: boolean } | null>(null);
@@ -71,6 +73,55 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
   const [viewingTask, setViewingTask] = useState<DeskTask | null>(null);
   const [activeTab, setActiveTab] = useState<'active' | 'completed' | 'all' | 'brain'>('active');
   const [loadingStatus, setLoadingStatus] = useState<Record<string, boolean>>({});
+
+  // v6.0 Pipeline state
+  const [pipelines, setPipelines] = useState<any[]>([]);
+  const [pipelineInput, setPipelineInput] = useState('');
+  const [creatingPipeline, setCreatingPipeline] = useState(false);
+  const [showPipelines, setShowPipelines] = useState(true);
+
+  const fetchPipelines = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/max/pipeline?limit=10`);
+      if (res.ok) {
+        const data = await res.json();
+        setPipelines(data.pipelines || []);
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => { fetchPipelines(); }, [fetchPipelines]);
+
+  const submitPipeline = async () => {
+    if (!pipelineInput.trim()) return;
+    setCreatingPipeline(true);
+    try {
+      const res = await fetch(`${API}/max/pipeline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: pipelineInput, description: pipelineInput, source: 'command_center', channel: 'web' }),
+      });
+      if (res.ok) {
+        setPipelineInput('');
+        fetchPipelines();
+      }
+    } catch { /* silent */ }
+    setCreatingPipeline(false);
+  };
+
+  const approvePipelineTask = async (taskId: string) => {
+    try {
+      await fetch(`${API}/max/pipeline/task/${taskId}/approve`, { method: 'POST' });
+      fetchPipelines();
+    } catch { /* silent */ }
+  };
+
+  const rejectPipelineTask = async (taskId: string) => {
+    try {
+      await fetch(`${API}/max/pipeline/task/${taskId}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: 'Rejected from CC' }) });
+      fetchPipelines();
+    } catch { /* silent */ }
+  };
 
   const fetchDeskStatus = useCallback(async (deskId: string) => {
     setLoadingStatus(s => ({ ...s, [deskId]: true }));
@@ -91,12 +142,24 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
     setLoadingStatus(s => ({ ...s, [deskId]: false }));
   }, []);
 
+  // Deep-link: open desk when initialDeskId changes
+  useEffect(() => {
+    if (initialDeskId && initialDeskId !== openDesk) {
+      setOpenDesk(initialDeskId);
+      setActiveTab('active');
+      setTaskResult(null);
+      setTaskInput('');
+      fetchDeskStatus(initialDeskId);
+    }
+  }, [initialDeskId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleOpenDesk = (deskId: string) => {
     setOpenDesk(deskId);
     setActiveTab('active');
     setTaskResult(null);
     setTaskInput('');
     fetchDeskStatus(deskId);
+    onDeskChanged?.(deskId);
   };
 
   const submitTask = async (deskId: string) => {
@@ -107,12 +170,12 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
       const res = await fetch(API + '/max/ai-desks/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ desk_id: deskId, task: taskInput }),
+        body: JSON.stringify({ title: taskInput, description: `[Desk: ${deskId}] ${taskInput}`, priority: 'normal', source: 'founder' }),
       });
       const data = await res.json();
       setTaskResult({
         desk: deskId,
-        result: data.result || data.output || data.message || JSON.stringify(data),
+        result: res.ok ? `Task "${data.title}" assigned to ${data.desk || deskId} (${data.status})` : (data.detail ? JSON.stringify(data.detail) : JSON.stringify(data)),
         success: res.ok,
       });
       setTaskInput('');
@@ -149,7 +212,7 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
         {/* Desk header */}
         <div style={{ padding: '32px 36px 24px', background: cfg.bg }}>
           <div className="max-w-5xl mx-auto">
-            <button onClick={() => setOpenDesk(null)}
+            <button onClick={() => { setOpenDesk(null); onDeskChanged?.(null); }}
               className="flex items-center gap-1.5 cursor-pointer mb-4 transition-colors"
               style={{ fontSize: 12, fontWeight: 600, color: 'var(--dim)', background: 'none', border: 'none' }}>
               <ArrowLeft size={14} /> Back to All Desks
@@ -371,6 +434,98 @@ export default function DesksScreen({ desks, onSendTask }: Props) {
             <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--text)' }}>AI Desks</h1>
             <p style={{ fontSize: 13, color: 'var(--dim)' }}>{desks.length} agents ready · Click to open</p>
           </div>
+        </div>
+
+        {/* v6.0 Pipeline Panel */}
+        <div className="empire-card" style={{ padding: '18px 22px', marginTop: 20, marginBottom: 16 }}>
+          <div className="flex items-center justify-between mb-3 cursor-pointer" onClick={() => setShowPipelines(p => !p)}>
+            <div className="flex items-center gap-2">
+              <GitBranch size={16} style={{ color: 'var(--purple)' }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Task Pipelines</span>
+              {pipelines.length > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--purple)', background: 'var(--purple-bg)', padding: '2px 8px', borderRadius: 9 }}>
+                  {pipelines.filter(p => p.status === 'in_progress').length} active
+                </span>
+              )}
+            </div>
+            {showPipelines ? <ChevronUp size={14} style={{ color: 'var(--dim)' }} /> : <ChevronDown size={14} style={{ color: 'var(--dim)' }} />}
+          </div>
+
+          {showPipelines && (
+            <>
+              {/* Create pipeline input */}
+              <div className="flex gap-2 mb-3">
+                <input
+                  value={pipelineInput}
+                  onChange={e => setPipelineInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && submitPipeline()}
+                  placeholder="Describe a multi-step task for MAX to break down..."
+                  className="empire-input flex-1"
+                  style={{ fontSize: 12, padding: '8px 12px' }}
+                />
+                <button onClick={submitPipeline} disabled={creatingPipeline || !pipelineInput.trim()}
+                  className="empire-btn primary flex items-center gap-1"
+                  style={{ fontSize: 11, padding: '8px 14px' }}>
+                  {creatingPipeline ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+                  {creatingPipeline ? 'Creating...' : 'Launch'}
+                </button>
+              </div>
+
+              {/* Pipeline list */}
+              {pipelines.length === 0 ? (
+                <p style={{ fontSize: 11, color: 'var(--faint)', textAlign: 'center', padding: '8px 0' }}>
+                  No pipelines yet. Enter a task above to create one.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {pipelines.slice(0, 5).map((pl: any) => {
+                    const prog = pl.progress || {};
+                    const pct = prog.percent || 0;
+                    const isActive = pl.status === 'in_progress';
+                    return (
+                      <div key={pl.pipeline_id} className="empire-card flat" style={{ padding: '12px 14px' }}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span style={{ fontSize: 12, fontWeight: 600, color: isActive ? 'var(--text)' : 'var(--dim)' }}>
+                            {pl.title?.slice(0, 60)}
+                          </span>
+                          <span style={{ fontSize: 10, fontWeight: 600, fontFamily: 'monospace', color: isActive ? 'var(--green)' : pct === 100 ? 'var(--green)' : 'var(--dim)' }}>
+                            {pct}%
+                          </span>
+                        </div>
+                        {/* Progress bar */}
+                        <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden', marginBottom: 6 }}>
+                          <div style={{ height: '100%', width: `${pct}%`, borderRadius: 2, background: pct === 100 ? 'var(--green)' : 'var(--purple)', transition: 'width 0.3s' }} />
+                        </div>
+                        {/* Subtask summary */}
+                        <div className="flex items-center gap-3" style={{ fontSize: 10, color: 'var(--dim)' }}>
+                          <span>{prog.done || 0}/{prog.total || 0} done</span>
+                          {(prog.in_review || 0) > 0 && <span style={{ color: '#d97706', fontWeight: 600 }}>{prog.in_review} needs review</span>}
+                          {(prog.failed || 0) > 0 && <span style={{ color: 'var(--red)', fontWeight: 600 }}>{prog.failed} failed</span>}
+                        </div>
+                        {/* Review actions for subtasks needing approval */}
+                        {(pl.subtasks || []).filter((s: any) => s.status === 'waiting').map((s: any) => (
+                          <div key={s.id} className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+                            <span style={{ fontSize: 11, color: 'var(--text)' }}>{s.title?.slice(0, 40)} — <b style={{ color: '#d97706' }}>needs review</b></span>
+                            <div className="flex gap-1">
+                              <button onClick={() => approvePipelineTask(s.id)} className="empire-btn" style={{ fontSize: 10, padding: '3px 8px', color: 'var(--green)' }}>
+                                <Check size={11} /> Approve
+                              </button>
+                              <button onClick={() => rejectPipelineTask(s.id)} className="empire-btn" style={{ fontSize: 10, padding: '3px 8px', color: 'var(--red)' }}>
+                                <Ban size={11} /> Reject
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <button onClick={fetchPipelines} className="empire-btn flex items-center gap-1 mt-2" style={{ fontSize: 10, padding: '4px 10px', color: 'var(--dim)' }}>
+                <RefreshCw size={10} /> Refresh
+              </button>
+            </>
+          )}
         </div>
 
         <div className="section-label" style={{ marginBottom: 12, marginTop: 20 }}>All Desks</div>

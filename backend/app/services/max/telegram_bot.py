@@ -458,6 +458,72 @@ class TelegramBot:
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
+        # /pipeline command (v6.0)
+        async def cmd_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            try:
+                from app.services.max.pipeline import pipeline_engine
+                # Check if user provided text after /pipeline
+                args_text = " ".join(context.args) if context.args else ""
+                if args_text:
+                    # Submit new pipeline
+                    await update.message.reply_text("🔄 Breaking down task into subtasks...")
+                    result = await pipeline_engine.submit_pipeline(
+                        title=args_text,
+                        description=args_text,
+                        source="telegram",
+                        channel="telegram",
+                    )
+                    msg = f"🚀 <b>Pipeline Created</b>\n\n<b>ID:</b> {result['pipeline_id']}\n<b>Subtasks:</b>\n"
+                    for st in result.get("subtasks", []):
+                        msg += f"  {st['order']+1}. [{st['desk']}] {st['title']}\n"
+                    await update.message.reply_html(msg)
+                else:
+                    # Show active pipelines
+                    pipelines = pipeline_engine.get_active_pipelines()
+                    if not pipelines:
+                        await update.message.reply_text("No active pipelines.\n\nUse /pipeline <description> to create one.")
+                        return
+                    msg = "🔄 <b>Active Pipelines</b>\n\n"
+                    for pl in pipelines[:5]:
+                        prog = pl.get("progress", {})
+                        msg += (
+                            f"<b>{pl['title'][:50]}</b>\n"
+                            f"  {prog.get('done', 0)}/{prog.get('total', 0)} done"
+                            f" · {prog.get('in_review', 0)} in review\n\n"
+                        )
+                    await update.message.reply_html(msg)
+            except Exception as e:
+                await update.message.reply_text(f"Pipeline error: {e}")
+
+        # /review command (v6.0)
+        async def cmd_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            try:
+                from app.services.max.pipeline import pipeline_engine
+                tasks = pipeline_engine.get_review_tasks()
+                if not tasks:
+                    await update.message.reply_text("No tasks awaiting review. ✅")
+                    return
+                for t in tasks[:5]:
+                    msg = (
+                        f"🔍 <b>Review Required</b>\n\n"
+                        f"<b>Task:</b> {t.get('title', '?')}\n"
+                        f"<b>Desk:</b> {t.get('desk', '?')}\n"
+                        f"<b>Result:</b> {(t.get('result_summary') or 'No result')[:300]}\n"
+                    )
+                    markup = {
+                        "inline_keyboard": [[
+                            {"text": "✅ Approve", "callback_data": f"pl_approve_{t['id']}"},
+                            {"text": "❌ Reject", "callback_data": f"pl_reject_{t['id']}"},
+                        ]]
+                    }
+                    await update.message.reply_html(msg, reply_markup=markup)
+            except Exception as e:
+                await update.message.reply_text(f"Review error: {e}")
+
         # /help command
         async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
@@ -468,6 +534,8 @@ class TelegramBot:
                 "/status — System health check\n"
                 "/desks — List active desks\n"
                 "/tasks — Show open tasks\n"
+                "/pipeline — View/create pipelines\n"
+                "/review — Review pending approvals\n"
                 "/help — Show this message\n\n"
                 "You can also send:\n"
                 "💬 <b>Text</b> — Chat with MAX\n"
@@ -721,11 +789,41 @@ class TelegramBot:
                 await query.message.edit_reply_markup(reply_markup=None)
             elif data == "ack_alert":
                 await query.message.edit_text(query.message.text + "\n\n✅ Acknowledged", parse_mode="HTML")
+            elif data.startswith("pl_approve_"):
+                task_id = data.replace("pl_approve_", "")
+                try:
+                    from app.services.max.pipeline import pipeline_engine
+                    result = await pipeline_engine.approve_subtask(task_id)
+                    if result.get("error"):
+                        await query.message.reply_text(f"⚠️ {result['error']}")
+                    else:
+                        await query.message.edit_text(
+                            query.message.text + "\n\n✅ <b>APPROVED</b> by founder",
+                            parse_mode="HTML",
+                        )
+                except Exception as e:
+                    await query.message.reply_text(f"Approve error: {e}")
+            elif data.startswith("pl_reject_"):
+                task_id = data.replace("pl_reject_", "")
+                try:
+                    from app.services.max.pipeline import pipeline_engine
+                    result = await pipeline_engine.reject_subtask(task_id, "Rejected via Telegram")
+                    if result.get("error"):
+                        await query.message.reply_text(f"⚠️ {result['error']}")
+                    else:
+                        await query.message.edit_text(
+                            query.message.text + "\n\n❌ <b>REJECTED</b> — will retry",
+                            parse_mode="HTML",
+                        )
+                except Exception as e:
+                    await query.message.reply_text(f"Reject error: {e}")
 
         app.add_handler(CommandHandler("start", cmd_start))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("desks", cmd_desks))
         app.add_handler(CommandHandler("tasks", cmd_tasks))
+        app.add_handler(CommandHandler("pipeline", cmd_pipeline))
+        app.add_handler(CommandHandler("review", cmd_review))
         app.add_handler(CommandHandler("help", cmd_help))
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
