@@ -1,7 +1,7 @@
 """
 Empire Finance System — Invoices, Payments, Expenses, P&L Dashboard.
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List
 import json
@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime, date
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.middleware.rate_limiter import limiter
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 
@@ -119,8 +120,9 @@ def _enrich_invoice(inv: dict) -> dict:
 
 # ── Dashboard ────────────────────────────────────────────────────────
 
+@limiter.limit("30/minute")
 @router.get("/dashboard")
-def finance_dashboard():
+def finance_dashboard(request: Request):
     """P&L summary: revenue MTD/YTD, expenses MTD/YTD, outstanding invoices, AR aging."""
     now = datetime.now()
     month_start = now.strftime("%Y-%m-01")
@@ -215,8 +217,10 @@ def finance_dashboard():
 
 # ── Invoices ─────────────────────────────────────────────────────────
 
+@limiter.limit("30/minute")
 @router.get("/invoices")
 def list_invoices(
+    request: Request,
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
     date_from: Optional[str] = None,
@@ -259,8 +263,9 @@ def list_invoices(
         return {"invoices": invoices, "total": total, "limit": limit, "offset": offset}
 
 
+@limiter.limit("30/minute")
 @router.post("/invoices")
-def create_invoice(invoice: InvoiceCreate):
+def create_invoice(request: Request, invoice: InvoiceCreate):
     """Create a new invoice."""
     with get_db() as conn:
         inv_number = _next_invoice_number(conn)
@@ -306,8 +311,9 @@ def create_invoice(invoice: InvoiceCreate):
         return {"invoice": _enrich_invoice(dict_row(row))}
 
 
+@limiter.limit("30/minute")
 @router.get("/invoices/{invoice_id}")
-def get_invoice(invoice_id: str):
+def get_invoice(request: Request, invoice_id: str):
     """Get invoice detail with payments."""
     with get_db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -336,8 +342,9 @@ def get_invoice(invoice_id: str):
         return {"invoice": invoice}
 
 
+@limiter.limit("30/minute")
 @router.patch("/invoices/{invoice_id}")
-def update_invoice(invoice_id: str, update: InvoiceUpdate):
+def update_invoice(request: Request, invoice_id: str, update: InvoiceUpdate):
     """Update an invoice."""
     with get_db() as conn:
         existing = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -378,8 +385,9 @@ def update_invoice(invoice_id: str, update: InvoiceUpdate):
         return {"invoice": _enrich_invoice(dict_row(row))}
 
 
+@limiter.limit("30/minute")
 @router.delete("/invoices/{invoice_id}")
-def cancel_invoice(invoice_id: str):
+def cancel_invoice(request: Request, invoice_id: str):
     """Cancel an invoice (soft delete)."""
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -393,8 +401,9 @@ def cancel_invoice(invoice_id: str):
         return {"status": "cancelled", "invoice_id": invoice_id}
 
 
+@limiter.limit("30/minute")
 @router.post("/invoices/{invoice_id}/payment")
-def record_payment(invoice_id: str, payment: PaymentCreate):
+def record_payment(request: Request, invoice_id: str, payment: PaymentCreate):
     """Record a payment against an invoice."""
     with get_db() as conn:
         inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -435,8 +444,9 @@ def record_payment(invoice_id: str, payment: PaymentCreate):
         return {"invoice": _enrich_invoice(dict_row(updated_inv))}
 
 
+@limiter.limit("30/minute")
 @router.post("/invoices/from-quote/{quote_id}")
-def create_invoice_from_quote(quote_id: str):
+def create_invoice_from_quote(request: Request, quote_id: str):
     """Create an invoice from an existing quote JSON file."""
     quote_file = QUOTES_DIR / f"{quote_id}.json"
     if not quote_file.exists():
@@ -524,8 +534,10 @@ def create_invoice_from_quote(quote_id: str):
 
 # ── Payments ─────────────────────────────────────────────────────────
 
+@limiter.limit("30/minute")
 @router.get("/payments")
 def list_payments(
+    request: Request,
     invoice_id: Optional[str] = None,
     customer_id: Optional[str] = None,
     method: Optional[str] = None,
@@ -573,8 +585,10 @@ def list_payments(
 
 # ── Expenses ─────────────────────────────────────────────────────────
 
+@limiter.limit("30/minute")
 @router.get("/expenses")
 def list_expenses(
+    request: Request,
     category: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -616,8 +630,9 @@ def list_expenses(
         return {"expenses": dict_rows(rows), "total": total, "limit": limit, "offset": offset}
 
 
+@limiter.limit("30/minute")
 @router.post("/expenses")
-def create_expense(expense: ExpenseCreate):
+def create_expense(request: Request, expense: ExpenseCreate):
     """Create a new expense."""
     with get_db() as conn:
         exp_date = expense.expense_date or date.today().isoformat()
@@ -641,8 +656,9 @@ def create_expense(expense: ExpenseCreate):
         return {"expense": dict_row(row)}
 
 
+@limiter.limit("30/minute")
 @router.delete("/expenses/{expense_id}")
-def delete_expense(expense_id: str):
+def delete_expense(request: Request, expense_id: str):
     """Delete an expense."""
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM expenses WHERE id = ?", (expense_id,)).fetchone()
@@ -655,8 +671,10 @@ def delete_expense(expense_id: str):
 
 # ── Revenue ──────────────────────────────────────────────────────────
 
+@limiter.limit("30/minute")
 @router.get("/revenue")
 def revenue_breakdown(
+    request: Request,
     period: str = Query("monthly", description="monthly, weekly, or yearly"),
     year: Optional[int] = None,
 ):

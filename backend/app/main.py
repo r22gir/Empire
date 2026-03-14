@@ -3,6 +3,9 @@ Main FastAPI application entry point for EmpireBox backend.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.middleware.rate_limiter import limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
 import os
 
 # Create FastAPI app
@@ -13,6 +16,10 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Configure CORS
 cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")
@@ -84,6 +91,8 @@ load_router("app.routers.costs", "/api/v1", ["costs"])
 
 # Finance, CRM, Inventory
 load_router("app.routers.finance", "/api/v1", ["finance"])
+load_router("app.routers.payments", "/api/v1", ["payments"])
+load_router("app.routers.emails", "/api/v1", ["emails"])
 load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
 load_router("app.routers.jobs", "/api/v1", ["jobs"])

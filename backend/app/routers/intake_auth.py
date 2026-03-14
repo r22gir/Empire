@@ -16,6 +16,8 @@ import os
 import shutil
 import logging
 
+from app.middleware.rate_limiter import limiter
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["intake"])
@@ -186,8 +188,9 @@ class AdminUserUpdate(BaseModel):
 #  AUTH ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+@limiter.limit("10/minute")
 @router.post("/signup")
-async def signup(req: SignupRequest):
+async def signup(request: Request, req: SignupRequest):
     conn = get_db()
     existing = conn.execute("SELECT id FROM intake_users WHERE email = ?", (req.email.lower().strip(),)).fetchone()
     if existing:
@@ -207,8 +210,9 @@ async def signup(req: SignupRequest):
     return {"token": token, "user": {"id": user_id, "name": req.name, "email": req.email, "role": req.role}}
 
 
+@limiter.limit("10/minute")
 @router.post("/login")
-async def login(req: LoginRequest):
+async def login(request: Request, req: LoginRequest):
     conn = get_db()
     user = conn.execute("SELECT * FROM intake_users WHERE email = ?", (req.email.lower().strip(),)).fetchone()
     conn.close()
@@ -222,8 +226,9 @@ async def login(req: LoginRequest):
     }
 
 
+@limiter.limit("30/minute")
 @router.get("/me")
-async def get_me(user=Depends(get_current_user)):
+async def get_me(request: Request, user=Depends(get_current_user)):
     return {
         "id": user["id"],
         "name": user["name"],
@@ -235,8 +240,9 @@ async def get_me(user=Depends(get_current_user)):
     }
 
 
+@limiter.limit("10/minute")
 @router.put("/me")
-async def update_profile(update: ProfileUpdate, user=Depends(get_current_user)):
+async def update_profile(request: Request, update: ProfileUpdate, user=Depends(get_current_user)):
     """User self-service profile update."""
     conn = get_db()
     fields = []
@@ -266,8 +272,9 @@ async def update_profile(update: ProfileUpdate, user=Depends(get_current_user)):
 #  PROJECT ENDPOINTS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+@limiter.limit("10/minute")
 @router.post("/projects")
-async def create_project(project: ProjectCreate, user=Depends(get_current_user)):
+async def create_project(request: Request, project: ProjectCreate, user=Depends(get_current_user)):
     project_id = str(uuid.uuid4())
     intake_code = _next_intake_code()
     conn = get_db()
@@ -286,8 +293,9 @@ async def create_project(project: ProjectCreate, user=Depends(get_current_user))
     return {"id": project_id, "intake_code": intake_code, "status": "draft"}
 
 
+@limiter.limit("30/minute")
 @router.get("/projects")
-async def list_projects(user=Depends(get_current_user)):
+async def list_projects(request: Request, user=Depends(get_current_user)):
     conn = get_db()
     rows = conn.execute(
         "SELECT * FROM intake_projects WHERE user_id = ? ORDER BY created_at DESC", (user["id"],)
@@ -305,8 +313,9 @@ async def list_projects(user=Depends(get_current_user)):
     return {"projects": projects, "total": len(projects)}
 
 
+@limiter.limit("30/minute")
 @router.get("/projects/{project_id}")
-async def get_project(project_id: str, user=Depends(get_current_user)):
+async def get_project(request: Request, project_id: str, user=Depends(get_current_user)):
     conn = get_db()
     row = conn.execute(
         "SELECT * FROM intake_projects WHERE id = ? AND user_id = ?", (project_id, user["id"])
@@ -323,8 +332,9 @@ async def get_project(project_id: str, user=Depends(get_current_user)):
     return d
 
 
+@limiter.limit("10/minute")
 @router.put("/projects/{project_id}")
-async def update_project(project_id: str, update: ProjectUpdate, user=Depends(get_current_user)):
+async def update_project(request: Request, project_id: str, update: ProjectUpdate, user=Depends(get_current_user)):
     conn = get_db()
     row = conn.execute(
         "SELECT id FROM intake_projects WHERE id = ? AND user_id = ?", (project_id, user["id"])
@@ -356,8 +366,9 @@ async def update_project(project_id: str, update: ProjectUpdate, user=Depends(ge
     return await get_project(project_id, user)
 
 
+@limiter.limit("10/minute")
 @router.post("/projects/{project_id}/submit")
-async def submit_project(project_id: str, user=Depends(get_current_user)):
+async def submit_project(request: Request, project_id: str, user=Depends(get_current_user)):
     conn = get_db()
     conn.execute(
         "UPDATE intake_projects SET status = 'submitted', updated_at = datetime('now') WHERE id = ? AND user_id = ?",
@@ -386,8 +397,9 @@ async def submit_project(project_id: str, user=Depends(get_current_user)):
     return {"status": "submitted", "message": "Project submitted! We'll review and send a quote within 24 hours."}
 
 
+@limiter.limit("10/minute")
 @router.post("/projects/{project_id}/message")
-async def add_message(project_id: str, msg: MessageCreate, user=Depends(get_current_user)):
+async def add_message(request: Request, project_id: str, msg: MessageCreate, user=Depends(get_current_user)):
     conn = get_db()
     row = conn.execute(
         "SELECT messages FROM intake_projects WHERE id = ? AND user_id = ?", (project_id, user["id"])
@@ -416,8 +428,10 @@ async def add_message(project_id: str, msg: MessageCreate, user=Depends(get_curr
 #  FILE UPLOAD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+@limiter.limit("10/minute")
 @router.post("/projects/{project_id}/photos")
 async def upload_photo(
+    request: Request,
     project_id: str,
     file: UploadFile = File(...),
     user=Depends(get_current_user),
@@ -467,8 +481,10 @@ async def upload_photo(
     return {"filename": filename, "total_photos": len(photos)}
 
 
+@limiter.limit("10/minute")
 @router.post("/projects/{project_id}/scans")
 async def upload_scan(
+    request: Request,
     project_id: str,
     file: UploadFile = File(...),
     user=Depends(get_current_user),
@@ -507,8 +523,9 @@ async def upload_scan(
 
 
 # ── Admin endpoints (for Command Center) ─────────────────────
+@limiter.limit("30/minute")
 @router.get("/admin/projects")
-async def admin_list_all_projects():
+async def admin_list_all_projects(request: Request):
     """List all intake projects with user info (for founder dashboard)."""
     conn = get_db()
     rows = conn.execute("""
@@ -522,8 +539,9 @@ async def admin_list_all_projects():
     return [dict(r) for r in rows]
 
 
+@limiter.limit("30/minute")
 @router.get("/admin/users")
-async def admin_list_all_users():
+async def admin_list_all_users(request: Request):
     """List all registered intake users (for founder dashboard)."""
     conn = get_db()
     rows = conn.execute(
@@ -533,8 +551,9 @@ async def admin_list_all_users():
     return [dict(r) for r in rows]
 
 
+@limiter.limit("30/minute")
 @router.get("/admin/projects/{project_id}")
-async def admin_get_project(project_id: str):
+async def admin_get_project(request: Request, project_id: str):
     """Get single project with full details (for founder dashboard)."""
     conn = get_db()
     row = conn.execute("""
@@ -550,8 +569,9 @@ async def admin_get_project(project_id: str):
     return dict(row)
 
 
+@limiter.limit("10/minute")
 @router.put("/admin/users/{user_id}")
-async def admin_update_user(user_id: str, update: AdminUserUpdate):
+async def admin_update_user(request: Request, user_id: str, update: AdminUserUpdate):
     """Admin: update any user's info."""
     conn = get_db()
     row = conn.execute("SELECT id FROM intake_users WHERE id = ?", (user_id,)).fetchone()
@@ -574,8 +594,9 @@ async def admin_update_user(user_id: str, update: AdminUserUpdate):
     return dict(updated)
 
 
+@limiter.limit("10/minute")
 @router.delete("/admin/users/{user_id}")
-async def admin_delete_user(user_id: str):
+async def admin_delete_user(request: Request, user_id: str):
     """Admin: delete a user and their projects."""
     conn = get_db()
     row = conn.execute("SELECT id FROM intake_users WHERE id = ?", (user_id,)).fetchone()
@@ -589,8 +610,9 @@ async def admin_delete_user(user_id: str):
     return {"status": "deleted", "user_id": user_id}
 
 
+@limiter.limit("10/minute")
 @router.post("/admin/projects/{project_id}/to-quote")
-async def convert_to_quote(project_id: str):
+async def convert_to_quote(request: Request, project_id: str):
     """Convert an intake project into an Empire Workroom quote."""
     import importlib
     conn = get_db()

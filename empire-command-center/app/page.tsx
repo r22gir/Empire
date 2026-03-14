@@ -20,6 +20,7 @@ import DashboardScreen from './components/screens/DashboardScreen';
 import WorkroomPage from './components/screens/WorkroomPage';
 import CraftForgePage from './components/screens/CraftForgePage';
 import PlatformPage from './components/screens/PlatformPage';
+import PricingPage from './components/screens/PricingPage';
 import SocialForgePage from './components/screens/SocialForgePage';
 import LuxeForgePage from './components/screens/LuxeForgePage';
 import LLCFactoryPage from './components/screens/LLCFactoryPage';
@@ -214,6 +215,7 @@ export default function CommandCenter() {
         default: return <DashboardScreen activeTab={activeTab} />;
       }
     }
+    if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;

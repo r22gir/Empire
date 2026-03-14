@@ -1,7 +1,7 @@
 """
 Empire CRM — Customer management, import from quotes, sales pipeline.
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List
 import json
@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.middleware.rate_limiter import limiter
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -52,8 +53,10 @@ def _enrich_customer(cust: dict) -> dict:
 
 # ── Routes ───────────────────────────────────────────────────────────
 
+@limiter.limit("30/minute")
 @router.get("/customers")
 def list_customers(
+    request: Request,
     search: Optional[str] = None,
     type: Optional[str] = None,
     source: Optional[str] = None,
@@ -102,8 +105,9 @@ def list_customers(
         return {"customers": customers, "total": total, "limit": limit, "offset": offset}
 
 
+@limiter.limit("30/minute")
 @router.post("/customers")
-def create_customer(customer: CustomerCreate):
+def create_customer(request: Request, customer: CustomerCreate):
     """Create a new customer."""
     with get_db() as conn:
         conn.execute(
@@ -129,8 +133,9 @@ def create_customer(customer: CustomerCreate):
         return {"customer": _enrich_customer(dict_row(row))}
 
 
+@limiter.limit("30/minute")
 @router.get("/customers/{customer_id}")
-def get_customer(customer_id: str):
+def get_customer(request: Request, customer_id: str):
     """Full customer detail with quote/invoice/payment history."""
     with get_db() as conn:
         row = conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
@@ -162,8 +167,9 @@ def get_customer(customer_id: str):
         return {"customer": customer}
 
 
+@limiter.limit("30/minute")
 @router.patch("/customers/{customer_id}")
-def update_customer(customer_id: str, update: CustomerUpdate):
+def update_customer(request: Request, customer_id: str, update: CustomerUpdate):
     """Update a customer."""
     with get_db() as conn:
         existing = conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
@@ -193,8 +199,9 @@ def update_customer(customer_id: str, update: CustomerUpdate):
         return {"customer": _enrich_customer(dict_row(row))}
 
 
+@limiter.limit("30/minute")
 @router.delete("/customers/{customer_id}")
-def delete_customer(customer_id: str):
+def delete_customer(request: Request, customer_id: str):
     """Delete a customer."""
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
@@ -205,8 +212,9 @@ def delete_customer(customer_id: str):
         return {"status": "deleted", "customer_id": customer_id}
 
 
+@limiter.limit("30/minute")
 @router.get("/customers/{customer_id}/quotes")
-def get_customer_quotes(customer_id: str):
+def get_customer_quotes(request: Request, customer_id: str):
     """All quotes for a customer (from JSON files)."""
     with get_db() as conn:
         row = conn.execute("SELECT name, email FROM customers WHERE id = ?", (customer_id,)).fetchone()
@@ -218,8 +226,9 @@ def get_customer_quotes(customer_id: str):
         return {"customer_id": customer_id, "quotes": quotes, "total": len(quotes)}
 
 
+@limiter.limit("30/minute")
 @router.get("/customers/{customer_id}/invoices")
-def get_customer_invoices(customer_id: str):
+def get_customer_invoices(request: Request, customer_id: str):
     """All invoices for a customer."""
     with get_db() as conn:
         row = conn.execute("SELECT id FROM customers WHERE id = ?", (customer_id,)).fetchone()
@@ -236,8 +245,9 @@ def get_customer_invoices(customer_id: str):
         return {"customer_id": customer_id, "invoices": invoices, "total": len(invoices)}
 
 
+@limiter.limit("30/minute")
 @router.post("/customers/import-from-quotes")
-def import_customers_from_quotes():
+def import_customers_from_quotes(request: Request):
     """Scan all quote JSON files, extract unique customers, insert into DB."""
     if not QUOTES_DIR.exists():
         raise HTTPException(status_code=404, detail="Quotes directory not found")
@@ -360,8 +370,9 @@ def import_customers_from_quotes():
     }
 
 
+@limiter.limit("30/minute")
 @router.get("/pipeline")
-def sales_pipeline():
+def sales_pipeline(request: Request):
     """Sales pipeline: group quotes by status with totals."""
     if not QUOTES_DIR.exists():
         return {"pipeline": {}, "total_quotes": 0}

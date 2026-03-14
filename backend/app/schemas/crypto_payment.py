@@ -7,8 +7,8 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # Supported chains and tokens
 # ---------------------------------------------------------------------------
-SUPPORTED_CHAINS = {"solana", "bnb", "cardano", "ethereum"}
-SUPPORTED_TOKENS = {"SOL", "USDC", "EMPIRE", "BNB", "USDT", "BUSD", "ADA", "ETH"}
+SUPPORTED_CHAINS = {"solana", "bnb", "cardano", "ethereum", "bitcoin"}
+SUPPORTED_TOKENS = {"SOL", "USDC", "EMPIRE", "BNB", "USDT", "BUSD", "ADA", "ETH", "BTC"}
 
 # Discount percentages per payment method
 DISCOUNT_CRYPTO = 15   # 15% off for any crypto payment

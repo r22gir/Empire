@@ -2,15 +2,16 @@
 Crypto Payment Service — Phase 1 implementation.
 
 Supports:
+- Bitcoin (BTC)
+- Ethereum (ETH, USDC)
 - Solana Pay (USDC, SOL) — priority
 - BNB Chain (BNB, USDT, BUSD)
 - Cardano (ADA) — Phase 2 placeholder
-- Ethereum (ETH, USDC)
 
-Each order receives a unique per-order wallet address derived deterministically
-from the master seed + order_id using HMAC-SHA256.  In a production deployment
-the master seed lives in an HSM / secrets manager; here it falls back to an env
-variable (CRYPTO_MASTER_SEED) for development.
+Each order/invoice receives a unique per-order wallet address derived
+deterministically from the master seed + order_id using HMAC-SHA256.
+In a production deployment the master seed lives in an HSM / secrets manager;
+here it falls back to an env variable (CRYPTO_MASTER_SEED) for development.
 """
 
 import hashlib
