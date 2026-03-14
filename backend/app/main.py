@@ -118,6 +118,9 @@ try:
 except Exception as e:
     print(f"✗ Measurement table init: {e}")
 
+# OpenClaw Bridge — MAX→OpenClaw autonomous task dispatch
+load_router("app.routers.openclaw_bridge", "", ["openclaw"])
+
 # Docker / System / Ollama management
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])

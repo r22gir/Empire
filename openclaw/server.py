@@ -98,7 +98,7 @@ def _run_skill(skill: dict) -> str:
             shell=True,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=60,
         )
         return result.stdout.strip() or result.stderr.strip()
     except subprocess.TimeoutExpired:

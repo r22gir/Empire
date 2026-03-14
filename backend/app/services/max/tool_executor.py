@@ -1968,6 +1968,47 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+# ── OPENCLAW DISPATCH ──────────────────────────────────────────────
+
+@tool("dispatch_to_openclaw")
+def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Send a task to OpenClaw for autonomous execution."""
+    import httpx as _httpx
+
+    title = params.get("title", "").strip()
+    description = params.get("description", "").strip()
+    if not title or not description:
+        return ToolResult(tool="dispatch_to_openclaw", success=False, error="Both title and description are required")
+
+    priority = params.get("priority", "normal")
+    skills = params.get("skills_needed", [])
+    wait = params.get("wait_for_result", True)
+    endpoint = "dispatch" if wait else "dispatch-async"
+
+    try:
+        resp = _httpx.post(
+            f"http://localhost:8000/api/v1/openclaw/{endpoint}",
+            json={
+                "title": title,
+                "description": description,
+                "priority": priority,
+                "desk": desk,
+                "skills_needed": skills,
+            },
+            timeout=120,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return ToolResult(tool="dispatch_to_openclaw", success=True, result=data)
+        return ToolResult(tool="dispatch_to_openclaw", success=False, error=f"OpenClaw returned {resp.status_code}: {resp.text[:200]}")
+    except _httpx.ConnectError:
+        return ToolResult(tool="dispatch_to_openclaw", success=False, error="OpenClaw not running on port 7878")
+    except _httpx.ReadTimeout:
+        return ToolResult(tool="dispatch_to_openclaw", success=False, error="OpenClaw task timed out")
+    except Exception as e:
+        return ToolResult(tool="dispatch_to_openclaw", success=False, error=str(e))
+
+
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
 TOOLS_DOC = """## Available Tools
@@ -2062,6 +2103,12 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   `{"tool": "present", "topic": "DC custom drapery market trends 2026"}`
   `{"tool": "present", "topic": "Competitor analysis", "source_content": "Optional context..."}`
   ⚠️ ONLY use this tool when the founder EXPLICITLY asks for a "presentation", "report", "briefing", or "research document". Do NOT auto-generate presentations for casual conversation topics, analogies, or keywords mentioned in passing. If unsure, ask: "Would you like me to create a presentation about X?"
+
+### Autonomous Execution
+- **dispatch_to_openclaw** — Send a task to OpenClaw for autonomous execution. Returns results.
+  `{"tool": "dispatch_to_openclaw", "title": "Health check", "description": "Run full API health check"}`
+  `{"tool": "dispatch_to_openclaw", "title": "Disk report", "description": "check disk usage", "wait_for_result": true}`
+  Optional: `priority` (low/normal/high/critical), `skills_needed` (list of skill names), `wait_for_result` (true/false)
 
 ### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
 - NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.
