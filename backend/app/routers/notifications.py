@@ -120,3 +120,43 @@ def system_alert(title: str, message: str, severity: str = "medium"):
 def business_event(title: str, message: str, event_type: str = ""):
     """Business events (orders, payments, etc.)"""
     return notify_founder("Business", "business_event", title, message, "medium", {"event_type": event_type})
+
+
+# ============ NOTIFICATION LOG & EMERGENCY ============
+
+@router.get("/notifications/log")
+async def get_notification_log(limit: int = 50):
+    """Founder checks this on demand — last N notifications (newest first)."""
+    return {"notifications": notifications_db[:limit], "total": len(notifications_db)}
+
+
+class EmergencyAlert(BaseModel):
+    title: str
+    message: str
+    source: str = "System"
+
+# Emergency types that justify Telegram
+EMERGENCY_TYPES = [
+    "server_down",        # Service on port 8000 unreachable 3+ min
+    "payment_failure",    # Failed payment webhook
+    "security_breach",    # Security scan critical finding
+]
+
+@router.post("/notifications/emergency")
+async def send_emergency(alert: EmergencyAlert):
+    """ONLY endpoint that sends Telegram. For genuine emergencies only."""
+    import httpx as _httpx
+
+    # Log it
+    entry = notify_founder(alert.source, "system_alert", f"EMERGENCY: {alert.title}", alert.message, "critical")
+
+    # Send via Telegram
+    sent = False
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if telegram_bot.is_configured:
+            sent = await telegram_bot.send_urgent_alert(alert.title, alert.message)
+    except Exception as e:
+        entry["telegram_error"] = str(e)
+
+    return {"status": "sent" if sent else "logged_only", "notification": entry, "telegram_sent": sent}

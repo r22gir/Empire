@@ -9,6 +9,7 @@ import logging
 import asyncio
 import tempfile
 import subprocess
+from datetime import datetime
 from typing import Optional, Dict, Any
 from pathlib import Path
 import httpx
@@ -594,6 +595,69 @@ class TelegramBot:
             ]
             await update.message.reply_html("\n".join(lines))
 
+        # /brief command — on-demand morning brief
+        async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.get("http://localhost:8000/api/v1/system/metrics")
+                    data = resp.json()
+
+                import psutil
+                from app.config.business_config import biz as _biz
+
+                # Build brief from live metrics
+                ports = data.get("active_ports", {})
+                port_lines = []
+                for p, name in [("8000", "API"), ("3005", "CC"), ("7878", "OpenClaw"), ("11434", "Ollama"), ("3077", "Recovery")]:
+                    status = "✅" if ports.get(p) else "❌"
+                    port_lines.append(f"{status} {name}")
+
+                # Tasks
+                task_info = ""
+                try:
+                    resp2 = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
+                    tasks = resp2.json().get("tasks", [])
+                    task_info = f"\n📋 <b>Tasks:</b> {len(tasks)} active"
+                except Exception:
+                    pass
+
+                brief = (
+                    f"<b>☀️ {_biz.business_name} Brief</b>\n"
+                    f"<i>{datetime.now().strftime('%A, %B %d %I:%M %p')}</i>\n\n"
+                    f"💻 CPU {data.get('cpu_percent', '?')}% | RAM {data.get('ram_percent', '?')}% | Disk {data.get('disk_percent', '?')}%\n"
+                    f"🆙 Uptime: {int(data.get('uptime_seconds', 0)) // 3600}h {(int(data.get('uptime_seconds', 0)) % 3600) // 60}m\n"
+                    f"💰 AI costs today: ${data.get('ai_costs_today', 0):.4f}\n"
+                    f"⚠️ Errors (24h): {data.get('error_count_24h', 0)}\n\n"
+                    f"<b>Services:</b> {' | '.join(port_lines)}"
+                    f"{task_info}"
+                )
+                await update.message.reply_html(brief)
+            except Exception as e:
+                await update.message.reply_text(f"Brief error: {e}")
+
+        # /notifications command — check recent notifications on demand
+        async def cmd_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get("http://localhost:8000/api/v1/notifications/log", params={"limit": 10})
+                    data = resp.json()
+                    notifs = data.get("notifications", [])
+                    total = data.get("total", 0)
+                    if not notifs:
+                        await update.message.reply_text("No notifications.")
+                        return
+                    msg = f"<b>🔔 Recent Notifications</b> ({total} total)\n\n"
+                    for n in notifs[:10]:
+                        icon = {"system_alert": "⚠️", "task_complete": "✅", "business_event": "💼", "error": "❌"}.get(n.get("type", ""), "📌")
+                        msg += f"{icon} <b>{n.get('title', '?')}</b>\n<i>{n.get('created_at', '?')[:16]}</i>\n\n"
+                    await update.message.reply_html(msg)
+            except Exception as e:
+                await update.message.reply_text(f"Error: {e}")
+
         # /help command
         async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
@@ -601,6 +665,8 @@ class TelegramBot:
             await update.message.reply_html(
                 "🏰 <b>MAX Commands</b>\n\n"
                 "/start — Welcome message\n"
+                "/brief — On-demand system brief\n"
+                "/notifications — Check recent alerts\n"
                 "/status — System health check\n"
                 "/desks — List active desks\n"
                 "/tasks — Show open tasks\n"
@@ -913,6 +979,8 @@ class TelegramBot:
                     await query.message.reply_text(f"Reject error: {e}")
 
         app.add_handler(CommandHandler("start", cmd_start))
+        app.add_handler(CommandHandler("brief", cmd_brief))
+        app.add_handler(CommandHandler("notifications", cmd_notifications))
         app.add_handler(CommandHandler("status", cmd_status))
         app.add_handler(CommandHandler("desks", cmd_desks))
         app.add_handler(CommandHandler("tasks", cmd_tasks))

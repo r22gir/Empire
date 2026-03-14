@@ -1,7 +1,8 @@
 """
 MAX Proactive Monitor — Background loop that checks system health,
-overdue tasks, and inbox items. Sends Telegram alerts automatically.
-Runs every 15 minutes inside the FastAPI process.
+overdue tasks, and inbox items. Logs to notification system.
+Only sends Telegram for genuine emergencies (API down 3+ min, payment failure, security breach).
+Runs every hour inside the FastAPI process.
 """
 import logging
 import asyncio
@@ -14,12 +15,17 @@ logger = logging.getLogger("max.monitor")
 
 CHECK_INTERVAL = 3600  # 1 hour
 
+# Emergency definition: these trigger Telegram
+EMERGENCY_PORTS = {8000: "Backend API"}  # Only API down = emergency
+EMERGENCY_PORT_DOWN_THRESHOLD = 180  # 3 minutes before alerting
+
 
 class MaxMonitor:
     def __init__(self):
         self._running = False
         self._task: asyncio.Task | None = None
         self._sent_today: dict[str, str] = {}  # alert_key -> date, dedup within same day
+        self._port_down_since: dict[int, float] = {}  # port -> timestamp when first detected down
 
     async def start(self):
         if self._running:
@@ -49,59 +55,72 @@ class MaxMonitor:
             await asyncio.sleep(CHECK_INTERVAL)
 
     async def _run_checks(self):
-        """Run all monitoring checks."""
+        """Run all monitoring checks. Log to notifications. Only Telegram for emergencies."""
         alerts = []
+        emergencies = []
 
-        # 1. Overdue tasks
+        # 1. Overdue tasks — log only
         overdue = await self._check_overdue_tasks()
         if overdue:
             alerts.append(overdue)
 
-        # 2. Unread inbox
+        # 2. Unread inbox — log only
         inbox = self._check_inbox()
         if inbox:
             alerts.append(inbox)
 
-        # 3. System health
+        # 3. System health — log only (unless critical)
         health = self._check_system_health()
         if health:
             alerts.append(health)
 
-        if not alerts:
-            return
+        # 4. Emergency check: critical ports down for 3+ minutes
+        port_emergency = await self._check_emergency_ports()
+        if port_emergency:
+            emergencies.append(port_emergency)
 
-        # Deduplicate: only send each alert type once per day
-        today = datetime.now().strftime("%Y-%m-%d")
-        new_alerts = []
-        for alert in alerts:
-            # Use first 40 chars as dedup key (captures the alert type)
-            key = alert.strip()[:40]
-            if self._sent_today.get(key) == today:
-                continue
-            self._sent_today[key] = today
-            new_alerts.append(alert)
+        # Log all alerts to notification system (founder checks when ready)
+        if alerts:
+            from app.routers.notifications import notify_founder
+            today = datetime.now().strftime("%Y-%m-%d")
+            for alert in alerts:
+                key = alert.strip()[:40]
+                if self._sent_today.get(key) == today:
+                    continue
+                self._sent_today[key] = today
+                notify_founder("System", "system_alert", "Monitor Check", alert.strip(), "low")
 
-        # Purge stale entries from previous days
-        self._sent_today = {k: v for k, v in self._sent_today.items() if v == today}
+            self._sent_today = {k: v for k, v in self._sent_today.items() if v == today}
+            logger.info(f"Monitor: {len(alerts)} alert(s) logged")
 
-        if not new_alerts:
-            return
+        # ONLY emergencies go to Telegram
+        if emergencies:
+            from app.services.max.telegram_bot import telegram_bot
+            if telegram_bot.is_configured:
+                msg = f"<b>EMERGENCY</b>\n" + "\n".join(emergencies)
+                await telegram_bot.send_urgent_alert("System Emergency", msg)
+                logger.warning(f"EMERGENCY sent to Telegram: {emergencies}")
 
-        # Send combined alert
-        from app.services.max.telegram_bot import telegram_bot
-        if not telegram_bot.is_configured:
-            return
-
-        msg = f"<b>🔔 {biz.ai_assistant_name} Monitor Alert</b>\n"
-        msg += f"<i>{datetime.now().strftime('%I:%M %p')}</i>\n"
-        msg += "\n".join(new_alerts)
-
-        markup = {"inline_keyboard": [[
-            {"text": "📋 Full Details", "callback_data": "monitor_details"},
-            {"text": "✅ Dismiss", "callback_data": "monitor_dismiss"},
-        ]]}
-        await telegram_bot.send_message(msg, reply_markup=markup)
-        logger.info(f"Monitor alert sent ({len(new_alerts)} check(s))")
+    async def _check_emergency_ports(self) -> str | None:
+        """Check if critical ports (API) have been down for 3+ minutes."""
+        import socket
+        now = asyncio.get_event_loop().time()
+        for port, name in EMERGENCY_PORTS.items():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(("127.0.0.1", port))
+            sock.close()
+            if result != 0:
+                # Port is down
+                if port not in self._port_down_since:
+                    self._port_down_since[port] = now
+                elif now - self._port_down_since[port] >= EMERGENCY_PORT_DOWN_THRESHOLD:
+                    down_min = int((now - self._port_down_since[port]) / 60)
+                    return f"{name} (port {port}) DOWN for {down_min}+ minutes"
+            else:
+                # Port is up — clear any tracking
+                self._port_down_since.pop(port, None)
+        return None
 
     async def _check_overdue_tasks(self) -> str | None:
         """Check for overdue tasks — lists task names."""

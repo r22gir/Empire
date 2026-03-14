@@ -18,6 +18,7 @@ class MaxScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone=biz.timezone)
         self._started = False
+        self._last_brief = None  # Cached for on-demand retrieval
 
     async def start(self):
         if self._started:
@@ -128,18 +129,17 @@ class MaxScheduler:
             if disk.percent > 90:
                 brief += f"\n⚠️ Disk usage high ({disk.percent}%)"
 
-            await telegram_bot.send_message(brief)
-            logger.info("Daily brief sent")
+            # Log to notifications — available on demand via "brief" command or dashboard
+            from app.routers.notifications import notify_founder
+            notify_founder("MAX", "system_alert", "Morning Brief", brief, "low")
+            self._last_brief = brief  # Cache for on-demand retrieval
+            logger.info("Daily brief generated (on-demand, not auto-sent)")
         except Exception as e:
             logger.error(f"Daily brief failed: {e}")
 
     async def check_overdue_tasks(self):
-        """Alert on overdue tasks via Telegram."""
+        """Log overdue tasks to notification system (no auto-Telegram)."""
         try:
-            from app.services.max.telegram_bot import telegram_bot
-            if not telegram_bot.is_configured:
-                return
-
             from app.db.database import get_db
             now = datetime.now().strftime("%Y-%m-%d")
             db = get_db()
@@ -153,13 +153,12 @@ class MaxScheduler:
             if not overdue:
                 return
 
-            msg = f"<b>⏰ {len(overdue)} Overdue Task(s)</b>\n\n"
-            for row in overdue:
-                msg += f"• <b>{row[1]}</b> (due {row[2]}, desk: {row[3]})\n"
-            msg += "\nReply /tasks to manage"
+            msg = f"{len(overdue)} Overdue Task(s): "
+            msg += ", ".join(f"{row[1]} (due {row[2]})" for row in overdue[:5])
 
-            await telegram_bot.send_message(msg)
-            logger.info(f"Overdue alert: {len(overdue)} tasks")
+            from app.routers.notifications import notify_founder
+            notify_founder("MAX", "system_alert", f"{len(overdue)} Overdue Tasks", msg, "medium")
+            logger.info(f"Overdue logged: {len(overdue)} tasks")
         except Exception as e:
             logger.error(f"Overdue check failed: {e}")
 
@@ -208,8 +207,9 @@ class MaxScheduler:
             if len(stale_quotes) > 5:
                 msg += f"\n...and {len(stale_quotes) - 5} more"
 
-            await telegram_bot.send_message(msg)
-            logger.info(f"Sales followup: {len(stale_quotes)} stale quotes")
+            from app.routers.notifications import notify_founder
+            notify_founder("Business", "business_event", f"{len(stale_quotes)} Stale Quotes", msg, "medium", {"type": "sales_followup"})
+            logger.info(f"Sales followup logged: {len(stale_quotes)} stale quotes")
         except Exception as e:
             logger.error(f"Sales followup failed: {e}")
 
@@ -251,8 +251,9 @@ class MaxScheduler:
                 f"\nHave a great weekend! 🎉"
             )
 
-            await telegram_bot.send_message(msg)
-            logger.info("Weekly report sent")
+            from app.routers.notifications import notify_founder
+            notify_founder("MAX", "system_alert", "Weekly Report", msg, "low")
+            logger.info("Weekly report logged (on-demand)")
         except Exception as e:
             logger.error(f"Weekly report failed: {e}")
 
@@ -407,20 +408,15 @@ class MaxScheduler:
 
             logger.info(f"Brain sync complete — {len(db_stats)} tables, {quote_count} quotes, {brain_memories} memories")
 
-            # Notify via Telegram
+            # Log brain sync — no auto-Telegram
             try:
-                from app.services.max.telegram_bot import telegram_bot
-                if telegram_bot.is_configured:
-                    msg = (
-                        f"<b>🧠 Brain Sync Complete</b>\n"
-                        f"<i>{now.strftime('%B %d, %Y %I:%M %p')}</i>\n\n"
-                        f"📊 DB: {', '.join(f'{k}={v}' for k, v in list(db_stats.items())[:5])}\n"
-                        f"💰 {finance_summary}\n"
-                        f"📋 Active tasks: {active_tasks_summary}"
-                    )
-                    await telegram_bot.send_message(msg)
+                from app.routers.notifications import notify_founder
+                notify_founder("MAX", "task_complete", "Brain Sync Complete",
+                    f"DB: {', '.join(f'{k}={v}' for k, v in list(db_stats.items())[:5])}. "
+                    f"{finance_summary}. Active tasks: {active_tasks_summary}",
+                    "low")
             except Exception:
-                pass  # Telegram notification is optional
+                pass
 
         except Exception as e:
             logger.error(f"Brain sync failed: {e}")

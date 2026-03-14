@@ -211,8 +211,8 @@ async def _execute_in_background(task: TaskRequest, task_id: str, task_record: d
                 })
                 logger.info(f"Background task completed: {task.title} [{task_id}]")
 
-                # Notify via Telegram
-                await _notify_founder(task_id, task.title, "completed", result_text[:300])
+                # Log to notification system (no auto-Telegram)
+                await _log_notification(task_id, task.title, "completed", result_text[:300])
             else:
                 task_record["status"] = "failed"
                 task_record["error"] = resp.text[:200]
@@ -249,18 +249,23 @@ async def list_results():
     return {"results": task_results, "count": len(task_results)}
 
 
-async def _notify_founder(task_id: str, title: str, status: str, summary: str):
-    """Send task completion notification via Telegram."""
+async def _log_notification(task_id: str, title: str, status: str, summary: str):
+    """Log task completion to notification system (no auto-Telegram)."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(
-                "http://localhost:8000/api/v1/telegram/send",
+                "http://localhost:8000/api/v1/notifications/internal",
                 json={
-                    "message": f"🦞 OpenClaw Task {status.upper()}\n\n📋 {title}\n🆔 {task_id}\n\n{summary[:200]}"
+                    "source": "System",
+                    "type": "task_complete",
+                    "title": f"OpenClaw: {title}",
+                    "message": f"Task {task_id} {status}: {summary[:300]}",
+                    "priority": "low",
+                    "context": {"task_id": task_id, "status": status},
                 },
             )
     except Exception as e:
-        logger.warning(f"Failed to notify founder: {e}")
+        logger.warning(f"Failed to log notification: {e}")
 
 
 def _get_gateway_token() -> str:
