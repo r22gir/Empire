@@ -1,8 +1,16 @@
 """System Monitor — CPU, RAM, disk, temperature stats via psutil."""
+import os
+import socket
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+
 import psutil
 from fastapi import APIRouter
 
 router = APIRouter()
+
+_PROCESS_START_TIME = time.time()
 
 
 @router.get("/system/stats")
@@ -41,6 +49,66 @@ async def system_stats():
             "percent": disk.percent,
         },
         "temperatures": temps,
+    }
+
+
+@router.get("/system/metrics")
+async def system_metrics():
+    """Lightweight observability — single endpoint for all key metrics."""
+    cpu_percent = psutil.cpu_percent(interval=0.5)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    # Check active ports
+    ports = {"8000": "API", "3005": "CC", "7878": "OpenClaw", "11434": "Ollama", "3077": "RecoveryForge"}
+    active_ports = {}
+    for port_str in ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        active_ports[port_str] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
+        sock.close()
+
+    # AI costs today
+    ai_costs_today = 0.0
+    try:
+        db_path = Path(os.path.expanduser("~/empire-repo/backend/data/token_usage.db"))
+        if db_path.exists():
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            today = datetime.now().strftime("%Y-%m-%d")
+            row = conn.execute(
+                "SELECT COALESCE(SUM(cost), 0) FROM token_usage WHERE date(timestamp) = ?", (today,)
+            ).fetchone()
+            ai_costs_today = round(row[0], 6) if row else 0.0
+            conn.close()
+    except Exception:
+        pass
+
+    # Error count last 24h
+    error_count = 0
+    try:
+        log_path = Path("/tmp/backend.log")
+        if log_path.exists():
+            cutoff = datetime.now() - timedelta(hours=24)
+            for line in log_path.read_text(errors="ignore").splitlines()[-2000:]:
+                if "ERROR" in line or "CRITICAL" in line:
+                    error_count += 1
+    except Exception:
+        pass
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "cpu_percent": cpu_percent,
+        "ram_percent": mem.percent,
+        "ram_used_gb": round(mem.used / (1024 ** 3), 2),
+        "ram_total_gb": round(mem.total / (1024 ** 3), 2),
+        "disk_percent": disk.percent,
+        "disk_used_gb": round(disk.used / (1024 ** 3), 2),
+        "disk_total_gb": round(disk.total / (1024 ** 3), 2),
+        "active_ports": active_ports,
+        "ai_costs_today": ai_costs_today,
+        "error_count_24h": error_count,
+        "uptime_seconds": round(time.time() - _PROCESS_START_TIME, 1),
     }
 
 

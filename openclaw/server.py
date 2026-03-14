@@ -71,12 +71,21 @@ ALL_SKILLS: list[dict] = _load_skills()
 
 
 def _match_skill(message: str) -> Optional[dict]:
+    """Score skills by keyword matches — best match wins, not first match."""
     lower = message.lower()
+    best_skill = None
+    best_score = 0
     for skill in ALL_SKILLS:
+        score = 0
         for kw in skill.get("keywords", []):
             if kw.lower() in lower:
-                return skill
-    return None
+                score += len(kw)
+        if skill.get("name", "").replace("_", " ") in lower:
+            score += 10
+        if score > best_score:
+            best_score = score
+            best_skill = skill
+    return best_skill
 
 
 def _run_skill(skill: dict) -> str:

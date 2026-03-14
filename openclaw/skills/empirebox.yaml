@@ -1,52 +1,176 @@
 name: empirebox
 
 skills:
-  - name: sales_today
-    description: Get today's sales summary
-    command: "echo 'Sales today: $1,247 across eBay, Poshmark, Mercari, Direct'"
-    keywords: [sales, today, revenue, money, earnings]
-
-  - name: ship_pending
-    description: List pending shipments
-    command: "echo 'Pending shipments: 3 orders need labels (Orders #1247, #1249, #1251)'"
-    keywords: [ship, pending, shipments, labels, orders]
+  # ── LIVE SYSTEM SKILLS (query real API — no more fake echo data) ──
 
   - name: check_health
-    description: Check system health status
-    command: "echo 'System health: CPU 18%, RAM 42%, Disk 61% - All systems operational'"
+    description: Check system health — CPU, RAM, disk, services
+    command: "curl -s http://localhost:8000/api/v1/system/stats 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); print(f'CPU: {d.get(\\\"cpu\\\",{}).get(\\\"percent\\\",\\\"?\\\")}%, RAM: {d.get(\\\"memory\\\",{}).get(\\\"percent\\\",\\\"?\\\")}%, Disk: {d.get(\\\"disk\\\",{}).get(\\\"percent\\\",\\\"?\\\")}%')\" 2>/dev/null || echo 'Backend API not reachable on :8000'"
     keywords: [health, status, system, cpu, ram, disk, online]
 
-  - name: backup
-    description: Trigger a system backup
-    command: "echo 'Backup initiated: EmpireBox data backup started at $(date)'"
-    keywords: [backup, save, snapshot]
+  - name: services_health
+    description: Check which Empire services are running
+    command: "for p in 8000 3005 7878 11434 3077; do ss -tlnp 2>/dev/null | grep -q \":$p \" && echo \"$p: ONLINE\" || echo \"$p: OFFLINE\"; done"
+    keywords: [services, ports, running]
 
-  - name: list_agents
-    description: List all running agents and their status
-    command: "echo 'Agents: MarketBot (running), ShipBot (running), SupportBot (running), TelegramBot (paused)'"
-    keywords: [agents, bots, status, running, paused]
+  - name: finance_summary
+    description: Get financial overview
+    command: "curl -s http://localhost:8000/api/v1/finance/dashboard 2>/dev/null | python3 -m json.tool || echo 'Finance API not available'"
+    keywords: [finance, revenue, expenses, profit, money, earnings, sales]
 
-  - name: open_tickets
-    description: Show open support tickets
-    command: "echo 'Open tickets: 4 total - 1 urgent (#892 Where is my order), 3 pending response'"
-    keywords: [tickets, support, open, issues]
+  - name: customer_count
+    description: Count customers in CRM
+    command: "curl -s 'http://localhost:8000/api/v1/crm/customers' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get('items',d.get('customers',[])); print(f'Total customers: {len(items)}')\" 2>/dev/null || echo 'CRM not available'"
+    keywords: [customers, clients, crm, count]
 
-  - name: expiring_listings
-    description: Show listings expiring soon
-    command: "echo 'Expiring soon: 3 eBay listings expire in 2 hours - Vintage Lamp, Leather Bag, Phone Case'"
-    keywords: [expiring, listings, relist, expire]
+  - name: inventory_check
+    description: Check inventory and low stock
+    command: "curl -s 'http://localhost:8000/api/v1/inventory/items' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); items=d if isinstance(d,list) else d.get('items',[]); low=[i for i in items if i.get('quantity',0)<=i.get('min_stock',0)]; print(f'Items: {len(items)}, Low stock: {len(low)}'); [print(f'  LOW: {i[\\\"name\\\"]} ({i[\\\"quantity\\\"]} left)') for i in low]\" 2>/dev/null || echo 'Inventory not available'"
+    keywords: [inventory, stock, materials, low, reorder, fabric]
 
-  - name: low_stock
-    description: Check low stock alerts
-    command: "echo 'Low stock: 2 items below threshold - Phone Cases (3 left), Shipping Supplies (10 left)'"
-    keywords: [stock, inventory, low, reorder]
+  - name: cost_tracker
+    description: Check AI costs today
+    command: "curl -s http://localhost:8000/api/v1/costs/today 2>/dev/null | python3 -m json.tool || echo 'Cost tracker not available'"
+    keywords: [costs, tokens, ai costs, spending, budget]
 
-  - name: channel_status
-    description: Check marketplace channel connection status
-    command: "echo 'Channels: eBay OK (156 active), Poshmark OK (89 active), Mercari WARN (auth expiring), Etsy DOWN (not connected)'"
-    keywords: [channels, ebay, poshmark, mercari, etsy, connected, sync]
+  - name: intake_projects
+    description: Check intake form submissions
+    command: "curl -s 'http://localhost:8000/api/v1/intake/admin/projects' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); p=d if isinstance(d,list) else d.get('projects',[]); print(f'Intake projects: {len(p)}'); [print(f'  {x.get(\\\"intake_code\\\",\\\"?\\\")}: {x.get(\\\"name\\\",\\\"?\\\")} [{x.get(\\\"status\\\",\\\"?\\\")}]') for x in p[:10]]\" 2>/dev/null || echo 'Intake not available'"
+    keywords: [intake, submissions, forms, projects, luxeforge]
 
-  - name: today_orders
-    description: Get today's order count and details
-    command: "echo 'Today: 23 orders - 8 shipped, 12 processing, 3 need action'"
-    keywords: [orders, today, count, processing]
+  - name: quotes_summary
+    description: Check recent quotes
+    command: "curl -s 'http://localhost:8000/api/v1/quotes' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); q=d if isinstance(d,list) else d.get('quotes',[]); print(f'Quotes: {len(q)}')\" 2>/dev/null || echo 'Quotes not available'"
+    keywords: [quotes, estimates, proposals]
+
+  - name: jobs_board
+    description: Check active jobs
+    command: "curl -s 'http://localhost:8000/api/v1/jobs/' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); j=d if isinstance(d,list) else d.get('jobs',[]); print(f'Jobs: {len(j)}'); [print(f'  {x.get(\\\"title\\\",\\\"?\\\")} [{x.get(\\\"status\\\",\\\"?\\\")}]') for x in j[:5]]\" 2>/dev/null || echo 'Jobs not available'"
+    keywords: [jobs, work, schedule, fabrication, installation]
+
+  - name: desk_status
+    description: Check MAX desk task counts
+    command: "curl -s 'http://localhost:8000/api/v1/max/desks/status' 2>/dev/null | python3 -m json.tool || echo 'Desk status not available'"
+    keywords: [desks, tasks, desk status, max]
+
+  # ── SYSTEM OPERATION SKILLS ──
+
+  - name: backup_db
+    description: Backup all databases now
+    command: "mkdir -p ~/empire-repo/backend/data/backups && cp ~/empire-repo/backend/data/empire.db ~/empire-repo/backend/data/backups/empire_$(date +%Y%m%d_%H%M).db && cp ~/empire-repo/backend/data/intake.db ~/empire-repo/backend/data/backups/intake_$(date +%Y%m%d_%H%M).db 2>/dev/null; echo 'Backup complete'"
+    keywords: [backup, save, snapshot, database]
+
+  - name: disk_usage
+    description: Check disk space
+    command: "df -h / | tail -1 | awk '{print \"Disk: \" $3 \" used / \" $2 \" total (\" $5 \" full)\"}'"
+    keywords: [disk, space, storage, full]
+
+  - name: git_status
+    description: Check git status of empire-repo
+    command: "cd ~/empire-repo && echo \"Branch: $(git branch --show-current)\" && echo \"Last: $(git log --oneline -1)\" && echo \"Uncommitted: $(git status --short | wc -l) files\""
+    keywords: [git, status, commit, changes, branch]
+
+  - name: restart_backend
+    description: Restart the backend API
+    command: "kill $(ss -tlnp | grep ':8000' | grep -oP 'pid=\\K[0-9]+' | head -1) 2>/dev/null; sleep 2; cd ~/empire-repo/backend && source venv/bin/activate && nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/backend.log 2>&1 & sleep 3; ss -tlnp | grep ':8000' && echo 'Backend restarted' || echo 'FAILED'"
+    keywords: [restart, backend, reload, server]
+
+  - name: ollama_models
+    description: List available Ollama models
+    command: "curl -s http://localhost:11434/api/tags 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); [print(f'  {m[\\\"name\\\"]} ({m.get(\\\"size\\\",0)//1048576}MB)') for m in d.get('models',[])]\" 2>/dev/null || echo 'Ollama not available'"
+    keywords: [ollama, models, local, ai, llm]
+
+  - name: memory_usage
+    description: Check RAM usage by Empire processes
+    command: "ps aux --sort=-%mem | head -8 | awk '{printf \"%-6s %-5s %-40s\\n\", $4\"%\", $2, substr($11,1,40)}'"
+    keywords: [memory, ram, processes, usage]
+
+  # ── BUSINESS INTELLIGENCE ──
+
+  - name: revenue_today
+    description: Show today's revenue from invoices and payments
+    command: "curl -s 'http://localhost:8000/api/v1/finance/dashboard' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); print('Revenue: ' + str(d.get('total_revenue',0))); print('Expenses: ' + str(d.get('total_expenses',0))); print('Invoices: ' + str(d.get('invoice_count',0)))\" 2>/dev/null || echo 'Finance API not available'"
+    keywords: [revenue, today, income, payments, daily]
+
+  - name: pipeline_value
+    description: Total value of open quotes in pipeline
+    command: "curl -s 'http://localhost:8000/api/v1/quotes' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); q=d if isinstance(d,list) else d.get('quotes',[]); total=sum(float(x.get('total',0)) for x in q if x.get('status','')!='closed'); print('Pipeline: ' + str(len(q)) + ' quotes, total value: ' + str(total)); [print('  ' + x.get('status','?') + ': ' + x.get('customer_name','?') + ' ' + str(x.get('total',0))) for x in q[:8]]\" 2>/dev/null || echo 'Quotes not available'"
+    keywords: [pipeline, value, open quotes, funnel, sales pipeline]
+
+  - name: overdue_invoices
+    description: Find overdue unpaid invoices
+    command: "curl -s 'http://localhost:8000/api/v1/finance/invoices' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); inv=d if isinstance(d,list) else d.get('invoices',[]); overdue=[x for x in inv if x.get('status','')=='overdue']; print('Overdue: ' + str(len(overdue)) + ' of ' + str(len(inv)) + ' invoices'); [print('  ' + x.get('customer_name','?') + ' — ' + str(x.get('amount',0)) + ' (due ' + x.get('due_date','?') + ')') for x in overdue[:10]]\" 2>/dev/null || echo 'Finance API not available'"
+    keywords: [overdue, unpaid, late, past due, collections]
+
+  - name: customer_activity
+    description: Show recent customer interactions
+    command: "curl -s 'http://localhost:8000/api/v1/crm/customers' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); c=d if isinstance(d,list) else d.get('items',d.get('customers',[])); c.sort(key=lambda x:x.get('updated_at',''),reverse=True); print('Recent activity (' + str(len(c)) + ' customers):'); [print('  ' + x.get('name','?') + ' — ' + x.get('updated_at','?')[:10]) for x in c[:8]]\" 2>/dev/null || echo 'CRM not available'"
+    keywords: [customer activity, recent, interactions, latest customers]
+
+  # ── DEVOPS & MONITORING ──
+
+  - name: api_health_check
+    description: Hit every critical API endpoint and report status
+    command: "for ep in /health /api/v1/finance/dashboard /api/v1/crm/customers /api/v1/inventory/items /api/v1/jobs/ /api/v1/quotes /api/v1/costs/today /api/v1/max/desks/status /api/v1/intake/admin/projects /api/v1/craftforge/dashboard /api/v1/amp/admin/stats /api/v1/openclaw/health; do code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000$ep 2>/dev/null); [ \"$code\" = \"200\" ] && echo \"OK $ep\" || echo \"FAIL $ep ($code)\"; done"
+    keywords: [api health, endpoints, health check, test api, status check]
+
+  - name: log_errors
+    description: Show recent backend errors from log
+    command: "tail -200 /tmp/backend.log 2>/dev/null | grep -iE 'ERROR|CRITICAL|Traceback|Exception' | tail -15 || echo 'No errors found or log not available'"
+    keywords: [errors, logs, exceptions, traceback, debug]
+
+  - name: port_conflicts
+    description: Detect duplicate listeners on Empire ports
+    command: "for p in 8000 3000 3001 3002 3003 3005 3007 3009 3077 7878 11434; do count=$(ss -tlnp 2>/dev/null | grep -c \":$p \"); [ \"$count\" -gt 1 ] && echo \"CONFLICT: $count listeners on :$p\" || [ \"$count\" -eq 1 ] && echo \"OK: :$p\" || echo \"FREE: :$p\"; done"
+    keywords: [port conflict, duplicate, listener, binding]
+
+  - name: db_sizes
+    description: Show database file sizes and row counts
+    command: "for db in ~/empire-repo/backend/data/empire.db ~/empire-repo/backend/data/empirebox.db ~/empire-repo/backend/data/intake.db ~/empire-repo/backend/data/token_usage.db ~/empire-repo/backend/data/amp.db; do [ -f \"$db\" ] && echo \"$(basename $db): $(du -h $db | cut -f1)\" || echo \"$(basename $db): NOT FOUND\"; done"
+    keywords: [database sizes, db size, db sizes, tables, rows, sqlite, row counts]
+
+  # ── AI & COST MANAGEMENT ──
+
+  - name: cost_weekly
+    description: Weekly AI cost breakdown by model
+    command: "curl -s 'http://localhost:8000/api/v1/costs/range?days=7' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); print('7-day AI costs: ' + str(d.get('total_cost',0))); models=d.get('by_model',{}); [print('  ' + k + ': ' + str(v)) for k,v in models.items()]\" 2>/dev/null || echo 'Cost API not available'"
+    keywords: [weekly costs, cost breakdown, model costs, spending weekly]
+
+  - name: model_status
+    description: Check which AI providers are reachable
+    command: "echo '--- AI Providers ---'; curl -s -o /dev/null -w 'Ollama: %{http_code}' http://localhost:11434/api/tags 2>/dev/null; echo; curl -s -o /dev/null -w 'OpenClaw: %{http_code}' http://localhost:7878/health 2>/dev/null; echo; curl -s -o /dev/null -w 'Backend: %{http_code}' http://localhost:8000/health 2>/dev/null; echo"
+    keywords: [model status, providers, ai status, grok, claude, ollama reachable]
+
+  - name: ollama_pull
+    description: Pull or update an Ollama model
+    command: "echo 'Pulling llama3.1:8b...'; curl -s -X POST http://localhost:11434/api/pull -d '{\"name\":\"llama3.1:8b\"}' 2>/dev/null | tail -1 || echo 'Ollama not available'"
+    keywords: [ollama pull, download model, update model]
+
+  # ── CONTENT & SOCIAL ──
+
+  - name: social_queue
+    description: Show pending social media posts
+    command: "curl -s 'http://localhost:8000/api/v1/socialforge/posts?status=scheduled' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); p=d if isinstance(d,list) else d.get('posts',[]); print('Scheduled posts: ' + str(len(p))); [print('  ' + x.get('platform','?') + ' — ' + str(x.get('title',x.get('content','?')))[:60]) for x in p[:5]]\" 2>/dev/null || echo 'SocialForge not available'"
+    keywords: [social queue, scheduled posts, content queue, social media]
+
+  - name: intake_pending
+    description: Count unreviewed intake submissions
+    command: "curl -s 'http://localhost:8000/api/v1/intake/admin/projects' 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); p=d if isinstance(d,list) else d.get('projects',[]); pending=[x for x in p if x.get('status','')=='pending']; print('Pending intake: ' + str(len(pending)) + ' of ' + str(len(p)) + ' total'); [print('  ' + x.get('intake_code','?') + ': ' + x.get('name','?')) for x in pending[:5]]\" 2>/dev/null || echo 'Intake not available'"
+    keywords: [intake pending, unreviewed, new submissions, waiting]
+
+  # ── MAINTENANCE ──
+
+  - name: cleanup_tmp
+    description: Remove temp files older than 7 days
+    command: "count=$(find /tmp -maxdepth 1 -user $(whoami) -mtime +7 -type f 2>/dev/null | wc -l); echo \"Found $count temp files older than 7 days\"; [ \"$count\" -gt 0 ] && find /tmp -maxdepth 1 -user $(whoami) -mtime +7 -type f -delete 2>/dev/null && echo 'Cleaned up' || echo 'Nothing to clean'"
+    keywords: [cleanup, temp files, tmp, clean, maintenance]
+
+  - name: backup_status
+    description: Show last backup time and sizes
+    command: "ls -lht ~/empire-repo/backend/data/backups/ 2>/dev/null | head -6 || echo 'No backups found — run backup_db first'"
+    keywords: [backup status, last backup, backup check]
+
+  - name: system_metrics
+    description: Full system metrics from observability endpoint
+    command: "curl -s http://localhost:8000/api/v1/system/metrics 2>/dev/null | python3 -m json.tool || echo 'Metrics endpoint not available'"
+    keywords: [metrics, observability, full status, system metrics, monitoring]
