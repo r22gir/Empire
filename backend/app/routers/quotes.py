@@ -1406,7 +1406,7 @@ def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
 
         room_total = sum(w.get("price", 0) for w in regular_windows) + sum(u.get("price", 0) for u in upholstery)
 
-        html += f'<h3 style="color:#D4AF37;margin:16px 0 6px;border-bottom:2px solid #D4AF37;padding-bottom:3px">{room["name"]}</h3>'
+        html += f'<h3 style="color:#D4AF37;margin:16px 0 6px;border-bottom:2px solid #D4AF37;padding-bottom:3px">{room.get("name", "Room")}</h3>'
 
         # Regular (non-proposal) windows — standard table
         if regular_windows:

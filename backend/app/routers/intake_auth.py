@@ -636,13 +636,13 @@ async def convert_to_quote(request: Request, project_id: str):
     rooms = []
     for m in measurements_raw:
         rooms.append({
-            "room_name": m.get("room", "Window"),
+            "name": m.get("room", "Window"),
             "windows": [{
                 "name": m.get("room", "Window"),
                 "width": float(m.get("width", 0)),
                 "height": float(m.get("height", 0)),
                 "quantity": 1,
-                "treatment_type": project.get("treatment", "drapery"),
+                "treatmentType": project.get("treatment", "drapery"),
             }],
         })
 
@@ -650,13 +650,13 @@ async def convert_to_quote(request: Request, project_id: str):
     for r in rooms_raw:
         if isinstance(r, dict) and r.get("name"):
             rooms.append({
-                "room_name": r.get("name", "Room"),
+                "name": r.get("name", "Room"),
                 "windows": [{
                     "name": r.get("name", "Item"),
                     "width": 0,
                     "height": 0,
                     "quantity": 1,
-                    "treatment_type": r.get("treatment", project.get("treatment", "")),
+                    "treatmentType": r.get("treatment", project.get("treatment", "")),
                     "description": r.get("description", ""),
                 }],
             })
@@ -674,7 +674,18 @@ async def convert_to_quote(request: Request, project_id: str):
                                f"Scope: {project.get('scope', 'N/A')}.",
         "notes": project.get("notes") or "",
         "rooms": rooms,
-        "line_items": [],
+        "line_items": [
+            {
+                "description": f"{w.get('name', 'Window')} — {w.get('treatmentType', 'drapery')}",
+                "quantity": w.get("quantity", 1),
+                "unit": "ea",
+                "rate": 0.0,
+                "amount": 0.0,
+                "category": "labor",
+            }
+            for room in rooms
+            for w in room.get("windows", [])
+        ],
         "valid_days": 30,
     }
 
