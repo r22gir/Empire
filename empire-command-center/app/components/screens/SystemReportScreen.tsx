@@ -117,10 +117,13 @@ export default function SystemReportScreen() {
       <div className="section-label" style={{ marginBottom: 10 }}>System Overview</div>
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
         <StatCard icon={<Cpu size={18} />} label="CPU" value={`${report.system.cpu_percent || 0}%`}
+          subtitle={`${report.system.cpu_cores || 20} cores`}
           color={report.system.cpu_percent > 80 ? 'var(--red)' : 'var(--green)'} />
         <StatCard icon={<HardDrive size={18} />} label="RAM" value={`${report.system.memory_percent || 0}%`}
+          subtitle={`${report.system.memory_total_gb || 31} GB total`}
           color={report.system.memory_percent > 80 ? 'var(--red)' : 'var(--blue)'} />
         <StatCard icon={<Database size={18} />} label="Disk" value={`${report.system.disk_percent || 0}%`}
+          subtitle={`${report.system.disk_total_gb || 0} GB total`}
           color={report.system.disk_percent > 80 ? 'var(--red)' : 'var(--purple)'} />
         <StatCard icon={<Plug size={18} />} label="Connected" value={`${connectedModules}/${report.modules.length}`}
           color="var(--green)" />
@@ -277,7 +280,7 @@ export default function SystemReportScreen() {
   );
 }
 
-function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
+function StatCard({ icon, label, value, color, subtitle }: { icon: React.ReactNode; label: string; value: string; color: string; subtitle?: string }) {
   return (
     <div className="empire-card flat" style={{ padding: '12px 16px' }}>
       <div className="flex items-center gap-2 mb-1">
@@ -285,6 +288,7 @@ function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label:
         <span className="section-label" style={{ letterSpacing: 1 }}>{label}</span>
       </div>
       <span style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color }}>{value}</span>
+      {subtitle && <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>{subtitle}</div>}
     </div>
   );
 }
