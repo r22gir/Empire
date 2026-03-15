@@ -13,12 +13,46 @@ router = APIRouter()
 _PROCESS_START_TIME = time.time()
 
 
+def _get_disk_summary():
+    """Aggregate disk usage across all physical partitions (skip snap/tmpfs/loop)."""
+    total = 0
+    used = 0
+    drives = []
+    seen_devices = set()
+    for part in psutil.disk_partitions(all=False):
+        if part.device in seen_devices:
+            continue
+        if any(skip in part.mountpoint for skip in ['/snap', '/boot/efi']):
+            continue
+        seen_devices.add(part.device)
+        try:
+            usage = psutil.disk_usage(part.mountpoint)
+            total += usage.total
+            used += usage.used
+            drives.append({
+                "mount": part.mountpoint,
+                "device": part.device,
+                "total_gb": round(usage.total / (1024 ** 3), 1),
+                "used_gb": round(usage.used / (1024 ** 3), 1),
+                "percent": usage.percent,
+            })
+        except PermissionError:
+            continue
+    pct = round((used / total) * 100, 1) if total else 0
+    return {
+        "total_gb": round(total / (1024 ** 3), 1),
+        "used_gb": round(used / (1024 ** 3), 1),
+        "percent": pct,
+        "drives": drives,
+    }
+
+
 @router.get("/system/stats")
 async def system_stats():
     """Return current system resource usage."""
     cpu_percent = psutil.cpu_percent(interval=0.5)
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
+    disk = _get_disk_summary()
 
     # Temperature sensors (may not exist on all systems)
     temps = {}
@@ -43,11 +77,7 @@ async def system_stats():
             "used_gb": round(mem.used / (1024 ** 3), 2),
             "percent": mem.percent,
         },
-        "disk": {
-            "total_gb": round(disk.total / (1024 ** 3), 2),
-            "used_gb": round(disk.used / (1024 ** 3), 2),
-            "percent": disk.percent,
-        },
+        "disk": disk,
         "temperatures": temps,
     }
 
@@ -57,7 +87,7 @@ async def system_metrics():
     """Lightweight observability — single endpoint for all key metrics."""
     cpu_percent = psutil.cpu_percent(interval=0.5)
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage("/")
+    disk = _get_disk_summary()
 
     # Check active ports
     ports = {"8000": "API", "3005": "CC", "7878": "OpenClaw", "11434": "Ollama", "3077": "RecoveryForge"}
@@ -102,9 +132,10 @@ async def system_metrics():
         "ram_percent": mem.percent,
         "ram_used_gb": round(mem.used / (1024 ** 3), 2),
         "ram_total_gb": round(mem.total / (1024 ** 3), 2),
-        "disk_percent": disk.percent,
-        "disk_used_gb": round(disk.used / (1024 ** 3), 2),
-        "disk_total_gb": round(disk.total / (1024 ** 3), 2),
+        "disk_percent": disk["percent"],
+        "disk_used_gb": disk["used_gb"],
+        "disk_total_gb": disk["total_gb"],
+        "disk_drives": disk["drives"],
         "active_ports": active_ports,
         "ai_costs_today": ai_costs_today,
         "error_count_24h": error_count,
