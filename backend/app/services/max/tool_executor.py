@@ -1995,7 +1995,7 @@ def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResul
                 "desk": desk,
                 "skills_needed": skills,
             },
-            timeout=120,
+            timeout=300,
         )
         if resp.status_code == 200:
             data = resp.json()
