@@ -33,12 +33,11 @@ ensure_node_modules() {
 }
 
 # ── Kill existing ────────────────────────────────────────────────
-log "Clearing ports 8000, 3009, 3000, 3001, 3002..."
+log "Clearing ports 8000, 3005, 3000, 7878..."
 fuser -k 8000/tcp 2>/dev/null
-fuser -k 3009/tcp 2>/dev/null
+fuser -k 3005/tcp 2>/dev/null
 fuser -k 3000/tcp 2>/dev/null
-fuser -k 3001/tcp 2>/dev/null
-fuser -k 3002/tcp 2>/dev/null
+fuser -k 7878/tcp 2>/dev/null
 sleep 2
 ok "Ports cleared"
 
@@ -54,15 +53,17 @@ else
     err "Backend — check $LOG_DIR/backend_${TS}.log"
 fi
 
-# ── 2. Empire Command Center (port 3009) ─────────────────────────
+# ── 2. Empire Command Center (port 3005) ─────────────────────────
 ensure_node_modules "$EMPIRE/empire-command-center"
-log "Starting Empire Command Center on port 3009..."
+log "Starting Empire Command Center on port 3005..."
 cd "$EMPIRE/empire-command-center"
-nohup npx next dev -p 3009 \
+# Remove stale lock if present
+rm -f "$EMPIRE/empire-command-center/.next/dev/lock"
+nohup npx next dev -p 3005 \
     > "$LOG_DIR/command_center_${TS}.log" 2>&1 &
 
-if wait_port 3009; then
-    ok "Empire Command Center — http://localhost:3009"
+if wait_port 3005; then
+    ok "Empire Command Center — http://localhost:3005"
 else
     err "Empire Command Center — check $LOG_DIR/command_center_${TS}.log"
 fi
@@ -80,45 +81,32 @@ else
     err "Empire App — check $LOG_DIR/empire_app_${TS}.log"
 fi
 
-# ── 4. WorkroomForge (port 3001) ─────────────────────────────────
-ensure_node_modules "$EMPIRE/workroomforge"
-log "Starting WorkroomForge on port 3001..."
-cd "$EMPIRE/workroomforge"
-nohup npx next dev -p 3001 \
-    > "$LOG_DIR/workroomforge_${TS}.log" 2>&1 &
+# ── WorkroomForge (:3001) and LuxeForge (:3002) retired ──────────
+# Replaced by Command Center (:3005)
 
-if wait_port 3001; then
-    ok "WorkroomForge — http://localhost:3001"
+# ── 4. OpenClaw AI Server (port 7878) ──────────────────────────
+log "Starting OpenClaw AI on port 7878..."
+cd "$EMPIRE/openclaw"
+nohup "$VENV_PYTHON" server.py \
+    > "$LOG_DIR/openclaw_${TS}.log" 2>&1 &
+
+if wait_port 7878; then
+    ok "OpenClaw AI — http://localhost:7878"
 else
-    err "WorkroomForge — check $LOG_DIR/workroomforge_${TS}.log"
-fi
-
-# ── 5. LuxeForge (port 3002) ────────────────────────────────────
-ensure_node_modules "$EMPIRE/luxeforge_web"
-log "Starting LuxeForge on port 3002..."
-cd "$EMPIRE/luxeforge_web"
-nohup npx next dev -p 3002 \
-    > "$LOG_DIR/luxeforge_${TS}.log" 2>&1 &
-
-if wait_port 3002; then
-    ok "LuxeForge — http://localhost:3002"
-else
-    err "LuxeForge — check $LOG_DIR/luxeforge_${TS}.log"
+    err "OpenClaw — check $LOG_DIR/openclaw_${TS}.log"
 fi
 
 # ── Open browsers ────────────────────────────────────────────────
 sleep 1
-xdg-open "http://localhost:3009" 2>/dev/null &
+xdg-open "http://localhost:3005" 2>/dev/null &
 xdg-open "http://localhost:3000" 2>/dev/null &
-xdg-open "http://localhost:3001" 2>/dev/null &
-xdg-open "http://localhost:3002" 2>/dev/null &
 
 # ── Summary ──────────────────────────────────────────────────────
 echo ""
 echo -e "${Y}=============================================${N}"
 echo -e "${Y}         Empire Services Status              ${N}"
 echo -e "${Y}=============================================${N}"
-for pair in "Backend API:8000" "Command Center:3009" "Empire App:3000" "WorkroomForge:3001" "LuxeForge:3002"; do
+for pair in "Backend API:8000" "Command Center:3005" "Empire App:3000" "OpenClaw AI:7878"; do
     name="${pair%%:*}"; port="${pair##*:}"
     if curl -sf -o /dev/null "http://localhost:$port" 2>/dev/null; then
         echo -e "  ${G}*${N} $name — :$port"

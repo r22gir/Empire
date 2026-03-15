@@ -8,6 +8,7 @@ import asyncio
 import logging
 import socket
 from datetime import datetime
+from .base_desk import TaskState
 
 logger = logging.getLogger("max.desks.scheduler")
 
@@ -158,6 +159,26 @@ class DeskScheduler:
                                 task.result = ai_result
                     except Exception as e:
                         logger.warning(f"AI enhancement failed for {desk_id}: {e}")
+
+            # If desk handler escalated or failed, try OpenClaw as fallback
+            if task.state.value in ("escalated", "failed"):
+                try:
+                    from app.routers.openclaw_bridge import dispatch_desk_task_to_openclaw
+                    logger.info(f"[Scheduler] Trying OpenClaw fallback for: {desk_id} → {title}")
+                    oc_result = await dispatch_desk_task_to_openclaw(
+                        desk_id=desk_id,
+                        task_title=title,
+                        task_description=description,
+                        timeout=120,
+                    )
+                    if oc_result.get("status") == "completed":
+                        task.state = TaskState.COMPLETED
+                        task.result = oc_result.get("summary", "Completed via OpenClaw fallback")
+                        task.completed_at = datetime.now().isoformat()
+                        logger.info(f"[Scheduler] OpenClaw fallback succeeded: {desk_id} → {title}")
+                except Exception as oc_err:
+                    logger.debug(f"[Scheduler] OpenClaw fallback unavailable: {oc_err}")
+                    # Keep original failure — OpenClaw is optional
 
             # Store to database
             await self._persist_task(desk_id, task)

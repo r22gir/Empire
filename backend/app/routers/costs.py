@@ -83,6 +83,18 @@ async def update_budget(
     return {"status": "updated", "budget": stats["budget"]}
 
 
+@router.get("/costs/tenant/{tenant_id}/usage")
+async def tenant_usage(tenant_id: str, days: int = Query(30, ge=1, le=365)):
+    """Token usage stats for a specific tenant."""
+    return token_tracker.get_tenant_usage(tenant_id, days)
+
+
+@router.get("/costs/tenant/{tenant_id}/budget")
+async def tenant_budget(tenant_id: str, tier: str = Query("pro")):
+    """Budget status for a tenant compared to their pricing tier."""
+    return token_tracker.get_tenant_budget_status(tenant_id, tier)
+
+
 @router.get("/costs/rates")
 async def cost_rates():
     """Current pricing rates for all models."""

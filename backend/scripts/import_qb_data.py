@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 DB_PATH = Path.home() / "empire-repo" / "backend" / "data" / "empire.db"
-IIF_PATH = Path.home() / "Downloads" / "NW QB Items Vendors and Customers.IIF"
+IIF_PATH = Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "other" / "NW QB Items Vendors and Customers.IIF"
 
 def short_id():
     return uuid.uuid4().hex[:16]
@@ -132,6 +132,25 @@ def parse_iif_items():
                 }
                 category = cat_map.get(category, category)
 
+                # Map to allowed DB categories: fabric, hardware, motors, lining, thread, trim, wood, tools, other
+                db_cat_map = {
+                    'Drapery': 'fabric',
+                    'Shades': 'fabric',
+                    'Bedding': 'fabric',
+                    'Valances': 'fabric',
+                    'Pillows & Cushions': 'fabric',
+                    'Upholstery': 'fabric',
+                    'Fabrics & Linings': 'fabric',
+                    'Accessories': 'trim',
+                    'Hardware': 'hardware',
+                    'Furniture': 'wood',
+                    'Wall Panels': 'wood',
+                    'Foam & Padding': 'other',
+                    'Professional Services': 'other',
+                    'OTWW Wholesale': 'other',
+                }
+                db_category = db_cat_map.get(category, 'other')
+
                 # Skip QB accounting artifacts — not real items/services
                 skip_cats = {
                     'Commission', 'Credit', 'Discount', 'Markup', 'Subtotal',
@@ -172,7 +191,8 @@ def parse_iif_items():
                 items.append({
                     'name': display_name,
                     'sku': name_raw[:40].replace(' ', '-').replace(':', '-').upper()[:40],
-                    'category': category,
+                    'category': db_category,
+                    'qb_category': category,
                     'description': desc,
                     'sell_price': price,
                     'cost_per_unit': cost,
@@ -353,7 +373,7 @@ def import_items(conn, items):
                     item['sell_price'],
                     item['vendor'],
                     '',  # location
-                    item.get('description', ''),
+                    f"QB: {item.get('qb_category','')}. {item.get('description', '')}".strip(),
                     'workroom',
                     datetime.now().isoformat(),
                     datetime.now().isoformat(),
@@ -421,7 +441,6 @@ def import_vendors(conn, vendors):
             account_number TEXT,
             lead_time_days INTEGER DEFAULT 7,
             notes TEXT,
-            business TEXT DEFAULT 'workroom',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -439,8 +458,8 @@ def import_vendors(conn, vendors):
         try:
             conn.execute(
                 """INSERT INTO vendors
-                   (id, name, contact_name, email, phone, address, account_number, notes, business, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (id, name, contact_name, email, phone, address, account_number, notes, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     short_id(),
                     v['name'],
@@ -450,7 +469,6 @@ def import_vendors(conn, vendors):
                     v.get('address', ''),
                     v.get('account_number', ''),
                     'Imported from QB',
-                    'workroom',
                     datetime.now().isoformat(),
                     datetime.now().isoformat(),
                 )

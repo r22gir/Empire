@@ -1,0 +1,27 @@
+{
+  "name": "review_and_curate_images",
+  "description": "Review classified images and move approved ones to social folders. Can re-tag, check stats, list unreviewed or ambiguous images.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["list_unreviewed", "list_ambiguous", "approve", "retag", "stats"],
+        "description": "list_unreviewed: unreviewed images. list_ambiguous: low-confidence. approve: move to social. retag: fix classification. stats: pipeline statistics."
+      },
+      "filename": { "type": "string", "description": "Image filename (for approve/retag)" },
+      "business": { "type": "string", "description": "New business tag (for retag)" },
+      "category": { "type": "string", "description": "New category tag (for retag)" }
+    },
+    "required": ["action"]
+  },
+  "endpoint": "http://localhost:8000/api/v1/recovery-forge",
+  "method": "POST",
+  "routing": {
+    "list_unreviewed": "/index?reviewed=false",
+    "list_ambiguous": "/index?pre_tag=ambiguous",
+    "approve": "/move-to-social/{filename}",
+    "retag": "/review/{filename}",
+    "stats": "/stats"
+  }
+}

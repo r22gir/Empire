@@ -272,3 +272,154 @@ def _get_gateway_token() -> str:
     """Get OpenClaw gateway token from env."""
     import os
     return os.getenv("OPENCLAW_GATEWAY_TOKEN", "empire-max-gateway")
+
+
+# ── Desk-Aware Dispatch (called by desks / scheduler) ────────────────────
+
+async def dispatch_desk_task_to_openclaw(
+    desk_id: str,
+    task_title: str,
+    task_description: str,
+    timeout: int = 120,
+) -> dict:
+    """Called by desks to execute tasks via OpenClaw. Returns result dict.
+
+    This is the primary integration point between the desk system and OpenClaw.
+    Desks call this function directly (not via HTTP) to avoid a roundtrip.
+
+    Returns:
+        {"status": "completed", "summary": "...", "task_id": "...", "source": "openclaw"}
+        or
+        {"status": "failed", "error": "..."}
+    """
+    task_id = f"oc-desk-{desk_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+
+    # Build prompt with desk context
+    prompt = f"""Execute the following task for the {desk_id} desk:
+
+## Task: {task_title}
+Desk: {desk_id}
+
+## Instructions
+{task_description}
+
+## Requirements
+1. Read relevant files before making changes
+2. Back up any data before deleting
+3. Test your changes if applicable
+4. Report back with what you did, what changed, and any issues
+"""
+
+    # Record in task queue
+    task_record = {
+        "task_id": task_id,
+        "title": task_title,
+        "desk": desk_id,
+        "priority": "normal",
+        "status": "dispatched",
+        "dispatched_at": datetime.now().isoformat(),
+    }
+    task_queue.append(task_record)
+
+    logger.info(f"Desk dispatch to OpenClaw: [{desk_id}] {task_title} [{task_id}]")
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{OPENCLAW_URL}/chat",
+                json={
+                    "message": prompt,
+                    "history": [],
+                    "system_prompt": (
+                        f"You are MAX's execution agent for the {desk_id} desk. "
+                        "Execute the task precisely. Report what you did and any issues."
+                    ),
+                },
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                result_text = data.get("response", "")
+
+                result = {
+                    "task_id": task_id,
+                    "status": "completed",
+                    "summary": result_text[:500],
+                    "full_response": result_text,
+                    "source": "openclaw",
+                    "desk": desk_id,
+                    "completed_at": datetime.now().isoformat(),
+                }
+                task_record["status"] = "completed"
+                task_results.append(result)
+
+                logger.info(f"OpenClaw desk dispatch completed: [{desk_id}] {task_title}")
+
+                # Process result back into desk system
+                await handle_openclaw_result(task_id, result)
+
+                return result
+            else:
+                error_detail = resp.text[:200]
+                task_record["status"] = "failed"
+                logger.error(f"OpenClaw desk dispatch error {resp.status_code}: {error_detail}")
+                return {"status": "failed", "error": f"OpenClaw returned {resp.status_code}: {error_detail}", "task_id": task_id}
+
+    except httpx.ConnectError:
+        task_record["status"] = "failed"
+        logger.warning(f"OpenClaw not running — desk dispatch failed for [{desk_id}] {task_title}")
+        return {"status": "failed", "error": "OpenClaw is not running on port 7878", "task_id": task_id}
+    except httpx.ReadTimeout:
+        task_record["status"] = "timeout"
+        logger.warning(f"OpenClaw timeout — desk dispatch for [{desk_id}] {task_title}")
+        return {"status": "failed", "error": f"OpenClaw timed out after {timeout}s", "task_id": task_id}
+    except Exception as e:
+        task_record["status"] = "failed"
+        logger.error(f"OpenClaw desk dispatch exception: {e}")
+        return {"status": "failed", "error": str(e), "task_id": task_id}
+
+
+async def handle_openclaw_result(task_id: str, result: dict) -> None:
+    """Process OpenClaw result back into desk task system.
+
+    Updates the in-memory task record and sends a Telegram notification
+    if the result is significant (completed or failed with errors).
+    """
+    try:
+        # Update task record in queue
+        for task in task_queue:
+            if task["task_id"] == task_id:
+                task["status"] = result.get("status", "unknown")
+                task["completed_at"] = result.get("completed_at", datetime.now().isoformat())
+                break
+
+        # Persist to DB if available
+        try:
+            from app.db.database import get_db
+            import json as _json
+            with get_db() as conn:
+                conn.execute(
+                    """INSERT INTO task_activity (task_id, actor, action, detail)
+                       VALUES (?, 'openclaw', ?, ?)""",
+                    (
+                        task_id,
+                        f"openclaw_{result.get('status', 'unknown')}",
+                        result.get("summary", "")[:500],
+                    ),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to persist OpenClaw result to DB: {e}")
+
+        # Notify via Telegram if significant
+        status = result.get("status", "unknown")
+        desk = result.get("desk", "unknown")
+        if status in ("completed", "failed"):
+            await _log_notification(
+                task_id,
+                f"[{desk}] OpenClaw task",
+                status,
+                result.get("summary", "No summary")[:300],
+            )
+
+    except Exception as e:
+        logger.warning(f"handle_openclaw_result error: {e}")

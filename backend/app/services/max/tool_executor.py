@@ -1968,6 +1968,71 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
     })
 
 
+# ── SHELL EXECUTE (safe, allowlisted) ─────────────────────────────
+
+ALLOWED_COMMANDS = [
+    "ls", "cat", "head", "tail", "wc", "df", "du", "free",
+    "ps", "uptime", "date", "whoami", "pwd", "find", "grep",
+    "git status", "git log", "git diff", "git branch",
+    "curl", "wget", "pip list", "npm list",
+    "systemctl status", "journalctl",
+    "ollama list", "ollama ps",
+    "docker ps", "docker images",
+]
+
+BLOCKED_PATTERNS = [
+    "rm -rf", "rm -r", "pkill -f", "kill -9", "killall",
+    "dd if=", "mkfs", "fdisk", "sudo rm", "chmod 777",
+    "> /dev/", "| sh", "| bash", "eval", "exec",
+    "sensors-detect",  # CRITICAL: crashes EmpireDell
+]
+
+
+@tool("shell_execute")
+def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Execute a safe shell command. Blocked commands are rejected."""
+    import subprocess
+
+    command = params.get("command", "").strip()
+    if not command:
+        return ToolResult(tool="shell_execute", success=False, error="No command provided")
+
+    # Safety checks — block dangerous patterns
+    for blocked in BLOCKED_PATTERNS:
+        if blocked in command:
+            return ToolResult(
+                tool="shell_execute", success=False,
+                error=f"Blocked command pattern: {blocked}",
+            )
+
+    # Check if command starts with an allowed prefix
+    allowed = any(command.startswith(cmd) for cmd in ALLOWED_COMMANDS)
+    if not allowed:
+        return ToolResult(
+            tool="shell_execute", success=False,
+            error=f"Command not in allowlist. Allowed: {', '.join(ALLOWED_COMMANDS[:10])}...",
+        )
+
+    # Execute with timeout
+    try:
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True,
+            timeout=30, cwd=os.path.expanduser("~/empire-repo"),
+        )
+        return ToolResult(
+            tool="shell_execute", success=True,
+            result={
+                "stdout": result.stdout[:2000],
+                "stderr": result.stderr[:500],
+                "returncode": result.returncode,
+            },
+        )
+    except subprocess.TimeoutExpired:
+        return ToolResult(tool="shell_execute", success=False, error="Command timed out (30s limit)")
+    except Exception as e:
+        return ToolResult(tool="shell_execute", success=False, error=str(e))
+
+
 # ── OPENCLAW DISPATCH ──────────────────────────────────────────────
 
 @tool("dispatch_to_openclaw")
@@ -2103,6 +2168,13 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   `{"tool": "present", "topic": "DC custom drapery market trends 2026"}`
   `{"tool": "present", "topic": "Competitor analysis", "source_content": "Optional context..."}`
   ⚠️ ONLY use this tool when the founder EXPLICITLY asks for a "presentation", "report", "briefing", or "research document". Do NOT auto-generate presentations for casual conversation topics, analogies, or keywords mentioned in passing. If unsure, ask: "Would you like me to create a presentation about X?"
+
+### Shell Execution
+- **shell_execute** — Execute a safe, allowlisted shell command. Blocked patterns are rejected.
+  `{"tool": "shell_execute", "command": "git status"}`
+  `{"tool": "shell_execute", "command": "df -h"}`
+  Allowed commands: ls, cat, head, tail, wc, df, du, free, ps, uptime, date, whoami, pwd, find, grep, git status/log/diff/branch, curl, wget, pip list, npm list, systemctl status, journalctl, ollama list/ps, docker ps/images.
+  BLOCKED: rm -rf, rm -r, pkill -f, kill -9, killall, dd, mkfs, fdisk, sudo rm, chmod 777, sensors-detect, eval, exec, pipe to sh/bash.
 
 ### Autonomous Execution
 - **dispatch_to_openclaw** — Send a task to OpenClaw for autonomous execution. Returns results.

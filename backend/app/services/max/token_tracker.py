@@ -111,11 +111,12 @@ class TokenTracker:
                 VALUES (1, ?, 0.8, 0, 0.95)
             """, (DEFAULT_MONTHLY_BUDGET,))
             # Safe migration: add columns if missing
-            for col, default in [("feature", "'chat'"), ("business", "'general'"), ("source", "''")]:
+            for col, default in [("feature", "'chat'"), ("business", "'general'"), ("source", "''"), ("tenant_id", "'founder'")]:
                 try:
                     conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} TEXT DEFAULT {default}")
                 except sqlite3.OperationalError:
                     pass  # Column already exists
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_tenant ON token_usage(tenant_id)")
             conn.commit()
             conn.close()
         except Exception as e:
@@ -146,18 +147,19 @@ class TokenTracker:
         feature: str = "chat",
         business: str = "general",
         source: str = "",
+        tenant_id: str = "founder",
     ):
         cost = self.calculate_cost(model, input_tokens, output_tokens)
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute(
-                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id, feature, business, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (model, provider, input_tokens, output_tokens, cost, endpoint, conversation_id, feature, business, source),
+                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id, feature, business, source, tenant_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (model, provider, input_tokens, output_tokens, cost, endpoint, conversation_id, feature, business, source, tenant_id),
             )
             conn.commit()
             conn.close()
-            logger.debug(f"Cost logged: {model} {feature} ${cost:.4f} [{business}]")
+            logger.debug(f"Cost logged: {model} {feature} ${cost:.4f} [{business}] tenant={tenant_id}")
         except Exception as e:
             logger.warning(f"Failed to log token usage: {e}")
 
@@ -195,12 +197,13 @@ class TokenTracker:
         feature: str = "chat",
         business: str = "general",
         source: str = "",
+        tenant_id: str = "founder",
     ):
         """Convenience: estimate tokens from text and log."""
         provider = "local" if model in ("ollama-llama3.1", "ollama-llama", "openclaw", "mistral:7b") else "cloud"
         input_tokens = self.estimate_tokens(input_text)
         output_tokens = self.estimate_tokens(output_text)
-        self.log_usage(model, provider, input_tokens, output_tokens, endpoint, conversation_id, feature, business, source)
+        self.log_usage(model, provider, input_tokens, output_tokens, endpoint, conversation_id, feature, business, source, tenant_id)
 
     def get_stats(self, days: int = 30) -> dict:
         """Get aggregated token usage stats."""
@@ -555,6 +558,144 @@ class TokenTracker:
             return (spent / budget["monthly_budget"]) >= budget["auto_switch_threshold"]
         except Exception:
             return False
+
+
+    def get_tenant_usage(self, tenant_id: str, days: int = 30) -> dict:
+        """Get aggregated token usage stats for a specific tenant."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+            row = conn.execute(
+                """SELECT
+                     COALESCE(SUM(input_tokens), 0) as total_input,
+                     COALESCE(SUM(output_tokens), 0) as total_output,
+                     COALESCE(SUM(cost_usd), 0) as total_cost,
+                     COUNT(*) as total_requests
+                   FROM token_usage WHERE tenant_id = ? AND timestamp >= ?""",
+                (tenant_id, since),
+            ).fetchone()
+
+            # Current month usage
+            month_start = datetime.utcnow().replace(day=1).strftime("%Y-%m-%d")
+            month_row = conn.execute(
+                """SELECT
+                     COALESCE(SUM(input_tokens), 0) as input_tokens,
+                     COALESCE(SUM(output_tokens), 0) as output_tokens,
+                     COALESCE(SUM(cost_usd), 0) as cost
+                   FROM token_usage WHERE tenant_id = ? AND timestamp >= ?""",
+                (tenant_id, month_start),
+            ).fetchone()
+
+            # Per-model breakdown
+            model_rows = conn.execute(
+                """SELECT model,
+                     SUM(input_tokens) as input_tokens,
+                     SUM(output_tokens) as output_tokens,
+                     SUM(cost_usd) as cost,
+                     COUNT(*) as requests
+                   FROM token_usage WHERE tenant_id = ? AND timestamp >= ?
+                   GROUP BY model ORDER BY cost DESC""",
+                (tenant_id, since),
+            ).fetchall()
+
+            conn.close()
+
+            total_input = row["total_input"]
+            total_output = row["total_output"]
+
+            return {
+                "tenant_id": tenant_id,
+                "period_days": days,
+                "total": {
+                    "input_tokens": total_input,
+                    "output_tokens": total_output,
+                    "total_tokens": total_input + total_output,
+                    "cost_usd": round(row["total_cost"], 4),
+                    "requests": row["total_requests"],
+                },
+                "current_month": {
+                    "input_tokens": month_row["input_tokens"],
+                    "output_tokens": month_row["output_tokens"],
+                    "total_tokens": month_row["input_tokens"] + month_row["output_tokens"],
+                    "cost_usd": round(month_row["cost"], 4),
+                },
+                "by_model": [
+                    {
+                        "model": r["model"],
+                        "input_tokens": r["input_tokens"],
+                        "output_tokens": r["output_tokens"],
+                        "cost": round(r["cost"], 4),
+                        "requests": r["requests"],
+                    }
+                    for r in model_rows
+                ],
+            }
+        except Exception as e:
+            logger.error(f"get_tenant_usage failed: {e}")
+            return {
+                "tenant_id": tenant_id,
+                "period_days": days,
+                "total": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0, "requests": 0},
+                "current_month": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0},
+                "by_model": [],
+            }
+
+    def get_tenant_budget_status(self, tenant_id: str, tier_id: str) -> dict:
+        """Get budget status for a tenant compared to their tier limits."""
+        from app.config.pricing_tiers import get_tier, get_token_budget
+
+        tier = get_tier(tier_id)
+        token_budget = get_token_budget(tier_id)
+
+        # Get current month token usage
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            month_start = datetime.utcnow().replace(day=1).strftime("%Y-%m-%d")
+            row = conn.execute(
+                """SELECT
+                     COALESCE(SUM(input_tokens), 0) as input_tokens,
+                     COALESCE(SUM(output_tokens), 0) as output_tokens,
+                     COALESCE(SUM(cost_usd), 0) as cost
+                   FROM token_usage WHERE tenant_id = ? AND timestamp >= ?""",
+                (tenant_id, month_start),
+            ).fetchone()
+            conn.close()
+
+            total_tokens = row["input_tokens"] + row["output_tokens"]
+            cost_usd = round(row["cost"], 4)
+        except Exception as e:
+            logger.error(f"get_tenant_budget_status failed: {e}")
+            total_tokens = 0
+            cost_usd = 0.0
+
+        # Calculate budget percentage (unlimited = -1)
+        if token_budget == -1:
+            percent_used = 0.0
+            over_budget = False
+        else:
+            percent_used = round((total_tokens / token_budget) * 100, 1) if token_budget > 0 else 0.0
+            over_budget = total_tokens >= token_budget
+
+        return {
+            "tenant_id": tenant_id,
+            "tier": tier_id,
+            "tier_name": tier["name"],
+            "token_budget": token_budget,
+            "tokens_used": total_tokens,
+            "tokens_remaining": max(0, token_budget - total_tokens) if token_budget != -1 else -1,
+            "percent_used": percent_used,
+            "over_budget": over_budget,
+            "cost_usd": cost_usd,
+            "price_monthly": tier["price_monthly"],
+        }
+
+    def check_tenant_within_budget(self, tenant_id: str, tier_id: str) -> bool:
+        """Quick check: is this tenant still within their tier's token budget?"""
+        status = self.get_tenant_budget_status(tenant_id, tier_id)
+        return not status["over_budget"]
 
 
 # Singleton

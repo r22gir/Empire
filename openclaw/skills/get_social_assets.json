@@ -1,0 +1,22 @@
+{
+  "name": "get_social_assets",
+  "description": "Get curated, approved images from the social assets library. Use when drafting social media posts that need an image.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "business": {
+        "type": "string",
+        "enum": ["empire-workroom", "woodcraft", "general"],
+        "description": "Which business to get images for"
+      },
+      "category": {
+        "type": "string",
+        "description": "Image category (e.g. before-after, finished-installs)"
+      },
+      "limit": { "type": "integer", "default": 5 }
+    },
+    "required": ["business"]
+  },
+  "endpoint": "http://localhost:8000/api/v1/recovery-forge/social-assets",
+  "method": "GET"
+}

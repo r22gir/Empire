@@ -334,6 +334,44 @@ class BaseDesk(ABC):
             logger.error(f"[{self.desk_name}] git_commit failed: {e}")
             return {"success": False, "commit_hash": None, "error": str(e)}
 
+    # ── v6.0: OpenClaw Dispatch ──────────────────────────────────
+
+    async def dispatch_to_openclaw(self, task: DeskTask) -> DeskTask:
+        """Dispatch a task to OpenClaw for execution. Fallback for complex tasks.
+
+        Any desk can call this when its own handler cannot complete a task,
+        e.g., when the task requires shell execution or autonomous code work.
+        OpenClaw may not be running — all errors are handled gracefully.
+        """
+        try:
+            from app.routers.openclaw_bridge import dispatch_desk_task_to_openclaw
+
+            result = await dispatch_desk_task_to_openclaw(
+                desk_id=self.desk_id,
+                task_title=task.title,
+                task_description=task.description,
+            )
+
+            if result.get("status") == "completed":
+                self._log_to_brain(
+                    f"OpenClaw completed task: {task.title}",
+                    importance=6,
+                    tags=["desk", self.desk_id, "openclaw", "completed"],
+                )
+                return await self.complete_task(task, result.get("summary", "Completed via OpenClaw"))
+            else:
+                error_msg = result.get("error", "OpenClaw execution failed")
+                self._log_to_brain(
+                    f"OpenClaw failed task: {task.title} — {error_msg}",
+                    importance=7,
+                    tags=["desk", self.desk_id, "openclaw", "failed"],
+                )
+                return await self.fail_task(task, f"OpenClaw: {error_msg}")
+
+        except Exception as e:
+            logger.warning(f"[{self.desk_name}] OpenClaw dispatch error: {e}")
+            return await self.fail_task(task, f"OpenClaw unavailable: {e}")
+
     # ── v6.0: Cross-Desk Delegation ─────────────────────────────
 
     async def delegate_to_pipeline(self, title: str, description: str) -> dict:

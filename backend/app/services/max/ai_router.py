@@ -191,15 +191,15 @@ class AIRouter:
 
     # ── Non-streaming chat ──────────────────────────────────────────────
 
-    def _log_chat_cost(self, messages: List[AIMessage], response: str, model: str, feature: str = "chat", business: str = "general"):
+    def _log_chat_cost(self, messages: List[AIMessage], response: str, model: str, feature: str = "chat", business: str = "general", tenant_id: str = "founder"):
         """Log cost for a chat completion."""
         try:
             input_text = " ".join(m.content for m in messages if m.content)
-            token_tracker.log_chat(model, input_text, response, feature=feature, business=business, source="ai_router")
+            token_tracker.log_chat(model, input_text, response, feature=feature, business=business, source="ai_router", tenant_id=tenant_id)
         except Exception as e:
             logger.debug(f"Cost logging failed: {e}")
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None) -> AIResponse:
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder") -> AIResponse:
         use_model = model or self.primary_model
         prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
         feature = "vision" if image_filename else ("chat" if not desk else "desk_task")
@@ -229,7 +229,7 @@ class AIRouter:
                 try:
                     logger.info(f"[MAX] Chat via xAI Grok{' (fallback)' if fallback else ''}")
                     resp = await self._grok_chat(full_messages, image_path)
-                    self._log_chat_cost(full_messages, resp, "grok", feature, business)
+                    self._log_chat_cost(full_messages, resp, "grok", feature, business, tenant_id)
                     return AIResponse(content=resp, model_used="grok", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Grok failed: {type(e).__name__}: {e}")
@@ -238,7 +238,7 @@ class AIRouter:
                 try:
                     logger.info(f"[MAX] Chat via Claude{' (fallback)' if fallback else ''}")
                     resp = await self._claude_chat(full_messages, image_path)
-                    self._log_chat_cost(full_messages, resp, "claude-4.6-sonnet", feature, business)
+                    self._log_chat_cost(full_messages, resp, "claude-4.6-sonnet", feature, business, tenant_id)
                     return AIResponse(content=resp, model_used="claude-4.6-sonnet", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Claude failed: {type(e).__name__}: {e}")
@@ -247,7 +247,7 @@ class AIRouter:
                 try:
                     logger.info(f"[MAX] Chat via Groq{' (fallback)' if fallback else ''}")
                     resp = await self._groq_chat(full_messages)
-                    self._log_chat_cost(full_messages, resp, "groq-llama-3.3-70b", feature, business)
+                    self._log_chat_cost(full_messages, resp, "groq-llama-3.3-70b", feature, business, tenant_id)
                     return AIResponse(content=resp, model_used="groq-llama-3.3-70b", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Groq failed: {type(e).__name__}: {e}")
@@ -256,7 +256,7 @@ class AIRouter:
                 try:
                     logger.info(f"[MAX] Chat via OpenClaw{' (fallback)' if fallback else ''}")
                     resp = await self._openclaw_chat(messages)
-                    self._log_chat_cost(messages, resp, "openclaw", feature, business)
+                    self._log_chat_cost(messages, resp, "openclaw", feature, business, tenant_id)
                     return AIResponse(content=resp, model_used="openclaw", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"OpenClaw failed: {e}")
@@ -265,7 +265,7 @@ class AIRouter:
                 try:
                     logger.info(f"[MAX] Chat via Ollama{' (fallback)' if fallback else ''}")
                     resp = await self._ollama_chat(full_messages)
-                    self._log_chat_cost(full_messages, resp, "ollama-llama3.1", feature, business)
+                    self._log_chat_cost(full_messages, resp, "ollama-llama3.1", feature, business, tenant_id)
                     return AIResponse(content=resp, model_used="ollama-llama3.1", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Ollama failed: {e}")
@@ -274,7 +274,7 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None) -> AsyncGenerator[tuple[str, str], None]:
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder") -> AsyncGenerator[tuple[str, str], None]:
         use_model = model or self.primary_model
         prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
         feature = "vision" if image_filename else ("chat/stream" if not desk else "desk_task")
@@ -302,7 +302,7 @@ class AIRouter:
                     async for chunk in self._grok_chat_stream(full_messages, image_path):
                         collected.append(chunk)
                         yield chunk, "grok"
-                    self._log_chat_cost(full_messages, "".join(collected), "grok", feature, business)
+                    self._log_chat_cost(full_messages, "".join(collected), "grok", feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Grok stream failed: {e}")
@@ -314,7 +314,7 @@ class AIRouter:
                     async for chunk in self._claude_chat_stream(full_messages, image_path):
                         collected.append(chunk)
                         yield chunk, "claude-4.6-sonnet"
-                    self._log_chat_cost(full_messages, "".join(collected), "claude-4.6-sonnet", feature, business)
+                    self._log_chat_cost(full_messages, "".join(collected), "claude-4.6-sonnet", feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Claude stream failed: {e}")
@@ -326,7 +326,7 @@ class AIRouter:
                     async for chunk in self._groq_chat_stream(full_messages):
                         collected.append(chunk)
                         yield chunk, "groq-llama-3.3-70b"
-                    self._log_chat_cost(full_messages, "".join(collected), "groq-llama-3.3-70b", feature, business)
+                    self._log_chat_cost(full_messages, "".join(collected), "groq-llama-3.3-70b", feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Groq stream failed: {e}")
@@ -335,7 +335,7 @@ class AIRouter:
                 try:
                     logger.info("[MAX] Streaming via OpenClaw")
                     resp = await self._openclaw_chat(messages)
-                    self._log_chat_cost(messages, resp, "openclaw", feature, business)
+                    self._log_chat_cost(messages, resp, "openclaw", feature, business, tenant_id)
                     yield resp, "openclaw"
                     return
                 except Exception as e:
@@ -348,7 +348,7 @@ class AIRouter:
                     async for chunk in self._ollama_chat_stream(full_messages):
                         collected.append(chunk)
                         yield chunk, "ollama-llama3.1"
-                    self._log_chat_cost(full_messages, "".join(collected), "ollama-llama3.1", feature, business)
+                    self._log_chat_cost(full_messages, "".join(collected), "ollama-llama3.1", feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Ollama stream failed: {e}")
