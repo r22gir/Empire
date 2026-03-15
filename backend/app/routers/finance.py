@@ -457,7 +457,7 @@ def create_invoice_from_quote(request: Request, quote_id: str):
 
     # Extract line items from rooms
     line_items = []
-    for room in quote.get("rooms", []):
+    for room in (quote.get("rooms") or []):
         room_name = room.get("name", "Room")
         for window in room.get("windows", []):
             line_items.append({

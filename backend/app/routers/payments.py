@@ -123,7 +123,7 @@ async def _notify_emergency(title: str, message: str, context: dict = None):
         logger.error(f"Failed to send emergency notification: {e}")
 
 
-def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "stripe",
+def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "card",
                            stripe_session_id: str = None):
     """Update invoice status and record payment in finance DB."""
     try:
@@ -190,7 +190,8 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
 
             return True
     except Exception as e:
-        logger.error(f"Failed to update invoice {invoice_id}: {e}")
+        import traceback
+        logger.error(f"Failed to update invoice {invoice_id}: {e}\n{traceback.format_exc()}")
         return False
 
 
@@ -359,7 +360,7 @@ async def stripe_webhook(request: Request):
             if invoice_id:
                 _update_invoice_status(
                     invoice_id, "paid",
-                    payment_method="stripe",
+                    payment_method="card",
                     stripe_session_id=data.get("id"),
                 )
                 await _notify_internal(
