@@ -119,6 +119,13 @@ class DeskScheduler:
                         self._last_run["weekly_report"] = week_key
                         asyncio.create_task(self._generate_weekly_report())
 
+                # Accuracy digest: 10:00 PM daily
+                if now.hour == 22 and now.minute == 0:
+                    digest_key = f"accuracy_digest:{today}"
+                    if self._last_run.get("accuracy_digest") != digest_key:
+                        self._last_run["accuracy_digest"] = digest_key
+                        asyncio.create_task(self._send_accuracy_digest())
+
                 # v6.0 Pipeline executor: process pending subtasks (every 2 min)
                 if now.minute % 2 == 0:
                     pl_tick = f"{today}:{now.hour}:{now.minute}"
@@ -500,6 +507,47 @@ class DeskScheduler:
 
         except Exception as e:
             logger.error(f"[Scheduler] Weekly report failed: {e}")
+
+    async def _send_accuracy_digest(self):
+        """Send daily MAX accuracy report via Telegram."""
+        logger.info("[Scheduler] Generating accuracy digest")
+        try:
+            from app.services.max.accuracy_monitor import accuracy_monitor
+            from app.services.max.telegram_bot import telegram_bot
+
+            stats = accuracy_monitor.get_stats(days=1)
+            total = stats.get("total_queries", 0)
+
+            if total == 0:
+                return  # No web queries today, skip digest
+
+            accuracy = stats.get("accuracy_rate", 100)
+            flagged = stats.get("fail_count", 0)
+            avg_conf = stats.get("avg_confidence", 1.0)
+
+            icon = "\u2705" if accuracy >= 90 else "\u26a0\ufe0f" if accuracy >= 70 else "\u274c"
+
+            msg = (
+                f"\ud83d\udcca <b>MAX Accuracy Report \u2014 Daily</b>\n\n"
+                f"{icon} Accuracy: {accuracy:.1f}%\n"
+                f"\ud83d\udcdd Total web queries: {total}\n"
+                f"\ud83c\udfaf Avg confidence: {avg_conf:.1%}\n"
+                f"\ud83d\udea9 Flagged responses: {flagged}\n"
+            )
+
+            # Add worst sources if any
+            worst = stats.get("worst_sources", [])
+            if worst:
+                msg += "\n<b>Worst sources:</b>\n"
+                for s in worst[:3]:
+                    msg += f"  \u2022 {s['domain']}: {s['phantom_count']} phantom citations\n"
+
+            if telegram_bot.is_configured:
+                await telegram_bot.send_message(msg)
+
+            logger.info(f"[Scheduler] Accuracy digest sent: {total} queries, {accuracy:.1f}% accuracy")
+        except Exception as e:
+            logger.error(f"[Scheduler] Accuracy digest failed: {e}")
 
     # ── Event triggers (called by other parts of the system) ──────────
 

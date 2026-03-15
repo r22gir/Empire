@@ -89,6 +89,9 @@ load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
 # AI Cost Tracker
 load_router("app.routers.costs", "/api/v1", ["costs"])
 
+# MAX Accuracy Monitor
+load_router("app.routers.accuracy", "/api/v1", ["accuracy"])
+
 # Finance, CRM, Inventory
 load_router("app.routers.finance", "/api/v1", ["finance"])
 load_router("app.routers.payments", "/api/v1", ["payments"])

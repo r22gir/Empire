@@ -19,6 +19,7 @@ from app.services.max.telegram_bot import telegram_bot
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
+from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
@@ -170,7 +171,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             tool_summary_parts = []
             for r in round_results:
                 if r["success"] and r["result"]:
-                    tool_summary_parts.append(f"[{r['tool']}] Result:\n{json.dumps(r['result'], indent=2, default=str)[:3000]}")
+                    # Give web_read more room so AI has enough content to cite accurately
+                    limit = 5000 if r['tool'] == 'web_read' else 3000
+                    tool_summary_parts.append(f"[{r['tool']}] Result:\n{json.dumps(r['result'], indent=2, default=str)[:limit]}")
                 else:
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
@@ -186,7 +189,25 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
 
             current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt)
-            final_content = strip_tool_blocks(final_content) + "\n\n" + current_response.content
+            # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
+            final_content = current_response.content
+
+        # Grounding verification: strip hallucinated citations from web-sourced responses
+        if tool_results_list:
+            has_web_tools = any(tr.get("tool") in ("web_search", "web_read") for tr in tool_results_list)
+            if has_web_tools:
+                try:
+                    verification = verify_web_response(final_content, tool_results_list)
+                    if verification.claims_stripped > 0:
+                        logger.info(f"Grounding: {verification.claims_verified} verified, {verification.claims_stripped} stripped, {verification.phantom_citations_removed} phantom citations removed")
+                    final_content = verification.verified
+                    log_to_audit(
+                        user_query=request.message,
+                        verification=verification,
+                        model_used=response.model_used,
+                    )
+                except Exception as e:
+                    logger.warning(f"Grounding verification failed: {e}")
 
         # Track conversation in background
         conv_id = request.conversation_id or str(uuid.uuid4())
@@ -345,7 +366,8 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
                 current_text = followup_text
-                full_response = strip_tool_blocks(full_response) + "\n\n" + followup_text
+                # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
+                full_response = followup_text
 
             # Track assistant response — fire-and-forget background tasks
             conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))

@@ -2,15 +2,22 @@
 import { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
 import { BusinessTab } from '../../lib/types';
-import { Zap, DollarSign, ClipboardList, Package, Truck, Megaphone, Headphones, TrendingUp, Users } from 'lucide-react';
+import { Zap, DollarSign, ClipboardList, Package, Truck, Megaphone, Headphones, TrendingUp, Users, Shield, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 
 export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab }) {
   const [quotes, setQuotes] = useState<any[]>([]);
+  const [accuracy, setAccuracy] = useState<any>(null);
+  const [accuracyLoading, setAccuracyLoading] = useState(true);
 
   useEffect(() => {
     fetch(API + '/quotes?limit=10').then(r => r.json()).then(data => {
       setQuotes(data.quotes || data || []);
     }).catch(() => {});
+
+    fetch(API + '/max/accuracy/stats?days=7')
+      .then(r => r.json())
+      .then(data => { setAccuracy(data); setAccuracyLoading(false); })
+      .catch(() => { setAccuracyLoading(false); });
   }, []);
 
   const openQuotes = quotes.filter(q => q.status !== 'accepted').length;
@@ -55,6 +62,79 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
         <BizCard name="Platform" icon="🌐" color="#2563eb"
           stats={['All services monitored', 'AI routing active']} />
       </div>
+
+      {/* MAX Accuracy */}
+      <div className="section-label flex items-center gap-2" style={{ marginBottom: 8 }}>
+        <Shield size={14} className="text-[#b8960c]" />
+        MAX Accuracy
+      </div>
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <KPI
+          icon={<CheckCircle size={18} />}
+          iconBg={accuracy && accuracy.accuracy_rate >= 90 ? '#dcfce7' : accuracy && accuracy.accuracy_rate >= 70 ? '#fef3c7' : '#fee2e2'}
+          iconColor={accuracy && accuracy.accuracy_rate >= 90 ? '#16a34a' : accuracy && accuracy.accuracy_rate >= 70 ? '#d97706' : '#dc2626'}
+          label="Accuracy"
+          value={accuracyLoading ? '...' : accuracy ? `${accuracy.accuracy_rate.toFixed(1)}%` : '--'}
+          sub="Last 7 days"
+        />
+        <KPI
+          icon={<Activity size={18} />}
+          iconBg="#fdf8eb"
+          iconColor="#b8960c"
+          label="Total Queries"
+          value={accuracyLoading ? '...' : accuracy ? String(accuracy.total_queries) : '--'}
+          sub="Queries processed"
+        />
+        <KPI
+          icon={<AlertTriangle size={18} />}
+          iconBg="#fee2e2"
+          iconColor="#dc2626"
+          label="Flagged"
+          value={accuracyLoading ? '...' : accuracy ? String(accuracy.fail_count) : '--'}
+          sub="Failed checks"
+        />
+        <KPI
+          icon={<Shield size={18} />}
+          iconBg="#ede9fe"
+          iconColor="#7c3aed"
+          label="Avg Confidence"
+          value={accuracyLoading ? '...' : accuracy ? `${(accuracy.avg_confidence * 100).toFixed(0)}%` : '--'}
+          sub="Model confidence"
+        />
+      </div>
+      {accuracy?.trend && accuracy.trend.length > 0 && (
+        <div className="empire-card mb-6" style={{ padding: '16px 20px' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#aaa', marginBottom: 12 }}>Daily Accuracy Trend</div>
+          <div className="flex items-end gap-2" style={{ height: 60 }}>
+            {accuracy.trend.slice().reverse().map((day: any, i: number) => {
+              const barColor = day.accuracy >= 90 ? '#16a34a' : day.accuracy >= 70 ? '#d97706' : '#dc2626';
+              return (
+                <div key={i} className="flex flex-col items-center flex-1" style={{ gap: 4 }}>
+                  <div style={{ fontSize: 9, color: '#aaa', fontWeight: 600 }}>{day.accuracy.toFixed(0)}%</div>
+                  <div
+                    style={{
+                      width: '100%',
+                      maxWidth: 32,
+                      height: `${Math.max(day.accuracy * 0.55, 4)}px`,
+                      background: barColor,
+                      borderRadius: 3,
+                      transition: 'height 0.3s ease',
+                    }}
+                  />
+                  <div style={{ fontSize: 8, color: '#bbb' }}>
+                    {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {!accuracy?.trend && !accuracyLoading && (
+        <div className="empire-card mb-6" style={{ minHeight: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 12, color: '#aaa' }}>No trend data available</div>
+        </div>
+      )}
 
       {/* Revenue chart placeholder */}
       <div className="empire-card" style={{ minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

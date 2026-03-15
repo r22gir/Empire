@@ -1532,20 +1532,25 @@ def _web_read(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 
 def _html_to_text(html: str) -> str:
-    """Extract readable text from HTML, stripping tags, scripts, styles."""
-    # Remove script/style blocks
+    """Extract readable text from HTML, preserving heading structure."""
+    import html as html_mod
+    # Remove script/style/noscript blocks
     text = re.sub(r'<(script|style|noscript)[^>]*>.*?</\1>', '', html, flags=re.DOTALL | re.IGNORECASE)
-    # Remove nav/header/footer
-    text = re.sub(r'<(nav|header|footer)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Remove nav/header/footer (boilerplate)
+    text = re.sub(r'<(nav|header|footer|aside)[^>]*>.*?</\1>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # Preserve headings as markdown-style markers (helps AI understand page structure)
+    text = re.sub(r'<h1[^>]*>(.*?)</h1>', r'\n### \1\n', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<h2[^>]*>(.*?)</h2>', r'\n## \1\n', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<h[3-6][^>]*>(.*?)</h[3-6]>', r'\n# \1\n', text, flags=re.DOTALL | re.IGNORECASE)
     # Convert common elements to readable text
     text = re.sub(r'<br\s*/?>', '\n', text)
-    text = re.sub(r'</(p|div|h[1-6]|li|tr)>', '\n', text)
+    text = re.sub(r'</(p|div|li|tr)>', '\n', text)
+    text = re.sub(r'<li[^>]*>', '- ', text)
     text = re.sub(r'<[^>]+>', ' ', text)
     # Clean up whitespace
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     # Decode HTML entities
-    import html as html_mod
     text = html_mod.unescape(text)
     return text.strip()
 
