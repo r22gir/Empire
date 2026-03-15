@@ -36,6 +36,7 @@ import VetForgePage from './components/screens/VetForgePage';
 import PetForgePage from './components/screens/PetForgePage';
 import VisionAnalysisPage from './components/screens/VisionAnalysisPage';
 import ForgeCRMPage from './components/screens/ForgeCRMPage';
+import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
 import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
@@ -137,6 +138,8 @@ export default function CommandCenter() {
       reports: 'report',
       calendar: 'calendar',
       documents: 'docs',
+      'business-profile': 'business-profile',
+      settings: 'business-profile',
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
@@ -215,6 +218,7 @@ export default function CommandCenter() {
         default: return <DashboardScreen activeTab={activeTab} />;
       }
     }
+    if (activeScreen === 'business-profile') return <BusinessProfileScreen />;
     if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;

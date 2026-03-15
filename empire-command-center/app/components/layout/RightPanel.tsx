@@ -7,7 +7,7 @@ import {
   DollarSign, Users, TrendingUp, ClipboardList, FileText, Flag, Calendar,
   Zap, Sparkles, Send, BookOpen, Camera, CheckCircle2, Eye, ArrowRight,
   Bot, Hammer, ShoppingBag, Megaphone, Headphones, BadgeDollarSign, PieChart,
-  Wrench, Monitor, Globe, Scale, FlaskConical, Shield, Sun, BarChart3,
+  Wrench, Monitor, Globe, Scale, FlaskConical, Shield, Sun, BarChart3, Building2,
 } from 'lucide-react';
 
 interface Props {
@@ -469,6 +469,12 @@ function NavigationHelper({ activeProduct, activeSection, onScreenChange, onModu
             </div>
           </>
         )}
+        <div className="mt-2">
+          <div style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Settings</div>
+          <div className="flex flex-col gap-1">
+            <SidebarAction label="Business Profile" icon={<Building2 size={12} />} color="#b8960c" onClick={() => onScreenChange('business-profile')} />
+          </div>
+        </div>
       </div>
     );
   }
