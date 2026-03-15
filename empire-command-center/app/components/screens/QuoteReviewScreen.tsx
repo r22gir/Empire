@@ -14,6 +14,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [selected, setSelected] = useState<number>(1);
   const [loading, setLoading] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     if (!quoteId) {
@@ -55,8 +56,6 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     { label: 'Designer', key: 'B', color: '#b8960c', bg: '#fdf8eb', border: '#f5ecd0' },
     { label: 'Premium', key: 'C', color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
   ];
-
-  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   const showFeedback = (msg: string) => {
     setActionFeedback(msg);
