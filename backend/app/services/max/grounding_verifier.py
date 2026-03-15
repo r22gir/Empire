@@ -264,6 +264,8 @@ def log_to_audit(
     verification: VerifiedResponse,
     model_used: str,
     response_time_ms: int = 0,
+    channel: str = "chat",
+    output_type: str = "response",
 ):
     """Log grounding verification result to the accuracy audit table."""
     try:
@@ -274,6 +276,8 @@ def log_to_audit(
             verification=verification,
             model_used=model_used,
             response_time_ms=response_time_ms,
+            channel=channel,
+            output_type=output_type,
         )
     except Exception as e:
         logger.warning(f"Failed to log to accuracy audit: {e}")

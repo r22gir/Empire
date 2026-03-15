@@ -15,6 +15,8 @@ import base64
 import httpx
 import logging
 
+from app.services.max.response_quality_engine import quality_engine, Channel
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
@@ -228,6 +230,61 @@ async def create_quote(payload: QuoteCreate):
     ]
 
     quote = _compute_financials(quote)
+
+    # Quality gate: validate quote before saving
+    qr = quality_engine.validate(
+        json.dumps(quote, default=str),
+        channel=Channel.QUOTE,
+        context={"quote_data": quote},
+    )
+    if qr.blocked:
+        # Log to accuracy monitor
+        try:
+            from app.services.max.accuracy_monitor import accuracy_monitor
+            accuracy_monitor.log_audit(
+                user_query=f"Create quote for {quote.get('customer_name', 'unknown')}",
+                response_text=json.dumps(quote, default=str)[:3000],
+                verification=type('V', (), {'claims_found': len(qr.issues), 'claims_verified': 0, 'claims_stripped': len(qr.issues), 'phantom_citations_removed': 0})(),
+                model_used="quality_engine",
+                channel="quote",
+                output_type="quote_create",
+                quality_severity=qr.severity,
+                fixed_by_engine=qr.fixed_count,
+            )
+        except Exception:
+            pass
+        # Alert founder via Telegram
+        try:
+            import asyncio
+            from app.services.max.telegram_bot import telegram_bot
+            issues_text = "\n".join(f"• {i.message}" for i in qr.issues[:5])
+            asyncio.create_task(telegram_bot.send_message(
+                f"🚨 <b>QUOTE BLOCKED</b>\n\nQuote for {quote.get('customer_name', 'unknown')} — ${quote.get('total', 0):,.2f}\n\n<b>Issues:</b>\n{issues_text}"
+            ))
+        except Exception:
+            pass
+        raise HTTPException(422, detail={
+            "message": "Quote blocked by quality engine",
+            "issues": [{"check": i.check, "severity": i.severity.value, "message": i.message} for i in qr.issues],
+        })
+
+    # Log quality check (even if passed)
+    if qr.issues:
+        try:
+            from app.services.max.accuracy_monitor import accuracy_monitor
+            accuracy_monitor.log_audit(
+                user_query=f"Create quote for {quote.get('customer_name', 'unknown')}",
+                response_text=json.dumps(quote, default=str)[:3000],
+                verification=type('V', (), {'claims_found': len(qr.issues), 'claims_verified': len(qr.issues) - qr.fixed_count, 'claims_stripped': qr.fixed_count, 'phantom_citations_removed': 0})(),
+                model_used="quality_engine",
+                channel="quote",
+                output_type="quote_create",
+                quality_severity=qr.severity,
+                fixed_by_engine=qr.fixed_count,
+            )
+        except Exception:
+            pass
+
     _save_quote(quote)
     return {"status": "created", "quote": quote}
 
@@ -549,6 +606,19 @@ async def delete_quote(quote_id: str):
 async def send_quote(quote_id: str):
     """Mark quote as sent."""
     quote = _load_quote(quote_id)
+
+    # Quality gate: final check before marking as sent
+    qr = quality_engine.validate(
+        json.dumps(quote, default=str),
+        channel=Channel.QUOTE,
+        context={"quote_data": quote},
+    )
+    if qr.blocked:
+        raise HTTPException(422, detail={
+            "message": "Quote blocked by quality engine — cannot send",
+            "issues": [{"check": i.check, "severity": i.severity.value, "message": i.message} for i in qr.issues],
+        })
+
     quote["status"] = "sent"
     quote["sent_at"] = datetime.utcnow().isoformat()
     quote["updated_at"] = datetime.utcnow().isoformat()

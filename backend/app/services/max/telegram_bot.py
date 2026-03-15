@@ -700,6 +700,13 @@ class TelegramBot:
             # Get natural MAX response (always shown to user)
             chat_id = str(update.effective_chat.id) if update.effective_chat else None
             html_response, plain_text, tool_results = await self._chat_with_max(text, chat_id=chat_id)
+            # Quality check on Telegram response
+            from app.services.max.response_quality_engine import quality_engine, Channel
+            qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
+            if qr.fixed_count > 0:
+                plain_text = qr.cleaned
+                html_response = f"{qr.cleaned}\n\n<i>— via MAX</i>"
+                logger.info(f"Quality engine fixed {qr.fixed_count} issues in Telegram response")
             if len(html_response) > 4000:
                 html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
             await update.message.reply_html(html_response)
@@ -795,6 +802,12 @@ class TelegramBot:
                 await update.message.reply_chat_action("typing")
                 voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
                 html_response, plain_text, _ = await self._chat_with_max(transcript, chat_id=voice_chat_id, user_meta={"type": "voice"})
+                # Quality check on voice response
+                from app.services.max.response_quality_engine import quality_engine, Channel
+                qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
+                if qr.fixed_count > 0:
+                    plain_text = qr.cleaned
+                    html_response = f"{qr.cleaned}\n\n<i>— via MAX</i>"
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
 

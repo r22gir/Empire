@@ -542,6 +542,18 @@ class DeskScheduler:
                 for s in worst[:3]:
                     msg += f"  \u2022 {s['domain']}: {s['phantom_count']} phantom citations\n"
 
+            # Per-channel breakdown
+            by_channel = stats.get("by_channel", {})
+            if by_channel:
+                msg += "\n<b>By channel:</b>\n"
+                for ch, ch_stats in by_channel.items():
+                    ch_acc = ch_stats.get("accuracy_rate", 100)
+                    ch_icon = "✅" if ch_acc >= 90 else "⚠️" if ch_acc >= 70 else "❌"
+                    msg += f"  {ch_icon} {ch}: {ch_stats['total']} queries, {ch_acc:.0f}% accuracy"
+                    if ch_stats.get("auto_fixed", 0) > 0:
+                        msg += f", {ch_stats['auto_fixed']} auto-fixed"
+                    msg += "\n"
+
             if telegram_bot.is_configured:
                 await telegram_bot.send_message(msg)
 

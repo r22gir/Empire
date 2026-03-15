@@ -36,6 +36,22 @@ try:
 except Exception as e:
     logger.warning(f"Failed to create max_response_audit table: {e}")
 
+# Add new columns for quality engine (safe — ignores if already exist)
+try:
+    with get_db() as conn:
+        for col, coltype in [
+            ("channel", "TEXT DEFAULT 'chat'"),
+            ("output_type", "TEXT DEFAULT 'response'"),
+            ("quality_severity", "TEXT DEFAULT 'none'"),
+            ("fixed_by_engine", "INT DEFAULT 0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE max_response_audit ADD COLUMN {col} {coltype}")
+            except Exception:
+                pass  # Column already exists
+except Exception as e:
+    logger.debug(f"Column migration note: {e}")
+
 
 class AccuracyMonitor:
     """Logs and queries MAX grounding verification audit data."""
@@ -47,6 +63,10 @@ class AccuracyMonitor:
         verification,
         model_used: str,
         response_time_ms: int = 0,
+        channel: str = "chat",
+        output_type: str = "response",
+        quality_severity: str = "none",
+        fixed_by_engine: int = 0,
     ):
         """Log a grounding verification result to the audit table.
 
@@ -79,8 +99,9 @@ class AccuracyMonitor:
                     """INSERT INTO max_response_audit
                        (id, timestamp, user_query, response_text, sources_cited,
                         claims_extracted, claims_verified, claims_failed,
-                        confidence_score, model_used, grounding_pass, response_time_ms)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        confidence_score, model_used, grounding_pass, response_time_ms,
+                        channel, output_type, quality_severity, fixed_by_engine)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         row_id,
                         timestamp,
@@ -94,6 +115,10 @@ class AccuracyMonitor:
                         model_used or "unknown",
                         grounding_pass,
                         response_time_ms,
+                        channel,
+                        output_type,
+                        quality_severity,
+                        fixed_by_engine,
                     ),
                 )
 
@@ -155,6 +180,28 @@ class AccuracyMonitor:
                         "avg_confidence": mr["avg_conf"] or 1.0,
                     }
 
+                # By channel breakdown
+                channel_rows = conn.execute(
+                    """SELECT channel,
+                              COUNT(*) as count,
+                              SUM(grounding_pass) as passed,
+                              SUM(fixed_by_engine) as fixed
+                       FROM max_response_audit
+                       WHERE timestamp >= ?
+                       GROUP BY channel""",
+                    (cutoff,),
+                ).fetchall()
+
+                by_channel = {}
+                for cr in channel_rows:
+                    c_total = cr["count"]
+                    c_passed = cr["passed"] or 0
+                    by_channel[cr["channel"] or "chat"] = {
+                        "total": c_total,
+                        "accuracy_rate": (c_passed / c_total * 100) if c_total > 0 else 100.0,
+                        "auto_fixed": cr["fixed"] or 0,
+                    }
+
                 # Worst sources (domains with most phantom citations)
                 source_rows = conn.execute(
                     """SELECT sources_cited, claims_failed
@@ -209,6 +256,7 @@ class AccuracyMonitor:
                     "avg_confidence": avg_conf,
                     "fail_count": failed,
                     "by_model": by_model,
+                    "by_channel": by_channel,
                     "worst_sources": worst_sources,
                     "trend": trend,
                 }
@@ -221,6 +269,7 @@ class AccuracyMonitor:
                 "avg_confidence": 1.0,
                 "fail_count": 0,
                 "by_model": {},
+                "by_channel": {},
                 "worst_sources": [],
                 "trend": [],
             }

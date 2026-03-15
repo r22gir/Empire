@@ -20,6 +20,7 @@ from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
+from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.system_prompt import get_system_prompt_with_brain
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
@@ -208,6 +209,35 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                     )
                 except Exception as e:
                     logger.warning(f"Grounding verification failed: {e}")
+
+        # Universal quality check on final response
+        chat_channel = Channel.TELEGRAM if (hasattr(request, 'channel') and request.channel == 'telegram') else Channel.CHAT
+        qr = quality_engine.validate(final_content, channel=chat_channel)
+        if qr.fixed_count > 0:
+            logger.info(f"Quality engine fixed {qr.fixed_count} issues in {chat_channel.value} response")
+            final_content = qr.cleaned
+
+        # Log to accuracy monitor (all channels, not just web-sourced)
+        if qr.issues or not tool_results_list:
+            try:
+                from app.services.max.accuracy_monitor import accuracy_monitor
+                accuracy_monitor.log_audit(
+                    user_query=request.message,
+                    response_text=final_content,
+                    verification=type('V', (), {
+                        'claims_found': len(qr.issues),
+                        'claims_verified': len(qr.issues) - len([i for i in qr.issues if i.severity.value == 'critical']),
+                        'claims_stripped': qr.fixed_count,
+                        'phantom_citations_removed': 0,
+                    })(),
+                    model_used=response.model_used,
+                    channel=chat_channel.value,
+                    output_type="chat",
+                    quality_severity=qr.severity,
+                    fixed_by_engine=qr.fixed_count,
+                )
+            except Exception as e:
+                logger.debug(f"Quality audit log failed: {e}")
 
         # Track conversation in background
         conv_id = request.conversation_id or str(uuid.uuid4())

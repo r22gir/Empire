@@ -15,6 +15,7 @@ from app.services.email.templates import (
     render_payment_received,
 )
 from app.services.email.sender import send_email
+from app.services.max.response_quality_engine import quality_engine, Channel
 
 logger = logging.getLogger("empire.email.router")
 router = APIRouter()
@@ -85,6 +86,27 @@ def _log_notification(source: str, title: str, message: str, context: dict = Non
 async def send_quote_email(req: QuoteEmailRequest):
     """Send a branded quote email to a customer."""
     html = render_quote_sent(req.model_dump())
+
+    # Quality gate: validate email content
+    qr = quality_engine.validate(
+        html,
+        channel=Channel.EMAIL,
+        context={
+            "recipient": req.to_email,
+            "customer_name": req.customer_name,
+            "subject": f"Quote #{req.quote_number}",
+            "quote_data": {"quote_number": req.quote_number, "total": req.total},
+        },
+    )
+    if qr.blocked:
+        return {
+            "status": "blocked",
+            "message": "Email blocked by quality engine",
+            "issues": [{"check": i.check, "severity": i.severity.value, "message": i.message} for i in qr.issues],
+        }
+    if qr.fixed_count > 0:
+        html = qr.cleaned  # Use auto-fixed version
+
     subject = f"Your Quote #{req.quote_number} from RG's Drapery & Upholstery"
 
     sent = await send_email(req.to_email, subject, html)
