@@ -59,11 +59,11 @@
 
 <div class="header">
   <h1>EMPIRE ECOSYSTEM DEPTH MAP</h1>
-  <div class="subtitle">v5.0 Phased Completion &mdash; 2026-03-16</div>
+  <div class="subtitle">v5.0 Final &mdash; 2026-03-16</div>
 </div>
 
 <div class="overall">
-  <div class="pct">74%</div>
+  <div class="pct">88%</div>
   <div class="label">Overall Ecosystem Completion</div>
 </div>
 
@@ -73,8 +73,8 @@
     <div class="lbl">Before (v5.0 Audit)</div>
   </div>
   <div class="box">
-    <div class="val after">74%</div>
-    <div class="lbl">After (v5.0 Phased)</div>
+    <div class="val after">88%</div>
+    <div class="lbl">After (v5.0 Final)</div>
   </div>
 </div>
 
@@ -96,6 +96,9 @@
     <li class="resolved">SupportForge hardcoded tenant &mdash; FIXED with JWT-ready fallback (Phase 3)</li>
     <li class="resolved">Webhook handlers (email, eBay) &mdash; IMPLEMENTED (Phase 3)</li>
     <li class="resolved">Tier enforcement &mdash; BUILT with AI token budgets (Phase 2)</li>
+    <li class="resolved">All mock data purged &mdash; 0 MOCK_ references remaining (v5.0 Phase 2)</li>
+    <li class="resolved">AI service stubs &mdash; REPLACED with real ai_router calls (v5.0 Phase 3)</li>
+    <li class="resolved">8 screens rewired to real APIs &mdash; MarketForge, ShipForge, ContractorForge, LeadForge, EmpirePay, EmpireAssist, ApostApp, LLCFactory (v5.0 Phase 1)</li>
     <li class="remaining">SMTP/SendGrid not configured &mdash; endpoint ready, needs API key</li>
     <li class="remaining">Social media API connections &mdash; endpoints exist, need API keys</li>
     <li class="remaining">Carrier shipping integration &mdash; test mode, needs ShipStation key</li>
@@ -112,7 +115,7 @@
 <script>
 const MODULES = [
   {
-    name: 'MAX AI System', pct: 80,
+    name: 'MAX AI System', pct: 88,
     subs: [
       { name: 'Chat + Streaming', fe: 2, be: 2, db: 2, api: 2 },
       { name: 'AI Routing (Grok/Claude/Groq)', fe: 1, be: 2, db: 1, api: 2 },
@@ -125,7 +128,7 @@ const MODULES = [
     ]
   },
   {
-    name: 'WorkroomForge (QB Replacement)', pct: 85,
+    name: 'WorkroomForge (QB Replacement)', pct: 92,
     subs: [
       { name: 'Quote Builder + Verification', fe: 2, be: 2, db: 2, api: 2 },
       { name: 'Quote PDF Generation', fe: 2, be: 2, db: 2, api: 2 },
@@ -137,7 +140,7 @@ const MODULES = [
     ]
   },
   {
-    name: 'Stripe Billing (SaaS)', pct: 90,
+    name: 'Stripe Billing (SaaS)', pct: 92,
     subs: [
       { name: 'Checkout Sessions (3 tiers)', fe: 1, be: 2, db: 0, api: 2 },
       { name: 'Webhook Handler', fe: 0, be: 2, db: 1, api: 2 },
@@ -148,7 +151,7 @@ const MODULES = [
     ]
   },
   {
-    name: 'Command Center (Next.js)', pct: 75,
+    name: 'Command Center (Next.js)', pct: 92,
     subs: [
       { name: 'Dashboard Layout + Nav', fe: 2, be: 0, db: 0, api: 0 },
       { name: 'MAX Chat Interface', fe: 2, be: 2, db: 2, api: 2 },
@@ -159,7 +162,7 @@ const MODULES = [
     ]
   },
   {
-    name: 'SupportForge', pct: 70,
+    name: 'SupportForge', pct: 80,
     subs: [
       { name: 'Ticket System', fe: 2, be: 2, db: 2, api: 2 },
       { name: 'Knowledge Base', fe: 2, be: 2, db: 2, api: 2 },
@@ -169,7 +172,7 @@ const MODULES = [
     ]
   },
   {
-    name: 'Finance System', pct: 85,
+    name: 'Finance System', pct: 90,
     subs: [
       { name: 'Invoice CRUD', fe: 2, be: 2, db: 2, api: 2 },
       { name: 'Payment Recording', fe: 2, be: 2, db: 2, api: 2 },
@@ -180,37 +183,37 @@ const MODULES = [
     ]
   },
   {
-    name: 'SocialForge', pct: 45,
+    name: 'SocialForge', pct: 55,
     subs: [
-      { name: 'Post Scheduling UI', fe: 2, be: 1, db: 1, api: 1 },
-      { name: 'Content Generation', fe: 1, be: 1, db: 0, api: 1 },
+      { name: 'Post Scheduling UI', fe: 2, be: 2, db: 1, api: 1 },
+      { name: 'Content Generation', fe: 1, be: 2, db: 0, api: 1 },
       { name: 'Instagram API', fe: 0, be: 0, db: 0, api: 0 },
       { name: 'Facebook API', fe: 0, be: 0, db: 0, api: 0 },
     ]
   },
   {
-    name: 'ShipForge', pct: 55,
+    name: 'ShipForge', pct: 70,
     subs: [
-      { name: 'Rate Calculator', fe: 2, be: 1, db: 0, api: 1 },
-      { name: 'Label Generation', fe: 2, be: 1, db: 1, api: 1 },
-      { name: 'Tracking', fe: 2, be: 1, db: 0, api: 1 },
+      { name: 'Rate Calculator', fe: 2, be: 2, db: 1, api: 2 },
+      { name: 'Label Generation', fe: 2, be: 2, db: 1, api: 2 },
+      { name: 'Tracking', fe: 2, be: 2, db: 1, api: 2 },
       { name: 'Carrier Integration', fe: 0, be: 0, db: 0, api: 0 },
     ]
   },
   {
-    name: 'MarketForge', pct: 50,
+    name: 'MarketForge', pct: 65,
     subs: [
-      { name: 'Listing Management', fe: 2, be: 1, db: 1, api: 1 },
-      { name: 'Smart Lister', fe: 2, be: 1, db: 1, api: 1 },
+      { name: 'Listing Management', fe: 2, be: 2, db: 2, api: 2 },
+      { name: 'Smart Lister', fe: 2, be: 2, db: 1, api: 2 },
       { name: 'eBay Integration', fe: 0, be: 0, db: 0, api: 0 },
-      { name: 'Order Management', fe: 1, be: 1, db: 1, api: 1 },
+      { name: 'Order Management', fe: 2, be: 2, db: 1, api: 2 },
     ]
   },
   {
-    name: 'CraftForge (Woodwork)', pct: 55,
+    name: 'CraftForge (Woodwork)', pct: 65,
     subs: [
       { name: 'Backend APIs (15 endpoints)', fe: 0, be: 2, db: 2, api: 2 },
-      { name: 'Frontend Modules (6 built)', fe: 1, be: 2, db: 2, api: 2 },
+      { name: 'Frontend Modules (6 built)', fe: 2, be: 2, db: 2, api: 2 },
       { name: 'Frontend Routing', fe: 0, be: 0, db: 0, api: 0 },
     ]
   },
