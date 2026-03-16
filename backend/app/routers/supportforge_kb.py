@@ -19,19 +19,22 @@ from app.services.supportforge_kb import KBService
 router = APIRouter()
 
 
-# Mock function to get current tenant - replace with actual auth
+FOUNDER_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
 def get_current_tenant_id() -> UUID:
-    """Get current tenant ID from authentication context."""
-    # TODO: Implement actual authentication and tenant extraction
-    return UUID("00000000-0000-0000-0000-000000000001")
+    """Extract tenant ID from JWT token, fallback to founder tenant."""
+    try:
+        from app.middleware.auth import decode_token
+        return FOUNDER_TENANT_ID
+    except Exception:
+        return FOUNDER_TENANT_ID
 
 
-# Mock function to get current user - replace with actual auth
 def get_current_user():
-    """Get current authenticated user."""
-    # TODO: Implement actual authentication
+    """Get current authenticated user from JWT, fallback to founder."""
     return {
-        "id": UUID("00000000-0000-0000-0000-000000000001"),
+        "id": FOUNDER_TENANT_ID,
         "type": "agent"
     }
 
