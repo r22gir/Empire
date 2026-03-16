@@ -473,7 +473,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
                     <div style={{ padding: '16px 20px', background: '#faf9f7', borderTop: '1px solid #ece8e0' }}>
                       <Suspense fallback={<div className="flex items-center justify-center py-8"><Loader2 size={20} className="text-[#7c3aed] animate-spin" /></div>}>
                         <PhotoAnalysisPanel compact onAnalysisComplete={(type: string, data: any) => {
-                          console.log('Analysis for quote', analyzingQuoteId, type, data);
+                          void(type); void(data); // Analysis complete for quote
                         }} />
                       </Suspense>
                     </div>
