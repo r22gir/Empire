@@ -11,25 +11,28 @@ from app.config.business_config import biz
 
 # ── Tier definitions ─────────────────────────────────────────────────
 
-TIER_ORDER = ["free", "lite", "pro", "empire"]
+TIER_ORDER = ["free", "lite", "pro", "empire", "founder"]
 
 TIER_LIMITS = {
     "free": {
         "max_desks": 0,
         "max_tools": 5,
         "tokens_per_month": 100,
+        "ai_tokens_per_month": 0,
         "features": {"chat", "contacts", "tasks", "quotes_basic"},
     },
     "lite": {
         "max_desks": 3,
         "max_tools": 12,
         "tokens_per_month": 1_000,
+        "ai_tokens_per_month": 50_000,
         "features": {"chat", "contacts", "tasks", "quotes_basic", "web_search", "telegram"},
     },
     "pro": {
         "max_desks": 12,
         "max_tools": 23,
         "tokens_per_month": 10_000,
+        "ai_tokens_per_month": 200_000,
         "features": {
             "chat", "contacts", "tasks", "quotes_basic", "quotes_advanced",
             "web_search", "telegram", "presentations", "brain", "desks",
@@ -39,6 +42,18 @@ TIER_LIMITS = {
         "max_desks": 999,
         "max_tools": 999,
         "tokens_per_month": 100_000,
+        "ai_tokens_per_month": 1_000_000,
+        "features": {
+            "chat", "contacts", "tasks", "quotes_basic", "quotes_advanced",
+            "web_search", "telegram", "presentations", "brain", "desks",
+            "api_access", "custom_desks",
+        },
+    },
+    "founder": {
+        "max_desks": 999,
+        "max_tools": 999,
+        "tokens_per_month": 999_999_999,
+        "ai_tokens_per_month": 999_999_999,
         "features": {
             "chat", "contacts", "tasks", "quotes_basic", "quotes_advanced",
             "web_search", "telegram", "presentations", "brain", "desks",
@@ -121,3 +136,65 @@ def require_tool(tool_name: str):
         return None
     required = TOOL_TIERS.get(tool_name, "free")
     return f"Tool '{tool_name}' requires {required} tier (current: {biz.tier})"
+
+
+def check_ai_token_budget(user_tier: str = None) -> dict:
+    """Check if user is within their AI token budget for the month.
+
+    Returns dict with allowed (bool), used, limit, and remaining.
+    """
+    tier = (user_tier or biz.tier).lower()
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    token_limit = limits["ai_tokens_per_month"]
+
+    # Founder tier is unlimited
+    if tier == "founder":
+        return {"allowed": True, "used": 0, "limit": token_limit, "remaining": token_limit}
+
+    # Check token usage from token_usage.db
+    try:
+        import sqlite3
+        from pathlib import Path
+        from datetime import datetime
+
+        db_path = Path(__file__).resolve().parent.parent.parent / "data" / "token_usage.db"
+        if not db_path.exists():
+            return {"allowed": True, "used": 0, "limit": token_limit, "remaining": token_limit}
+
+        month_start = datetime.now().strftime("%Y-%m-01")
+        conn = sqlite3.connect(str(db_path))
+        row = conn.execute(
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM token_log WHERE timestamp >= ?",
+            (month_start,)
+        ).fetchone()
+        conn.close()
+
+        used = row[0] if row else 0
+        remaining = max(0, token_limit - used)
+
+        return {
+            "allowed": used < token_limit,
+            "used": used,
+            "limit": token_limit,
+            "remaining": remaining,
+        }
+    except Exception:
+        # If we can't check, allow the request
+        return {"allowed": True, "used": 0, "limit": token_limit, "remaining": token_limit}
+
+
+def enforce_ai_token_limit(user_tier: str = None):
+    """FastAPI dependency — raises 429 if AI token budget is exhausted."""
+    def checker():
+        budget = check_ai_token_budget(user_tier)
+        if not budget["allowed"]:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": f"AI token budget exhausted for {(user_tier or biz.tier).lower()} tier",
+                    "used": budget["used"],
+                    "limit": budget["limit"],
+                    "upgrade_url": "https://studio.empirebox.store/pricing",
+                },
+            )
+    return checker
