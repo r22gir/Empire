@@ -1,167 +1,108 @@
 """
-AI service for interfacing with EmpireBox agents.
+AI service for interfacing with Empire AI routing.
+Routes through ai_router.py (Grok -> Claude -> Groq -> Ollama).
 """
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import User
-from app.services.economic_service import EconomicService
-from app.config import settings
 
 
 class AIService:
     """
-    Service for AI-powered features using EmpireBox agents.
-    
-    This would integrate with the empire_box_agents module when available.
-    For now, provides mock implementations with economic tracking.
+    Service for AI-powered features using Empire AI routing.
+    Routes all calls through app.services.max.ai_router.
     """
-    
+
     def __init__(self, user: User, db: Optional[AsyncSession] = None):
         self.user = user
         self.db = db
-        # TODO: Initialize TokenManager and RequestRouter from empire_box_agents
-        # self.token_manager = TokenManager(user_id=str(user.id), tier=user.tier)
-        # self.router = RequestRouter(token_manager=self.token_manager)
-    
-    async def generate_description(self, product_info: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Generate product description using AI.
-        
-        Args:
-            product_info: Dictionary with title, category, condition, photos
-            
-        Returns:
-            Dictionary with description and tokens_used
-        """
-        # TODO: Implement actual AI generation
-        # result = await self.router.route_request(
-        #     task_type="content_generation",
-        #     prompt=f"Write product description for: {product_info}",
-        #     complexity="high"
-        # )
-        
-        # Mock implementation
-        description = f"High-quality {product_info.get('title', 'item')} in excellent condition."
-        input_tokens = 50
-        output_tokens = 100
-        
-        # Track economic cost if DB session available
-        if self.db and settings.economic_enabled:
-            economic_service = EconomicService(self.db)
-            await economic_service.record_ai_cost(
-                entity_type="user",
-                entity_id=self.user.id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                model="gpt-4",
-                description="Generate product description"
+
+    async def _call_ai(self, prompt: str, system: str = "You are a helpful business assistant.", max_tokens: int = 500) -> str:
+        """Route AI call through Empire AI router."""
+        try:
+            from app.services.max.ai_router import route_ai_call
+            result = await route_ai_call(
+                messages=[{"role": "user", "content": prompt}],
+                system=system,
+                max_tokens=max_tokens
             )
-        
+            return result.get("content", "")
+        except Exception:
+            return ""
+
+    async def generate_description(self, product_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate product description using AI."""
+        title = product_info.get('title', 'item')
+        category = product_info.get('category', '')
+        condition = product_info.get('condition', 'good')
+
+        prompt = f"Write a compelling 2-3 sentence product listing description for: {title}. Category: {category}. Condition: {condition}."
+        description = await self._call_ai(prompt, system="You are an expert product copywriter. Write concise, compelling descriptions.")
+
+        if not description:
+            description = f"High-quality {title} in {condition} condition."
+
         return {
             "description": description,
-            "tokens_used": input_tokens + output_tokens,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens
+            "tokens_used": len(description.split()) * 2,
+            "input_tokens": len(prompt.split()),
+            "output_tokens": len(description.split())
         }
-    
+
     async def enhance_description(self, current_description: str) -> Dict[str, Any]:
-        """
-        Enhance existing product description.
-        
-        Args:
-            current_description: Current description text
-            
-        Returns:
-            Dictionary with enhanced_description and tokens_used
-        """
-        # Mock implementation
-        enhanced = f"{current_description}\n\nEnhanced with additional details and SEO keywords."
-        input_tokens = len(current_description.split()) * 2  # Rough estimate
-        output_tokens = 60
-        
-        # Track economic cost if DB session available
-        if self.db and settings.economic_enabled:
-            economic_service = EconomicService(self.db)
-            await economic_service.record_ai_cost(
-                entity_type="user",
-                entity_id=self.user.id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                model="gpt-4",
-                description="Enhance product description"
-            )
-        
+        """Enhance existing product description."""
+        prompt = f"Improve this product description with better details and SEO keywords. Keep it concise:\n\n{current_description}"
+        enhanced = await self._call_ai(prompt, system="You are an expert product copywriter. Enhance descriptions for better sales.")
+
+        if not enhanced:
+            enhanced = current_description
+
         return {
             "enhanced_description": enhanced,
-            "tokens_used": input_tokens + output_tokens,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens
+            "tokens_used": len(enhanced.split()) * 2,
+            "input_tokens": len(current_description.split()),
+            "output_tokens": len(enhanced.split())
         }
-    
+
     async def suggest_price(self, product_info: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Suggest pricing for a product.
-        
-        Args:
-            product_info: Dictionary with title, category, condition, description
-            
-        Returns:
-            Dictionary with suggested_price, price_range, reasoning
-        """
-        # Mock implementation
-        input_tokens = 80
-        output_tokens = 40
-        
-        # Track economic cost if DB session available
-        if self.db and settings.economic_enabled:
-            economic_service = EconomicService(self.db)
-            await economic_service.record_ai_cost(
-                entity_type="user",
-                entity_id=self.user.id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                model="gpt-4",
-                description="Suggest product price"
-            )
-        
-        return {
-            "suggested_price": 49.99,
-            "price_range": {"min": 39.99, "max": 59.99},
-            "reasoning": "Based on similar items and market conditions",
-            "tokens_used": input_tokens + output_tokens,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens
-        }
-    
+        """Suggest pricing for a product."""
+        title = product_info.get('title', 'item')
+        category = product_info.get('category', '')
+        condition = product_info.get('condition', 'good')
+
+        prompt = f"Suggest a fair market price for: {title}. Category: {category}. Condition: {condition}. Reply with JSON: {{\"price\": X, \"min\": X, \"max\": X, \"reasoning\": \"...\"}}"
+        response = await self._call_ai(prompt, system="You are a pricing expert. Always respond with valid JSON.")
+
+        # Try to parse JSON response, fallback to defaults
+        try:
+            import json
+            data = json.loads(response)
+            return {
+                "suggested_price": data.get("price", 49.99),
+                "price_range": {"min": data.get("min", 39.99), "max": data.get("max", 59.99)},
+                "reasoning": data.get("reasoning", "Based on market analysis"),
+                "tokens_used": len(response.split()) * 2,
+            }
+        except Exception:
+            return {
+                "suggested_price": 49.99,
+                "price_range": {"min": 39.99, "max": 59.99},
+                "reasoning": "Default estimate — AI pricing unavailable",
+                "tokens_used": 0,
+            }
+
     async def draft_message_response(
         self,
         message_content: str,
         context: Optional[str] = None
     ) -> str:
-        """
-        Generate AI draft response for a message.
-        
-        Args:
-            message_content: Original message content
-            context: Optional additional context
-            
-        Returns:
-            Draft response text
-        """
-        # Mock implementation
-        input_tokens = len(message_content.split()) * 2
-        output_tokens = 50
-        
-        # Track economic cost if DB session available
-        if self.db and settings.economic_enabled:
-            economic_service = EconomicService(self.db)
-            await economic_service.record_ai_cost(
-                entity_type="user",
-                entity_id=self.user.id,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                model="gpt-4",
-                description="Draft message response"
-            )
-        
-        return f"Thank you for your interest! {message_content[:50]}... I'll get back to you shortly."
+        """Generate AI draft response for a message."""
+        ctx = f"\nContext: {context}" if context else ""
+        prompt = f"Draft a professional, friendly reply to this customer message:{ctx}\n\nMessage: {message_content}"
+
+        response = await self._call_ai(prompt, system="You are a professional business assistant. Write friendly, helpful responses.")
+
+        if not response:
+            response = f"Thank you for reaching out! I'll review your message and get back to you shortly."
+
+        return response
