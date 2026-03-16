@@ -611,6 +611,159 @@ def create_invoice_from_job(request: Request, job_id: str):
         return {"invoice": inv, "job_id": job_id}
 
 
+# ── Invoice PDF ──────────────────────────────────────────────────────
+
+@router.get("/invoices/{invoice_id}/pdf")
+def invoice_pdf(request: Request, invoice_id: str):
+    """Generate a branded PDF for an invoice."""
+    import weasyprint
+
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+
+        invoice = _enrich_invoice(dict_row(row))
+
+        # Get customer info
+        customer = None
+        if invoice.get("customer_id"):
+            cust_row = conn.execute(
+                "SELECT * FROM customers WHERE id = ?", (invoice["customer_id"],)
+            ).fetchone()
+            if cust_row:
+                customer = dict_row(cust_row)
+
+    # Build line items table
+    items_html = ""
+    for item in invoice.get("line_items") or []:
+        desc = item.get("description", "")
+        qty = item.get("quantity", 1)
+        unit_price = item.get("unit_price", item.get("rate", 0))
+        total = item.get("total", item.get("amount", 0))
+        items_html += f"""<tr>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd">{desc}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:center">{qty}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${unit_price:,.2f}</td>
+            <td style="padding:10px 12px;border-bottom:1px solid #e8e4dd;text-align:right">${total:,.2f}</td>
+        </tr>"""
+
+    if not items_html:
+        items_html = f"""<tr>
+            <td style="padding:10px 12px" colspan="3">Services as quoted</td>
+            <td style="padding:10px 12px;text-align:right">${invoice.get('subtotal', 0):,.2f}</td>
+        </tr>"""
+
+    customer_name = customer["name"] if customer else "Customer"
+    customer_email = customer.get("email", "") if customer else ""
+    customer_phone = customer.get("phone", "") if customer else ""
+    customer_address = customer.get("address", "") if customer else ""
+
+    customer_block = f"<strong>{customer_name}</strong>"
+    if customer_email:
+        customer_block += f"<br>{customer_email}"
+    if customer_phone:
+        customer_block += f"<br>{customer_phone}"
+    if customer_address:
+        customer_block += f"<br>{customer_address}"
+
+    status_color = {"draft": "#888", "sent": "#2563eb", "partial": "#d97706", "paid": "#16a34a", "overdue": "#dc2626", "cancelled": "#6b7280"}.get(invoice.get("status", "draft"), "#888")
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  @page {{ size: letter; margin: 0.75in; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; line-height: 1.5; }}
+  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 3px solid #b8960c; }}
+  .logo {{ font-size: 24pt; font-weight: 800; color: #1a1a2e; }}
+  .logo span {{ color: #b8960c; }}
+  .invoice-title {{ text-align: right; }}
+  .invoice-title h1 {{ margin: 0; font-size: 28pt; color: #b8960c; letter-spacing: 2px; }}
+  .invoice-number {{ font-size: 11pt; color: #666; margin-top: 4px; }}
+  .status {{ display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 9pt; font-weight: 600; text-transform: uppercase; color: white; background: {status_color}; }}
+  .info-grid {{ display: flex; justify-content: space-between; margin: 24px 0; }}
+  .info-box {{ flex: 1; }}
+  .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: #b8960c; letter-spacing: 1px; }}
+  table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
+  thead {{ background: #f5f3ef; }}
+  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid #b8960c; }}
+  .totals {{ margin-left: auto; width: 280px; }}
+  .totals tr td {{ padding: 6px 12px; }}
+  .totals .total-row {{ font-size: 14pt; font-weight: 700; color: #1a1a2e; border-top: 2px solid #b8960c; }}
+  .footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
+</style></head><body>
+
+<div class="header">
+  <div>
+    <div class="logo">Empire <span>Workroom</span></div>
+    <div style="font-size:9pt;color:#666;margin-top:4px">Custom Window Treatments & Upholstery</div>
+  </div>
+  <div class="invoice-title">
+    <h1>INVOICE</h1>
+    <div class="invoice-number">{invoice.get('invoice_number', '')}</div>
+    <div style="margin-top:6px"><span class="status">{invoice.get('status', 'draft')}</span></div>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-box">
+    <h3>Bill To</h3>
+    <p>{customer_block}</p>
+  </div>
+  <div class="info-box" style="text-align:right">
+    <h3>Invoice Details</h3>
+    <p>
+      <strong>Date:</strong> {invoice.get('created_at', '')[:10]}<br>
+      <strong>Due:</strong> {invoice.get('due_date', 'N/A')}<br>
+      <strong>Terms:</strong> {invoice.get('terms', 'Net 30')}
+    </p>
+  </div>
+</div>
+
+<table>
+  <thead><tr>
+    <th>Description</th>
+    <th style="text-align:center">Qty</th>
+    <th style="text-align:right">Unit Price</th>
+    <th style="text-align:right">Amount</th>
+  </tr></thead>
+  <tbody>{items_html}</tbody>
+</table>
+
+<table class="totals">
+  <tr><td>Subtotal</td><td style="text-align:right">${invoice.get('subtotal', 0):,.2f}</td></tr>
+  <tr><td>Tax ({invoice.get('tax_rate', 0)*100:.1f}%)</td><td style="text-align:right">${invoice.get('tax_amount', 0):,.2f}</td></tr>
+  <tr class="total-row"><td>Total</td><td style="text-align:right">${invoice.get('total', 0):,.2f}</td></tr>
+  <tr><td>Paid</td><td style="text-align:right">${invoice.get('amount_paid', 0):,.2f}</td></tr>
+  <tr style="font-weight:700;color:#b8960c"><td>Balance Due</td><td style="text-align:right">${invoice.get('balance_due', 0):,.2f}</td></tr>
+</table>
+
+{"<div style='margin:20px 0;padding:12px;background:#f5f3ef;border-radius:8px;font-size:10pt'><strong>Notes:</strong> " + invoice.get('notes', '') + "</div>" if invoice.get('notes') else ""}
+
+<div class="footer">
+  Empire Workroom &mdash; Thank you for your business<br>
+  Questions? Contact us at your convenience.
+</div>
+
+</body></html>"""
+
+    pdf_bytes = weasyprint.HTML(string=html).write_pdf()
+
+    # Save PDF
+    pdf_dir = Path(__file__).resolve().parent.parent.parent / "data" / "invoices" / "pdf"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = pdf_dir / f"{invoice['invoice_number']}.pdf"
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+
+    from fastapi.responses import Response as FastResponse
+    return FastResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{invoice["invoice_number"]}.pdf"'},
+    )
+
+
 # ── Payments ─────────────────────────────────────────────────────────
 
 @limiter.limit("30/minute")
