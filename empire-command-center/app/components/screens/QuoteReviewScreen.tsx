@@ -64,8 +64,27 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
 
   const handleAction = async (action: string) => {
     if (action === 'pdf') {
-      window.open(API.replace('/api/v1', '') + `/api/v1/quotes/${quote.id}/pdf`, '_blank');
-      showFeedback('Opening PDF...');
+      showFeedback('Generating PDF...');
+      try {
+        const res = await fetch(`${API}/quotes/${quote.id}/pdf?skip_verification=true`, { method: 'POST' });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+          showFeedback(err.error || 'PDF generation failed');
+          return;
+        }
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `${quote.quote_number || quote.id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+        showFeedback('PDF downloaded!');
+      } catch {
+        showFeedback('PDF generation failed');
+      }
     } else if (action === 'telegram') {
       showFeedback('Sending to Telegram...');
       try {

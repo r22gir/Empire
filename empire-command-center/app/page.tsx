@@ -45,6 +45,7 @@ import EcosystemProductPage from './components/screens/EcosystemProductPage';
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
+import TasksScreen from './components/screens/TasksScreen';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -115,12 +116,18 @@ export default function CommandCenter() {
 
   const handleModuleClick = useCallback((module: string) => {
     // Modules that map to Workroom sections
+    // Tasks gets its own dedicated screen
+    if (module === 'tasks') {
+      setActiveSection(null);
+      setActiveScreen('tasks');
+      return;
+    }
+
     const workroomSections: Record<string, string> = {
       quotes: 'quotes',
       invoices: 'invoices',
       crm: 'customers',
       inventory: 'inventory',
-      tasks: 'tasks',
     };
 
     if (workroomSections[module]) {
@@ -224,6 +231,7 @@ export default function CommandCenter() {
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
+    if (activeScreen === 'tasks') return <TasksScreen />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;

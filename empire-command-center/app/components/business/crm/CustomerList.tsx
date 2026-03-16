@@ -24,6 +24,7 @@ function fmt(n: number): string {
 
 interface CustomerListProps {
   onSelectCustomer?: (id: string) => void;
+  business?: string;
 }
 
 export default function CustomerList({ onSelectCustomer }: CustomerListProps = {}) {

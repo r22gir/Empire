@@ -149,7 +149,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
           label="Download PDF"
           icon={<FileDown size={14} />}
           color="#b8960c"
-          onClick={() => handleAction('pdf', `/quotes/${quoteId}/pdf`)}
+          onClick={() => handleAction('pdf', `/quotes/${quoteId}/pdf?skip_verification=true`)}
         />
         <ActionBtn
           id="invoice"

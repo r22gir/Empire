@@ -68,13 +68,14 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
   // Fetch module stats
   const fetchModuleStats = useCallback(async () => {
     const stats: Record<string, string> = {};
-    const [quotes, invoices, customers, inventory, tickets, costs] = await Promise.all([
+    const [quotes, invoices, customers, inventory, tickets, costs, tasksDash] = await Promise.all([
       safeFetch(`${API}/quotes`),
       safeFetch(`${API}/finance/invoices?limit=1`),
       safeFetch(`${API}/crm/customers?limit=1`),
       safeFetch(`${API}/inventory/items?limit=1`),
       safeFetch(`${API}/tickets/?status=open&limit=1`),
       safeFetch(`${API}/costs/overview?days=30`),
+      safeFetch(`${API}/tasks/dashboard`),
     ]);
     stats.quotes = quotes ? `${(quotes.quotes || []).filter((q: any) => q.status !== 'accepted').length} open` : 'Offline';
     stats.invoices = invoices ? `${invoices.total ?? 0} total` : 'Offline';
@@ -84,6 +85,12 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
     stats.costs = costs?.today?.cost_usd ? `$${costs.today.cost_usd.toFixed(2)} today` : 'Token tracking';
     stats.shipping = '--';
     stats.reports = 'Weekly ready';
+    if (tasksDash?.totals) {
+      const active = (tasksDash.totals.todo || 0) + (tasksDash.totals.in_progress || 0) + (tasksDash.totals.waiting || 0);
+      stats.tasks = `${active} active`;
+    } else {
+      stats.tasks = '--';
+    }
     setModuleStats(stats);
   }, [safeFetch]);
 
@@ -113,6 +120,7 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
         { id: 'invoices', label: 'Invoices', stat: moduleStats.invoices || '...' },
         { id: 'crm', label: 'CRM', stat: moduleStats.crm || '...' },
         { id: 'inventory', label: 'Inventory', stat: moduleStats.inventory || '...' },
+        { id: 'tasks', label: 'Tasks', stat: moduleStats.tasks || '...' },
         { id: 'shipping', label: 'Shipping', stat: moduleStats.shipping || '--' },
         { id: 'costs', label: 'Costs', stat: moduleStats.costs || '...' },
       ];
@@ -122,12 +130,14 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
         { id: 'craft-crm', label: 'CRM', stat: moduleStats.crm || '...' },
         { id: 'inventory', label: 'Materials', stat: moduleStats.inventory || '...' },
         { id: 'quotes', label: 'Orders', stat: moduleStats.quotes || '...' },
+        { id: 'tasks', label: 'Tasks', stat: moduleStats.tasks || '...' },
         { id: 'costs', label: 'Costs', stat: moduleStats.costs || '...' },
       ];
     }
     // MAX Desk / Owner — empire-wide overview
     return [
       { id: 'empire-crm', label: 'CRM', stat: moduleStats.crm || '...' },
+      { id: 'tasks', label: 'Tasks', stat: moduleStats.tasks || '...' },
       { id: 'costs', label: 'AI Costs', stat: moduleStats.costs || '...' },
       { id: 'tickets', label: 'Tickets', stat: moduleStats.tickets || '...' },
       { id: 'reports', label: 'Reports', stat: moduleStats.reports || '...' },

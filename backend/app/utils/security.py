@@ -5,7 +5,15 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+
+# Import settings — use uppercase field names from core config
 from app.config import settings
+
+# Alias uppercase config fields for cleaner access
+_SECRET_KEY = settings.SECRET_KEY
+_ALGORITHM = settings.ALGORITHM
+_ACCESS_EXPIRE = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+_REFRESH_EXPIRE = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -36,10 +44,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
-    
+        expire = datetime.utcnow() + timedelta(minutes=_ACCESS_EXPIRE)
+
     to_encode.update({"exp": expire, "type": "access"})
-    encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+    encoded_jwt = jwt.encode(to_encode, _SECRET_KEY, algorithm=_ALGORITHM)
     return encoded_jwt
 
 
@@ -54,9 +62,9 @@ def create_refresh_token(data: dict) -> str:
         Encoded JWT refresh token string
     """
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=settings.refresh_token_expire_days)
+    expire = datetime.utcnow() + timedelta(days=_REFRESH_EXPIRE)
     to_encode.update({"exp": expire, "type": "refresh"})
-    encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+    encoded_jwt = jwt.encode(to_encode, _SECRET_KEY, algorithm=_ALGORITHM)
     return encoded_jwt
 
 
@@ -74,7 +82,7 @@ def decode_token(token: str) -> dict:
         JWTError: If token is invalid or expired
     """
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+        payload = jwt.decode(token, _SECRET_KEY, algorithms=[_ALGORITHM])
         return payload
     except JWTError:
         raise

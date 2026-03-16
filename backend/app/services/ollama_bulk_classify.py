@@ -16,6 +16,7 @@ import shutil
 import time
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from PIL import Image
@@ -28,12 +29,16 @@ PRESORTED_FILE = "/data/images/presorted_inventory.json"
 PROGRESS_FILE = "/data/images/ollama_progress.json"
 CLASSIFIED_DIR = "/data/images/classified"
 OLLAMA_URL = "http://localhost:11434"
-OLLAMA_MODEL = "llava"
 
-BATCH_SIZE = 1              # One at a time for CPU (no parallelism)
+# Model selection: llava (7B, more accurate) or moondream (1B, faster)
+# Set OLLAMA_MODEL env var to override, e.g.: OLLAMA_MODEL=moondream
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llava")
+
+WORKERS = int(os.environ.get("CLASSIFY_WORKERS", "4"))  # Parallel workers (Xeon has 20 cores)
 SAVE_EVERY = 25             # Save progress every N images
-PAUSE_BETWEEN = 1.0         # Seconds between images (let CPU breathe)
+PAUSE_BETWEEN = 0.1         # Minimal pause (was 1.0s — thermal OK on Xeon)
 CONFIDENCE_THRESHOLD = 0.6  # Below this = ambiguous, goes to Layer 4 (Grok)
+IMAGE_MAX_SIZE = int(os.environ.get("IMAGE_MAX_SIZE", "512"))  # Was 768 — smaller = faster
 
 CLASSIFY_PROMPT = """You are an image classifier for two businesses:
 1. Empire Workroom - drapery, upholstery, curtains, blinds, fabric work, sewing
@@ -57,8 +62,10 @@ Categories:
 """
 
 
-def prepare_image(filepath, max_size=768):
+def prepare_image(filepath, max_size=None):
     """Resize for Ollama (smaller = faster on CPU)."""
+    if max_size is None:
+        max_size = IMAGE_MAX_SIZE
     if HAS_PIL:
         try:
             with Image.open(filepath) as img:
@@ -168,7 +175,11 @@ def run_bulk_classification():
     print(f"Total needing AI:   {len(needs_ai):,}")
     print(f"Already processed:  {len(already_done):,}")
     print(f"Remaining:          {len(todo):,}")
-    est_hours = len(todo) * 45 / 3600  # ~45s average per image
+    print(f"Model:              {OLLAMA_MODEL}")
+    print(f"Workers:            {WORKERS}")
+    print(f"Image max size:     {IMAGE_MAX_SIZE}px")
+    est_per_img = 10 if OLLAMA_MODEL == "moondream" else 30  # rough estimate
+    est_hours = len(todo) * est_per_img / WORKERS / 3600
     print(f"Estimated time:     {est_hours:.1f} hours ({est_hours/24:.1f} days)")
     print(f"{'='*60}")
     print(f"Starting... (safe to Ctrl+C and resume later)\n")
@@ -179,71 +190,89 @@ def run_bulk_classification():
         "personal": 0, "ambiguous": 0, "errors": 0
     })
 
-    for i, img in enumerate(todo):
+    def _process_image(img):
+        """Classify one image — called from thread pool."""
         filepath = img["path"]
         if not os.path.exists(filepath):
-            already_done.add(filepath)
-            continue
+            return img, None, 0
 
         start = time.time()
         result = classify_one(filepath)
         elapsed = time.time() - start
+        return img, result, elapsed
 
-        # Update image in the inventory
-        img.update(result)
-        img["classified_at"] = datetime.now().isoformat()
+    processed_count = 0
+    batch_start = time.time()
 
-        # Handle ambiguous
-        if result["confidence"] < CONFIDENCE_THRESHOLD:
-            img["pre_tag"] = "ambiguous"
-            stats["ambiguous"] = stats.get("ambiguous", 0) + 1
-        else:
-            img["pre_tag"] = result["business"]
-            stats[result["business"]] = stats.get(result["business"], 0) + 1
+    with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+        # Submit work in chunks to allow periodic saves
+        chunk_size = max(SAVE_EVERY, WORKERS * 2)
+        for chunk_start in range(0, len(todo), chunk_size):
+            chunk = todo[chunk_start:chunk_start + chunk_size]
+            futures = {executor.submit(_process_image, img): img for img in chunk}
 
-        # Copy to classified folder
-        biz = img.get("pre_tag", "general")
-        cat = result.get("category", "misc")
-        if biz == "ambiguous":
-            dest_dir = os.path.join(CLASSIFIED_DIR, "ambiguous")
-        elif biz == "personal":
-            dest_dir = os.path.join(CLASSIFIED_DIR, "personal")
-        else:
-            dest_dir = os.path.join(CLASSIFIED_DIR, biz, cat or "misc")
+            for future in as_completed(futures):
+                img, result, elapsed = future.result()
 
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, img["filename"])
-        if not os.path.exists(dest):
-            try:
-                shutil.copy2(filepath, dest)
-                img["classified_path"] = dest
-            except (OSError, IOError):
-                pass
+                if result is None:
+                    already_done.add(img["path"])
+                    continue
 
-        if result.get("error"):
-            stats["errors"] = stats.get("errors", 0) + 1
+                # Update image in the inventory
+                img.update(result)
+                img["classified_at"] = datetime.now().isoformat()
 
-        already_done.add(filepath)
-        stats["processed"] = len(already_done)
+                # Handle ambiguous
+                if result["confidence"] < CONFIDENCE_THRESHOLD:
+                    img["pre_tag"] = "ambiguous"
+                    stats["ambiguous"] = stats.get("ambiguous", 0) + 1
+                else:
+                    img["pre_tag"] = result["business"]
+                    stats[result["business"]] = stats.get(result["business"], 0) + 1
 
-        # Progress output
-        done = len(already_done)
-        total = len(needs_ai)
-        remaining = total - done
-        eta_hours = remaining * elapsed / 3600
-        print(f"[{done}/{total}] {elapsed:.1f}s | {img['filename'][:30]:30s} | "
-              f"{result['business']:16s} | conf={result['confidence']:.2f} | "
-              f"ETA: {eta_hours:.1f}h")
+                # Copy to classified folder
+                biz = img.get("pre_tag", "general")
+                cat = result.get("category", "misc")
+                if biz == "ambiguous":
+                    dest_dir = os.path.join(CLASSIFIED_DIR, "ambiguous")
+                elif biz == "personal":
+                    dest_dir = os.path.join(CLASSIFIED_DIR, "personal")
+                else:
+                    dest_dir = os.path.join(CLASSIFIED_DIR, biz, cat or "misc")
 
-        # Save progress periodically
-        if (i + 1) % SAVE_EVERY == 0:
+                os.makedirs(dest_dir, exist_ok=True)
+                dest = os.path.join(dest_dir, img["filename"])
+                if not os.path.exists(dest):
+                    try:
+                        shutil.copy2(img["path"], dest)
+                        img["classified_path"] = dest
+                    except (OSError, IOError):
+                        pass
+
+                if result.get("error"):
+                    stats["errors"] = stats.get("errors", 0) + 1
+
+                already_done.add(img["path"])
+                stats["processed"] = len(already_done)
+                processed_count += 1
+
+                # Progress output
+                done = len(already_done)
+                total = len(needs_ai)
+                remaining = total - done
+                avg_elapsed = (time.time() - batch_start) / max(processed_count, 1)
+                eta_hours = remaining * avg_elapsed / WORKERS / 3600
+                print(f"[{done}/{total}] {elapsed:.1f}s | {img['filename'][:30]:30s} | "
+                      f"{result['business']:16s} | conf={result['confidence']:.2f} | "
+                      f"ETA: {eta_hours:.1f}h")
+
+                time.sleep(PAUSE_BETWEEN)
+
+            # Save progress after each chunk
             save_progress(already_done, stats)
-            # Also save back to presorted inventory
             with open(PRESORTED_FILE, "w") as f:
                 json.dump(data, f)
-            print(f"  >> Progress saved ({done} done)")
-
-        time.sleep(PAUSE_BETWEEN)
+            print(f"  >> Progress saved ({len(already_done)} done)")
 
     # Final save
     save_progress(already_done, stats)

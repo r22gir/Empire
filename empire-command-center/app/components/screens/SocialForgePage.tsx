@@ -31,74 +31,25 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   failed: { bg: '#fef2f2', text: '#dc2626' },
 };
 
-// ============ MOCK DATA ============
+// ============ DEFAULT EMPTY STATE ============
 
-const MOCK_CONNECTED_ACCOUNTS = [
-  { id: 'ig-1', platform: 'instagram', handle: '@empire_workroom', displayName: 'Empire Workroom', avatar: 'E', followers: 2847, connected: true, lastSync: '2026-03-09T10:30:00Z', status: 'active' },
-  { id: 'fb-1', platform: 'facebook', handle: 'EmpireWorkroom', displayName: 'Empire Workroom LLC', avatar: 'E', followers: 1203, connected: true, lastSync: '2026-03-09T10:30:00Z', status: 'active' },
-  { id: 'x-1', platform: 'x', handle: '@empireworkroom', displayName: 'Empire Workroom', avatar: 'E', followers: 892, connected: true, lastSync: '2026-03-09T09:15:00Z', status: 'active' },
-  { id: 'tt-1', platform: 'tiktok', handle: '@empire.workroom', displayName: 'Empire Workroom', avatar: 'E', followers: 5621, connected: true, lastSync: '2026-03-09T08:00:00Z', status: 'active' },
-  { id: 'li-1', platform: 'linkedin', handle: 'empire-workroom', displayName: 'Empire Workroom', avatar: 'E', followers: 412, connected: false, lastSync: null, status: 'disconnected' },
-];
-
-const MOCK_SCHEDULED_POSTS = [
-  { id: 'sp-1', platform: 'instagram', content: 'Transform your living room with our handcrafted Roman shades. Every fold tells a story of precision and luxury. #CustomDrapes #InteriorDesign #LuxuryLiving', scheduledFor: '2026-03-10T09:00:00Z', status: 'scheduled', mediaType: 'image', engagement: null },
-  { id: 'sp-2', platform: 'facebook', content: 'Spring Sale: 20% off all custom window treatments! Book your free consultation today. Limited time offer for the DC Metro area.', scheduledFor: '2026-03-10T12:00:00Z', status: 'scheduled', mediaType: 'image', engagement: null },
-  { id: 'sp-3', platform: 'x', content: 'Nothing beats natural light filtered through premium linen drapes. What\'s your favorite window treatment style? #HomeDecor #WindowTreatments', scheduledFor: '2026-03-11T08:30:00Z', status: 'scheduled', mediaType: 'text', engagement: null },
-  { id: 'sp-4', platform: 'tiktok', content: 'Watch us transform this bay window from boring to breathtaking in 60 seconds! Full custom drapery installation timelapse.', scheduledFor: '2026-03-11T17:00:00Z', status: 'scheduled', mediaType: 'video', engagement: null },
-  { id: 'sp-5', platform: 'instagram', content: 'Behind the scenes at the Empire Workroom: Hand-stitching the perfect pleat. Quality takes time, and we never rush perfection.', scheduledFor: '2026-03-12T10:00:00Z', status: 'scheduled', mediaType: 'image', engagement: null },
-  { id: 'sp-6', platform: 'instagram', content: 'Client reveal day is always the best day! This Georgetown townhouse went from dated to stunning with our custom silk drapes.', scheduledFor: '2026-03-13T11:00:00Z', status: 'draft', mediaType: 'image', engagement: null },
-  { id: 'sp-7', platform: 'facebook', content: 'Meet our team! We are a family of artisans dedicated to crafting the finest custom window treatments in the DC Metro area.', scheduledFor: '2026-03-14T09:00:00Z', status: 'draft', mediaType: 'image', engagement: null },
-  { id: 'sp-8', platform: 'linkedin', content: 'How we built Empire Workroom from a single sewing machine to a full-service luxury window treatment studio. Our entrepreneurship story.', scheduledFor: '2026-03-15T08:00:00Z', status: 'draft', mediaType: 'text', engagement: null },
-];
-
-const MOCK_PAST_POSTS = [
-  { id: 'pp-1', platform: 'instagram', content: 'Our latest motorized sheer installation in Bethesda. Swipe to see the before & after!', postedAt: '2026-03-08T10:00:00Z', status: 'posted', engagement: { likes: 234, comments: 18, shares: 12, reach: 3420, impressions: 4890 } },
-  { id: 'pp-2', platform: 'facebook', content: 'Happy client spotlight! The Johnson family loves their new custom plantation shutters.', postedAt: '2026-03-07T12:00:00Z', status: 'posted', engagement: { likes: 89, comments: 7, shares: 5, reach: 1230, impressions: 1890 } },
-  { id: 'pp-3', platform: 'tiktok', content: 'POV: You ordered custom drapes and installation day finally arrives #satisfying #homedecor', postedAt: '2026-03-07T17:00:00Z', status: 'posted', engagement: { likes: 1892, comments: 143, shares: 267, reach: 28400, impressions: 42100 } },
-  { id: 'pp-4', platform: 'x', content: 'Pro tip: Measure twice, order once. Our free in-home consultation ensures perfect fit every time. Book yours today!', postedAt: '2026-03-06T09:00:00Z', status: 'posted', engagement: { likes: 45, comments: 3, shares: 8, reach: 890, impressions: 1240 } },
-  { id: 'pp-5', platform: 'instagram', content: 'Fabric Friday! This week we are working with a stunning Belgian linen in oatmeal. Perfect for that relaxed luxury look.', postedAt: '2026-03-05T10:00:00Z', status: 'posted', engagement: { likes: 312, comments: 24, shares: 19, reach: 4100, impressions: 5670 } },
-  { id: 'pp-6', platform: 'instagram', content: 'Spring collection preview: Soft pastels meet clean lines. Our new curated fabric collection drops next week!', postedAt: '2026-03-04T10:00:00Z', status: 'posted', engagement: { likes: 278, comments: 31, shares: 22, reach: 3890, impressions: 5230 } },
-];
-
-const MOCK_ANALYTICS = {
+const EMPTY_ANALYTICS = {
   overview: {
-    totalFollowers: 10975,
-    followerGrowth: 342,
-    followerGrowthPct: 3.2,
-    engagementRate: 4.7,
-    engagementChange: 0.8,
-    totalReach: 42930,
-    reachChange: 12.3,
-    totalImpressions: 61020,
-    impressionsChange: 8.7,
-    postsThisWeek: 6,
-    postsLastWeek: 4,
+    totalFollowers: 0,
+    followerGrowth: 0,
+    followerGrowthPct: 0,
+    engagementRate: 0,
+    engagementChange: 0,
+    totalReach: 0,
+    reachChange: 0,
+    totalImpressions: 0,
+    impressionsChange: 0,
+    postsThisWeek: 0,
+    postsLastWeek: 0,
   },
-  platformBreakdown: [
-    { platform: 'instagram', followers: 2847, engagement: 5.2, reach: 16080, posts: 12, topTime: '10:00 AM' },
-    { platform: 'facebook', followers: 1203, engagement: 3.1, reach: 5120, posts: 8, topTime: '12:00 PM' },
-    { platform: 'x', followers: 892, engagement: 2.4, reach: 3130, posts: 10, topTime: '8:30 AM' },
-    { platform: 'tiktok', followers: 5621, engagement: 8.9, reach: 15600, posts: 4, topTime: '5:00 PM' },
-    { platform: 'linkedin', followers: 412, engagement: 1.8, reach: 3000, posts: 2, topTime: '9:00 AM' },
-  ],
-  weeklyData: [
-    { day: 'Mon', posts: 2, engagement: 156, reach: 4200 },
-    { day: 'Tue', posts: 1, engagement: 89, reach: 2100 },
-    { day: 'Wed', posts: 1, engagement: 234, reach: 5800 },
-    { day: 'Thu', posts: 0, engagement: 0, reach: 0 },
-    { day: 'Fri', posts: 2, engagement: 312, reach: 7200 },
-    { day: 'Sat', posts: 0, engagement: 45, reach: 890 },
-    { day: 'Sun', posts: 0, engagement: 23, reach: 450 },
-  ],
-  topHashtags: [
-    { tag: '#CustomDrapes', uses: 18, avgEngagement: 4.8 },
-    { tag: '#InteriorDesign', uses: 24, avgEngagement: 5.1 },
-    { tag: '#LuxuryLiving', uses: 15, avgEngagement: 4.2 },
-    { tag: '#WindowTreatments', uses: 20, avgEngagement: 3.9 },
-    { tag: '#HomeDecor', uses: 22, avgEngagement: 4.5 },
-    { tag: '#DCMetro', uses: 10, avgEngagement: 3.2 },
-  ],
+  platformBreakdown: [] as { platform: string; followers: number; engagement: number; reach: number; posts: number; topTime: string }[],
+  weeklyData: [] as { day: string; posts: number; engagement: number; reach: number }[],
+  topHashtags: [] as { tag: string; uses: number; avgEngagement: number }[],
 };
 
 // ============ TAB CONFIG ============
@@ -119,13 +70,14 @@ const NAV_TABS: { id: Tab; label: string; icon: any }[] = [
 
 export default function SocialForgePage() {
   const [tab, setTab] = useState<Tab>('dashboard');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Dashboard state
-  const [connectedAccounts, setConnectedAccounts] = useState(MOCK_CONNECTED_ACCOUNTS);
-  const [scheduledPosts, setScheduledPosts] = useState(MOCK_SCHEDULED_POSTS);
-  const [pastPosts, setPastPosts] = useState(MOCK_PAST_POSTS);
-  const [analytics, setAnalytics] = useState(MOCK_ANALYTICS);
+  const [connectedAccounts, setConnectedAccounts] = useState<any[]>([]);
+  const [scheduledPosts, setScheduledPosts] = useState<any[]>([]);
+  const [pastPosts, setPastPosts] = useState<any[]>([]);
+  const [analytics, setAnalytics] = useState(EMPTY_ANALYTICS);
 
   // Compose state
   const [composeText, setComposeText] = useState('');
@@ -140,22 +92,61 @@ export default function SocialForgePage() {
   const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
   const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
 
-  // Try to load real data, fall back to mock
+  // Load real data from API
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [dash, postList] = await Promise.all([
-        fetch(`${SF_API}/dashboard`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`${SF_API}/posts`).then(r => r.ok ? r.json() : null).catch(() => null),
+      const [dashRes, postsRes, accountsRes] = await Promise.all([
+        fetch(`${SF_API}/dashboard`).then(r => { if (!r.ok) throw new Error('Dashboard fetch failed'); return r.json(); }),
+        fetch(`${SF_API}/posts`).then(r => { if (!r.ok) throw new Error('Posts fetch failed'); return r.json(); }),
+        fetch(`${SF_API}/accounts`).then(r => { if (!r.ok) throw new Error('Accounts fetch failed'); return r.json(); }),
       ]);
-      if (dash) {
-        // Merge real data if available
+
+      // Set accounts from API
+      if (Array.isArray(accountsRes)) {
+        setConnectedAccounts(accountsRes);
       }
-      if (postList && Array.isArray(postList) && postList.length > 0) {
-        // Could merge with mock data
+
+      // Separate posts by status
+      const posts = Array.isArray(postsRes) ? postsRes : [];
+      setScheduledPosts(posts.filter((p: any) => p.status === 'scheduled' || p.status === 'draft'));
+      setPastPosts(posts.filter((p: any) => p.status === 'posted'));
+
+      // Build analytics from dashboard response
+      if (dashRes) {
+        const byPlatform = dashRes.by_platform || {};
+        const platformBreakdown = Object.entries(byPlatform).map(([platform, data]: [string, any]) => ({
+          platform,
+          followers: data.followers || 0,
+          engagement: data.engagement_rate || 0,
+          reach: data.reach || 0,
+          posts: data.posts || 0,
+          topTime: data.best_time || '--',
+        }));
+
+        setAnalytics({
+          overview: {
+            totalFollowers: dashRes.total_engagement || 0,
+            followerGrowth: 0,
+            followerGrowthPct: 0,
+            engagementRate: dashRes.total_engagement || 0,
+            engagementChange: 0,
+            totalReach: dashRes.total_engagement || 0,
+            reachChange: 0,
+            totalImpressions: 0,
+            impressionsChange: 0,
+            postsThisWeek: dashRes.total_posts || 0,
+            postsLastWeek: 0,
+          },
+          platformBreakdown,
+          weeklyData: EMPTY_ANALYTICS.weeklyData,
+          topHashtags: EMPTY_ANALYTICS.topHashtags,
+        });
       }
-    } catch (_err) {
-      // Use mock data
+    } catch (err: any) {
+      console.error('SocialForge loadData error:', err);
+      setError(err.message || 'Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -178,72 +169,106 @@ export default function SocialForgePage() {
     const scheduledFor = composeScheduleDate && composeScheduleTime
       ? `${composeScheduleDate}T${composeScheduleTime}:00Z`
       : null;
+    const status = scheduledFor ? 'scheduled' : 'draft';
 
-    // Create a post for each selected platform
-    const newPosts = composePlatforms.map(plat => ({
-      id: `sp-${Date.now()}-${plat}`,
-      platform: plat,
-      content: composeText + (composeHashtags ? '\n\n' + composeHashtags : ''),
-      scheduledFor: scheduledFor || '',
-      status: scheduledFor ? 'scheduled' : 'draft',
-      mediaType: composeMediaName ? 'image' : 'text',
-      engagement: null,
-    }));
-
-    // Try API first
     try {
-      for (const post of newPosts) {
-        await fetch(`${SF_API}/posts`, {
+      for (const plat of composePlatforms) {
+        const res = await fetch(`${SF_API}/posts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            platform: post.platform,
-            content: post.content,
+            platform: plat,
+            content: composeText,
             hashtags: composeHashtags,
+            media_url: composeMediaName || null,
             scheduled_for: scheduledFor,
-            status: post.status,
+            status,
           }),
         });
+        if (!res.ok) throw new Error('Failed to create post');
       }
-    } catch (_err) {
-      // Use local state
+      // Clear form and reload data
+      setComposeText('');
+      setComposeHashtags('');
+      setComposeScheduleDate('');
+      setComposeScheduleTime('');
+      setComposeMediaName('');
+      await loadData();
+      setTab('calendar');
+    } catch (err: any) {
+      console.error('SocialForge compose error:', err);
+      setError(err.message || 'Failed to create post');
+    } finally {
+      setComposeSaving(false);
     }
-
-    setScheduledPosts(prev => [...newPosts, ...prev]);
-    setComposeText('');
-    setComposeHashtags('');
-    setComposeScheduleDate('');
-    setComposeScheduleTime('');
-    setComposeMediaName('');
-    setComposeSaving(false);
-    setTab('calendar');
   };
 
-  const handleDeletePost = (id: string) => {
+  const handleDeletePost = async (id: string) => {
+    // Optimistic update
     setScheduledPosts(prev => prev.filter(p => p.id !== id));
     setPastPosts(prev => prev.filter(p => p.id !== id));
-    fetch(`${SF_API}/posts/${id}`, { method: 'DELETE' }).catch(() => {});
+    try {
+      const res = await fetch(`${SF_API}/posts/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Delete failed');
+    } catch (err: any) {
+      console.error('SocialForge delete error:', err);
+      // Reload to restore correct state on failure
+      await loadData();
+    }
   };
 
-  const handleStatusChange = (id: string, status: string) => {
+  const handleStatusChange = async (id: string, status: string) => {
+    // Optimistic update
     setScheduledPosts(prev => prev.map(p => p.id === id ? { ...p, status } : p));
-    fetch(`${SF_API}/posts/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    }).catch(() => {});
+    try {
+      const res = await fetch(`${SF_API}/posts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error('Status update failed');
+      // If marked as posted, reload to move it to pastPosts
+      if (status === 'posted') await loadData();
+    } catch (err: any) {
+      console.error('SocialForge status change error:', err);
+      await loadData();
+    }
   };
 
-  const handleDisconnectAccount = (id: string) => {
+  const handleDisconnectAccount = async (id: string) => {
+    // Optimistic update
     setConnectedAccounts(prev =>
       prev.map(a => a.id === id ? { ...a, connected: false, status: 'disconnected' } : a)
     );
+    try {
+      const res = await fetch(`${SF_API}/accounts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'disconnected', connected: false }),
+      });
+      if (!res.ok) throw new Error('Disconnect failed');
+    } catch (err: any) {
+      console.error('SocialForge disconnect error:', err);
+      await loadData();
+    }
   };
 
-  const handleConnectAccount = (id: string) => {
+  const handleConnectAccount = async (id: string) => {
+    // Optimistic update
     setConnectedAccounts(prev =>
       prev.map(a => a.id === id ? { ...a, connected: true, status: 'active', lastSync: new Date().toISOString() } : a)
     );
+    try {
+      const res = await fetch(`${SF_API}/accounts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'active', connected: true }),
+      });
+      if (!res.ok) throw new Error('Connect failed');
+    } catch (err: any) {
+      console.error('SocialForge connect error:', err);
+      await loadData();
+    }
   };
 
   // Helpers
@@ -260,7 +285,7 @@ export default function SocialForgePage() {
   const getPostsForDate = (day: number) => {
     const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     return allPosts.filter(p => {
-      const pDate = (p as any).scheduledFor || (p as any).postedAt || '';
+      const pDate = (p as any).scheduledFor || (p as any).scheduled_for || (p as any).postedAt || (p as any).posted_at || '';
       return pDate.startsWith(dateStr);
     });
   };
@@ -301,12 +326,28 @@ export default function SocialForgePage() {
 
       <div className="flex-1 overflow-auto" style={{ padding: '24px 36px' }}>
 
+        {/* Error Banner */}
+        {error && (
+          <div style={{ padding: '12px 16px', marginBottom: 16, borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Error: {error}</span>
+            <button onClick={() => { setError(null); loadData(); }} style={{ fontSize: 11, fontWeight: 600, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div style={{ padding: '48px 0', textAlign: 'center' }}>
+            <Loader2 size={28} className="animate-spin mx-auto mb-3" style={{ color: '#ec4899' }} />
+            <p style={{ fontSize: 13, color: '#aaa' }}>Loading SocialForge data...</p>
+          </div>
+        )}
+
         {/* ==================== DASHBOARD TAB ==================== */}
-        {tab === 'dashboard' && (
+        {!loading && tab === 'dashboard' && (
           <div>
             {/* KPI Row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-              <DashKpi label="Total Followers" value={totalFollowers.toLocaleString()} icon={Users} change="+3.2%" positive />
+              <DashKpi label="Total Followers" value={totalFollowers.toLocaleString()} icon={Users} change={analytics.overview.followerGrowthPct ? `+${analytics.overview.followerGrowthPct}%` : undefined} positive />
               <DashKpi label="Engagement Rate" value={`${analytics.overview.engagementRate}%`} icon={Heart} change={`+${analytics.overview.engagementChange}%`} positive />
               <DashKpi label="Post Queue" value={queueCount.toString()} icon={Clock} sublabel={`${draftCount} drafts`} />
               <DashKpi label="Weekly Reach" value={analytics.overview.totalReach.toLocaleString()} icon={Eye} change={`+${analytics.overview.reachChange}%`} positive />
@@ -315,32 +356,39 @@ export default function SocialForgePage() {
             {/* Connected Accounts Strip */}
             <div className="empire-card" style={{ marginBottom: 16 }}>
               <div className="section-label" style={{ marginBottom: 12 }}>Connected Accounts</div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {connectedAccounts.map(acc => {
-                  const plat = PLATFORMS.find(p => p.id === acc.platform);
-                  const Icon = plat?.icon || Globe;
-                  return (
-                    <div key={acc.id} style={{
-                      padding: '12px',
-                      borderRadius: 12,
-                      background: acc.connected ? plat?.bgLight || '#f5f5f5' : '#f9f9f9',
-                      border: `1px solid ${acc.connected ? plat?.color + '30' : '#e5e5e5'}`,
-                      opacity: acc.connected ? 1 : 0.6,
-                    }}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <Icon size={16} style={{ color: plat?.color }} />
-                        <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{plat?.label}</span>
-                        {acc.connected && <CheckCircle size={12} style={{ color: '#16a34a' }} />}
+              {connectedAccounts.length === 0 ? (
+                <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                  <Users size={28} className="mx-auto mb-2" style={{ color: '#ddd' }} />
+                  <p style={{ fontSize: 12, color: '#aaa' }}>No accounts connected yet. Go to Accounts tab to connect your social profiles.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                  {connectedAccounts.map(acc => {
+                    const plat = PLATFORMS.find(p => p.id === acc.platform);
+                    const Icon = plat?.icon || Globe;
+                    return (
+                      <div key={acc.id} style={{
+                        padding: '12px',
+                        borderRadius: 12,
+                        background: acc.connected ? plat?.bgLight || '#f5f5f5' : '#f9f9f9',
+                        border: `1px solid ${acc.connected ? plat?.color + '30' : '#e5e5e5'}`,
+                        opacity: acc.connected ? 1 : 0.6,
+                      }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Icon size={16} style={{ color: plat?.color }} />
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{plat?.label}</span>
+                          {acc.connected && <CheckCircle size={12} style={{ color: '#16a34a' }} />}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#777' }}>{acc.handle}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a', marginTop: 4 }}>
+                          {(acc.followers || 0).toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#aaa' }}>followers</div>
                       </div>
-                      <div style={{ fontSize: 11, color: '#777' }}>{acc.handle}</div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a', marginTop: 4 }}>
-                        {acc.followers.toLocaleString()}
-                      </div>
-                      <div style={{ fontSize: 10, color: '#aaa' }}>followers</div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Upcoming Posts */}
@@ -372,6 +420,12 @@ export default function SocialForgePage() {
             {/* Recent Performance */}
             <div className="empire-card">
               <div className="section-label" style={{ marginBottom: 12 }}>Recent Post Performance</div>
+              {pastPosts.length === 0 ? (
+                <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                  <BarChart3 size={28} className="mx-auto mb-2" style={{ color: '#ddd' }} />
+                  <p style={{ fontSize: 12, color: '#aaa' }}>No posted content yet. Compose and publish posts to see performance data.</p>
+                </div>
+              ) : (
               <div className="space-y-2">
                 {pastPosts.slice(0, 4).map(post => {
                   const plat = PLATFORMS.find(p => p.id === post.platform);
@@ -386,7 +440,7 @@ export default function SocialForgePage() {
                             <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }} className="capitalize">{post.platform}</span>
                             <SFStatusBadge status={post.status} />
                             <span style={{ fontSize: 10, color: '#aaa' }}>
-                              {new Date(post.postedAt!).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              {(post.postedAt || post.posted_at || post.scheduledFor || post.scheduled_for) ? new Date(post.postedAt || post.posted_at || post.scheduledFor || post.scheduled_for).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}
                             </span>
                           </div>
                           <p style={{ fontSize: 12, color: '#555' }} className="line-clamp-1">{post.content.slice(0, 120)}</p>
@@ -396,7 +450,7 @@ export default function SocialForgePage() {
                             <span className="flex items-center gap-1 text-[#777]"><Heart size={11} /> {eng.likes}</span>
                             <span className="flex items-center gap-1 text-[#777]"><MessageCircle size={11} /> {eng.comments}</span>
                             <span className="flex items-center gap-1 text-[#777]"><Share2 size={11} /> {eng.shares}</span>
-                            <span className="flex items-center gap-1 text-[#777]"><Eye size={11} /> {eng.reach.toLocaleString()}</span>
+                            <span className="flex items-center gap-1 text-[#777]"><Eye size={11} /> {(eng.reach || 0).toLocaleString()}</span>
                           </div>
                         )}
                       </div>
@@ -404,12 +458,13 @@ export default function SocialForgePage() {
                   );
                 })}
               </div>
+              )}
             </div>
           </div>
         )}
 
         {/* ==================== CALENDAR TAB ==================== */}
-        {tab === 'calendar' && (
+        {!loading && tab === 'calendar' && (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Content Calendar</h2>
@@ -516,7 +571,7 @@ export default function SocialForgePage() {
               ) : (
                 <div className="space-y-2">
                   {scheduledPosts
-                    .sort((a, b) => (a.scheduledFor || '').localeCompare(b.scheduledFor || ''))
+                    .sort((a, b) => (a.scheduledFor || a.scheduled_for || '').localeCompare(b.scheduledFor || b.scheduled_for || ''))
                     .map(post => (
                       <PostRow key={post.id} post={post} onDelete={handleDeletePost} onStatusChange={handleStatusChange} />
                     ))}
@@ -734,7 +789,7 @@ export default function SocialForgePage() {
         )}
 
         {/* ==================== ANALYTICS TAB ==================== */}
-        {tab === 'analytics' && (
+        {!loading && tab === 'analytics' && (
           <div>
             <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', marginBottom: 16 }}>Analytics</h2>
 
@@ -876,7 +931,7 @@ export default function SocialForgePage() {
                             <div className="flex gap-3 mt-1" style={{ fontSize: 10, color: '#aaa' }}>
                               <span>{post.engagement?.likes} likes</span>
                               <span>{post.engagement?.comments} comments</span>
-                              <span>{post.engagement?.reach.toLocaleString()} reach</span>
+                              <span>{(post.engagement?.reach || 0).toLocaleString()} reach</span>
                             </div>
                           </div>
                         </div>
@@ -943,7 +998,7 @@ export default function SocialForgePage() {
         )}
 
         {/* ==================== ACCOUNTS TAB ==================== */}
-        {tab === 'accounts' && (
+        {!loading && tab === 'accounts' && (
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Connected Accounts</h2>
@@ -1009,7 +1064,7 @@ export default function SocialForgePage() {
                           <span style={{ fontWeight: 600, color: '#ec4899' }}>{acc.handle}</span>
                         </td>
                         <td style={{ textAlign: 'right', padding: '14px 16px', fontWeight: 600 }}>
-                          {acc.followers.toLocaleString()}
+                          {(acc.followers || 0).toLocaleString()}
                         </td>
                         <td style={{ textAlign: 'center', padding: '14px 16px' }}>
                           <span style={{
@@ -1087,7 +1142,7 @@ export default function SocialForgePage() {
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       <div style={{ padding: '8px', borderRadius: 8, background: '#faf9f7', textAlign: 'center' }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{acc.followers.toLocaleString()}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{(acc.followers || 0).toLocaleString()}</div>
                         <div style={{ fontSize: 9, color: '#aaa' }}>Followers</div>
                       </div>
                       <div style={{ padding: '8px', borderRadius: 8, background: '#faf9f7', textAlign: 'center' }}>
@@ -1165,7 +1220,7 @@ function PostRow({ post, onDelete, onStatusChange }: {
 }) {
   const plat = PLATFORMS.find(p => p.id === post.platform);
   const Icon = plat?.icon || Globe;
-  const date = post.scheduledFor || post.postedAt;
+  const date = post.scheduledFor || post.scheduled_for || post.postedAt || post.posted_at;
   return (
     <div className="flex items-start gap-3" style={{
       padding: '12px',

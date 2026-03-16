@@ -1476,7 +1476,7 @@ def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
 
         room_total = sum(w.get("price", 0) for w in regular_windows) + sum(u.get("price", 0) for u in upholstery)
 
-        html += f'<h3 style="color:#D4AF37;margin:16px 0 6px;border-bottom:2px solid #D4AF37;padding-bottom:3px">{room.get("name", "Room")}</h3>'
+        html += f'<h3 style="color:#b8960c;margin:16px 0 6px;border-bottom:2px solid #b8960c;padding-bottom:3px">{room.get("name", "Room")}</h3>'
 
         # Regular (non-proposal) windows — standard table
         if regular_windows:
@@ -2233,7 +2233,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
         install_date = f"<p><strong>Estimated Install Date:</strong> {quote['install_date']}</p>"
 
     logo_html = ""
-    biz_name = quote.get("business_name") or "Empire"
+    biz_name = quote.get("business_name") or "Empire Workroom"
     if quote.get("business_logo_url"):
         logo_html = f'<img src="{quote["business_logo_url"]}" style="max-height:60px;margin-bottom:8px" /><br>'
 
@@ -2245,16 +2245,16 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 <html><head><meta charset="utf-8"><title>{quote_number}</title>
 <style>
   @page {{ size: letter; margin: 0.5in 0.6in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12px; line-height: 1.45; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12px; line-height: 1.45; background: #f5f3ef; }}
   h1 {{ color: #1a1a2e; margin: 0; font-size: 28px; letter-spacing: -0.5px; }}
   h3 {{ page-break-after: avoid; }}
   table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
-  th {{ background: #1a1a2e; color: #D4AF37; padding: 8px 6px; text-align: left; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; }}
+  th {{ background: #2c2416; color: #b8960c; padding: 8px 6px; text-align: left; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; }}
   td {{ font-size: 0.85em; }}
 </style></head><body>
 
 <!-- ═══ HEADER / LETTERHEAD ═══ -->
-<div style="border-bottom:3px solid #D4AF37;padding-bottom:14px;margin-bottom:16px">
+<div style="border-bottom:3px solid #b8960c;padding-bottom:14px;margin-bottom:16px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start">
     <div>
       {logo_html}
@@ -2262,7 +2262,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
       <p style="margin:4px 0 0;color:#888;font-size:0.85em">Custom Window Treatments &amp; Upholstery</p>
     </div>
     <div style="text-align:right;padding-top:4px">
-      <div style="background:#1a1a2e;color:#D4AF37;padding:8px 16px;border-radius:6px;font-weight:700;font-size:1.1em;letter-spacing:1px;display:inline-block;margin-bottom:8px">ESTIMATE</div>
+      <div style="background:#2c2416;color:#b8960c;padding:8px 16px;border-radius:6px;font-weight:700;font-size:1.1em;letter-spacing:1px;display:inline-block;margin-bottom:8px">ESTIMATE</div>
       <p style="margin:3px 0;color:#333;font-size:0.9em;font-weight:600">{quote_number}</p>
       <p style="margin:3px 0;color:#666;font-size:0.82em">Date: {created_date}</p>
       <p style="margin:3px 0;color:#666;font-size:0.82em">Valid until: {expires_date}</p>
@@ -2300,17 +2300,17 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 {f'''<table style="margin-top:16px"><tbody>
   <tr><td colspan="8" style="padding:10px 8px;text-align:right;color:#666;font-style:italic">
     Treatment options range from</td>
-  <td style="padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.15em;white-space:nowrap">
+  <td style="padding:10px 8px;text-align:right;font-weight:700;color:#b8960c;font-size:1.15em;white-space:nowrap">
     ${min(p["total"] for p in design_proposals):,.0f} &ndash; ${max(p["total"] for p in design_proposals):,.0f}</td></tr>
 </tbody></table>''' if design_proposals and not proposal_selected else f'''<table style="margin-top:16px"><tbody>
-  {f"<tr><td colspan='8' style='padding:10px 8px;text-align:right;color:#666;font-style:italic'>Treatment options range from</td><td style='padding:10px 8px;text-align:right;font-weight:700;color:#D4AF37;font-size:1.1em;white-space:nowrap'>${quote['price_range_low']:,.0f} &ndash; ${quote['price_range_high']:,.0f}</td></tr>" if quote.get("price_range_low") else f"""
+  {f"<tr><td colspan='8' style='padding:10px 8px;text-align:right;color:#666;font-style:italic'>Treatment options range from</td><td style='padding:10px 8px;text-align:right;font-weight:700;color:#b8960c;font-size:1.1em;white-space:nowrap'>${quote['price_range_low']:,.0f} &ndash; ${quote['price_range_high']:,.0f}</td></tr>" if quote.get("price_range_low") else f"""
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Subtotal</td>
-  <td style='padding:8px;text-align:right;color:#666'>${quote["subtotal"]:.2f}</td></tr>
+  <td style='padding:8px;text-align:right;color:#666'>${quote.get("subtotal", 0):.2f}</td></tr>
   {"<tr><td colspan='8' style='padding:8px;text-align:right;color:#c00'>Discount</td><td style='padding:8px;text-align:right;color:#c00'>-$" + f"{quote['discount_amount']:.2f}</td></tr>" if quote.get('discount_amount') else ""}
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Tax ({quote.get('tax_rate', 0) * 100:.1f}%)</td>
   <td style='padding:8px;text-align:right;color:#666'>${quote.get('tax_amount', 0):.2f}</td></tr>
-  <tr><td colspan='8' style='padding:14px 8px;text-align:right;border-top:3px solid #D4AF37'><strong style='font-size:1.15em;color:#1a1a2e'>Total</strong></td>
-  <td style='padding:14px 8px;text-align:right;border-top:3px solid #D4AF37'><strong style='font-size:1.2em;color:#D4AF37'>${quote["total"]:.2f}</strong></td></tr>"""}
+  <tr><td colspan='8' style='padding:14px 8px;text-align:right;border-top:3px solid #b8960c'><strong style='font-size:1.15em;color:#1a1a2e'>Total</strong></td>
+  <td style='padding:14px 8px;text-align:right;border-top:3px solid #b8960c'><strong style='font-size:1.2em;color:#b8960c'>${quote.get("total", 0):.2f}</strong></td></tr>"""}
   {deposit_html}
 </tbody></table>'''}
 
@@ -2329,8 +2329,8 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 {f"<div style='margin-top:10px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666'><strong>Notes:</strong> {quote['notes']}</div>" if quote.get('notes') else ""}
 
 <!-- ═══ ACCEPTANCE / SIGNATURE ═══ -->
-<div style="margin-top:36px;padding:24px 20px;border:2px solid #D4AF37;border-radius:10px;page-break-inside:avoid">
-  <p style="margin:0 0 12px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.5px;color:#D4AF37;font-weight:700">Acceptance</p>
+<div style="margin-top:36px;padding:24px 20px;border:2px solid #b8960c;border-radius:10px;page-break-inside:avoid">
+  <p style="margin:0 0 12px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.5px;color:#b8960c;font-weight:700">Acceptance</p>
   <p style="margin:0 0 20px;font-size:0.85em;color:#555">By signing below, I accept this estimate and authorize {biz_name} to proceed with the work described above.</p>
   <div style="display:flex;gap:40px;margin-top:16px">
     <div style="flex:1">
@@ -2352,8 +2352,12 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 </body></html>"""
 
     # Convert HTML to PDF using weasyprint
-    from weasyprint import HTML as WeasyHTML
-    pdf_bytes = WeasyHTML(string=html).write_pdf()
+    try:
+        from weasyprint import HTML as WeasyHTML
+        pdf_bytes = WeasyHTML(string=html).write_pdf()
+    except Exception as e:
+        logger.error(f"WeasyPrint PDF generation failed: {e}")
+        raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
     # Save PDF file
     pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
@@ -2361,6 +2365,8 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
     pdf_path = os.path.join(pdf_dir, f"{quote['quote_number']}.pdf")
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
+
+    logger.info(f"PDF generated: {quote['quote_number']} ({len(pdf_bytes)} bytes) -> {pdf_path}")
 
     return Response(
         content=pdf_bytes,
@@ -2373,14 +2379,15 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
 @router.get("/{quote_id}/pdf")
 async def download_pdf(quote_id: str):
-    """Download a previously generated PDF."""
+    """Download a previously generated PDF. Auto-generates if not yet created."""
     quote = _load_quote(quote_id)
     pdf_path = os.path.join(
         os.path.expanduser("~/empire-repo/backend/data/quotes/pdf"),
         f"{quote['quote_number']}.pdf",
     )
     if not os.path.exists(pdf_path):
-        raise HTTPException(404, "PDF not yet generated. POST to generate first.")
+        # Auto-generate on first GET request (skip verification for convenience)
+        return await generate_pdf(quote_id, skip_verification=True)
 
     with open(pdf_path, "rb") as f:
         pdf_bytes = f.read()
