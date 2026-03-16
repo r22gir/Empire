@@ -62,7 +62,7 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ElementTy
 
 const CRYPTO_TOKENS = ['USDC', 'SOL', 'ETH', 'EMPIRE'];
 const CRYPTO_RATES: Record<string, number> = { USDC: 1, SOL: 0.0067, ETH: 0.00028, EMPIRE: 100 };
-const MOCK_WALLETS: Record<string, string> = {
+const WALLET_ADDRESSES: Record<string, string> = {
   USDC: '0x7a3B...eF92',
   SOL: 'Emp1r...x4Bz',
   ETH: '0x7a3B...eF92',
@@ -337,8 +337,8 @@ export default function PaymentModule({
         <div style={{ marginBottom: 14 }}>
           <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 4 }}>Send to Wallet Address</label>
           <div style={{ fontFamily: 'monospace', fontSize: 14, background: PAGE_BG, padding: '10px 12px', borderRadius: 8, border: `1px solid ${BORDER}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>{MOCK_WALLETS[cryptoToken]}</span>
-            <button onClick={() => { navigator.clipboard.writeText(MOCK_WALLETS[cryptoToken] || '').catch(() => {}); }}
+            <span>{WALLET_ADDRESSES[cryptoToken]}</span>
+            <button onClick={() => { navigator.clipboard.writeText(WALLET_ADDRESSES[cryptoToken] || '').catch(() => {}); }}
               style={{ border: 'none', background: 'none', cursor: 'pointer', color: MUTED }}><Copy size={14} /></button>
           </div>
         </div>

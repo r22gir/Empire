@@ -1,13 +1,17 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Hammer, LayoutDashboard, FolderKanban, Users, CalendarDays, LayoutTemplate,
   FileText, Star, DollarSign, Clock, CheckCircle, Wrench, Zap, TreePine,
   Droplets, Search, Plus, ChevronRight, ArrowUpRight, ArrowDownRight,
-  AlertCircle, Eye, BookOpen, CreditCard
+  AlertCircle, Eye, BookOpen, CreditCard, Loader2
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+
+// ============ API ============
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 // ============ NAV ============
 
@@ -28,75 +32,38 @@ const AMBER = '#d97706';
 const AMBER_BG = '#fef3c7';
 const AMBER_BORDER = '#fde68a';
 
-// ============ MOCK DATA ============
+// ============ TYPES ============
 
-const MOCK_PROJECTS = [
-  { id: 'PRJ-001', name: 'Kitchen Rewire', client: 'Sarah Mitchell', contractor: 'Dave Kowalski', status: 'in-progress', date: '2026-03-09', amount: 4800 },
-  { id: 'PRJ-002', name: 'Bathroom Remodel Plumbing', client: 'James Chen', contractor: 'Maria Lopez', status: 'scheduled', date: '2026-03-12', amount: 6200 },
-  { id: 'PRJ-003', name: 'Backyard Patio Landscaping', client: 'Robert Hartley', contractor: 'Chris Meadows', status: 'completed', date: '2026-03-05', amount: 3500 },
-  { id: 'PRJ-004', name: 'Full House Electrical Panel Upgrade', client: 'Linda Nguyen', contractor: 'Dave Kowalski', status: 'invoiced', date: '2026-03-01', amount: 8900 },
-  { id: 'PRJ-005', name: 'Commercial HVAC Install', client: 'Apex Office Group', contractor: 'Tony Russo', status: 'in-progress', date: '2026-03-07', amount: 14200 },
-  { id: 'PRJ-006', name: 'Deck Repair & Staining', client: 'Emily Watson', contractor: 'Chris Meadows', status: 'scheduled', date: '2026-03-15', amount: 2800 },
-  { id: 'PRJ-007', name: 'Emergency Pipe Burst Repair', client: 'Mark Sullivan', contractor: 'Maria Lopez', status: 'completed', date: '2026-03-03', amount: 1200 },
-  { id: 'PRJ-008', name: 'Sprinkler System Installation', client: 'Valley HOA', contractor: 'Chris Meadows', status: 'scheduled', date: '2026-03-18', amount: 5600 },
-  { id: 'PRJ-009', name: 'Garage Subpanel Wiring', client: 'Tom Fischer', contractor: 'Dave Kowalski', status: 'in-progress', date: '2026-03-08', amount: 3100 },
-  { id: 'PRJ-010', name: 'Water Heater Replacement', client: 'Ana Reyes', contractor: 'Maria Lopez', status: 'invoiced', date: '2026-02-28', amount: 2400 },
-];
+interface Project {
+  id: string;
+  name: string;
+  client: string;
+  contractor: string;
+  status: string;
+  date: string;
+  amount: number;
+}
 
-const MOCK_CONTRACTORS = [
-  { id: 'C-001', name: 'Dave Kowalski', specialty: 'Electrical', rating: 4.9, availability: 'Available', hourlyRate: 95, jobsCompleted: 187 },
-  { id: 'C-002', name: 'Maria Lopez', specialty: 'Plumbing', rating: 4.8, availability: 'On Job', hourlyRate: 85, jobsCompleted: 143 },
-  { id: 'C-003', name: 'Chris Meadows', specialty: 'Landscaping', rating: 4.7, availability: 'Available', hourlyRate: 70, jobsCompleted: 112 },
-  { id: 'C-004', name: 'Tony Russo', specialty: 'HVAC', rating: 4.6, availability: 'On Job', hourlyRate: 90, jobsCompleted: 98 },
-  { id: 'C-005', name: 'Keisha Brown', specialty: 'General Contracting', rating: 4.9, availability: 'Available', hourlyRate: 80, jobsCompleted: 214 },
-  { id: 'C-006', name: 'Jorge Ramirez', specialty: 'Roofing', rating: 4.5, availability: 'Off', hourlyRate: 75, jobsCompleted: 76 },
-];
+interface Contractor {
+  id: string;
+  name: string;
+  specialty: string;
+  rating: number;
+  availability: string;
+  hourlyRate: number;
+  jobsCompleted: number;
+}
 
-const MOCK_INVOICES = [
-  { id: 'INV-2001', client: 'Linda Nguyen', job: 'Full House Electrical Panel Upgrade', amount: 8900, status: 'paid', date: '2026-03-02' },
-  { id: 'INV-2002', client: 'Robert Hartley', job: 'Backyard Patio Landscaping', amount: 3500, status: 'paid', date: '2026-03-06' },
-  { id: 'INV-2003', client: 'Mark Sullivan', job: 'Emergency Pipe Burst Repair', amount: 1200, status: 'overdue', date: '2026-03-04' },
-  { id: 'INV-2004', client: 'Ana Reyes', job: 'Water Heater Replacement', amount: 2400, status: 'sent', date: '2026-03-01' },
-  { id: 'INV-2005', client: 'Sarah Mitchell', job: 'Kitchen Rewire', amount: 4800, status: 'draft', date: '2026-03-09' },
-  { id: 'INV-2006', client: 'Apex Office Group', job: 'Commercial HVAC Install (deposit)', amount: 7100, status: 'paid', date: '2026-02-25' },
-  { id: 'INV-2007', client: 'Emily Watson', job: 'Deck Repair & Staining', amount: 2800, status: 'draft', date: '2026-03-15' },
-];
+interface Invoice {
+  id: string;
+  client: string;
+  job: string;
+  amount: number;
+  status: string;
+  date: string;
+}
 
-const SCHEDULE_DAYS = ['Mon 3/9', 'Tue 3/10', 'Wed 3/11', 'Thu 3/12', 'Fri 3/13', 'Sat 3/14', 'Sun 3/15'];
-
-const MOCK_SCHEDULE: Record<string, { time: string; job: string; contractor: string; color: string }[]> = {
-  'Mon 3/9': [
-    { time: '8:00 AM', job: 'Kitchen Rewire', contractor: 'Dave Kowalski', color: '#d97706' },
-    { time: '9:00 AM', job: 'Commercial HVAC Install', contractor: 'Tony Russo', color: '#2563eb' },
-  ],
-  'Tue 3/10': [
-    { time: '7:30 AM', job: 'Kitchen Rewire', contractor: 'Dave Kowalski', color: '#d97706' },
-    { time: '10:00 AM', job: 'Garage Subpanel Wiring', contractor: 'Dave Kowalski', color: '#7c3aed' },
-  ],
-  'Wed 3/11': [
-    { time: '8:00 AM', job: 'Commercial HVAC Install', contractor: 'Tony Russo', color: '#2563eb' },
-    { time: '1:00 PM', job: 'Sprinkler System Quote', contractor: 'Chris Meadows', color: '#16a34a' },
-  ],
-  'Thu 3/12': [
-    { time: '9:00 AM', job: 'Bathroom Remodel Plumbing', contractor: 'Maria Lopez', color: '#dc2626' },
-    { time: '8:00 AM', job: 'Commercial HVAC Install', contractor: 'Tony Russo', color: '#2563eb' },
-  ],
-  'Fri 3/13': [
-    { time: '8:00 AM', job: 'Bathroom Remodel Plumbing', contractor: 'Maria Lopez', color: '#dc2626' },
-    { time: '11:00 AM', job: 'Deck Repair Estimate', contractor: 'Chris Meadows', color: '#16a34a' },
-  ],
-  'Sat 3/14': [
-    { time: '9:00 AM', job: 'Deck Repair & Staining', contractor: 'Chris Meadows', color: '#16a34a' },
-  ],
-  'Sun 3/15': [],
-};
-
-const TEMPLATE_CARDS = [
-  { id: 'luxeforge', name: 'LuxeForge', desc: 'High-end home renovation and design-build projects', icon: Star, color: '#b8960c', features: ['Design-build workflows', 'Material sourcing', 'Client mood boards', 'Premium invoicing'] },
-  { id: 'electricforge', name: 'ElectricForge', desc: 'Residential & commercial electrical contractors', icon: Zap, color: '#d97706', features: ['Panel schedules', 'Permit tracking', 'Code compliance', 'Load calculations'] },
-  { id: 'landscapeforge', name: 'LandscapeForge', desc: 'Landscaping, hardscaping, and irrigation businesses', icon: TreePine, color: '#16a34a', features: ['Seasonal scheduling', 'Property maps', 'Plant inventory', 'Maintenance plans'] },
-  { id: 'plumbforge', name: 'PlumbForge', desc: 'Plumbing service and installation companies', icon: Droplets, color: '#2563eb', features: ['Emergency dispatch', 'Parts inventory', 'Fixture specs', 'Warranty tracking'] },
-];
+// ============ CONFIG ============
 
 const STATUS_CONFIG: Record<string, { bg: string; color: string; label: string }> = {
   scheduled: { bg: '#dbeafe', color: '#2563eb', label: 'Scheduled' },
@@ -117,6 +84,159 @@ const AVAILABILITY_CONFIG: Record<string, { bg: string; color: string }> = {
   'On Job': { bg: AMBER_BG, color: AMBER },
   Off: { bg: '#f3f4f6', color: '#6b7280' },
 };
+
+// ============ SHARED COMPONENTS ============
+
+function LoadingSpinner({ message }: { message?: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 48, color: '#999' }}>
+      <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', marginBottom: 12 }} />
+      <div style={{ fontSize: 12 }}>{message || 'Loading...'}</div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 48, color: '#999' }}>
+      <AlertCircle size={28} style={{ color: '#dc2626', marginBottom: 12 }} />
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#dc2626', marginBottom: 4 }}>Error loading data</div>
+      <div style={{ fontSize: 12, color: '#999', marginBottom: 12 }}>{message}</div>
+      {onRetry && (
+        <button onClick={onRetry} style={{ padding: '6px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: AMBER, color: '#fff', border: 'none', cursor: 'pointer' }}>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 48, color: '#999' }}>
+      <FolderKanban size={28} style={{ marginBottom: 12, opacity: 0.4 }} />
+      <div style={{ fontSize: 12 }}>{message}</div>
+    </div>
+  );
+}
+
+// ============ DATA FETCHING HELPERS ============
+
+function mapJobToProject(job: Record<string, unknown>): Project {
+  return {
+    id: String(job.id || job.job_id || ''),
+    name: String(job.name || job.title || job.job_name || ''),
+    client: String(job.client || job.client_name || job.customer || ''),
+    contractor: String(job.contractor || job.assigned_to || job.contractor_name || ''),
+    status: String(job.status || 'scheduled'),
+    date: String(job.date || job.start_date || job.created_at || '').slice(0, 10),
+    amount: Number(job.amount || job.total || job.price || 0),
+  };
+}
+
+function mapContactToContractor(contact: Record<string, unknown>): Contractor {
+  return {
+    id: String(contact.id || contact.contact_id || ''),
+    name: String(contact.name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || ''),
+    specialty: String(contact.specialty || contact.category || contact.type || 'General'),
+    rating: Number(contact.rating || 0),
+    availability: String(contact.availability || contact.status || 'Off'),
+    hourlyRate: Number(contact.hourly_rate || contact.hourlyRate || contact.rate || 0),
+    jobsCompleted: Number(contact.jobs_completed || contact.jobsCompleted || contact.total_jobs || 0),
+  };
+}
+
+function mapToInvoice(inv: Record<string, unknown>): Invoice {
+  return {
+    id: String(inv.id || inv.invoice_id || inv.invoice_number || ''),
+    client: String(inv.client || inv.client_name || inv.customer || inv.customer_name || ''),
+    job: String(inv.job || inv.job_name || inv.description || inv.title || ''),
+    amount: Number(inv.amount || inv.total || inv.grand_total || 0),
+    status: String(inv.status || 'draft'),
+    date: String(inv.date || inv.invoice_date || inv.created_at || '').slice(0, 10),
+  };
+}
+
+// ============ CUSTOM HOOKS ============
+
+function useProjects() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchProjects = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/jobs/`);
+      if (!res.ok) throw new Error(`Failed to fetch projects (${res.status})`);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.items || data.jobs || data.results || []);
+      setProjects(items.map(mapJobToProject));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+  return { projects, loading, error, refetch: fetchProjects };
+}
+
+function useContractors() {
+  const [contractors, setContractors] = useState<Contractor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchContractors = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/contacts/`);
+      if (!res.ok) throw new Error(`Failed to fetch contractors (${res.status})`);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.items || data.contacts || data.results || []);
+      setContractors(items.map(mapContactToContractor));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setContractors([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchContractors(); }, [fetchContractors]);
+  return { contractors, loading, error, refetch: fetchContractors };
+}
+
+function useInvoices() {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchInvoices = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/finance/invoices`);
+      if (!res.ok) throw new Error(`Failed to fetch invoices (${res.status})`);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.items || data.invoices || data.results || []);
+      setInvoices(items.map(mapToInvoice));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setInvoices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
+  return { invoices, loading, error, refetch: fetchInvoices };
+}
 
 // ============ MAIN COMPONENT ============
 
@@ -216,10 +336,20 @@ function StatusBadge({ status, config }: { status: string; config: Record<string
 // ============ DASHBOARD ============
 
 function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) {
-  const activeProjects = MOCK_PROJECTS.filter(p => p.status === 'in-progress').length;
-  const totalContractors = MOCK_CONTRACTORS.length;
-  const monthRevenue = MOCK_INVOICES.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0);
-  const upcomingJobs = MOCK_PROJECTS.filter(p => p.status === 'scheduled').length;
+  const { projects, loading: loadingProjects, error: errorProjects, refetch: refetchProjects } = useProjects();
+  const { contractors, loading: loadingContractors, error: errorContractors, refetch: refetchContractors } = useContractors();
+  const { invoices, loading: loadingInvoices, error: errorInvoices, refetch: refetchInvoices } = useInvoices();
+
+  const loading = loadingProjects || loadingContractors || loadingInvoices;
+
+  const activeProjects = projects.filter(p => p.status === 'in-progress').length;
+  const totalContractors = contractors.length;
+  const monthRevenue = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0);
+  const upcomingJobs = projects.filter(p => p.status === 'scheduled').length;
+
+  if (loading) {
+    return <LoadingSpinner message="Loading dashboard..." />;
+  }
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100, margin: '0 auto' }}>
@@ -237,7 +367,7 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
       {/* KPIs */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <KPI icon={<FolderKanban size={16} />} iconBg={AMBER_BG} iconColor={AMBER} label="Active Projects" value={String(activeProjects)} sub="currently in progress" onClick={() => onNavigate('projects')} />
-        <KPI icon={<Users size={16} />} iconBg="#dbeafe" iconColor="#2563eb" label="Contractors" value={String(totalContractors)} sub={`${MOCK_CONTRACTORS.filter(c => c.availability === 'Available').length} available`} onClick={() => onNavigate('contractors')} />
+        <KPI icon={<Users size={16} />} iconBg="#dbeafe" iconColor="#2563eb" label="Contractors" value={String(totalContractors)} sub={`${contractors.filter(c => c.availability === 'Available').length} available`} onClick={() => onNavigate('contractors')} />
         <KPI icon={<DollarSign size={16} />} iconBg="#dcfce7" iconColor="#16a34a" label="Monthly Revenue" value={`$${monthRevenue.toLocaleString()}`} sub="from paid invoices" onClick={() => onNavigate('invoices')} />
         <KPI icon={<CalendarDays size={16} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Upcoming Jobs" value={String(upcomingJobs)} sub="scheduled this week" onClick={() => onNavigate('schedule')} />
       </div>
@@ -251,18 +381,24 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
               className="flex items-center gap-1">View All <ChevronRight size={12} /></button>
           </div>
           <div className="space-y-2">
-            {MOCK_PROJECTS.slice(0, 5).map(p => (
-              <div key={p.id} className="flex items-center justify-between" style={{ padding: '10px 12px', borderRadius: 10, background: '#f9f7f4', border: '1px solid #ece8e0' }}>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: '#999' }}>{p.client} &middot; {p.contractor}</div>
+            {errorProjects ? (
+              <ErrorState message={errorProjects} onRetry={refetchProjects} />
+            ) : projects.length === 0 ? (
+              <EmptyState message="No projects yet" />
+            ) : (
+              projects.slice(0, 5).map(p => (
+                <div key={p.id} className="flex items-center justify-between" style={{ padding: '10px 12px', borderRadius: 10, background: '#f9f7f4', border: '1px solid #ece8e0' }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{p.name}</div>
+                    <div style={{ fontSize: 10, color: '#999' }}>{p.client} &middot; {p.contractor}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a' }}>${p.amount.toLocaleString()}</div>
+                    <StatusBadge status={p.status} config={STATUS_CONFIG} />
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a' }}>${p.amount.toLocaleString()}</div>
-                  <StatusBadge status={p.status} config={STATUS_CONFIG} />
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 
@@ -274,25 +410,31 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
               className="flex items-center gap-1">View All <ChevronRight size={12} /></button>
           </div>
           <div className="space-y-2">
-            {MOCK_CONTRACTORS.map(c => {
-              const avail = AVAILABILITY_CONFIG[c.availability] || AVAILABILITY_CONFIG['Off'];
-              return (
-                <div key={c.id} className="flex items-center justify-between" style={{ padding: '10px 12px', borderRadius: 10, background: '#f9f7f4', border: '1px solid #ece8e0' }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: AMBER_BG, color: AMBER, fontSize: 11, fontWeight: 700 }}>
-                      {c.name.split(' ').map(n => n[0]).join('')}
+            {errorContractors ? (
+              <ErrorState message={errorContractors} onRetry={refetchContractors} />
+            ) : contractors.length === 0 ? (
+              <EmptyState message="No contractors yet" />
+            ) : (
+              contractors.map(c => {
+                const avail = AVAILABILITY_CONFIG[c.availability] || AVAILABILITY_CONFIG['Off'];
+                return (
+                  <div key={c.id} className="flex items-center justify-between" style={{ padding: '10px 12px', borderRadius: 10, background: '#f9f7f4', border: '1px solid #ece8e0' }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: AMBER_BG, color: AMBER, fontSize: 11, fontWeight: 700 }}>
+                        {c.name.split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{c.name}</div>
+                        <div style={{ fontSize: 10, color: '#999' }}>{c.specialty}</div>
+                      </div>
                     </div>
-                    <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{c.name}</div>
-                      <div style={{ fontSize: 10, color: '#999' }}>{c.specialty}</div>
-                    </div>
+                    <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: avail.bg, color: avail.color }}>
+                      {c.availability}
+                    </span>
                   </div>
-                  <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: avail.bg, color: avail.color }}>
-                    {c.availability}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -305,15 +447,20 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
             className="flex items-center gap-1">Full Week <ChevronRight size={12} /></button>
         </div>
         <div className="flex gap-3">
-          {(MOCK_SCHEDULE['Mon 3/9'] || []).map((s, i) => (
-            <div key={i} style={{ padding: '12px 16px', borderRadius: 12, border: `2px solid ${s.color}20`, background: `${s.color}08`, flex: 1 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: s.color, marginBottom: 4 }}>{s.time}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{s.job}</div>
-              <div style={{ fontSize: 11, color: '#999' }}>{s.contractor}</div>
-            </div>
-          ))}
-          {(!MOCK_SCHEDULE['Mon 3/9'] || MOCK_SCHEDULE['Mon 3/9'].length === 0) && (
+          {projects.filter(p => p.status === 'in-progress' || p.status === 'scheduled').length === 0 ? (
             <div style={{ fontSize: 12, color: '#999', padding: 16 }}>No jobs scheduled today</div>
+          ) : (
+            projects.filter(p => p.status === 'in-progress' || p.status === 'scheduled').slice(0, 3).map((p, i) => {
+              const colors = [AMBER, '#2563eb', '#16a34a', '#dc2626', '#7c3aed'];
+              const color = colors[i % colors.length];
+              return (
+                <div key={p.id} style={{ padding: '12px 16px', borderRadius: 12, border: `2px solid ${color}20`, background: `${color}08`, flex: 1 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: color, marginBottom: 4 }}>{p.date}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>{p.contractor}</div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
@@ -326,8 +473,9 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
 function ProjectsSection() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const { projects, loading, error, refetch } = useProjects();
 
-  const filtered = MOCK_PROJECTS.filter(p => {
+  const filtered = projects.filter(p => {
     const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.client.toLowerCase().includes(search.toLowerCase()) || p.contractor.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === 'all' || p.status === filterStatus;
     return matchSearch && matchStatus;
@@ -338,7 +486,7 @@ function ProjectsSection() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a1a' }}>Projects</div>
-          <div style={{ fontSize: 12, color: '#999' }}>{MOCK_PROJECTS.length} total jobs</div>
+          <div style={{ fontSize: 12, color: '#999' }}>{projects.length} total jobs</div>
         </div>
         <button style={{ padding: '8px 16px', borderRadius: 10, background: AMBER, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}
           className="flex items-center gap-2">
@@ -364,35 +512,43 @@ function ProjectsSection() {
       </div>
 
       {/* Table */}
-      <div className="empire-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ background: '#f9f7f4', borderBottom: '1px solid #ece8e0' }}>
-              {['Job Name', 'Client', 'Contractor', 'Status', 'Date', 'Amount'].map(h => (
-                <th key={h} style={{ padding: '10px 16px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999', textAlign: 'left', letterSpacing: 0.5 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(p => (
-              <tr key={p.id} style={{ borderBottom: '1px solid #f0ede8' }} className="hover:bg-[#f9f7f4] transition-colors">
-                <td style={{ padding: '12px 16px' }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{p.name}</div>
-                  <div style={{ fontSize: 10, color: '#999' }}>{p.id}</div>
-                </td>
-                <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{p.client}</td>
-                <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{p.contractor}</td>
-                <td style={{ padding: '12px 16px' }}><StatusBadge status={p.status} config={STATUS_CONFIG} /></td>
-                <td style={{ padding: '12px 16px', fontSize: 12, color: '#666' }}>{p.date}</td>
-                <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>${p.amount.toLocaleString()}</td>
+      {loading ? (
+        <LoadingSpinner message="Loading projects..." />
+      ) : error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <div className="empire-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f9f7f4', borderBottom: '1px solid #ece8e0' }}>
+                {['Job Name', 'Client', 'Contractor', 'Status', 'Date', 'Amount'].map(h => (
+                  <th key={h} style={{ padding: '10px 16px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999', textAlign: 'left', letterSpacing: 0.5 }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && (
-          <div style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 12 }}>No projects match your filters</div>
-        )}
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map(p => (
+                <tr key={p.id} style={{ borderBottom: '1px solid #f0ede8' }} className="hover:bg-[#f9f7f4] transition-colors">
+                  <td style={{ padding: '12px 16px' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{p.name}</div>
+                    <div style={{ fontSize: 10, color: '#999' }}>{p.id}</div>
+                  </td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{p.client}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{p.contractor}</td>
+                  <td style={{ padding: '12px 16px' }}><StatusBadge status={p.status} config={STATUS_CONFIG} /></td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#666' }}>{p.date}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>${p.amount.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 12 }}>
+              {projects.length === 0 ? 'No projects yet' : 'No projects match your filters'}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -401,8 +557,9 @@ function ProjectsSection() {
 
 function ContractorsSection() {
   const [search, setSearch] = useState('');
+  const { contractors, loading, error, refetch } = useContractors();
 
-  const filtered = MOCK_CONTRACTORS.filter(c =>
+  const filtered = contractors.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.specialty.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -411,7 +568,7 @@ function ContractorsSection() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a1a' }}>Contractors</div>
-          <div style={{ fontSize: 12, color: '#999' }}>{MOCK_CONTRACTORS.length} registered contractors</div>
+          <div style={{ fontSize: 12, color: '#999' }}>{contractors.length} registered contractors</div>
         </div>
         <button style={{ padding: '8px 16px', borderRadius: 10, background: AMBER, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}
           className="flex items-center gap-2">
@@ -425,47 +582,57 @@ function ContractorsSection() {
           style={{ border: 'none', outline: 'none', fontSize: 12, background: 'transparent', width: '100%', color: '#1a1a1a' }} />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        {filtered.map(c => {
-          const avail = AVAILABILITY_CONFIG[c.availability] || AVAILABILITY_CONFIG['Off'];
-          return (
-            <div key={c.id} className="empire-card" style={{ padding: '18px 20px' }}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: AMBER_BG, color: AMBER, fontSize: 13, fontWeight: 700 }}>
-                    {c.name.split(' ').map(n => n[0]).join('')}
+      {loading ? (
+        <LoadingSpinner message="Loading contractors..." />
+      ) : error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            {filtered.map(c => {
+              const avail = AVAILABILITY_CONFIG[c.availability] || AVAILABILITY_CONFIG['Off'];
+              return (
+                <div key={c.id} className="empire-card" style={{ padding: '18px 20px' }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ background: AMBER_BG, color: AMBER, fontSize: 13, fontWeight: 700 }}>
+                        {c.name.split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{c.name}</div>
+                        <div style={{ fontSize: 11, color: '#999' }}>{c.specialty}</div>
+                      </div>
+                    </div>
+                    <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: avail.bg, color: avail.color }}>
+                      {c.availability}
+                    </span>
                   </div>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{c.name}</div>
-                    <div style={{ fontSize: 11, color: '#999' }}>{c.specialty}</div>
+                  <div className="grid grid-cols-3 gap-3" style={{ borderTop: '1px solid #ece8e0', paddingTop: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999' }}>Rating</div>
+                      <div className="flex items-center gap-1" style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>
+                        <Star size={12} fill="#d97706" style={{ color: '#d97706' }} /> {c.rating}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999' }}>Rate</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>${c.hourlyRate}/hr</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999' }}>Jobs Done</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{c.jobsCompleted}</div>
+                    </div>
                   </div>
                 </div>
-                <span style={{ padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700, background: avail.bg, color: avail.color }}>
-                  {c.availability}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-3" style={{ borderTop: '1px solid #ece8e0', paddingTop: 12 }}>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999' }}>Rating</div>
-                  <div className="flex items-center gap-1" style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>
-                    <Star size={12} fill="#d97706" style={{ color: '#d97706' }} /> {c.rating}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999' }}>Rate</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>${c.hourlyRate}/hr</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999' }}>Jobs Done</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{c.jobsCompleted}</div>
-                </div>
-              </div>
+              );
+            })}
+          </div>
+          {filtered.length === 0 && (
+            <div className="empire-card" style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 12 }}>
+              {contractors.length === 0 ? 'No contractors yet' : 'No contractors match your search'}
             </div>
-          );
-        })}
-      </div>
-      {filtered.length === 0 && (
-        <div className="empire-card" style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 12 }}>No contractors match your search</div>
+          )}
+        </>
       )}
     </div>
   );
@@ -479,35 +646,14 @@ function ScheduleSection() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a1a' }}>Weekly Schedule</div>
-          <div style={{ fontSize: 12, color: '#999' }}>Week of March 9 - 15, 2026</div>
+          <div style={{ fontSize: 12, color: '#999' }}>Schedule view</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-3">
-        {SCHEDULE_DAYS.map(day => {
-          const jobs = MOCK_SCHEDULE[day] || [];
-          const isToday = day === 'Mon 3/9';
-          return (
-            <div key={day} className="empire-card" style={{ padding: 0, overflow: 'hidden', border: isToday ? `2px solid ${AMBER}` : undefined }}>
-              <div style={{ padding: '10px 12px', background: isToday ? AMBER_BG : '#f9f7f4', borderBottom: '1px solid #ece8e0', textAlign: 'center' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: isToday ? AMBER : '#666' }}>{day}</div>
-                {isToday && <div style={{ fontSize: 8, fontWeight: 700, color: AMBER, textTransform: 'uppercase', marginTop: 2 }}>Today</div>}
-              </div>
-              <div style={{ padding: 8, minHeight: 120 }}>
-                {jobs.length === 0 && (
-                  <div style={{ fontSize: 10, color: '#ccc', textAlign: 'center', marginTop: 24 }}>No jobs</div>
-                )}
-                {jobs.map((j, i) => (
-                  <div key={i} style={{ padding: '8px 10px', borderRadius: 8, marginBottom: 6, background: `${j.color}10`, borderLeft: `3px solid ${j.color}` }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: j.color }}>{j.time}</div>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: '#1a1a1a', marginTop: 2 }}>{j.job}</div>
-                    <div style={{ fontSize: 9, color: '#999' }}>{j.contractor}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
+      <div className="empire-card" style={{ padding: 48, textAlign: 'center' }}>
+        <CalendarDays size={32} style={{ color: '#ccc', margin: '0 auto 12px' }} />
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>No schedule entries yet</div>
+        <div style={{ fontSize: 12, color: '#999' }}>Schedule data will appear here once jobs are assigned dates and times.</div>
       </div>
     </div>
   );
@@ -523,33 +669,10 @@ function TemplatesSection() {
         <div style={{ fontSize: 12, color: '#999' }}>Pre-configured setups for common service businesses</div>
       </div>
 
-      <div className="grid grid-cols-2 gap-5">
-        {TEMPLATE_CARDS.map(t => {
-          const Icon = t.icon;
-          return (
-            <div key={t.id} className="empire-card" style={{ padding: '22px 24px', border: `1.5px solid ${t.color}30` }}>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-11 h-11 rounded-xl flex items-center justify-center" style={{ background: `${t.color}18` }}>
-                  <Icon size={22} style={{ color: t.color }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1a1a' }}>{t.name}</div>
-                  <div style={{ fontSize: 11, color: '#999' }}>{t.desc}</div>
-                </div>
-              </div>
-              <div className="space-y-2 mb-4">
-                {t.features.map((f, i) => (
-                  <div key={i} className="flex items-center gap-2" style={{ fontSize: 12, color: '#555' }}>
-                    <CheckCircle size={13} style={{ color: t.color }} /> {f}
-                  </div>
-                ))}
-              </div>
-              <button style={{ width: '100%', padding: '10px 0', borderRadius: 10, background: `${t.color}12`, color: t.color, fontSize: 12, fontWeight: 700, border: `1px solid ${t.color}30`, cursor: 'pointer' }}>
-                Activate Template
-              </button>
-            </div>
-          );
-        })}
+      <div className="empire-card" style={{ padding: 48, textAlign: 'center' }}>
+        <LayoutTemplate size={32} style={{ color: '#ccc', margin: '0 auto 12px' }} />
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>No templates yet</div>
+        <div style={{ fontSize: 12, color: '#999' }}>Templates will be available here once they are configured.</div>
       </div>
     </div>
   );
@@ -559,20 +682,21 @@ function TemplatesSection() {
 
 function InvoicesSection() {
   const [search, setSearch] = useState('');
+  const { invoices, loading, error, refetch } = useInvoices();
 
-  const filtered = MOCK_INVOICES.filter(inv =>
+  const filtered = invoices.filter(inv =>
     !search || inv.client.toLowerCase().includes(search.toLowerCase()) || inv.job.toLowerCase().includes(search.toLowerCase()) || inv.id.toLowerCase().includes(search.toLowerCase())
   );
 
-  const totalPaid = MOCK_INVOICES.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0);
-  const totalOutstanding = MOCK_INVOICES.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + i.amount, 0);
+  const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.amount, 0);
+  const totalOutstanding = invoices.filter(i => i.status === 'sent' || i.status === 'overdue').reduce((s, i) => s + i.amount, 0);
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1100, margin: '0 auto' }}>
       <div className="flex items-center justify-between mb-5">
         <div>
           <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a1a' }}>Invoices</div>
-          <div style={{ fontSize: 12, color: '#999' }}>{MOCK_INVOICES.length} invoices &middot; ${totalPaid.toLocaleString()} collected &middot; ${totalOutstanding.toLocaleString()} outstanding</div>
+          <div style={{ fontSize: 12, color: '#999' }}>{invoices.length} invoices &middot; ${totalPaid.toLocaleString()} collected &middot; ${totalOutstanding.toLocaleString()} outstanding</div>
         </div>
         <button style={{ padding: '8px 16px', borderRadius: 10, background: AMBER, color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer' }}
           className="flex items-center gap-2">
@@ -586,32 +710,40 @@ function InvoicesSection() {
           style={{ border: 'none', outline: 'none', fontSize: 12, background: 'transparent', width: '100%', color: '#1a1a1a' }} />
       </div>
 
-      <div className="empire-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ background: '#f9f7f4', borderBottom: '1px solid #ece8e0' }}>
-              {['Invoice ID', 'Client', 'Job', 'Amount', 'Status', 'Date'].map(h => (
-                <th key={h} style={{ padding: '10px 16px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999', textAlign: 'left', letterSpacing: 0.5 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(inv => (
-              <tr key={inv.id} style={{ borderBottom: '1px solid #f0ede8' }} className="hover:bg-[#f9f7f4] transition-colors">
-                <td style={{ padding: '12px 16px', fontSize: 12, fontWeight: 600, color: AMBER }}>{inv.id}</td>
-                <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{inv.client}</td>
-                <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{inv.job}</td>
-                <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>${inv.amount.toLocaleString()}</td>
-                <td style={{ padding: '12px 16px' }}><StatusBadge status={inv.status} config={INVOICE_STATUS_CONFIG} /></td>
-                <td style={{ padding: '12px 16px', fontSize: 12, color: '#666' }}>{inv.date}</td>
+      {loading ? (
+        <LoadingSpinner message="Loading invoices..." />
+      ) : error ? (
+        <ErrorState message={error} onRetry={refetch} />
+      ) : (
+        <div className="empire-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f9f7f4', borderBottom: '1px solid #ece8e0' }}>
+                {['Invoice ID', 'Client', 'Job', 'Amount', 'Status', 'Date'].map(h => (
+                  <th key={h} style={{ padding: '10px 16px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999', textAlign: 'left', letterSpacing: 0.5 }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && (
-          <div style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 12 }}>No invoices match your search</div>
-        )}
-      </div>
+            </thead>
+            <tbody>
+              {filtered.map(inv => (
+                <tr key={inv.id} style={{ borderBottom: '1px solid #f0ede8' }} className="hover:bg-[#f9f7f4] transition-colors">
+                  <td style={{ padding: '12px 16px', fontSize: 12, fontWeight: 600, color: AMBER }}>{inv.id}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{inv.client}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#444' }}>{inv.job}</td>
+                  <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>${inv.amount.toLocaleString()}</td>
+                  <td style={{ padding: '12px 16px' }}><StatusBadge status={inv.status} config={INVOICE_STATUS_CONFIG} /></td>
+                  <td style={{ padding: '12px 16px', fontSize: 12, color: '#666' }}>{inv.date}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && (
+            <div style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 12 }}>
+              {invoices.length === 0 ? 'No invoices yet' : 'No invoices match your search'}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
