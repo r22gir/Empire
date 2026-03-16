@@ -43,13 +43,13 @@ const SHARED_GENESIS: DocEntry[] = [
 ];
 
 const QUOTE_PDFS: DocEntry[] = [
-  { title: "Sample Quote: EST-2026-001", path: "data/quotes/pdf/EST-2026-001.pdf", type: "pdf", description: "Generated estimate PDF — sample #001" },
-  { title: "Sample Quote: EST-2026-005", path: "data/quotes/pdf/EST-2026-005.pdf", type: "pdf", description: "Generated estimate PDF — sample #005" },
-  { title: "Sample Quote: EST-2026-007", path: "data/quotes/pdf/EST-2026-007.pdf", type: "pdf", description: "Generated estimate PDF — sample #007" },
-  { title: "Sample Quote: EST-2026-010", path: "data/quotes/pdf/EST-2026-010.pdf", type: "pdf", description: "Generated estimate PDF — sample #010" },
-  { title: "Sample Quote: EST-2026-012", path: "data/quotes/pdf/EST-2026-012.pdf", type: "pdf", description: "Generated estimate PDF — sample #012" },
-  { title: "Sample Quote: EST-2026-016", path: "data/quotes/pdf/EST-2026-016.pdf", type: "pdf", description: "Generated estimate PDF — sample #016" },
-  { title: "Sample Quote: EST-2026-022", path: "data/quotes/pdf/EST-2026-022.pdf", type: "pdf", description: "Generated estimate PDF — sample #022" },
+  { title: "Quote PDF: EST-2026-001", path: "data/quotes/pdf/EST-2026-001.pdf", type: "pdf", description: "Generated estimate PDF — #001" },
+  { title: "Quote PDF: EST-2026-005", path: "data/quotes/pdf/EST-2026-005.pdf", type: "pdf", description: "Generated estimate PDF — #005" },
+  { title: "Quote PDF: EST-2026-007", path: "data/quotes/pdf/EST-2026-007.pdf", type: "pdf", description: "Generated estimate PDF — #007" },
+  { title: "Quote PDF: EST-2026-010", path: "data/quotes/pdf/EST-2026-010.pdf", type: "pdf", description: "Generated estimate PDF — #010" },
+  { title: "Quote PDF: EST-2026-012", path: "data/quotes/pdf/EST-2026-012.pdf", type: "pdf", description: "Generated estimate PDF — #012" },
+  { title: "Quote PDF: EST-2026-016", path: "data/quotes/pdf/EST-2026-016.pdf", type: "pdf", description: "Generated estimate PDF — #016" },
+  { title: "Quote PDF: EST-2026-022", path: "data/quotes/pdf/EST-2026-022.pdf", type: "pdf", description: "Generated estimate PDF — #022" },
   { title: "Customer Quote: EMP-Q-260301", path: "data/quotes/pdf/EMP-Q-260301-7FF9.pdf", type: "pdf", description: "Customer quote PDF — March 1" },
   { title: "Customer Quote: EMP-Q-260303-CFF9", path: "data/quotes/pdf/EMP-Q-260303-CFF9.pdf", type: "pdf", description: "Customer quote PDF — March 3" },
   { title: "Customer Quote: EMP-Q-260303-900C", path: "data/quotes/pdf/EMP-Q-260303-900C.pdf", type: "pdf", description: "Customer quote PDF — March 3" },
