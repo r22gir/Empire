@@ -59,6 +59,7 @@ class TTSService:
                     json={
                         "text": clean_text,
                         "voice_id": voice,
+                        "language": "en",
                     },
                 )
 
@@ -105,6 +106,7 @@ class TTSService:
                     json={
                         "text": clean_text,
                         "voice_id": TTS_VOICE,
+                        "language": "en",
                     },
                 )
 

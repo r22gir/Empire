@@ -5,7 +5,7 @@ import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
-  ChevronsLeft, ChevronsRight, Camera, PawPrint,
+  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor,
 } from 'lucide-react';
 
 interface NavItem {
@@ -21,6 +21,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: 'Command',
     items: [
       { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c' },
+      { id: 'max-avatar' as any, name: 'MAX Avatar', icon: <Monitor size={16} />, status: 'active', color: '#b8960c' },
     ],
   },
   {

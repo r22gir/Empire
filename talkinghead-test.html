@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MAX Avatar — TalkingHead Test</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d0b08; color: #d4af37; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
+    h1 { margin-bottom: 16px; font-size: 20px; letter-spacing: 2px; }
+    #avatar-container { width: 600px; height: 500px; border: 2px solid rgba(184,150,12,0.3); border-radius: 12px; overflow: hidden; position: relative; }
+    .status { margin-top: 12px; font-size: 12px; color: #999; }
+    .controls { margin-top: 16px; display: flex; gap: 8px; }
+    button { background: #b8960c; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+    button:hover { background: #d4af37; }
+    .placeholder { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, #1a1812, #0d0b08); }
+    .placeholder-circle { width: 120px; height: 120px; border-radius: 50%; background: linear-gradient(135deg, #b8960c, #d4af37); display: flex; align-items: center; justify-content: center; font-size: 48px; margin-bottom: 16px; }
+    .error { color: #ef4444; font-size: 12px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>MAX Avatar Test</h1>
+  <div id="avatar-container">
+    <div class="placeholder" id="placeholder">
+      <div class="placeholder-circle">M</div>
+      <p>Loading TalkingHead...</p>
+    </div>
+  </div>
+  <div class="status" id="status">Initializing...</div>
+  <div class="controls">
+    <button onclick="testSpeak()">Test Speak</button>
+    <button onclick="testEmotion('happy')">Happy</button>
+    <button onclick="testEmotion('serious')">Serious</button>
+    <button onclick="testEmotion('neutral')">Neutral</button>
+  </div>
+  <div class="error" id="error"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    const statusEl = document.getElementById('status');
+    const errorEl = document.getElementById('error');
+    const placeholder = document.getElementById('placeholder');
+
+    let head = null;
+
+    async function init() {
+      try {
+        statusEl.textContent = 'Loading TalkingHead module from CDN...';
+        const module = await import('https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs');
+        const TalkingHead = module.TalkingHead;
+
+        statusEl.textContent = 'Creating TalkingHead instance...';
+        const container = document.getElementById('avatar-container');
+        placeholder.style.display = 'none';
+
+        head = new TalkingHead(container, {
+          cameraView: 'upper',
+          cameraRotateEnable: true,
+        });
+
+        statusEl.textContent = 'Loading avatar model...';
+
+        try {
+          await head.showAvatar({
+            url: 'https://models.readyplayer.me/6460d95f9ae8fbc38ce95c38.glb?morphTargets=ARKit,Oculus+Visemes,mouthOpen,mouthSmile,eyesClosed,eyesLookUp,eyesLookDown&textureSizeLimit=1024&textureFormat=png',
+            body: 'M',
+            avatarMood: 'neutral',
+            lipsyncLang: 'en',
+          });
+          statusEl.textContent = 'Avatar loaded! Breathing + blinking active.';
+        } catch (e) {
+          statusEl.textContent = 'Avatar model failed — showing placeholder.';
+          placeholder.style.display = 'flex';
+          errorEl.textContent = `Model load error: ${e.message}`;
+        }
+
+        window._head = head;
+      } catch (e) {
+        statusEl.textContent = 'TalkingHead failed to load.';
+        errorEl.textContent = `Init error: ${e.message}`;
+        placeholder.style.display = 'flex';
+      }
+    }
+
+    window.testSpeak = async function() {
+      if (!head) { statusEl.textContent = 'No avatar loaded'; return; }
+      try {
+        statusEl.textContent = 'Speaking...';
+        await head.speakText('Hello! I am MAX, your Empire AI assistant. Welcome to the presentation.');
+        statusEl.textContent = 'Done speaking.';
+      } catch (e) {
+        errorEl.textContent = `Speak error: ${e.message}`;
+      }
+    };
+
+    window.testEmotion = function(mood) {
+      if (!head) return;
+      head.setMood(mood);
+      statusEl.textContent = `Mood: ${mood}`;
+    };
+
+    init();
+  </script>
+</body>
+</html>

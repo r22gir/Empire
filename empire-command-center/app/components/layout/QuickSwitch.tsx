@@ -1,9 +1,10 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo } from 'lucide-react';
+import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor } from 'lucide-react';
 
 const SECTIONS = [
   { label: 'Chat', shortcut: 'C', screen: 'chat', icon: MessageSquare, color: '#b8960c' },
+  { label: 'MAX Avatar', shortcut: 'M', screen: 'presentation', icon: Monitor, color: '#b8960c' },
   { label: 'Dashboard', shortcut: 'D', screen: 'dashboard', icon: BarChart3, color: '#b8960c' },
   { label: 'Tasks', shortcut: 'K', screen: 'tasks', icon: ListTodo, color: '#d97706' },
   { label: 'Quote Review', shortcut: 'Q', screen: 'quote', icon: ClipboardList, color: '#d97706' },

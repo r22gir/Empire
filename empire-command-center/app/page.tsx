@@ -46,6 +46,7 @@ const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
 import TasksScreen from './components/screens/TasksScreen';
+import PresentationScreen from './components/screens/PresentationScreen';
 const TicketsPage = lazy(() => import('./components/business/support/TicketsPage'));
 const ShippingPage = lazy(() => import('./components/business/shipping/ShippingPage'));
 const CostTracker = lazy(() => import('./components/business/costs/CostTracker'));
@@ -104,6 +105,7 @@ export default function CommandCenter() {
     setActiveSection(null);
     // When switching product, go to dashboard for that product (or chat for owner)
     if (product === 'owner') setActiveScreen('chat');
+    else if (product === 'max-avatar') setActiveScreen('presentation');
     else if (product === 'tokens') setActiveScreen('costs');
     else if (product === 'system') setActiveScreen('report');
     else setActiveScreen('dashboard');
@@ -160,6 +162,7 @@ export default function CommandCenter() {
     if (screen === 'workroom-page') { setActiveProduct('workroom'); setActiveScreen('dashboard'); }
     else if (screen === 'craft-page') { setActiveProduct('craft'); setActiveScreen('dashboard'); }
     else if (screen === 'platform-page') { setActiveProduct('platform'); setActiveScreen('dashboard'); }
+    else if (screen === 'presentation') { setActiveProduct('max-avatar'); setActiveScreen('presentation'); }
     else handleScreenChange(screen);
   }, [handleScreenChange]);
 
@@ -235,6 +238,7 @@ export default function CommandCenter() {
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;
+    if (activeScreen === 'presentation') return <PresentationScreen />;
     if (activeScreen === 'chat') {
       return (
         <ChatScreen

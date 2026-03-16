@@ -86,6 +86,9 @@ load_router("app.routers.inbox", "/api/v1", ["inbox"])
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
 load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
 
+# Avatar / Presentation Mode
+load_router("app.routers.avatar", "/api/v1", ["avatar"])
+
 # AI Cost Tracker
 load_router("app.routers.costs", "/api/v1", ["costs"])
 
