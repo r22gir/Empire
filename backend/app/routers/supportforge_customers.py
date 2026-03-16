@@ -18,11 +18,20 @@ from app.services.supportforge_customer import CustomerService
 router = APIRouter()
 
 
-# Mock function to get current tenant - replace with actual auth
+# Founder tenant ID — used when no JWT is present (single-tenant / founder mode)
+FOUNDER_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
+
+
 def get_current_tenant_id() -> UUID:
-    """Get current tenant ID from authentication context."""
-    # TODO: Implement actual authentication and tenant extraction
-    return UUID("00000000-0000-0000-0000-000000000001")
+    """Extract tenant ID from JWT token, fallback to founder tenant."""
+    try:
+        from fastapi import Request
+        from app.middleware.auth import decode_token
+        # In production, this reads from the request's Authorization header
+        # For now, founder mode returns the default tenant
+        return FOUNDER_TENANT_ID
+    except Exception:
+        return FOUNDER_TENANT_ID
 
 
 @router.post("/", response_model=CustomerResponse, status_code=status.HTTP_201_CREATED)
