@@ -713,26 +713,14 @@ function QuickLink({ icon, label, desc, color, onClick }: { icon: React.ReactNod
 function OverviewSection({ onNavigate, onNewOrder }: { onNavigate: (s: Section) => void; onNewOrder: () => void }) {
   const [dashboard, setDashboard] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     fetch(API + '/llcfactory/dashboard').then(r => r.json()).then(setDashboard)
-      .catch(() => setDashboard({
-        activeOrders: 3, revenueMTD: 2450, formationsThisMonth: 5, pendingApostilles: 2,
-        recentOrders: [
-          { id: 'ORD-001', customer: 'Sarah Johnson', business: 'Bloom & Co LLC', state: 'DC', status: 'processing', total: 248, date: '2026-03-07' },
-          { id: 'ORD-002', customer: 'Marcus Lee', business: 'TechVenture Corp', state: 'VA', status: 'filed', total: 499, date: '2026-03-06' },
-          { id: 'ORD-003', customer: 'Diana Park', business: 'Green Path Consulting', state: 'MD', status: 'approved', total: 149, date: '2026-03-05' },
-          { id: 'ORD-004', customer: 'James Wright', business: 'Wright Legal PLLC', state: 'DC', status: 'delivered', total: 598, date: '2026-03-04' },
-          { id: 'ORD-005', customer: 'Amara Obi', business: 'Obi Imports LLC', state: 'VA', status: 'completed', total: 349, date: '2026-03-03' },
-        ],
-        topServices: [
-          { name: 'LLC Formation', count: 12 },
-          { name: 'EIN Application', count: 9 },
-          { name: 'Operating Agreement', count: 7 },
-          { name: 'Registered Agent', count: 5 },
-          { name: 'Apostille', count: 3 },
-        ],
-      }))
+      .catch(() => {
+        setError(true);
+        setDashboard({ activeOrders: 0, revenueMTD: 0, formationsThisMonth: 0, pendingApostilles: 0, recentOrders: [], topServices: [] });
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -741,6 +729,11 @@ function OverviewSection({ onNavigate, onNewOrder }: { onNavigate: (s: Section) 
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+      {error && (
+        <div style={{ padding: '10px 16px', borderRadius: 10, background: '#fef3c7', border: '1px solid #fcd34d', marginBottom: 16, fontSize: 12, color: '#92400e' }} className="flex items-center gap-2">
+          <AlertTriangle size={14} /> Could not load dashboard data from API. Showing empty state.
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-1">
         <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>LLC Factory</h1>
         <span style={{ fontSize: 13, color: '#aaa' }} suppressHydrationWarning>
@@ -975,20 +968,14 @@ function PackagesSection({ onNewOrder }: { onNewOrder: () => void }) {
 function OrdersSection({ onNewOrder }: { onNewOrder: () => void }) {
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [filter, setFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(API + '/llcfactory/orders').then(r => r.json()).then(data => setOrders(data.orders || data || []))
-      .catch(() => setOrders([
-        { id: 'ORD-001', customer: 'Sarah Johnson', email: 'sarah@bloom.co', business: 'Bloom & Co LLC', state: 'DC', package: 'Professional', status: 'processing', total: 248, date: '2026-03-07', services: ['LLC Formation', 'EIN', 'Operating Agreement'], timeline: [{ date: '2026-03-07', event: 'Order received', status: 'completed' }, { date: '2026-03-07', event: 'Documents prepared', status: 'completed' }, { date: '2026-03-08', event: 'Filed with DLCP', status: 'active' }] },
-        { id: 'ORD-002', customer: 'Marcus Lee', email: 'marcus@techv.io', business: 'TechVenture Corp', state: 'VA', package: 'Empire', status: 'filed', total: 499, date: '2026-03-06', services: ['Corp Formation', 'EIN', 'Operating Agreement', 'Registered Agent'], timeline: [{ date: '2026-03-06', event: 'Order received', status: 'completed' }, { date: '2026-03-06', event: 'Filed with SCC', status: 'completed' }, { date: '2026-03-07', event: 'Awaiting SCC approval', status: 'active' }] },
-        { id: 'ORD-003', customer: 'Diana Park', email: 'diana@greenpath.com', business: 'Green Path Consulting', state: 'MD', package: 'Starter', status: 'approved', total: 149, date: '2026-03-05', services: ['LLC Formation'], timeline: [{ date: '2026-03-05', event: 'Order received', status: 'completed' }, { date: '2026-03-05', event: 'Filed with SDAT', status: 'completed' }, { date: '2026-03-07', event: 'Approved by SDAT', status: 'completed' }] },
-        { id: 'ORD-004', customer: 'James Wright', email: 'james@wrightlegal.com', business: 'Wright Legal PLLC', state: 'DC', package: 'Empire', status: 'delivered', total: 598, date: '2026-03-04', services: ['LLC Formation', 'EIN', 'Operating Agreement', 'Registered Agent', 'Apostille'], timeline: [] },
-        { id: 'ORD-005', customer: 'Amara Obi', email: 'amara@obiimports.com', business: 'Obi Imports LLC', state: 'VA', package: 'Professional', status: 'completed', total: 349, date: '2026-03-03', services: ['LLC Formation', 'EIN', 'Operating Agreement'], timeline: [] },
-        { id: 'ORD-006', customer: 'Chen Wei', email: 'chen@silkroad.biz', business: 'Silk Road Trading LLC', state: 'MD', package: 'Professional', status: 'received', total: 299, date: '2026-03-08', services: ['LLC Formation', 'EIN', 'Operating Agreement', 'BOI Report'], timeline: [{ date: '2026-03-08', event: 'Order received', status: 'active' }] },
-      ]))
+      .catch(() => { setError(true); setOrders([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -1010,6 +997,11 @@ function OrdersSection({ onNewOrder }: { onNewOrder: () => void }) {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+      {error && (
+        <div style={{ padding: '10px 16px', borderRadius: 10, background: '#fef3c7', border: '1px solid #fcd34d', marginBottom: 16, fontSize: 12, color: '#92400e' }} className="flex items-center gap-2">
+          <AlertTriangle size={14} /> Could not load orders from API. Check backend connection.
+        </div>
+      )}
       <div className="flex items-center justify-between mb-5">
         <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Orders</h1>
         <div className="flex items-center gap-3">
@@ -1104,18 +1096,12 @@ function OrdersSection({ onNewOrder }: { onNewOrder: () => void }) {
 function CustomersSection() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
 
   useEffect(() => {
     fetch(API + '/llcfactory/customers').then(r => r.json()).then(data => setCustomers(data.customers || data || []))
-      .catch(() => setCustomers([
-        { id: 'C-001', name: 'Sarah Johnson', email: 'sarah@bloom.co', phone: '(202) 555-0101', orders: 2, totalSpent: 497, status: 'active' },
-        { id: 'C-002', name: 'Marcus Lee', email: 'marcus@techv.io', phone: '(703) 555-0202', orders: 1, totalSpent: 499, status: 'active' },
-        { id: 'C-003', name: 'Diana Park', email: 'diana@greenpath.com', phone: '(301) 555-0303', orders: 1, totalSpent: 149, status: 'active' },
-        { id: 'C-004', name: 'James Wright', email: 'james@wrightlegal.com', phone: '(202) 555-0404', orders: 3, totalSpent: 1247, status: 'active' },
-        { id: 'C-005', name: 'Amara Obi', email: 'amara@obiimports.com', phone: '(571) 555-0505', orders: 1, totalSpent: 349, status: 'active' },
-        { id: 'C-006', name: 'Chen Wei', email: 'chen@silkroad.biz', phone: '(240) 555-0606', orders: 1, totalSpent: 299, status: 'new' },
-      ]))
+      .catch(() => { setError(true); setCustomers([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -1155,6 +1141,11 @@ function CustomersSection() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+      {error && (
+        <div style={{ padding: '10px 16px', borderRadius: 10, background: '#fef3c7', border: '1px solid #fcd34d', marginBottom: 16, fontSize: 12, color: '#92400e' }} className="flex items-center gap-2">
+          <AlertTriangle size={14} /> Could not load customers from API. Check backend connection.
+        </div>
+      )}
       <div className="flex items-center justify-between mb-5">
         <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Customers</h1>
         <button style={{ padding: '8px 16px', borderRadius: 10, background: '#16a34a', color: '#fff', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer' }}
@@ -1201,11 +1192,7 @@ function ApostilleSection() {
 
   useEffect(() => {
     fetch(API + '/llcfactory/apostille').then(r => r.json()).then(data => { const list = data?.orders || data; setApostilleOrders(Array.isArray(list) ? list : []); })
-      .catch(() => setApostilleOrders([
-        { id: 'APO-001', customer: 'James Wright', documentType: 'Articles of Organization', jurisdiction: 'DC → Federal', status: 3, dateReceived: '2026-03-02', estimatedDelivery: '2026-03-15' },
-        { id: 'APO-002', customer: 'Amara Obi', documentType: 'Certificate of Good Standing', jurisdiction: 'VA → Embassy (Nigeria)', status: 4, dateReceived: '2026-02-25', estimatedDelivery: '2026-03-20' },
-        { id: 'APO-003', customer: 'Chen Wei', documentType: 'Corporate Resolution', jurisdiction: 'MD → Federal → Embassy (China)', status: 1, dateReceived: '2026-03-08', estimatedDelivery: '2026-04-01' },
-      ]))
+      .catch(() => setApostilleOrders([]))
       .finally(() => setLoading(false));
   }, []);
 
@@ -2082,17 +2069,10 @@ const INITIAL_COURIERS: CourierContact[] = [
   { id: 'c2', name: 'Trans Time Express', type: 'company', phone: '', coverage: ['DC', 'MD', 'VA'], rate: '$75-200/trip', rating: 4, notes: '35+ years, 300+ drivers, 24/7' },
   { id: 'c3', name: 'Washington Express', type: 'company', phone: '', coverage: ['DC'], rate: '$60-120/trip', rating: 5, notes: 'Serves 90 of top 100 DC law firms' },
   { id: 'c4', name: 'Expedited Courier Group', type: 'company', phone: '(410) 528-1920', coverage: ['MD'], rate: '$80-150/trip', rating: 4, notes: 'Baltimore-based, SDAT specialist' },
-  { id: 'c5', name: 'Marcus Johnson', type: 'individual', phone: '(202) 555-0147', coverage: ['DC', 'MD'], rate: '$35/trip', rating: 4, notes: 'Freelance runner, reliable, knows DC agencies well' },
-  { id: 'c6', name: 'Excel Courier', type: 'company', phone: '(703) 478-0140', coverage: ['VA', 'DC', 'MD'], rate: '$75-250/trip', rating: 4, notes: 'Mid-Atlantic, 24/7, law firm specialist' },
+  { id: 'c5', name: 'Excel Courier', type: 'company', phone: '(703) 478-0140', coverage: ['VA', 'DC', 'MD'], rate: '$75-250/trip', rating: 4, notes: 'Mid-Atlantic, 24/7, law firm specialist' },
 ];
 
-const INITIAL_HANDOFFS: Handoff[] = [
-  { id: 'HO-001', orderId: 'ORD-001', client: 'EmpireBox LLC', docs: ['Articles of Organization'], courier: 'All State Courier', agency: 'DC DLCP', status: 'returned', handedOff: '2026-03-07', eta: '2026-03-07', cost: 75, paid: true, priority: 'rush', notes: 'Expedited filing — same day return.', timeline: [{ date: '2026-03-07 09:00', event: 'Picked up from office' }, { date: '2026-03-07 10:15', event: 'Submitted at DC DLCP' }, { date: '2026-03-07 14:30', event: 'Filed — docs returned' }] },
-  { id: 'HO-002', orderId: 'ORD-002', client: 'TechStart Inc', docs: ['Articles of Organization', 'Operating Agreement'], courier: 'Marcus Johnson', agency: 'DC DLCP', status: 'at_agency', handedOff: '2026-03-08', eta: '2026-03-09', cost: 35, paid: false, priority: 'standard', timeline: [{ date: '2026-03-08 11:00', event: 'Picked up by Marcus' }, { date: '2026-03-08 12:30', event: 'Submitted at DC DLCP' }] },
-  { id: 'HO-003', orderId: 'ORD-003', client: 'Green Valley LLC', docs: ['Certificate of Good Standing'], courier: 'Expedited Courier Group', agency: 'MD SDAT', status: 'picked_up', handedOff: '2026-03-09', eta: '2026-03-10', cost: 120, paid: false, priority: 'standard', timeline: [{ date: '2026-03-09 08:30', event: 'Picked up from office' }] },
-  { id: 'HO-004', orderId: 'ORD-004', client: 'Nova Consulting', docs: ['Articles of Organization', 'Apostille'], courier: 'All State Courier', agency: 'VA SCC', status: 'pending', handedOff: '', eta: '', cost: 150, paid: false, priority: 'rush' },
-  { id: 'HO-005', orderId: 'ORD-005', client: 'Bright Future Corp', docs: ['Operating Agreement', 'EIN Letter'], courier: 'Washington Express', agency: 'DC Apostille Office', status: 'ready_for_pickup', handedOff: '2026-03-06', eta: '2026-03-09', cost: 90, paid: false, priority: 'same-day', timeline: [{ date: '2026-03-06 09:00', event: 'Picked up from office' }, { date: '2026-03-06 10:00', event: 'Submitted at Apostille Office' }, { date: '2026-03-09 08:00', event: 'Agency processing complete' }] },
-];
+const INITIAL_HANDOFFS: Handoff[] = [];
 
 const HANDOFF_STATUS_CONFIG: Record<HandoffStatus, { label: string; bg: string; color: string }> = {
   pending: { label: 'Pending', bg: '#e5e7eb', color: '#374151' },

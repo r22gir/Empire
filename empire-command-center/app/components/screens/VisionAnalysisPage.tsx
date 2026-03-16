@@ -54,11 +54,7 @@ export default function VisionAnalysisPage() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [customerSearch, setCustomerSearch] = useState('');
-  const [jobs, setJobs] = useState<AnalysisJob[]>([
-    { id: 'AJ-001', customerName: 'Sarah Mitchell', customerEmail: 'sarah@example.com', photoCount: 5, status: 'complete', stepsCompleted: 4, createdAt: '2026-03-09T08:30:00', notes: 'Living room + bedroom windows' },
-    { id: 'AJ-002', customerName: 'Edison Orozco', customerEmail: 'edison@example.com', photoCount: 3, status: 'in-progress', stepsCompleted: 2, createdAt: '2026-03-09T10:15:00', notes: 'Dining room reupholstery' },
-    { id: 'AJ-003', customerName: 'Maria Chen', customerEmail: 'maria@example.com', photoCount: 8, status: 'pending', stepsCompleted: 0, createdAt: '2026-03-09T11:00:00', notes: 'Full home consultation' },
-  ]);
+  const [jobs, setJobs] = useState<AnalysisJob[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   // Fetch CRM customers for assignment

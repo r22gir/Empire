@@ -74,7 +74,7 @@ export default function EmpireAssistPage() {
 
   useEffect(() => {
     setHistoryLoading(true);
-    fetch(`${API}/costs/recent?limit=20`)
+    fetch(`${API}/costs/transactions?limit=20`)
       .then(r => r.json())
       .then(data => {
         const logs = (data.recent || data.logs || []).map((log: Record<string, unknown>, i: number) => ({
