@@ -163,7 +163,7 @@ def create_job_from_quote(quote_id: str):
 
     # Build description from rooms
     rooms_desc = []
-    for room in quote.get("rooms", []):
+    for room in (quote.get("rooms") or []):
         room_name = room.get("name", "Room")
         windows = [w.get("name", "Window") for w in room.get("windows", [])]
         rooms_desc.append(f"{room_name}: {', '.join(windows)}")
@@ -206,7 +206,10 @@ def create_job_from_quote(quote_id: str):
         row = conn.execute(
             "SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
-        return {"job": _enrich_job(dict_row(row)), "quote_id": quote_id}
+        job_data = dict_row(row)
+        if not job_data:
+            raise HTTPException(status_code=500, detail="Job insert succeeded but retrieval failed")
+        return {"job": _enrich_job(job_data), "quote_id": quote_id}
 
 
 # -- CRUD -------------------------------------------------------------------

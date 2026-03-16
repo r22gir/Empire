@@ -17,6 +17,9 @@ from .website_desk import WebsiteDesk
 from .legal_desk import LegalDesk
 from .lab_desk import LabDesk
 from .innovation_desk import InnovationDesk
+from .intake_desk import IntakeDesk
+from .analytics_desk import AnalyticsDesk
+from .quality_desk import QualityDesk
 from .desk_router import DeskRouter
 from .desk_manager import AIDeskManager, TaskStatus
 
@@ -25,6 +28,6 @@ __all__ = [
     "ForgeDesk", "MarketDesk", "MarketingDesk", "SupportDesk",
     "SalesDesk", "FinanceDesk", "ClientsDesk", "ContractorsDesk",
     "ITDesk", "WebsiteDesk", "LegalDesk", "LabDesk",
-    "InnovationDesk",
+    "InnovationDesk", "IntakeDesk", "AnalyticsDesk", "QualityDesk",
     "DeskRouter", "AIDeskManager", "TaskStatus",
 ]

@@ -43,6 +43,16 @@ DAILY_SCHEDULE = [
      "Summarize today's quote pipeline for Empire Workroom. "
      "List active quotes, pending measurements, upcoming installations, and production status. "
      "Flag anything that needs immediate attention. Include revenue at stake."),
+
+    (11, 0, "analytics", "Daily Business Metrics",
+     "Pull key metrics from all databases: customers, jobs (pending/completed), "
+     "invoices (unpaid/paid), revenue, expenses, profit, inventory items, open tasks. "
+     "Generate a concise daily metrics summary."),
+
+    (11, 30, "quality", "AI Quality Audit",
+     "Run quality audit on all MAX AI responses. Check accuracy rate from "
+     "max_response_audit table. Flag any accuracy below 90% threshold. "
+     "Generate quality report with total responses audited, flagged count, and accuracy percentage."),
 ]
 
 # Empire services to health-check

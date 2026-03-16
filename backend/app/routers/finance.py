@@ -532,6 +532,85 @@ def create_invoice_from_quote(request: Request, quote_id: str):
         return {"invoice": _enrich_invoice(dict_row(row)), "quote_id": quote_id}
 
 
+@limiter.limit("10/minute")
+@router.post("/invoices/from-job/{job_id}")
+def create_invoice_from_job(request: Request, job_id: str):
+    """Create an invoice from a completed job. Pulls data from job + linked quote."""
+    with get_db() as conn:
+        job = dict_row(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+        # Get line items from linked quote if available
+        line_items = []
+        quote_id = job.get("quote_id")
+        subtotal = 0
+
+        if quote_id:
+            quote_file = QUOTES_DIR / f"{quote_id}.json"
+            if quote_file.exists():
+                with open(quote_file) as f:
+                    quote = json.load(f)
+                for room in (quote.get("rooms") or []):
+                    room_name = room.get("name", "Room")
+                    for window in room.get("windows", []):
+                        item_total = window.get("total", 0)
+                        line_items.append({
+                            "description": f"{room_name} - {window.get('name', 'Window')} - {window.get('treatment_type', 'Treatment')}",
+                            "quantity": 1,
+                            "unit_price": item_total,
+                            "total": item_total,
+                        })
+                subtotal = quote.get("subtotal", 0) or sum(i.get("total", 0) for i in line_items)
+
+        # Add labor + materials from job
+        if job.get("labor_cost") and job["labor_cost"] > 0:
+            line_items.append({"description": "Labor", "quantity": 1, "unit_price": job["labor_cost"], "total": job["labor_cost"]})
+            subtotal += job["labor_cost"]
+        if job.get("materials_cost") and job["materials_cost"] > 0:
+            line_items.append({"description": "Materials", "quantity": 1, "unit_price": job["materials_cost"], "total": job["materials_cost"]})
+            subtotal += job["materials_cost"]
+
+        if subtotal == 0:
+            subtotal = sum(i.get("total", 0) for i in line_items)
+
+        tax_rate = 0.06
+        tax_amount = round(subtotal * tax_rate, 2)
+        total = round(subtotal + tax_amount, 2)
+
+        from datetime import timedelta
+        due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        inv_number = _next_invoice_number(conn)
+
+        conn.execute(
+            """INSERT INTO invoices
+               (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
+            (
+                inv_number,
+                job.get("customer_id"),
+                quote_id,
+                subtotal,
+                tax_rate,
+                tax_amount,
+                total,
+                total,
+                json.dumps(line_items),
+                f"Generated from job {job['title']}",
+                due,
+            )
+        )
+
+        # Link invoice to job
+        row = conn.execute("SELECT * FROM invoices WHERE invoice_number = ?", (inv_number,)).fetchone()
+        inv = _enrich_invoice(dict_row(row))
+        if inv:
+            conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (inv["id"], job_id))
+
+        return {"invoice": inv, "job_id": job_id}
+
+
 # ── Payments ─────────────────────────────────────────────────────────
 
 @limiter.limit("30/minute")

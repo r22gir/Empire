@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Empire Ecosystem Depth Map</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d0b08;color:#e5e0d8;font-family:system-ui,-apple-system,sans-serif;padding:24px}
+h1{color:#d4af37;text-align:center;font-size:28px;letter-spacing:2px;margin-bottom:4px}
+.subtitle{text-align:center;color:#999;font-size:13px;margin-bottom:24px}
+.overall{text-align:center;margin:20px 0 32px;padding:20px;background:linear-gradient(135deg,#1a1812,#0d0b08);border:2px solid #b8960c;border-radius:16px}
+.overall .pct{font-size:64px;font-weight:800;color:#d4af37;line-height:1}
+.overall .label{font-size:14px;color:#999;margin-top:4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;max-width:1400px;margin:0 auto}
+.card{background:#141210;border:1.5px solid #2a2520;border-radius:14px;overflow:hidden;transition:all .2s}
+.card:hover{border-color:#b8960c;box-shadow:0 0 20px rgba(184,150,12,.1)}
+.card.dead-end{animation:pulse-red 2s ease-in-out infinite}
+.card-header{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e1c18}
+.card-name{font-weight:700;font-size:14px}
+.card-pct{font-size:20px;font-weight:800;min-width:48px;text-align:right}
+.bar{height:4px;background:#1e1c18;border-radius:2px;margin:0 16px 8px;overflow:hidden}
+.bar-fill{height:100%;border-radius:2px;transition:width .5s ease}
+.subs{padding:8px 16px 14px}
+.sub{display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid #1a1812}
+.sub:last-child{border:none}
+.sub-name{color:#ccc;flex:1}
+.sub-pct{font-weight:700;min-width:36px;text-align:right}
+.layers{display:flex;gap:4px;margin-left:8px}
+.layer{width:8px;height:8px;border-radius:2px;title:attr(data-title)}
+.legend{display:flex;gap:16px;justify-content:center;margin:24px 0;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:#999}
+.legend-dot{width:10px;height:10px;border-radius:3px}
+.g{color:#22c55e}.y{color:#eab308}.r{color:#ef4444}.k{color:#666}
+.bg-g{background:#22c55e}.bg-y{background:#eab308}.bg-r{background:#ef4444}.bg-k{background:#444}
+.fill-g{background:linear-gradient(90deg,#16a34a,#22c55e)}.fill-y{background:linear-gradient(90deg,#ca8a04,#eab308)}.fill-r{background:linear-gradient(90deg,#dc2626,#ef4444)}.fill-k{background:#444}
+details{cursor:pointer}details summary{list-style:none}details summary::-webkit-details-marker{display:none}
+@keyframes pulse-red{0%,100%{border-color:#2a2520}50%{border-color:#ef4444}}
+.footer{text-align:center;color:#555;font-size:10px;margin-top:32px;padding-top:16px;border-top:1px solid #1e1c18}
+</style>
+</head>
+<body>
+
+<h1>EMPIRE ECOSYSTEM DEPTH MAP</h1>
+<p class="subtitle">Generated 2026-03-16 | Commit 199e3ab | EmpireBox v5.0</p>
+
+<div class="overall">
+<div class="pct">62%</div>
+<div class="label">Overall Ecosystem Completion (before fixes)</div>
+</div>
+
+<div class="legend">
+<div class="legend-item"><div class="legend-dot bg-g"></div> Complete (80-100%)</div>
+<div class="legend-item"><div class="legend-dot bg-y"></div> Partial (40-79%)</div>
+<div class="legend-item"><div class="legend-dot bg-r"></div> Dead End (1-39%)</div>
+<div class="legend-item"><div class="legend-dot" style="background:#222;border:1px solid #444"></div> Not Started (0%)</div>
+<div class="legend-item">Layers: <span style="font-size:9px;color:#666">FE | BE | DB | API</span></div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="footer">Empire Ecosystem Depth Map &mdash; studio.empirebox.store &mdash; EmpireBox v5.0</div>
+
+<script>
+const modules = [
+  { name: "Workroom", pct: 61, color: "#16a34a", subs: [
+    { name: "Quotes / Quote Builder", pct: 80, fe: 3, be: 3, db: 2, api: 2 },
+    { name: "CRM / Customers", pct: 75, fe: 3, be: 3, db: 3, api: 0 },
+    { name: "Jobs / Work Orders", pct: 60, fe: 2, be: 3, db: 3, api: 0 },
+    { name: "Inventory", pct: 65, fe: 2, be: 3, db: 3, api: 0 },
+    { name: "Finance / Invoicing", pct: 70, fe: 2, be: 3, db: 3, api: 0 },
+    { name: "Shipping (ShipForge)", pct: 15, fe: 1, be: 1, db: 0, api: 0 },
+  ]},
+  { name: "SocialForge", pct: 30, color: "#ec4899", subs: [
+    { name: "Post Scheduling", pct: 60, fe: 3, be: 3, db: 2, api: 0 },
+    { name: "Platform Connections", pct: 0, fe: 0, be: 0, db: 0, api: 0 },
+    { name: "Content Generation", pct: 30, fe: 1, be: 2, db: 0, api: 0 },
+  ]},
+  { name: "CraftForge", pct: 40, color: "#ca8a04", subs: [
+    { name: "Frontend (6 modules)", pct: 40, fe: 2, be: 3, db: 2, api: 0 },
+  ]},
+  { name: "LuxeForge", pct: 40, color: "#7c3aed", subs: [
+    { name: "Free Tier (intake form)", pct: 70, fe: 3, be: 3, db: 2, api: 0 },
+    { name: "Paid Tier (designer tools)", pct: 10, fe: 0, be: 1, db: 0, api: 0 },
+  ]},
+  { name: "MAX AI System", pct: 75, color: "#d4af37", subs: [
+    { name: "16 AI Desks", pct: 75, fe: 2, be: 3, db: 3, api: 3 },
+    { name: "Tool Executor (20+ tools)", pct: 75, fe: 0, be: 3, db: 2, api: 2 },
+    { name: "Desk Scheduler", pct: 65, fe: 0, be: 3, db: 2, api: 0 },
+    { name: "Avatar / Presentation", pct: 90, fe: 3, be: 3, db: 0, api: 3 },
+    { name: "Telegram Bot", pct: 80, fe: 0, be: 3, db: 0, api: 3 },
+    { name: "Cost Tracker", pct: 85, fe: 3, be: 3, db: 3, api: 0 },
+  ]},
+  { name: "Marketplaces", pct: 5, color: "#ef4444", subs: [
+    { name: "eBay", pct: 0, fe: 0, be: 0, db: 0, api: 0 },
+    { name: "Facebook Marketplace", pct: 0, fe: 0, be: 0, db: 0, api: 0 },
+    { name: "Etsy", pct: 0, fe: 0, be: 0, db: 0, api: 0 },
+    { name: "RelistApp", pct: 25, fe: 2, be: 1, db: 0, api: 0 },
+  ]},
+  { name: "Communication", pct: 37, color: "#2563eb", subs: [
+    { name: "Email (SMTP)", pct: 30, fe: 0, be: 3, db: 0, api: 0 },
+    { name: "Telegram Bot", pct: 80, fe: 0, be: 3, db: 0, api: 3 },
+    { name: "SMS / Twilio", pct: 0, fe: 0, be: 0, db: 0, api: 0 },
+  ]},
+  { name: "SaaS Platform", pct: 66, color: "#2563eb", subs: [
+    { name: "JWT Auth", pct: 95, fe: 2, be: 3, db: 3, api: 0 },
+    { name: "Stripe Billing", pct: 85, fe: 1, be: 3, db: 2, api: 3 },
+    { name: "Onboarding Flow", pct: 60, fe: 2, be: 3, db: 2, api: 0 },
+    { name: "Multi-Tenant", pct: 50, fe: 1, be: 2, db: 2, api: 0 },
+    { name: "Tier Enforcement", pct: 40, fe: 0, be: 2, db: 2, api: 0 },
+  ]},
+  { name: "RecoveryForge", pct: 50, color: "#06b6d4", subs: [
+    { name: "File Scanner + Classification", pct: 50, fe: 2, be: 2, db: 1, api: 1 },
+  ]},
+  { name: "Infrastructure", pct: 57, color: "#16a34a", subs: [
+    { name: "Cloudflare Tunnel + DNS + SSL", pct: 90, fe: 0, be: 0, db: 0, api: 3 },
+    { name: "Backups", pct: 30, fe: 0, be: 1, db: 0, api: 0 },
+    { name: "Monitoring", pct: 40, fe: 1, be: 2, db: 0, api: 0 },
+    { name: "Log Rotation", pct: 10, fe: 0, be: 0, db: 0, api: 0 },
+  ]},
+];
+
+function pctClass(p) { return p >= 80 ? 'g' : p >= 40 ? 'y' : p > 0 ? 'r' : 'k'; }
+function layerColor(v) { return v >= 3 ? '#22c55e' : v >= 2 ? '#eab308' : v >= 1 ? '#ef4444' : '#222'; }
+
+const grid = document.getElementById('grid');
+modules.forEach(m => {
+  const c = pctClass(m.pct);
+  const card = document.createElement('div');
+  card.className = 'card' + (m.pct < 20 && m.pct > 0 ? ' dead-end' : '');
+  card.innerHTML = `
+    <div class="card-header">
+      <span class="card-name" style="color:${m.color}">${m.name}</span>
+      <span class="card-pct ${c}">${m.pct}%</span>
+    </div>
+    <div class="bar"><div class="bar-fill fill-${c}" style="width:${m.pct}%"></div></div>
+    <div class="subs">
+      ${m.subs.map(s => {
+        const sc = pctClass(s.pct);
+        return `<div class="sub">
+          <span class="sub-name">${s.name}</span>
+          <div class="layers">
+            <div class="layer" style="background:${layerColor(s.fe)}" title="Frontend"></div>
+            <div class="layer" style="background:${layerColor(s.be)}" title="Backend"></div>
+            <div class="layer" style="background:${layerColor(s.db)}" title="Database"></div>
+            <div class="layer" style="background:${layerColor(s.api)}" title="External API"></div>
+          </div>
+          <span class="sub-pct ${sc}">${s.pct}%</span>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+  grid.appendChild(card);
+});
+</script>
+</body>
+</html>
