@@ -12,8 +12,14 @@ import subprocess
 from datetime import datetime
 from typing import Optional, Dict, Any
 from pathlib import Path
+import re as _re
 import httpx
 from app.services.max.brain.memory_store import MemoryStore
+
+try:
+    from app.services.max.access_control import access_controller
+except ImportError:
+    access_controller = None
 
 logger = logging.getLogger("max.telegram")
 
@@ -325,7 +331,7 @@ class TelegramBot:
         cid = str(chat_id or self.founder_chat_id or "default")
         history = _get_history(cid)[-_MAX_HISTORY:]
         try:
-            payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}", "channel": "telegram"}
+            payload: Dict[str, Any] = {"message": text, "history": history, "conversation_id": f"telegram-{cid}", "channel": "telegram", "chat_id": cid}
             if image_filename:
                 payload["image_filename"] = image_filename
             async with httpx.AsyncClient(timeout=120.0) as client:
@@ -658,6 +664,34 @@ class TelegramBot:
             except Exception as e:
                 await update.message.reply_text(f"Error: {e}")
 
+        # /setpin command — set access control PIN
+        async def cmd_setpin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not is_authorized(update):
+                return
+            if not access_controller:
+                await update.message.reply_text("Access control not available.")
+                return
+            chat_id = str(update.effective_chat.id)
+            try:
+                user = access_controller.resolve_user(chat_id, "telegram")
+            except Exception:
+                user = None
+            if not user or user.get("role") not in ("founder", "admin"):
+                await update.message.reply_text("Only founder or admin can set a PIN.")
+                return
+            pin_text = " ".join(context.args).strip() if context.args else ""
+            if not pin_text:
+                await update.message.reply_text("Usage: /setpin 1234 (4-6 digits)")
+                return
+            if not _re.match(r"^\d{4,6}$", pin_text):
+                await update.message.reply_text("PIN must be 4-6 digits.")
+                return
+            try:
+                access_controller.set_pin(user["id"], pin_text)
+                await update.message.reply_text("PIN updated.")
+            except Exception as e:
+                await update.message.reply_text(f"Error setting PIN: {e}")
+
         # /help command
         async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not is_authorized(update):
@@ -674,6 +708,7 @@ class TelegramBot:
                 "/review — Review pending approvals\n"
                 "/voiceprint — Enroll/check voice ID\n"
                 "/security — Security stats\n"
+                "/setpin — Set access control PIN\n"
                 "/help — Show this message\n\n"
                 "You can also send:\n"
                 "💬 <b>Text</b> — Chat with MAX\n"
@@ -687,6 +722,40 @@ class TelegramBot:
                 return
             text = update.message.text
             msg_id = update.message.message_id
+
+            # Access control: intercept CONFIRM and PIN responses
+            if access_controller:
+                chat_id_str = str(update.effective_chat.id)
+                try:
+                    pending = access_controller.get_pending_session(chat_id_str)
+                    if pending and text.strip().upper() == "CONFIRM" and pending.get("level") == 2:
+                        result = access_controller.confirm_session(pending["id"])
+                        if result:
+                            from app.services.max.tool_executor import execute_tool
+                            tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
+                            if tr.success:
+                                await update.message.reply_text(f"Confirmed. {tr.tool} executed successfully.")
+                            else:
+                                await update.message.reply_text(f"Confirmed but tool failed: {tr.error}")
+                            access_controller.audit_log(pending.get("user_id", ""), result["tool_name"], 2, "confirmed", channel="telegram")
+                        else:
+                            await update.message.reply_text("Session expired or not found.")
+                        return
+                    if pending and _re.match(r"^\d{4,6}$", text.strip()) and pending.get("level") == 3:
+                        result = access_controller.authorize_pin_session(pending["id"], text.strip())
+                        if result:
+                            from app.services.max.tool_executor import execute_tool
+                            tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
+                            if tr.success:
+                                await update.message.reply_text(f"Authorized. {tr.tool} executed successfully.")
+                            else:
+                                await update.message.reply_text(f"Authorized but tool failed: {tr.error}")
+                            access_controller.audit_log(pending.get("user_id", ""), result["tool_name"], 3, "pin_authorized", channel="telegram")
+                        else:
+                            await update.message.reply_text("Invalid PIN or session expired.")
+                        return
+                except Exception as ac_err:
+                    logger.warning(f"Access control intercept error: {ac_err}")
 
             # v6.0 — unified sanitizer check
             from app.services.max.security.sanitizer import sanitizer as _sanitizer
@@ -710,6 +779,21 @@ class TelegramBot:
             if len(html_response) > 4000:
                 html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
             await update.message.reply_html(html_response)
+
+            # Check for __ACCESS_PENDING__ sentinel in tool results
+            if access_controller and tool_results:
+                for tr in tool_results:
+                    err = tr.get("error") or ""
+                    if err.startswith("__ACCESS_PENDING__"):
+                        parts = err.split("__", 4)
+                        if len(parts) >= 5:
+                            action_type = parts[3]
+                            summary = parts[4] if len(parts) > 4 else "Action requires authorization"
+                            if action_type == "confirm":
+                                await update.message.reply_text(f"⚠️ {summary}\nReply CONFIRM within 60 seconds to proceed.")
+                            elif action_type == "pin":
+                                await update.message.reply_text(f"🔐 {summary}\nEnter your PIN to authorize.")
+                        return
 
             # Send any documents/files produced by tool execution (deduplicate by path)
             sent_files = set()
@@ -1001,6 +1085,7 @@ class TelegramBot:
         app.add_handler(CommandHandler("review", cmd_review))
         app.add_handler(CommandHandler("voiceprint", cmd_voiceprint))
         app.add_handler(CommandHandler("security", cmd_security))
+        app.add_handler(CommandHandler("setpin", cmd_setpin))
         app.add_handler(CommandHandler("help", cmd_help))
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))

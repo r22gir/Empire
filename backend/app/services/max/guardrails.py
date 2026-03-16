@@ -1,6 +1,23 @@
 """Input/Output guardrails for MAX AI."""
+import os
 import re
+import logging
 from typing import Tuple
+
+logger = logging.getLogger("max.guardrails")
+
+_FOUNDER_CHAT_ID = os.getenv("TELEGRAM_FOUNDER_CHAT_ID")
+
+
+def is_founder_message(message_context: dict) -> bool:
+    if not _FOUNDER_CHAT_ID:
+        return False
+    chat_id = str(message_context.get("chat_id", ""))
+    channel = message_context.get("channel", "")
+    if channel == "telegram" and chat_id == _FOUNDER_CHAT_ID:
+        return True
+    return False
+
 
 INJECTION_PATTERNS = [
     r"ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|prompts|rules)",
@@ -20,14 +37,20 @@ BLOCKED_TOPICS = [
     r"(how\s+to\s+)?(make|build|create)\s+(a\s+)?(bomb|explosive)",
 ]
 
-def check_input(text: str) -> Tuple[bool, str]:
+def check_input(text: str, message_context: dict = None) -> Tuple[bool, str]:
     text_lower = text.lower()
+    founder = is_founder_message(message_context or {})
     for pattern in INJECTION_PATTERNS:
         if re.search(pattern, text_lower, re.IGNORECASE):
-            return False, "prompt_injection"
+            if founder:
+                logger.info(f"Founder override: skipping prompt_injection block")
+            else:
+                return False, "prompt_injection"
     for pattern in BLOCKED_TOPICS:
         if re.search(pattern, text_lower, re.IGNORECASE):
-            return False, "blocked_topic"
+            if not founder:
+                return False, "blocked_topic"
+            logger.info(f"Founder override: skipping blocked_topic block")
     return True, "ok"
 
 def sanitize_output(text: str) -> str:

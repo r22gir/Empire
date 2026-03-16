@@ -11,6 +11,10 @@ import uuid
 from datetime import datetime
 from enum import Enum
 from .base_desk import BaseDesk, DeskTask, TaskPriority, TaskState
+try:
+    from app.db.database import get_db, dict_rows
+except ImportError:
+    get_db = None
 from .desk_router import DeskRouter
 from .forge_desk import ForgeDesk
 from .market_desk import MarketDesk
@@ -188,9 +192,36 @@ class AIDeskManager:
 
     # ── Backward-compatible API (replaces legacy DeskManager) ────────────
 
+    def _get_db_task_counts(self) -> dict:
+        """Fetch task counts per desk from DB."""
+        counts = {}
+        try:
+            if not get_db:
+                return counts
+            with get_db() as conn:
+                rows = dict_rows(conn.execute(
+                    "SELECT desk, status, COUNT(*) as cnt FROM tasks WHERE status != 'cancelled' GROUP BY desk, status"
+                ).fetchall())
+                for r in rows:
+                    desk_id = r["desk"]
+                    if desk_id not in counts:
+                        counts[desk_id] = {"completed": 0, "failed": 0, "todo": 0, "in_progress": 0}
+                    if r["status"] == "done":
+                        counts[desk_id]["completed"] = r["cnt"]
+                    elif r["status"] == "failed":
+                        counts[desk_id]["failed"] = r["cnt"]
+                    elif r["status"] == "todo":
+                        counts[desk_id]["todo"] = r["cnt"]
+                    elif r["status"] == "in_progress":
+                        counts[desk_id]["in_progress"] = r["cnt"]
+        except Exception as e:
+            logger.debug(f"Could not load DB task counts: {e}")
+        return counts
+
     def get_all_desks(self) -> list[dict]:
         """Return desk list in the legacy format (used by /max/desks endpoint)."""
         self.initialize()
+        db_counts = self._get_db_task_counts()
         return [
             {
                 "id": desk.desk_id,
@@ -201,11 +232,13 @@ class AIDeskManager:
                 "domains": desk.capabilities,
                 "current_task": desk.active_tasks[0].id if desk.active_tasks else None,
                 "stats": {
-                    "completed": len(desk.completed_tasks),
-                    "failed": len([
+                    "completed": db_counts.get(desk.desk_id, {}).get("completed", 0) + len(desk.completed_tasks),
+                    "failed": db_counts.get(desk.desk_id, {}).get("failed", 0) + len([
                         t for t in desk.completed_tasks
                         if t.state == TaskState.FAILED
                     ]),
+                    "todo": db_counts.get(desk.desk_id, {}).get("todo", 0),
+                    "in_progress": db_counts.get(desk.desk_id, {}).get("in_progress", 0),
                 },
             }
             for desk in self.all_desks

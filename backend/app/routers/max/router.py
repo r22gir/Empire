@@ -16,7 +16,7 @@ from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot
-from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL
+from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
@@ -30,6 +30,11 @@ from app.services.max.brain.brain_config import (
 )
 from app.services.max.token_tracker import token_tracker
 from app.services.max.desks import AIDeskManager, TaskStatus
+
+try:
+    from app.services.max.access_control import access_controller
+except ImportError:
+    access_controller = None
 
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
@@ -58,6 +63,7 @@ class ChatRequest(BaseModel):
     desk: Optional[str] = None
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
+    chat_id: Optional[str] = None  # Telegram chat ID for founder detection
 
 
 TELEGRAM_DIRECTIVE = (
@@ -100,7 +106,12 @@ class PresentRequest(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks):
-    is_safe, reason = check_input(request.message)
+    msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
+    founder = is_founder_message(msg_ctx)
+    if founder:
+        logger.info(f"Founder message detected via chat_id={request.chat_id}")
+
+    is_safe, reason = check_input(request.message, message_context=msg_ctx)
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
         return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
@@ -147,6 +158,16 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
         response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
 
+        # Resolve access control user
+        _ac_context = None
+        if access_controller:
+            try:
+                _ac_user = access_controller.resolve_user(request.chat_id or request.conversation_id or "", request.channel or "web")
+                if _ac_user:
+                    _ac_context = {"user": _ac_user}
+            except Exception as _ac_err:
+                logger.debug(f"Access control resolve failed: {_ac_err}")
+
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
         tool_results_list = []
         final_content = response.content
@@ -163,7 +184,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                 # Inject image_filename into quote tools so uploaded photos flow through
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
-                result = execute_tool(tc, desk=request.desk)
+                result = execute_tool(tc, desk=request.desk, access_context=_ac_context)
                 entry = {"tool": result.tool, "success": result.success, "result": result.result, "error": result.error}
                 round_results.append(entry)
                 tool_results_list.append(entry)
@@ -212,7 +233,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 
         # Universal quality check on final response
         chat_channel = Channel.TELEGRAM if (hasattr(request, 'channel') and request.channel == 'telegram') else Channel.CHAT
-        qr = quality_engine.validate(final_content, channel=chat_channel)
+        qr = quality_engine.validate(final_content, channel=chat_channel, founder_override=founder)
         if qr.fixed_count > 0:
             logger.info(f"Quality engine fixed {qr.fixed_count} issues in {chat_channel.value} response")
             final_content = qr.cleaned
@@ -278,7 +299,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
 @router.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     """SSE streaming endpoint for MAX chat with brain context."""
-    is_safe, reason = check_input(request.message)
+    msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
+    founder = is_founder_message(msg_ctx)
+    if founder:
+        logger.info(f"Founder message (stream) detected via chat_id={request.chat_id}")
+
+    is_safe, reason = check_input(request.message, message_context=msg_ctx)
     if not is_safe:
         logger.warning(f"Blocked input ({reason}): {request.message[:100]}")
         async def refusal_gen():
@@ -339,6 +365,16 @@ async def chat_stream(request: ChatRequest):
     conv_id = request.conversation_id or str(uuid.uuid4())
     conversation_tracker.add_message(conv_id, "user", request.message)
 
+    # Resolve access control user for streaming
+    _stream_ac_context = None
+    if access_controller:
+        try:
+            _stream_ac_user = access_controller.resolve_user(request.chat_id or request.conversation_id or "", request.channel or "web")
+            if _stream_ac_user:
+                _stream_ac_context = {"user": _stream_ac_user}
+        except Exception as _ac_err:
+            logger.debug(f"Access control resolve failed (stream): {_ac_err}")
+
     async def event_generator():
         model_used = "unknown"
         full_response = ""
@@ -364,7 +400,7 @@ async def chat_stream(request: ChatRequest):
                     # Inject image_filename into quote tools so uploaded photos flow through
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
-                    result = execute_tool(tc, desk=request.desk)
+                    result = execute_tool(tc, desk=request.desk, access_context=_stream_ac_context)
                     round_results.append(result)
                     tool_results_list.append(result)
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
@@ -895,6 +931,39 @@ async def get_telegram_history(chat_id: Optional[str] = None, limit: int = 50):
         return {"chats": chats}
     messages = _get_history(str(target))
     return {"chat_id": str(target), "messages": messages[-limit:], "total": len(messages)}
+
+
+class AccessConfirmRequest(BaseModel):
+    session_id: str
+
+
+class AccessPinRequest(BaseModel):
+    session_id: str
+    pin: str
+
+
+@router.post("/access/confirm")
+async def access_confirm(request: AccessConfirmRequest):
+    if not access_controller:
+        raise HTTPException(status_code=501, detail="Access control not available")
+    result = access_controller.confirm_session(request.session_id)
+    if not result:
+        raise HTTPException(status_code=400, detail="Session expired or not found")
+    tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
+    access_controller.audit_log(result.get("user_id", ""), result["tool_name"], 2, "confirmed", channel="web")
+    return {"tool": tr.tool, "success": tr.success, "result": tr.result, "error": tr.error}
+
+
+@router.post("/access/pin")
+async def access_pin(request: AccessPinRequest):
+    if not access_controller:
+        raise HTTPException(status_code=501, detail="Access control not available")
+    result = access_controller.authorize_pin_session(request.session_id, request.pin)
+    if not result:
+        raise HTTPException(status_code=403, detail="Invalid PIN or session expired")
+    tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
+    access_controller.audit_log(result.get("user_id", ""), result["tool_name"], 3, "pin_authorized", channel="web")
+    return {"tool": tr.tool, "success": tr.success, "result": tr.result, "error": tr.error}
 
 
 @router.get("/brain/status")

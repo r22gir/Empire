@@ -5,8 +5,16 @@ Run once on first startup, safe to re-run (uses IF NOT EXISTS).
 """
 import json
 import os
+import hashlib
+import secrets
 from pathlib import Path
 from .database import get_db, DB_PATH
+
+try:
+    import bcrypt
+    HAS_BCRYPT = True
+except ImportError:
+    HAS_BCRYPT = False
 
 SCHEMA_SQL = """
 -- Tasks: The core unit of work across all desks
@@ -220,6 +228,57 @@ CREATE INDEX IF NOT EXISTS idx_inventory_business ON inventory_items(business);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON jobs(customer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_scheduled ON jobs(scheduled_date);
+
+-- Access control: users
+CREATE TABLE IF NOT EXISTS access_users (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'viewer'
+        CHECK (role IN ('founder', 'admin', 'manager', 'operator', 'viewer')),
+    telegram_chat_id TEXT UNIQUE,
+    desk TEXT,
+    pin_hash TEXT,
+    failed_pin_attempts INTEGER DEFAULT 0,
+    locked_until TEXT,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Access control: pending confirmation/PIN sessions
+CREATE TABLE IF NOT EXISTS access_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    tool_params TEXT,
+    desk TEXT,
+    channel TEXT,
+    chat_id TEXT,
+    level INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'confirmed', 'denied', 'expired')),
+    expires_at TEXT NOT NULL,
+    confirmed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES access_users(id)
+);
+
+-- Access control: audit trail
+CREATE TABLE IF NOT EXISTS access_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    tool_name TEXT NOT NULL,
+    level INTEGER,
+    result TEXT NOT NULL,
+    detail TEXT,
+    channel TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_users_telegram ON access_users(telegram_chat_id);
+CREATE INDEX IF NOT EXISTS idx_access_sessions_chat ON access_sessions(chat_id, status);
+CREATE INDEX IF NOT EXISTS idx_access_audit_user ON access_audit(user_id);
+CREATE INDEX IF NOT EXISTS idx_access_audit_created ON access_audit(created_at);
 """
 
 DESKS_JSON_PATH = Path(__file__).resolve().parent.parent / "config" / "desks.json"
@@ -236,6 +295,9 @@ def init_database():
 
         # v6.0 Pipeline columns (additive migration — safe to re-run)
         _migrate_pipeline_columns(conn)
+
+        # Access control tables migration
+        _migrate_access_control(conn)
 
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
@@ -263,6 +325,39 @@ def _migrate_pipeline_columns(conn):
     if added:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_pipeline ON tasks(pipeline_id)")
         print(f"✓ Pipeline migration: added {added} column(s) to tasks table")
+
+
+def _hash_pin(pin):
+    if HAS_BCRYPT:
+        return bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
+    salt = secrets.token_hex(16)
+    h = hashlib.sha256(f"{salt}{pin}".encode()).hexdigest()
+    return f"sha256:{salt}:{h}"
+
+
+def _migrate_access_control(conn):
+    for table in ("access_users", "access_sessions", "access_audit"):
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,)
+        ).fetchone()
+        if not exists:
+            return
+
+    count = conn.execute("SELECT COUNT(*) FROM access_users").fetchone()[0]
+    if count == 0:
+        founder_chat_id = os.environ.get("TELEGRAM_FOUNDER_CHAT_ID")
+        if founder_chat_id:
+            pin_hash = None
+            founder_pin = os.environ.get("FOUNDER_PIN")
+            if founder_pin:
+                pin_hash = _hash_pin(founder_pin)
+            conn.execute(
+                """INSERT INTO access_users (name, role, telegram_chat_id, pin_hash)
+                   VALUES (?, 'founder', ?, ?)""",
+                ("Founder", founder_chat_id, pin_hash)
+            )
+            print(f"✓ Seeded founder access user (chat_id={founder_chat_id})")
 
 
 def _seed_desks(conn):

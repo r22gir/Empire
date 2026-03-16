@@ -90,6 +90,7 @@ class ResponseQualityEngine:
         content: str,
         channel: Channel = Channel.CHAT,
         context: Optional[dict] = None,
+        founder_override: bool = False,
     ) -> QualityResult:
         """Run quality checks on content before it reaches a human.
 
@@ -100,6 +101,7 @@ class ResponseQualityEngine:
                 - For quotes: {"quote_data": {...}, "customer": {...}}
                 - For emails: {"recipient": "...", "subject": "...", "quote_data": {...}}
                 - For analysis: {"analysis_type": "measurement|mockup|outline"}
+            founder_override: If True, skip safety hedging checks but keep quality fixes
         """
         if not content or not content.strip():
             return QualityResult(
@@ -122,7 +124,9 @@ class ResponseQualityEngine:
         # ── UNIVERSAL CHECKS (all channels) ─────────────────────
         self._check_duplication(result)
         self._check_ai_artifacts(result)
-        self._check_empty_claims(result)
+        if not founder_override:
+            self._check_empty_claims(result)
+        self._check_fake_task_ids(result, ctx)
 
         # ── CHANNEL-SPECIFIC CHECKS ─────────────────────────────
         if channel == Channel.QUOTE:
@@ -138,15 +142,20 @@ class ResponseQualityEngine:
         if result.issues:
             result.cleaned = self._apply_auto_fixes(result)
 
-        # Determine pass/block
-        result.passed = all(i.severity != Severity.CRITICAL for i in result.issues)
-        result.blocked = any(i.severity == Severity.CRITICAL for i in result.issues)
+        # Determine pass/block — founder messages are never blocked by quality engine
+        if founder_override:
+            result.passed = True
+            result.blocked = False
+        else:
+            result.passed = all(i.severity != Severity.CRITICAL for i in result.issues)
+            result.blocked = any(i.severity == Severity.CRITICAL for i in result.issues)
         result.fixed_count = sum(1 for i in result.issues if i.auto_fixed)
 
         if result.issues:
             logger.info(
                 f"Quality [{channel.value}]: {len(result.issues)} issues "
                 f"({result.severity}), {result.fixed_count} auto-fixed"
+                f"{' [founder-override]' if founder_override else ''}"
             )
 
         return result
@@ -523,6 +532,35 @@ class ResponseQualityEngine:
                 idx = rest.rfind(first_block)
                 if idx >= 0:
                     result.cleaned = rest[idx:]
+
+    # ── FAKE TASK ID CHECK ──────────────────────────────────────
+
+    def _check_fake_task_ids(self, result: QualityResult, ctx: dict):
+        """Detect hallucinated task IDs when no create_task tool was called."""
+        tools_called = ctx.get("tools_called", [])
+        if any(t in ("create_task", "submit_desk_task") for t in tools_called):
+            return
+
+        text = result.cleaned
+        fake_patterns = [
+            r"Task\s+#[0-9a-fA-F]{4,}",
+            r"Task\s+ID[:\s]+[0-9a-fA-F]{4,}",
+            r"Task\s+#\w{2,8}\s+created",
+            r"(?:logged|queued|created)\s+(?:task|Task)\s+#\w+",
+        ]
+
+        for pat in fake_patterns:
+            match = re.search(pat, text, re.IGNORECASE)
+            if match:
+                result.cleaned = re.sub(pat, "I'll create that task now using the task tool", text, flags=re.IGNORECASE)
+                result.issues.append(QualityIssue(
+                    check="fake_task_id",
+                    severity=Severity.MEDIUM,
+                    message=f"Fake task ID detected: '{match.group()}' — no create_task tool was called",
+                    auto_fixed=True,
+                    fix_description="Replaced fabricated task reference with prompt to use tool",
+                ))
+                return
 
     # ── AUTO-FIX ENGINE ─────────────────────────────────────────
 

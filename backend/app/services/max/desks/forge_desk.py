@@ -82,8 +82,8 @@ class ForgeDesk(BaseDesk):
             elif any(w in combined for w in ["ai measure", "photo measure", "vision measure"]):
                 return await self._handle_ai_vision(task, "measure")
             elif any(w in combined for w in ["complaint", "issue", "problem", "unhappy", "angry"]):
-                # Complaints always escalate
-                return await self.escalate(task, "Customer complaint — needs founder attention")
+                if task.source != "founder":
+                    return await self.escalate(task, "Customer complaint — needs founder attention")
             else:
                 return await self._handle_general(task)
         except Exception as e:
@@ -100,15 +100,15 @@ class ForgeDesk(BaseDesk):
         # Extract customer and amount if mentioned
         amount_mentioned = self._extract_dollar_amount(task.description)
 
-        # Escalate large quotes
-        if amount_mentioned and amount_mentioned > QUOTE_ESCALATION_THRESHOLD:
+        # Escalate large quotes (skip if founder-originated — don't escalate back to the founder)
+        if amount_mentioned and amount_mentioned > QUOTE_ESCALATION_THRESHOLD and task.source != "founder":
             return await self.escalate(
                 task,
                 f"Quote over ${QUOTE_ESCALATION_THRESHOLD:,} (estimated ${amount_mentioned:,.0f}) — needs founder approval"
             )
 
-        # Check if this is a new customer (escalate for approval)
-        if task.customer_name and self._is_new_customer(task.customer_name):
+        # Check if this is a new customer (escalate for approval, skip for founder)
+        if task.customer_name and self._is_new_customer(task.customer_name) and task.source != "founder":
             return await self.escalate(
                 task,
                 f"New customer '{task.customer_name}' — needs founder approval before quoting"
@@ -166,8 +166,8 @@ class ForgeDesk(BaseDesk):
             detail="Processing scheduling request",
         ))
 
-        # Installation scheduling always needs founder confirmation
-        if "install" in task.description.lower():
+        # Installation scheduling needs founder confirmation (skip if founder is the one asking)
+        if "install" in task.description.lower() and task.source != "founder":
             return await self.escalate(
                 task,
                 "Installation scheduling requires founder confirmation of date and crew availability"

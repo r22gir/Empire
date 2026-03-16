@@ -578,6 +578,12 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
                 {(deskData.stats || deskCosts[d.id]) && (
                   <div className="flex items-center gap-3 mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
                     {deskData.stats && <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600 }}>{deskData.stats.completed} done</span>}
+                    {deskData.stats?.todo > 0 && (
+                      <span style={{ fontSize: 10, color: '#2563eb', fontWeight: 600 }}>{deskData.stats.todo} todo</span>
+                    )}
+                    {deskData.stats?.in_progress > 0 && (
+                      <span style={{ fontSize: 10, color: '#d97706', fontWeight: 600 }}>{deskData.stats.in_progress} active</span>
+                    )}
                     {deskData.stats?.failed > 0 && (
                       <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>{deskData.stats.failed} failed</span>
                     )}
