@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Bot, Zap, FileText, Clock, Settings, Play, Pause, RotateCcw,
   Mail, FileDown, Share2, BarChart3, PenTool, Users, Hash,
@@ -67,18 +67,13 @@ const MOCK_TEMPLATES = [
   { id: '6', name: 'Customer Response', description: 'Draft a helpful reply to a customer inquiry', icon: Users, category: 'Support', useCount: 118 },
 ];
 
-const MOCK_HISTORY = [
-  { id: '1', timestamp: '2026-03-09 09:12', prompt: 'Draft follow-up email for Johnson Corp quote', module: 'WorkroomForge', tokens: 342, model: 'grok-3' },
-  { id: '2', timestamp: '2026-03-09 08:55', prompt: 'Summarize March revenue report', module: 'CostTracker', tokens: 518, model: 'claude-sonnet-4-20250514' },
-  { id: '3', timestamp: '2026-03-09 08:30', prompt: 'Generate Instagram post for new leather wallet', module: 'SocialForge', tokens: 276, model: 'grok-3' },
-  { id: '4', timestamp: '2026-03-09 07:45', prompt: 'Analyze shipping costs Q1 2026', module: 'ShipForge', tokens: 891, model: 'claude-sonnet-4-20250514' },
-  { id: '5', timestamp: '2026-03-09 07:10', prompt: 'Write customer apology for delayed order #4821', module: 'SupportForge', tokens: 203, model: 'llama3' },
-  { id: '6', timestamp: '2026-03-08 23:40', prompt: 'Create product listing for handmade notebook set', module: 'CraftForge', tokens: 445, model: 'grok-3' },
-];
+// History loaded from real API (token usage logs)
 
 const MODELS = ['Grok', 'Claude', 'Ollama'] as const;
 
 // ============ COMPONENT ============
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 export default function EmpireAssistPage() {
   const [activeSection, setActiveSection] = useState<Section>('dashboard');
@@ -86,6 +81,27 @@ export default function EmpireAssistPage() {
   const [defaultModel, setDefaultModel] = useState<string>('Grok');
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(2048);
+  const [history, setHistory] = useState<Array<{id: string; timestamp: string; prompt: string; module: string; tokens: number; model: string}>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  useEffect(() => {
+    setHistoryLoading(true);
+    fetch(`${API}/costs/recent?limit=20`)
+      .then(r => r.json())
+      .then(data => {
+        const logs = (data.recent || data.logs || []).map((log: Record<string, unknown>, i: number) => ({
+          id: String(i),
+          timestamp: String(log.timestamp || '').slice(0, 16).replace('T', ' '),
+          prompt: String(log.prompt || log.description || 'AI request'),
+          module: String(log.desk || log.source || 'MAX'),
+          tokens: Number(log.total_tokens || log.tokens || 0),
+          model: String(log.model || 'unknown'),
+        }));
+        setHistory(logs);
+      })
+      .catch(() => setHistory([]))
+      .finally(() => setHistoryLoading(false));
+  }, []);
 
   const toggleAutomation = (id: string) => {
     setAutomations(prev => prev.map(a =>
@@ -249,28 +265,36 @@ export default function EmpireAssistPage() {
           Recent AI Interactions
         </h3>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {MOCK_HISTORY.map((h, i) => (
-          <div key={h.id} style={{
-            display: 'grid', gridTemplateColumns: '130px 1fr 120px 80px 140px',
-            alignItems: 'center', padding: '12px 24px', gap: 12,
-            borderBottom: i < MOCK_HISTORY.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
-          }}>
-            <span style={{ fontSize: 12, color: 'var(--muted, #888)', fontFamily: 'monospace' }}>{h.timestamp}</span>
-            <span style={{ fontSize: 13, color: 'var(--text, #fff)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.prompt}</span>
-            <span style={{
-              fontSize: 11, fontWeight: 500, color: ACCENT,
-              background: ACCENT_BG, padding: '2px 8px', borderRadius: 6, textAlign: 'center',
-            }}>{h.module}</span>
-            <span style={{ fontSize: 12, color: 'var(--muted, #888)', textAlign: 'right' }}>{h.tokens} tok</span>
-            <span style={{
-              fontSize: 11, color: 'var(--muted, #888)',
-              background: 'rgba(255,255,255,0.04)', padding: '2px 8px', borderRadius: 6, textAlign: 'center',
-              fontFamily: 'monospace',
-            }}>{h.model}</span>
-          </div>
-        ))}
-      </div>
+      {historyLoading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 32 }}>
+          <div style={{ width: 32, height: 32, border: `2px solid ${ACCENT}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        </div>
+      ) : history.length === 0 ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--muted, #888)', fontSize: 14 }}>No AI interactions yet</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {history.map((h, i) => (
+            <div key={h.id} style={{
+              display: 'grid', gridTemplateColumns: '130px 1fr 120px 80px 140px',
+              alignItems: 'center', padding: '12px 24px', gap: 12,
+              borderBottom: i < history.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--muted, #888)', fontFamily: 'monospace' }}>{h.timestamp}</span>
+              <span style={{ fontSize: 13, color: 'var(--text, #fff)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.prompt}</span>
+              <span style={{
+                fontSize: 11, fontWeight: 500, color: ACCENT,
+                background: ACCENT_BG, padding: '2px 8px', borderRadius: 6, textAlign: 'center',
+              }}>{h.module}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted, #888)', textAlign: 'right' }}>{h.tokens} tok</span>
+              <span style={{
+                fontSize: 11, color: 'var(--muted, #888)',
+                background: 'rgba(255,255,255,0.04)', padding: '2px 8px', borderRadius: 6, textAlign: 'center',
+                fontFamily: 'monospace',
+              }}>{h.model}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 

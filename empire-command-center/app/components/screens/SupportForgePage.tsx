@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Headphones, LayoutDashboard, Ticket, BookOpen, Users, BarChart3,
   Search, Filter, Clock, CheckCircle, AlertTriangle, AlertCircle,
@@ -8,6 +8,10 @@ import {
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+
+// ============ API ============
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 // ============ TYPES ============
 
@@ -18,33 +22,151 @@ type TicketStatus = 'open' | 'progress' | 'resolved' | 'closed';
 
 interface SupportTicket {
   id: string;
+  ticket_number: number;
   subject: string;
-  customer: string;
-  email: string;
+  customer_id: string;
+  assigned_agent_id: string | null;
   priority: Priority;
   status: TicketStatus;
-  assigned: string;
-  date: string;
-  lastUpdate: string;
+  channel: string;
+  tags: string[];
+  category: string | null;
+  created_at: string;
+  updated_at: string | null;
 }
 
 interface KBArticle {
   id: string;
   title: string;
-  preview: string;
-  category: string;
-  views: number;
-  helpful: number;
-  updatedAt: string;
+  slug: string;
+  content: string;
+  content_html: string;
+  category_id: string | null;
+  tags: string[];
+  status: string;
+  view_count: number;
+  helpful_count: number;
+  not_helpful_count: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+interface KBCategory {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
 }
 
 interface CustomerRecord {
-  id: string;
+  id: string | number;
   name: string;
-  email: string;
-  totalTickets: number;
-  satisfaction: number;
-  lastContact: string;
+  email: string | null;
+  phone: string | null;
+  company: string | null;
+  type: string;
+  tags: string[];
+  source: string;
+  created_at: string;
+  updated_at: string | null;
+}
+
+// ============ DATA HOOKS ============
+
+function useTickets() {
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`${API}/tickets/?per_page=100`)
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
+      .then(data => setTickets(data.tickets ?? []))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { tickets, loading, error, refresh };
+}
+
+function useArticles() {
+  const [articles, setArticles] = useState<KBArticle[]>([]);
+  const [categories, setCategories] = useState<KBCategory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      fetch(`${API}/kb/articles?per_page=100`).then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); }),
+      fetch(`${API}/kb/categories`).then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); }),
+    ])
+      .then(([artData, catData]) => {
+        setArticles(artData.articles ?? []);
+        setCategories(Array.isArray(catData) ? catData : []);
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { articles, categories, loading, error, refresh };
+}
+
+function useCustomers() {
+  const [customers, setCustomers] = useState<CustomerRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetch(`${API}/crm/customers?limit=200`)
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
+      .then(data => setCustomers(data.customers ?? []))
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+  return { customers, loading, error, refresh };
+}
+
+// ============ LOADING / ERROR HELPERS ============
+
+function LoadingSpinner({ label }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3" style={{ padding: 48 }}>
+      <Loader2 size={28} className="animate-spin" style={{ color: '#7c3aed' }} />
+      <span style={{ fontSize: 13, color: '#999' }}>{label || 'Loading...'}</span>
+    </div>
+  );
+}
+
+function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex items-center gap-3" style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '14px 20px' }}>
+      <AlertCircle size={18} style={{ color: '#dc2626' }} />
+      <span style={{ fontSize: 13, color: '#dc2626', flex: 1 }}>Failed to load data: {message}</span>
+      {onRetry && (
+        <button onClick={onRetry} style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed', background: 'none', border: 'none', cursor: 'pointer' }}>
+          Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2" style={{ padding: 48 }}>
+      <span style={{ fontSize: 13, color: '#999' }}>{message}</span>
+    </div>
+  );
 }
 
 // ============ CONSTANTS ============
@@ -65,42 +187,33 @@ const STATUS_COLORS: Record<TicketStatus, { bg: string; text: string; label: str
   closed:   { bg: '#f3f4f6', text: '#6b7280', label: 'Closed' },
 };
 
-const KB_CATEGORIES = ['Getting Started', 'Billing', 'Technical', 'Account'];
+// ============ HELPERS ============
 
-// ============ MOCK DATA ============
+function formatDate(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  return new Date(iso).toLocaleDateString('en-CA');
+}
 
-const MOCK_TICKETS: SupportTicket[] = [
-  { id: 'TK-1001', subject: "Can't log in", customer: 'Sarah Chen', email: 'sarah@example.com', priority: 'high', status: 'open', assigned: 'MAX', date: '2026-03-09', lastUpdate: '2 min ago' },
-  { id: 'TK-1002', subject: 'Billing question', customer: 'James Miller', email: 'james@example.com', priority: 'medium', status: 'progress', assigned: 'Desk 3', date: '2026-03-08', lastUpdate: '1 hr ago' },
-  { id: 'TK-1003', subject: 'API 500 errors', customer: 'Priya Patel', email: 'priya@devco.io', priority: 'urgent', status: 'open', assigned: 'MAX', date: '2026-03-09', lastUpdate: '5 min ago' },
-  { id: 'TK-1004', subject: 'Feature request', customer: 'Tom Wilson', email: 'tom@startup.co', priority: 'low', status: 'resolved', assigned: 'Desk 7', date: '2026-03-07', lastUpdate: '1 day ago' },
-  { id: 'TK-1005', subject: 'Password reset', customer: 'Lisa Park', email: 'lisa@mail.com', priority: 'medium', status: 'open', assigned: 'MAX', date: '2026-03-09', lastUpdate: '20 min ago' },
-  { id: 'TK-1006', subject: 'Invoice not received', customer: 'David Kim', email: 'david@corp.net', priority: 'medium', status: 'progress', assigned: 'Desk 3', date: '2026-03-08', lastUpdate: '3 hrs ago' },
-  { id: 'TK-1007', subject: 'Dashboard loading slow', customer: 'Emma Davis', email: 'emma@biz.org', priority: 'high', status: 'open', assigned: 'MAX', date: '2026-03-09', lastUpdate: '10 min ago' },
-  { id: 'TK-1008', subject: 'Account deletion request', customer: 'Carlos Ruiz', email: 'carlos@web.io', priority: 'low', status: 'closed', assigned: 'Desk 5', date: '2026-03-05', lastUpdate: '4 days ago' },
-];
+function timeAgo(iso: string | null | undefined): string {
+  if (!iso) return '--';
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs > 1 ? 's' : ''} ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days} day${days > 1 ? 's' : ''} ago`;
+}
 
-const MOCK_ARTICLES: KBArticle[] = [
-  { id: 'kb-1', title: 'Getting Started with EmpireBox', preview: 'Learn how to set up your account, configure your first workspace, and start using the platform in minutes.', category: 'Getting Started', views: 1243, helpful: 89, updatedAt: '2026-03-01' },
-  { id: 'kb-2', title: 'Understanding Your Invoice', preview: 'A breakdown of how billing works, what each line item means, and how to update your payment method.', category: 'Billing', views: 876, helpful: 64, updatedAt: '2026-02-28' },
-  { id: 'kb-3', title: 'API Authentication Guide', preview: 'How to generate API keys, authenticate requests, and troubleshoot common 401/403 errors.', category: 'Technical', views: 2105, helpful: 152, updatedAt: '2026-03-05' },
-  { id: 'kb-4', title: 'Managing Team Members', preview: 'Add, remove, and manage roles for team members in your organization account.', category: 'Account', views: 654, helpful: 41, updatedAt: '2026-02-20' },
-  { id: 'kb-5', title: 'Connecting Your Domain', preview: 'Step-by-step guide to pointing your custom domain to EmpireBox via Cloudflare or other DNS providers.', category: 'Getting Started', views: 987, helpful: 73, updatedAt: '2026-03-03' },
-  { id: 'kb-6', title: 'Subscription Plans Explained', preview: 'Compare features across Starter, Professional, and Empire plans to find the right fit.', category: 'Billing', views: 1532, helpful: 98, updatedAt: '2026-03-07' },
-  { id: 'kb-7', title: 'Webhook Configuration', preview: 'Set up webhooks to receive real-time notifications when events occur in your account.', category: 'Technical', views: 743, helpful: 55, updatedAt: '2026-02-25' },
-  { id: 'kb-8', title: 'Two-Factor Authentication Setup', preview: 'Enable 2FA on your account using an authenticator app or SMS for added security.', category: 'Account', views: 1120, helpful: 82, updatedAt: '2026-03-04' },
-];
-
-const MOCK_CUSTOMERS: CustomerRecord[] = [
-  { id: 'c-1', name: 'Sarah Chen', email: 'sarah@example.com', totalTickets: 3, satisfaction: 4.2, lastContact: '2026-03-09' },
-  { id: 'c-2', name: 'James Miller', email: 'james@example.com', totalTickets: 7, satisfaction: 3.8, lastContact: '2026-03-08' },
-  { id: 'c-3', name: 'Priya Patel', email: 'priya@devco.io', totalTickets: 12, satisfaction: 4.6, lastContact: '2026-03-09' },
-  { id: 'c-4', name: 'Tom Wilson', email: 'tom@startup.co', totalTickets: 2, satisfaction: 5.0, lastContact: '2026-03-07' },
-  { id: 'c-5', name: 'Lisa Park', email: 'lisa@mail.com', totalTickets: 1, satisfaction: 4.0, lastContact: '2026-03-09' },
-  { id: 'c-6', name: 'David Kim', email: 'david@corp.net', totalTickets: 5, satisfaction: 3.5, lastContact: '2026-03-08' },
-  { id: 'c-7', name: 'Emma Davis', email: 'emma@biz.org', totalTickets: 4, satisfaction: 4.4, lastContact: '2026-03-09' },
-  { id: 'c-8', name: 'Carlos Ruiz', email: 'carlos@web.io', totalTickets: 1, satisfaction: 4.8, lastContact: '2026-03-05' },
-];
+function stripHtml(html: string): string {
+  if (typeof document !== 'undefined') {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  }
+  return html.replace(/<[^>]*>/g, '');
+}
 
 // ============ HELPER COMPONENTS ============
 
@@ -152,27 +265,32 @@ function PriorityBar({ data }: { data: { label: string; count: number; color: st
 // ============ TAB CONTENT ============
 
 function DashboardTab() {
-  const openCount = MOCK_TICKETS.filter(t => t.status === 'open').length;
-  const progressCount = MOCK_TICKETS.filter(t => t.status === 'progress').length;
-  const resolvedCount = MOCK_TICKETS.filter(t => t.status === 'resolved').length;
+  const { tickets, loading, error, refresh } = useTickets();
+
+  if (loading) return <LoadingSpinner label="Loading dashboard..." />;
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+
+  const openCount = tickets.filter(t => t.status === 'open').length;
+  const progressCount = tickets.filter(t => t.status === 'progress').length;
+  const resolvedCount = tickets.filter(t => t.status === 'resolved').length;
 
   const priorityCounts = [
-    { label: 'Urgent', count: MOCK_TICKETS.filter(t => t.priority === 'urgent').length, color: '#be185d' },
-    { label: 'High', count: MOCK_TICKETS.filter(t => t.priority === 'high').length, color: '#dc2626' },
-    { label: 'Medium', count: MOCK_TICKETS.filter(t => t.priority === 'medium').length, color: '#d97706' },
-    { label: 'Low', count: MOCK_TICKETS.filter(t => t.priority === 'low').length, color: '#16a34a' },
+    { label: 'Urgent', count: tickets.filter(t => t.priority === 'urgent').length, color: '#be185d' },
+    { label: 'High', count: tickets.filter(t => t.priority === 'high').length, color: '#dc2626' },
+    { label: 'Medium', count: tickets.filter(t => t.priority === 'medium').length, color: '#d97706' },
+    { label: 'Low', count: tickets.filter(t => t.priority === 'low').length, color: '#16a34a' },
   ];
 
-  const recentTickets = [...MOCK_TICKETS].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const recentTickets = [...tickets].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 5);
 
   return (
     <div className="flex flex-col gap-6">
       {/* Stats Row */}
       <div className="grid grid-cols-4 gap-4">
         <StatCard label="Open Tickets" value={openCount} sub={`${progressCount} in progress`} icon={Ticket} color={ACCENT} />
-        <StatCard label="Avg Response Time" value="12 min" sub="Down 3 min from last week" icon={Clock} color="#2563eb" />
-        <StatCard label="Satisfaction Score" value="94%" sub="Based on 156 ratings" icon={Star} color="#d97706" />
-        <StatCard label="Resolved Today" value={resolvedCount} sub={`${MOCK_TICKETS.length} total tickets`} icon={CheckCircle} color="#16a34a" />
+        <StatCard label="Avg Response Time" value="--" sub="Calculated from ticket data" icon={Clock} color="#2563eb" />
+        <StatCard label="Total Tickets" value={tickets.length} sub={`${resolvedCount} resolved`} icon={Star} color="#d97706" />
+        <StatCard label="Resolved" value={resolvedCount} sub={`${tickets.length} total tickets`} icon={CheckCircle} color="#16a34a" />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -182,20 +300,24 @@ function DashboardTab() {
         {/* Recent Tickets */}
         <div style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 12, padding: '20px 24px' }}>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Recent Tickets</div>
-          <div className="flex flex-col gap-2">
-            {recentTickets.map(t => (
-              <div key={t.id} className="flex items-center justify-between" style={{ padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
-                <div className="flex items-center gap-3">
-                  <Badge {...PRIORITY_COLORS[t.priority]} />
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{t.subject}</div>
-                    <div style={{ fontSize: 11, color: '#999' }}>{t.customer} - {t.lastUpdate}</div>
+          {recentTickets.length === 0 ? (
+            <EmptyState message="No tickets yet." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {recentTickets.map(t => (
+                <div key={t.id} className="flex items-center justify-between" style={{ padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
+                  <div className="flex items-center gap-3">
+                    <Badge {...(PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium)} />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>{t.subject}</div>
+                      <div style={{ fontSize: 11, color: '#999' }}>TK-{t.ticket_number} - {timeAgo(t.updated_at || t.created_at)}</div>
+                    </div>
                   </div>
+                  <Badge {...(STATUS_COLORS[t.status] || STATUS_COLORS.open)} />
                 </div>
-                <Badge {...STATUS_COLORS[t.status]} />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -203,12 +325,17 @@ function DashboardTab() {
 }
 
 function TicketsTab() {
+  const { tickets, loading, error, refresh } = useTickets();
   const [search, setSearch] = useState('');
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
-  const filtered = MOCK_TICKETS.filter(t => {
-    if (search && !t.subject.toLowerCase().includes(search.toLowerCase()) && !t.customer.toLowerCase().includes(search.toLowerCase()) && !t.id.toLowerCase().includes(search.toLowerCase())) return false;
+  if (loading) return <LoadingSpinner label="Loading tickets..." />;
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+
+  const filtered = tickets.filter(t => {
+    const q = search.toLowerCase();
+    if (search && !t.subject.toLowerCase().includes(q) && !`TK-${t.ticket_number}`.toLowerCase().includes(q) && !(t.channel || '').toLowerCase().includes(q)) return false;
     if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
     if (filterStatus !== 'all' && t.status !== filterStatus) return false;
     return true;
@@ -222,7 +349,7 @@ function TicketsTab() {
           <Search size={14} style={{ color: '#999' }} />
           <input
             type="text"
-            placeholder="Search tickets by ID, subject, or customer..."
+            placeholder="Search tickets by ID, subject, or channel..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{ background: 'transparent', border: 'none', outline: 'none', fontSize: 13, width: '100%', color: '#333' }}
@@ -257,7 +384,7 @@ function TicketsTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#faf9f7', borderBottom: '1px solid #ece8e0' }}>
-              {['ID', 'Subject', 'Customer', 'Priority', 'Status', 'Assigned', 'Date'].map(h => (
+              {['ID', 'Subject', 'Channel', 'Priority', 'Status', 'Category', 'Date'].map(h => (
                 <th key={h} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 600, color: '#999', textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
               ))}
             </tr>
@@ -265,18 +392,20 @@ function TicketsTab() {
           <tbody>
             {filtered.map(t => (
               <tr key={t.id} style={{ borderBottom: '1px solid #f3f4f6' }} className="hover:bg-[#faf9f7] transition-colors cursor-pointer">
-                <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: ACCENT }}>{t.id}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600, color: ACCENT }}>TK-{t.ticket_number}</td>
                 <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 500 }}>{t.subject}</td>
-                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{t.customer}</td>
-                <td style={{ padding: '12px 16px' }}><Badge {...PRIORITY_COLORS[t.priority]} /></td>
-                <td style={{ padding: '12px 16px' }}><Badge {...STATUS_COLORS[t.status]} /></td>
-                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{t.assigned}</td>
-                <td style={{ padding: '12px 16px', fontSize: 13, color: '#999' }}>{t.date}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{t.channel || '--'}</td>
+                <td style={{ padding: '12px 16px' }}><Badge {...(PRIORITY_COLORS[t.priority] || PRIORITY_COLORS.medium)} /></td>
+                <td style={{ padding: '12px 16px' }}><Badge {...(STATUS_COLORS[t.status] || STATUS_COLORS.open)} /></td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{t.category || '--'}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#999' }}>{formatDate(t.created_at)}</td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 13 }}>No tickets match your filters.</td>
+                <td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 13 }}>
+                  {tickets.length === 0 ? 'No tickets yet.' : 'No tickets match your filters.'}
+                </td>
               </tr>
             )}
           </tbody>
@@ -287,11 +416,17 @@ function TicketsTab() {
 }
 
 function KnowledgeBaseTab() {
+  const { articles, categories, loading, error, refresh } = useArticles();
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [search, setSearch] = useState('');
 
-  const filtered = MOCK_ARTICLES.filter(a => {
-    if (activeCategory !== 'all' && a.category !== activeCategory) return false;
+  if (loading) return <LoadingSpinner label="Loading knowledge base..." />;
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
+
+  const filtered = articles.filter(a => {
+    if (activeCategory !== 'all' && a.category_id !== activeCategory) return false;
     if (search && !a.title.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -299,8 +434,8 @@ function KnowledgeBaseTab() {
   return (
     <div className="flex flex-col gap-4">
       {/* Category Tabs + Search */}
-      <div className="flex items-center gap-3" style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 12, padding: '12px 20px' }}>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 flex-wrap" style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 12, padding: '12px 20px' }}>
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setActiveCategory('all')}
             style={{
@@ -311,17 +446,17 @@ function KnowledgeBaseTab() {
           >
             All
           </button>
-          {KB_CATEGORIES.map(cat => (
+          {categories.map(cat => (
             <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
+              key={cat.id}
+              onClick={() => setActiveCategory(cat.id)}
               style={{
                 padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500, border: 'none', cursor: 'pointer',
-                background: activeCategory === cat ? ACCENT : 'transparent',
-                color: activeCategory === cat ? '#fff' : '#555',
+                background: activeCategory === cat.id ? ACCENT : 'transparent',
+                color: activeCategory === cat.id ? '#fff' : '#555',
               }}
             >
-              {cat}
+              {cat.name}
             </button>
           ))}
         </div>
@@ -339,52 +474,49 @@ function KnowledgeBaseTab() {
       </div>
 
       {/* Articles Grid */}
-      <div className="grid grid-cols-2 gap-4">
-        {filtered.map(a => (
-          <div key={a.id} style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 12, padding: '20px 24px', cursor: 'pointer' }} className="hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-2 mb-3">
-              <span style={{ background: `${ACCENT}18`, color: ACCENT, fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 99 }}>{a.category}</span>
-              <span style={{ fontSize: 11, color: '#999' }}>Updated {a.updatedAt}</span>
-            </div>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: '#1a1a1a' }}>{a.title}</div>
-            <div style={{ fontSize: 13, color: '#777', lineHeight: 1.5, marginBottom: 16 }}>{a.preview}</div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-1" style={{ fontSize: 12, color: '#999' }}>
-                <Eye size={13} /> {a.views.toLocaleString()} views
+      {filtered.length === 0 ? (
+        <EmptyState message={articles.length === 0 ? 'No articles yet.' : 'No articles match your search.'} />
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          {filtered.map(a => {
+            const preview = a.content ? stripHtml(a.content).slice(0, 160) : '';
+            const categoryName = a.category_id ? (catMap[a.category_id] || 'Uncategorized') : 'Uncategorized';
+            return (
+              <div key={a.id} style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 12, padding: '20px 24px', cursor: 'pointer' }} className="hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-2 mb-3">
+                  <span style={{ background: `${ACCENT}18`, color: ACCENT, fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 99 }}>{categoryName}</span>
+                  <span style={{ fontSize: 11, color: '#999' }}>Updated {formatDate(a.updated_at || a.created_at)}</span>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: '#1a1a1a' }}>{a.title}</div>
+                <div style={{ fontSize: 13, color: '#777', lineHeight: 1.5, marginBottom: 16 }}>{preview || 'No preview available.'}</div>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1" style={{ fontSize: 12, color: '#999' }}>
+                    <Eye size={13} /> {a.view_count.toLocaleString()} views
+                  </div>
+                  <div className="flex items-center gap-1" style={{ fontSize: 12, color: '#999' }}>
+                    <ThumbsUp size={13} /> {a.helpful_count} helpful
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-1" style={{ fontSize: 12, color: '#999' }}>
-                <ThumbsUp size={13} /> {a.helpful} helpful
-              </div>
-            </div>
-          </div>
-        ))}
-        {filtered.length === 0 && (
-          <div style={{ gridColumn: '1 / -1', padding: 32, textAlign: 'center', color: '#999', fontSize: 13 }}>No articles match your search.</div>
-        )}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
 function CustomersTab() {
+  const { customers, loading, error, refresh } = useCustomers();
   const [search, setSearch] = useState('');
 
-  const filtered = MOCK_CUSTOMERS.filter(c => {
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.email.toLowerCase().includes(search.toLowerCase())) return false;
+  if (loading) return <LoadingSpinner label="Loading customers..." />;
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+
+  const filtered = customers.filter(c => {
+    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !(c.email || '').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
-
-  const renderStars = (rating: number) => {
-    const full = Math.floor(rating);
-    return (
-      <div className="flex items-center gap-0.5">
-        {[...Array(5)].map((_, i) => (
-          <Star key={i} size={13} fill={i < full ? '#d97706' : 'none'} style={{ color: i < full ? '#d97706' : '#ddd' }} />
-        ))}
-        <span style={{ fontSize: 12, color: '#777', marginLeft: 4 }}>{rating.toFixed(1)}</span>
-      </div>
-    );
-  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -405,7 +537,7 @@ function CustomersTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ background: '#faf9f7', borderBottom: '1px solid #ece8e0' }}>
-              {['Name', 'Email', 'Total Tickets', 'Satisfaction', 'Last Contact'].map(h => (
+              {['Name', 'Email', 'Phone', 'Company', 'Type', 'Added'].map(h => (
                 <th key={h} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 600, color: '#999', textAlign: 'left', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
               ))}
             </tr>
@@ -421,12 +553,24 @@ function CustomersTab() {
                     {c.name}
                   </div>
                 </td>
-                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{c.email}</td>
-                <td style={{ padding: '12px 16px', fontSize: 13, fontWeight: 600 }}>{c.totalTickets}</td>
-                <td style={{ padding: '12px 16px' }}>{renderStars(c.satisfaction)}</td>
-                <td style={{ padding: '12px 16px', fontSize: 13, color: '#999' }}>{c.lastContact}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{c.email || '--'}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{c.phone || '--'}</td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#555' }}>{c.company || '--'}</td>
+                <td style={{ padding: '12px 16px' }}>
+                  <span style={{ background: '#f3f4f6', color: '#555', fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 99 }}>
+                    {c.type}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 16px', fontSize: 13, color: '#999' }}>{formatDate(c.created_at)}</td>
               </tr>
             ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#999', fontSize: 13 }}>
+                  {customers.length === 0 ? 'No customers yet.' : 'No customers match your search.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -547,6 +691,7 @@ const NAV_TABS: { id: Tab; label: string; icon: any }[] = [
 
 export default function SupportForgePage() {
   const [tab, setTab] = useState<Tab>('dashboard');
+  const { tickets: headerTickets } = useTickets();
 
   const renderTab = () => {
     switch (tab) {
@@ -576,10 +721,10 @@ export default function SupportForgePage() {
           </div>
           <div className="flex items-center gap-2">
             <div style={{ background: '#dcfce7', color: '#16a34a', fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 99 }}>
-              {MOCK_TICKETS.filter(t => t.status === 'open').length} Open
+              {headerTickets.filter(t => t.status === 'open').length} Open
             </div>
             <div style={{ background: '#fef3c7', color: '#d97706', fontSize: 12, fontWeight: 600, padding: '4px 12px', borderRadius: 99 }}>
-              {MOCK_TICKETS.filter(t => t.status === 'progress').length} In Progress
+              {headerTickets.filter(t => t.status === 'progress').length} In Progress
             </div>
           </div>
         </div>
