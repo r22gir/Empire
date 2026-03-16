@@ -167,24 +167,7 @@ const RON_STATES = [
   { state: 'VA', authorized: 'Yes', since: '2012', notes: 'Pioneer state — first to authorize RON in the US' },
 ];
 
-const MOCK_ESIGN_DOCS: ESignDocument[] = [
-  { id: 'es-1', name: 'Power of Attorney - Martinez', recipient: 'sarah@example.com', sentDate: '2026-03-07', deadline: '2026-03-14', status: 'signed', platform: 'DocuSign' },
-  { id: 'es-2', name: 'Notarial Certificate - Chen', recipient: 'james@example.com', sentDate: '2026-03-08', deadline: '2026-03-15', status: 'viewed', platform: 'HelloSign' },
-  { id: 'es-3', name: 'Affidavit of Identity - Rodriguez', recipient: 'maria@example.com', sentDate: '2026-03-09', deadline: '2026-03-16', status: 'pending', platform: 'DocuSign' },
-];
-
-const FALLBACK_COURIERS: CourierContact[] = [
-  { id: 'cr-1', name: 'Carlos Mendez', company: 'CapCity Couriers', phone: '202-555-7700', email: 'carlos@capcity.com', states: ['DC', 'MD', 'VA'], services: ['Same-day', 'Rush', 'Standard'], rating: 4.9 },
-  { id: 'cr-2', name: 'Aisha Johnson', company: 'Metro Express Delivery', phone: '301-555-8800', email: 'aisha@metroexpress.com', states: ['MD', 'DC'], services: ['Same-day', 'Overnight'], rating: 4.7 },
-  { id: 'cr-3', name: 'Tom Wilson', company: 'VA Swift Runners', phone: '703-555-9900', email: 'tom@vaswift.com', states: ['VA', 'DC'], services: ['Rush', 'Standard', 'Government drop-off'], rating: 4.8 },
-  { id: 'cr-4', name: 'Priya Patel', company: 'DMV Document Services', phone: '202-555-1122', email: 'priya@dmvdocs.com', states: ['DC', 'MD', 'VA'], services: ['Government drop-off', 'Embassy runs', 'Standard'], rating: 5.0 },
-];
-
-const FALLBACK_DELIVERIES: CourierDelivery[] = [
-  { id: 'del-1', courier: 'Carlos Mendez', orderNumber: 'APT-2026-001', pickup: 'Empire Office, DC', destination: 'DC Secretary of State', status: 'in-transit', eta: '2026-03-09 2:00 PM' },
-  { id: 'del-2', courier: 'Priya Patel', orderNumber: 'APT-2026-003', pickup: 'Empire Office, DC', destination: 'VA Secretary of Commonwealth', status: 'delivered', eta: '2026-03-08 11:00 AM' },
-  { id: 'del-3', courier: 'Tom Wilson', orderNumber: 'APT-2026-005', pickup: 'MD Secretary of State', destination: '654 Maple Dr, Silver Spring MD', status: 'pickup-scheduled', eta: '2026-03-10 9:00 AM' },
-];
+// Mock/fallback data removed — all data fetched from backend APIs
 
 // ============ NAV SECTIONS ============
 
@@ -264,75 +247,19 @@ const TRACKING_STEPS = [
   { key: 'delivered', label: 'Delivered', icon: Package },
 ];
 
-// ============ FALLBACK DATA ============
-
-const FALLBACK_ORDERS: ApostOrder[] = [
-  {
-    id: '1', orderNumber: 'APT-2026-001',
-    customer: { name: 'Sarah Martinez', email: 'sarah@example.com', phone: '202-555-0101' },
-    documents: [
-      { id: 'd1', type: 'Birth Certificate', description: 'For use in Spain', stateOfOrigin: 'DC', destinationCountry: 'Spain', needsNotarization: false, needsCertification: true, status: 'at_state' },
-      { id: 'd2', type: 'Marriage Certificate', description: 'For use in Spain', stateOfOrigin: 'DC', destinationCountry: 'Spain', needsNotarization: false, needsCertification: true, status: 'notarized' },
-    ],
-    status: 'at_state', rush: true, sameDay: false, total: 265, shippingMethod: 'express', shippingAddress: '123 Main St, Washington DC 20001', createdAt: '2026-03-05',
-  },
-  {
-    id: '2', orderNumber: 'APT-2026-002',
-    customer: { name: 'James Chen', email: 'james@example.com', phone: '301-555-0202' },
-    documents: [
-      { id: 'd3', type: 'Diploma / Degree', description: 'University of Maryland degree for UAE', stateOfOrigin: 'MD', destinationCountry: 'UAE', needsNotarization: true, needsCertification: true, status: 'received' },
-    ],
-    status: 'processing', rush: false, sameDay: false, total: 174, shippingMethod: 'international', shippingAddress: '456 Oak Ave, Bethesda MD 20814', createdAt: '2026-03-07',
-  },
-  {
-    id: '3', orderNumber: 'APT-2026-003',
-    customer: { name: 'Maria Rodriguez', email: 'maria@example.com', phone: '703-555-0303' },
-    documents: [
-      { id: 'd4', type: 'Corporate Documents', description: 'LLC docs for Mexico', stateOfOrigin: 'VA', destinationCountry: 'Mexico', needsNotarization: true, needsCertification: true, status: 'apostilled' },
-      { id: 'd5', type: 'Certificate of Good Standing', description: 'For Mexico', stateOfOrigin: 'VA', destinationCountry: 'Mexico', needsNotarization: false, needsCertification: true, status: 'apostilled' },
-      { id: 'd6', type: 'Power of Attorney', description: 'Notarized POA for Mexico', stateOfOrigin: 'VA', destinationCountry: 'Mexico', needsNotarization: true, needsCertification: false, status: 'at_state' },
-    ],
-    status: 'at_state', rush: false, sameDay: false, total: 398, shippingMethod: 'fedex', shippingAddress: '789 Elm St, Arlington VA 22201', createdAt: '2026-03-01',
-  },
-  {
-    id: '4', orderNumber: 'APT-2026-004',
-    customer: { name: 'David Kim', email: 'david@example.com', phone: '202-555-0404' },
-    documents: [
-      { id: 'd7', type: 'FBI Background Check', description: 'For Korea immigration', stateOfOrigin: 'DC', destinationCountry: 'South Korea', needsNotarization: false, needsCertification: true, status: 'delivered' },
-    ],
-    status: 'completed', rush: true, sameDay: false, total: 287, shippingMethod: 'fedex', shippingAddress: '321 Pine St, Washington DC 20002', createdAt: '2026-02-15', trackingNumber: 'FX-789456123',
-  },
-  {
-    id: '5', orderNumber: 'APT-2026-005',
-    customer: { name: 'Lisa Thompson', email: 'lisa@example.com', phone: '240-555-0505' },
-    documents: [
-      { id: 'd8', type: 'Transcript', description: 'College transcript for Germany', stateOfOrigin: 'MD', destinationCountry: 'Germany', needsNotarization: true, needsCertification: true, status: 'shipped' },
-    ],
-    status: 'shipped', rush: false, sameDay: false, total: 152, shippingMethod: 'international', shippingAddress: '654 Maple Dr, Silver Spring MD 20910', createdAt: '2026-02-20', trackingNumber: 'UP-321654987',
-  },
-];
-
-const FALLBACK_CUSTOMERS: ApostCustomer[] = [
-  { id: 'c1', name: 'Sarah Martinez', email: 'sarah@example.com', phone: '202-555-0101', totalOrders: 3, totalSpent: 685, orders: [] },
-  { id: 'c2', name: 'James Chen', email: 'james@example.com', phone: '301-555-0202', totalOrders: 1, totalSpent: 174, orders: [] },
-  { id: 'c3', name: 'Maria Rodriguez', email: 'maria@example.com', phone: '703-555-0303', totalOrders: 2, totalSpent: 612, orders: [] },
-  { id: 'c4', name: 'David Kim', email: 'david@example.com', phone: '202-555-0404', totalOrders: 4, totalSpent: 1120, orders: [] },
-  { id: 'c5', name: 'Lisa Thompson', email: 'lisa@example.com', phone: '240-555-0505', totalOrders: 1, totalSpent: 152, orders: [] },
-];
-
-const FALLBACK_LLC_ORDERS = [
-  { id: 'llc-1', company: 'Martinez Consulting LLC', state: 'DC', status: 'completed', documents: ['Articles of Organization', 'Operating Agreement', 'Certificate of Good Standing'] },
-  { id: 'llc-2', company: 'Chen Tech Solutions LLC', state: 'MD', status: 'completed', documents: ['Articles of Organization', 'Operating Agreement'] },
-  { id: 'llc-3', company: 'Global Ventures Corp', state: 'VA', status: 'approved', documents: ['Articles of Incorporation', 'Certificate of Good Standing', 'Corporate Resolution'] },
-];
+// Fallback data removed — all data fetched from backend APIs
 
 // ============ COMPONENT ============
 
 export default function ApostAppPage() {
   const [activeSection, setActiveSection] = useState<Section>('overview');
-  const [orders, setOrders] = useState<ApostOrder[]>(FALLBACK_ORDERS);
-  const [customers, setCustomers] = useState<ApostCustomer[]>(FALLBACK_CUSTOMERS);
-  const [loading, setLoading] = useState(false);
+  const [orders, setOrders] = useState<ApostOrder[]>([]);
+  const [customers, setCustomers] = useState<ApostCustomer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [llcOrders, setLlcOrders] = useState<{ id: string; company: string; state: string; status: string; documents: string[] }[]>([]);
+  const [courierContacts, setCourierContacts] = useState<CourierContact[]>([]);
+  const [courierDeliveries, setCourierDeliveries] = useState<CourierDelivery[]>([]);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [orderFilter, setOrderFilter] = useState<string>('all');
   const [customerSearch, setCustomerSearch] = useState('');
@@ -355,7 +282,7 @@ export default function ApostAppPage() {
   const [aiFillGenerated, setAiFillGenerated] = useState(false);
   const [ronSessionForm, setRonSessionForm] = useState({ clientName: '', docType: '', preferredDate: '', preferredTime: '', state: 'DC' });
   const [eSignForm, setESignForm] = useState({ documentName: '', recipientEmail: '', message: '', deadline: '' });
-  const [eSignDocs, setESignDocs] = useState<ESignDocument[]>(MOCK_ESIGN_DOCS);
+  const [eSignDocs, setESignDocs] = useState<ESignDocument[]>([]);
   const [courierSearch, setCourierSearch] = useState('');
   const [courierStateFilter, setCourierStateFilter] = useState('all');
   const [courierServiceFilter, setCourierServiceFilter] = useState('all');
@@ -382,13 +309,39 @@ export default function ApostAppPage() {
   const [calcNeedNotary, setCalcNeedNotary] = useState(false);
   const [calcRush, setCalcRush] = useState(false);
 
-  // Fetch orders from API (falls back to mock)
+  // Fetch orders from API
   useEffect(() => {
     setLoading(true);
+    setOrdersError(null);
     fetch(`${API}/apostapp/orders`)
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(data => { if (Array.isArray(data)) setOrders(data); })
-      .catch(() => {})
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to fetch orders')))
+      .then(data => {
+        if (Array.isArray(data)) {
+          setOrders(data);
+          // Derive customers from orders
+          const customerMap = new Map<string, ApostCustomer>();
+          data.forEach((o: ApostOrder) => {
+            const key = o.customer.email || o.customer.name;
+            if (customerMap.has(key)) {
+              const existing = customerMap.get(key)!;
+              existing.totalOrders += 1;
+              existing.totalSpent += o.total;
+            } else {
+              customerMap.set(key, {
+                id: `c-${customerMap.size + 1}`,
+                name: o.customer.name,
+                email: o.customer.email,
+                phone: o.customer.phone,
+                totalOrders: 1,
+                totalSpent: o.total,
+                orders: [],
+              });
+            }
+          });
+          setCustomers(Array.from(customerMap.values()));
+        }
+      })
+      .catch((err) => { setOrdersError(err.message || 'Failed to load orders'); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -466,22 +419,8 @@ export default function ApostAppPage() {
         setNewOrder({ customerName: '', customerEmail: '', customerPhone: '', documents: [], rush: false, sameDay: false, shippingMethod: 'standard', shippingAddress: '', shippingCity: '', shippingState: '', shippingZip: '' });
       }
     } catch {
-      // API not available — add mock order
-      const mock: ApostOrder = {
-        id: `mock-${Date.now()}`,
-        orderNumber: `APT-2026-${String(orders.length + 1).padStart(3, '0')}`,
-        customer: { name: newOrder.customerName, email: newOrder.customerEmail, phone: newOrder.customerPhone },
-        documents: newOrder.documents.map((d, i) => ({ ...d, id: `md-${i}`, status: 'received' as const })),
-        status: 'received',
-        rush: newOrder.rush, sameDay: newOrder.sameDay,
-        total: newOrderTotal,
-        shippingMethod: newOrder.shippingMethod,
-        shippingAddress: `${newOrder.shippingAddress}, ${newOrder.shippingCity}, ${newOrder.shippingState} ${newOrder.shippingZip}`,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setOrders(prev => [mock, ...prev]);
-      setActiveSection('orders');
-      setNewOrder({ customerName: '', customerEmail: '', customerPhone: '', documents: [], rush: false, sameDay: false, shippingMethod: 'standard', shippingAddress: '', shippingCity: '', shippingState: '', shippingZip: '' });
+      // API not available
+      alert('Failed to submit order. Please check your connection and try again.');
     }
   };
 
@@ -501,22 +440,7 @@ export default function ApostAppPage() {
         setOrders(prev => [created, ...prev]);
       }
     } catch {
-      // Mock import
-      const llcOrder = FALLBACK_LLC_ORDERS.find(l => l.id === llcId);
-      if (llcOrder) {
-        const mock: ApostOrder = {
-          id: `llc-import-${Date.now()}`,
-          orderNumber: `APT-2026-${String(orders.length + 1).padStart(3, '0')}`,
-          customer: { name: llcOrder.company, email: '', phone: '' },
-          documents: llcOrder.documents.map((doc, i) => ({
-            id: `llcd-${i}`, type: doc, description: `From LLC Factory - ${llcOrder.company}`,
-            stateOfOrigin: llcOrder.state, destinationCountry: '', needsNotarization: true, needsCertification: true, status: 'received' as const,
-          })),
-          status: 'received', rush: false, sameDay: false, total: llcOrder.documents.length * 75 + llcOrder.documents.length * 25,
-          shippingMethod: 'standard', shippingAddress: '', createdAt: new Date().toISOString().split('T')[0],
-        };
-        setOrders(prev => [mock, ...prev]);
-      }
+      // API not available
     }
   };
 
@@ -547,6 +471,12 @@ export default function ApostAppPage() {
 
   const renderOverview = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {ordersError && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8 }}>
+          <AlertTriangle size={16} style={{ color: '#dc2626' }} />
+          <span style={{ fontSize: 13, color: '#dc2626' }}>{ordersError}. Showing empty state — connect backend to see live data.</span>
+        </div>
+      )}
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
         <KPICard label="Active Orders" value={activeOrders} icon={FileText} color="#2563eb" />
@@ -947,6 +877,9 @@ export default function ApostAppPage() {
               ))}
             </tbody>
           </table>
+          {filteredCustomers.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>No customers found</div>
+          )}
         </div>
       )}
     </div>
@@ -1068,7 +1001,7 @@ export default function ApostAppPage() {
           <div style={{ fontSize: 13, fontWeight: 600 }}>Available LLC Orders</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {FALLBACK_LLC_ORDERS.map(llc => (
+          {llcOrders.map(llc => (
             <div key={llc.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderBottom: '1px solid #ece8e0' }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{llc.company}</div>
@@ -1088,6 +1021,9 @@ export default function ApostAppPage() {
               </div>
             </div>
           ))}
+          {llcOrders.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>No LLC orders available for import</div>
+          )}
         </div>
       </div>
     </div>
@@ -1929,7 +1865,7 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
   };
 
   const renderCouriers = () => {
-    const filteredCouriers = FALLBACK_COURIERS.filter(c => {
+    const filteredCouriers = courierContacts.filter(c => {
       if (courierStateFilter !== 'all' && !c.states.includes(courierStateFilter)) return false;
       if (courierServiceFilter !== 'all' && !c.services.some(s => s.toLowerCase().includes(courierServiceFilter.toLowerCase()))) return false;
       if (courierSearch && !c.name.toLowerCase().includes(courierSearch.toLowerCase()) && !c.company.toLowerCase().includes(courierSearch.toLowerCase())) return false;
@@ -2031,7 +1967,7 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
               </tr>
             </thead>
             <tbody>
-              {FALLBACK_DELIVERIES.map(d => {
+              {courierDeliveries.map(d => {
                 const ds = deliveryStatusColors[d.status] || deliveryStatusColors['pickup-scheduled'];
                 return (
                   <tr key={d.id} style={{ borderBottom: '1px solid #ece8e0' }}>
@@ -2048,6 +1984,9 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
               })}
             </tbody>
           </table>
+          {courierDeliveries.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: '#6b7280', fontSize: 13 }}>No courier deliveries scheduled</div>
+          )}
         </div>
       </div>
     );

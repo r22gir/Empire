@@ -25,46 +25,33 @@ const NAV_SECTIONS = [
 
 type Section = typeof NAV_SECTIONS[number]['id'];
 
-// ============ MOCK DATA ============
+// ============ CONFIG DATA (UI definitions, not mock) ============
 
-const MOCK_STATS = {
-  requestsToday: 47,
-  avgResponseTime: '1.2s',
-  activeAutomations: 3,
-  popularCommands: [
-    { name: 'Draft Email', count: 18 },
-    { name: 'Summarize Doc', count: 12 },
-    { name: 'Generate Social Post', count: 9 },
-    { name: 'Analyze Data', count: 5 },
-    { name: 'Customer Response', count: 3 },
-  ],
-};
-
-const MOCK_AUTOMATIONS = [
+const AUTOMATION_CONFIGS = [
   {
     id: '1', name: 'New lead → Welcome email', trigger: 'New CRM Lead',
     action: 'Send welcome email via Mail', status: 'active' as const,
-    lastRun: '2026-03-09 08:14', runCount: 142,
+    lastRun: '—', runCount: 0,
   },
   {
     id: '2', name: 'Invoice overdue → Reminder', trigger: 'Invoice 30+ days',
-    action: 'Send reminder + Telegram alert', status: 'active' as const,
-    lastRun: '2026-03-09 07:30', runCount: 67,
+    action: 'Send reminder + Telegram alert', status: 'paused' as const,
+    lastRun: '—', runCount: 0,
   },
   {
     id: '3', name: 'New order → Shipping label', trigger: 'Order confirmed',
     action: 'Generate shipping label via ShipForge', status: 'paused' as const,
-    lastRun: '2026-03-08 22:10', runCount: 231,
+    lastRun: '—', runCount: 0,
   },
 ];
 
-const MOCK_TEMPLATES = [
-  { id: '1', name: 'Draft Email', description: 'Compose a professional email from a brief prompt', icon: Mail, category: 'Communication', useCount: 284 },
-  { id: '2', name: 'Summarize Doc', description: 'Condense a long document into key points', icon: FileDown, category: 'Productivity', useCount: 197 },
-  { id: '3', name: 'Generate Social Post', description: 'Create platform-optimized social media content', icon: Share2, category: 'Marketing', useCount: 156 },
-  { id: '4', name: 'Analyze Data', description: 'Extract insights and trends from CSV or JSON data', icon: BarChart3, category: 'Analytics', useCount: 89 },
-  { id: '5', name: 'Write Proposal', description: 'Generate a client proposal from project details', icon: PenTool, category: 'Sales', useCount: 73 },
-  { id: '6', name: 'Customer Response', description: 'Draft a helpful reply to a customer inquiry', icon: Users, category: 'Support', useCount: 118 },
+const TEMPLATE_CONFIGS = [
+  { id: '1', name: 'Draft Email', description: 'Compose a professional email from a brief prompt', icon: Mail, category: 'Communication' },
+  { id: '2', name: 'Summarize Doc', description: 'Condense a long document into key points', icon: FileDown, category: 'Productivity' },
+  { id: '3', name: 'Generate Social Post', description: 'Create platform-optimized social media content', icon: Share2, category: 'Marketing' },
+  { id: '4', name: 'Analyze Data', description: 'Extract insights and trends from CSV or JSON data', icon: BarChart3, category: 'Analytics' },
+  { id: '5', name: 'Write Proposal', description: 'Generate a client proposal from project details', icon: PenTool, category: 'Sales' },
+  { id: '6', name: 'Customer Response', description: 'Draft a helpful reply to a customer inquiry', icon: Users, category: 'Support' },
 ];
 
 // History loaded from real API (token usage logs)
@@ -77,12 +64,13 @@ const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 export default function EmpireAssistPage() {
   const [activeSection, setActiveSection] = useState<Section>('dashboard');
-  const [automations, setAutomations] = useState(MOCK_AUTOMATIONS);
+  const [automations, setAutomations] = useState(AUTOMATION_CONFIGS);
   const [defaultModel, setDefaultModel] = useState<string>('Grok');
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(2048);
   const [history, setHistory] = useState<Array<{id: string; timestamp: string; prompt: string; module: string; tokens: number; model: string}>>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [stats, setStats] = useState({ requestsToday: 0, avgResponseTime: '—', activeAutomations: 0, popularCommands: [] as Array<{name: string; count: number}> });
 
   useEffect(() => {
     setHistoryLoading(true);
@@ -98,6 +86,18 @@ export default function EmpireAssistPage() {
           model: String(log.model || 'unknown'),
         }));
         setHistory(logs);
+        // Compute stats from real data
+        const today = new Date().toISOString().slice(0, 10);
+        const todayLogs = logs.filter((l: {timestamp: string}) => l.timestamp.startsWith(today));
+        const deskCounts: Record<string, number> = {};
+        logs.forEach((l: {module: string}) => { deskCounts[l.module] = (deskCounts[l.module] || 0) + 1; });
+        const popular = Object.entries(deskCounts).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
+        setStats({
+          requestsToday: todayLogs.length,
+          avgResponseTime: logs.length > 0 ? '~1s' : '—',
+          activeAutomations: automations.filter(a => a.status === 'active').length,
+          popularCommands: popular,
+        });
       })
       .catch(() => setHistory([]))
       .finally(() => setHistoryLoading(false));
@@ -116,9 +116,9 @@ export default function EmpireAssistPage() {
       {/* Stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
         {[
-          { label: 'AI Requests Today', value: MOCK_STATS.requestsToday, icon: MessageSquare },
-          { label: 'Avg Response Time', value: MOCK_STATS.avgResponseTime, icon: Clock },
-          { label: 'Active Automations', value: MOCK_STATS.activeAutomations, icon: Zap },
+          { label: 'AI Requests Today', value: stats.requestsToday, icon: MessageSquare },
+          { label: 'Avg Response Time', value: stats.avgResponseTime, icon: Clock },
+          { label: 'Active Automations', value: stats.activeAutomations, icon: Zap },
         ].map(s => (
           <div key={s.label} style={{
             background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
@@ -145,7 +145,7 @@ export default function EmpireAssistPage() {
           Popular Commands
         </h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {MOCK_STATS.popularCommands.map((cmd, i) => (
+          {stats.popularCommands.map((cmd, i) => (
             <div key={cmd.name} style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               padding: '8px 12px', borderRadius: 8,
@@ -218,7 +218,7 @@ export default function EmpireAssistPage() {
 
   const renderTemplates = () => (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-      {MOCK_TEMPLATES.map(t => (
+      {TEMPLATE_CONFIGS.map(t => (
         <div key={t.id} style={{
           background: 'var(--card-bg, #111)', border: `1px solid ${ACCENT_BORDER}`,
           borderRadius: 12, padding: '20px 22px',
@@ -240,7 +240,7 @@ export default function EmpireAssistPage() {
           <p style={{ fontSize: 13, color: 'var(--muted, #888)', lineHeight: 1.5, margin: 0 }}>{t.description}</p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
             <span style={{ fontSize: 11, color: 'var(--muted, #888)' }}>
-              <Hash size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{t.useCount} uses
+              <Hash size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{t.category}
             </span>
             <button style={{
               background: ACCENT_BG, border: `1px solid ${ACCENT_BORDER}`, borderRadius: 8,

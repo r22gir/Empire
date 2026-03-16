@@ -1,14 +1,18 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Target, LayoutDashboard, Kanban, Users, Megaphone, BarChart3,
   Plus, Search, Phone, Mail, Building, Globe, Share2, Snowflake,
   ArrowRight, DollarSign, TrendingUp, UserPlus, Filter,
   ChevronDown, ChevronUp, Eye, Clock, CheckCircle, XCircle,
-  Star, Zap, PieChart, Funnel, BookOpen, CreditCard
+  Star, Zap, PieChart, Funnel, BookOpen, CreditCard, Loader2
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+
+// ============ API ============
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 // ============ NAV ============
 
@@ -56,31 +60,60 @@ interface Campaign {
   converted: number;
 }
 
-// ============ MOCK DATA ============
+// ============ API RESPONSE MAPPING ============
 
-const MOCK_LEADS: Lead[] = [
-  { id: 'L001', name: 'Sarah Chen', email: 'sarah@techvista.io', phone: '(202) 555-0147', company: 'TechVista Solutions', source: 'website', score: 92, status: 'qualified', value: 45000, date: '2026-03-07', daysInStage: 3 },
-  { id: 'L002', name: 'Marcus Williams', email: 'marcus@greenleaf.co', phone: '(301) 555-0283', company: 'GreenLeaf Partners', source: 'referral', score: 87, status: 'proposal', value: 78000, date: '2026-03-05', daysInStage: 5 },
-  { id: 'L003', name: 'Priya Patel', email: 'priya@novahealth.com', phone: '(703) 555-0391', company: 'Nova Health Systems', source: 'social', score: 74, status: 'contacted', value: 32000, date: '2026-03-08', daysInStage: 2 },
-  { id: 'L004', name: 'James O\'Brien', email: 'james@obrien-law.com', phone: '(202) 555-0512', company: 'O\'Brien Legal Group', source: 'cold', score: 45, status: 'new', value: 15000, date: '2026-03-09', daysInStage: 1 },
-  { id: 'L005', name: 'Diana Rodriguez', email: 'diana@meridiandev.com', phone: '(571) 555-0644', company: 'Meridian Development', source: 'website', score: 96, status: 'won', value: 120000, date: '2026-02-20', daysInStage: 0 },
-  { id: 'L006', name: 'Kevin Nguyen', email: 'kevin@blueocean.tech', phone: '(240) 555-0777', company: 'Blue Ocean Tech', source: 'referral', score: 81, status: 'qualified', value: 55000, date: '2026-03-06', daysInStage: 4 },
-  { id: 'L007', name: 'Amanda Foster', email: 'amanda@peakretail.com', phone: '(202) 555-0888', company: 'Peak Retail Group', source: 'social', score: 63, status: 'contacted', value: 28000, date: '2026-03-07', daysInStage: 3 },
-  { id: 'L008', name: 'Robert Kim', email: 'robert@capitalcraft.io', phone: '(301) 555-0199', company: 'Capital Craft Studios', source: 'website', score: 88, status: 'proposal', value: 92000, date: '2026-03-01', daysInStage: 8 },
-  { id: 'L009', name: 'Lisa Hernandez', email: 'lisa@solarvolt.com', phone: '(703) 555-0321', company: 'SolarVolt Energy', source: 'cold', score: 35, status: 'lost', value: 60000, date: '2026-02-15', daysInStage: 0 },
-  { id: 'L010', name: 'Tom Bradley', email: 'tom@urbanbuild.co', phone: '(571) 555-0456', company: 'UrbanBuild Construction', source: 'referral', score: 79, status: 'new', value: 42000, date: '2026-03-09', daysInStage: 1 },
-  { id: 'L011', name: 'Rachel Green', email: 'rachel@brightwaters.com', phone: '(202) 555-0567', company: 'Brightwaters Consulting', source: 'website', score: 91, status: 'won', value: 85000, date: '2026-02-25', daysInStage: 0 },
-  { id: 'L012', name: 'David Park', email: 'david@nexgenai.io', phone: '(240) 555-0678', company: 'NexGen AI Labs', source: 'social', score: 70, status: 'contacted', value: 38000, date: '2026-03-08', daysInStage: 2 },
-];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapContactToLead(contact: any): Lead {
+  const validSources: LeadSource[] = ['website', 'referral', 'social', 'cold'];
+  const validStatuses: LeadStatus[] = ['new', 'contacted', 'qualified', 'proposal', 'won', 'lost'];
 
-const MOCK_CAMPAIGNS: Campaign[] = [
-  { id: 'C001', name: 'Spring LLC Formation Push', type: 'email', status: 'active', sent: 2450, opened: 892, clicked: 234, converted: 18 },
-  { id: 'C002', name: 'Referral Partner Outreach', type: 'email', status: 'active', sent: 580, opened: 312, clicked: 89, converted: 12 },
-  { id: 'C003', name: 'Tax Season Reminder', type: 'sms', status: 'completed', sent: 1200, opened: 1080, clicked: 156, converted: 24 },
-  { id: 'C004', name: 'LinkedIn B2B Campaign', type: 'social', status: 'active', sent: 3200, opened: 1450, clicked: 420, converted: 31 },
-  { id: 'C005', name: 'Cold Outreach — Real Estate', type: 'email', status: 'paused', sent: 850, opened: 204, clicked: 38, converted: 3 },
-  { id: 'C006', name: 'New Service Announcement', type: 'sms', status: 'draft', sent: 0, opened: 0, clicked: 0, converted: 0 },
-];
+  const rawSource = (contact.source || contact.lead_source || 'cold').toLowerCase();
+  const rawStatus = (contact.status || contact.lead_status || 'new').toLowerCase();
+
+  return {
+    id: contact.id?.toString() || contact.uuid || '',
+    name: contact.name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Unknown',
+    email: contact.email || '',
+    phone: contact.phone || '',
+    company: contact.company || contact.organization || '',
+    source: validSources.includes(rawSource as LeadSource) ? rawSource as LeadSource : 'cold',
+    score: contact.score ?? contact.lead_score ?? 50,
+    status: validStatuses.includes(rawStatus as LeadStatus) ? rawStatus as LeadStatus : 'new',
+    value: contact.value ?? contact.deal_value ?? 0,
+    date: contact.created_at ? contact.created_at.slice(0, 10) : (contact.date || new Date().toISOString().slice(0, 10)),
+    daysInStage: contact.days_in_stage ?? 0,
+  };
+}
+
+// ============ DATA HOOK ============
+
+function useLeads() {
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLeads = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/contacts/`);
+      if (!res.ok) throw new Error(`Failed to fetch leads (${res.status})`);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.items || data.contacts || data.results || []);
+      setLeads(items.map(mapContactToLead));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load leads';
+      setError(message);
+      setLeads([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchLeads(); }, [fetchLeads]);
+
+  return { leads, loading, error, refetch: fetchLeads };
+}
 
 // ============ HELPERS ============
 
@@ -128,6 +161,40 @@ function formatCurrency(v: number): string {
   return '$' + v.toLocaleString();
 }
 
+// ============ LOADING / ERROR / EMPTY STATES ============
+
+function LoadingSpinner({ label }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center" style={{ padding: 60 }}>
+      <Loader2 size={32} className="animate-spin" style={{ color: ACCENT, marginBottom: 12 }} />
+      <span style={{ fontSize: 13, color: '#999' }}>{label || 'Loading...'}</span>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center" style={{ padding: 60 }}>
+      <XCircle size={32} style={{ color: '#dc2626', marginBottom: 12 }} />
+      <span style={{ fontSize: 13, color: '#dc2626', marginBottom: 12 }}>{message}</span>
+      {onRetry && (
+        <button onClick={onRetry} style={{ fontSize: 12, fontWeight: 600, color: ACCENT, cursor: 'pointer', background: 'none', border: 'none', textDecoration: 'underline' }}>
+          Try Again
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center" style={{ padding: 60, color: '#999' }}>
+      <Users size={32} style={{ marginBottom: 12, opacity: 0.4 }} />
+      <span style={{ fontSize: 13 }}>{message}</span>
+    </div>
+  );
+}
+
 // ============ KPI CARD ============
 
 function KPI({ icon, iconBg, iconColor, label, value, sub }: {
@@ -159,18 +226,24 @@ function Badge({ label, color, bg }: { label: string; color: string; bg: string 
 // ============ DASHBOARD SECTION ============
 
 function DashboardSection() {
-  const totalLeads = MOCK_LEADS.length;
-  const wonLeads = MOCK_LEADS.filter(l => l.status === 'won').length;
-  const conversionRate = Math.round((wonLeads / totalLeads) * 100);
-  const pipelineValue = MOCK_LEADS.filter(l => !['won', 'lost'].includes(l.status)).reduce((s, l) => s + l.value, 0);
-  const totalWonValue = MOCK_LEADS.filter(l => l.status === 'won').reduce((s, l) => s + l.value, 0);
+  const { leads, loading, error, refetch } = useLeads();
 
-  const sourceCounts = MOCK_LEADS.reduce((acc, l) => {
+  if (loading) return <LoadingSpinner label="Loading dashboard..." />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+  if (leads.length === 0) return <EmptyState message="No leads yet — add your first lead to get started" />;
+
+  const totalLeads = leads.length;
+  const wonLeads = leads.filter(l => l.status === 'won').length;
+  const conversionRate = Math.round((wonLeads / totalLeads) * 100);
+  const pipelineValue = leads.filter(l => !['won', 'lost'].includes(l.status)).reduce((s, l) => s + l.value, 0);
+  const totalWonValue = leads.filter(l => l.status === 'won').reduce((s, l) => s + l.value, 0);
+
+  const sourceCounts = leads.reduce((acc, l) => {
     acc[l.source] = (acc[l.source] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
 
-  const recentLeads = [...MOCK_LEADS].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const recentLeads = [...leads].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
 
   return (
     <div style={{ padding: 24 }}>
@@ -186,9 +259,9 @@ function DashboardSection() {
 
       {/* KPIs */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPI icon={<Users size={17} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Total Leads" value={totalLeads.toString()} sub="+3 this week" />
+        <KPI icon={<Users size={17} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Total Leads" value={totalLeads.toString()} sub={`${totalLeads} total contacts`} />
         <KPI icon={<TrendingUp size={17} />} iconBg="#dbeafe" iconColor="#2563eb" label="Conversion Rate" value={`${conversionRate}%`} sub={`${wonLeads} of ${totalLeads} converted`} />
-        <KPI icon={<DollarSign size={17} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Pipeline Value" value={formatCurrency(pipelineValue)} sub={`${MOCK_LEADS.filter(l => !['won', 'lost'].includes(l.status)).length} active deals`} />
+        <KPI icon={<DollarSign size={17} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Pipeline Value" value={formatCurrency(pipelineValue)} sub={`${leads.filter(l => !['won', 'lost'].includes(l.status)).length} active deals`} />
         <KPI icon={<CheckCircle size={17} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Won Revenue" value={formatCurrency(totalWonValue)} sub="Closed deals" />
       </div>
 
@@ -250,6 +323,12 @@ function DashboardSection() {
 // ============ PIPELINE SECTION ============
 
 function PipelineSection() {
+  const { leads, loading, error, refetch } = useLeads();
+
+  if (loading) return <LoadingSpinner label="Loading pipeline..." />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+  if (leads.length === 0) return <EmptyState message="No leads in the pipeline yet" />;
+
   const columns: { status: LeadStatus; label: string; color: string }[] = [
     { status: 'new', label: 'New', color: '#2563eb' },
     { status: 'contacted', label: 'Contacted', color: '#b8960c' },
@@ -270,8 +349,8 @@ function PipelineSection() {
 
       <div className="flex gap-3" style={{ overflowX: 'auto', paddingBottom: 8 }}>
         {columns.map(col => {
-          const leads = MOCK_LEADS.filter(l => l.status === col.status);
-          const colValue = leads.reduce((s, l) => s + l.value, 0);
+          const colLeads = leads.filter(l => l.status === col.status);
+          const colValue = colLeads.reduce((s, l) => s + l.value, 0);
           return (
             <div key={col.status} style={{ minWidth: 220, flex: '1 0 220px' }}>
               {/* Column header */}
@@ -279,19 +358,19 @@ function PipelineSection() {
                 <div className="flex items-center gap-2">
                   <div style={{ width: 8, height: 8, borderRadius: 4, background: col.color }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{col.label}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#999', background: '#f3f4f6', padding: '1px 7px', borderRadius: 99 }}>{leads.length}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#999', background: '#f3f4f6', padding: '1px 7px', borderRadius: 99 }}>{colLeads.length}</span>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 600, color: col.color }}>{formatCurrency(colValue)}</span>
               </div>
 
               {/* Cards */}
               <div className="flex flex-col gap-2">
-                {leads.length === 0 && (
+                {colLeads.length === 0 && (
                   <div style={{ padding: 20, textAlign: 'center', color: '#ccc', fontSize: 11, border: '2px dashed #e5e7eb', borderRadius: 10 }}>
                     No leads
                   </div>
                 )}
-                {leads.map(lead => {
+                {colLeads.map(lead => {
                   const srcCfg = SOURCE_CONFIG[lead.source];
                   const SrcIcon = srcCfg.icon;
                   return (
@@ -334,13 +413,17 @@ function PipelineSection() {
 // ============ LEADS SECTION ============
 
 function LeadsSection() {
+  const { leads, loading, error, refetch } = useLeads();
   const [search, setSearch] = useState('');
   const [filterSource, setFilterSource] = useState<LeadSource | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<LeadStatus | 'all'>('all');
   const [sortField, setSortField] = useState<'score' | 'date' | 'value'>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  let filtered = MOCK_LEADS.filter(l => {
+  if (loading) return <LoadingSpinner label="Loading leads..." />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+
+  let filtered = leads.filter(l => {
     if (search && !l.name.toLowerCase().includes(search.toLowerCase()) && !l.company.toLowerCase().includes(search.toLowerCase()) && !l.email.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterSource !== 'all' && l.source !== filterSource) return false;
     if (filterStatus !== 'all' && l.status !== filterStatus) return false;
@@ -385,7 +468,7 @@ function LeadsSection() {
             style={{ width: '100%', padding: '8px 12px 8px 32px', borderRadius: 8, border: '1px solid #ece8e0', fontSize: 12, background: '#fff', outline: 'none' }}
           />
         </div>
-        <select value={filterSource} onChange={e => setFilterSource(e.target.value as any)}
+        <select value={filterSource} onChange={e => setFilterSource(e.target.value as LeadSource | 'all')}
           style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ece8e0', fontSize: 12, background: '#fff', cursor: 'pointer' }}>
           <option value="all">All Sources</option>
           <option value="website">Website</option>
@@ -393,7 +476,7 @@ function LeadsSection() {
           <option value="social">Social</option>
           <option value="cold">Cold</option>
         </select>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as LeadStatus | 'all')}
           style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ece8e0', fontSize: 12, background: '#fff', cursor: 'pointer' }}>
           <option value="all">All Statuses</option>
           <option value="new">New</option>
@@ -406,68 +489,72 @@ function LeadsSection() {
       </div>
 
       {/* Table */}
-      <div className="empire-card" style={{ overflow: 'hidden' }}>
-        <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ece8e0' }}>
-              <th style={thStyle}>Name</th>
-              <th style={thStyle}>Email</th>
-              <th style={thStyle}>Phone</th>
-              <th style={thStyle}>Company</th>
-              <th style={thStyle}>Source</th>
-              <th style={{ ...thStyle, cursor: 'pointer' }} onClick={() => toggleSort('score')}>
-                <span className="flex items-center gap-1">Score <SortIcon field="score" /></span>
-              </th>
-              <th style={thStyle}>Status</th>
-              <th style={{ ...thStyle, cursor: 'pointer' }} onClick={() => toggleSort('value')}>
-                <span className="flex items-center gap-1">Value <SortIcon field="value" /></span>
-              </th>
-              <th style={{ ...thStyle, cursor: 'pointer' }} onClick={() => toggleSort('date')}>
-                <span className="flex items-center gap-1">Date <SortIcon field="date" /></span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(lead => {
-              const srcCfg = SOURCE_CONFIG[lead.source];
-              const SrcIcon = srcCfg.icon;
-              const sc = scoreColor(lead.score);
-              const stCfg = STATUS_CONFIG[lead.status];
-              return (
-                <tr key={lead.id} style={{ borderBottom: '1px solid #f3f4f6' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#fafaf8'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <td style={tdStyle}>
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: ACCENT_BG, color: ACCENT, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
-                        {lead.name.split(' ').map(n => n[0]).join('')}
+      {leads.length === 0 ? (
+        <EmptyState message="No leads yet — add your first lead to get started" />
+      ) : (
+        <div className="empire-card" style={{ overflow: 'hidden' }}>
+          <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ece8e0' }}>
+                <th style={thStyle}>Name</th>
+                <th style={thStyle}>Email</th>
+                <th style={thStyle}>Phone</th>
+                <th style={thStyle}>Company</th>
+                <th style={thStyle}>Source</th>
+                <th style={{ ...thStyle, cursor: 'pointer' }} onClick={() => toggleSort('score')}>
+                  <span className="flex items-center gap-1">Score <SortIcon field="score" /></span>
+                </th>
+                <th style={thStyle}>Status</th>
+                <th style={{ ...thStyle, cursor: 'pointer' }} onClick={() => toggleSort('value')}>
+                  <span className="flex items-center gap-1">Value <SortIcon field="value" /></span>
+                </th>
+                <th style={{ ...thStyle, cursor: 'pointer' }} onClick={() => toggleSort('date')}>
+                  <span className="flex items-center gap-1">Date <SortIcon field="date" /></span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(lead => {
+                const srcCfg = SOURCE_CONFIG[lead.source];
+                const SrcIcon = srcCfg.icon;
+                const sc = scoreColor(lead.score);
+                const stCfg = STATUS_CONFIG[lead.status];
+                return (
+                  <tr key={lead.id} style={{ borderBottom: '1px solid #f3f4f6' }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#fafaf8'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <td style={tdStyle}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: ACCENT_BG, color: ACCENT, fontSize: 10, fontWeight: 700, flexShrink: 0 }}>
+                          {lead.name.split(' ').map(n => n[0]).join('')}
+                        </div>
+                        <span style={{ fontWeight: 600 }}>{lead.name}</span>
                       </div>
-                      <span style={{ fontWeight: 600 }}>{lead.name}</span>
-                    </div>
-                  </td>
-                  <td style={tdStyle}><span style={{ color: '#666' }}>{lead.email}</span></td>
-                  <td style={tdStyle}><span style={{ color: '#666' }}>{lead.phone}</span></td>
-                  <td style={tdStyle}><span style={{ fontWeight: 500 }}>{lead.company}</span></td>
-                  <td style={tdStyle}>
-                    <span className="flex items-center gap-1" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: srcCfg.bg, color: srcCfg.color, fontWeight: 600, display: 'inline-flex' }}>
-                      <SrcIcon size={11} /> {srcCfg.label}
-                    </span>
-                  </td>
-                  <td style={tdStyle}>
-                    <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 99, background: sc.bg, color: sc.color }}>
-                      {lead.score}
-                    </span>
-                  </td>
-                  <td style={tdStyle}><Badge {...stCfg} /></td>
-                  <td style={tdStyle}><span style={{ fontWeight: 600 }}>{formatCurrency(lead.value)}</span></td>
-                  <td style={tdStyle}><span style={{ color: '#999' }}>{lead.date}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    </td>
+                    <td style={tdStyle}><span style={{ color: '#666' }}>{lead.email}</span></td>
+                    <td style={tdStyle}><span style={{ color: '#666' }}>{lead.phone}</span></td>
+                    <td style={tdStyle}><span style={{ fontWeight: 500 }}>{lead.company}</span></td>
+                    <td style={tdStyle}>
+                      <span className="flex items-center gap-1" style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: srcCfg.bg, color: srcCfg.color, fontWeight: 600, display: 'inline-flex' }}>
+                        <SrcIcon size={11} /> {srcCfg.label}
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 99, background: sc.bg, color: sc.color }}>
+                        {lead.score}
+                      </span>
+                    </td>
+                    <td style={tdStyle}><Badge {...stCfg} /></td>
+                    <td style={tdStyle}><span style={{ fontWeight: 600 }}>{formatCurrency(lead.value)}</span></td>
+                    <td style={tdStyle}><span style={{ color: '#999' }}>{lead.date}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -483,6 +570,9 @@ const tdStyle: React.CSSProperties = {
 // ============ CAMPAIGNS SECTION ============
 
 function CampaignsSection() {
+  // No campaigns backend — show empty state
+  const campaigns: Campaign[] = [];
+
   return (
     <div style={{ padding: 24 }}>
       <div className="flex items-center justify-between mb-6">
@@ -495,57 +585,67 @@ function CampaignsSection() {
         </button>
       </div>
 
-      {/* Summary KPIs */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPI icon={<Megaphone size={17} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Active Campaigns" value={MOCK_CAMPAIGNS.filter(c => c.status === 'active').length.toString()} sub="Running now" />
-        <KPI icon={<Mail size={17} />} iconBg="#dbeafe" iconColor="#2563eb" label="Total Sent" value={MOCK_CAMPAIGNS.reduce((s, c) => s + c.sent, 0).toLocaleString()} sub="All campaigns" />
-        <KPI icon={<Eye size={17} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Avg Open Rate" value={`${Math.round((MOCK_CAMPAIGNS.filter(c => c.sent > 0).reduce((s, c) => s + (c.opened / c.sent), 0) / MOCK_CAMPAIGNS.filter(c => c.sent > 0).length) * 100)}%`} sub="Across active" />
-        <KPI icon={<CheckCircle size={17} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Total Converted" value={MOCK_CAMPAIGNS.reduce((s, c) => s + c.converted, 0).toString()} sub="From all campaigns" />
-      </div>
+      {campaigns.length === 0 ? (
+        <div className="empire-card flex flex-col items-center justify-center" style={{ padding: 60 }}>
+          <Megaphone size={40} style={{ color: '#ccc', marginBottom: 16 }} />
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#666', marginBottom: 4 }}>No campaigns yet</span>
+          <span style={{ fontSize: 12, color: '#999' }}>Create your first campaign to start reaching leads</span>
+        </div>
+      ) : (
+        <>
+          {/* Summary KPIs */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <KPI icon={<Megaphone size={17} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Active Campaigns" value={campaigns.filter(c => c.status === 'active').length.toString()} sub="Running now" />
+            <KPI icon={<Mail size={17} />} iconBg="#dbeafe" iconColor="#2563eb" label="Total Sent" value={campaigns.reduce((s, c) => s + c.sent, 0).toLocaleString()} sub="All campaigns" />
+            <KPI icon={<Eye size={17} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Avg Open Rate" value={`${campaigns.filter(c => c.sent > 0).length > 0 ? Math.round((campaigns.filter(c => c.sent > 0).reduce((s, c) => s + (c.opened / c.sent), 0) / campaigns.filter(c => c.sent > 0).length) * 100) : 0}%`} sub="Across active" />
+            <KPI icon={<CheckCircle size={17} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Total Converted" value={campaigns.reduce((s, c) => s + c.converted, 0).toString()} sub="From all campaigns" />
+          </div>
 
-      {/* Table */}
-      <div className="empire-card" style={{ overflow: 'hidden' }}>
-        <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ece8e0' }}>
-              <th style={thStyle}>Campaign</th>
-              <th style={thStyle}>Type</th>
-              <th style={thStyle}>Status</th>
-              <th style={thStyle}>Sent</th>
-              <th style={thStyle}>Opened</th>
-              <th style={thStyle}>Clicked</th>
-              <th style={thStyle}>Converted</th>
-              <th style={thStyle}>Conv. Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK_CAMPAIGNS.map(camp => {
-              const typeCfg = CAMPAIGN_TYPE_CONFIG[camp.type];
-              const stCfg = CAMPAIGN_STATUS_CONFIG[camp.status];
-              const convRate = camp.sent > 0 ? ((camp.converted / camp.sent) * 100).toFixed(1) : '0.0';
-              return (
-                <tr key={camp.id} style={{ borderBottom: '1px solid #f3f4f6' }}
-                  onMouseEnter={e => { e.currentTarget.style.background = '#fafaf8'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <td style={tdStyle}><span style={{ fontWeight: 600 }}>{camp.name}</span></td>
-                  <td style={tdStyle}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: typeCfg.color }}>{typeCfg.label}</span>
-                  </td>
-                  <td style={tdStyle}><Badge {...stCfg} /></td>
-                  <td style={tdStyle}>{camp.sent.toLocaleString()}</td>
-                  <td style={tdStyle}>{camp.opened.toLocaleString()}</td>
-                  <td style={tdStyle}>{camp.clicked.toLocaleString()}</td>
-                  <td style={tdStyle}><span style={{ fontWeight: 700, color: ACCENT }}>{camp.converted}</span></td>
-                  <td style={tdStyle}>
-                    <span style={{ fontWeight: 600, color: parseFloat(convRate) >= 2 ? ACCENT : '#b8960c' }}>{convRate}%</span>
-                  </td>
+          {/* Table */}
+          <div className="empire-card" style={{ overflow: 'hidden' }}>
+            <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #ece8e0' }}>
+                  <th style={thStyle}>Campaign</th>
+                  <th style={thStyle}>Type</th>
+                  <th style={thStyle}>Status</th>
+                  <th style={thStyle}>Sent</th>
+                  <th style={thStyle}>Opened</th>
+                  <th style={thStyle}>Clicked</th>
+                  <th style={thStyle}>Converted</th>
+                  <th style={thStyle}>Conv. Rate</th>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody>
+                {campaigns.map(camp => {
+                  const typeCfg = CAMPAIGN_TYPE_CONFIG[camp.type];
+                  const stCfg = CAMPAIGN_STATUS_CONFIG[camp.status];
+                  const convRate = camp.sent > 0 ? ((camp.converted / camp.sent) * 100).toFixed(1) : '0.0';
+                  return (
+                    <tr key={camp.id} style={{ borderBottom: '1px solid #f3f4f6' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#fafaf8'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <td style={tdStyle}><span style={{ fontWeight: 600 }}>{camp.name}</span></td>
+                      <td style={tdStyle}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: typeCfg.color }}>{typeCfg.label}</span>
+                      </td>
+                      <td style={tdStyle}><Badge {...stCfg} /></td>
+                      <td style={tdStyle}>{camp.sent.toLocaleString()}</td>
+                      <td style={tdStyle}>{camp.opened.toLocaleString()}</td>
+                      <td style={tdStyle}>{camp.clicked.toLocaleString()}</td>
+                      <td style={tdStyle}><span style={{ fontWeight: 700, color: ACCENT }}>{camp.converted}</span></td>
+                      <td style={tdStyle}>
+                        <span style={{ fontWeight: 600, color: parseFloat(convRate) >= 2 ? ACCENT : '#b8960c' }}>{convRate}%</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -553,8 +653,14 @@ function CampaignsSection() {
 // ============ ANALYTICS SECTION ============
 
 function AnalyticsSection() {
-  const totalLeads = MOCK_LEADS.length;
-  const sourceCounts = MOCK_LEADS.reduce((acc, l) => {
+  const { leads, loading, error, refetch } = useLeads();
+
+  if (loading) return <LoadingSpinner label="Loading analytics..." />;
+  if (error) return <ErrorState message={error} onRetry={refetch} />;
+  if (leads.length === 0) return <EmptyState message="No data yet — add leads to see analytics" />;
+
+  const totalLeads = leads.length;
+  const sourceCounts = leads.reduce((acc, l) => {
     acc[l.source] = (acc[l.source] || 0) + 1;
     return acc;
   }, {} as Record<string, number>);
@@ -562,14 +668,14 @@ function AnalyticsSection() {
   // Funnel data
   const funnelStages = [
     { label: 'Total Leads', count: totalLeads, color: '#2563eb' },
-    { label: 'Contacted', count: MOCK_LEADS.filter(l => !['new'].includes(l.status)).length, color: '#b8960c' },
-    { label: 'Qualified', count: MOCK_LEADS.filter(l => ['qualified', 'proposal', 'won'].includes(l.status)).length, color: '#7c3aed' },
-    { label: 'Proposal', count: MOCK_LEADS.filter(l => ['proposal', 'won'].includes(l.status)).length, color: '#ea580c' },
-    { label: 'Won', count: MOCK_LEADS.filter(l => l.status === 'won').length, color: '#16a34a' },
+    { label: 'Contacted', count: leads.filter(l => !['new'].includes(l.status)).length, color: '#b8960c' },
+    { label: 'Qualified', count: leads.filter(l => ['qualified', 'proposal', 'won'].includes(l.status)).length, color: '#7c3aed' },
+    { label: 'Proposal', count: leads.filter(l => ['proposal', 'won'].includes(l.status)).length, color: '#ea580c' },
+    { label: 'Won', count: leads.filter(l => l.status === 'won').length, color: '#16a34a' },
   ];
 
   // Revenue by source
-  const revenueBySource = MOCK_LEADS.filter(l => l.status === 'won').reduce((acc, l) => {
+  const revenueBySource = leads.filter(l => l.status === 'won').reduce((acc, l) => {
     acc[l.source] = (acc[l.source] || 0) + l.value;
     return acc;
   }, {} as Record<string, number>);
@@ -595,7 +701,7 @@ function AnalyticsSection() {
             <div style={{ width: 140, height: 140, borderRadius: '50%', position: 'relative', flexShrink: 0,
               background: (() => {
                 const sources = Object.entries(sourceCounts);
-                let gradientParts: string[] = [];
+                const gradientParts: string[] = [];
                 let cumPct = 0;
                 sources.forEach(([src, count]) => {
                   const pct = (count / totalLeads) * 100;
@@ -619,7 +725,7 @@ function AnalyticsSection() {
                     <div style={{ width: 10, height: 10, borderRadius: 3, background: cfg.color, flexShrink: 0 }} />
                     <span style={{ fontSize: 12, color: '#666', flex: 1 }}>{cfg.label}</span>
                     <span style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a' }}>{count}</span>
-                    <span style={{ fontSize: 11, color: '#999' }}>({Math.round((count / totalLeads) * 100)}%)</span>
+                    <span style={{ fontSize: 11, color: '#999' }}>({totalLeads > 0 ? Math.round((count / totalLeads) * 100) : 0}%)</span>
                   </div>
                 );
               })}
@@ -707,10 +813,12 @@ function AnalyticsSection() {
           <p style={{ fontSize: 11, color: '#999', marginBottom: 16 }}>Performance indicators</p>
 
           {(() => {
-            const avgScore = Math.round(MOCK_LEADS.reduce((s, l) => s + l.score, 0) / totalLeads);
-            const avgValue = Math.round(MOCK_LEADS.reduce((s, l) => s + l.value, 0) / totalLeads);
-            const avgDays = Math.round(MOCK_LEADS.filter(l => l.daysInStage > 0).reduce((s, l) => s + l.daysInStage, 0) / MOCK_LEADS.filter(l => l.daysInStage > 0).length);
-            const winRate = Math.round((MOCK_LEADS.filter(l => l.status === 'won').length / MOCK_LEADS.filter(l => ['won', 'lost'].includes(l.status)).length) * 100);
+            const avgScore = Math.round(leads.reduce((s, l) => s + l.score, 0) / totalLeads);
+            const avgValue = Math.round(leads.reduce((s, l) => s + l.value, 0) / totalLeads);
+            const activeLeads = leads.filter(l => l.daysInStage > 0);
+            const avgDays = activeLeads.length > 0 ? Math.round(activeLeads.reduce((s, l) => s + l.daysInStage, 0) / activeLeads.length) : 0;
+            const closedLeads = leads.filter(l => ['won', 'lost'].includes(l.status));
+            const winRate = closedLeads.length > 0 ? Math.round((leads.filter(l => l.status === 'won').length / closedLeads.length) * 100) : 0;
 
             const metrics = [
               { label: 'Average Lead Score', value: avgScore.toString(), sub: 'Out of 100', color: '#2563eb' },

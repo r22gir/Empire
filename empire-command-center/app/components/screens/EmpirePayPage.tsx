@@ -1,13 +1,18 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Wallet, ArrowUpDown, Link2, Coins, Settings, LayoutDashboard,
   TrendingUp, TrendingDown, ArrowUpRight, ArrowDownLeft, Copy,
   CheckCircle, Clock, XCircle, Plus, QrCode, Trash2, ToggleLeft,
-  ToggleRight, RefreshCw, ExternalLink, Shield, Zap, Eye, BookOpen, CreditCard
+  ToggleRight, RefreshCw, ExternalLink, Shield, Zap, Eye, BookOpen, CreditCard,
+  Loader2, AlertTriangle, Inbox
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+
+// ============ API BASE ============
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 // ============ NAV SECTIONS ============
 
@@ -24,47 +29,42 @@ const NAV_SECTIONS = [
 
 type Section = typeof NAV_SECTIONS[number]['id'];
 
-// ============ MOCK DATA ============
+// ============ TYPES ============
 
-const MOCK_WALLETS = [
-  { id: 'w1', name: 'Main Treasury', address: '0x7a16fF8270133F063aAb6C9977183D9e72835428', chain: 'Ethereum', balance: 12.4521, balanceUsd: 43582.35, token: 'ETH', lastActivity: '2026-03-09 08:14' },
-  { id: 'w2', name: 'Solana Hot Wallet', address: '7nYBs13hWLyqnQZgRb2vE4vKpBMf8HmgXS3KaGrfhanL', chain: 'Solana', balance: 342.88, balanceUsd: 48003.20, token: 'SOL', lastActivity: '2026-03-09 07:52' },
-  { id: 'w3', name: 'BTC Cold Storage', address: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh', chain: 'Bitcoin', balance: 1.08432, balanceUsd: 72891.44, token: 'BTC', lastActivity: '2026-03-08 22:30' },
-  { id: 'w4', name: 'USDC Operations', address: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', chain: 'Ethereum', balance: 25000.00, balanceUsd: 25000.00, token: 'USDC', lastActivity: '2026-03-09 09:01' },
-  { id: 'w5', name: 'EMPIRE Vault', address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', chain: 'Ethereum', balance: 1500000, balanceUsd: 15000.00, token: 'EMPIRE', lastActivity: '2026-03-09 06:33' },
-];
+interface ChainInfo {
+  id: string;
+  name: string;
+  chain: string;
+  token: string;
+}
 
-const MOCK_TRANSACTIONS = [
-  { id: 'TX-0091', type: 'payment', amount: 0.25, token: 'ETH', from: '0x1234...abcd', to: '0x7a16...5428', status: 'confirmed', timestamp: '2026-03-09 09:12', usdValue: 875.50 },
-  { id: 'TX-0090', type: 'transfer', amount: 50.0, token: 'SOL', from: '7nYB...hanL', to: '4kNp...9xQm', status: 'confirmed', timestamp: '2026-03-09 08:44', usdValue: 7005.00 },
-  { id: 'TX-0089', type: 'payment', amount: 500.0, token: 'USDC', from: '0x9876...efgh', to: '0x3C44...93BC', status: 'confirmed', timestamp: '2026-03-09 07:30', usdValue: 500.00 },
-  { id: 'TX-0088', type: 'mint', amount: 100000, token: 'EMPIRE', from: 'Contract', to: '0xdAC1...1ec7', status: 'confirmed', timestamp: '2026-03-09 06:33', usdValue: 1000.00 },
-  { id: 'TX-0087', type: 'payment', amount: 0.015, token: 'BTC', from: 'bc1q...8wlh', to: 'bc1q...4m2k', status: 'pending', timestamp: '2026-03-09 05:15', usdValue: 1009.12 },
-  { id: 'TX-0086', type: 'transfer', amount: 2.5, token: 'ETH', from: '0x7a16...5428', to: '0xABCD...1234', status: 'confirmed', timestamp: '2026-03-08 22:01', usdValue: 8755.00 },
-  { id: 'TX-0085', type: 'payment', amount: 1250.0, token: 'USDC', from: '0x5555...6666', to: '0x3C44...93BC', status: 'confirmed', timestamp: '2026-03-08 19:44', usdValue: 1250.00 },
-  { id: 'TX-0084', type: 'payment', amount: 12.5, token: 'SOL', from: '3Fgh...kLmN', to: '7nYB...hanL', status: 'failed', timestamp: '2026-03-08 18:22', usdValue: 1751.25 },
-  { id: 'TX-0083', type: 'mint', amount: 50000, token: 'EMPIRE', from: 'Contract', to: '0xdAC1...1ec7', status: 'confirmed', timestamp: '2026-03-08 14:00', usdValue: 500.00 },
-  { id: 'TX-0082', type: 'payment', amount: 0.05, token: 'BTC', from: 'bc1q...7pqr', to: 'bc1q...8wlh', status: 'confirmed', timestamp: '2026-03-08 11:30', usdValue: 3363.04 },
-];
+interface Invoice {
+  id: string;
+  type?: string;
+  amount: number;
+  token?: string;
+  currency?: string;
+  from?: string;
+  to?: string;
+  status: string;
+  created_at?: string;
+  timestamp?: string;
+  total?: number;
+  description?: string;
+}
 
-const MOCK_PAYMENT_LINKS = [
-  { id: 'PL-001', amount: 100.00, description: 'Website Design Deposit', tokens: ['ETH', 'USDC', 'SOL'], expiry: '2026-03-16', status: 'active', created: '2026-03-09', clicks: 12, payments: 2 },
-  { id: 'PL-002', amount: 500.00, description: 'LLC Formation Package', tokens: ['USDC', 'BTC'], expiry: '2026-03-23', status: 'active', created: '2026-03-08', clicks: 8, payments: 1 },
-  { id: 'PL-003', amount: 25.00, description: 'Consultation Fee', tokens: ['ETH', 'SOL', 'USDC', 'EMPIRE'], expiry: '2026-03-12', status: 'active', created: '2026-03-07', clicks: 34, payments: 5 },
-  { id: 'PL-004', amount: 1000.00, description: 'Premium Service Retainer', tokens: ['BTC', 'ETH'], expiry: '2026-03-05', status: 'expired', created: '2026-03-01', clicks: 3, payments: 0 },
-];
+// ============ STATIC INFO ============
 
 const EMPIRE_TOKEN_INFO = {
   name: 'EMPIRE',
   symbol: 'EMPIRE',
   chain: 'Ethereum (ERC-20)',
-  contractAddress: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  contractAddress: 'TBD — Token not yet deployed',
   totalSupply: 100000000,
-  circulatingSupply: 8500000,
-  holders: 1247,
-  price: 0.01,
-  marketCap: 85000,
-  change24h: 4.2,
+  circulatingSupply: 0,
+  holders: 0,
+  price: 0,
+  change24h: 0,
   distribution: [
     { label: 'Treasury', pct: 40, amount: 40000000, color: '#16a34a' },
     { label: 'Team & Founders', pct: 20, amount: 20000000, color: '#2563eb' },
@@ -79,6 +79,12 @@ const CHAIN_COLORS: Record<string, string> = {
   Ethereum: '#627eea',
   Solana: '#9945ff',
   Bitcoin: '#f7931a',
+  ethereum: '#627eea',
+  solana: '#9945ff',
+  bitcoin: '#f7931a',
+  ETH: '#627eea',
+  SOL: '#9945ff',
+  BTC: '#f7931a',
 };
 
 const TOKEN_COLORS: Record<string, string> = {
@@ -91,13 +97,52 @@ const TOKEN_COLORS: Record<string, string> = {
 
 const STATUS_MAP: Record<string, { bg: string; color: string; icon: React.ElementType }> = {
   confirmed: { bg: '#dcfce7', color: '#16a34a', icon: CheckCircle },
+  paid: { bg: '#dcfce7', color: '#16a34a', icon: CheckCircle },
+  completed: { bg: '#dcfce7', color: '#16a34a', icon: CheckCircle },
   pending: { bg: '#fef9c3', color: '#a16207', icon: Clock },
+  unpaid: { bg: '#fef9c3', color: '#a16207', icon: Clock },
   failed: { bg: '#fee2e2', color: '#dc2626', icon: XCircle },
+  cancelled: { bg: '#fee2e2', color: '#dc2626', icon: XCircle },
 };
 
 const ACCENT = '#16a34a';
 const ACCENT_BG = '#dcfce7';
 const ACCENT_BORDER = '#bbf7d0';
+
+// ============ SHARED UI COMPONENTS ============
+
+function Spinner({ label }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center" style={{ padding: 60, color: '#999' }}>
+      <Loader2 size={28} className="animate-spin" style={{ marginBottom: 10, color: ACCENT }} />
+      <span style={{ fontSize: 13 }}>{label || 'Loading...'}</span>
+    </div>
+  );
+}
+
+function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <div className="flex items-center gap-3" style={{ padding: '14px 18px', margin: '20px 24px', borderRadius: 12, background: '#fee2e2', border: '1.5px solid #fca5a5' }}>
+      <AlertTriangle size={18} style={{ color: '#dc2626', flexShrink: 0 }} />
+      <span style={{ fontSize: 13, color: '#dc2626', flex: 1 }}>{message}</span>
+      {onRetry && (
+        <button onClick={onRetry} className="cursor-pointer flex items-center gap-1" style={{ padding: '4px 12px', borderRadius: 8, background: '#fff', border: '1px solid #fca5a5', fontSize: 12, fontWeight: 600, color: '#dc2626' }}>
+          <RefreshCw size={12} /> Retry
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center" style={{ padding: 60, color: '#999' }}>
+      <div style={{ marginBottom: 12, color: '#ccc' }}>{icon}</div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: '#666', marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 12, color: '#999' }}>{subtitle}</div>
+    </div>
+  );
+}
 
 // ============ KPI CARD ============
 
@@ -123,83 +168,153 @@ function truncAddr(addr: string) {
   return addr.slice(0, 6) + '...' + addr.slice(-4);
 }
 
+// ============ CUSTOM HOOKS ============
+
+function useChains() {
+  const [chains, setChains] = useState<ChainInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchChains = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/crypto-payments/chains`);
+      if (!res.ok) throw new Error(`Failed to load chains (${res.status})`);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.chains || data.data || []);
+      setChains(items.map((c: Record<string, string>, i: number) => ({
+        id: c.id || c.chain_id || `chain-${i}`,
+        name: c.name || c.chain || 'Unknown',
+        chain: c.chain || c.network || c.name || 'Unknown',
+        token: c.token || c.symbol || c.native_token || c.name || '',
+      })));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load chains');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchChains(); }, [fetchChains]);
+  return { chains, loading, error, refetch: fetchChains };
+}
+
+function useInvoices() {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchInvoices = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/finance/invoices`);
+      if (!res.ok) throw new Error(`Failed to load invoices (${res.status})`);
+      const data = await res.json();
+      const items = Array.isArray(data) ? data : (data.invoices || data.data || data.items || []);
+      setInvoices(items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load invoices');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchInvoices(); }, [fetchInvoices]);
+  return { invoices, loading, error, refetch: fetchInvoices };
+}
+
 // ============ DASHBOARD SECTION ============
 
 function DashboardSection() {
-  const totalUsd = MOCK_WALLETS.reduce((s, w) => s + w.balanceUsd, 0);
-  const recentTxns = MOCK_TRANSACTIONS.slice(0, 5);
-  const paymentsProcessed = MOCK_TRANSACTIONS.filter(t => t.type === 'payment').length;
-  const totalPaymentUsd = MOCK_TRANSACTIONS.filter(t => t.type === 'payment').reduce((s, t) => s + t.usdValue, 0);
+  const { chains, loading: chainsLoading, error: chainsError, refetch: refetchChains } = useChains();
+  const { invoices, loading: invoicesLoading, error: invoicesError, refetch: refetchInvoices } = useInvoices();
+
+  const loading = chainsLoading || invoicesLoading;
+  const error = chainsError || invoicesError;
+
+  const recentTxns = invoices.slice(0, 5);
+  const totalPaymentUsd = invoices.reduce((s, t) => s + (t.total || t.amount || 0), 0);
+
+  if (loading) return <Spinner label="Loading dashboard..." />;
 
   return (
     <div style={{ padding: 24 }}>
       <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>EmpirePay Dashboard</div>
       <div style={{ fontSize: 12, color: '#999', marginBottom: 20 }}>Crypto payments, wallets, and EMPIRE token management</div>
 
+      {error && <ErrorBanner message={error} onRetry={() => { refetchChains(); refetchInvoices(); }} />}
+
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPI icon={<Wallet size={16} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Total Balance" value={`$${totalUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} sub={`${MOCK_WALLETS.length} wallets`} />
-        <KPI icon={<ArrowUpDown size={16} />} iconBg="#dbeafe" iconColor="#2563eb" label="Transactions" value={String(MOCK_TRANSACTIONS.length)} sub="Last 7 days" />
-        <KPI icon={<Coins size={16} />} iconBg="#fef9c3" iconColor="#a16207" label="EMPIRE Price" value={`$${EMPIRE_TOKEN_INFO.price.toFixed(4)}`} sub={`${EMPIRE_TOKEN_INFO.change24h > 0 ? '+' : ''}${EMPIRE_TOKEN_INFO.change24h}% (24h)`} />
-        <KPI icon={<Zap size={16} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Payments Processed" value={`$${totalPaymentUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} sub={`${paymentsProcessed} payments`} />
+        <KPI icon={<Wallet size={16} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Supported Chains" value={String(chains.length)} sub={`${chains.length} chain${chains.length !== 1 ? 's' : ''} available`} />
+        <KPI icon={<ArrowUpDown size={16} />} iconBg="#dbeafe" iconColor="#2563eb" label="Invoices" value={String(invoices.length)} sub="Total records" />
+        <KPI icon={<Coins size={16} />} iconBg="#fef9c3" iconColor="#a16207" label="EMPIRE Price" value="N/A" sub="Token not yet live" />
+        <KPI icon={<Zap size={16} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Total Invoiced" value={`$${totalPaymentUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}`} sub={`${invoices.length} invoice${invoices.length !== 1 ? 's' : ''}`} />
       </div>
 
       {/* Recent Transactions */}
       <div className="empire-card" style={{ padding: 0, marginBottom: 20 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #ece8e0' }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>Recent Transactions</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>Recent Invoices</span>
         </div>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              <th style={{ padding: '10px 18px', textAlign: 'left' }}>ID</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Type</th>
-              <th style={{ padding: '10px 12px', textAlign: 'right' }}>Amount</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Token</th>
-              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Status</th>
-              <th style={{ padding: '10px 18px', textAlign: 'right' }}>Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recentTxns.map(tx => {
-              const st = STATUS_MAP[tx.status] || STATUS_MAP.pending;
-              const StIcon = st.icon;
-              return (
-                <tr key={tx.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
-                  <td style={{ padding: '10px 18px', fontWeight: 600, color: '#1a1a1a' }}>{tx.id}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: tx.type === 'payment' ? ACCENT_BG : tx.type === 'mint' ? '#ede9fe' : '#dbeafe', color: tx.type === 'payment' ? ACCENT : tx.type === 'mint' ? '#7c3aed' : '#2563eb' }}>
-                      {tx.type}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>{tx.amount.toLocaleString()}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ color: TOKEN_COLORS[tx.token] || '#666', fontWeight: 600 }}>{tx.token}</span>
-                  </td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span className="flex items-center gap-1" style={{ color: st.color }}><StIcon size={13} />{tx.status}</span>
-                  </td>
-                  <td style={{ padding: '10px 18px', textAlign: 'right', color: '#999', fontSize: 11 }}>{tx.timestamp}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {recentTxns.length === 0 ? (
+          <EmptyState icon={<Inbox size={32} />} title="No invoices yet" subtitle="Invoice history will appear here" />
+        ) : (
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <th style={{ padding: '10px 18px', textAlign: 'left' }}>ID</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Description</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Amount</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Status</th>
+                <th style={{ padding: '10px 18px', textAlign: 'right' }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recentTxns.map(tx => {
+                const statusKey = (tx.status || 'pending').toLowerCase();
+                const st = STATUS_MAP[statusKey] || STATUS_MAP.pending;
+                const StIcon = st.icon;
+                return (
+                  <tr key={tx.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
+                    <td style={{ padding: '10px 18px', fontWeight: 600, color: '#1a1a1a' }}>{tx.id}</td>
+                    <td style={{ padding: '10px 12px', color: '#666' }}>{tx.description || '-'}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>
+                      ${(tx.total || tx.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span className="flex items-center gap-1" style={{ color: st.color }}><StIcon size={13} />{tx.status}</span>
+                    </td>
+                    <td style={{ padding: '10px 18px', textAlign: 'right', color: '#999', fontSize: 11 }}>{tx.created_at || tx.timestamp || '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
-      {/* Wallet Summary */}
+      {/* Supported Chains Summary */}
       <div className="empire-card" style={{ padding: 0 }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid #ece8e0' }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>Wallet Balances</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>Supported Chains</span>
         </div>
-        <div className="grid grid-cols-5 gap-0">
-          {MOCK_WALLETS.map(w => (
-            <div key={w.id} style={{ padding: '16px 18px', borderRight: '1px solid #f5f3ef' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#999', marginBottom: 4 }}>{w.name}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>{w.balance.toLocaleString()} <span style={{ fontSize: 11, color: TOKEN_COLORS[w.token] || '#666' }}>{w.token}</span></div>
-              <div style={{ fontSize: 11, color: '#999' }}>${w.balanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
-            </div>
-          ))}
-        </div>
+        {chains.length === 0 ? (
+          <EmptyState icon={<Wallet size={32} />} title="No chains configured" subtitle="Connect to the backend to see supported chains" />
+        ) : (
+          <div className="grid grid-cols-5 gap-0">
+            {chains.map(w => (
+              <div key={w.id} style={{ padding: '16px 18px', borderRight: '1px solid #f5f3ef' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#999', marginBottom: 4 }}>{w.name}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>
+                  <span style={{ fontSize: 11, color: CHAIN_COLORS[w.chain] || CHAIN_COLORS[w.token] || '#666' }}>{w.token || w.chain}</span>
+                </div>
+                <div style={{ fontSize: 11, color: '#999' }}>{w.chain}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -208,78 +323,66 @@ function DashboardSection() {
 // ============ WALLETS SECTION ============
 
 function WalletsSection() {
-  const [copied, setCopied] = useState<string | null>(null);
+  const { chains, loading, error, refetch } = useChains();
 
-  const handleCopy = (addr: string, id: string) => {
-    navigator.clipboard.writeText(addr).catch(() => {});
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
+  if (loading) return <Spinner label="Loading supported chains..." />;
 
   return (
     <div style={{ padding: 24 }}>
       <div className="flex items-center justify-between mb-5">
         <div>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>Wallets</div>
-          <div style={{ fontSize: 12, color: '#999' }}>Manage connected wallets across all chains</div>
+          <div style={{ fontSize: 12, color: '#999' }}>Supported chains for crypto payments</div>
         </div>
-        <button className="flex items-center gap-2 cursor-pointer" style={{ padding: '8px 16px', borderRadius: 10, background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600, border: 'none' }}>
-          <Plus size={15} /> Add Wallet
+        <button onClick={refetch} className="flex items-center gap-2 cursor-pointer" style={{ padding: '8px 16px', borderRadius: 10, background: '#fff', color: '#666', fontSize: 13, fontWeight: 600, border: '1.5px solid #ece8e0' }}>
+          <RefreshCw size={15} /> Refresh
         </button>
       </div>
 
+      {error && <ErrorBanner message={error} onRetry={refetch} />}
+
       <div className="empire-card" style={{ padding: 0 }}>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              <th style={{ padding: '12px 18px', textAlign: 'left' }}>Wallet Name</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Address</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Chain</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>Balance</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>USD Value</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>Last Activity</th>
-              <th style={{ padding: '12px 18px', textAlign: 'center' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK_WALLETS.map(w => (
-              <tr key={w.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
-                <td style={{ padding: '12px 18px', fontWeight: 600, color: '#1a1a1a' }}>
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${TOKEN_COLORS[w.token]}18`, color: TOKEN_COLORS[w.token] }}>
-                      <Wallet size={14} />
-                    </div>
-                    {w.name}
-                  </div>
-                </td>
-                <td style={{ padding: '12px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>
-                  <span className="flex items-center gap-1.5" style={{ color: '#666' }}>
-                    {truncAddr(w.address)}
-                    <button onClick={() => handleCopy(w.address, w.id)} className="cursor-pointer" style={{ background: 'none', border: 'none', color: copied === w.id ? ACCENT : '#999', padding: 2 }}>
-                      {copied === w.id ? <CheckCircle size={13} /> : <Copy size={13} />}
-                    </button>
-                  </span>
-                </td>
-                <td style={{ padding: '12px 12px' }}>
-                  <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: `${CHAIN_COLORS[w.chain] || '#666'}18`, color: CHAIN_COLORS[w.chain] || '#666' }}>
-                    {w.chain}
-                  </span>
-                </td>
-                <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>
-                  {w.balance.toLocaleString()} <span style={{ color: TOKEN_COLORS[w.token], fontSize: 10 }}>{w.token}</span>
-                </td>
-                <td style={{ padding: '12px 12px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a' }}>
-                  ${w.balanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                </td>
-                <td style={{ padding: '12px 12px', textAlign: 'right', color: '#999', fontSize: 11 }}>{w.lastActivity}</td>
-                <td style={{ padding: '12px 18px', textAlign: 'center' }}>
-                  <button className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999', padding: 4 }} title="View on explorer"><ExternalLink size={14} /></button>
-                  <button className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999', padding: 4 }} title="Refresh"><RefreshCw size={14} /></button>
-                </td>
+        {chains.length === 0 && !error ? (
+          <EmptyState icon={<Wallet size={32} />} title="No chains available" subtitle="No supported blockchain networks found from the backend" />
+        ) : (
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <th style={{ padding: '12px 18px', textAlign: 'left' }}>Chain Name</th>
+                <th style={{ padding: '12px 12px', textAlign: 'left' }}>Network</th>
+                <th style={{ padding: '12px 12px', textAlign: 'left' }}>Native Token</th>
+                <th style={{ padding: '12px 18px', textAlign: 'center' }}>Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {chains.map(c => (
+                <tr key={c.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
+                  <td style={{ padding: '12px 18px', fontWeight: 600, color: '#1a1a1a' }}>
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: `${CHAIN_COLORS[c.chain] || CHAIN_COLORS[c.token] || '#666'}18`, color: CHAIN_COLORS[c.chain] || CHAIN_COLORS[c.token] || '#666' }}>
+                        <Wallet size={14} />
+                      </div>
+                      {c.name}
+                    </div>
+                  </td>
+                  <td style={{ padding: '12px 12px' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, background: `${CHAIN_COLORS[c.chain] || '#666'}18`, color: CHAIN_COLORS[c.chain] || '#666' }}>
+                      {c.chain}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 12px', fontWeight: 600, color: TOKEN_COLORS[c.token] || '#1a1a1a' }}>
+                    {c.token}
+                  </td>
+                  <td style={{ padding: '12px 18px', textAlign: 'center' }}>
+                    <span className="flex items-center justify-center gap-1" style={{ color: ACCENT, fontWeight: 600, fontSize: 11 }}>
+                      <CheckCircle size={13} /> Supported
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -288,18 +391,26 @@ function WalletsSection() {
 // ============ TRANSACTIONS SECTION ============
 
 function TransactionsSection() {
-  const [filter, setFilter] = useState<'all' | 'payment' | 'transfer' | 'mint'>('all');
-  const filtered = filter === 'all' ? MOCK_TRANSACTIONS : MOCK_TRANSACTIONS.filter(t => t.type === filter);
+  const { invoices, loading, error, refetch } = useInvoices();
+  const [filter, setFilter] = useState<string>('all');
+
+  const filtered = filter === 'all'
+    ? invoices
+    : invoices.filter(t => (t.status || '').toLowerCase() === filter || (t.type || '').toLowerCase() === filter);
+
+  if (loading) return <Spinner label="Loading transactions..." />;
+
+  const statusOptions = ['all', ...Array.from(new Set(invoices.map(i => (i.status || 'unknown').toLowerCase())))];
 
   return (
     <div style={{ padding: 24 }}>
       <div className="flex items-center justify-between mb-5">
         <div>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>Transactions</div>
-          <div style={{ fontSize: 12, color: '#999' }}>All payments, transfers, and token operations</div>
+          <div style={{ fontSize: 12, color: '#999' }}>Payment history from invoices</div>
         </div>
         <div className="flex gap-2">
-          {(['all', 'payment', 'transfer', 'mint'] as const).map(f => (
+          {statusOptions.map(f => (
             <button key={f} onClick={() => setFilter(f)}
               className="cursor-pointer"
               style={{
@@ -315,56 +426,50 @@ function TransactionsSection() {
         </div>
       </div>
 
+      {error && <ErrorBanner message={error} onRetry={refetch} />}
+
       <div className="empire-card" style={{ padding: 0 }}>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              <th style={{ padding: '12px 18px', textAlign: 'left' }}>ID</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Type</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>Amount</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Token</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>From</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>To</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Status</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>USD Value</th>
-              <th style={{ padding: '12px 18px', textAlign: 'right' }}>Timestamp</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(tx => {
-              const st = STATUS_MAP[tx.status] || STATUS_MAP.pending;
-              const StIcon = st.icon;
-              return (
-                <tr key={tx.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
-                  <td style={{ padding: '10px 18px', fontWeight: 600, color: '#1a1a1a', fontFamily: 'JetBrains Mono, monospace' }}>{tx.id}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span className="flex items-center gap-1.5" style={{
-                      padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600, display: 'inline-flex',
-                      background: tx.type === 'payment' ? ACCENT_BG : tx.type === 'mint' ? '#ede9fe' : '#dbeafe',
-                      color: tx.type === 'payment' ? ACCENT : tx.type === 'mint' ? '#7c3aed' : '#2563eb',
-                    }}>
-                      {tx.type === 'payment' ? <ArrowDownLeft size={11} /> : tx.type === 'transfer' ? <ArrowUpRight size={11} /> : <Coins size={11} />}
-                      {tx.type}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>{tx.amount.toLocaleString()}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ color: TOKEN_COLORS[tx.token] || '#666', fontWeight: 600 }}>{tx.token}</span>
-                  </td>
-                  <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: '#666' }}>{tx.from}</td>
-                  <td style={{ padding: '10px 12px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: '#666' }}>{tx.to}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span className="flex items-center gap-1" style={{ color: st.color, fontWeight: 600, fontSize: 11 }}>
-                      <StIcon size={13} />{tx.status}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', color: '#1a1a1a', fontWeight: 500 }}>${tx.usdValue.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-                  <td style={{ padding: '10px 18px', textAlign: 'right', color: '#999', fontSize: 11 }}>{tx.timestamp}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        {filtered.length === 0 ? (
+          <EmptyState icon={<ArrowUpDown size={32} />} title="No transactions found" subtitle={filter === 'all' ? 'Transaction history will appear here when invoices are created' : `No transactions with status "${filter}"`} />
+        ) : (
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <th style={{ padding: '12px 18px', textAlign: 'left' }}>ID</th>
+                <th style={{ padding: '12px 12px', textAlign: 'left' }}>Description</th>
+                <th style={{ padding: '12px 12px', textAlign: 'right' }}>Amount</th>
+                <th style={{ padding: '12px 12px', textAlign: 'left' }}>Currency</th>
+                <th style={{ padding: '12px 12px', textAlign: 'left' }}>Status</th>
+                <th style={{ padding: '12px 18px', textAlign: 'right' }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(tx => {
+                const statusKey = (tx.status || 'pending').toLowerCase();
+                const st = STATUS_MAP[statusKey] || STATUS_MAP.pending;
+                const StIcon = st.icon;
+                return (
+                  <tr key={tx.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
+                    <td style={{ padding: '10px 18px', fontWeight: 600, color: '#1a1a1a', fontFamily: 'JetBrains Mono, monospace' }}>{tx.id}</td>
+                    <td style={{ padding: '10px 12px', color: '#666' }}>{tx.description || '-'}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>
+                      ${(tx.total || tx.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{ color: TOKEN_COLORS[tx.currency || tx.token || ''] || '#666', fontWeight: 600 }}>{tx.currency || tx.token || 'USD'}</span>
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span className="flex items-center gap-1" style={{ color: st.color, fontWeight: 600, fontSize: 11 }}>
+                        <StIcon size={13} />{tx.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 18px', textAlign: 'right', color: '#999', fontSize: 11 }}>{tx.created_at || tx.timestamp || '-'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -373,16 +478,6 @@ function TransactionsSection() {
 // ============ PAYMENT LINKS SECTION ============
 
 function PaymentLinksSection() {
-  const [showCreate, setShowCreate] = useState(false);
-  const [newLink, setNewLink] = useState({ amount: '', description: '', tokens: ['ETH', 'USDC'] as string[], expiryDays: '7' });
-
-  const toggleToken = (token: string) => {
-    setNewLink(prev => ({
-      ...prev,
-      tokens: prev.tokens.includes(token) ? prev.tokens.filter(t => t !== token) : [...prev.tokens, token],
-    }));
-  };
-
   return (
     <div style={{ padding: 24 }}>
       <div className="flex items-center justify-between mb-5">
@@ -390,115 +485,14 @@ function PaymentLinksSection() {
           <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>Payment Links</div>
           <div style={{ fontSize: 12, color: '#999' }}>Create and manage crypto payment links</div>
         </div>
-        <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-2 cursor-pointer" style={{ padding: '8px 16px', borderRadius: 10, background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600, border: 'none' }}>
-          <Plus size={15} /> Create Link
-        </button>
       </div>
 
-      {showCreate && (
-        <div className="empire-card" style={{ padding: 20, marginBottom: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>New Payment Link</div>
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: '#999', display: 'block', marginBottom: 4 }}>Amount (USD)</label>
-              <input type="number" value={newLink.amount} onChange={e => setNewLink(p => ({ ...p, amount: e.target.value }))}
-                placeholder="0.00"
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #ece8e0', fontSize: 13, outline: 'none' }} />
-            </div>
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: '#999', display: 'block', marginBottom: 4 }}>Description</label>
-              <input type="text" value={newLink.description} onChange={e => setNewLink(p => ({ ...p, description: e.target.value }))}
-                placeholder="What is this payment for?"
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid #ece8e0', fontSize: 13, outline: 'none' }} />
-            </div>
-          </div>
-          <div className="mb-4">
-            <label style={{ fontSize: 11, fontWeight: 600, color: '#999', display: 'block', marginBottom: 6 }}>Accepted Tokens</label>
-            <div className="flex gap-2">
-              {['ETH', 'SOL', 'BTC', 'USDC', 'EMPIRE'].map(t => (
-                <button key={t} onClick={() => toggleToken(t)} className="cursor-pointer"
-                  style={{
-                    padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1.5px solid',
-                    background: newLink.tokens.includes(t) ? `${TOKEN_COLORS[t]}18` : '#fff',
-                    color: newLink.tokens.includes(t) ? TOKEN_COLORS[t] : '#999',
-                    borderColor: newLink.tokens.includes(t) ? TOKEN_COLORS[t] : '#ece8e0',
-                  }}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-end gap-4">
-            <div>
-              <label style={{ fontSize: 11, fontWeight: 600, color: '#999', display: 'block', marginBottom: 4 }}>Expires In</label>
-              <select value={newLink.expiryDays} onChange={e => setNewLink(p => ({ ...p, expiryDays: e.target.value }))}
-                style={{ padding: '8px 12px', borderRadius: 8, border: '1.5px solid #ece8e0', fontSize: 13, outline: 'none' }}>
-                <option value="1">1 day</option>
-                <option value="3">3 days</option>
-                <option value="7">7 days</option>
-                <option value="14">14 days</option>
-                <option value="30">30 days</option>
-                <option value="0">Never</option>
-              </select>
-            </div>
-            <div className="flex-1" />
-            <div style={{ width: 80, height: 80, borderRadius: 12, background: '#f5f3ef', border: '2px dashed #ddd', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc' }}>
-              <QrCode size={32} />
-            </div>
-            <button className="cursor-pointer" style={{ padding: '8px 20px', borderRadius: 10, background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600, border: 'none', height: 38 }}>
-              Generate Link
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="empire-card" style={{ padding: 0 }}>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-              <th style={{ padding: '12px 18px', textAlign: 'left' }}>ID</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Description</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>Amount</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Tokens</th>
-              <th style={{ padding: '12px 12px', textAlign: 'left' }}>Status</th>
-              <th style={{ padding: '12px 12px', textAlign: 'center' }}>Clicks</th>
-              <th style={{ padding: '12px 12px', textAlign: 'center' }}>Payments</th>
-              <th style={{ padding: '12px 12px', textAlign: 'right' }}>Expires</th>
-              <th style={{ padding: '12px 18px', textAlign: 'center' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {MOCK_PAYMENT_LINKS.map(pl => (
-              <tr key={pl.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
-                <td style={{ padding: '10px 18px', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>{pl.id}</td>
-                <td style={{ padding: '10px 12px', color: '#1a1a1a', fontWeight: 500 }}>{pl.description}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', color: '#1a1a1a' }}>${pl.amount.toFixed(2)}</td>
-                <td style={{ padding: '10px 12px' }}>
-                  <div className="flex gap-1">
-                    {pl.tokens.map(t => (
-                      <span key={t} style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: `${TOKEN_COLORS[t]}18`, color: TOKEN_COLORS[t] }}>{t}</span>
-                    ))}
-                  </div>
-                </td>
-                <td style={{ padding: '10px 12px' }}>
-                  <span style={{
-                    padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-                    background: pl.status === 'active' ? ACCENT_BG : '#fee2e2',
-                    color: pl.status === 'active' ? ACCENT : '#dc2626',
-                  }}>{pl.status}</span>
-                </td>
-                <td style={{ padding: '10px 12px', textAlign: 'center', color: '#666' }}>{pl.clicks}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: ACCENT }}>{pl.payments}</td>
-                <td style={{ padding: '10px 12px', textAlign: 'right', color: '#999', fontSize: 11 }}>{pl.expiry}</td>
-                <td style={{ padding: '10px 18px', textAlign: 'center' }}>
-                  <button className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999', padding: 4 }} title="Copy link"><Copy size={14} /></button>
-                  <button className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999', padding: 4 }} title="QR Code"><QrCode size={14} /></button>
-                  <button className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#dc2626', padding: 4 }} title="Delete"><Trash2 size={14} /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <EmptyState
+          icon={<Link2 size={32} />}
+          title="Create your first payment link"
+          subtitle="Generate shareable crypto payment links for your customers"
+        />
       </div>
     </div>
   );
@@ -511,13 +505,13 @@ function EmpireTokenSection() {
   return (
     <div style={{ padding: 24 }}>
       <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>EMPIRE Token</div>
-      <div style={{ fontSize: 12, color: '#999', marginBottom: 20 }}>Token metrics, distribution, and management</div>
+      <div style={{ fontSize: 12, color: '#999', marginBottom: 20 }}>Token metrics, distribution, and management (planned)</div>
 
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPI icon={<Coins size={16} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Price" value={`$${t.price.toFixed(4)}`} sub={`${t.change24h > 0 ? '+' : ''}${t.change24h}% (24h)`} />
-        <KPI icon={<TrendingUp size={16} />} iconBg="#dbeafe" iconColor="#2563eb" label="Market Cap" value={`$${t.marketCap.toLocaleString()}`} sub={`${t.circulatingSupply.toLocaleString()} circulating`} />
-        <KPI icon={<Eye size={16} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Holders" value={t.holders.toLocaleString()} sub="Unique addresses" />
-        <KPI icon={<Shield size={16} />} iconBg="#fef9c3" iconColor="#a16207" label="Total Supply" value={`${(t.totalSupply / 1e6).toFixed(0)}M`} sub="100,000,000 EMPIRE" />
+        <KPI icon={<Coins size={16} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Price" value="N/A" sub="Token not yet deployed" />
+        <KPI icon={<TrendingUp size={16} />} iconBg="#dbeafe" iconColor="#2563eb" label="Market Cap" value="N/A" sub="Pre-launch" />
+        <KPI icon={<Eye size={16} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Holders" value="0" sub="Pre-launch" />
+        <KPI icon={<Shield size={16} />} iconBg="#fef9c3" iconColor="#a16207" label="Total Supply" value={`${(t.totalSupply / 1e6).toFixed(0)}M`} sub="100,000,000 EMPIRE (planned)" />
       </div>
 
       {/* Token Info Card */}
@@ -529,9 +523,9 @@ function EmpireTokenSection() {
               ['Name', t.name],
               ['Symbol', t.symbol],
               ['Chain', t.chain],
-              ['Contract', truncAddr(t.contractAddress)],
-              ['Total Supply', t.totalSupply.toLocaleString()],
-              ['Circulating Supply', t.circulatingSupply.toLocaleString()],
+              ['Contract', t.contractAddress],
+              ['Total Supply', `${t.totalSupply.toLocaleString()} (planned)`],
+              ['Status', 'Pre-launch'],
             ].map(([label, val]) => (
               <div key={label} className="flex items-center justify-between" style={{ fontSize: 12 }}>
                 <span style={{ color: '#999', fontWeight: 500 }}>{label}</span>
@@ -543,7 +537,7 @@ function EmpireTokenSection() {
 
         {/* Distribution */}
         <div className="empire-card" style={{ padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>Distribution Breakdown</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>Planned Distribution</div>
           <div className="flex flex-col gap-2.5">
             {t.distribution.map(d => (
               <div key={d.label}>
@@ -566,69 +560,59 @@ function EmpireTokenSection() {
 // ============ SETTINGS SECTION ============
 
 function SettingsSection() {
-  const [accepted, setAccepted] = useState<Record<string, boolean>>({ ETH: true, SOL: true, BTC: true, USDC: true, EMPIRE: true });
-  const [confirmations, setConfirmations] = useState<Record<string, number>>({ ETH: 12, SOL: 1, BTC: 3 });
+  const { chains, loading, error, refetch } = useChains();
+  const [accepted, setAccepted] = useState<Record<string, boolean>>({});
   const [autoConvert, setAutoConvert] = useState(true);
+
+  useEffect(() => {
+    if (chains.length > 0 && Object.keys(accepted).length === 0) {
+      const initial: Record<string, boolean> = {};
+      chains.forEach(c => { initial[c.token || c.name] = true; });
+      setAccepted(initial);
+    }
+  }, [chains, accepted]);
 
   const toggleCrypto = (token: string) => {
     setAccepted(prev => ({ ...prev, [token]: !prev[token] }));
   };
+
+  if (loading) return <Spinner label="Loading settings..." />;
 
   return (
     <div style={{ padding: 24 }}>
       <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Settings</div>
       <div style={{ fontSize: 12, color: '#999', marginBottom: 20 }}>Configure payment acceptance and processing</div>
 
+      {error && <ErrorBanner message={error} onRetry={refetch} />}
+
       {/* Accepted Cryptocurrencies */}
       <div className="empire-card" style={{ padding: 20, marginBottom: 20 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>Accepted Cryptocurrencies</div>
-        <div className="flex flex-col gap-3">
-          {[
-            { token: 'ETH', name: 'Ethereum', chain: 'ERC-20' },
-            { token: 'SOL', name: 'Solana', chain: 'SPL' },
-            { token: 'BTC', name: 'Bitcoin', chain: 'Native' },
-            { token: 'USDC', name: 'USD Coin', chain: 'ERC-20 / SPL' },
-            { token: 'EMPIRE', name: 'EMPIRE Token', chain: 'ERC-20' },
-          ].map(c => (
-            <div key={c.token} className="flex items-center justify-between" style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#fff' }}>
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${TOKEN_COLORS[c.token]}18`, color: TOKEN_COLORS[c.token] }}>
-                  <Coins size={16} />
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>Supported Chains</div>
+        {chains.length === 0 ? (
+          <EmptyState icon={<Settings size={28} />} title="No chains configured" subtitle="No supported chains returned from backend" />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {chains.map(c => {
+              const tokenKey = c.token || c.name;
+              return (
+                <div key={c.id} className="flex items-center justify-between" style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#fff' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `${CHAIN_COLORS[c.chain] || CHAIN_COLORS[c.token] || '#666'}18`, color: CHAIN_COLORS[c.chain] || CHAIN_COLORS[c.token] || '#666' }}>
+                      <Coins size={16} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{c.name} <span style={{ color: CHAIN_COLORS[c.token] || '#666', fontSize: 11 }}>({c.token})</span></div>
+                      <div style={{ fontSize: 11, color: '#999' }}>{c.chain}</div>
+                    </div>
+                  </div>
+                  <button onClick={() => toggleCrypto(tokenKey)} className="cursor-pointer" style={{ background: 'none', border: 'none', color: accepted[tokenKey] ? ACCENT : '#ccc' }}>
+                    {accepted[tokenKey] ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
+                  </button>
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{c.name} <span style={{ color: TOKEN_COLORS[c.token], fontSize: 11 }}>({c.token})</span></div>
-                  <div style={{ fontSize: 11, color: '#999' }}>{c.chain}</div>
-                </div>
-              </div>
-              <button onClick={() => toggleCrypto(c.token)} className="cursor-pointer" style={{ background: 'none', border: 'none', color: accepted[c.token] ? ACCENT : '#ccc' }}>
-                {accepted[c.token] ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Confirmation Requirements */}
-      <div className="empire-card" style={{ padding: 20, marginBottom: 20 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }}>Confirmation Requirements</div>
-        <div style={{ fontSize: 12, color: '#999', marginBottom: 14 }}>Set the number of block confirmations required before a payment is accepted</div>
-        <div className="flex flex-col gap-3">
-          {Object.entries(confirmations).map(([chain, count]) => (
-            <div key={chain} className="flex items-center justify-between" style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#fff' }}>
-              <div className="flex items-center gap-2">
-                <span style={{ fontSize: 13, fontWeight: 600, color: CHAIN_COLORS[chain === 'ETH' ? 'Ethereum' : chain === 'SOL' ? 'Solana' : 'Bitcoin'] }}>{chain}</span>
-                <span style={{ fontSize: 12, color: '#999' }}>confirmations</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setConfirmations(p => ({ ...p, [chain]: Math.max(1, (p[chain] || 1) - 1) }))}
-                  className="cursor-pointer" style={{ width: 28, height: 28, borderRadius: 6, border: '1.5px solid #ece8e0', background: '#fff', fontSize: 14, fontWeight: 700, color: '#666', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>-</button>
-                <span style={{ width: 32, textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#1a1a1a', fontFamily: 'JetBrains Mono, monospace' }}>{count}</span>
-                <button onClick={() => setConfirmations(p => ({ ...p, [chain]: (p[chain] || 1) + 1 }))}
-                  className="cursor-pointer" style={{ width: 28, height: 28, borderRadius: 6, border: '1.5px solid #ece8e0', background: '#fff', fontSize: 14, fontWeight: 700, color: '#666', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Auto-Convert */}

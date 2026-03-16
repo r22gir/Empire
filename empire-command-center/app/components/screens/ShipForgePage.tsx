@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Package, Truck, BarChart3, MapPin, DollarSign, Settings,
   Plus, Search, ChevronRight, Check, X, Loader2, Clock,
@@ -27,7 +27,9 @@ const ACCENT = '#2563eb';
 const ACCENT_BG = '#dbeafe';
 const ACCENT_BORDER = '#93c5fd';
 
-// ============ MOCK DATA ============
+// ============ UI CONFIG ============
+
+const SHIPPING_API = 'http://localhost:8000/shipping';
 
 const CARRIERS = ['USPS', 'UPS', 'FedEx', 'DHL'] as const;
 type Carrier = typeof CARRIERS[number];
@@ -43,47 +45,38 @@ type ShipmentStatus = 'label_created' | 'in_transit' | 'out_for_delivery' | 'del
 
 interface Shipment {
   id: string;
-  trackingNumber: string;
-  recipient: string;
-  recipientCity: string;
-  recipientState: string;
-  carrier: Carrier;
+  tracking_number: string;
+  carrier: string;
   service: string;
-  status: ShipmentStatus;
-  date: string;
-  cost: number;
-  weight: number;
-  dimensions: string;
+  our_price: number;
+  status: string;
+  created_at: string;
+  label_url: string;
+  label_pdf_url: string;
 }
 
-const MOCK_SHIPMENTS: Shipment[] = [
-  { id: 'SHP-001', trackingNumber: '9400111899223847561234', recipient: 'Sarah Chen', recipientCity: 'New York', recipientState: 'NY', carrier: 'USPS', service: 'Priority Mail', status: 'delivered', date: '2026-03-08', cost: 8.95, weight: 2.3, dimensions: '12x8x6' },
-  { id: 'SHP-002', trackingNumber: '1Z999AA10123456784', recipient: 'Marcus Johnson', recipientCity: 'Los Angeles', recipientState: 'CA', carrier: 'UPS', service: 'Ground', status: 'in_transit', date: '2026-03-08', cost: 12.50, weight: 5.1, dimensions: '16x12x10' },
-  { id: 'SHP-003', trackingNumber: '794644790132', recipient: 'Emily Rodriguez', recipientCity: 'Chicago', recipientState: 'IL', carrier: 'FedEx', service: '2Day', status: 'out_for_delivery', date: '2026-03-07', cost: 18.75, weight: 3.8, dimensions: '14x10x8' },
-  { id: 'SHP-004', trackingNumber: '9400111899223847561235', recipient: 'James Williams', recipientCity: 'Houston', recipientState: 'TX', carrier: 'USPS', service: 'Ground Advantage', status: 'in_transit', date: '2026-03-07', cost: 5.25, weight: 1.2, dimensions: '10x8x4' },
-  { id: 'SHP-005', trackingNumber: '1Z999AA10123456785', recipient: 'Aisha Patel', recipientCity: 'Phoenix', recipientState: 'AZ', carrier: 'UPS', service: 'Next Day Air', status: 'delivered', date: '2026-03-07', cost: 32.40, weight: 4.5, dimensions: '18x14x12' },
-  { id: 'SHP-006', trackingNumber: '4987654321098765', recipient: 'David Kim', recipientCity: 'Philadelphia', recipientState: 'PA', carrier: 'DHL', service: 'Express Worldwide', status: 'label_created', date: '2026-03-09', cost: 45.00, weight: 8.2, dimensions: '20x16x14' },
-  { id: 'SHP-007', trackingNumber: '794644790133', recipient: 'Lisa Thompson', recipientCity: 'San Antonio', recipientState: 'TX', carrier: 'FedEx', service: 'Ground', status: 'exception', date: '2026-03-06', cost: 9.80, weight: 2.0, dimensions: '12x10x6' },
-  { id: 'SHP-008', trackingNumber: '9400111899223847561236', recipient: 'Robert Garcia', recipientCity: 'San Diego', recipientState: 'CA', carrier: 'USPS', service: 'Priority Mail Express', status: 'delivered', date: '2026-03-06', cost: 26.35, weight: 3.0, dimensions: '14x12x8' },
-  { id: 'SHP-009', trackingNumber: '1Z999AA10123456786', recipient: 'Jennifer Lee', recipientCity: 'Dallas', recipientState: 'TX', carrier: 'UPS', service: '2nd Day Air', status: 'in_transit', date: '2026-03-09', cost: 22.10, weight: 6.0, dimensions: '22x16x12' },
-  { id: 'SHP-010', trackingNumber: '794644790134', recipient: 'Michael Brown', recipientCity: 'San Jose', recipientState: 'CA', carrier: 'FedEx', service: 'Standard Overnight', status: 'label_created', date: '2026-03-09', cost: 38.50, weight: 2.5, dimensions: '12x10x8' },
-  { id: 'SHP-011', trackingNumber: '9400111899223847561237', recipient: 'Amanda Wilson', recipientCity: 'Austin', recipientState: 'TX', carrier: 'USPS', service: 'First-Class', status: 'delivered', date: '2026-03-05', cost: 4.50, weight: 0.8, dimensions: '9x6x3' },
-  { id: 'SHP-012', trackingNumber: '1Z999AA10123456787', recipient: 'Chris Martinez', recipientCity: 'Jacksonville', recipientState: 'FL', carrier: 'UPS', service: 'UPS SurePost', status: 'delivered', date: '2026-03-05', cost: 7.20, weight: 1.5, dimensions: '10x8x5' },
-];
+interface ShippingRate {
+  carrier: string;
+  service: string;
+  rate: number;
+  our_price: number;
+  delivery_days: number | null;
+  shipment_id: string;
+  rate_id: string;
+}
 
-const MOCK_RATES = [
-  { carrier: 'USPS' as Carrier, service: 'Priority Mail', days: '1-3', price: 8.95 },
-  { carrier: 'USPS' as Carrier, service: 'Ground Advantage', days: '2-5', price: 5.25 },
-  { carrier: 'USPS' as Carrier, service: 'Priority Mail Express', days: '1-2', price: 26.35 },
-  { carrier: 'UPS' as Carrier, service: 'Ground', days: '3-5', price: 12.50 },
-  { carrier: 'UPS' as Carrier, service: '2nd Day Air', days: '2', price: 22.10 },
-  { carrier: 'UPS' as Carrier, service: 'Next Day Air', days: '1', price: 32.40 },
-  { carrier: 'FedEx' as Carrier, service: 'Ground', days: '3-5', price: 9.80 },
-  { carrier: 'FedEx' as Carrier, service: '2Day', days: '2', price: 18.75 },
-  { carrier: 'FedEx' as Carrier, service: 'Standard Overnight', days: '1', price: 38.50 },
-  { carrier: 'DHL' as Carrier, service: 'eCommerce', days: '5-8', price: 11.00 },
-  { carrier: 'DHL' as Carrier, service: 'Express Worldwide', days: '2-4', price: 45.00 },
-];
+interface TrackingEvent {
+  datetime: string;
+  message: string;
+  city: string | null;
+  state: string | null;
+}
+
+interface TrackingInfo {
+  status: string;
+  status_detail: string | null;
+  events: TrackingEvent[];
+}
 
 const PACKAGE_PRESETS = [
   { name: 'Small Box', length: 10, width: 8, height: 4, weight: 1.0 },
@@ -223,26 +216,66 @@ function SectionHeader({ title, subtitle, action }: { title: string; subtitle: s
 // ============ 1. DASHBOARD ============
 
 function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) {
-  const today = MOCK_SHIPMENTS.filter(s => s.date === '2026-03-09');
-  const thisWeek = MOCK_SHIPMENTS.filter(s => s.date >= '2026-03-03');
-  const thisMonth = MOCK_SHIPMENTS;
-  const avgCost = thisMonth.reduce((sum, s) => sum + s.cost, 0) / thisMonth.length;
-  const pending = MOCK_SHIPMENTS.filter(s => s.status === 'label_created' || s.status === 'in_transit');
-  const delivered = MOCK_SHIPMENTS.filter(s => s.status === 'delivered');
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchShipments = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${SHIPPING_API}/history`);
+        if (!res.ok) throw new Error('Failed to load shipments');
+        const data = await res.json();
+        setShipments(data);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchShipments();
+  }, []);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+  const today = shipments.filter(s => s.created_at?.slice(0, 10) === todayStr);
+  const thisWeek = shipments.filter(s => (s.created_at?.slice(0, 10) ?? '') >= weekAgo);
+  const thisMonth = shipments;
+  const avgCost = thisMonth.length > 0 ? thisMonth.reduce((sum, s) => sum + s.our_price, 0) / thisMonth.length : 0;
+  const pending = shipments.filter(s => s.status === 'label_created' || s.status === 'in_transit');
+  const delivered = shipments.filter(s => s.status === 'delivered');
 
   const carrierBreakdown = CARRIERS.map(c => ({
     carrier: c,
-    count: MOCK_SHIPMENTS.filter(s => s.carrier === c).length,
-    total: MOCK_SHIPMENTS.filter(s => s.carrier === c).reduce((sum, s) => sum + s.cost, 0),
+    count: shipments.filter(s => s.carrier === c).length,
+    total: shipments.filter(s => s.carrier === c).reduce((sum, s) => sum + s.our_price, 0),
   }));
+
+  if (loading) {
+    return (
+      <div style={{ padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
+        <Loader2 size={24} className="animate-spin" style={{ color: ACCENT }} />
+        <span style={{ marginLeft: 10, fontSize: 14, color: '#999' }}>Loading dashboard...</span>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: 24 }}>
       <SectionHeader title="Shipping Dashboard" subtitle="Overview of your shipping operations" />
 
+      {error && (
+        <div className="empire-card mb-4" style={{ padding: '12px 16px', borderColor: '#fca5a5' }}>
+          <div className="flex items-center gap-2" style={{ color: '#dc2626', fontSize: 13 }}>
+            <AlertTriangle size={14} /> {error}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPI icon={<Package size={16} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Shipped Today" value={String(today.length)} sub={`$${today.reduce((s, x) => s + x.cost, 0).toFixed(2)} total`} />
-        <KPI icon={<Truck size={16} />} iconBg="#fef3c7" iconColor="#d97706" label="This Week" value={String(thisWeek.length)} sub={`$${thisWeek.reduce((s, x) => s + x.cost, 0).toFixed(2)} total`} />
+        <KPI icon={<Package size={16} />} iconBg={ACCENT_BG} iconColor={ACCENT} label="Shipped Today" value={String(today.length)} sub={`$${today.reduce((s, x) => s + x.our_price, 0).toFixed(2)} total`} />
+        <KPI icon={<Truck size={16} />} iconBg="#fef3c7" iconColor="#d97706" label="This Week" value={String(thisWeek.length)} sub={`$${thisWeek.reduce((s, x) => s + x.our_price, 0).toFixed(2)} total`} />
         <KPI icon={<Calendar size={16} />} iconBg="#dcfce7" iconColor="#16a34a" label="This Month" value={String(thisMonth.length)} sub={`Avg $${avgCost.toFixed(2)} per shipment`} />
         <KPI icon={<Clock size={16} />} iconBg="#fef2f2" iconColor="#dc2626" label="Pending" value={String(pending.length)} sub={`${delivered.length} delivered`} />
       </div>
@@ -293,26 +326,37 @@ function DashboardSection({ onNavigate }: { onNavigate: (s: Section) => void }) 
             View All <ChevronRight size={14} />
           </button>
         </div>
-        <div className="flex flex-col gap-2">
-          {MOCK_SHIPMENTS.slice(0, 5).map(s => (
-            <div key={s.id} style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #ece8e0', background: '#fafaf8' }}
-              className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: CARRIER_COLORS[s.carrier] + '18', color: CARRIER_COLORS[s.carrier] }}>
-                  <Truck size={14} />
+        {shipments.length === 0 ? (
+          <div style={{ padding: 30, textAlign: 'center', color: '#999', fontSize: 13 }}>
+            <Package size={32} style={{ color: '#ddd', margin: '0 auto 10px' }} />
+            <div>No shipments yet — create your first label</div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {shipments.slice(0, 5).map(s => {
+              const carrierKey = s.carrier as Carrier;
+              const carrierColor = CARRIER_COLORS[carrierKey] || '#666';
+              return (
+                <div key={s.id} style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #ece8e0', background: '#fafaf8' }}
+                  className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: carrierColor + '18', color: carrierColor }}>
+                      <Truck size={14} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{s.tracking_number.slice(0, 20)}...</div>
+                      <div style={{ fontSize: 11, color: '#999' }}>{s.carrier} {s.service}</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status={(s.status as ShipmentStatus) || 'label_created'} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>${s.our_price.toFixed(2)}</span>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{s.recipient}</div>
-                  <div style={{ fontSize: 11, color: '#999' }}>{s.carrier} {s.service} &middot; {s.recipientCity}, {s.recipientState}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <StatusBadge status={s.status} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>${s.cost.toFixed(2)}</span>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -338,7 +382,13 @@ function ShipNowSection() {
   const [carrier, setCarrier] = useState<Carrier>('USPS');
   const [service, setService] = useState('');
   const [showRates, setShowRates] = useState(false);
+  const [rates, setRates] = useState<ShippingRate[]>([]);
+  const [ratesLoading, setRatesLoading] = useState(false);
+  const [ratesError, setRatesError] = useState('');
   const [labelGenerated, setLabelGenerated] = useState(false);
+  const [labelLoading, setLabelLoading] = useState(false);
+  const [labelError, setLabelError] = useState('');
+  const [selectedRate, setSelectedRate] = useState<ShippingRate | null>(null);
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd',
@@ -349,13 +399,55 @@ function ShipNowSection() {
     fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4, display: 'block', textTransform: 'uppercase', letterSpacing: 0.5,
   };
 
-  const handleCompareRates = () => {
-    if (toZip && weight) setShowRates(true);
+  const handleCompareRates = async () => {
+    if (!toZip || !weight) return;
+    setRatesLoading(true);
+    setRatesError('');
+    try {
+      const res = await fetch(`${SHIPPING_API}/rates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_address: { name: fromName, street1: fromAddr, city: fromCity, state: fromState, zip: fromZip },
+          to_address: { name: toName, street1: toAddr, city: toCity, state: toState, zip: toZip },
+          parcel: { length: parseFloat(length), width: parseFloat(width), height: parseFloat(height), weight: parseFloat(weight) * 16 },
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to fetch rates');
+      const data = await res.json();
+      setRates(data.rates || []);
+      setShowRates(true);
+    } catch (err: unknown) {
+      setRatesError(err instanceof Error ? err.message : 'Failed to fetch rates');
+    } finally {
+      setRatesLoading(false);
+    }
   };
 
-  const handleGenerateLabel = () => {
-    setLabelGenerated(true);
-    setTimeout(() => setLabelGenerated(false), 3000);
+  const handleGenerateLabel = async () => {
+    if (!selectedRate) {
+      setLabelError('Please compare rates and select one first');
+      return;
+    }
+    setLabelLoading(true);
+    setLabelError('');
+    try {
+      const res = await fetch(`${SHIPPING_API}/labels`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shipment_id: selectedRate.shipment_id,
+          rate_id: selectedRate.rate_id,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to generate label');
+      setLabelGenerated(true);
+      setTimeout(() => setLabelGenerated(false), 3000);
+    } catch (err: unknown) {
+      setLabelError(err instanceof Error ? err.message : 'Failed to generate label');
+    } finally {
+      setLabelLoading(false);
+    }
   };
 
   const applyPreset = (preset: typeof PACKAGE_PRESETS[0]) => {
@@ -470,17 +562,22 @@ function ShipNowSection() {
         </div>
 
         <div className="flex gap-3 mt-5">
-          <button onClick={handleCompareRates}
+          <button onClick={handleCompareRates} disabled={ratesLoading}
             className="flex items-center gap-2 cursor-pointer"
-            style={{ padding: '10px 20px', borderRadius: 10, border: `1px solid ${ACCENT}`, background: '#fff', color: ACCENT, fontSize: 13, fontWeight: 600 }}>
-            <DollarSign size={15} /> Compare Rates
+            style={{ padding: '10px 20px', borderRadius: 10, border: `1px solid ${ACCENT}`, background: '#fff', color: ACCENT, fontSize: 13, fontWeight: 600, opacity: ratesLoading ? 0.6 : 1 }}>
+            {ratesLoading ? <><Loader2 size={15} className="animate-spin" /> Loading...</> : <><DollarSign size={15} /> Compare Rates</>}
           </button>
-          <button onClick={handleGenerateLabel}
+          <button onClick={handleGenerateLabel} disabled={labelLoading}
             className="flex items-center gap-2 cursor-pointer"
-            style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600 }}>
-            {labelGenerated ? <><CheckCircle size={15} /> Label Generated!</> : <><Clipboard size={15} /> Generate Label</>}
+            style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600, opacity: labelLoading ? 0.6 : 1 }}>
+            {labelLoading ? <><Loader2 size={15} className="animate-spin" /> Generating...</> : labelGenerated ? <><CheckCircle size={15} /> Label Generated!</> : <><Clipboard size={15} /> Generate Label</>}
           </button>
         </div>
+        {(ratesError || labelError) && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626' }} className="flex items-center gap-1">
+            <AlertTriangle size={13} /> {ratesError || labelError}
+          </div>
+        )}
       </div>
 
       {/* Rate Comparison */}
@@ -491,36 +588,48 @@ function ShipNowSection() {
             <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>Rate Comparison</span>
             <span style={{ fontSize: 11, color: '#999', marginLeft: 8 }}>{fromZip} &rarr; {toZip} &middot; {weight} lbs</span>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #ece8e0' }}>
-                {['Carrier', 'Service', 'Est. Days', 'Price'].map(h => (
-                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {MOCK_RATES.sort((a, b) => a.price - b.price).map((r, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #f0ede8' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#fafaf8')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span className="inline-flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 600, color: CARRIER_COLORS[r.carrier] }}>
-                      <Truck size={12} /> {r.carrier}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 13, color: '#1a1a1a' }}>{r.service}</td>
-                  <td style={{ padding: '10px 12px', fontSize: 13, color: '#666' }}>{r.days} days</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: i === 0 ? '#16a34a' : '#1a1a1a' }}>
-                      ${(r.price * parseFloat(weight || '1')).toFixed(2)}
-                      {i === 0 && <span style={{ fontSize: 10, color: '#16a34a', marginLeft: 6, fontWeight: 600 }}>BEST</span>}
-                    </span>
-                  </td>
+          {rates.length === 0 ? (
+            <div style={{ padding: 30, textAlign: 'center', color: '#999', fontSize: 13 }}>No rates returned. Check addresses and try again.</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #ece8e0' }}>
+                  {['', 'Carrier', 'Service', 'Est. Days', 'Price'].map(h => (
+                    <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {[...rates].sort((a, b) => a.our_price - b.our_price).map((r, i) => {
+                  const carrierColor = CARRIER_COLORS[r.carrier as Carrier] || '#666';
+                  const isSelected = selectedRate?.rate_id === r.rate_id;
+                  return (
+                    <tr key={r.rate_id} style={{ borderBottom: '1px solid #f0ede8', background: isSelected ? ACCENT_BG : 'transparent', cursor: 'pointer' }}
+                      onClick={() => setSelectedRate(r)}
+                      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#fafaf8'; }}
+                      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
+                      <td style={{ padding: '10px 12px', width: 30 }}>
+                        <div style={{ width: 16, height: 16, borderRadius: '50%', border: isSelected ? `4px solid ${ACCENT}` : '2px solid #ccc' }} />
+                      </td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span className="inline-flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 600, color: carrierColor }}>
+                          <Truck size={12} /> {r.carrier}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px 12px', fontSize: 13, color: '#1a1a1a' }}>{r.service}</td>
+                      <td style={{ padding: '10px 12px', fontSize: 13, color: '#666' }}>{r.delivery_days != null ? `${r.delivery_days} days` : 'N/A'}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: i === 0 ? '#16a34a' : '#1a1a1a' }}>
+                          ${r.our_price.toFixed(2)}
+                          {i === 0 && <span style={{ fontSize: 10, color: '#16a34a', marginLeft: 6, fontWeight: 600 }}>BEST</span>}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
@@ -530,27 +639,64 @@ function ShipNowSection() {
 // ============ 3. SHIPMENTS ============
 
 function ShipmentsSection() {
+  const [shipments, setShipments] = useState<Shipment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [filter, setFilter] = useState<ShipmentStatus | 'all'>('all');
   const [search, setSearch] = useState('');
 
-  const filtered = MOCK_SHIPMENTS.filter(s => {
+  useEffect(() => {
+    const fetchShipments = async () => {
+      try {
+        setLoading(true);
+        const res = await fetch(`${SHIPPING_API}/history`);
+        if (!res.ok) throw new Error('Failed to load shipments');
+        const data = await res.json();
+        setShipments(data);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Failed to load');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchShipments();
+  }, []);
+
+  const filtered = shipments.filter(s => {
     if (filter !== 'all' && s.status !== filter) return false;
-    if (search && !s.recipient.toLowerCase().includes(search.toLowerCase()) && !s.trackingNumber.includes(search)) return false;
+    if (search && !s.tracking_number.toLowerCase().includes(search.toLowerCase()) && !s.carrier.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
   const statusCounts = {
-    all: MOCK_SHIPMENTS.length,
-    label_created: MOCK_SHIPMENTS.filter(s => s.status === 'label_created').length,
-    in_transit: MOCK_SHIPMENTS.filter(s => s.status === 'in_transit').length,
-    out_for_delivery: MOCK_SHIPMENTS.filter(s => s.status === 'out_for_delivery').length,
-    delivered: MOCK_SHIPMENTS.filter(s => s.status === 'delivered').length,
-    exception: MOCK_SHIPMENTS.filter(s => s.status === 'exception').length,
+    all: shipments.length,
+    label_created: shipments.filter(s => s.status === 'label_created').length,
+    in_transit: shipments.filter(s => s.status === 'in_transit').length,
+    out_for_delivery: shipments.filter(s => s.status === 'out_for_delivery').length,
+    delivered: shipments.filter(s => s.status === 'delivered').length,
+    exception: shipments.filter(s => s.status === 'exception').length,
   };
+
+  if (loading) {
+    return (
+      <div style={{ padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
+        <Loader2 size={24} className="animate-spin" style={{ color: ACCENT }} />
+        <span style={{ marginLeft: 10, fontSize: 14, color: '#999' }}>Loading shipments...</span>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: 24 }}>
-      <SectionHeader title="Shipments" subtitle={`${MOCK_SHIPMENTS.length} total shipments`} />
+      <SectionHeader title="Shipments" subtitle={`${shipments.length} total shipments`} />
+
+      {error && (
+        <div className="empire-card mb-4" style={{ padding: '12px 16px', borderColor: '#fca5a5' }}>
+          <div className="flex items-center gap-2" style={{ color: '#dc2626', fontSize: 13 }}>
+            <AlertTriangle size={14} /> {error}
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3 mb-4">
@@ -587,30 +733,38 @@ function ShipmentsSection() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(s => (
+            {filtered.map(s => {
+              const carrierColor = CARRIER_COLORS[s.carrier as Carrier] || '#666';
+              return (
               <tr key={s.id} style={{ borderBottom: '1px solid #f0ede8' }}
                 onMouseEnter={e => (e.currentTarget.style.background = '#fafaf8')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                 <td style={{ padding: '10px 14px' }}>
-                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: ACCENT, fontWeight: 500 }}>{s.trackingNumber.slice(0, 16)}...</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: ACCENT, fontWeight: 500 }}>{s.tracking_number.slice(0, 16)}...</span>
                 </td>
                 <td style={{ padding: '10px 14px' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{s.recipient}</div>
-                  <div style={{ fontSize: 11, color: '#999' }}>{s.recipientCity}, {s.recipientState}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{s.tracking_number.slice(0, 12)}...</div>
                 </td>
                 <td style={{ padding: '10px 14px' }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: CARRIER_COLORS[s.carrier] }}>{s.carrier}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: carrierColor }}>{s.carrier}</span>
                 </td>
                 <td style={{ padding: '10px 14px', fontSize: 12, color: '#666' }}>{s.service}</td>
-                <td style={{ padding: '10px 14px' }}><StatusBadge status={s.status} /></td>
-                <td style={{ padding: '10px 14px', fontSize: 12, color: '#666' }}>{s.date}</td>
-                <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>${s.cost.toFixed(2)}</td>
+                <td style={{ padding: '10px 14px' }}><StatusBadge status={(s.status as ShipmentStatus) || 'label_created'} /></td>
+                <td style={{ padding: '10px 14px', fontSize: 12, color: '#666' }}>{s.created_at?.slice(0, 10)}</td>
+                <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>${s.our_price.toFixed(2)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {filtered.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: '#999', fontSize: 13 }}>No shipments match your filter.</div>
+          <div style={{ padding: 40, textAlign: 'center', color: '#999', fontSize: 13 }}>
+            {shipments.length === 0 ? (
+              <div><Package size={32} style={{ color: '#ddd', margin: '0 auto 10px' }} /><div>No shipments yet — create your first label</div></div>
+            ) : (
+              'No shipments match your filter.'
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -621,15 +775,32 @@ function ShipmentsSection() {
 
 function TrackingSection() {
   const [trackingInput, setTrackingInput] = useState('');
-  const [tracked, setTracked] = useState<Shipment | null>(null);
+  const [trackingInfo, setTrackingInfo] = useState<TrackingInfo | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState('');
 
-  const handleTrack = () => {
-    const found = MOCK_SHIPMENTS.find(s => s.trackingNumber === trackingInput.trim());
-    if (found) { setTracked(found); setNotFound(false); }
-    else { setTracked(null); setNotFound(true); }
+  const handleTrack = async () => {
+    const num = trackingInput.trim();
+    if (!num) return;
+    setTrackingLoading(true);
+    setTrackingError('');
+    setNotFound(false);
+    setTrackingInfo(null);
+    try {
+      const res = await fetch(`${SHIPPING_API}/track/${encodeURIComponent(num)}`);
+      if (res.status === 404) { setNotFound(true); return; }
+      if (!res.ok) throw new Error('Failed to track shipment');
+      const data = await res.json();
+      setTrackingInfo(data);
+    } catch (err: unknown) {
+      setTrackingError(err instanceof Error ? err.message : 'Tracking failed');
+    } finally {
+      setTrackingLoading(false);
+    }
   };
 
+  const statusOrder: ShipmentStatus[] = ['label_created', 'in_transit', 'out_for_delivery', 'delivered'];
   const timelineSteps: { status: ShipmentStatus; label: string; detail: string }[] = [
     { status: 'label_created', label: 'Label Created', detail: 'Shipping label has been created' },
     { status: 'in_transit', label: 'In Transit', detail: 'Package picked up by carrier' },
@@ -637,8 +808,8 @@ function TrackingSection() {
     { status: 'delivered', label: 'Delivered', detail: 'Package delivered to recipient' },
   ];
 
-  const statusOrder: ShipmentStatus[] = ['label_created', 'in_transit', 'out_for_delivery', 'delivered'];
-  const currentIndex = tracked ? statusOrder.indexOf(tracked.status === 'exception' ? 'in_transit' : tracked.status) : -1;
+  const trackedStatus = (trackingInfo?.status || 'label_created') as ShipmentStatus;
+  const currentIndex = statusOrder.indexOf(trackedStatus === 'exception' ? 'in_transit' : trackedStatus);
 
   return (
     <div style={{ padding: 24 }}>
@@ -653,17 +824,21 @@ function TrackingSection() {
               placeholder="Enter tracking number..."
               style={{ width: '100%', padding: '10px 14px 10px 32px', borderRadius: 10, border: '1px solid #ddd', fontSize: 14, background: '#fff', outline: 'none' }} />
           </div>
-          <button onClick={handleTrack}
+          <button onClick={handleTrack} disabled={trackingLoading}
             className="flex items-center gap-2 cursor-pointer"
-            style={{ padding: '10px 24px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600 }}>
-            <Search size={15} /> Track
+            style={{ padding: '10px 24px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600, opacity: trackingLoading ? 0.6 : 1 }}>
+            {trackingLoading ? <><Loader2 size={15} className="animate-spin" /> Tracking...</> : <><Search size={15} /> Track</>}
           </button>
         </div>
-        <div style={{ fontSize: 11, color: '#999', marginTop: 8 }}>
-          Try: <button onClick={() => setTrackingInput('9400111899223847561234')} className="cursor-pointer" style={{ color: ACCENT, background: 'none', border: 'none', fontSize: 11, fontWeight: 600, textDecoration: 'underline' }}>9400111899223847561234</button>
-          {' '} or <button onClick={() => setTrackingInput('1Z999AA10123456784')} className="cursor-pointer" style={{ color: ACCENT, background: 'none', border: 'none', fontSize: 11, fontWeight: 600, textDecoration: 'underline' }}>1Z999AA10123456784</button>
-        </div>
       </div>
+
+      {trackingError && (
+        <div className="empire-card mb-4" style={{ padding: '12px 16px', borderColor: '#fca5a5' }}>
+          <div className="flex items-center gap-2" style={{ color: '#dc2626', fontSize: 13 }}>
+            <AlertTriangle size={14} /> {trackingError}
+          </div>
+        </div>
+      )}
 
       {notFound && (
         <div className="empire-card" style={{ padding: '20px 22px', borderColor: '#fca5a5' }}>
@@ -675,48 +850,70 @@ function TrackingSection() {
         </div>
       )}
 
-      {tracked && (
+      {trackingInfo && (
         <>
           {/* Package Info */}
           <div className="empire-card mb-6" style={{ padding: '20px 22px' }}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>{tracked.recipient}</div>
-                <div style={{ fontSize: 12, color: '#999' }}>{tracked.recipientCity}, {tracked.recipientState} &middot; {tracked.carrier} {tracked.service}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>Tracking: {trackingInput}</div>
+                <div style={{ fontSize: 12, color: '#999' }}>{trackingInfo.status_detail || trackingInfo.status}</div>
               </div>
-              <StatusBadge status={tracked.status} />
+              <StatusBadge status={trackedStatus} />
             </div>
-            <div className="grid grid-cols-4 gap-4" style={{ paddingTop: 12, borderTop: '1px solid #ece8e0' }}>
+            <div className="grid grid-cols-2 gap-4" style={{ paddingTop: 12, borderTop: '1px solid #ece8e0' }}>
               <div>
                 <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>Tracking #</div>
-                <div style={{ fontSize: 12, fontFamily: 'monospace', color: ACCENT, marginTop: 2 }}>{tracked.trackingNumber}</div>
+                <div style={{ fontSize: 12, fontFamily: 'monospace', color: ACCENT, marginTop: 2 }}>{trackingInput}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>Ship Date</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginTop: 2 }}>{tracked.date}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>Weight</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginTop: 2 }}>{tracked.weight} lbs</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>Cost</div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginTop: 2 }}>${tracked.cost.toFixed(2)}</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5 }}>Status</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginTop: 2 }}>{trackingInfo.status}</div>
               </div>
             </div>
           </div>
 
-          {/* Visual Timeline */}
-          <div className="empire-card" style={{ padding: '24px 28px' }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 24 }}>Tracking Timeline</div>
+          {/* Events Timeline */}
+          {trackingInfo.events.length > 0 && (
+            <div className="empire-card mb-6" style={{ padding: '24px 28px' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 24 }}>Tracking Events</div>
+              <div className="flex flex-col gap-0">
+                {trackingInfo.events.map((evt, i) => (
+                  <div key={i} className="flex items-start gap-4" style={{ position: 'relative', paddingBottom: i < trackingInfo.events.length - 1 ? 24 : 0 }}>
+                    {i < trackingInfo.events.length - 1 && (
+                      <div style={{ position: 'absolute', left: 15, top: 32, width: 2, height: 24, background: '#e5e7eb' }} />
+                    )}
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: i === 0 ? ACCENT : '#f3f4f6',
+                      color: i === 0 ? '#fff' : '#9ca3af',
+                    }}>
+                      {i === 0 ? <Check size={14} /> : <CircleDot size={14} />}
+                    </div>
+                    <div style={{ paddingTop: 4 }}>
+                      <div style={{ fontSize: 14, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? '#1a1a1a' : '#9ca3af' }}>{evt.message}</div>
+                      <div style={{ fontSize: 12, color: '#999', marginTop: 1 }}>
+                        {evt.datetime}{evt.city ? ` — ${evt.city}, ${evt.state}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-            {tracked.status === 'exception' && (
+          {/* Visual Status Timeline */}
+          <div className="empire-card" style={{ padding: '24px 28px' }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 24 }}>Status Progress</div>
+
+            {trackedStatus === 'exception' && (
               <div style={{ padding: '12px 16px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fca5a5', marginBottom: 20 }}
                 className="flex items-center gap-2">
                 <AlertTriangle size={16} style={{ color: '#dc2626' }} />
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#dc2626' }}>Delivery Exception</div>
-                  <div style={{ fontSize: 11, color: '#999' }}>Address issue detected. Contact carrier for resolution.</div>
+                  <div style={{ fontSize: 11, color: '#999' }}>{trackingInfo.status_detail || 'Contact carrier for resolution.'}</div>
                 </div>
               </div>
             )}
@@ -727,14 +924,12 @@ function TrackingSection() {
                 const isCurrent = i === currentIndex;
                 return (
                   <div key={step.status} className="flex items-start gap-4" style={{ position: 'relative', paddingBottom: i < timelineSteps.length - 1 ? 32 : 0 }}>
-                    {/* Line */}
                     {i < timelineSteps.length - 1 && (
                       <div style={{
                         position: 'absolute', left: 15, top: 32, width: 2, height: 32,
                         background: i < currentIndex ? ACCENT : '#e5e7eb',
                       }} />
                     )}
-                    {/* Dot */}
                     <div style={{
                       width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -744,7 +939,6 @@ function TrackingSection() {
                     }}>
                       {isComplete ? <Check size={14} /> : <CircleDot size={14} />}
                     </div>
-                    {/* Text */}
                     <div style={{ paddingTop: 4 }}>
                       <div style={{ fontSize: 14, fontWeight: isCurrent ? 700 : isComplete ? 600 : 500, color: isComplete ? '#1a1a1a' : '#9ca3af' }}>{step.label}</div>
                       <div style={{ fontSize: 12, color: isComplete ? '#666' : '#ccc', marginTop: 1 }}>{step.detail}</div>
@@ -770,6 +964,9 @@ function RatesSection() {
   const [rHeight, setRHeight] = useState('6');
   const [rWeight, setRWeight] = useState('2');
   const [showResults, setShowResults] = useState(false);
+  const [rates, setRates] = useState<ShippingRate[]>([]);
+  const [ratesLoading, setRatesLoading] = useState(false);
+  const [ratesError, setRatesError] = useState('');
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #ddd',
@@ -780,11 +977,30 @@ function RatesSection() {
     fontSize: 11, fontWeight: 600, color: '#666', marginBottom: 4, display: 'block', textTransform: 'uppercase', letterSpacing: 0.5,
   };
 
-  const handleCalculate = () => {
-    if (destZip && rWeight) setShowResults(true);
+  const handleCalculate = async () => {
+    if (!destZip || !rWeight) return;
+    setRatesLoading(true);
+    setRatesError('');
+    try {
+      const res = await fetch(`${SHIPPING_API}/rates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_address: { name: 'Sender', street1: '123 Main St', city: 'Washington', state: 'DC', zip: originZip },
+          to_address: { name: 'Recipient', street1: '456 Oak Ave', city: 'Destination', state: 'XX', zip: destZip },
+          parcel: { length: parseFloat(rLength), width: parseFloat(rWidth), height: parseFloat(rHeight), weight: parseFloat(rWeight) * 16 },
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to fetch rates');
+      const data = await res.json();
+      setRates(data.rates || []);
+      setShowResults(true);
+    } catch (err: unknown) {
+      setRatesError(err instanceof Error ? err.message : 'Failed to fetch rates');
+    } finally {
+      setRatesLoading(false);
+    }
   };
-
-  const wt = parseFloat(rWeight || '1');
 
   return (
     <div style={{ padding: 24 }}>
@@ -799,44 +1015,56 @@ function RatesSection() {
           <div><label style={labelStyle}>Height (in)</label><input value={rHeight} onChange={e => setRHeight(e.target.value)} style={inputStyle} type="number" /></div>
           <div><label style={labelStyle}>Weight (lbs)</label><input value={rWeight} onChange={e => setRWeight(e.target.value)} style={inputStyle} type="number" step="0.1" /></div>
         </div>
-        <button onClick={handleCalculate}
+        <button onClick={handleCalculate} disabled={ratesLoading}
           className="flex items-center gap-2 cursor-pointer mt-4"
-          style={{ padding: '10px 24px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600 }}>
-          <Scale size={15} /> Calculate Rates
+          style={{ padding: '10px 24px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontSize: 13, fontWeight: 600, opacity: ratesLoading ? 0.6 : 1 }}>
+          {ratesLoading ? <><Loader2 size={15} className="animate-spin" /> Calculating...</> : <><Scale size={15} /> Calculate Rates</>}
         </button>
+        {ratesError && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#dc2626' }} className="flex items-center gap-1">
+            <AlertTriangle size={13} /> {ratesError}
+          </div>
+        )}
       </div>
 
       {showResults && (
-        <div className="grid grid-cols-4 gap-4">
-          {CARRIERS.map(c => {
-            const rates = MOCK_RATES.filter(r => r.carrier === c).sort((a, b) => a.price - b.price);
-            return (
-              <div key={c} className="empire-card" style={{ padding: '20px 22px' }}>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: CARRIER_COLORS[c], color: '#fff' }}>
-                    <Truck size={14} />
-                  </div>
-                  <span style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>{c}</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {rates.map((r, i) => (
-                    <div key={r.service} style={{
-                      padding: '10px 12px', borderRadius: 10,
-                      border: i === 0 ? `1.5px solid ${ACCENT_BORDER}` : '1px solid #ece8e0',
-                      background: i === 0 ? ACCENT_BG : '#fafaf8',
-                    }}>
-                      <div className="flex items-center justify-between">
-                        <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{r.service}</span>
-                        <span style={{ fontSize: 14, fontWeight: 700, color: i === 0 ? ACCENT : '#1a1a1a' }}>${(r.price * wt).toFixed(2)}</span>
-                      </div>
-                      <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{r.days} business days</div>
+        rates.length === 0 ? (
+          <div className="empire-card" style={{ padding: 30, textAlign: 'center', color: '#999', fontSize: 13 }}>
+            No rates available for this route. Check addresses and try again.
+          </div>
+        ) : (
+          <div className="grid grid-cols-4 gap-4">
+            {CARRIERS.map(c => {
+              const carrierRates = rates.filter(r => r.carrier === c).sort((a, b) => a.our_price - b.our_price);
+              if (carrierRates.length === 0) return null;
+              return (
+                <div key={c} className="empire-card" style={{ padding: '20px 22px' }}>
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: CARRIER_COLORS[c], color: '#fff' }}>
+                      <Truck size={14} />
                     </div>
-                  ))}
+                    <span style={{ fontSize: 15, fontWeight: 700, color: '#1a1a1a' }}>{c}</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {carrierRates.map((r, i) => (
+                      <div key={r.rate_id} style={{
+                        padding: '10px 12px', borderRadius: 10,
+                        border: i === 0 ? `1.5px solid ${ACCENT_BORDER}` : '1px solid #ece8e0',
+                        background: i === 0 ? ACCENT_BG : '#fafaf8',
+                      }}>
+                        <div className="flex items-center justify-between">
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{r.service}</span>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: i === 0 ? ACCENT : '#1a1a1a' }}>${r.our_price.toFixed(2)}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>{r.delivery_days != null ? `${r.delivery_days} business days` : 'N/A'}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )
       )}
     </div>
   );
