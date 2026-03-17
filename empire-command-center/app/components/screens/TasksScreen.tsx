@@ -652,7 +652,7 @@ function TaskDetailView({ task, onBack, onStatusChange, onDelete, onComment, act
   };
 
   return (
-    <div className="flex-1 overflow-y-auto" style={{ background: '#f5f2ed', padding: '24px 36px' }}>
+    <div className="flex-1 overflow-y-auto px-4 sm:px-9 py-6" style={{ background: '#f5f2ed' }}>
       {/* Back button */}
       <button
         onClick={onBack}

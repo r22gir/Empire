@@ -113,7 +113,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
       case 'analysis':
         return (
           <Suspense fallback={<Loading />}>
-            <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+            <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
               <div className="flex items-center gap-3 mb-5">
                 <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
                   <Camera size={20} className="text-[#7c3aed]" /> AI Photo Analysis
@@ -312,7 +312,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
   // Viewing a specific quote — show full review
   if (viewingQuoteId) {
     return (
-      <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+      <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
         <button
           onClick={() => setViewingQuoteId(null)}
           className="flex items-center gap-2 cursor-pointer mb-4 transition-colors hover:text-[#b8960c]"
@@ -328,7 +328,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+    <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-5 gap-3">
         <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
           <ClipboardList size={20} className="text-[#b8960c]" /> Quotes
@@ -406,7 +406,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
       )}
 
       {/* Filter tabs */}
-      <div className="flex gap-1 mb-4">
+      <div className="flex flex-wrap gap-1 mb-4">
         {filters.map(f => (
           <button key={f} onClick={() => setFilter(f)}
             className={`filter-tab ${filter === f ? 'active' : ''}`}>
@@ -608,7 +608,7 @@ function TasksSection() {
   const urgent = tasks.filter(t => t.priority === 'urgent' && t.status !== 'done');
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+    <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
@@ -718,8 +718,8 @@ function TasksSection() {
       )}
 
       {/* Filters */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-1">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
+        <div className="flex flex-wrap gap-1">
           {(['all', 'pending', 'done'] as const).map(f => (
             <button key={f} onClick={() => setFilter(f)}
               className={`filter-tab ${filter === f ? 'active' : ''}`}>
@@ -961,7 +961,7 @@ function KPI({ icon, iconBg, iconColor, label, value, sub, onClick }: {
       </div>
       <div className="kpi-value">{value}</div>
       <div className="kpi-label">{label}</div>
-      <div style={{ fontSize: 9, color: '#aaa', marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>{sub}</div>
     </div>
   );
 }
@@ -1037,7 +1037,7 @@ function CreationsSection() {
   };
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+    <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#fdf4ff] flex items-center justify-center">
@@ -1151,7 +1151,7 @@ function CreationsSection() {
 
 function ComingSoon({ title, description, icon }: { title: string; description: string; icon: React.ReactNode }) {
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }}>
+    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 400 }} className="px-4 sm:px-9 py-6">
       <div className="text-center">
         <div style={{ color: '#d8d3cb', marginBottom: 12 }}>{icon}</div>
         <div style={{ fontSize: 18, fontWeight: 700, color: '#aaa' }}>{title}</div>
