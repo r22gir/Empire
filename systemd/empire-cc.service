@@ -1,0 +1,22 @@
+[Unit]
+Description=Empire Command Center (Next.js)
+After=network.target empire-backend.service
+Wants=empire-backend.service
+
+[Service]
+Type=simple
+User=rg
+Group=rg
+WorkingDirectory=/home/rg/empire-repo/empire-command-center
+Environment=PATH=/usr/bin:/usr/local/bin:/home/rg/.local/bin
+Environment=NODE_ENV=development
+ExecStartPre=/bin/rm -f /home/rg/empire-repo/empire-command-center/.next/dev/lock
+ExecStart=/usr/bin/npx next dev -p 3005
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=empire-cc
+
+[Install]
+WantedBy=multi-user.target

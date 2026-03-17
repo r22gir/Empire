@@ -1,0 +1,19 @@
+[Unit]
+Description=Empire OpenClaw AI Server
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rg
+Group=rg
+WorkingDirectory=/home/rg/empire-repo/openclaw
+ExecStart=/home/rg/empire-repo/backend/venv/bin/python3 server.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=empire-openclaw
+
+[Install]
+WantedBy=multi-user.target
