@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor } from 'lucide-react';
+import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor, Terminal, HardDrive, ShoppingBag } from 'lucide-react';
 
 const SECTIONS = [
   { label: 'Chat', shortcut: 'C', screen: 'chat', icon: MessageSquare, color: '#b8960c' },
@@ -15,6 +15,9 @@ const SECTIONS = [
   { label: 'WoodCraft', shortcut: 'G', screen: 'craft-page', icon: Hammer, color: '#ca8a04' },
   { label: 'Platform', shortcut: 'P', screen: 'platform-page', icon: Server, color: '#2563eb' },
   { label: 'Telegram', shortcut: 'T', screen: 'telegram', icon: MessageCircle, color: '#2563eb' },
+  { label: 'Dev Panel', shortcut: 'X', screen: 'dev', icon: Terminal, color: '#b8960c' },
+  { label: 'RecoveryForge', shortcut: 'Y', screen: 'recovery', icon: HardDrive, color: '#b8960c' },
+  { label: 'RelistApp', shortcut: 'L', screen: 'relist', icon: ShoppingBag, color: '#b8960c' },
 ];
 
 interface Props {

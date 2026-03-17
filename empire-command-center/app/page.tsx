@@ -44,6 +44,7 @@ import TelegramScreen from './components/screens/TelegramScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppScreen from './components/screens/RelistAppScreen';
+import DevPanel from './components/screens/DevPanel';
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
@@ -68,6 +69,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   platform: 'platform',
   openclaw: 'max',
   recovery: 'max',
+  dev: 'max',
   luxe: 'max',
   hardware: 'max',
   system: 'max',
@@ -110,6 +112,7 @@ export default function CommandCenter() {
     else if (product === 'max-avatar') setActiveScreen('presentation');
     else if (product === 'tokens') setActiveScreen('costs');
     else if (product === 'system') setActiveScreen('report');
+    else if (product === 'dev') setActiveScreen('dev');
     else setActiveScreen('dashboard');
   }, []);
 
@@ -165,6 +168,9 @@ export default function CommandCenter() {
     else if (screen === 'craft-page') { setActiveProduct('craft'); setActiveScreen('dashboard'); }
     else if (screen === 'platform-page') { setActiveProduct('platform'); setActiveScreen('dashboard'); }
     else if (screen === 'presentation') { setActiveProduct('max-avatar'); setActiveScreen('presentation'); }
+    else if (screen === 'dev' || screen === 'dev-panel') { setActiveProduct('dev'); setActiveScreen('dev'); }
+    else if (screen === 'recovery') { setActiveProduct('recovery'); setActiveScreen('dashboard'); }
+    else if (screen === 'relist') { setActiveProduct('relist'); setActiveScreen('dashboard'); }
     else handleScreenChange(screen);
   }, [handleScreenChange]);
 
@@ -200,6 +206,8 @@ export default function CommandCenter() {
           return <RecoveryForgeScreen />;
         case 'relist':
           return <RelistAppScreen />;
+        case 'dev':
+          return <DevPanel />;
         case 'openclaw':
         case 'hardware':
           return <EcosystemProductPage productId={activeProduct} productName="" productColor="#b8960c" productIcon={null} />;
@@ -223,6 +231,7 @@ export default function CommandCenter() {
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;
     if (activeScreen === 'presentation') return <PresentationScreen />;
+    if (activeScreen === 'dev') return <DevPanel />;
     if (activeScreen === 'chat') {
       return (
         <ChatScreen

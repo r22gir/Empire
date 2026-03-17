@@ -92,6 +92,9 @@ load_router("app.routers.avatar", "/api/v1", ["avatar"])
 # RecoveryForge — Layer 3 classifier status/control
 load_router("app.routers.recovery", "/api/v1", ["recovery"])
 
+# Dev Panel API
+load_router("app.routers.dev", "/api/v1", ["dev"])
+
 # AI Cost Tracker
 load_router("app.routers.costs", "/api/v1", ["costs"])
 
