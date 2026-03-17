@@ -36,10 +36,9 @@ ensure_node_modules() {
 }
 
 # ── Kill existing ────────────────────────────────────────────────
-log "Clearing ports 8000, 3005, 3000, 7878..."
+log "Clearing ports 8000, 3005, 7878..."
 fuser -k 8000/tcp 2>/dev/null
 fuser -k 3005/tcp 2>/dev/null
-fuser -k 3000/tcp 2>/dev/null
 fuser -k 7878/tcp 2>/dev/null
 sleep 2
 ok "Ports cleared"
@@ -71,21 +70,8 @@ else
     err "Empire Command Center — check $LOG_DIR/command_center_${TS}.log"
 fi
 
-# ── 3. Empire App (port 3000) ────────────────────────────────────
-ensure_node_modules "$EMPIRE/empire-app"
-log "Starting Empire App on port 3000..."
-cd "$EMPIRE/empire-app"
-nohup npx next dev -p 3000 \
-    > "$LOG_DIR/empire_app_${TS}.log" 2>&1 &
-
-if wait_port 3000; then
-    ok "Empire App — http://localhost:3000"
-else
-    err "Empire App — check $LOG_DIR/empire_app_${TS}.log"
-fi
-
-# ── WorkroomForge (:3001) and LuxeForge (:3002) retired ──────────
-# Replaced by Command Center (:3005)
+# ── Empire App (:3000), WorkroomForge (:3001), LuxeForge (:3002) retired ──
+# All replaced by Command Center (:3005) — everything renders inside CC
 
 # ── 4. OpenClaw AI Server (port 7878) ──────────────────────────
 log "Starting OpenClaw AI on port 7878..."
@@ -99,7 +85,17 @@ else
     err "OpenClaw — check $LOG_DIR/openclaw_${TS}.log"
 fi
 
-# ── Open browser (Command Center only — Empire App is secondary) ──
+# ── 5. RecoveryForge (port 3077) ─────────────────────────────────
+log "Starting RecoveryForge on port 3077..."
+cd ~/recoveryforge
+nohup recoveryforge launch --port 3077 > "$LOG_DIR/recoveryforge_${TS}.log" 2>&1 &
+if wait_port 3077; then
+    ok "RecoveryForge — http://localhost:3077"
+else
+    err "RecoveryForge — check $LOG_DIR/recoveryforge_${TS}.log"
+fi
+
+# ── Open browser (Command Center — the single UI) ──
 sleep 1
 xdg-open "http://localhost:3005" 2>/dev/null &
 
@@ -108,7 +104,7 @@ echo ""
 echo -e "${Y}=============================================${N}"
 echo -e "${Y}         Empire Services Status              ${N}"
 echo -e "${Y}=============================================${N}"
-for pair in "Backend API:8000" "Command Center:3005" "Empire App:3000" "OpenClaw AI:7878" "Ollama:11434"; do
+for pair in "Backend API:8000" "Command Center:3005" "OpenClaw AI:7878" "Ollama:11434" "RecoveryForge:3077"; do
     name="${pair%%:*}"; port="${pair##*:}"
     code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null)
     [ "$code" = "000" ] && code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port" 2>/dev/null)

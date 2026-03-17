@@ -89,6 +89,9 @@ load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
 # Avatar / Presentation Mode
 load_router("app.routers.avatar", "/api/v1", ["avatar"])
 
+# RecoveryForge — Layer 3 classifier status/control
+load_router("app.routers.recovery", "/api/v1", ["recovery"])
+
 # AI Cost Tracker
 load_router("app.routers.costs", "/api/v1", ["costs"])
 
