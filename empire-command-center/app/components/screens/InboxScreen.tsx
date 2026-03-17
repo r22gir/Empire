@@ -86,7 +86,7 @@ export default function InboxScreen() {
         // Always show some system items
         inbox.push(
           { id: 'sys-1', type: 'system', title: 'Empire Backend', body: 'All services running on port 8000', timestamp: new Date().toISOString(), read: true, priority: 'low', source: 'system' },
-          { id: 'sys-2', type: 'system', title: 'Command Center', body: 'Running on port 3009', timestamp: new Date().toISOString(), read: true, priority: 'low', source: 'system' },
+          { id: 'sys-2', type: 'system', title: 'Command Center', body: 'Running on port 3005', timestamp: new Date().toISOString(), read: true, priority: 'low', source: 'system' },
         );
 
         setItems(inbox);

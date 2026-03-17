@@ -108,7 +108,7 @@ const PRODUCT_MAP: Record<string, ProductInfo> = {
     name: 'LuxeForge',
     description: 'Custom workroom and window treatment management. Designer portal with intake forms, quote building, and client tracking.',
     status: 'active',
-    port: 3002,
+    port: 3005,
     endpoints: ['/intake'],
   },
   hardware: {

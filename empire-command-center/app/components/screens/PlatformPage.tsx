@@ -218,7 +218,7 @@ export default function PlatformPage() {
             <>
               {[
                 { name: 'Backend API', port: '8000', online: true },
-                { name: 'Command Center', port: '3009', online: true },
+                { name: 'Command Center', port: '3005', online: true },
                 { name: 'Ollama', port: '11434', online: ollamaOnline },
               ].map((s, i) => (
                 <div key={i} className="flex items-center justify-between" style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>

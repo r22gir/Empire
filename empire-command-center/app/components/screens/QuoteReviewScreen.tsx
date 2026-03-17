@@ -232,7 +232,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           <Check size={18} /> Confirm Selection
         </button>
         <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
-          if (onOpenBuilder) { onOpenBuilder(); } else { window.open(`http://localhost:3001${quote?.id ? `?quote=${quote.id}` : ''}`, '_blank'); }
+          if (onOpenBuilder) { onOpenBuilder(); }
         }} />
         <ActionBtn icon={<FileText size={16} />} label="PDF" onClick={() => handleAction('pdf')} />
         <ActionBtn icon={<Send size={16} />} label="Telegram" onClick={() => handleAction('telegram')} />
