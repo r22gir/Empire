@@ -1187,7 +1187,7 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
 def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Check which Empire services are running."""
     services = {
-        "backend": {"port": 8000, "url": "http://localhost:8000/docs"},
+        "backend": {"port": 8000, "url": "http://localhost:8000/api/v1/system/stats"},
         "command_center": {"port": 3005, "url": "http://localhost:3005"},
         "recoveryforge": {"port": 3077, "url": "http://localhost:3077"},
         "relistapp": {"port": 3007, "url": "http://localhost:3007"},
