@@ -16,72 +16,27 @@ interface ChatMessage {
   hasAudio?: boolean;
 }
 
-// ── TalkingHead Avatar Component (CDN-loaded) ────────────────────────
-function AvatarPanel({ mode, isSpeaking, isThinking }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean }) {
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const headRef = useRef<any>(null);
+// ── TalkingHead Avatar Component (iframe-loaded) ────────────────────────
+function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: PresentationMode; isSpeaking: boolean; isThinking: boolean; iframeRef: React.RefObject<HTMLIFrameElement | null> }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Listen for messages from avatar iframe
   useEffect(() => {
-    if (mode !== 'presentation' || !canvasRef.current) return;
+    if (mode !== 'presentation') return;
 
-    let cancelled = false;
-
-    async function initAvatar() {
-      try {
-        // Load TalkingHead via dynamic eval to bypass TS module resolution
-        const cdnUrl = 'https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs';
-        let TalkingHead: any;
-        try {
-          const module = await (new Function('url', 'return import(url)'))(cdnUrl);
-          TalkingHead = module.TalkingHead;
-        } catch {
-          // CDN failed — use placeholder
-          if (!cancelled) setError('placeholder');
-          return;
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'avatar-loaded') {
+        if (event.data.success) {
+          setLoaded(true);
+          setError(null);
+        } else {
+          setError('placeholder');
         }
-
-        if (cancelled || !canvasRef.current) return;
-
-        const head = new TalkingHead(canvasRef.current, {
-          ttsEndpoint: `${API}/avatar/tts-proxy`,
-          cameraView: 'upper',
-          cameraRotateEnable: false,
-        });
-
-        // Try to load avatar model
-        try {
-          await head.showAvatar({
-            url: 'https://models.readyplayer.me/6460d95f9ae8fbc38ce95c38.glb?morphTargets=ARKit,Oculus+Visemes,mouthOpen,mouthSmile,eyesClosed,eyesLookUp,eyesLookDown&textureSizeLimit=1024&textureFormat=png',
-            body: 'M',
-            avatarMood: 'neutral',
-            lipsyncLang: 'en',
-          });
-        } catch {
-          // Model load failed — show placeholder
-          if (!cancelled) setError('placeholder');
-          return;
-        }
-
-        headRef.current = head;
-        if (!cancelled) setLoaded(true);
-      } catch (e) {
-        console.warn('TalkingHead init failed, using placeholder:', e);
-        if (!cancelled) setError('placeholder');
       }
-    }
-
-    initAvatar();
-
-    return () => {
-      cancelled = true;
-      if (headRef.current) {
-        try { headRef.current.dispose?.(); } catch {}
-        headRef.current = null;
-      }
-      setLoaded(false);
     };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
   }, [mode]);
 
   if (mode !== 'presentation') return null;
@@ -174,13 +129,17 @@ function AvatarPanel({ mode, isSpeaking, isThinking }: { mode: PresentationMode;
           )}
         </div>
       ) : (
-        <div
-          ref={canvasRef}
+        <iframe
+          ref={iframeRef}
+          src="/avatar.html"
           style={{
             width: '100%', height: '100%',
+            border: 'none',
             opacity: loaded ? 1 : 0.3,
             transition: 'opacity 0.5s ease',
+            background: 'transparent',
           }}
+          allow="autoplay"
         />
       )}
 
@@ -302,6 +261,7 @@ export default function PresentationScreen() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Persist mode
   useEffect(() => {
@@ -397,10 +357,21 @@ export default function PresentationScreen() {
       };
       setMessages(prev => [...prev, assistMsg]);
 
-      // Play audio in presentation mode
-      if (data.audio && mode === 'presentation') {
-        playAudio(data.audio);
-        setSessionCost(prev => prev + 0.015); // ~$0.015 per TTS call
+      // Play audio in presentation mode + lip-sync avatar
+      if (mode === 'presentation') {
+        if (data.audio) {
+          playAudio(data.audio);
+          // Send audio to avatar for lip-sync
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: 'speak-audio', audio: data.audio }, '*'
+          );
+          setSessionCost(prev => prev + 0.015); // ~$0.015 per TTS call
+        } else if (assistMsg.content) {
+          // No audio — use TalkingHead's built-in TTS for lip-sync
+          iframeRef.current?.contentWindow?.postMessage(
+            { type: 'speak-text', text: assistMsg.content }, '*'
+          );
+        }
       }
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -460,9 +431,18 @@ export default function PresentationScreen() {
               model: data.model_used,
               hasAudio: !!data.audio,
             }]);
-            if (data.audio && mode === 'presentation') {
-              playAudio(data.audio);
-              setSessionCost(prev => prev + 0.015);
+            if (mode === 'presentation') {
+              if (data.audio) {
+                playAudio(data.audio);
+                iframeRef.current?.contentWindow?.postMessage(
+                  { type: 'speak-audio', audio: data.audio }, '*'
+                );
+                setSessionCost(prev => prev + 0.015);
+              } else if (data.response) {
+                iframeRef.current?.contentWindow?.postMessage(
+                  { type: 'speak-text', text: data.response }, '*'
+                );
+              }
             }
           }
         } catch (err) {
@@ -508,7 +488,7 @@ export default function PresentationScreen() {
       {/* Main content */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Avatar panel (presentation mode only) */}
-        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} />
+        <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} />
 
         {/* Chat panel */}
         <div style={{
