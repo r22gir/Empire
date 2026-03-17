@@ -96,10 +96,9 @@ else
     err "OpenClaw — check $LOG_DIR/openclaw_${TS}.log"
 fi
 
-# ── Open browsers ────────────────────────────────────────────────
+# ── Open browser (Command Center only — Empire App is secondary) ──
 sleep 1
 xdg-open "http://localhost:3005" 2>/dev/null &
-xdg-open "http://localhost:3000" 2>/dev/null &
 
 # ── Summary ──────────────────────────────────────────────────────
 echo ""
