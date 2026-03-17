@@ -108,9 +108,11 @@ echo ""
 echo -e "${Y}=============================================${N}"
 echo -e "${Y}         Empire Services Status              ${N}"
 echo -e "${Y}=============================================${N}"
-for pair in "Backend API:8000" "Command Center:3005" "Empire App:3000" "OpenClaw AI:7878"; do
+for pair in "Backend API:8000" "Command Center:3005" "Empire App:3000" "OpenClaw AI:7878" "Ollama:11434"; do
     name="${pair%%:*}"; port="${pair##*:}"
-    if curl -sf -o /dev/null "http://localhost:$port" 2>/dev/null; then
+    code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null)
+    [ "$code" = "000" ] && code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port" 2>/dev/null)
+    if [ "$code" = "200" ] || [ "$code" = "307" ] || [ "$code" = "404" ]; then
         echo -e "  ${G}*${N} $name — :$port"
     else
         echo -e "  ${R}*${N} $name — :$port (down)"
