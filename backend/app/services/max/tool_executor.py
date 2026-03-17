@@ -1188,10 +1188,9 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
     """Check which Empire services are running."""
     services = {
         "backend": {"port": 8000, "url": "http://localhost:8000/docs"},
-        "founder_dashboard": {"port": 3009, "url": "http://localhost:3009"},
-        "workroomforge": {"port": 3001, "url": "http://localhost:3001"},
-        "empire_app": {"port": 3000, "url": "http://localhost:3000"},
-        "luxeforge": {"port": 3002, "url": "http://localhost:3002"},
+        "command_center": {"port": 3005, "url": "http://localhost:3005"},
+        "recoveryforge": {"port": 3077, "url": "http://localhost:3077"},
+        "relistapp": {"port": 3007, "url": "http://localhost:3007"},
         "ollama": {"port": 11434, "url": "http://localhost:11434/"},
         "openclaw": {"port": 7878, "url": "http://localhost:7878/health"},
     }
