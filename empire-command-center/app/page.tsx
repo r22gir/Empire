@@ -195,26 +195,6 @@ export default function CommandCenter() {
         case 'apost':
           return <ApostAppPage />;
         case 'relist':
-          return (
-            <div className="flex-1 flex flex-col items-center justify-center gap-4 py-20">
-              <div className="w-16 h-16 rounded-2xl bg-[#ecfeff] flex items-center justify-center">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-              </div>
-              <h2 className="text-xl font-bold text-[#1a1a1a]">RelistApp</h2>
-              <p className="text-sm text-[#777] text-center max-w-md">Cross-platform listing manager. List once, sell everywhere. AI-powered descriptions, pricing intelligence, and auto-relist scheduling.</p>
-              <a href="http://localhost:3007" target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-2 px-6 py-3 rounded-xl text-white font-bold text-sm transition-all hover:brightness-110"
-                style={{ background: 'linear-gradient(135deg, #06b6d4, #0891b2)', boxShadow: '0 4px 12px rgba(6,182,212,0.3)' }}>
-                Open RelistApp <span style={{ fontSize: 16 }}>→</span>
-              </a>
-              <div className="flex gap-3 mt-2">
-                <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-[#dcfce7] text-[#16a34a]">eBay</span>
-                <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-[#fff7ed] text-[#f1641e]">Etsy</span>
-                <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-[#f0fdf4] text-[#96bf48]">Shopify</span>
-                <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-[#fdf8eb] text-[#b8960c]">+ More</span>
-              </div>
-            </div>
-          );
         case 'openclaw':
         case 'recovery':
         case 'hardware':

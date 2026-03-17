@@ -79,8 +79,9 @@ const PRODUCT_MAP: Record<string, ProductInfo> = {
   },
   relist: {
     name: 'RelistApp',
-    description: 'Cross-platform relisting tool. Automatically relist items across marketplaces to boost visibility and sales.',
-    status: 'planned',
+    description: 'Cross-platform listing manager. List once, sell everywhere. AI-powered descriptions, pricing intelligence, and auto-relist scheduling.',
+    status: 'dev',
+    endpoints: ['/listings/listings', '/marketplaces/marketplaces'],
   },
   llc: {
     name: 'LLCFactory',
@@ -200,21 +201,19 @@ export default function EcosystemProductPage({
     setLaunchStatus(null);
     try {
       if (info.port) {
-        // Has a dedicated port — try docker start then open
+        // Has a dedicated port — check if running, show inline status
         try {
-          const res = await fetch(`${API}/docker/${productId}/start`, { method: 'POST' });
-          if (res.ok) {
+          const res = await fetch(`http://localhost:${info.port}`, { signal: AbortSignal.timeout(3000) });
+          if (res.ok || res.status === 307 || res.status === 404) {
             setLaunchStatus('started');
-            setTimeout(() => {
-              window.open(`http://localhost:${info.port}`, '_blank');
-            }, 2000);
           } else {
-            window.open(`http://localhost:${info.port}`, '_blank');
-            setLaunchStatus('opened');
+            // Try docker start
+            await fetch(`${API}/docker/${productId}/start`, { method: 'POST' }).catch(() => {});
+            setLaunchStatus('started');
           }
         } catch {
-          window.open(`http://localhost:${info.port}`, '_blank');
-          setLaunchStatus('opened');
+          await fetch(`${API}/docker/${productId}/start`, { method: 'POST' }).catch(() => {});
+          setLaunchStatus('starting');
         }
       } else if (info.endpoints?.length) {
         // Backend-only service — verify first endpoint is live
