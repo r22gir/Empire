@@ -44,11 +44,13 @@ let head = null;
 
 async function init() {
   try {
+    loading.textContent = 'Initializing TalkingHead...';
     head = new TalkingHead(container, {
       cameraView: 'upper',
       cameraRotateEnable: false,
     });
 
+    loading.textContent = 'Loading avatar model (4.7MB)...';
     await head.showAvatar({
       url: '/max-avatar.glb',
       body: 'M',
@@ -66,6 +68,13 @@ async function init() {
     window.parent.postMessage({ type: 'avatar-loaded', success: false, error: e.message }, '*');
   }
 }
+
+// Timeout fallback — if stuck loading for 15s, show what stage it's at
+setTimeout(() => {
+  if (loading.style.display !== 'none') {
+    loading.innerHTML = loading.textContent + '<br><small style="color:#888;font-size:11px">Taking longer than expected — check browser console (F12) for errors</small>';
+  }
+}, 15000);
 
 // Listen for commands from parent (Command Center)
 window.addEventListener('message', async (event) => {

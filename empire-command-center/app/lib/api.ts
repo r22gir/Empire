@@ -1,4 +1,6 @@
-export const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+export const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store/api/v1'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
 
 export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {

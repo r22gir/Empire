@@ -344,7 +344,12 @@ export default function PlatformPage() {
             const mod = modules.find((m: any) => m.endpoint === r.prefix || m.name?.toLowerCase().includes(r.name.toLowerCase()));
             return (
               <div key={i} className="flex items-center justify-between" style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer' }}
-                onClick={() => window.open(`http://localhost:8000/api/v1${r.prefix}`, '_blank')}>
+                onClick={() => {
+                const base = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+                  ? 'https://api.empirebox.store'
+                  : 'http://localhost:8000';
+                window.open(`${base}/api/v1${r.prefix}`, '_blank');
+              }}>
                 <div className="flex items-center gap-2 min-w-0">
                   <span style={{ fontSize: 9, fontWeight: 700, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4, color: '#2563eb', background: '#dbeafe' }}>/api/v1</span>
                   <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 600, color: '#1a1a1a' }}>{r.prefix}</span>

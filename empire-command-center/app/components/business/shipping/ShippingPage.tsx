@@ -7,7 +7,9 @@ import StatusBadge from '../shared/StatusBadge';
 import EmptyState from '../shared/EmptyState';
 
 // Shipping endpoints are at /shipping/ (NOT /api/v1/shipping)
-const SHIP_API = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/api\/v1$/, '');
+const SHIP_API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/api\/v1$/, '');
 
 type ShipTab = 'history' | 'rates' | 'track';
 

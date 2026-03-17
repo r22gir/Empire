@@ -9,6 +9,10 @@ import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
+const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store'
+  : 'http://localhost:8000';
+
 const statusConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   draft: { label: 'Draft', color: '#888', bg: '#f5f3ef', icon: Clock },
   submitted: { label: 'Submitted — Under Review', color: '#2563eb', bg: '#dbeafe', icon: Clock },
@@ -196,7 +200,7 @@ export default function ProjectDetail() {
                 </div>
               </div>
               <a
-                href={`http://localhost:8000${project.quote_pdf}`}
+                href={`${API_BASE}${project.quote_pdf}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-4 py-2 text-[11px] font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors flex items-center gap-1.5"
@@ -220,7 +224,7 @@ export default function ProjectDetail() {
               {photos.map((p: any, i: number) => (
                 <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
                   <img
-                    src={`http://localhost:8000${p.path}`}
+                    src={`${API_BASE}${p.path}`}
                     alt={p.original_name}
                     className="w-full h-full object-cover"
                   />

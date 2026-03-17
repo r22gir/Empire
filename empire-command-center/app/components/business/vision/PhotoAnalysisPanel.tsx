@@ -120,7 +120,9 @@ const TIER_COLORS: Record<string, { bg: string; border: string; accent: string }
   'Ultimate Luxury': { bg: '#fdf4ff', border: '#e9d5ff', accent: '#7c3aed' },
 };
 
-const IMAGE_BASE = 'http://localhost:8000';
+const IMAGE_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store'
+  : 'http://localhost:8000';
 
 const DESIGN_STYLES: { key: string; label: string; icon: string; desc: string }[] = [
   { key: 'modern', label: 'Modern', icon: '◻', desc: 'Clean lines, minimal' },

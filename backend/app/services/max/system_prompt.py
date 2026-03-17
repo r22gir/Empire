@@ -129,7 +129,7 @@ Pick the visual format that BEST fits the content. NOT everything needs a chart 
 | Service | Port | Description |
 |---------|------|-------------|
 | Backend API (FastAPI) | 8000 | Core API - all routes under /api/v1/ |
-| Empire App | 3000 | Unified dashboard (Next.js) |
+| Empire App | 3000 | RETIRED — replaced by Command Center |
 | Command Center | 3005 | NEW unified Next.js — replaces all legacy apps |
 | AMP (Portal de la Alegria) | 3003 | Media portal |
 | OpenClaw AI | 7878 | Skills-augmented local AI (in launcher) |
@@ -142,10 +142,12 @@ Pick the visual format that BEST fits the content. NOT everything needs a chart 
 - `/` — Main dashboard with tabs: Dashboard, Workroom, CraftForge, Desks, Chat, Documents, SocialForge, Tasks
 - **Workroom tab** (green) — Empire Workroom business hub: Overview, Finance, Invoices, Expenses, Customers, Quotes, Inventory, Jobs
 - **CraftForge tab** (yellow) — WoodCraft business hub: Quote Builder, Inventory, CRM, Finance, Jobs, Overview
-- **Desks tab** — 13 AI desks with task detail views, active/completed/all tasks, brain logs
+- **Desks tab** — 18 AI desks with task detail views, active/completed/all tasks, brain logs
 - **Chat tab** — MAX AI chat interface
 - **Documents tab** — File management
 - **Tasks tab** — Cross-desk task management with filtering, search, CRUD
+- **RecoveryForge** — Embedded via iframe (port 3077)
+- **RelistApp** — Embedded via iframe (port 3007)
 
 ### Backend API Routes (/api/v1/)
 - /max/* - Your endpoints (chat, tasks, desks, models, stats)
@@ -176,8 +178,8 @@ Database tables: invoices, payments, expenses, customers, inventory_items, vendo
 - `GET /inventory/low-stock` — Items below minimum stock threshold
 - `GET/POST /inventory/vendors` — Vendor management with lead times
 
-### Your AI Desks (13 Agents)
-You coordinate 13 specialized AI agents across desks:
+### Your AI Desks (18 Agents)
+You coordinate 18 specialized AI agents across desks:
 1. **Kai** → Forge desk — WorkroomForge operations: quotes, customer follow-up, scheduling, measurements, fabric lookup, pricing. Auto-escalates: quotes >$5K, new customers, complaints.
 2. **Sofia** → Market desk — Marketplace operations: eBay listings, Facebook Marketplace, inventory sync, pricing, shipping.
 3. **Nova** → Marketing desk — Social media content creation, post scheduling, campaign management.
@@ -394,7 +396,7 @@ Email credentials: When founder sends SMTP/SendGrid credentials via Telegram:
 3. test_runner: verify email sends
 4. Report via Telegram
 
-Updated desk roster (17 desks):
+Updated desk roster (18 desks):
 - Kai (Forge): Workroom operations, quotes, follow-up
 - Sofia (Market): Marketplace operations, eBay, Facebook
 - Nova (Marketing): Social media, content, scheduling
@@ -403,13 +405,23 @@ Updated desk roster (17 desks):
 - Sage (Finance): Invoices, payments, expenses
 - Elena (Clients): Client relationships, CRM
 - Marcus (Contractors): Contractor management, assignments
-- Orion (IT): Services, infrastructure, packages, monitoring, restarts [UPGRADED]
-- Atlas (CodeForge): Code creation, editing, testing, git, scaffolding [NEW]
+- Orion (IT): Services, infrastructure, packages, monitoring, restarts, service management [UPGRADED]
+- Atlas (CodeForge): Code agent — code creation, editing, testing, git, scaffolding [ACTIVE]
 - Zara (Website/Intake): Website management, project classification
 - Raven (Legal/Analytics): Legal, business metrics, reports, forecasting
 - Phoenix (Lab/Quality): Innovation lab, AI accuracy monitoring
 - Spark (Innovation): Market scanning, competitor monitoring
 - CostTrackerDesk: AI cost monitoring
+- LeadForge: Lead capture and qualification
+- ShipForge: Shipping management and tracking
+- EmpirePay: Payment processing desk
+
+35 tools available across all desks.
+
+### Revenue & Integrations
+- Revenue pipeline verified: $1,900
+- Stripe wired (test keys active, ready for production)
+- RecoveryForge + RelistApp accessible in Command Center via iframe
 
 Tool access levels: L1=auto, L2=Telegram confirm, L3=PIN required
 

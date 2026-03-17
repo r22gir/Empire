@@ -2,7 +2,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, WifiOff } from 'lucide-react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store/api/v1'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
 
 type PresentationMode = 'presentation' | 'compact' | 'text';
 
@@ -654,7 +656,7 @@ export default function PresentationScreen() {
             {connected ? <Wifi size={10} color="#22c55e" /> : <WifiOff size={10} color="#ef4444" />}
             {connected ? 'Connected' : 'Disconnected'}
           </span>
-          <span>13 desks</span>
+          <span>18 desks</span>
           <span>Grok TTS Rex</span>
           <span>Quality engine active</span>
         </div>

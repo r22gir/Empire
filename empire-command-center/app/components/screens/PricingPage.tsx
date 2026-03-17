@@ -87,7 +87,10 @@ export default function PricingPage() {
     setLoading(tier);
     setError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/v1/payments/checkout', {
+      const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+        ? 'https://api.empirebox.store'
+        : 'http://localhost:8000';
+      const res = await fetch(`${API_BASE}/api/v1/payments/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

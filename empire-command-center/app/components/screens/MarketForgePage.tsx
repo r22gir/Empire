@@ -52,9 +52,14 @@ interface Order {
 
 // ============ API ============
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-const LISTINGS_URL = 'http://localhost:8000/listings/listings';
-const ORDERS_URL = 'http://localhost:8000/preorders/';
+const _API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store'
+  : 'http://localhost:8000';
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store/api/v1'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+const LISTINGS_URL = `${_API_BASE}/listings/listings`;
+const ORDERS_URL = `${_API_BASE}/preorders/`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapListingFromAPI(raw: any): Listing {

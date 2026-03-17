@@ -1,4 +1,6 @@
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store/api/v1'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
 const AMP_API = `${API}/amp`;
 
 export function getAmpToken(): string | null {
