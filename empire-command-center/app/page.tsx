@@ -43,6 +43,7 @@ import SystemReportScreen from './components/screens/SystemReportScreen';
 import TelegramScreen from './components/screens/TelegramScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
+import RelistAppScreen from './components/screens/RelistAppScreen';
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
@@ -198,6 +199,7 @@ export default function CommandCenter() {
         case 'recovery':
           return <RecoveryForgeScreen />;
         case 'relist':
+          return <RelistAppScreen />;
         case 'openclaw':
         case 'hardware':
           return <EcosystemProductPage productId={activeProduct} productName="" productColor="#b8960c" productIcon={null} />;

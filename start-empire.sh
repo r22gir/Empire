@@ -95,6 +95,17 @@ else
     err "RecoveryForge — check $LOG_DIR/recoveryforge_${TS}.log"
 fi
 
+# ── 6. RelistApp (port 3007) ──────────────────────────────────────
+log "Starting RelistApp on port 3007..."
+cd "$EMPIRE/relistapp"
+ensure_node_modules "$EMPIRE/relistapp"
+nohup npx next dev -p 3007 > "$LOG_DIR/relistapp_${TS}.log" 2>&1 &
+if wait_port 3007; then
+    ok "RelistApp — http://localhost:3007"
+else
+    err "RelistApp — check $LOG_DIR/relistapp_${TS}.log"
+fi
+
 # ── Open browser (Command Center — the single UI) ──
 sleep 1
 xdg-open "http://localhost:3005" 2>/dev/null &
@@ -104,7 +115,7 @@ echo ""
 echo -e "${Y}=============================================${N}"
 echo -e "${Y}         Empire Services Status              ${N}"
 echo -e "${Y}=============================================${N}"
-for pair in "Backend API:8000" "Command Center:3005" "OpenClaw AI:7878" "Ollama:11434" "RecoveryForge:3077"; do
+for pair in "Backend API:8000" "Command Center:3005" "OpenClaw AI:7878" "Ollama:11434" "RecoveryForge:3077" "RelistApp:3007"; do
     name="${pair%%:*}"; port="${pair##*:}"
     code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null)
     [ "$code" = "000" ] && code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port" 2>/dev/null)
