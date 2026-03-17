@@ -120,9 +120,9 @@ export default function DevPanel() {
   const runningCount = services.filter(s => s.running).length;
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="px-4 sm:px-6 py-5" style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className="flex flex-wrap items-center gap-3">
         <Terminal size={22} style={{ color: '#b8960c' }} />
         <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
           CodeForge — Dev Panel
@@ -158,7 +158,7 @@ export default function DevPanel() {
       </div>
 
       {/* Main Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16 }}>
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] gap-4">
         {/* Terminal Output */}
         <div style={{
           background: '#1e1e1e', borderRadius: 14, overflow: 'hidden',

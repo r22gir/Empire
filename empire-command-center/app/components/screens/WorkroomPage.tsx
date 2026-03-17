@@ -771,11 +771,11 @@ function TasksSection() {
                       <div style={{ fontSize: 11, color: '#999', marginTop: 2 }} className="truncate">{task.description}</div>
                     )}
                     <div className="flex items-center gap-2 mt-1.5">
-                      <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 4, background: pc.bg, color: pc.text, border: `1px solid ${pc.border}` }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 4, background: pc.bg, color: pc.text, border: `1px solid ${pc.border}` }}>
                         {task.priority || 'normal'}
                       </span>
                       {task.desk && (
-                        <span style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe' }}>
                           {task.desk}
                         </span>
                       )}
