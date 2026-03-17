@@ -2241,4 +2241,622 @@ Then after seeing results, use the quote_id:
 ```tool
 {{"tool": "send_quote_telegram", "quote_id": "THE_ACTUAL_ID"}}
 ```
+
+### Development Tools (Atlas / Orion)
+- **file_read** — Read a file with optional line range. `{{"tool": "file_read", "path": "backend/app/main.py", "line_start": 1, "line_end": 50}}`
+- **file_write** — Write content to a file. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
+- **file_edit** — Replace a string in a file. `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
+- **git_ops** — Git operations. `{{"tool": "git_ops", "command": "status|diff|add|commit|push|log", "args": "optional args"}}`
+- **service_manager** — Manage Empire services. `{{"tool": "service_manager", "command": "status|restart|logs|start|stop", "service": "backend|cc|openclaw|ollama|recoveryforge|relistapp|all"}}`
+- **package_manager** — Install packages or build. `{{"tool": "package_manager", "command": "pip_install|npm_install|npm_build|pip_list|npm_list", "package": "...", "project_dir": "..."}}`
+- **test_runner** — Run tests and health checks. `{{"tool": "test_runner", "command": "endpoint|all|build|health", "url": "...", "method": "GET"}}`
+- **project_scaffold** — Create new files from templates. `{{"tool": "project_scaffold", "command": "router|component|desk|page", "name": "..."}}`
 """
+
+
+# ── DEV TOOLS (Atlas/Orion) ─────────────────────────────────────────
+
+from app.services.max.tool_safety import validate_path, validate_command
+from app.services.max.tool_audit import log_execution
+import subprocess
+import time as _time
+
+
+@tool("file_read")
+def _file_read(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Read a file with optional line range."""
+    start = _time.time()
+    path = params.get("path", "")
+    if not path:
+        return ToolResult(tool="file_read", success=False, error="path is required")
+
+    # Expand relative paths to empire-repo
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+
+    ok, reason = validate_path(path)
+    if not ok:
+        log_execution("file_read", params, reason, desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=reason)
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+        line_start = params.get("line_start")
+        line_end = params.get("line_end")
+        total = len(lines)
+
+        if line_start or line_end:
+            s = max(1, line_start or 1) - 1
+            e = min(total, line_end or total)
+            selected = lines[s:e]
+            content = "".join(f"{i+s+1:4d} | {l}" for i, l in enumerate(selected))
+        else:
+            # Cap at 500 lines for safety
+            if total > 500:
+                selected = lines[:500]
+                content = "".join(f"{i+1:4d} | {l}" for i, l in enumerate(selected))
+                content += f"\n... ({total - 500} more lines truncated)"
+            else:
+                content = "".join(f"{i+1:4d} | {l}" for i, l in enumerate(lines))
+
+        duration = int((_time.time() - start) * 1000)
+        log_execution("file_read", params, {"lines": total}, desk=desk, success=True, duration_ms=duration)
+        return ToolResult(tool="file_read", success=True, result={
+            "content": content, "lines": total, "path": path,
+        })
+    except FileNotFoundError:
+        log_execution("file_read", params, "not found", desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=f"File not found: {path}")
+    except Exception as e:
+        log_execution("file_read", params, str(e), desk=desk, success=False)
+        return ToolResult(tool="file_read", success=False, error=str(e))
+
+
+@tool("file_write")
+def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Write content to a file."""
+    start = _time.time()
+    path = params.get("path", "")
+    content = params.get("content", "")
+    if not path:
+        return ToolResult(tool="file_write", success=False, error="path is required")
+
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+
+    ok, reason = validate_path(path)
+    if not ok:
+        log_execution("file_write", params, reason, desk=desk, success=False)
+        return ToolResult(tool="file_write", success=False, error=reason)
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+        lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+        nbytes = len(content.encode("utf-8"))
+        duration = int((_time.time() - start) * 1000)
+        log_execution("file_write", params, {"lines": lines, "bytes": nbytes}, access_level=2, desk=desk, success=True, duration_ms=duration)
+        return ToolResult(tool="file_write", success=True, result={
+            "path": path, "lines": lines, "bytes": nbytes,
+        })
+    except Exception as e:
+        log_execution("file_write", params, str(e), desk=desk, success=False)
+        return ToolResult(tool="file_write", success=False, error=str(e))
+
+
+@tool("file_edit")
+def _file_edit(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Replace first occurrence of old_str with new_str in a file."""
+    start = _time.time()
+    path = params.get("path", "")
+    old_str = params.get("old_str", "")
+    new_str = params.get("new_str", "")
+    if not path or not old_str:
+        return ToolResult(tool="file_edit", success=False, error="path and old_str are required")
+
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+
+    ok, reason = validate_path(path)
+    if not ok:
+        log_execution("file_edit", params, reason, desk=desk, success=False)
+        return ToolResult(tool="file_edit", success=False, error=reason)
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if old_str not in content:
+            log_execution("file_edit", params, "old_str not found", desk=desk, success=False)
+            return ToolResult(tool="file_edit", success=False, error="old_str not found in file")
+
+        new_content = content.replace(old_str, new_str, 1)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        # Build a short diff preview
+        old_lines = old_str.strip().split("\n")
+        new_lines = new_str.strip().split("\n")
+        preview = f"-{old_lines[0][:80]}\n+{new_lines[0][:80]}"
+
+        duration = int((_time.time() - start) * 1000)
+        log_execution("file_edit", params, {"replacements": 1}, access_level=2, desk=desk, success=True, duration_ms=duration)
+        return ToolResult(tool="file_edit", success=True, result={
+            "path": path, "replacements": 1, "diff_preview": preview,
+        })
+    except Exception as e:
+        log_execution("file_edit", params, str(e), desk=desk, success=False)
+        return ToolResult(tool="file_edit", success=False, error=str(e))
+
+
+@tool("git_ops")
+def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Run git operations in ~/empire-repo."""
+    start = _time.time()
+    command = params.get("command", "")
+    args = params.get("args", "")
+
+    allowed_commands = {"status", "diff", "add", "commit", "push", "log", "branch"}
+    if command not in allowed_commands:
+        return ToolResult(tool="git_ops", success=False, error=f"Unknown git command: {command}. Allowed: {', '.join(allowed_commands)}")
+
+    # Determine access level
+    if command in ("status", "diff", "log", "branch"):
+        level = 1
+    elif command in ("add", "commit"):
+        level = 2
+    else:  # push
+        level = 3
+
+    repo = os.path.expanduser("~/empire-repo")
+    cmd_parts = ["git", command]
+    if args:
+        cmd_parts.extend(args.split())
+
+    full_cmd = " ".join(cmd_parts)
+    ok, reason = validate_command(full_cmd)
+    if not ok:
+        log_execution("git_ops", params, reason, access_level=level, desk=desk, success=False)
+        return ToolResult(tool="git_ops", success=False, error=reason)
+
+    try:
+        result = subprocess.run(
+            cmd_parts, cwd=repo,
+            capture_output=True, text=True, timeout=30,
+        )
+        output = result.stdout + result.stderr
+        duration = int((_time.time() - start) * 1000)
+        success = result.returncode == 0
+        log_execution("git_ops", params, {"exit_code": result.returncode}, access_level=level, desk=desk, success=success, duration_ms=duration)
+        return ToolResult(tool="git_ops", success=success, result={
+            "command": full_cmd, "output": output[:3000], "exit_code": result.returncode,
+        })
+    except subprocess.TimeoutExpired:
+        log_execution("git_ops", params, "timeout", access_level=level, desk=desk, success=False)
+        return ToolResult(tool="git_ops", success=False, error="Git command timed out")
+    except Exception as e:
+        log_execution("git_ops", params, str(e), access_level=level, desk=desk, success=False)
+        return ToolResult(tool="git_ops", success=False, error=str(e))
+
+
+SERVICE_MAP = {
+    "backend": {"port": 8000, "process": "uvicorn", "log": "/tmp/backend.log"},
+    "cc": {"port": 3005, "process": "next.*3005", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "openclaw": {"port": 7878, "process": "openclaw|server.py", "log": "/tmp/openclaw.log"},
+    "ollama": {"port": 11434, "process": "ollama", "log": None},
+    "recoveryforge": {"port": 3077, "process": "recoveryforge", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "relistapp": {"port": 3007, "process": "next.*3007", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+}
+
+
+@tool("service_manager")
+def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Manage Empire services: status, restart, logs, start, stop."""
+    start = _time.time()
+    command = params.get("command", "status")
+    service = params.get("service", "all")
+
+    if command not in ("status", "restart", "logs", "start", "stop"):
+        return ToolResult(tool="service_manager", success=False, error=f"Unknown command: {command}")
+
+    level = 1 if command in ("status", "logs") else 3
+
+    services_to_check = SERVICE_MAP.keys() if service == "all" else [service]
+    results = []
+
+    for svc_name in services_to_check:
+        svc = SERVICE_MAP.get(svc_name)
+        if not svc:
+            results.append({"name": svc_name, "error": "Unknown service"})
+            continue
+
+        port = svc["port"]
+        if command == "status":
+            import socket
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=2):
+                    running = True
+            except (ConnectionRefusedError, TimeoutError, OSError):
+                running = False
+
+            # Try to find PID
+            pid = None
+            try:
+                r = subprocess.run(
+                    ["fuser", f"{port}/tcp"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.stdout.strip():
+                    pid = int(r.stdout.strip().split()[-1])
+            except Exception:
+                pass
+
+            results.append({"name": svc_name, "port": port, "running": running, "pid": pid})
+
+        elif command == "logs":
+            log_path = svc.get("log")
+            if not log_path and svc.get("log_dir"):
+                # Find most recent log
+                log_dir = svc["log_dir"]
+                try:
+                    files = sorted(
+                        [f for f in os.listdir(log_dir) if svc_name in f.lower() or (svc_name == "cc" and "command_center" in f.lower())],
+                        reverse=True,
+                    )
+                    if files:
+                        log_path = os.path.join(log_dir, files[0])
+                except Exception:
+                    pass
+
+            if log_path and os.path.exists(log_path):
+                try:
+                    with open(log_path, "r") as f:
+                        lines = f.readlines()
+                    tail = "".join(lines[-50:])
+                    results.append({"name": svc_name, "log": tail[:5000]})
+                except Exception as e:
+                    results.append({"name": svc_name, "error": str(e)})
+            else:
+                results.append({"name": svc_name, "error": "No log file found"})
+
+    duration = int((_time.time() - start) * 1000)
+    log_execution("service_manager", params, {"services": len(results)}, access_level=level, desk=desk, success=True, duration_ms=duration)
+    return ToolResult(tool="service_manager", success=True, result={"services": results})
+
+
+@tool("package_manager")
+def _package_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Install packages or build projects."""
+    start = _time.time()
+    command = params.get("command", "")
+    package = params.get("package", "")
+    project_dir = params.get("project_dir", "")
+
+    level = 1 if command in ("pip_list", "npm_list", "npm_build") else 2
+
+    try:
+        if command == "pip_install":
+            if not package:
+                return ToolResult(tool="package_manager", success=False, error="package is required")
+            venv_pip = os.path.expanduser("~/empire-repo/backend/venv/bin/pip3")
+            r = subprocess.run(
+                [venv_pip, "install", package],
+                capture_output=True, text=True, timeout=120,
+            )
+        elif command == "pip_list":
+            venv_pip = os.path.expanduser("~/empire-repo/backend/venv/bin/pip3")
+            search = package or ""
+            r = subprocess.run(
+                [venv_pip, "list"], capture_output=True, text=True, timeout=30,
+            )
+            if search:
+                lines = [l for l in r.stdout.split("\n") if search.lower() in l.lower()]
+                r = type(r)(args=r.args, returncode=0, stdout="\n".join(lines), stderr="")
+        elif command == "npm_install":
+            pdir = project_dir or os.path.expanduser("~/empire-repo/empire-command-center")
+            if not os.path.isabs(pdir):
+                pdir = os.path.join(os.path.expanduser("~/empire-repo"), pdir)
+            r = subprocess.run(
+                ["npm", "install"] + ([package] if package else []),
+                cwd=pdir, capture_output=True, text=True, timeout=120,
+            )
+        elif command == "npm_build":
+            pdir = project_dir or os.path.expanduser("~/empire-repo/empire-command-center")
+            if not os.path.isabs(pdir):
+                pdir = os.path.join(os.path.expanduser("~/empire-repo"), pdir)
+            r = subprocess.run(
+                ["npx", "next", "build"],
+                cwd=pdir, capture_output=True, text=True, timeout=300,
+            )
+        elif command == "npm_list":
+            pdir = project_dir or os.path.expanduser("~/empire-repo/empire-command-center")
+            if not os.path.isabs(pdir):
+                pdir = os.path.join(os.path.expanduser("~/empire-repo"), pdir)
+            r = subprocess.run(
+                ["npm", "list", "--depth=0"],
+                cwd=pdir, capture_output=True, text=True, timeout=30,
+            )
+        else:
+            return ToolResult(tool="package_manager", success=False, error=f"Unknown command: {command}")
+
+        duration = int((_time.time() - start) * 1000)
+        success = r.returncode == 0
+        output = (r.stdout + r.stderr)[:5000]
+        log_execution("package_manager", params, {"exit_code": r.returncode}, access_level=level, desk=desk, success=success, duration_ms=duration)
+        return ToolResult(tool="package_manager", success=success, result={
+            "output": output, "success": success,
+        })
+    except subprocess.TimeoutExpired:
+        log_execution("package_manager", params, "timeout", access_level=level, desk=desk, success=False)
+        return ToolResult(tool="package_manager", success=False, error="Command timed out")
+    except Exception as e:
+        log_execution("package_manager", params, str(e), access_level=level, desk=desk, success=False)
+        return ToolResult(tool="package_manager", success=False, error=str(e))
+
+
+CRITICAL_ENDPOINTS = [
+    ("GET", "/health", "Backend Health"),
+    ("GET", "/api/v1/max/ai-desks/status", "Desk Status"),
+    ("GET", "/api/v1/system/stats", "System Stats"),
+    ("GET", "/api/v1/costs/summary", "Cost Summary"),
+    ("GET", "/api/v1/finance/dashboard", "Finance Dashboard"),
+    ("GET", "/api/v1/inventory/items", "Inventory"),
+    ("GET", "/api/v1/crm/customers", "CRM Customers"),
+    ("GET", "/api/v1/tasks", "Tasks"),
+    ("GET", "/api/v1/chats/conversations", "Chat History"),
+    ("GET", "/api/v1/files/", "Files"),
+    ("GET", "/api/v1/notifications/", "Notifications"),
+    ("GET", "/api/v1/quotes/", "Quotes"),
+    ("GET", "/api/v1/tickets/", "Tickets"),
+    ("GET", "/api/v1/inbox/", "Inbox"),
+    ("GET", "/api/v1/contacts/", "Contacts"),
+]
+
+
+@tool("test_runner")
+def _test_runner(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Run endpoint tests and health checks."""
+    start = _time.time()
+    command = params.get("command", "health")
+    url = params.get("url", "")
+    method = params.get("method", "GET")
+
+    results = []
+    passed = 0
+    failed = 0
+
+    if command == "endpoint" and url:
+        try:
+            r = httpx.request(method, url if url.startswith("http") else f"http://localhost:8000{url}", timeout=10)
+            ok = 200 <= r.status_code < 500
+            results.append({
+                "url": url, "status": r.status_code, "ok": ok,
+                "time_ms": int(r.elapsed.total_seconds() * 1000),
+                "body_preview": r.text[:200],
+            })
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+        except Exception as e:
+            results.append({"url": url, "error": str(e), "ok": False})
+            failed += 1
+
+    elif command in ("all", "health"):
+        import socket
+
+        # Test endpoints
+        for method_name, path, label in CRITICAL_ENDPOINTS:
+            try:
+                r = httpx.request(method_name, f"http://localhost:8000{path}", timeout=5)
+                ok = 200 <= r.status_code < 500
+                results.append({"label": label, "path": path, "status": r.status_code, "ok": ok})
+                if ok:
+                    passed += 1
+                else:
+                    failed += 1
+            except Exception:
+                results.append({"label": label, "path": path, "ok": False, "error": "unreachable"})
+                failed += 1
+
+        if command == "health":
+            # Also check service ports
+            for name, info in SERVICE_MAP.items():
+                try:
+                    with socket.create_connection(("127.0.0.1", info["port"]), timeout=2):
+                        results.append({"label": f"Service: {name}", "port": info["port"], "ok": True})
+                        passed += 1
+                except Exception:
+                    results.append({"label": f"Service: {name}", "port": info["port"], "ok": False})
+                    failed += 1
+
+    elif command == "build":
+        pdir = os.path.expanduser("~/empire-repo/empire-command-center")
+        try:
+            r = subprocess.run(
+                ["npx", "next", "build"],
+                cwd=pdir, capture_output=True, text=True, timeout=300,
+            )
+            ok = r.returncode == 0
+            results.append({"label": "CC Build", "ok": ok, "output": (r.stdout + r.stderr)[-2000:]})
+            if ok:
+                passed += 1
+            else:
+                failed += 1
+        except Exception as e:
+            results.append({"label": "CC Build", "ok": False, "error": str(e)})
+            failed += 1
+
+    duration = int((_time.time() - start) * 1000)
+    log_execution("test_runner", params, {"passed": passed, "failed": failed}, desk=desk, success=True, duration_ms=duration)
+    return ToolResult(tool="test_runner", success=True, result={
+        "results": results, "passed": passed, "failed": failed,
+    })
+
+
+SCAFFOLD_TEMPLATES = {
+    "router": '''"""
+{name} Router — auto-generated by Atlas (CodeForge).
+"""
+from fastapi import APIRouter, HTTPException
+import logging
+
+router = APIRouter()
+logger = logging.getLogger("{name}")
+
+
+@router.get("/{name}/")
+async def list_{name}():
+    """List all {name} items."""
+    return {{"items": [], "count": 0}}
+
+
+@router.get("/{name}/{{item_id}}")
+async def get_{name}(item_id: str):
+    """Get a single {name} item."""
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+@router.post("/{name}/")
+async def create_{name}(data: dict):
+    """Create a new {name} item."""
+    return {{"id": "new", "status": "created", **data}}
+''',
+    "component": '''\'use client\';
+import {{ useState, useEffect }} from 'react';
+import {{ Loader2, AlertCircle }} from 'lucide-react';
+import {{ API }} from '../../lib/api';
+
+export default function {Name}() {{
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {{
+    fetch(`${{API}}/{name}/`)
+      .then(r => r.json())
+      .then(d => {{ setData(d.items || []); setLoading(false); }})
+      .catch(e => {{ setError(e.message); setLoading(false); }});
+  }}, []);
+
+  if (loading) return <div className="flex items-center justify-center p-8"><Loader2 className="animate-spin" size={{20}} /></div>;
+  if (error) return <div className="flex items-center gap-2 p-4 text-red-600"><AlertCircle size={{16}} />{{error}}</div>;
+  if (!data.length) return <div className="p-8 text-center text-gray-400">No items yet</div>;
+
+  return (
+    <div style={{{{ padding: '24px 28px' }}}}>
+      <h2 style={{{{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#1a1a1a' }}}}>
+        {Name}
+      </h2>
+      <div style={{{{ display: 'flex', flexDirection: 'column', gap: 8 }}}}>
+        {{data.map((item, i) => (
+          <div key={{i}} style={{{{
+            padding: '12px 16px', background: '#faf9f7',
+            border: '1px solid #ece8e0', borderRadius: 10,
+            fontSize: 13, color: '#555',
+          }}}}>
+            {{JSON.stringify(item)}}
+          </div>
+        ))}}
+      </div>
+    </div>
+  );
+}}
+''',
+    "desk": '''"""
+{Name}Desk — auto-generated by Atlas (CodeForge).
+"""
+import logging
+from .base_desk import BaseDesk, DeskTask, DeskAction
+
+logger = logging.getLogger("max.desks.{name}")
+
+
+class {Name}Desk(BaseDesk):
+    desk_id = "{name}"
+    desk_name = "{Name}Desk"
+    agent_name = "{Name}"
+    desk_description = "{Name} desk — handles {name}-related tasks"
+    capabilities = ["{name}_management"]
+
+    async def handle_task(self, task: DeskTask) -> DeskTask:
+        await self.accept_task(task)
+        try:
+            result = await self.ai_execute_task(task)
+            return await self.complete_task(task, result)
+        except Exception as e:
+            logger.error(f"{Name}Desk task failed: {{e}}")
+            return await self.fail_task(task, str(e))
+''',
+}
+
+
+@tool("project_scaffold")
+def _project_scaffold(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Create new files from templates."""
+    start = _time.time()
+    command = params.get("command", "")
+    name = params.get("name", "").strip()
+
+    if not name:
+        return ToolResult(tool="project_scaffold", success=False, error="name is required")
+
+    if command not in SCAFFOLD_TEMPLATES and command != "page":
+        return ToolResult(tool="project_scaffold", success=False, error=f"Unknown scaffold type: {command}")
+
+    name_lower = name.lower().replace(" ", "_").replace("-", "_")
+    name_cap = "".join(w.capitalize() for w in name_lower.split("_"))
+    files_created = []
+    hints = []
+
+    try:
+        if command == "router":
+            path = os.path.expanduser(f"~/empire-repo/backend/app/routers/{name_lower}.py")
+            content = SCAFFOLD_TEMPLATES["router"].format(name=name_lower)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(content)
+            files_created.append(path)
+            hints.append(f'Add to main.py: load_router("app.routers.{name_lower}", "/api/v1", ["{name_lower}"])')
+
+        elif command == "component":
+            path = os.path.expanduser(f"~/empire-repo/empire-command-center/app/components/screens/{name_cap}.tsx")
+            content = SCAFFOLD_TEMPLATES["component"].format(name=name_lower, Name=name_cap)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(content)
+            files_created.append(path)
+            hints.append(f"Import in page.tsx: import {name_cap} from './components/screens/{name_cap}'")
+
+        elif command == "desk":
+            path = os.path.expanduser(f"~/empire-repo/backend/app/services/max/desks/{name_lower}_desk.py")
+            content = SCAFFOLD_TEMPLATES["desk"].format(name=name_lower, Name=name_cap)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(content)
+            files_created.append(path)
+            hints.append(f"Register in desk_manager.py: from .{name_lower}_desk import {name_cap}Desk")
+
+        elif command == "page":
+            # Create both router + component
+            router_path = os.path.expanduser(f"~/empire-repo/backend/app/routers/{name_lower}.py")
+            comp_path = os.path.expanduser(f"~/empire-repo/empire-command-center/app/components/screens/{name_cap}Page.tsx")
+            with open(router_path, "w") as f:
+                f.write(SCAFFOLD_TEMPLATES["router"].format(name=name_lower))
+            with open(comp_path, "w") as f:
+                f.write(SCAFFOLD_TEMPLATES["component"].format(name=name_lower, Name=name_cap + "Page"))
+            files_created.extend([router_path, comp_path])
+            hints.append(f'Register router + import component in page.tsx')
+
+        duration = int((_time.time() - start) * 1000)
+        log_execution("project_scaffold", params, {"files": len(files_created)}, access_level=2, desk=desk, success=True, duration_ms=duration)
+        return ToolResult(tool="project_scaffold", success=True, result={
+            "files_created": files_created, "register_hints": hints,
+        })
+    except Exception as e:
+        log_execution("project_scaffold", params, str(e), access_level=2, desk=desk, success=False)
+        return ToolResult(tool="project_scaffold", success=False, error=str(e))
