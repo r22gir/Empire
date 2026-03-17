@@ -5,7 +5,7 @@ PDF generation via POST /api/v1/quotes/{id}/pdf.
 """
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional
 from datetime import datetime, timedelta
 import json
@@ -37,6 +37,19 @@ class LineItem(BaseModel):
     amount: float = 0.0         # quantity * rate (computed)
     category: str = "labor"     # labor, materials, other
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, data):
+        """Accept qty/unit_price as aliases for quantity/rate."""
+        if isinstance(data, dict):
+            if "qty" in data and "quantity" not in data:
+                data["quantity"] = data.pop("qty")
+            if "unit_price" in data and "rate" not in data:
+                data["rate"] = data.pop("unit_price")
+            if "price" in data and "rate" not in data:
+                data["rate"] = data.pop("price")
+        return data
+
 class Measurements(BaseModel):
     width: Optional[float] = None
     height: Optional[float] = None
@@ -62,6 +75,15 @@ class QuoteCreate(BaseModel):
     desk_id: Optional[str] = None
     line_items: list[LineItem] = Field(default_factory=list)
     measurements: Optional[Measurements] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, data):
+        """Accept 'items' as alias for 'line_items'."""
+        if isinstance(data, dict):
+            if "items" in data and "line_items" not in data:
+                data["line_items"] = data.pop("items")
+        return data
     subtotal: float = 0.0
     tax_rate: float = 0.0
     tax_amount: float = 0.0
