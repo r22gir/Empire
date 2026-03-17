@@ -67,6 +67,7 @@ class VendorUpdate(BaseModel):
 
 # ── Inventory Items ──────────────────────────────────────────────────
 
+@router.get("")
 @router.get("/items")
 def list_items(
     category: Optional[str] = None,
