@@ -2255,7 +2255,7 @@ Then after seeing results, use the quote_id:
 
 # ── DEV TOOLS (Atlas/Orion) ─────────────────────────────────────────
 
-from app.services.max.tool_safety import validate_path, validate_command
+from app.services.max.tool_safety import validate_path, validate_command, is_critical_file
 from app.services.max.tool_audit import log_execution
 import subprocess
 import time as _time
@@ -2329,6 +2329,31 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not ok:
         log_execution("file_write", params, reason, desk=desk, success=False)
         return ToolResult(tool="file_write", success=False, error=reason)
+
+    # Block file_write to critical system files — use file_edit instead
+    if is_critical_file(path):
+        log_execution("file_write", params, "critical file blocked", desk=desk, success=False)
+        return ToolResult(
+            tool="file_write",
+            success=False,
+            error=f"BLOCKED: {os.path.basename(path)} is a critical system file. Use file_edit for modifications.",
+        )
+
+    # Safety: prevent accidental truncation of existing files
+    if os.path.exists(path):
+        old_size = os.path.getsize(path)
+        new_size = len(content.encode('utf-8'))
+        if old_size > 1000 and new_size < (old_size * 0.5):
+            log_execution("file_write", params, "truncation blocked", desk=desk, success=False)
+            return ToolResult(
+                tool="file_write",
+                success=False,
+                error=f"BLOCKED: New content ({new_size} bytes) is less than 50% of existing file ({old_size} bytes). This looks like accidental truncation. Use file_edit for partial changes.",
+            )
+        # Always backup before overwrite
+        import shutil
+        backup_path = path + '.bak'
+        shutil.copy2(path, backup_path)
 
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -24,6 +24,19 @@ BLOCKED_PATHS = [
 ]
 
 
+# Critical system files that require extra caution for writes
+CRITICAL_FILES = [
+    "tool_executor.py", "main.py", "system_prompt.py",
+    "ai_router.py", "tool_safety.py", "tool_audit.py",
+]
+
+
+def is_critical_file(path: str) -> bool:
+    """Check if a path points to a critical system file."""
+    basename = os.path.basename(path)
+    return basename in CRITICAL_FILES
+
+
 def validate_path(path: str) -> tuple[bool, str]:
     """Validate that a file path is within allowed boundaries.
 
