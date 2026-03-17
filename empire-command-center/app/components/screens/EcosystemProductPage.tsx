@@ -38,9 +38,9 @@ const PRODUCT_MAP: Record<string, ProductInfo> = {
   },
   recovery: {
     name: 'RecoveryForge',
-    description: 'Data recovery and backup management. Automated chat history backup, file snapshots, and disaster recovery.',
+    description: 'Data recovery and backup management. Automated chat history backup, file snapshots, and disaster recovery. Layer 3 image classification running via Ollama LLaVA.',
     status: 'active',
-    endpoints: ['/chat-backup/status', '/chat-backup/export', '/chat-backup/restore'],
+    endpoints: ['/chat-backup/dashboard', '/chat-backup/sessions', '/ollama/models'],
   },
   market: {
     name: 'MarketForge',
@@ -314,7 +314,7 @@ export default function EcosystemProductPage({
             </button>
           ) : null}
 
-          {(info.port || info.status === 'active') && (
+          {info.port && (
             <button
               onClick={() => setShowLaunchConfirm(true)}
               style={{
