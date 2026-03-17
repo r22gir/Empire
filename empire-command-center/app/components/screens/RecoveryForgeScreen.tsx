@@ -66,18 +66,14 @@ export default function RecoveryForgeScreen() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header + Status Bar */}
-      <div style={{
-        padding: '12px 20px',
+      <div className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3" style={{
         background: '#faf9f7',
         borderBottom: '1px solid #ece8e0',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
         flexShrink: 0,
       }}>
         <HardDrive size={20} style={{ color: '#b8960c' }} />
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
-          RecoveryForge — Layer 3 File Recovery
+        <h2 className="text-sm sm:text-base" style={{ fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
+          RecoveryForge
         </h2>
 
         {status && (
@@ -115,10 +111,11 @@ export default function RecoveryForgeScreen() {
                 border: 'none',
                 background: status.running ? '#dc2626' : '#16a34a',
                 color: '#fff',
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 600,
                 cursor: 'pointer',
                 opacity: actionLoading ? 0.6 : 1,
+                minHeight: 44,
               }}
             >
               {actionLoading ? <Loader2 size={14} className="animate-spin" /> :

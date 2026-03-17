@@ -33,17 +33,13 @@ export default function RelistAppScreen() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Header */}
-      <div style={{
-        padding: '12px 20px',
+      <div className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3" style={{
         background: '#faf9f7',
         borderBottom: '1px solid #ece8e0',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
         flexShrink: 0,
       }}>
         <ShoppingBag size={20} style={{ color: '#b8960c' }} />
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
+        <h2 className="text-sm sm:text-base" style={{ fontWeight: 700, color: '#1a1a1a', margin: 0 }}>
           RelistApp — Smart Lister
         </h2>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
