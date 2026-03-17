@@ -388,17 +388,105 @@ export default function PresentationScreen() {
     }
   }, [mode, isLoading, playAudio]);
 
-  // Voice recording
+  // Voice recording — Web Speech API primary (mobile), MediaRecorder fallback (desktop)
   const toggleRecording = useCallback(async () => {
     if (isRecording) {
-      mediaRecorderRef.current?.stop();
+      if ((window as any).__speechRecognition) {
+        (window as any).__speechRecognition.stop();
+      } else {
+        mediaRecorderRef.current?.stop();
+      }
       setIsRecording(false);
       return;
     }
 
+    // Try Web Speech API first (works reliably on mobile)
+    const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = 'en-US';
+        (window as any).__speechRecognition = recognition;
+
+        recognition.onresult = async (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          setIsRecording(false);
+          (window as any).__speechRecognition = null;
+          if (!transcript) return;
+
+          // Add user message
+          setMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            role: 'user',
+            content: transcript,
+            timestamp: new Date().toISOString(),
+          }]);
+
+          // Send to MAX via avatar/chat (text, not audio)
+          setIsLoading(true);
+          try {
+            const resp = await fetch(`${API}/avatar/chat`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message: transcript, voice: mode === 'presentation', channel: 'avatar', mode }),
+            });
+            const data = await resp.json();
+            if (data.response) {
+              setMessages(prev => [...prev, {
+                id: (Date.now() + 1).toString(),
+                role: 'assistant',
+                content: data.response,
+                timestamp: new Date().toISOString(),
+                model: data.model_used,
+                hasAudio: !!data.audio,
+              }]);
+              if (mode === 'presentation') {
+                if (data.audio) {
+                  playAudio(data.audio);
+                  iframeRef.current?.contentWindow?.postMessage(
+                    { type: 'speak-audio', audio: data.audio }, '*'
+                  );
+                  setSessionCost(prev => prev + 0.015);
+                } else if (data.response) {
+                  iframeRef.current?.contentWindow?.postMessage(
+                    { type: 'speak-text', text: data.response }, '*'
+                  );
+                }
+              }
+            }
+          } catch (e) {
+            console.error('Chat failed:', e);
+          } finally {
+            setIsLoading(false);
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error:', event.error);
+          setIsRecording(false);
+          (window as any).__speechRecognition = null;
+        };
+
+        recognition.onend = () => {
+          setIsRecording(false);
+          (window as any).__speechRecognition = null;
+        };
+
+        recognition.start();
+        setIsRecording(true);
+        return;
+      } catch (e) {
+        console.error('SpeechRecognition failed, falling back to MediaRecorder:', e);
+      }
+    }
+
+    // Fallback: MediaRecorder (desktop)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'; const recorder = new MediaRecorder(stream, { mimeType });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      const recorder = new MediaRecorder(stream, { mimeType });
       const chunks: Blob[] = [];
 
       recorder.ondataavailable = (e) => chunks.push(e.data);
@@ -586,22 +674,32 @@ export default function PresentationScreen() {
             background: 'var(--panel)',
           }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button
-                onClick={toggleRecording}
-                style={{
-                  width: 44, height: 44, borderRadius: 10,
-                  border: isRecording ? '2px solid #ef4444' : '1px solid #e5e2dc',
-                  background: isRecording ? '#fef2f2' : '#fff',
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  color: isRecording ? '#ef4444' : '#999',
-                  transition: 'all 0.15s ease',
-                  flexShrink: 0,
-                }}
-                title={isRecording ? 'Stop recording' : 'Start voice input'}
-              >
-                {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
-              </button>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  onClick={toggleRecording}
+                  style={{
+                    width: 44, height: 44, borderRadius: 10,
+                    border: isRecording ? '2px solid #E24B4A' : '1px solid #e5e2dc',
+                    background: isRecording ? '#E24B4A' : '#fff',
+                    cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: isRecording ? '#fff' : '#999',
+                    transition: 'all 0.15s ease',
+                    animation: isRecording ? 'mic-pulse 1.5s ease-in-out infinite' : 'none',
+                  }}
+                  title={isRecording ? 'Stop recording' : 'Start voice input'}
+                >
+                  {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+                </button>
+                {isRecording && (
+                  <span style={{
+                    position: 'absolute', top: -20, left: '50%', transform: 'translateX(-50%)',
+                    fontSize: 10, color: '#E24B4A', fontWeight: 600, whiteSpace: 'nowrap',
+                  }}>
+                    Listening...
+                  </span>
+                )}
+              </div>
 
               <input
                 type="text"
@@ -683,6 +781,10 @@ export default function PresentationScreen() {
         @keyframes speak-bar {
           0%, 100% { height: 4px; }
           50% { height: 20px; }
+        }
+        @keyframes mic-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(226, 75, 74, 0.4); }
+          50% { box-shadow: 0 0 0 8px rgba(226, 75, 74, 0); }
         }
       `}</style>
     </div>
