@@ -14,9 +14,9 @@ export default function IntakeLanding() {
             <span className="font-bold text-[13px] text-white tracking-wide">Empire</span>
             <span className="text-[9px] text-[#888] font-medium tracking-wider uppercase">LuxeForge</span>
           </div>
-          <div className="flex items-center gap-3">
-            <Link href="/intake/login" className="text-[11px] text-[#aaa] hover:text-[#b8960c] transition-colors font-medium">Sign In</Link>
-            <Link href="/intake/signup" className="px-4 py-1.5 text-[11px] font-semibold bg-[#b8960c] text-white rounded-lg hover:bg-[#a3850b] transition-colors">Get Started</Link>
+          <div className="flex items-center gap-2">
+            <Link href="/intake/login" className="px-3 py-2 min-h-[44px] flex items-center text-sm text-[#aaa] hover:text-[#b8960c] transition-colors font-medium">Sign In</Link>
+            <Link href="/intake/signup" className="px-4 py-2 min-h-[44px] flex items-center text-sm font-semibold bg-[#b8960c] text-white rounded-lg hover:bg-[#a3850b] transition-colors">Get Started</Link>
           </div>
         </div>
       </nav>

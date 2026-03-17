@@ -83,8 +83,10 @@ export default function RelistAppScreen() {
               width: '100%',
               height: '100%',
               border: 'none',
+              WebkitOverflowScrolling: 'touch' as any,
             }}
             title="RelistApp"
+            allow="fullscreen"
           />
         ) : (
           <div style={{

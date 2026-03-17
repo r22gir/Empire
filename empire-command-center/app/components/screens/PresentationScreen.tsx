@@ -45,8 +45,8 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: Presen
 
   return (
     <div
+      className="w-full h-[200px] md:w-[60%] md:h-auto"
       style={{
-        flex: '0 0 60%',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -55,6 +55,7 @@ function AvatarPanel({ mode, isSpeaking, isThinking, iframeRef }: { mode: Presen
         borderRight: '2px solid #b8960c',
         position: 'relative',
         overflow: 'hidden',
+        flexShrink: 0,
       }}
     >
       {/* Empire branding */}
@@ -487,8 +488,8 @@ export default function PresentationScreen() {
         <ModeToggle mode={mode} onChange={handleModeChange} />
       </div>
 
-      {/* Main content */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* Main content — stack vertically on mobile via CSS */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Avatar panel (presentation mode only) */}
         <AvatarPanel mode={mode} isSpeaking={isSpeaking} isThinking={isLoading} iframeRef={iframeRef} />
 

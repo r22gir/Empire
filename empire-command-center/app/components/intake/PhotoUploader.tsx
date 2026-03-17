@@ -78,22 +78,22 @@ export default function PhotoUploader({
         <p className="text-[12px] text-[#888] mb-3">
           {uploading ? 'Uploading...' : 'Drag photos here or'}
         </p>
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="px-4 py-2 text-[11px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            className="w-full sm:w-auto px-5 py-3 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
           >
-            <ImageIcon size={13} /> Browse Files
+            <ImageIcon size={16} /> Browse Files
           </button>
           <button
             type="button"
             onClick={() => cameraRef.current?.click()}
             disabled={uploading}
-            className="px-4 py-2 text-[11px] font-semibold border border-[#ece8e0] text-[#888] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors disabled:opacity-50 flex items-center gap-1.5 bg-[#faf9f7]"
+            className="w-full sm:w-auto px-5 py-3 min-h-[44px] text-sm font-semibold border border-[#ece8e0] text-[#888] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 bg-[#faf9f7]"
           >
-            <Camera size={13} /> Take Photo
+            <Camera size={16} /> Take Photo
           </button>
         </div>
         <input ref={fileRef} type="file" accept="image/*" multiple onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
@@ -101,7 +101,7 @@ export default function PhotoUploader({
       </div>
 
       {photos.length > 0 && (
-        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mt-4">
           {photos.map((p: any, i: number) => (
             <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
               <img

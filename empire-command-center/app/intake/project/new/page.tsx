@@ -183,18 +183,18 @@ export default function NewProject() {
             <div className="space-y-4">
               <h2 className="text-base font-bold text-[#1a1a1a] mb-4">Tell Us About Your Project</h2>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Project Name *</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Project Name *</label>
                 <input type="text" required value={name} onChange={e => setName(e.target.value)}
                   className="form-input" placeholder="e.g., Johnson Residence - Full Home" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Address</label>
+                  <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Address</label>
                   <input type="text" value={address} onChange={e => setAddress(e.target.value)}
                     className="form-input" placeholder="123 Main St, City, ST" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Scope</label>
+                  <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Scope</label>
                   <select value={scope} onChange={e => setScope(e.target.value)} className="form-input">
                     <option value="">Select...</option>
                     <option value="single-window">Single Window</option>
@@ -208,7 +208,7 @@ export default function NewProject() {
               {/* Line Items */}
               <div style={{ marginTop: 20 }}>
                 <div className="flex items-center justify-between mb-3">
-                  <label className="text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px]">
+                  <label className="text-xs font-semibold text-[#999] uppercase tracking-[0.5px]">
                     Items / Rooms ({items.length})
                   </label>
                   <button
@@ -335,7 +335,7 @@ export default function NewProject() {
               {/* Summary of items */}
               {items.filter(i => i.treatment || i.room).length > 0 && (
                 <div className="mt-4 p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
-                  <div className="text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-2">Project Summary</div>
+                  <div className="text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-2">Project Summary</div>
                   {items.filter(i => i.treatment || i.room).map((item, idx) => (
                     <div key={item.id} className="flex items-center gap-2 text-[12px] py-1">
                       <span className="text-[#b8960c] font-bold">{idx + 1}.</span>
@@ -358,20 +358,20 @@ export default function NewProject() {
         </div>
 
         {/* Navigation buttons */}
-        <div className="flex items-center justify-between mt-6">
+        <div className="flex items-center justify-between mt-6 gap-3">
           {step > 0 ? (
             <button
               onClick={() => setStep(s => s - 1)}
-              className="px-4 py-2 text-[11px] font-semibold text-[#888] border border-[#ece8e0] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors flex items-center gap-1.5 bg-[#faf9f7] cursor-pointer"
+              className="px-4 py-2.5 min-h-[44px] text-sm font-semibold text-[#888] border border-[#ece8e0] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors flex items-center gap-1.5 bg-[#faf9f7] cursor-pointer"
             >
-              <ArrowLeft size={13} /> Back
+              <ArrowLeft size={14} /> Back
             </button>
           ) : (
             <button
               onClick={() => router.push('/intake/dashboard')}
-              className="px-4 py-2 text-[11px] font-semibold text-[#888] border border-[#ece8e0] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors flex items-center gap-1.5 bg-[#faf9f7] cursor-pointer"
+              className="px-4 py-2.5 min-h-[44px] text-sm font-semibold text-[#888] border border-[#ece8e0] rounded-[10px] hover:border-[#d5d0c8] hover:text-[#555] transition-colors flex items-center gap-1.5 bg-[#faf9f7] cursor-pointer"
             >
-              <ArrowLeft size={13} /> Dashboard
+              <ArrowLeft size={14} /> Dashboard
             </button>
           )}
 
@@ -379,17 +379,17 @@ export default function NewProject() {
             <button
               onClick={handleNext}
               disabled={step === 0 && !name.trim()}
-              className="px-6 py-2 text-[11px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              className="flex-1 sm:flex-none px-6 py-2.5 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              Next <ArrowRight size={13} />
+              Next <ArrowRight size={14} />
             </button>
           ) : (
             <button
               onClick={handleSubmit}
               disabled={submitting}
-              className="px-6 py-2 text-[11px] font-bold bg-[#16a34a] text-white rounded-[10px] hover:bg-[#15803d] transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              className="flex-1 sm:flex-none px-6 py-2.5 min-h-[44px] text-sm font-bold bg-[#16a34a] text-white rounded-[10px] hover:bg-[#15803d] transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              {submitting ? 'Submitting...' : (<><Send size={13} /> Submit Project</>)}
+              {submitting ? 'Submitting...' : (<><Send size={14} /> Submit Project</>)}
             </button>
           )}
         </div>

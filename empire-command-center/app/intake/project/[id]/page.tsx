@@ -163,7 +163,7 @@ export default function ProjectDetail() {
         </div>
 
         {/* Details grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-5">
           {project.treatment && (
             <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[10px] p-3">
               <div className="text-[9px] text-[#c5c0b8] font-semibold uppercase tracking-[0.5px] mb-0.5">Treatment</div>
@@ -203,7 +203,7 @@ export default function ProjectDetail() {
                 href={`${API_BASE}${project.quote_pdf}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-4 py-2 text-[11px] font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors flex items-center gap-1.5"
+                className="px-4 py-2.5 min-h-[44px] text-sm font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors flex items-center gap-1.5"
               >
                 <Download size={13} /> View Quote
               </a>
@@ -220,7 +220,7 @@ export default function ProjectDetail() {
           {canEdit ? (
             <PhotoUploader projectId={projectId} photos={photos} onUpload={loadProject} />
           ) : photos.length > 0 ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
               {photos.map((p: any, i: number) => (
                 <div key={i} className="relative aspect-square rounded-[10px] overflow-hidden bg-[#f5f2ed] border border-[#ece8e0]">
                   <img
@@ -340,13 +340,13 @@ export default function ProjectDetail() {
                 <button
                   onClick={addMeasurement}
                   disabled={savingMeasurement || !newMeasurement.width || !newMeasurement.height}
-                  className="px-4 py-2 text-[11px] font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors disabled:opacity-50"
+                  className="px-4 py-2.5 min-h-[44px] text-sm font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors disabled:opacity-50"
                 >
                   {savingMeasurement ? 'Saving...' : 'Add Dimension'}
                 </button>
                 <button
                   onClick={() => { setShowAddMeasurement(false); setNewMeasurement({ room: '', width: '', height: '', reference: '' }); }}
-                  className="px-4 py-2 text-[11px] text-[#888] hover:text-[#555] transition-colors"
+                  className="px-4 py-2.5 min-h-[44px] text-sm text-[#888] hover:text-[#555] transition-colors"
                 >
                   Cancel
                 </button>

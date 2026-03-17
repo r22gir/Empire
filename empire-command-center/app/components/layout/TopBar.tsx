@@ -133,25 +133,25 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, servic
   };
 
   return (
-    <header className="h-[56px] bg-[var(--panel)] border-b border-[var(--border)] flex items-center justify-between px-6 shrink-0 z-50">
+    <header className="h-[56px] bg-[var(--panel)] border-b border-[var(--border)] flex items-center justify-between px-3 md:px-6 shrink-0 z-50">
       {/* Logo */}
       <div className="text-[16px] font-bold tracking-[3px] text-[var(--text)]">
         <span className="text-[var(--gold)]">E</span>MPIRE
       </div>
 
-      {/* Search */}
+      {/* Search — hidden on mobile */}
       <button
         onClick={onQuickSwitch}
-        className="flex items-center gap-2 bg-[#f5f3ef] border border-[var(--border)] rounded-[var(--radius)] px-5 py-[10px] w-[320px] text-[13px] text-[var(--faint)] cursor-pointer hover:border-[var(--border-h)] transition-colors"
+        className="hidden md:flex items-center gap-2 bg-[#f5f3ef] border border-[var(--border)] rounded-[var(--radius)] px-5 py-[10px] w-[320px] text-[13px] text-[var(--faint)] cursor-pointer hover:border-[var(--border-h)] transition-colors"
       >
         <span className="text-[11px] font-mono">⌘K</span>
         <span>Search anything...</span>
       </button>
 
       {/* Right controls */}
-      <div className="flex items-center gap-3">
-        {/* Model selector */}
-        <div ref={modelRef} className="relative">
+      <div className="flex items-center gap-2 md:gap-3">
+        {/* Model selector — hidden on mobile */}
+        <div ref={modelRef} className="relative hidden md:block">
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
             className="empire-card flex items-center gap-2 !py-2 !px-3 text-[11px] font-bold font-mono"
@@ -191,7 +191,7 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, servic
             )}
           </button>
           {showNotifs && (
-            <div className="absolute top-[46px] right-0 w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] z-[200] overflow-hidden">
+            <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[380px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-2xl shadow-[0_12px_40px_rgba(0,0,0,0.15)] z-[200] overflow-hidden">
               {/* Header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
                 <div className="flex items-center gap-2">

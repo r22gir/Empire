@@ -51,7 +51,7 @@ export default function AmpSignup() {
             <div style={fieldStyle}><Lock size={14} color="#9B9590" /><input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="Mínimo 6 caracteres" style={inputStyle} /></div>
           </div>
           <button type="submit" disabled={loading}
-            style={{ width: '100%', background: '#D4A030', color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: loading ? 0.6 : 1 }}>
+            style={{ width: '100%', background: '#D4A030', color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: loading ? 0.6 : 1, minHeight: 44 }}>
             {loading ? 'Creando cuenta...' : <>Crear Cuenta Gratis <ArrowRight size={16} /></>}
           </button>
           <p style={{ textAlign: 'center', fontSize: 13, color: '#9B9590', marginTop: 16 }}>

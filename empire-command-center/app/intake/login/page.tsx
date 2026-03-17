@@ -48,12 +48,12 @@ export default function IntakeLogin() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="text-[11px] text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3 py-2">
+                <div className="text-sm text-[#dc2626] bg-[#fef2f2] border border-[#fecaca] rounded-[10px] px-3 py-2.5">
                   {error}
                 </div>
               )}
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Email</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Email</label>
                 <input
                   type="email"
                   required
@@ -64,7 +64,7 @@ export default function IntakeLogin() {
                 />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Password</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Password</label>
                 <input
                   type="password"
                   required
@@ -77,14 +77,14 @@ export default function IntakeLogin() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 text-[12px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
+                className="w-full py-3 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
               >
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
             </form>
           </div>
 
-          <p className="text-[11px] text-[#888] text-center mt-5">
+          <p className="text-sm text-[#888] text-center mt-5">
             Don&apos;t have an account?{' '}
             <Link href="/intake/signup" className="text-[#b8960c] font-semibold hover:underline">
               Create one free

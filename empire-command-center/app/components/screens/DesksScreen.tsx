@@ -226,25 +226,25 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
     return (
       <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
         {/* Desk header */}
-        <div style={{ padding: '32px 36px 24px', background: cfg.bg }}>
+        <div className="px-4 sm:px-9 pt-8 pb-6" style={{ background: cfg.bg }}>
           <div className="max-w-5xl mx-auto">
             <button onClick={() => { setOpenDesk(null); onDeskChanged?.(null); }}
               className="flex items-center gap-1.5 cursor-pointer mb-4 transition-colors"
               style={{ fontSize: 12, fontWeight: 600, color: 'var(--dim)', background: 'none', border: 'none' }}>
               <ArrowLeft size={14} /> Back to All Desks
             </button>
-            <div className="flex items-start gap-4">
+            <div className="flex flex-col sm:flex-row items-start gap-4">
               <div className="w-14 h-14 rounded-[var(--radius)] flex items-center justify-center shrink-0"
                 style={{ background: cfg.text + '18' }}>
                 <DeskIcon size={28} style={{ color: cfg.text }} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <h1 style={{ fontSize: 22, fontWeight: 600, color: cfg.text }}>
                     {deskData.agent_name || desk.name}
                   </h1>
                   <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted)', background: 'rgba(255,255,255,0.6)', padding: '2px 8px', borderRadius: 6 }}>{desk.id}</span>
-                  <span className="flex items-center gap-1.5" style={{ fontSize: 10, fontWeight: 700, marginLeft: 8 }}>
+                  <span className="flex items-center gap-1.5" style={{ fontSize: 10, fontWeight: 700 }}>
                     <span className="w-2.5 h-2.5 rounded-full" style={{ background: desk.status === 'busy' ? '#d97706' : 'var(--green)' }} />
                     <span style={{ color: desk.status === 'busy' ? '#d97706' : '#16a34a' }}>
                       {(desk.status || 'idle').toUpperCase()}
@@ -271,7 +271,7 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
                 )}
               </div>
               {/* Stats cards */}
-              <div className="flex gap-3 shrink-0">
+              <div className="flex gap-3 shrink-0 mt-3 sm:mt-0">
                 <MiniStat label="Active" value={String(activeTasks.length)} color={cfg.text} />
                 <MiniStat label="Done" value={String(status?.completed_total || deskData.stats?.completed || 0)} color="#16a34a" />
                 <MiniStat label="Escalated" value={String(escalatedTasks.length)} color="#d97706" />
@@ -281,7 +281,7 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
         </div>
 
         {/* Task input bar */}
-        <div style={{ padding: '20px 36px', borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
+        <div className="px-4 sm:px-9 py-5" style={{ borderBottom: '1px solid var(--border)', background: 'var(--panel)' }}>
           <div className="max-w-5xl mx-auto">
             <div className="empire-card flat" style={{ display: 'flex', gap: 12, padding: '12px 16px', alignItems: 'center' }}>
               <input
@@ -337,9 +337,9 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
         )}
 
         {/* Tabs + content */}
-        <div style={{ padding: '24px 36px 32px' }}>
+        <div className="px-4 sm:px-9 py-6 pb-8">
           <div className="max-w-5xl mx-auto">
-            <div className="flex items-center gap-2 mb-5" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+            <div className="flex items-center gap-2 mb-5 overflow-x-auto" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
               {([
                 { key: 'active' as const, label: 'Active Tasks', icon: CircleDot, count: activeTasks.length + escalatedTasks.length },
                 { key: 'completed' as const, label: 'Completed', icon: CheckCircle, count: completedTasks.length },
@@ -441,7 +441,7 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
   // ── Grid overview ───────────────────────────────────────────────────
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: 'var(--bg)' }}>
-      <div className="max-w-5xl mx-auto" style={{ padding: '28px 36px' }}>
+      <div className="max-w-5xl mx-auto px-4 sm:px-9 py-7">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 rounded-[var(--radius)] flex items-center justify-center" style={{ background: 'var(--purple-bg)' }}>
             <Bot size={20} style={{ color: 'var(--purple)' }} />
@@ -546,7 +546,7 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
 
         <div className="section-label" style={{ marginBottom: 12, marginTop: 20 }}>All Desks</div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {desks.map(d => {
             const cfg = DESK_CONFIG[d.id] || DESK_CONFIG.lab;
             const DeskIcon = cfg.Icon;
@@ -658,7 +658,7 @@ function TaskRow({ task, color, onView }: { task: DeskTask; color: string; onVie
 function TaskDetailModal({ task, onClose }: { task: DeskTask; onClose: () => void }) {
   const state = task.state || task.status || 'pending';
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 p-8" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={onClose}>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4 sm:p-8" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={onClose}>
       <div style={{ background: 'var(--panel)', borderRadius: 'var(--radius-lg)', maxWidth: '42rem', width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}
         onClick={e => e.stopPropagation()}>
         <div className="flex items-start justify-between" style={{ padding: '24px 24px 20px', borderBottom: '1px solid var(--border)' }}>

@@ -291,20 +291,24 @@ export default function CommandCenter() {
         </div>
 
         {!clientView && (
-          <RightPanel
-            desks={sys.desks}
-            briefing={sys.briefing}
-            systemStats={sys.systemStats}
-            activeScreen={activeScreen}
-            activeProduct={activeProduct}
-            activeSection={activeSection}
-            onScreenChange={handleScreenChange}
-            onModuleClick={handleModuleClick}
-          />
+          <div className="hidden md:block">
+            <RightPanel
+              desks={sys.desks}
+              briefing={sys.briefing}
+              systemStats={sys.systemStats}
+              activeScreen={activeScreen}
+              activeProduct={activeProduct}
+              activeSection={activeSection}
+              onScreenChange={handleScreenChange}
+              onModuleClick={handleModuleClick}
+            />
+          </div>
         )}
       </div>
 
-      <BottomBar services={sys.services} />
+      <div className="hidden md:block">
+        <BottomBar services={sys.services} />
+      </div>
 
       <QuickSwitch
         open={showQuickSwitch}

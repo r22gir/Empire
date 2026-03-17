@@ -117,7 +117,7 @@ export default function AccountPage() {
                 onChange={e => setForm(f => ({ ...f, company: e.target.value }))} />
             </div>
             <button onClick={saveProfile} disabled={saving}
-              className="mt-1 flex items-center justify-center gap-2 text-sm font-bold text-white rounded-xl py-2.5 cursor-pointer transition-all"
+              className="mt-1 flex items-center justify-center gap-2 text-sm font-bold text-white rounded-xl py-2.5 min-h-[44px] cursor-pointer transition-all"
               style={{ background: '#b8960c', border: '2px solid #a08509', opacity: saving ? 0.6 : 1 }}>
               <Save size={14} /> {saving ? 'Saving...' : 'Save Changes'}
             </button>
@@ -143,7 +143,7 @@ export default function AccountPage() {
                 onChange={e => setPasswordForm(f => ({ ...f, confirm: e.target.value }))} />
             </div>
             <button onClick={changePassword} disabled={saving || !passwordForm.password}
-              className="mt-1 flex items-center justify-center gap-2 text-sm font-bold rounded-xl py-2.5 cursor-pointer transition-all"
+              className="mt-1 flex items-center justify-center gap-2 text-sm font-bold rounded-xl py-2.5 min-h-[44px] cursor-pointer transition-all"
               style={{ background: '#1a1a1a', color: '#fff', border: '2px solid #333', opacity: (saving || !passwordForm.password) ? 0.4 : 1 }}>
               <Lock size={14} /> Update Password
             </button>

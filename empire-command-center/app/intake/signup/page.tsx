@@ -55,32 +55,32 @@ export default function IntakeSignup() {
                 </div>
               )}
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Full Name *</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Full Name *</label>
                 <input type="text" required value={form.name} onChange={e => set('name', e.target.value)}
                   className="form-input" placeholder="Jane Smith" />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Email *</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Email *</label>
                 <input type="email" required value={form.email} onChange={e => set('email', e.target.value)}
                   className="form-input" placeholder="jane@studio.com" />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Phone</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Phone</label>
                 <input type="tel" value={form.phone} onChange={e => set('phone', e.target.value)}
                   className="form-input" placeholder="(555) 123-4567" />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Password *</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Password *</label>
                 <input type="password" required value={form.password} onChange={e => set('password', e.target.value)}
                   className="form-input" placeholder="6+ characters" />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Company / Studio</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Company / Studio</label>
                 <input type="text" value={form.company} onChange={e => set('company', e.target.value)}
                   className="form-input" placeholder="Optional" />
               </div>
               <div>
-                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">I am a...</label>
+                <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">I am a...</label>
                 <select value={form.role} onChange={e => set('role', e.target.value)} className="form-input">
                   <option value="client">Homeowner / Client</option>
                   <option value="designer">Interior Designer</option>
@@ -90,14 +90,14 @@ export default function IntakeSignup() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 text-[12px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
+                className="w-full py-3 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors disabled:opacity-50"
               >
                 {loading ? 'Creating Account...' : 'Create Free Account'}
               </button>
             </form>
           </div>
 
-          <p className="text-[11px] text-[#888] text-center mt-5">
+          <p className="text-sm text-[#888] text-center mt-5">
             Already have an account?{' '}
             <Link href="/intake/login" className="text-[#b8960c] font-semibold hover:underline">
               Sign in

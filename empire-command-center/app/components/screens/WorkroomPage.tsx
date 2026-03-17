@@ -135,9 +135,9 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
   };
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex flex-col sm:flex-row overflow-hidden">
       {/* Sidebar nav */}
-      <nav style={{ width: 200, background: '#fff', borderRight: '1px solid #ece8e0', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <nav className="sm:w-[200px] w-full sm:border-r border-b sm:border-b-0" style={{ background: '#fff', borderColor: '#ece8e0', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '18px 16px', borderBottom: '1px solid #ece8e0' }}>
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-[#dcfce7] flex items-center justify-center">
@@ -149,8 +149,8 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
             </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto" style={{ padding: '10px 10px' }}>
-          <div className="flex flex-col gap-1.5">
+        <div className="flex-1 overflow-x-auto sm:overflow-x-hidden overflow-y-auto" style={{ padding: '10px 10px' }}>
+          <div className="flex sm:flex-col flex-row gap-1.5 sm:flex-nowrap flex-nowrap sm:w-auto w-max">
             {NAV_SECTIONS.map(nav => {
               const Icon = nav.icon;
               const isActive = section === nav.id && !selectedCustomer;
@@ -191,7 +191,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
 
 function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes: any[]; stats: any; onNavigate: (s: Section) => void; onSelectQuote?: (id: string) => void }) {
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
+    <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
       <div className="flex items-center gap-3 mb-1">
         <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Empire Workroom</h1>
         <span style={{ fontSize: 13, color: '#aaa' }} suppressHydrationWarning>
@@ -200,7 +200,7 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-3 mt-5 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-6">
         <KPI icon={<DollarSign size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Pipeline" value={`$${stats.pipeline.toLocaleString()}`} sub={`${quotes.length} quotes`} onClick={() => onNavigate('quotes')} />
         <KPI icon={<ClipboardList size={18} />} iconBg="#fef3c7" iconColor="#d97706" label="Open Quotes" value={String(stats.openQuotes)} sub="Awaiting approval" onClick={() => onNavigate('quotes')} />
         <KPI icon={<TrendingUp size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Accepted" value={String(stats.accepted)} sub="Ready to produce" />
@@ -209,7 +209,7 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
 
       {/* Quick links */}
       <div className="section-label" style={{ marginBottom: 8 }}>Quick Access</div>
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <QuickLink icon={<DollarSign size={18} />} label="Finance Dashboard" desc="Revenue, expenses, P&L" color="#16a34a" onClick={() => onNavigate('finance')} />
         <QuickLink icon={<FileText size={18} />} label="Invoices" desc="Create & manage invoices" color="#b8960c" onClick={() => onNavigate('invoices')} />
         <QuickLink icon={<Users size={18} />} label="Customers" desc="CRM & client directory" color="#2563eb" onClick={() => onNavigate('customers')} />
@@ -217,7 +217,7 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
       </div>
 
       {/* Recent Quotes + Stats */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="empire-card">
           <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 12 }} className="flex items-center gap-2">
             <ClipboardList size={15} className="text-[#b8960c]" /> Recent Quotes
@@ -329,36 +329,36 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-5 gap-3">
         <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
           <ClipboardList size={20} className="text-[#b8960c]" /> Quotes
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setShowBuilder(true)}
             className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:bg-[#a08509]"
-            style={{ height: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none' }}
+            style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none' }}
           >
             <Plus size={14} /> New Quote
           </button>
           <button
             onClick={() => setShowQuickQuote(!showQuickQuote)}
             className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:border-[#b8960c] hover:text-[#b8960c]"
-            style={{ height: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
+            style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
           >
             <Zap size={14} /> Quick Quote
           </button>
           <button
             onClick={() => setShowQuickCalc(!showQuickCalc)}
             className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:border-[#16a34a] hover:text-[#16a34a]"
-            style={{ height: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
+            style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
           >
             <DollarSign size={14} /> Calculator
           </button>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search quotes..."
-            style={{ padding: '8px 12px', border: '1px solid #ece8e0', borderRadius: 10, fontSize: 12, background: '#fff', outline: 'none', width: 200 }}
-            className="focus:border-[#b8960c]" />
+            style={{ padding: '8px 12px', border: '1px solid #ece8e0', borderRadius: 10, fontSize: 13, background: '#fff', outline: 'none', minHeight: 44 }}
+            className="focus:border-[#b8960c] w-full sm:w-[200px]" />
         </div>
       </div>
 
@@ -415,6 +415,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
         ))}
       </div>
 
+      <div className="overflow-x-auto">
       <table className="empire-table">
         <thead>
           <tr>
@@ -484,6 +485,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
           ))}
         </tbody>
       </table>
+      </div>
       {filtered.length === 0 && (
         <div style={{ textAlign: 'center', padding: '40px 0', fontSize: 13, color: '#aaa' }}>No quotes found</div>
       )}
@@ -620,17 +622,17 @@ function TasksSection() {
         <button
           onClick={() => setShowForm(!showForm)}
           className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:bg-[#a08509]"
-          style={{ height: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none' }}
+          style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none' }}
         >
           <Plus size={14} /> New Task
         </button>
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <div className="empire-card" style={{ textAlign: 'center', padding: '14px 10px' }}>
           <div style={{ fontSize: 22, fontWeight: 700, color: '#b8960c' }}>{pending.length}</div>
-          <div style={{ fontSize: 10, color: '#999', fontWeight: 600 }}>Pending</div>
+          <div style={{ fontSize: 11, color: '#999', fontWeight: 600 }}>Pending</div>
         </div>
         <div className="empire-card" style={{ textAlign: 'center', padding: '14px 10px' }}>
           <div style={{ fontSize: 22, fontWeight: 700, color: '#dc2626' }}>{urgent.length}</div>
@@ -664,7 +666,7 @@ function TasksSection() {
             className="form-input mb-3"
             style={{ resize: 'none' }}
           />
-          <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div>
               <label style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Priority</label>
               <div className="flex gap-1">

@@ -24,7 +24,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
   const pipeline = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0);
 
   return (
-    <div className="flex-1 overflow-y-auto" style={{ background: '#f5f2ed', padding: '24px 36px' }}>
+    <div className="flex-1 overflow-y-auto px-4 sm:px-9 py-6" style={{ background: '#f5f2ed' }}>
       {/* Header */}
       <div className="flex items-center gap-3 mb-1">
         <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
@@ -37,7 +37,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
       </div>
 
       {/* KPI Cards - Row 1 */}
-      <div className="grid grid-cols-4 gap-3 mt-5 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-4">
         <KPI icon={<DollarSign size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Pipeline" value={`$${pipeline.toLocaleString()}`} sub={`${quotes.length} quotes total`} />
         <KPI icon={<ClipboardList size={18} />} iconBg="#fef3c7" iconColor="#d97706" label="Open Quotes" value={String(openQuotes)} sub="Active proposals" />
         <KPI icon={<Package size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Inventory" value="--" sub="Fabrics · Hardware · Motors" />
@@ -45,7 +45,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
       </div>
 
       {/* KPI Cards - Row 2 */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <KPI icon={<Megaphone size={18} />} iconBg="#fce7f3" iconColor="#ec4899" label="Social" value="--" sub="SocialForge status" />
         <KPI icon={<Headphones size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Support" value="0" sub="No open tickets" />
         <KPI icon={<TrendingUp size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Revenue MTD" value="--" sub="Month to date" />
@@ -54,7 +54,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
 
       {/* Business Summary Cards */}
       <div className="section-label" style={{ marginBottom: 8 }}>Businesses</div>
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <BizCard name="Empire Workroom" icon="🏗" color="#16a34a"
           stats={[`${quotes.length} quotes`, `$${pipeline.toLocaleString()} pipeline`]} />
         <BizCard name="WoodCraft" icon="🪵" color="#ca8a04"
@@ -68,7 +68,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
         <Shield size={14} className="text-[#b8960c]" />
         MAX Accuracy
       </div>
-      <div className="grid grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <KPI
           icon={<CheckCircle size={18} />}
           iconBg={accuracy && accuracy.accuracy_rate >= 90 ? '#dcfce7' : accuracy && accuracy.accuracy_rate >= 70 ? '#fef3c7' : '#fee2e2'}
@@ -154,7 +154,7 @@ function KPI({ icon, iconBg, iconColor, label, value, sub }: { icon: React.React
       <div className="w-8 h-8 rounded-lg flex items-center justify-center mb-2" style={{ background: iconBg, color: iconColor }}>{icon}</div>
       <div className="kpi-value">{value}</div>
       <div className="kpi-label">{label}</div>
-      <div style={{ fontSize: 9, color: '#aaa', marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: 10, color: '#aaa', marginTop: 2 }}>{sub}</div>
     </div>
   );
 }

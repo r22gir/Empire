@@ -153,8 +153,10 @@ export default function RecoveryForgeScreen() {
               width: '100%',
               height: '100%',
               border: 'none',
+              WebkitOverflowScrolling: 'touch' as any,
             }}
             title="RecoveryForge"
+            allow="fullscreen"
           />
         ) : (
           <div style={{

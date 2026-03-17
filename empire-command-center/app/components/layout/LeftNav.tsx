@@ -1,11 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { EcosystemProduct } from '../../lib/types';
 import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
-  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor,
+  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X,
 } from 'lucide-react';
 
 interface NavItem {
@@ -78,113 +78,176 @@ interface Props {
 
 export default function LeftNav({ activeProduct, onProductChange }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Detect mobile and auto-collapse
+  useEffect(() => {
+    const check = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setCollapsed(true);
+        setMobileOpen(false);
+      }
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Close mobile nav on product change
+  const handleProductClick = (product: EcosystemProduct) => {
+    onProductChange(product);
+    if (isMobile) setMobileOpen(false);
+  };
+
+  // On mobile: show hamburger button (rendered in TopBar area via CSS), overlay nav
+  const showNav = isMobile ? mobileOpen : true;
+  const isCollapsed = isMobile ? false : collapsed; // On mobile overlay, always show expanded
 
   return (
-    <nav
-      className="bg-[var(--panel)] border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto"
-      style={{
-        width: collapsed ? 56 : 210,
-        transition: 'width 0.2s ease',
-        padding: collapsed ? '8px 6px' : '12px 10px',
-      }}
-    >
-      {/* Collapse toggle */}
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="flex items-center justify-center cursor-pointer hover:bg-[#f0ede8] transition-colors"
-        style={{
-          width: collapsed ? 36 : '100%',
-          height: 28,
-          borderRadius: 8,
-          border: 'none',
-          background: 'transparent',
-          color: '#999',
-          marginBottom: 8,
-          alignSelf: collapsed ? 'center' : 'flex-end',
-        }}
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      >
-        {collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />}
-      </button>
+    <>
+      {/* Mobile hamburger button - fixed position */}
+      {isMobile && !mobileOpen && (
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="fixed bottom-20 left-3 z-[110] flex items-center justify-center"
+          style={{
+            width: 48, height: 48, borderRadius: 14,
+            background: '#b8960c', color: '#fff',
+            boxShadow: '0 4px 16px rgba(184,150,12,0.4)',
+            border: 'none', cursor: 'pointer',
+          }}
+          aria-label="Open menu"
+        >
+          <Menu size={22} />
+        </button>
+      )}
 
-      {NAV_SECTIONS.map((section, si) => (
-        <div key={section.label}>
-          {si > 0 && <div className="h-px bg-[var(--border)] my-2" style={{ margin: collapsed ? '6px 4px' : '8px 6px' }} />}
-          {!collapsed && (
-            <div className="section-label mb-1.5" style={{ fontSize: 9, padding: '0 8px' }}>{section.label}</div>
-          )}
-          <div className="flex flex-col" style={{ gap: collapsed ? 2 : 3 }}>
-            {section.items.map(item => {
-              const isActive = activeProduct === item.id;
-              const statusDot = item.status === 'active' ? '#22c55e'
-                : item.status === 'dev' ? '#f59e0b'
-                : '#d1d5db';
+      {/* Mobile overlay backdrop */}
+      {isMobile && mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-[100]"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
 
-              if (collapsed) {
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => onProductChange(item.id)}
-                    className="flex items-center justify-center cursor-pointer transition-all"
-                    title={item.name}
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 12,
-                      border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                      background: isActive ? '#fdf8eb' : 'transparent',
-                      color: isActive ? '#b8960c' : item.color,
-                      opacity: isActive ? 1 : 0.7,
-                      alignSelf: 'center',
-                      position: 'relative',
-                    }}
-                    onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.opacity = '1'; } }}
-                    onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.opacity = '0.7'; } }}
-                  >
-                    {item.icon}
-                    <span style={{
-                      position: 'absolute', top: 4, right: 4,
-                      width: 5, height: 5, borderRadius: '50%',
-                      background: isActive ? '#b8960c' : statusDot,
-                    }} />
-                  </button>
-                );
-              }
+      {/* Nav panel */}
+      {showNav && (
+        <nav
+          className={`bg-[var(--panel)] border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto ${
+            isMobile ? 'fixed inset-y-0 left-0 z-[101] shadow-2xl' : ''
+          }`}
+          style={{
+            width: isCollapsed ? 56 : 220,
+            transition: 'width 0.2s ease',
+            padding: isCollapsed ? '8px 6px' : '12px 10px',
+          }}
+        >
+          {/* Close / Collapse toggle */}
+          <button
+            onClick={() => {
+              if (isMobile) setMobileOpen(false);
+              else setCollapsed(!collapsed);
+            }}
+            className="flex items-center justify-center cursor-pointer hover:bg-[#f0ede8] transition-colors"
+            style={{
+              width: isCollapsed ? 36 : '100%',
+              height: 36,
+              borderRadius: 8,
+              border: 'none',
+              background: 'transparent',
+              color: '#999',
+              marginBottom: 8,
+              alignSelf: isCollapsed ? 'center' : 'flex-end',
+            }}
+            title={isMobile ? 'Close menu' : (collapsed ? 'Expand sidebar' : 'Collapse sidebar')}
+          >
+            {isMobile ? <X size={18} /> : (collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />)}
+          </button>
 
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onProductChange(item.id)}
-                  className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: 12,
-                    fontSize: 12,
-                    border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                    background: isActive ? '#fdf8eb' : 'transparent',
-                    fontWeight: isActive ? 600 : 400,
-                    boxShadow: isActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
-                  }}
-                  onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
-                  onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
-                >
-                  <span className="shrink-0" style={{ color: isActive ? '#b8960c' : item.color, opacity: isActive ? 1 : 0.7 }}>
-                    {item.icon}
-                  </span>
-                  <span className="flex-1 truncate" style={{ color: isActive ? '#96750a' : '#666' }}>{item.name}</span>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? '#b8960c' : statusDot }} />
-                  {item.status === 'dev' && !isActive && (
-                    <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
-                  )}
-                  {item.status === 'planned' && !isActive && (
-                    <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </nav>
+          {NAV_SECTIONS.map((section, si) => (
+            <div key={section.label}>
+              {si > 0 && <div className="h-px bg-[var(--border)] my-2" style={{ margin: isCollapsed ? '6px 4px' : '8px 6px' }} />}
+              {!isCollapsed && (
+                <div className="section-label mb-1.5" style={{ fontSize: 9, padding: '0 8px' }}>{section.label}</div>
+              )}
+              <div className="flex flex-col" style={{ gap: isCollapsed ? 2 : 3 }}>
+                {section.items.map(item => {
+                  const isActive = activeProduct === item.id;
+                  const statusDot = item.status === 'active' ? '#22c55e'
+                    : item.status === 'dev' ? '#f59e0b'
+                    : '#d1d5db';
+
+                  if (isCollapsed) {
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleProductClick(item.id)}
+                        className="flex items-center justify-center cursor-pointer transition-all"
+                        title={item.name}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 12,
+                          border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                          background: isActive ? '#fdf8eb' : 'transparent',
+                          color: isActive ? '#b8960c' : item.color,
+                          opacity: isActive ? 1 : 0.7,
+                          alignSelf: 'center',
+                          position: 'relative',
+                        }}
+                        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.opacity = '1'; } }}
+                        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.opacity = '0.7'; } }}
+                      >
+                        {item.icon}
+                        <span style={{
+                          position: 'absolute', top: 4, right: 4,
+                          width: 5, height: 5, borderRadius: '50%',
+                          background: isActive ? '#b8960c' : statusDot,
+                        }} />
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleProductClick(item.id)}
+                      className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 12,
+                        fontSize: 13,
+                        minHeight: 44,
+                        border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                        background: isActive ? '#fdf8eb' : 'transparent',
+                        fontWeight: isActive ? 600 : 400,
+                        boxShadow: isActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
+                      }}
+                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
+                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                    >
+                      <span className="shrink-0" style={{ color: isActive ? '#b8960c' : item.color, opacity: isActive ? 1 : 0.7 }}>
+                        {item.icon}
+                      </span>
+                      <span className="flex-1 truncate" style={{ color: isActive ? '#96750a' : '#666' }}>{item.name}</span>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? '#b8960c' : statusDot }} />
+                      {item.status === 'dev' && !isActive && (
+                        <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
+                      )}
+                      {item.status === 'planned' && !isActive && (
+                        <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+      )}
+    </>
   );
 }

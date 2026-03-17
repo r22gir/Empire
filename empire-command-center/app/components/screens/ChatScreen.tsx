@@ -192,12 +192,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        padding: '24px 36px',
-      }}>
+        padding: '16px 12px',
+      }}
+      className="sm:!px-9 sm:!py-6">
         {messages.map((msg, i) => (
           <div key={msg.id || i} style={{
             marginBottom: 16,
-            maxWidth: '75%',
+            maxWidth: '90%',
             marginLeft: msg.role === 'user' ? 'auto' : undefined,
             marginRight: msg.role === 'user' ? 0 : 'auto',
           }}>
@@ -371,7 +372,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
       {/* Input area */}
       <div style={{
-        padding: '16px 36px 12px',
+        padding: '12px 12px 8px',
         flexShrink: 0,
         background: 'var(--chat-bg)',
       }}>

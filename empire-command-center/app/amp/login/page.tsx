@@ -52,7 +52,7 @@ export default function AmpLogin() {
             </div>
           </div>
           <button type="submit" disabled={loading}
-            style={{ width: '100%', background: '#D4A030', color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: loading ? 0.6 : 1 }}>
+            style={{ width: '100%', background: '#D4A030', color: '#fff', border: 'none', borderRadius: 12, padding: '14px', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: loading ? 0.6 : 1, minHeight: 44 }}>
             {loading ? 'Ingresando...' : <>Ingresar <ArrowRight size={16} /></>}
           </button>
           <p style={{ textAlign: 'center', fontSize: 13, color: '#9B9590', marginTop: 16 }}>

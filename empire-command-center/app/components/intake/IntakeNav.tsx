@@ -12,7 +12,7 @@ export default function IntakeNav({ user }: { user?: { name: string; company?: s
 
   return (
     <nav className="bg-[#1a1a1a] border-b border-[#2a2a2a] sticky top-0 z-50">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-12">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14">
         <a href="/intake" className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-[#b8960c] flex items-center justify-center">
             <Crown size={13} className="text-white" />
@@ -25,14 +25,14 @@ export default function IntakeNav({ user }: { user?: { name: string; company?: s
         {user && (
           <div className="flex items-center gap-3">
             <button onClick={() => router.push('/intake/account')}
-              className="flex items-center gap-1.5 text-[#999] hover:text-[#b8960c] transition-colors cursor-pointer bg-transparent border-none"
+              className="flex items-center gap-1.5 text-[#999] hover:text-[#b8960c] transition-colors cursor-pointer bg-transparent border-none p-2 min-h-[44px] min-w-[44px]"
               title="My Account">
-              <User size={13} />
-              <span className="text-[11px] font-semibold hidden sm:inline">{user.name}</span>
+              <User size={16} />
+              <span className="text-sm font-semibold hidden sm:inline">{user.name}</span>
             </button>
-            {user.company && <span className="text-[9px] text-[#555] hidden sm:inline">{user.company}</span>}
-            <button onClick={handleLogout} className="text-[#666] hover:text-[#dc2626] transition-colors cursor-pointer bg-transparent border-none" title="Sign Out">
-              <LogOut size={14} />
+            {user.company && <span className="text-xs text-[#555] hidden sm:inline">{user.company}</span>}
+            <button onClick={handleLogout} className="text-[#666] hover:text-[#dc2626] transition-colors cursor-pointer bg-transparent border-none p-2 min-h-[44px] min-w-[44px]" title="Sign Out">
+              <LogOut size={18} />
             </button>
           </div>
         )}

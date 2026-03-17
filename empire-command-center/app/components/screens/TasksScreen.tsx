@@ -232,9 +232,9 @@ export default function TasksScreen() {
   const totalAll = totalTodo + totalInProgress + totalWaiting + totalDone;
 
   return (
-    <div className="flex-1 overflow-y-auto" style={{ background: '#f5f2ed', padding: '24px 36px' }}>
+    <div className="flex-1 overflow-y-auto px-4 sm:px-9 py-6" style={{ background: '#f5f2ed' }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-5 gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#fdf8eb] flex items-center justify-center">
             <ListTodo size={20} className="text-[#b8960c]" />
@@ -273,7 +273,7 @@ export default function TasksScreen() {
       </div>
 
       {/* Dashboard Summary KPIs */}
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <DashKPI label="To Do" value={totalTodo} color="#d97706" bg="#fffbeb"
           active={filterStatus === 'todo'} onClick={() => setFilterStatus(filterStatus === 'todo' ? '' : 'todo')} />
         <DashKPI label="In Progress" value={totalInProgress} color="#2563eb" bg="#eff6ff"
@@ -440,7 +440,7 @@ function DeskBreakdown({ desks, filterDesk, onDeskFilter }: {
         <span style={{ fontSize: 10, color: '#bbb' }}>{entries.length} desks</span>
       </button>
       {expanded && (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {entries.map(([desk, counts]) => {
             const deskTotal = Object.values(counts).reduce((s, n) => s + n, 0);
             const isActive = filterDesk === desk;
@@ -717,7 +717,7 @@ function TaskDetailView({ task, onBack, onStatusChange, onDelete, onComment, act
         </div>
 
         {/* Metadata grid */}
-        <div className="grid grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           <MetaField label="Status">
             <span style={{ color: sc.color, background: sc.bg, padding: '4px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600 }}>
               {sc.label}
@@ -736,7 +736,7 @@ function TaskDetailView({ task, onBack, onStatusChange, onDelete, onComment, act
           </MetaField>
         </div>
 
-        <div className="grid grid-cols-4 gap-3 mt-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
           <MetaField label="Created">
             <span style={{ fontSize: 12, color: '#777' }}>{timeAgo(task.created_at)}</span>
           </MetaField>
@@ -756,7 +756,7 @@ function TaskDetailView({ task, onBack, onStatusChange, onDelete, onComment, act
         </div>
 
         {/* Status change buttons */}
-        <div className="flex gap-2 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+        <div className="flex flex-wrap gap-2 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
           <span className="section-label" style={{ alignSelf: 'center', marginRight: 8 }}>Change Status:</span>
           {STATUS_OPTIONS.map(s => (
             <button

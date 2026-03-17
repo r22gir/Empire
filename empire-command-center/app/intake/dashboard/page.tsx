@@ -76,41 +76,41 @@ export default function IntakeDashboard() {
             <button
               onClick={refresh}
               disabled={refreshing}
-              className="px-3 py-2 text-[11px] font-medium text-[#888] border border-[#ece8e0] bg-[#faf9f7] rounded-[10px] hover:bg-[#f0ede8] transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              className="px-3 py-2.5 min-h-[44px] text-sm font-medium text-[#888] border border-[#ece8e0] bg-[#faf9f7] rounded-[10px] hover:bg-[#f0ede8] transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
-              <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} /> Refresh
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> <span className="hidden sm:inline">Refresh</span>
             </button>
             <Link
               href="/intake/project/new"
-              className="px-4 py-2 text-[11px] font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors flex items-center gap-1.5"
+              className="px-4 py-2.5 min-h-[44px] text-sm font-bold bg-[#1a1a1a] text-white rounded-[10px] hover:bg-[#333] transition-colors flex items-center gap-1.5"
             >
-              <Plus size={13} /> New Project
+              <Plus size={14} /> New Project
             </Link>
           </div>
         </div>
 
         {/* Stats row */}
         {projects.length > 0 && (
-          <div className="flex gap-3 mb-6">
-            <div className="flex-1 bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
               <div className="text-[20px] font-bold text-[#1a1a1a]">{projects.length}</div>
-              <div className="text-[10px] text-[#999] font-medium mt-0.5">Projects</div>
+              <div className="text-xs text-[#999] font-medium mt-0.5">Projects</div>
             </div>
-            <div className="flex-1 bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
               <div className="text-[20px] font-bold text-[#2563eb]">
                 {projects.filter(p => p.status === 'submitted').length}
               </div>
-              <div className="text-[10px] text-[#999] font-medium mt-0.5">Pending Review</div>
+              <div className="text-xs text-[#999] font-medium mt-0.5">Pending</div>
             </div>
-            <div className="flex-1 bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
               <div className="text-[20px] font-bold text-[#b8960c]">
                 {projects.filter(p => p.status === 'quote-ready').length}
               </div>
-              <div className="text-[10px] text-[#999] font-medium mt-0.5">Quotes Ready</div>
+              <div className="text-xs text-[#999] font-medium mt-0.5">Quotes Ready</div>
             </div>
-            <div className="flex-1 bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
+            <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[12px] p-3.5 text-center">
               <div className="text-[20px] font-bold text-[#7c3aed]">{totalPhotos}</div>
-              <div className="text-[10px] text-[#999] font-medium mt-0.5">Photos</div>
+              <div className="text-xs text-[#999] font-medium mt-0.5">Photos</div>
             </div>
           </div>
         )}
