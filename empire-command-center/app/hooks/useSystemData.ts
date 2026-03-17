@@ -21,25 +21,36 @@ export function useSystemData() {
 
   const fetchServices = useCallback(async () => {
     try {
-      const res = await fetch(API + '/max/services');
-      if (res.ok) {
-        const svcData = await res.json();
-        // Also fetch Telegram bot status and merge into services
+      // Check real service endpoints in parallel
+      const checks = [
+        { name: 'backend', url: API + '/system/stats' },
+        { name: 'ollama', url: 'http://localhost:11434/api/tags' },
+        { name: 'openclaw', url: 'http://localhost:7878/health' },
+      ];
+      const results: Record<string, string> = {};
+      await Promise.all(checks.map(async (svc) => {
         try {
-          const tgRes = await fetch(API + '/max/telegram/status');
-          if (tgRes.ok) {
-            const tg = await tgRes.json();
-            svcData.tg = { status: tg.configured ? 'online' : 'offline' };
-          }
-        } catch { /* silent */ }
-        setServices(svcData);
-      }
+          const r = await fetch(svc.url, { signal: AbortSignal.timeout(3000) });
+          results[svc.name] = r.ok ? 'online' : 'degraded';
+        } catch {
+          results[svc.name] = 'offline';
+        }
+      }));
+      // Telegram status
+      try {
+        const tgRes = await fetch(API + '/max/telegram/status', { signal: AbortSignal.timeout(3000) });
+        if (tgRes.ok) {
+          const tg = await tgRes.json();
+          results.tg = tg.configured ? 'online' : 'offline';
+        }
+      } catch { results.tg = 'offline'; }
+      setServices(results);
     } catch { /* silent */ }
   }, []);
 
   const fetchBriefing = useCallback(async () => {
     try {
-      const res = await fetch(API + '/max/briefing');
+      const res = await fetch(API + '/max/ai-desks/briefing');
       if (res.ok) {
         const data = await res.json();
         setBriefing(data.briefing || data.content || '');
@@ -49,7 +60,7 @@ export function useSystemData() {
 
   const fetchSystem = useCallback(async () => {
     try {
-      const res = await fetch(API + '/max/system');
+      const res = await fetch(API + '/system/stats');
       if (res.ok) setSystemStats(await res.json());
     } catch { /* silent */ }
   }, []);
