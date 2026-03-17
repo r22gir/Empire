@@ -265,7 +265,7 @@ async def update_profile(request: Request, update: ProfileUpdate, user=Depends(g
         conn.execute(f"UPDATE intake_users SET {', '.join(fields)} WHERE id = ?", values)
         conn.commit()
     conn.close()
-    return await get_me(user)
+    return await get_me(request, user)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -363,7 +363,7 @@ async def update_project(request: Request, project_id: str, update: ProjectUpdat
         )
         conn.commit()
     conn.close()
-    return await get_project(project_id, user)
+    return await get_project(request, project_id, user)
 
 
 @limiter.limit("10/minute")

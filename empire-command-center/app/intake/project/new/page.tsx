@@ -89,7 +89,7 @@ export default function NewProject() {
       treatment: treatments.join(', '),
       style: items[0]?.style || '',
       scope,
-      rooms: JSON.stringify(rooms),
+      rooms,
     };
   };
 
@@ -119,13 +119,18 @@ export default function NewProject() {
   const handleNext = async () => {
     if (step === 0) {
       if (!name.trim()) return;
-      if (!projectId) await createProject();
-      else {
-        await intakeFetch(`/projects/${projectId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildProjectData()),
-        });
+      try {
+        if (!projectId) await createProject();
+        else {
+          await intakeFetch(`/projects/${projectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(buildProjectData()),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to save project:', err);
+        return;
       }
     }
     setStep(s => s + 1);
