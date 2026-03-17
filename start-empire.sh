@@ -18,7 +18,10 @@ err() { echo -e "${R}[FAIL]${N} $1"; }
 wait_port() {
     local port=$1 i=0
     while [ $i -lt 40 ]; do
-        if curl -sf -o /dev/null "http://localhost:$port" 2>/dev/null; then return 0; fi
+        local code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port/health" 2>/dev/null)
+        if [ "$code" = "200" ] || [ "$code" = "404" ]; then return 0; fi
+        code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$port" 2>/dev/null)
+        if [ "$code" = "200" ] || [ "$code" = "307" ]; then return 0; fi
         sleep 1; i=$((i + 1))
     done
     return 1
