@@ -398,15 +398,15 @@ export default function PresentationScreen() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'; const recorder = new MediaRecorder(stream, { mimeType });
       const chunks: Blob[] = [];
 
       recorder.ondataavailable = (e) => chunks.push(e.data);
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const blob = new Blob(chunks, { type: recorder.mimeType });
         const formData = new FormData();
-        formData.append('file', blob, 'voice.webm');
+        formData.append('file', blob, recorder.mimeType.includes('mp4') ? 'voice.mp4' : 'voice.webm');
         formData.append('mode', mode);
 
         setIsLoading(true);
