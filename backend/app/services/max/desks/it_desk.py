@@ -1,6 +1,7 @@
 """
 ITDesk — Empire platform systems administration and monitoring.
 Agent: Orion. Does REAL health checks — actually tests ports and resources.
+UPGRADED v5.0: service_manager (status/restart/start/stop/logs), package_manager (pip/npm install).
 """
 import logging
 import os
@@ -102,6 +103,8 @@ class ITDesk(BaseDesk):
         "resource_monitoring",
         "troubleshooting",
         "backup_verification",
+        "service_manager",
+        "package_manager",
     ]
 
     def __init__(self):
@@ -221,11 +224,35 @@ class ITDesk(BaseDesk):
         return await self.complete_task(task, result)
 
     async def _handle_restart(self, task: DeskTask) -> DeskTask:
-        task.actions.append(DeskAction(action="restart_request", detail="Processing restart request"))
-        return await self.escalate(
-            task,
-            f"Service restart requested: {task.title}. Needs founder confirmation."
-        )
+        """Handle service restart via service_manager tool (Level 3 — PIN required)."""
+        task.actions.append(DeskAction(action="restart_request", detail="Processing restart request via service_manager"))
+        from app.services.max.tool_executor import execute_tool
+
+        combined = f"{task.title} {task.description}".lower()
+        # Detect which service
+        service = "all"
+        for svc in ["backend", "cc", "openclaw", "ollama", "recoveryforge", "relistapp"]:
+            if svc in combined:
+                service = svc
+                break
+
+        # Detect command
+        cmd = "restart"
+        if "stop" in combined:
+            cmd = "stop"
+        elif "start" in combined:
+            cmd = "start"
+
+        r = execute_tool({"tool": "service_manager", "command": cmd, "service": service}, desk="it")
+        if r.success and r.result:
+            services = r.result.get("services", [])
+            lines = [f"Service {cmd}: {service}"]
+            for s in services:
+                status = "UP" if s.get("running") else "DOWN"
+                lines.append(f"  {s.get('name')}: {status} (:{s.get('port', '?')})")
+            return await self.complete_task(task, "\n".join(lines))
+        else:
+            return await self.escalate(task, f"Service {cmd} failed: {r.error or 'unknown error'}. Needs founder intervention.")
 
     async def _handle_log_analysis(self, task: DeskTask) -> DeskTask:
         task.actions.append(DeskAction(action="log_analysis", detail="Analyzing logs"))

@@ -14,7 +14,7 @@ class InnovationDesk(BaseDesk):
     # Actually use a distinct ID
     desk_id = "innovation"
     desk_name = "InnovationDesk"
-    agent_name = "Atlas"
+    agent_name = "Spark"
     desk_description = (
         "Proactive intelligence: market scanning, competitor monitoring, trend analysis, "
         "and monetization suggestions. Covers drapery/upholstery, woodwork/CNC (CraftForge), "

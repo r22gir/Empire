@@ -32,6 +32,7 @@ from .innovation_desk import InnovationDesk
 from .intake_desk import IntakeDesk
 from .analytics_desk import AnalyticsDesk
 from .quality_desk import QualityDesk
+from .codeforge_desk import CodeForgeDesk
 
 logger = logging.getLogger("max.desks.manager")
 
@@ -66,6 +67,7 @@ class AIDeskManager:
             WebsiteDesk(), LegalDesk(), LabDesk(),
             InnovationDesk(),
             IntakeDesk(), AnalyticsDesk(), QualityDesk(),
+            CodeForgeDesk(),
         ]
         for desk in desks:
             self.router.register_desk(desk)

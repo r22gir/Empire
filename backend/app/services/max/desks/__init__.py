@@ -20,6 +20,7 @@ from .innovation_desk import InnovationDesk
 from .intake_desk import IntakeDesk
 from .analytics_desk import AnalyticsDesk
 from .quality_desk import QualityDesk
+from .codeforge_desk import CodeForgeDesk
 from .desk_router import DeskRouter
 from .desk_manager import AIDeskManager, TaskStatus
 
@@ -29,5 +30,6 @@ __all__ = [
     "SalesDesk", "FinanceDesk", "ClientsDesk", "ContractorsDesk",
     "ITDesk", "WebsiteDesk", "LegalDesk", "LabDesk",
     "InnovationDesk", "IntakeDesk", "AnalyticsDesk", "QualityDesk",
+    "CodeForgeDesk",
     "DeskRouter", "AIDeskManager", "TaskStatus",
 ]
