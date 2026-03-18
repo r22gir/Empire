@@ -120,12 +120,14 @@ EMPIRE_CATALOG = {
         },
         "social_forge": {
             "name": "SocialForge",
-            "description": "Social media management — content creation, post scheduling, campaign management across Instagram, Facebook, Pinterest, LinkedIn, Google Business.",
-            "status": "dev",
+            "description": "Social media management — content creation, post scheduling, campaign management. Instagram and Facebook APIs wired with real tokens.",
+            "status": "active",
             "port": None,
             "cc_screen": "SocialForgePage.tsx",
             "desk": "marketing",
             "target_user": "Small business owners",
+            "endpoints": ["/api/v1/socialforge/post/instagram", "/api/v1/socialforge/post/facebook", "/api/v1/socialforge/accounts"],
+            "integrations": ["Instagram Graph API", "Facebook Pages API"],
         },
         "support_forge": {
             "name": "SupportForge",
@@ -480,8 +482,9 @@ EMPIRE_CATALOG = {
         "telegram": {"name": "Telegram Bot", "env_var": "TELEGRAM_BOT_TOKEN", "configured": True, "purpose": "Founder notifications, quote PDFs, voice messages"},
         "stability_ai": {"name": "Stability AI", "env_var": "STABILITY_API_KEY", "configured": True, "purpose": "Image inpainting for design mockups"},
         "stripe": {"name": "Stripe", "env_var": "STRIPE_SECRET_KEY", "configured": True, "purpose": "Payment processing — test keys active, 3 price tiers configured"},
-        "instagram": {"name": "Instagram API", "env_var": "INSTAGRAM_API_TOKEN", "configured": True, "purpose": "Social media integration"},
-        "facebook": {"name": "Facebook Pages", "env_var": "FACEBOOK_PAGE_TOKEN", "configured": True, "purpose": "Social media integration"},
+        "instagram": {"name": "Instagram API", "env_var": "INSTAGRAM_API_TOKEN", "configured": True, "purpose": "Social media posting via Graph API — SocialForge wired"},
+        "facebook": {"name": "Facebook Pages", "env_var": "FACEBOOK_PAGE_TOKEN", "configured": True, "purpose": "Social media posting via Graph API — SocialForge wired"},
+        "sendgrid": {"name": "SendGrid", "env_var": "SENDGRID_API_KEY", "configured": False, "purpose": "Email sending from workroom@empirebox.store (pending API key)"},
         "brave_search": {"name": "Brave Search", "env_var": "BRAVE_API_KEY", "configured": True, "purpose": "Web search fallback"},
         "openclaw_local": {"name": "OpenClaw", "env_var": "OPENCLAW_GATEWAY_TOKEN", "configured": True, "purpose": "Skills-augmented local AI — autonomous task execution"},
         "ollama_local": {"name": "Ollama", "env_var": None, "configured": True, "purpose": "Local LLM server — LLaVA for image classification"},
@@ -605,6 +608,13 @@ EMPIRE_CATALOG = {
         "system": [
             {"method": "GET", "path": "/api/v1/system/stats", "description": "CPU, RAM, disk, temperature"},
             {"method": "GET", "path": "/api/v1/system/health", "description": "Service health check"},
+            {"method": "GET", "path": "/api/v1/system/ollama/status", "description": "Ollama + RecoveryForge status"},
+            {"method": "POST", "path": "/api/v1/system/ollama/toggle", "description": "Toggle Ollama on/off"},
+        ],
+        "socialforge": [
+            {"method": "POST", "path": "/api/v1/socialforge/post/instagram", "description": "Post to Instagram"},
+            {"method": "POST", "path": "/api/v1/socialforge/post/facebook", "description": "Post to Facebook"},
+            {"method": "GET", "path": "/api/v1/socialforge/accounts", "description": "Check connected social accounts"},
         ],
         "other_groups": [
             "quotes", "chats", "files", "docker", "ollama", "notifications",
@@ -683,13 +693,14 @@ EMPIRE_CATALOG = {
             {"date": "2026-03-16", "event": "start-empire.sh cleanup, endpoint fixes, full app audit"},
             {"date": "2026-03-17", "event": "Live testing fixes — file safety, 3D avatar, timeouts, port refs, systemd services"},
             {"date": "2026-03-18", "event": "v5.0 Total Knowledge Build — ecosystem catalog, comprehensive report"},
+            {"date": "2026-03-18", "event": "v5.0.1 — embedding fix, MAX behavior rules, Ollama toggle, landing pages, SocialForge wired, expanded tools"},
         ],
     },
 
     "known_issues": [
         "GPU: Quadro K600 with nouveau driver — unstable, needs proprietary driver",
         "CraftForge: full spec + 15 backend endpoints exist, ZERO frontend built",
-        "SupportForge, SocialForge, MarketForge, ShipForge: screens exist but limited functionality",
+        "MarketForge, ShipForge: screens exist but limited functionality",
         "AMP: current app 'didn't capture the idea' — needs rebuild to match real vision",
         "contacts table empty (0 rows) — customers table has 113 rows instead",
         "access_audit table empty — audit logging may not be fully wired",
@@ -697,6 +708,8 @@ EMPIRE_CATALOG = {
         "3D avatar (TalkingHead) needs live testing to confirm rendering",
         "Ollama: no production models downloaded (only LLaVA for classification)",
         "Some desk agent names duplicated: Zara (website + intake), Raven (legal + analytics), Phoenix (quality + lab)",
+        "SendGrid API key needed for email sending from workroom@empirebox.store",
+        "Facebook App Secret needed for long-lived social tokens (60 days)",
     ],
 
     "stats": {

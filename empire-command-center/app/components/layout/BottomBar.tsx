@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, ChevronUp, ChevronDown, Newspaper } from 'lucide-react';
+import { ExternalLink, ChevronUp, ChevronDown, Newspaper, Power } from 'lucide-react';
 import { API } from '../../lib/api';
 
 interface Props {
@@ -19,6 +19,37 @@ interface NewsItem {
 export default function BottomBar({ services }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [ollamaStatus, setOllamaStatus] = useState<{ ollama: string; percentage: number } | null>(null);
+  const [toggling, setToggling] = useState(false);
+
+  // Poll Ollama status
+  useEffect(() => {
+    const check = () => {
+      fetch(API + '/system/ollama/status')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setOllamaStatus(data); })
+        .catch(() => {});
+    };
+    check();
+    const iv = setInterval(check, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const toggleOllama = async () => {
+    if (toggling) return;
+    const isOn = ollamaStatus?.ollama === 'running';
+    if (isOn && !confirm('Turning off Ollama will stop RecoveryForge classification. Continue?')) return;
+    if (!isOn && !confirm('Turning on Ollama may slow down MAX responses. Continue?')) return;
+    setToggling(true);
+    try {
+      const r = await fetch(API + '/system/ollama/toggle', { method: 'POST' });
+      if (r.ok) {
+        const data = await r.json();
+        setOllamaStatus(prev => prev ? { ...prev, ollama: data.ollama } : null);
+      }
+    } catch (e) { console.error(e); }
+    setToggling(false);
+  };
 
   // Fetch notifications/news from backend or use defaults
   useEffect(() => {
@@ -123,6 +154,27 @@ export default function BottomBar({ services }: Props) {
             ))}
           </div>
         </div>
+
+        <div className="w-px h-4 bg-[#444] shrink-0" />
+
+        {/* Ollama toggle */}
+        {ollamaStatus && (
+          <button
+            onClick={toggleOllama}
+            disabled={toggling}
+            className={`flex items-center gap-1 text-[10px] font-mono cursor-pointer whitespace-nowrap transition-colors px-1.5 py-0.5 rounded ${
+              ollamaStatus.ollama === 'running'
+                ? 'text-[#22c55e] hover:text-[#16a34a] bg-[#22c55e10]'
+                : 'text-[#f59e0b] hover:text-[#d97706] bg-[#f59e0b10]'
+            }`}
+            title={ollamaStatus.ollama === 'running'
+              ? `Ollama ON — RecoveryForge: ${ollamaStatus.percentage}%`
+              : 'Ollama OFF — MAX faster'}
+          >
+            <Power size={10} />
+            {ollamaStatus.ollama === 'running' ? 'Ollama ON' : 'Ollama OFF'}
+          </button>
+        )}
 
         <div className="w-px h-4 bg-[#444] shrink-0" />
 
