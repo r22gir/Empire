@@ -19,10 +19,11 @@ class CodeForgeDesk(BaseDesk):
         "and never modifies files outside ~/empire-repo/."
     )
     capabilities = [
-        "file_read", "file_write", "file_edit",
+        "file_read", "file_write", "file_edit", "file_append",
         "git_ops", "test_runner", "project_scaffold",
         "code_review", "bug_fixing", "feature_development",
     ]
+    preferred_model = "claude-opus-4-6"  # Atlas gets Opus for coding tasks
 
     def __init__(self):
         super().__init__()

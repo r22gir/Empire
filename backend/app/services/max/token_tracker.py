@@ -111,12 +111,13 @@ class TokenTracker:
                 VALUES (1, ?, 0.8, 0, 0.95)
             """, (DEFAULT_MONTHLY_BUDGET,))
             # Safe migration: add columns if missing
-            for col, default in [("feature", "'chat'"), ("business", "'general'"), ("source", "''"), ("tenant_id", "'founder'")]:
+            for col, default in [("feature", "'chat'"), ("business", "'general'"), ("source", "''"), ("tenant_id", "'founder'"), ("desk", "''")]:
                 try:
                     conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} TEXT DEFAULT {default}")
                 except sqlite3.OperationalError:
                     pass  # Column already exists
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_tenant ON token_usage(tenant_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_desk ON token_usage(desk)")
             conn.commit()
             conn.close()
         except Exception as e:

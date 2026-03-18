@@ -1,9 +1,12 @@
 """Email service for MAX — sends emails with optional PDF attachments.
 
-Uses Python stdlib smtplib + email.mime. Works with Gmail (app password),
-Outlook, or any standard SMTP provider.
+Priority: SendGrid API (if SENDGRID_API_KEY is set) -> SMTP (if configured).
 
-Env vars:
+SendGrid env vars:
+  SENDGRID_API_KEY    — SendGrid API key
+  SENDGRID_FROM_EMAIL — sender address (default: workroom@empirebox.store)
+
+SMTP env vars (fallback):
   SMTP_HOST       — SMTP server (default: smtp.gmail.com)
   SMTP_PORT       — SMTP port (default: 587 for STARTTLS)
   SMTP_USER       — login email address
@@ -24,6 +27,11 @@ logger = logging.getLogger("max.email_service")
 
 class EmailService:
     def __init__(self):
+        # SendGrid config
+        self.sendgrid_key = os.environ.get("SENDGRID_API_KEY", "")
+        self.sendgrid_from = os.environ.get("SENDGRID_FROM_EMAIL", "workroom@empirebox.store")
+
+        # SMTP config (fallback)
         self.host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
         self.port = int(os.environ.get("SMTP_PORT", "587"))
         self.user = os.environ.get("SMTP_USER", "")
@@ -32,7 +40,8 @@ class EmailService:
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.user and self.password)
+        """True if SendGrid OR SMTP credentials are available."""
+        return bool(self.sendgrid_key) or bool(self.user and self.password)
 
     def send(
         self,
@@ -44,6 +53,8 @@ class EmailService:
     ) -> bool:
         """Send an email. Returns True on success.
 
+        Tries SendGrid first (if configured), then SMTP fallback.
+
         Args:
             to: recipient email address
             subject: email subject line
@@ -52,8 +63,85 @@ class EmailService:
             cc: optional CC address
         """
         if not self.is_configured:
-            raise RuntimeError("Email not configured — set SMTP_USER and SMTP_PASSWORD env vars")
+            raise RuntimeError(
+                "Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD env vars"
+            )
 
+        if self.sendgrid_key:
+            return self._send_sendgrid(to, subject, body_html, attachments, cc)
+
+        return self._send_smtp(to, subject, body_html, attachments, cc)
+
+    def _send_sendgrid(
+        self,
+        to: str,
+        subject: str,
+        body_html: str,
+        attachments: list[str] | None = None,
+        cc: str | None = None,
+    ) -> bool:
+        """Send via SendGrid API."""
+        try:
+            from sendgrid import SendGridAPIClient
+            from sendgrid.helpers.mail import (
+                Mail, Attachment, FileContent, FileName, FileType, Disposition,
+            )
+            import base64
+            import mimetypes
+
+            message = Mail(
+                from_email=self.sendgrid_from,
+                to_emails=to,
+                subject=subject,
+                html_content=body_html,
+            )
+
+            if cc:
+                from sendgrid.helpers.mail import Cc
+                message.add_cc(Cc(cc))
+
+            # Attach files
+            for filepath in (attachments or []):
+                path = Path(filepath)
+                if not path.exists():
+                    logger.warning(f"Attachment not found: {filepath}")
+                    continue
+                with open(path, "rb") as f:
+                    file_data = f.read()
+                encoded_file = base64.b64encode(file_data).decode()
+                mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
+                attachment = Attachment(
+                    FileContent(encoded_file),
+                    FileName(path.name),
+                    FileType(mime_type),
+                    Disposition("attachment"),
+                )
+                message.add_attachment(attachment)
+
+            sg = SendGridAPIClient(self.sendgrid_key)
+            response = sg.send(message)
+            if response.status_code < 300:
+                logger.info(f"Email sent via SendGrid to {to} — subject: {subject}")
+                return True
+            else:
+                logger.error(f"SendGrid returned status {response.status_code} for {to}")
+                raise RuntimeError(f"SendGrid error: status {response.status_code}")
+        except ImportError:
+            logger.error("sendgrid package not installed — run: pip install sendgrid")
+            raise RuntimeError("sendgrid package not installed")
+        except Exception as e:
+            logger.error(f"SendGrid send failed: {e}")
+            raise
+
+    def _send_smtp(
+        self,
+        to: str,
+        subject: str,
+        body_html: str,
+        attachments: list[str] | None = None,
+        cc: str | None = None,
+    ) -> bool:
+        """Send via SMTP (original method)."""
         msg = MIMEMultipart()
         msg["From"] = f"{self.from_name} <{self.user}>"
         msg["To"] = to
@@ -89,8 +177,8 @@ class EmailService:
                 server.ehlo()
                 server.login(self.user, self.password)
                 server.sendmail(self.user, recipients, msg.as_string())
-            logger.info(f"Email sent to {to} — subject: {subject}")
+            logger.info(f"Email sent via SMTP to {to} — subject: {subject}")
             return True
         except Exception as e:
-            logger.error(f"Email send failed: {e}")
+            logger.error(f"SMTP send failed: {e}")
             raise

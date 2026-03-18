@@ -1321,7 +1321,7 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         from app.services.max.email_service import EmailService
         svc = EmailService()
         if not svc.is_configured:
-            return ToolResult(tool="send_email", success=False, error="Email not configured — set SMTP_USER and SMTP_PASSWORD in .env")
+            return ToolResult(tool="send_email", success=False, error="Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD in .env")
         svc.send(to=to, subject=subject, body_html=body, attachments=attachments, cc=cc)
         return ToolResult(tool="send_email", success=True, result={"sent_to": to, "subject": subject})
     except Exception as e:

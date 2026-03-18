@@ -106,6 +106,7 @@ class ITDesk(BaseDesk):
         "service_manager",
         "package_manager",
     ]
+    preferred_model = "claude-sonnet-4-6"  # Orion: Sonnet for IT ops
 
     def __init__(self):
         super().__init__()

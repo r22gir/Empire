@@ -21,6 +21,7 @@ class AnalyticsDesk(BaseDesk):
         "pipeline_analysis",
         "cost_analysis",
     ]
+    preferred_model = "claude-sonnet-4-6"  # Raven: Sonnet for analytics
 
     async def _get_metrics(self) -> dict:
         """Pull key metrics from all databases."""

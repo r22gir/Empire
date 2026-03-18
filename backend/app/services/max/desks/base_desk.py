@@ -67,6 +67,7 @@ class BaseDesk(ABC):
     desk_description: str = "Abstract base desk"
     agent_name: str = "MAX"
     capabilities: list[str] = []
+    preferred_model: str = "grok"  # default; desks override for cost-optimized routing
 
     def __init__(self):
         self.active_tasks: list[DeskTask] = []
@@ -189,18 +190,23 @@ class BaseDesk(ABC):
         Use this instead of raw ai_router.chat() — it logs costs to the desk
         and falls back gracefully if all providers are down.
 
+        Uses desk's preferred_model if no explicit model_preference is given.
+
         Args:
             prompt: The user/task prompt to send to AI.
             model_preference: Optional model ID ("grok", "claude", "ollama-llama").
+                             Falls back to self.preferred_model if not specified.
 
         Returns: AI response text, or empty string on failure.
         """
         from app.services.max.ai_router import ai_router, AIMessage, AIModel
 
+        # Use explicit preference, then desk default, then global default
+        pref = model_preference or self.preferred_model
         model = None
-        if model_preference:
+        if pref:
             try:
-                model = AIModel(model_preference)
+                model = AIModel(pref)
             except ValueError:
                 pass
 

@@ -20,6 +20,7 @@ class QualityDesk(BaseDesk):
         "weekly_digest",
         "escalate_issues",
     ]
+    preferred_model = "claude-sonnet-4-6"  # Phoenix: Sonnet for quality checks
 
     async def _get_quality_metrics(self) -> dict:
         """Pull quality metrics from accuracy monitor."""

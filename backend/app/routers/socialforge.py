@@ -12,6 +12,12 @@ import uuid
 import os
 import logging
 
+from app.services.social_service import (
+    post_to_instagram,
+    post_to_facebook,
+    get_social_accounts,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["socialforge"])
@@ -258,6 +264,42 @@ async def generate_content(data: AIContentRequest):
         }
     except Exception as e:
         raise HTTPException(500, f"AI generation failed: {e}")
+
+
+# ── Live Social Posting ───────────────────────────────────────────────────
+
+class InstagramPostRequest(BaseModel):
+    caption: str
+    image_url: Optional[str] = None
+
+
+class FacebookPostRequest(BaseModel):
+    message: str
+    link: Optional[str] = None
+
+
+@router.post("/post/instagram")
+async def api_post_to_instagram(data: InstagramPostRequest):
+    """Publish a post to Instagram via Graph API."""
+    result = await post_to_instagram(caption=data.caption, image_url=data.image_url)
+    if not result["posted"]:
+        raise HTTPException(400, result.get("error", "Instagram post failed"))
+    return result
+
+
+@router.post("/post/facebook")
+async def api_post_to_facebook(data: FacebookPostRequest):
+    """Publish a post to Facebook Page via Graph API."""
+    result = await post_to_facebook(message=data.message, link=data.link)
+    if not result["posted"]:
+        raise HTTPException(400, result.get("error", "Facebook post failed"))
+    return result
+
+
+@router.get("/connected-accounts")
+async def api_get_social_accounts():
+    """Check which social platforms have valid tokens configured."""
+    return await get_social_accounts()
 
 
 # ── Dashboard KPIs ────────────────────────────────────────────────────────
