@@ -18,6 +18,8 @@ logger = logging.getLogger("max.ai_router")
 class AIModel(Enum):
     GROK = "grok"
     CLAUDE = "claude"
+    CLAUDE_OPUS = "claude-opus-4-6"
+    CLAUDE_SONNET = "claude-sonnet-4-6"
     GROQ = "groq"
     OPENCLAW = "openclaw"
     OLLAMA = "ollama-llama"
@@ -37,6 +39,15 @@ class AIResponse:
 from .system_prompt import get_system_prompt
 from .desk_prompt import get_desk_system_prompt
 from .token_tracker import token_tracker
+
+# Per-desk model routing — overrides primary model when desk is specified
+DESK_MODEL_ROUTING = {
+    "codeforge": AIModel.CLAUDE_OPUS,     # Atlas gets Opus for coding
+    "analytics": AIModel.CLAUDE_SONNET,   # Raven gets Sonnet for analysis
+    "quality": AIModel.CLAUDE_SONNET,     # Phoenix gets Sonnet for quality checks
+    # All other desks use the primary model (Grok by default)
+}
+
 
 class AIRouter:
     def __init__(self):
@@ -61,6 +72,8 @@ class AIRouter:
         return [
             {"id": "grok", "name": "xAI Grok", "available": bool(self.xai_key), "primary": self.primary_model == AIModel.GROK, "type": "cloud"},
             {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud"},
+            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
+            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
             {"id": "groq", "name": "Groq Llama 3.3 70B", "available": bool(self.groq_key), "primary": self.primary_model == AIModel.GROQ, "type": "cloud"},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
             {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "type": "local"},
@@ -200,7 +213,11 @@ class AIRouter:
             logger.debug(f"Cost logging failed: {e}")
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder") -> AIResponse:
-        use_model = model or self.primary_model
+        # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
+        if model is None and desk and desk in DESK_MODEL_ROUTING:
+            use_model = DESK_MODEL_ROUTING[desk]
+        else:
+            use_model = model or self.primary_model
         prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
         feature = "vision" if image_filename else ("chat" if not desk else "desk_task")
         business = desk or "general"
@@ -214,6 +231,16 @@ class AIRouter:
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
+
+        # Resolve Claude variants to the base CLAUDE provider for fallback chain
+        # but track the specific model requested
+        claude_model_id = "claude-sonnet-4-6"  # default Claude model
+        if use_model == AIModel.CLAUDE_OPUS:
+            claude_model_id = "claude-opus-4-6"
+            use_model = AIModel.CLAUDE  # route through Claude provider
+        elif use_model == AIModel.CLAUDE_SONNET:
+            claude_model_id = "claude-sonnet-4-6"
+            use_model = AIModel.CLAUDE  # route through Claude provider
 
         # Build ordered provider chain: requested model first, then full fallback
         # Chain: Grok → Claude → Groq → OpenClaw → Ollama
@@ -236,10 +263,10 @@ class AIRouter:
 
             elif provider == AIModel.CLAUDE and self.anthropic_key:
                 try:
-                    logger.info(f"[MAX] Chat via Claude{' (fallback)' if fallback else ''}")
-                    resp = await self._claude_chat(full_messages, image_path)
-                    self._log_chat_cost(full_messages, resp, "claude-4.6-sonnet", feature, business, tenant_id)
-                    return AIResponse(content=resp, model_used="claude-4.6-sonnet", fallback_used=fallback)
+                    logger.info(f"[MAX] Chat via Claude ({claude_model_id}){' (fallback)' if fallback else ''}")
+                    resp = await self._claude_chat(full_messages, image_path, model_id=claude_model_id)
+                    self._log_chat_cost(full_messages, resp, claude_model_id, feature, business, tenant_id)
+                    return AIResponse(content=resp, model_used=claude_model_id, fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Claude failed: {type(e).__name__}: {e}")
 
@@ -275,7 +302,11 @@ class AIRouter:
     # ── Streaming chat ──────────────────────────────────────────────────
 
     async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder") -> AsyncGenerator[tuple[str, str], None]:
-        use_model = model or self.primary_model
+        # Per-desk model routing
+        if model is None and desk and desk in DESK_MODEL_ROUTING:
+            use_model = DESK_MODEL_ROUTING[desk]
+        else:
+            use_model = model or self.primary_model
         prompt = system_prompt or (get_desk_system_prompt(desk) if desk else self.system_prompt)
         feature = "vision" if image_filename else ("chat/stream" if not desk else "desk_task")
         business = desk or "general"
@@ -289,6 +320,15 @@ class AIRouter:
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
+
+        # Resolve Claude variants
+        claude_model_id = "claude-sonnet-4-6"
+        if use_model == AIModel.CLAUDE_OPUS:
+            claude_model_id = "claude-opus-4-6"
+            use_model = AIModel.CLAUDE
+        elif use_model == AIModel.CLAUDE_SONNET:
+            claude_model_id = "claude-sonnet-4-6"
+            use_model = AIModel.CLAUDE
 
         # Build ordered provider chain: requested model first, then full fallback
         all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
@@ -309,12 +349,12 @@ class AIRouter:
 
             elif provider == AIModel.CLAUDE and self.anthropic_key:
                 try:
-                    logger.info("[MAX] Streaming via Claude")
+                    logger.info(f"[MAX] Streaming via Claude ({claude_model_id})")
                     collected = []
-                    async for chunk in self._claude_chat_stream(full_messages, image_path):
+                    async for chunk in self._claude_chat_stream(full_messages, image_path, model_id=claude_model_id):
                         collected.append(chunk)
-                        yield chunk, "claude-4.6-sonnet"
-                    self._log_chat_cost(full_messages, "".join(collected), "claude-4.6-sonnet", feature, business, tenant_id)
+                        yield chunk, claude_model_id
+                    self._log_chat_cost(full_messages, "".join(collected), claude_model_id, feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Claude stream failed: {e}")
@@ -398,26 +438,26 @@ class AIRouter:
 
     # ── Claude (Anthropic API) ────────────────────────────────────────
 
-    async def _claude_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
+    async def _claude_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None, model_id: str = "claude-sonnet-4-6") -> str:
         system_msg, api_messages = self._prepare_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": self.anthropic_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-                json={"model": "claude-sonnet-4-6", "max_tokens": 8192, "system": system_msg, "messages": api_messages}
+                json={"model": model_id, "max_tokens": 8192, "system": system_msg, "messages": api_messages}
             )
             if resp.status_code != 200:
                 raise Exception(f"HTTP {resp.status_code}: {resp.text}")
             return resp.json().get("content", [{}])[0].get("text", "No response")
 
-    async def _claude_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
+    async def _claude_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None, model_id: str = "claude-sonnet-4-6") -> AsyncGenerator[str, None]:
         system_msg, api_messages = self._prepare_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": self.anthropic_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
-                json={"model": "claude-sonnet-4-6", "max_tokens": 8192, "stream": True, "system": system_msg, "messages": api_messages}
+                json={"model": model_id, "max_tokens": 8192, "stream": True, "system": system_msg, "messages": api_messages}
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()
