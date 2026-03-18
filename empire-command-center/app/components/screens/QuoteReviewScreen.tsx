@@ -1,9 +1,35 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { API } from '../../lib/api';
 import { Quote } from '../../lib/types';
-import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink } from 'lucide-react';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
+
+const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store' : 'http://localhost:8000';
+
+interface UploadedPhoto {
+  filename: string;
+  path: string;
+  size: number;
+  source: string;
+  analyzing?: boolean;
+  analysis?: AnalysisResult | null;
+}
+
+interface AnalyzedItem {
+  type: string;
+  description: string;
+  width?: number;
+  height?: number;
+  confidence?: number;
+  selected?: boolean;
+}
+
+interface AnalysisResult {
+  items: AnalyzedItem[];
+  error?: string;
+}
 
 interface Props {
   quoteId?: string;
@@ -15,6 +41,12 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [selected, setSelected] = useState<number>(1);
   const [loading, setLoading] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!quoteId) {
@@ -34,6 +66,73 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       if (res.ok) setQuote(await res.json());
     } catch { /* silent */ }
     setLoading(false);
+  };
+
+  // Load existing photos for this quote
+  useEffect(() => {
+    if (!quote?.id) return;
+    fetch(`${API}/photos/quote/${quote.id}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.photos?.length) {
+          setUploadedPhotos(data.photos.map((p: UploadedPhoto) => ({ ...p, analyzing: false, analysis: null })));
+        }
+      })
+      .catch(() => {});
+  }, [quote?.id]);
+
+  const handlePhotoUpload = useCallback(async (fileList: FileList | File[]) => {
+    if (!quote?.id) return;
+    const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('entity_type', 'quote');
+      formData.append('entity_id', quote.id);
+      formData.append('source', 'cc');
+      files.forEach(f => formData.append('files', f));
+      const res = await fetch(`${API}/photos/upload`, { method: 'POST', body: formData });
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const data = await res.json();
+      setUploadedPhotos(prev => [...prev, ...data.photos.map((p: UploadedPhoto) => ({ ...p, analyzing: false, analysis: null }))]);
+      showFeedback(`${data.total} photo(s) uploaded`);
+    } catch (err) {
+      showFeedback('Upload failed');
+    }
+    setUploading(false);
+  }, [quote?.id]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files.length) handlePhotoUpload(e.dataTransfer.files);
+  }, [handlePhotoUpload]);
+
+  const handleAnalyze = async (photo: UploadedPhoto, index: number) => {
+    setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: true } : p));
+    try {
+      const imgRes = await fetch(`${API_BASE}${photo.path}`);
+      const blob = await imgRes.blob();
+      const reader = new FileReader();
+      const b64 = await new Promise<string>((resolve) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+      const res = await fetch(`${API}/quotes/analyze-photo`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64, customer_notes: quote?.customer_name || '' }),
+      });
+      if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
+      const data = await res.json();
+      const items = (data.items || data.analyzed_items || []).map((it: AnalyzedItem) => ({ ...it, selected: true }));
+      setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items } } : p));
+      showFeedback(`Found ${items.length} item(s)`);
+    } catch {
+      setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items: [], error: 'Analysis failed' } } : p));
+      showFeedback('Analysis failed');
+    }
   };
 
   if (loading) return (
@@ -130,31 +229,147 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         </div>
       </div>
 
-      {/* Customer photo */}
-      {quote.photos && quote.photos.length > 0 ? (
-        <div className="empire-card" style={{ padding: 0, marginTop: 16, marginBottom: 20, overflow: 'hidden', borderRadius: 14 }}>
-          <div style={{ display: 'flex', gap: 2, overflowX: 'auto' }}>
-            {quote.photos.map((photo, pi) => (
-              <img
-                key={pi}
-                src={`${API}/files/images/${photo.filename}`}
-                alt={`Customer photo ${pi + 1}`}
-                style={{
-                  height: 220,
-                  objectFit: 'cover',
-                  flex: quote.photos!.length === 1 ? '1' : 'none',
-                  width: quote.photos!.length === 1 ? '100%' : 'auto',
-                  minWidth: 200,
-                  borderRadius: quote.photos!.length > 1 ? 4 : 0,
-                }}
-              />
+      {/* Hidden file inputs */}
+      <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/heic,image/webp" multiple
+        style={{ display: 'none' }} onChange={e => e.target.files && handlePhotoUpload(e.target.files)} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment"
+        style={{ display: 'none' }} onChange={e => e.target.files && handlePhotoUpload(e.target.files)} />
+
+      {/* Photo area */}
+      {(quote.photos && quote.photos.length > 0) || uploadedPhotos.length > 0 ? (
+        <div className="empire-card" style={{ padding: 12, marginTop: 16, marginBottom: 20, borderRadius: 14 }}>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
+            {/* Existing quote photos */}
+            {quote.photos?.map((photo, pi) => (
+              <div key={`q-${pi}`} style={{ position: 'relative', flexShrink: 0 }}>
+                <img
+                  src={`${API}/files/images/${photo.filename}`}
+                  alt={`Photo ${pi + 1}`}
+                  onClick={() => setPreviewPhoto(`${API}/files/images/${photo.filename}`)}
+                  style={{ height: 160, width: 200, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: '1px solid #e5e0d8' }}
+                />
+              </div>
             ))}
+            {/* Uploaded photos */}
+            {uploadedPhotos.map((photo, pi) => (
+              <div key={`u-${pi}`} style={{ position: 'relative', flexShrink: 0 }}>
+                <img
+                  src={`${API_BASE}${photo.path}`}
+                  alt={`Upload ${pi + 1}`}
+                  onClick={() => setPreviewPhoto(`${API_BASE}${photo.path}`)}
+                  style={{ height: 160, width: 200, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: '1px solid #e5e0d8' }}
+                />
+                <button
+                  onClick={() => handleAnalyze(photo, pi)}
+                  disabled={photo.analyzing}
+                  style={{
+                    position: 'absolute', bottom: 6, right: 6, padding: '5px 10px', borderRadius: 6,
+                    background: photo.analyzing ? '#888' : '#b8960c', color: '#fff', border: 'none',
+                    fontSize: 11, fontWeight: 600, cursor: photo.analyzing ? 'default' : 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 4, minHeight: 30,
+                  }}
+                >
+                  <Search size={12} /> {photo.analyzing ? 'Analyzing...' : 'Analyze'}
+                </button>
+                {/* Analysis results */}
+                {photo.analysis && photo.analysis.items.length > 0 && (
+                  <div style={{ marginTop: 6, background: '#f0fdf4', borderRadius: 6, padding: 6, fontSize: 11, maxWidth: 200 }}>
+                    {photo.analysis.items.map((it, ii) => (
+                      <label key={ii} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={it.selected !== false} onChange={() => {
+                          setUploadedPhotos(prev => prev.map((p, i) => {
+                            if (i !== pi || !p.analysis) return p;
+                            const items = [...p.analysis.items];
+                            items[ii] = { ...items[ii], selected: !items[ii].selected };
+                            return { ...p, analysis: { ...p.analysis, items } };
+                          }));
+                        }} />
+                        <span>{it.description || it.type} {it.width && it.height ? `${it.width}×${it.height}"` : ''}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {photo.analysis?.error && (
+                  <div style={{ marginTop: 4, fontSize: 11, color: '#dc2626', padding: '2px 4px' }}>{photo.analysis.error}</div>
+                )}
+              </div>
+            ))}
+            {/* Add more button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                flexShrink: 0, width: 80, height: 160, borderRadius: 8, border: '2px dashed #ccc',
+                background: '#faf9f7', cursor: 'pointer', display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 4, color: '#999', fontSize: 12,
+              }}
+            >
+              <Upload size={20} />
+              Add
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+              style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 13, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Upload size={14} /> Upload Files
+            </button>
+            <button onClick={() => cameraInputRef.current?.click()} disabled={uploading}
+              style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', fontSize: 13, minHeight: 44, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Camera size={14} /> Take Photo
+            </button>
           </div>
         </div>
       ) : (
-        <div className="empire-card" style={{ padding: 0, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 16, marginBottom: 20, background: '#eae7e2' }}>
-          <Image size={36} className="text-[#c0bbb3] mr-3" />
-          <span className="text-[#888] font-medium">No photo uploaded</span>
+        <div
+          className="empire-card"
+          onDrop={handleDrop}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          style={{
+            padding: 0, height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12,
+            marginTop: 16, marginBottom: 20,
+            background: dragOver ? '#fdf8eb' : '#eae7e2',
+            border: dragOver ? '2px dashed #b8960c' : '2px dashed transparent',
+            transition: 'all 0.2s',
+            cursor: 'pointer',
+          }}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {uploading ? (
+            <>
+              <div className="w-6 h-6 border-2 border-[#ccc] border-t-[#b8960c] rounded-full animate-spin" />
+              <span className="text-[#888] text-sm">Uploading...</span>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Image size={32} className="text-[#c0bbb3]" />
+              </div>
+              <span className="text-[#888] font-medium text-sm">No photos yet — drop images here or click to upload</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                  style={{
+                    padding: '10px 20px', borderRadius: 8, border: 'none',
+                    background: '#b8960c', color: '#fff', fontSize: 14, fontWeight: 600,
+                    cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', gap: 6,
+                  }}>
+                  <Camera size={16} /> Add Photos
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Full-size preview modal */}
+      {previewPhoto && (
+        <div
+          onClick={() => setPreviewPhoto(null)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.85)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}
+        >
+          <img src={previewPhoto} alt="Preview" style={{ maxWidth: '90vw', maxHeight: '90vh', borderRadius: 8 }} />
         </div>
       )}
 
