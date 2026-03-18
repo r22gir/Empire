@@ -1816,7 +1816,7 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "customer_name": params.get("customer_name"),
                 "source": "max_tool",
             },
-            timeout=30,
+            timeout=120,
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -2010,9 +2010,11 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
 ALLOWED_COMMANDS = [
     "ls", "cat", "head", "tail", "wc", "df", "du", "free",
     "ps", "uptime", "date", "whoami", "pwd", "find", "grep",
-    "git status", "git log", "git diff", "git branch",
-    "curl", "wget", "pip list", "npm list",
-    "systemctl status", "journalctl",
+    "echo", "sort", "uniq", "tee", "touch", "mkdir",
+    "git status", "git log", "git diff", "git branch", "git add", "git commit", "git push", "git pull", "git stash",
+    "curl", "wget", "pip", "pip3", "npm", "npx",
+    "systemctl status", "systemctl restart", "systemctl is-active", "systemctl start", "systemctl stop",
+    "journalctl",
     "ollama list", "ollama ps",
     "docker ps", "docker images",
 ]
@@ -2193,6 +2195,10 @@ To call a tool, include a tool block in your response:
   `{"tool": "get_weather", "city": "Los Angeles"}`
 - **get_services_health** — Check which Empire services are running
   `{"tool": "get_services_health"}`
+- **ollama_toggle** — Turn Ollama on or off. When off, MAX is faster. When on, RecoveryForge can classify images.
+  To toggle: use shell_execute with `curl -X POST http://localhost:8000/api/v1/system/ollama/toggle`
+  To check status: use shell_execute with `curl http://localhost:8000/api/v1/system/ollama/status`
+  When founder says "turn on/off Ollama", "start/stop RecoveryForge", or "Ollama status" — use these.
 
 IMPORTANT: Always use tools for factual data. NEVER fabricate task lists, weather, system stats, quotes, or customer info. If a tool returns empty results, say so honestly.
 When asked to send a quote PDF to Telegram, use send_quote_telegram with the quote_id.
@@ -2210,7 +2216,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 - **shell_execute** — Execute a safe, allowlisted shell command. Blocked patterns are rejected.
   `{"tool": "shell_execute", "command": "git status"}`
   `{"tool": "shell_execute", "command": "df -h"}`
-  Allowed commands: ls, cat, head, tail, wc, df, du, free, ps, uptime, date, whoami, pwd, find, grep, git status/log/diff/branch, curl, wget, pip list, npm list, systemctl status, journalctl, ollama list/ps, docker ps/images.
+  Allowed commands: ls, cat, head, tail, wc, echo, sort, uniq, tee, touch, mkdir, df, du, free, ps, uptime, date, whoami, pwd, find, grep, git (all operations), curl, wget, pip, pip3, npm, npx, systemctl (status/restart/start/stop/is-active), journalctl, ollama list/ps, docker ps/images.
   BLOCKED: rm -rf, rm -r, pkill -f, kill -9, killall, dd, mkfs, fdisk, sudo rm, chmod 777, sensors-detect, eval, exec, pipe to sh/bash.
 
 ### Autonomous Execution
@@ -2244,7 +2250,8 @@ Then after seeing results, use the quote_id:
 ### Development Tools (Atlas / Orion)
 - **file_read** — Read a file with optional line range. `{{"tool": "file_read", "path": "backend/app/main.py", "line_start": 1, "line_end": 50}}`
 - **file_write** — Write content to a file. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
-- **file_edit** — Replace a string in a file. `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
+- **file_edit** — Replace a string in a file. Use `old_str: "__APPEND__"` to append instead. `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
+- **file_append** — Append content to a file (never truncates). Safe for .env files. `{{"tool": "file_append", "path": "backend/.env", "content": "NEW_KEY=value"}}`
 - **git_ops** — Git operations. `{{"tool": "git_ops", "command": "status|diff|add|commit|push|log", "args": "optional args"}}`
 - **service_manager** — Manage Empire services. `{{"tool": "service_manager", "command": "status|restart|logs|start|stop", "service": "backend|cc|openclaw|ollama|recoveryforge|relistapp|all"}}`
 - **package_manager** — Install packages or build. `{{"tool": "package_manager", "command": "pip_install|npm_install|npm_build|pip_list|npm_list", "package": "...", "project_dir": "..."}}`
@@ -2374,12 +2381,20 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("file_edit")
 def _file_edit(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Replace first occurrence of old_str with new_str in a file."""
+    """Replace first occurrence of old_str with new_str in a file.
+    Special: if old_str is empty or '__APPEND__', appends new_str instead."""
     start = _time.time()
     path = params.get("path", "")
     old_str = params.get("old_str", "")
     new_str = params.get("new_str", "")
-    if not path or not old_str:
+
+    # __APPEND__ mode: delegate to file_append logic
+    if not old_str or old_str == "__APPEND__":
+        if not path or not new_str:
+            return ToolResult(tool="file_edit", success=False, error="path and new_str are required for append mode")
+        return _file_append({"path": path, "content": new_str}, desk=desk)
+
+    if not path:
         return ToolResult(tool="file_edit", success=False, error="path and old_str are required")
 
     if not os.path.isabs(path):
@@ -2415,6 +2430,41 @@ def _file_edit(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         log_execution("file_edit", params, str(e), desk=desk, success=False)
         return ToolResult(tool="file_edit", success=False, error=str(e))
+
+
+@tool("file_append")
+def _file_append(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Append content to a file. Never truncates or overwrites existing content."""
+    start = _time.time()
+    path = params.get("path", "")
+    content = params.get("content", "")
+    if not path:
+        return ToolResult(tool="file_append", success=False, error="path is required")
+    if not content:
+        return ToolResult(tool="file_append", success=False, error="content is required")
+
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+
+    ok, reason = validate_path(path)
+    if not ok:
+        log_execution("file_append", params, reason, desk=desk, success=False)
+        return ToolResult(tool="file_append", success=False, error=reason)
+
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(content if content.endswith("\n") else content + "\n")
+
+        nbytes = len(content.encode("utf-8"))
+        duration = int((_time.time() - start) * 1000)
+        log_execution("file_append", params, {"bytes": nbytes}, access_level=2, desk=desk, success=True, duration_ms=duration)
+        return ToolResult(tool="file_append", success=True, result={
+            "path": path, "bytes_appended": nbytes,
+        })
+    except Exception as e:
+        log_execution("file_append", params, str(e), desk=desk, success=False)
+        return ToolResult(tool="file_append", success=False, error=str(e))
 
 
 @tool("git_ops")
@@ -2468,18 +2518,21 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 
 SERVICE_MAP = {
-    "backend": {"port": 8000, "process": "uvicorn", "log": "/tmp/backend.log"},
-    "cc": {"port": 3005, "process": "next.*3005", "log_dir": os.path.expanduser("~/empire-repo/logs")},
-    "openclaw": {"port": 7878, "process": "openclaw|server.py", "log": "/tmp/openclaw.log"},
-    "ollama": {"port": 11434, "process": "ollama", "log": None},
-    "recoveryforge": {"port": 3077, "process": "recoveryforge", "log_dir": os.path.expanduser("~/empire-repo/logs")},
-    "relistapp": {"port": 3007, "process": "next.*3007", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "backend": {"port": 8000, "systemd": "empire-backend", "log": "/tmp/backend.log"},
+    "cc": {"port": 3005, "systemd": "empire-cc", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "openclaw": {"port": 7878, "systemd": "empire-openclaw", "log": "/tmp/openclaw.log"},
+    "ollama": {"port": 11434, "systemd": "ollama", "log": None},
+    "recoveryforge": {"port": 3077, "systemd": None, "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "relistapp": {"port": 3007, "systemd": None, "log_dir": os.path.expanduser("~/empire-repo/logs")},
 }
+
+# Systemd service names for monitored services
+SYSTEMD_SERVICES = ["empire-backend", "empire-cc", "empire-openclaw"]
 
 
 @tool("service_manager")
 def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Manage Empire services: status, restart, logs, start, stop."""
+    """Manage Empire services via systemd: status, restart, logs, start, stop."""
     start = _time.time()
     command = params.get("command", "status")
     service = params.get("service", "all")
@@ -2499,32 +2552,99 @@ def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
             continue
 
         port = svc["port"]
-        if command == "status":
-            import socket
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=2):
-                    running = True
-            except (ConnectionRefusedError, TimeoutError, OSError):
-                running = False
+        systemd_unit = svc.get("systemd")
 
-            # Try to find PID
+        if command == "status":
+            state = "unknown"
             pid = None
+            uptime = None
+
+            # Try systemd first
+            if systemd_unit:
+                try:
+                    r = subprocess.run(
+                        ["systemctl", "is-active", "--quiet", systemd_unit],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    state = "active" if r.returncode == 0 else "inactive"
+                except Exception:
+                    pass
+
+                # Get PID and uptime from systemd show
+                if state == "active":
+                    try:
+                        r = subprocess.run(
+                            ["systemctl", "show", systemd_unit, "--property=MainPID,ActiveEnterTimestamp", "--no-pager"],
+                            capture_output=True, text=True, timeout=5,
+                        )
+                        for line in r.stdout.strip().split("\n"):
+                            if line.startswith("MainPID="):
+                                pid_str = line.split("=", 1)[1].strip()
+                                if pid_str and pid_str != "0":
+                                    pid = int(pid_str)
+                            elif line.startswith("ActiveEnterTimestamp="):
+                                uptime = line.split("=", 1)[1].strip()
+                    except Exception:
+                        pass
+
+            # Fallback: port check for services without systemd units
+            if state == "unknown":
+                import socket
+                try:
+                    with socket.create_connection(("127.0.0.1", port), timeout=2):
+                        state = "active"
+                except (ConnectionRefusedError, TimeoutError, OSError):
+                    state = "inactive"
+
+                # Try to find PID via fuser
+                if state == "active":
+                    try:
+                        r = subprocess.run(
+                            ["fuser", f"{port}/tcp"],
+                            capture_output=True, text=True, timeout=5,
+                        )
+                        if r.stdout.strip():
+                            pid = int(r.stdout.strip().split()[-1])
+                    except Exception:
+                        pass
+
+            results.append({
+                "name": svc_name, "port": port, "state": state,
+                "running": state == "active", "pid": pid, "uptime": uptime,
+                "systemd_unit": systemd_unit,
+            })
+
+        elif command == "restart" and systemd_unit:
             try:
                 r = subprocess.run(
-                    ["fuser", f"{port}/tcp"],
-                    capture_output=True, text=True, timeout=5,
+                    ["systemctl", "restart", systemd_unit],
+                    capture_output=True, text=True, timeout=30,
                 )
-                if r.stdout.strip():
-                    pid = int(r.stdout.strip().split()[-1])
-            except Exception:
-                pass
-
-            results.append({"name": svc_name, "port": port, "running": running, "pid": pid})
+                success = r.returncode == 0
+                results.append({
+                    "name": svc_name, "action": "restart", "success": success,
+                    "output": (r.stdout + r.stderr)[:500],
+                })
+            except Exception as e:
+                results.append({"name": svc_name, "action": "restart", "success": False, "error": str(e)})
 
         elif command == "logs":
+            # Try journalctl for systemd services first
+            if systemd_unit:
+                try:
+                    r = subprocess.run(
+                        ["journalctl", "-u", systemd_unit, "--no-pager", "-n", "50"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if r.stdout.strip():
+                        results.append({"name": svc_name, "log": r.stdout[:5000]})
+                        continue
+                except Exception:
+                    pass
+
+            # Fallback to log files
             log_path = svc.get("log")
             if not log_path and svc.get("log_dir"):
-                # Find most recent log
                 log_dir = svc["log_dir"]
                 try:
                     files = sorted(

@@ -1,12 +1,32 @@
 """
 Vector embeddings for semantic memory search.
 Uses Ollama nomic-embed-text locally.
+Fast-fails when Ollama is offline (no 30s timeout).
 """
+import time
 import httpx
 import logging
 from .brain_config import OLLAMA_BASE_URL, EMBEDDING_MODEL
 
 logger = logging.getLogger("max.brain.embeddings")
+
+# ── Fast Ollama availability cache (avoids hitting Ollama on every request) ──
+_ollama_cache = {"available": False, "checked_at": 0.0}
+_OLLAMA_CHECK_INTERVAL = 15.0  # Re-check every 15 seconds
+
+
+def _is_ollama_available() -> bool:
+    """Quick 1-second sync check. Cached for 15s to avoid spamming."""
+    now = time.time()
+    if now - _ollama_cache["checked_at"] < _OLLAMA_CHECK_INTERVAL:
+        return _ollama_cache["available"]
+    try:
+        resp = httpx.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=1.0)
+        _ollama_cache["available"] = resp.status_code == 200
+    except Exception:
+        _ollama_cache["available"] = False
+    _ollama_cache["checked_at"] = now
+    return _ollama_cache["available"]
 
 
 class EmbeddingEngine:
@@ -15,18 +35,22 @@ class EmbeddingEngine:
         self.model = EMBEDDING_MODEL
 
     async def embed(self, text: str) -> list[float]:
-        """Generate embedding vector for text."""
+        """Generate embedding vector for text. Returns [] instantly if Ollama is offline."""
+        if not _is_ollama_available():
+            return []
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/api/embeddings",
                 json={"model": self.model, "prompt": text},
-                timeout=30.0,
+                timeout=10.0,
             )
             response.raise_for_status()
             return response.json()["embedding"]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for multiple texts."""
+        """Generate embeddings for multiple texts. Returns [] instantly if Ollama is offline."""
+        if not _is_ollama_available():
+            return [[] for _ in texts]
         embeddings = []
         for text in texts:
             emb = await self.embed(text)
@@ -37,14 +61,15 @@ class EmbeddingEngine:
         self, query: str, memories: list[dict], top_k: int = 10
     ) -> list[dict]:
         """Find semantically similar memories to query.
-
-        For MVP: uses cosine similarity in Python.
-        Future: use sqlite-vec for faster vector search.
+        Returns [] instantly when Ollama is offline — no timeout, no error log.
         """
+        if not _is_ollama_available():
+            return []
         try:
             query_embedding = await self.embed(query)
-        except Exception as e:
-            logger.warning(f"Embedding failed, returning empty results: {e}")
+            if not query_embedding:
+                return []
+        except Exception:
             return []
 
         scored = []
@@ -58,9 +83,11 @@ class EmbeddingEngine:
 
     async def is_available(self) -> bool:
         """Check if the embedding model is loaded and ready."""
+        if not _is_ollama_available():
+            return False
         try:
             async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{self.base_url}/api/tags", timeout=5.0)
+                resp = await client.get(f"{self.base_url}/api/tags", timeout=2.0)
                 models = resp.json().get("models", [])
                 return any(self.model in m.get("name", "") for m in models)
         except Exception:
