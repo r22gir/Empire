@@ -13,6 +13,7 @@ from difflib import SequenceMatcher
 import httpx
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.vision.diagram_generator import diagram_generator
 
 log = logging.getLogger("notes_extractor")
 
@@ -121,7 +122,21 @@ class NotesExtractor:
                     item["fabric_match"] = match
                     merged["inventory_matches"].append(match)
 
+        # Generate diagrams for each item with measurements
+        diagrams_generated = 0
+        for item in merged.get("items", []):
+            m = item.get("measurements") or {}
+            if m.get("width_inches") or m.get("height_inches"):
+                try:
+                    diagram = diagram_generator.generate(item)
+                    item["diagram_svg"] = diagram["svg"]
+                    item["diagram_summary"] = diagram["summary"]
+                    diagrams_generated += 1
+                except Exception as e:
+                    log.warning(f"Diagram generation failed for item: {e}")
+
         merged["pages_analyzed"] = len(photo_paths)
+        merged["diagrams_generated"] = diagrams_generated
         return merged
 
     async def _extract_single(self, photo_path: str) -> dict:
