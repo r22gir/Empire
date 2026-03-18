@@ -4,9 +4,10 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Camera, Upload, Loader2, Ruler, Armchair, Paintbrush, ClipboardList,
   X, CheckCircle, AlertTriangle, Sparkles, TriangleAlert, Info, Box, Video,
-  ArrowRight, Plus, ImageIcon, Trash2, Eye, Printer, Share2, FileDown, FileText
+  ArrowRight, Plus, ImageIcon, Trash2, Eye, Printer, Share2, FileDown, FileText, Edit3
 } from 'lucide-react';
 import { API } from '../../../lib/api';
+import MeasurementDiagram from '../quotes/MeasurementDiagram';
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -137,6 +138,22 @@ const DESIGN_STYLES: { key: string; label: string; icon: string; desc: string }[
   { key: 'luxe', label: 'Luxury', icon: '♛', desc: 'Premium, opulent' },
   { key: 'mid-century', label: 'Mid-Century', icon: '◇', desc: '50s-60s retro' },
   { key: 'scandinavian', label: 'Scandinavian', icon: '△', desc: 'Functional, light' },
+];
+
+type MeasureInputMethod = 'photo' | '3dscan' | 'manual';
+
+type ManualItemType = 'window' | 'sofa' | 'chair' | 'cushion' | 'pillow' | 'cornice' | 'valance' | 'roman_shade' | 'other';
+
+const MANUAL_ITEM_TYPES: { key: ManualItemType; label: string; icon: string }[] = [
+  { key: 'window', label: 'Window', icon: '🪟' },
+  { key: 'sofa', label: 'Sofa', icon: '🛋' },
+  { key: 'chair', label: 'Chair', icon: '💺' },
+  { key: 'cushion', label: 'Cushion', icon: '🛏' },
+  { key: 'pillow', label: 'Pillow', icon: '🛌' },
+  { key: 'cornice', label: 'Cornice', icon: '📐' },
+  { key: 'valance', label: 'Valance', icon: '🎪' },
+  { key: 'roman_shade', label: 'Roman Shade', icon: '🪟' },
+  { key: 'other', label: 'Other', icon: '📏' },
 ];
 
 /* ═══════════════════════════════════════════════════════════
@@ -344,6 +361,218 @@ function DimensionDrawing({ imageData, width, height, windowType }: {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   Manual Measure Entry
+   ═══════════════════════════════════════════════════════════ */
+
+function ManualMeasureEntry({ onAddToQuote }: { onAddToQuote?: (item: any) => void }) {
+  const [itemType, setItemType] = useState<ManualItemType>('window');
+  const [m, setM] = useState({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
+  const [opts, setOpts] = useState({ mount_type: 'inside', treatment: '', lining: '', notes: '', fabric: '' });
+  const [items, setItems] = useState<any[]>([]);
+
+  const isWindow = ['window', 'cornice', 'valance', 'roman_shade'].includes(itemType);
+  const isFurniture = ['sofa', 'chair'].includes(itemType);
+  const isCushion = ['cushion', 'pillow'].includes(itemType);
+
+  const updateM = (key: string, val: string) => {
+    setM(prev => ({ ...prev, [key]: parseFloat(val) || 0 }));
+  };
+
+  const currentItem = {
+    type: itemType,
+    subtype: opts.treatment || undefined,
+    measurements: { width_inches: m.width_inches, height_inches: m.height_inches, depth_inches: m.depth_inches || undefined, sill_depth: m.sill_depth || undefined, stack_space: m.stack_space || undefined },
+    treatment: opts.treatment || itemType,
+    mount_type: opts.mount_type || undefined,
+    lining: opts.lining || undefined,
+    description: opts.notes || undefined,
+  };
+
+  const addItem = () => {
+    if (!m.width_inches && !m.height_inches) return;
+    const newItem = { ...currentItem, id: Date.now() };
+    setItems(prev => [...prev, newItem]);
+    if (onAddToQuote) onAddToQuote(newItem);
+    setM({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
+    setOpts({ mount_type: 'inside', treatment: '', lining: '', notes: '', fabric: '' });
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {/* Item type selector */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
+          What are you measuring?
+        </label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {MANUAL_ITEM_TYPES.map(t => (
+            <button key={t.key} onClick={() => setItemType(t.key)}
+              className="cursor-pointer transition-all"
+              style={{
+                padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+                border: `1.5px solid ${itemType === t.key ? '#b8960c' : '#ece8e0'}`,
+                background: itemType === t.key ? '#fdf8e8' : '#faf9f7',
+                color: itemType === t.key ? '#b8960c' : '#777',
+                minHeight: 44,
+              }}>
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Measurement form + live diagram — side by side on desktop */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 16 }}>
+        {/* Left: form fields */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <label style={{ fontSize: 12 }}>
+              <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Width (in)</span>
+              <input type="number" value={m.width_inches || ''} onChange={e => updateM('width_inches', e.target.value)}
+                placeholder="e.g. 72" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Height (in)</span>
+              <input type="number" value={m.height_inches || ''} onChange={e => updateM('height_inches', e.target.value)}
+                placeholder="e.g. 96" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+            </label>
+          </div>
+
+          {(isFurniture || isCushion) && (
+            <label style={{ fontSize: 12 }}>
+              <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Depth (in)</span>
+              <input type="number" value={m.depth_inches || ''} onChange={e => updateM('depth_inches', e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+            </label>
+          )}
+
+          {isWindow && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Sill Depth (in)</span>
+                  <input type="number" value={m.sill_depth || ''} onChange={e => updateM('sill_depth', e.target.value)}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Stack Space (in/side)</span>
+                  <input type="number" value={m.stack_space || ''} onChange={e => updateM('stack_space', e.target.value)}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+                </label>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Mount Type</span>
+                  <select value={opts.mount_type} onChange={e => setOpts(p => ({...p, mount_type: e.target.value}))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
+                    <option value="inside">Inside Mount</option>
+                    <option value="outside">Outside Mount</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Treatment</span>
+                  <select value={opts.treatment} onChange={e => setOpts(p => ({...p, treatment: e.target.value}))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
+                    <option value="">--</option>
+                    <option value="pinch_pleat">Pinch Pleat</option>
+                    <option value="rod_pocket">Rod Pocket</option>
+                    <option value="grommet">Grommet</option>
+                    <option value="tab_top">Tab Top</option>
+                    <option value="ripplefold">Ripplefold</option>
+                    <option value="eyelet">Eyelet</option>
+                    <option value="goblet">Goblet</option>
+                  </select>
+                </label>
+              </div>
+              <label style={{ fontSize: 12 }}>
+                <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Lining</span>
+                <select value={opts.lining} onChange={e => setOpts(p => ({...p, lining: e.target.value}))}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
+                  <option value="">None</option>
+                  <option value="standard">Standard</option>
+                  <option value="blackout">Blackout</option>
+                  <option value="thermal">Thermal</option>
+                </select>
+              </label>
+            </>
+          )}
+
+          <label style={{ fontSize: 12 }}>
+            <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Notes</span>
+            <textarea value={opts.notes} onChange={e => setOpts(p => ({...p, notes: e.target.value}))}
+              placeholder="Additional notes..." rows={2}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', resize: 'none' }} />
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={addItem}
+              disabled={!m.width_inches && !m.height_inches}
+              className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 disabled:opacity-50"
+              style={{ flex: 1, padding: '12px 20px', borderRadius: 10, background: '#b8960c', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', minHeight: 48 }}>
+              <CheckCircle size={16} /> Add Item
+            </button>
+            <button onClick={() => { setM({width_inches:0,height_inches:0,depth_inches:0,sill_depth:0,stack_space:0}); setOpts({mount_type:'inside',treatment:'',lining:'',notes:'',fabric:''}); }}
+              className="cursor-pointer transition-all hover:bg-[#f0ede8]"
+              style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 13, fontWeight: 600, color: '#777', minHeight: 48 }}>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {/* Right: live SVG diagram */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          {(m.width_inches > 0 || m.height_inches > 0) ? (
+            <>
+              <div style={{ border: '1px solid #ece8e0', borderRadius: 12, overflow: 'hidden', background: '#fff', padding: 8, width: '100%' }}>
+                <MeasurementDiagram
+                  item={currentItem as any}
+                  width={400}
+                  height={320}
+                />
+              </div>
+              <span style={{ fontSize: 11, color: '#888' }}>Live preview -- updates as you type</span>
+            </>
+          ) : (
+            <div style={{ width: '100%', height: 320, borderRadius: 12, border: '2px dashed #ece8e0', background: '#faf9f7', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Ruler size={32} style={{ color: '#ddd' }} />
+              <span style={{ fontSize: 13, color: '#aaa', fontWeight: 500 }}>Enter measurements to see diagram</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Added items list */}
+      {items.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div className="section-label" style={{ marginBottom: 8 }}>ITEMS ADDED ({items.length})</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {items.map((item, i) => (
+              <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                <CheckCircle size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>
+                    {MANUAL_ITEM_TYPES.find(t => t.key === item.type)?.label || item.type}
+                  </span>
+                  <span style={{ fontSize: 12, color: '#666', marginLeft: 8 }}>
+                    {item.measurements.width_inches}" x {item.measurements.height_inches}"
+                    {item.treatment ? ` · ${item.treatment.replace(/_/g, ' ')}` : ''}
+                  </span>
+                </div>
+                <button onClick={() => setItems(prev => prev.filter((_, idx) => idx !== i))}
+                  className="cursor-pointer hover:bg-white transition-colors"
+                  style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #bbf7d0', background: 'transparent', color: '#999' }}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
    Main Component
    ═══════════════════════════════════════════════════════════ */
 
@@ -368,6 +597,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   const [showGallery, setShowGallery] = useState(true);
   // Design Mockup style preferences
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
+  const [measureInputMethod, setMeasureInputMethod] = useState<MeasureInputMethod>('photo');
   const fileRef = useRef<HTMLInputElement>(null);
   const file3DRef = useRef<HTMLInputElement>(null);
   const multiFileRef = useRef<HTMLInputElement>(null);
@@ -1288,6 +1518,32 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           <span style={{ fontSize: 12, color: '#777' }}>{currentMode.desc}</span>
         </div>
 
+        {/* Input method selector — Measure tab only */}
+        {mode === 'measure' && (
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            {[
+              { key: 'photo' as MeasureInputMethod, label: 'Photo', icon: <Camera size={15} />, color: '#2563eb' },
+              { key: '3dscan' as MeasureInputMethod, label: '3D Scan', icon: <Box size={15} />, color: '#16a34a' },
+              { key: 'manual' as MeasureInputMethod, label: 'Manual Entry', icon: <Edit3 size={15} />, color: '#b8960c' },
+            ].map(mi => {
+              const active = measureInputMethod === mi.key;
+              return (
+                <button key={mi.key} onClick={() => setMeasureInputMethod(mi.key)}
+                  className="flex items-center gap-2 cursor-pointer transition-all"
+                  style={{
+                    flex: 1, padding: '12px 16px', borderRadius: 12, fontSize: 13, fontWeight: 700,
+                    border: `2px solid ${active ? mi.color : '#ece8e0'}`,
+                    background: active ? `${mi.color}10` : '#faf9f7',
+                    color: active ? mi.color : '#777', minHeight: 48,
+                    justifyContent: 'center',
+                  }}>
+                  {mi.icon} {mi.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Hidden inputs */}
         <input
           ref={fileRef}
@@ -1314,7 +1570,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         <canvas ref={canvasRef} className="hidden" />
 
         {/* ═══ Photo Gallery / Organizer ═══ */}
-        {photos.length > 0 && (
+        {photos.length > 0 && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1394,7 +1650,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         )}
 
         {/* Three input method buttons */}
-        {!imageData && !showCamera && !model3D && (
+        {!imageData && !showCamera && !model3D && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
               Choose Input Method
@@ -1470,7 +1726,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         )}
 
         {/* Camera view */}
-        {showCamera && (
+        {showCamera && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <div style={{ marginBottom: 16, position: 'relative', borderRadius: 14, overflow: 'hidden', border: '2px solid #7c3aed', background: '#000' }}>
             <video
               ref={videoRef}
@@ -1499,7 +1755,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         )}
 
         {/* Photo preview */}
-        {imageData && !showCamera && (
+        {imageData && !showCamera && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '1px solid #ece8e0' }}>
               <img
@@ -1546,7 +1802,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         )}
 
         {/* 3D Model preview */}
-        {model3D && !imageData && !showCamera && (
+        {model3D && !imageData && !showCamera && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '2px solid #16a34a', background: '#f0fdf4', padding: '32px 20px', textAlign: 'center' }}>
               <Box size={48} style={{ color: '#16a34a', margin: '0 auto 12px' }} />
@@ -1581,6 +1837,11 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
               </button>
             </div>
           </div>
+        )}
+
+        {/* Manual Entry — Measure tab only */}
+        {mode === 'measure' && measureInputMethod === 'manual' && (
+          <ManualMeasureEntry onAddToQuote={onSaveQuote} />
         )}
 
         {/* ═══ Mode-specific info panels & options ═══ */}
@@ -1770,7 +2031,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         )}
 
         {/* Analyze button */}
-        {!result && (
+        {!result && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <button
             onClick={analyze}
             disabled={loading || (!imageData && !model3D)}

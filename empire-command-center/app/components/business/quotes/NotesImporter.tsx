@@ -499,7 +499,7 @@ export default function NotesImporter({ onQuoteCreated, onClose }: NotesImporter
                         stack_space: (item.measurements.additional as Record<string, number>)?.stack_space || undefined,
                       },
                       treatment: item.subtype || item.type,
-                      mount_type: (item.measurements.additional as Record<string, string>)?.mount_type || undefined,
+                      mount_type: (item.measurements.additional as Record<string, unknown>)?.mount_type as string || undefined,
                       lining: item.lining || undefined,
                     }}
                     width={380}

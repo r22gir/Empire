@@ -4,8 +4,9 @@ import { API } from '../../lib/api';
 import {
   ArrowLeft, ArrowRight, User, Camera, Layers, Settings, FileText,
   Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, GripVertical, Search,
-  Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare
+  Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle
 } from 'lucide-react';
+import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
 
 interface CustomerInfo {
   name: string;
@@ -66,6 +67,22 @@ const ITEM_TYPES = [
   'sofa', 'loveseat', 'chair', 'dining_chair', 'ottoman', 'bench', 'headboard', 'sectional',
   'drapery', 'roman_shade', 'valance', 'cornice',
   'cushion', 'throw_pillow', 'bedskirt', 'duvet', 'table_runner', 'placemats',
+];
+
+type QuoteInputMethod = 'photos' | '3dscan' | 'manual' | 'intake';
+
+type ManualItemType = 'window' | 'sofa' | 'chair' | 'cushion' | 'pillow' | 'cornice' | 'valance' | 'roman_shade' | 'other';
+
+const MANUAL_ITEM_TYPES: { key: ManualItemType; label: string; icon: string }[] = [
+  { key: 'window', label: 'Window', icon: '🪟' },
+  { key: 'sofa', label: 'Sofa', icon: '🛋' },
+  { key: 'chair', label: 'Chair', icon: '💺' },
+  { key: 'cushion', label: 'Cushion', icon: '🛏' },
+  { key: 'pillow', label: 'Pillow', icon: '🛌' },
+  { key: 'cornice', label: 'Cornice', icon: '📐' },
+  { key: 'valance', label: 'Valance', icon: '🎪' },
+  { key: 'roman_shade', label: 'Roman Shade', icon: '🪟' },
+  { key: 'other', label: 'Other', icon: '📏' },
 ];
 
 const STEPS = [
@@ -234,6 +251,24 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setShowAnalysis(false);
     setAnalysisResult(null);
     setAnalysisPhotoIdx(null);
+  };
+
+  // Add a manually entered item to Room 1
+  const addManualItem = (item: any) => {
+    const newItem: RoomItem = {
+      id: crypto.randomUUID(),
+      type: ITEM_TYPES.includes(item.type) ? item.type : 'sofa',
+      width: item.width || '',
+      height: item.height || '',
+      depth: item.depth || '',
+      quantity: 1,
+      notes: item.description || '',
+    };
+    setRooms(prev => {
+      const copy = [...prev];
+      copy[0] = { ...copy[0], items: [...copy[0].items, newItem] };
+      return copy;
+    });
   };
 
   const canAdvance = () => {
@@ -443,6 +478,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               intakeProjects={intakeProjects} loadingIntake={loadingIntake}
               selectedIntakeId={selectedIntakeId} onLoadIntake={loadIntakeProject}
               onAnalyze={analyzePhoto} analyzingPhoto={analyzingPhoto}
+              onManualItem={addManualItem}
             />
             {showAnalysis && (
               <AnalysisModal
@@ -608,14 +644,15 @@ function StepCustomer({ customer, setCustomer }: { customer: CustomerInfo; setCu
   );
 }
 
-function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loadingIntake, selectedIntakeId, onLoadIntake, onAnalyze, analyzingPhoto }: {
+function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loadingIntake, selectedIntakeId, onLoadIntake, onAnalyze, analyzingPhoto, onManualItem }: {
   photos: PhotoFile[]; onAdd: (files: FileList | File[]) => void; onRemove: (i: number) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   intakeProjects: any[]; loadingIntake: boolean; selectedIntakeId: string | null;
   onLoadIntake: (project: any) => void; onAnalyze: (idx: number) => void; analyzingPhoto: number | null;
+  onManualItem: (item: any) => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
-  const [showIntakeList, setShowIntakeList] = useState(true);
+  const [inputMethod, setInputMethod] = useState<QuoteInputMethod>('photos');
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -623,29 +660,168 @@ function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loa
     if (e.dataTransfer.files.length) onAdd(e.dataTransfer.files);
   };
 
+  const methodTabs: { key: QuoteInputMethod; label: string; icon: React.ReactNode; color: string }[] = [
+    { key: 'photos', label: 'Upload Photos', icon: <Camera size={15} />, color: '#2563eb' },
+    { key: '3dscan', label: '3D Scan', icon: <Box size={15} />, color: '#16a34a' },
+    { key: 'manual', label: 'Manual Entry', icon: <Edit3 size={15} />, color: '#b8960c' },
+    { key: 'intake', label: 'Load from Intake', icon: <FolderOpen size={15} />, color: '#7c3aed' },
+  ];
+
   return (
     <div>
-      {/* Section A: Load from Intake */}
-      <div style={{ marginBottom: 20 }}>
-        <button
-          onClick={() => setShowIntakeList(!showIntakeList)}
-          className="flex items-center gap-2 cursor-pointer transition-all w-full"
-          style={{ background: 'none', border: 'none', padding: 0, marginBottom: 12 }}>
-          <FolderOpen size={14} style={{ color: '#b8960c' }} />
-          <span style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Load from Intake Submission
-          </span>
-          <ChevronDown size={14} style={{ color: '#b8960c', transform: showIntakeList ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-          <div style={{ flex: 1 }} />
-          {selectedIntakeId && (
-            <span style={{ fontSize: 10, fontWeight: 600, color: '#16a34a', background: '#f0fdf4', padding: '3px 8px', borderRadius: 6, border: '1px solid #bbf7d0' }}>
-              <Check size={10} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
-              Loaded
-            </span>
-          )}
-        </button>
+      {/* Input method selector */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+        {methodTabs.map(tab => {
+          const active = inputMethod === tab.key;
+          return (
+            <button key={tab.key} onClick={() => setInputMethod(tab.key)}
+              className="flex items-center gap-2 cursor-pointer transition-all"
+              style={{
+                padding: '10px 16px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+                border: `2px solid ${active ? tab.color : '#ece8e0'}`,
+                background: active ? `${tab.color}10` : '#faf9f7',
+                color: active ? tab.color : '#777',
+                minHeight: 44,
+              }}>
+              {tab.icon} {tab.label}
+              {tab.key === 'intake' && selectedIntakeId && (
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16a34a', display: 'inline-block', marginLeft: 4 }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-        {showIntakeList && (
+      {/* ── Upload Photos ── */}
+      {inputMethod === 'photos' && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+            Photo Gallery
+          </div>
+
+          {photos.length > 0 && (
+            <div className="flex gap-3 flex-wrap mb-4">
+              {photos.map((p, i) => (
+                <div key={i} style={{ position: 'relative', width: 120, height: 140, borderRadius: 12, overflow: 'hidden', border: '2px solid #ece8e0', background: '#f5f3ef' }}>
+                  <img src={p.preview} alt="" style={{ width: '100%', height: 100, objectFit: 'cover' }} />
+                  {p.fromIntake && (
+                    <div style={{ position: 'absolute', top: 4, left: 4, fontSize: 8, fontWeight: 700, color: '#fff', background: '#b8960c', padding: '2px 5px', borderRadius: 4 }}>
+                      INTAKE
+                    </div>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); onRemove(i); }}
+                    className="cursor-pointer transition-all hover:bg-[#dc2626]"
+                    style={{
+                      position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
+                      background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                    }}>
+                    <X size={12} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onAnalyze(i); }}
+                    disabled={analyzingPhoto === i}
+                    className="cursor-pointer transition-all hover:bg-[#fdf8eb]"
+                    style={{
+                      width: '100%', height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                      background: '#faf9f7', border: 'none', borderTop: '1px solid #ece8e0',
+                      fontSize: 10, fontWeight: 600, color: analyzingPhoto === i ? '#b8960c' : '#777',
+                    }}>
+                    {analyzingPhoto === i
+                      ? <><Loader2 size={11} className="animate-spin" /> Analyzing...</>
+                      : <><Sparkles size={11} /> Analyze</>}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className="cursor-pointer transition-all"
+            style={{
+              border: `2px dashed ${dragOver ? '#b8960c' : '#ddd'}`,
+              borderRadius: 14,
+              padding: photos.length > 0 ? '20px 24px' : '36px 24px',
+              textAlign: 'center',
+              background: dragOver ? '#fdf8eb' : '#faf9f7',
+            }}>
+            <Upload size={photos.length > 0 ? 22 : 32} className="mx-auto mb-2" style={{ color: dragOver ? '#b8960c' : '#ccc' }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>
+              {photos.length > 0 ? 'Add more photos' : 'Drop photos here or click to browse'}
+            </div>
+            <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>JPG, PNG, HEIC accepted</div>
+            <input ref={fileInputRef} type="file" accept="image/*" multiple hidden
+              onChange={e => { if (e.target.files?.length) onAdd(e.target.files); e.target.value = ''; }} />
+          </div>
+        </div>
+      )}
+
+      {/* ── 3D Scan ── */}
+      {inputMethod === '3dscan' && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+            3D Scan Upload
+          </div>
+          <div style={{
+            border: '2px dashed #bbf7d0', borderRadius: 14, padding: '40px 24px', textAlign: 'center',
+            background: '#f0fdf4',
+          }}>
+            <Box size={36} className="mx-auto mb-3" style={{ color: '#16a34a' }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#333', marginBottom: 4 }}>
+              Upload a 3D Scan
+            </div>
+            <div style={{ fontSize: 12, color: '#777', marginBottom: 16 }}>
+              Supports GLB, GLTF, OBJ, PLY, USDZ from Polycam, LiDAR, or RealityScan
+            </div>
+            <button
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.glb,.gltf,.obj,.ply,.usdz';
+                input.onchange = (e: any) => {
+                  const file = e.target?.files?.[0];
+                  if (file) {
+                    onManualItem({
+                      type: '3d_scan',
+                      description: `3D Scan: ${file.name}`,
+                      measurements: {},
+                      _file: file,
+                    });
+                  }
+                };
+                input.click();
+              }}
+              className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 mx-auto"
+              style={{ padding: '12px 24px', borderRadius: 10, background: '#16a34a', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', minHeight: 48 }}>
+              <Upload size={16} /> Choose 3D File
+            </button>
+            <div style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>
+              Scan rooms with your phone&apos;s LiDAR sensor, then upload the exported model
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Manual Entry ── */}
+      {inputMethod === 'manual' && (
+        <QuoteManualEntry onAddItem={onManualItem} />
+      )}
+
+      {/* ── Load from Intake ── */}
+      {inputMethod === 'intake' && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+            Load from Intake Submission
+          </div>
+          {selectedIntakeId && (
+            <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12, fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Check size={14} /> Intake loaded — photos added to gallery
+            </div>
+          )}
           <div style={{ border: '1.5px solid #ece8e0', borderRadius: 12, background: '#faf9f7', overflow: 'hidden' }}>
             {loadingIntake ? (
               <div style={{ padding: '20px', textAlign: 'center' }}>
@@ -658,7 +834,7 @@ function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loa
                 No intake projects with photos found
               </div>
             ) : (
-              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 280, overflowY: 'auto' }}>
                 {intakeProjects.map((proj: any) => {
                   const isSelected = selectedIntakeId === proj.id;
                   return (
@@ -706,76 +882,190 @@ function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loa
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-      {/* Section B: Photo Gallery + Upload */}
+function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
+  const [itemType, setItemType] = useState<ManualItemType>('window');
+  const [m, setM] = useState({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
+  const [opts, setOpts] = useState({ mount_type: 'inside', treatment: '', lining: '', notes: '' });
+  const [addedCount, setAddedCount] = useState(0);
+
+  const isWindow = ['window', 'cornice', 'valance', 'roman_shade'].includes(itemType);
+  const isFurniture = ['sofa', 'chair'].includes(itemType);
+  const isCushion = ['cushion', 'pillow'].includes(itemType);
+
+  const updateM = (key: string, val: string) => {
+    setM(prev => ({ ...prev, [key]: parseFloat(val) || 0 }));
+  };
+
+  const currentItem = {
+    type: itemType,
+    subtype: opts.treatment || undefined,
+    measurements: { width_inches: m.width_inches, height_inches: m.height_inches, depth_inches: m.depth_inches || undefined },
+    treatment: opts.treatment || itemType,
+    mount_type: opts.mount_type || undefined,
+    lining: opts.lining || undefined,
+    description: opts.notes || undefined,
+  };
+
+  const addItem = () => {
+    if (!m.width_inches && !m.height_inches) return;
+    onAddItem({
+      type: ITEM_TYPES.includes(itemType) ? itemType : 'sofa',
+      width: m.width_inches ? `${m.width_inches}"` : '',
+      height: m.height_inches ? `${m.height_inches}"` : '',
+      depth: m.depth_inches ? `${m.depth_inches}"` : '',
+      description: [
+        MANUAL_ITEM_TYPES.find(t => t.key === itemType)?.label || itemType,
+        opts.treatment ? opts.treatment.replace(/_/g, ' ') : '',
+        opts.mount_type === 'outside' ? 'outside mount' : '',
+        opts.lining ? `${opts.lining} lining` : '',
+        opts.notes,
+      ].filter(Boolean).join(' · '),
+    });
+    setAddedCount(c => c + 1);
+    setM({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
+    setOpts({ mount_type: 'inside', treatment: '', lining: '', notes: '' });
+  };
+
+  return (
+    <div>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
-        Photo Gallery
+        Manual Measurement Entry
       </div>
 
-      {/* Thumbnails with Analyze buttons */}
-      {photos.length > 0 && (
-        <div className="flex gap-3 flex-wrap mb-4">
-          {photos.map((p, i) => (
-            <div key={i} style={{ position: 'relative', width: 120, height: 140, borderRadius: 12, overflow: 'hidden', border: '2px solid #ece8e0', background: '#f5f3ef' }}>
-              <img src={p.preview} alt="" style={{ width: '100%', height: 100, objectFit: 'cover' }} />
-              {/* Intake badge */}
-              {p.fromIntake && (
-                <div style={{ position: 'absolute', top: 4, left: 4, fontSize: 8, fontWeight: 700, color: '#fff', background: '#b8960c', padding: '2px 5px', borderRadius: 4 }}>
-                  INTAKE
-                </div>
-              )}
-              {/* Remove button */}
-              <button onClick={(e) => { e.stopPropagation(); onRemove(i); }}
-                className="cursor-pointer transition-all hover:bg-[#dc2626]"
-                style={{
-                  position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 6,
-                  background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                <X size={12} />
-              </button>
-              {/* Analyze button at bottom */}
-              <button
-                onClick={(e) => { e.stopPropagation(); onAnalyze(i); }}
-                disabled={analyzingPhoto === i}
-                className="cursor-pointer transition-all hover:bg-[#fdf8eb]"
-                style={{
-                  width: '100%', height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                  background: '#faf9f7', border: 'none', borderTop: '1px solid #ece8e0',
-                  fontSize: 10, fontWeight: 600, color: analyzingPhoto === i ? '#b8960c' : '#777',
-                }}>
-                {analyzingPhoto === i
-                  ? <><Loader2 size={11} className="animate-spin" /> Analyzing...</>
-                  : <><Sparkles size={11} /> Analyze</>}
-              </button>
-            </div>
-          ))}
+      {addedCount > 0 && (
+        <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', fontSize: 12, fontWeight: 600, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <CheckCircle size={14} /> {addedCount} item{addedCount !== 1 ? 's' : ''} added to Room 1
         </div>
       )}
 
-      {/* Drop zone */}
-      <div
-        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className="cursor-pointer transition-all"
-        style={{
-          border: `2px dashed ${dragOver ? '#b8960c' : '#ddd'}`,
-          borderRadius: 14,
-          padding: photos.length > 0 ? '20px 24px' : '36px 24px',
-          textAlign: 'center',
-          background: dragOver ? '#fdf8eb' : '#faf9f7',
-        }}>
-        <Upload size={photos.length > 0 ? 22 : 32} className="mx-auto mb-2" style={{ color: dragOver ? '#b8960c' : '#ccc' }} />
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>
-          {photos.length > 0 ? 'Add more photos' : 'Drop photos here or click to browse'}
+      {/* Item type selector */}
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
+          What are you measuring?
+        </label>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {MANUAL_ITEM_TYPES.map(t => (
+            <button key={t.key} onClick={() => setItemType(t.key)}
+              className="cursor-pointer transition-all"
+              style={{
+                padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+                border: `1.5px solid ${itemType === t.key ? '#b8960c' : '#ece8e0'}`,
+                background: itemType === t.key ? '#fdf8e8' : '#faf9f7',
+                color: itemType === t.key ? '#b8960c' : '#777',
+                minHeight: 44,
+              }}>
+              {t.icon} {t.label}
+            </button>
+          ))}
         </div>
-        <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>JPG, PNG, HEIC accepted</div>
-        <input ref={fileInputRef} type="file" accept="image/*" multiple hidden
-          onChange={e => { if (e.target.files?.length) onAdd(e.target.files); e.target.value = ''; }} />
+      </div>
+
+      {/* Form + live diagram side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <label style={{ fontSize: 12 }}>
+              <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Width (in)</span>
+              <input type="number" value={m.width_inches || ''} onChange={e => updateM('width_inches', e.target.value)}
+                placeholder="e.g. 72" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+            </label>
+            <label style={{ fontSize: 12 }}>
+              <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Height (in)</span>
+              <input type="number" value={m.height_inches || ''} onChange={e => updateM('height_inches', e.target.value)}
+                placeholder="e.g. 96" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+            </label>
+          </div>
+
+          {(isFurniture || isCushion) && (
+            <label style={{ fontSize: 12 }}>
+              <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Depth (in)</span>
+              <input type="number" value={m.depth_inches || ''} onChange={e => updateM('depth_inches', e.target.value)}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 14, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+            </label>
+          )}
+
+          {isWindow && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Mount Type</span>
+                  <select value={opts.mount_type} onChange={e => setOpts(p => ({...p, mount_type: e.target.value}))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
+                    <option value="inside">Inside Mount</option>
+                    <option value="outside">Outside Mount</option>
+                  </select>
+                </label>
+                <label style={{ fontSize: 12 }}>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Treatment</span>
+                  <select value={opts.treatment} onChange={e => setOpts(p => ({...p, treatment: e.target.value}))}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
+                    <option value="">--</option>
+                    <option value="pinch_pleat">Pinch Pleat</option>
+                    <option value="rod_pocket">Rod Pocket</option>
+                    <option value="grommet">Grommet</option>
+                    <option value="tab_top">Tab Top</option>
+                    <option value="ripplefold">Ripplefold</option>
+                    <option value="goblet">Goblet</option>
+                  </select>
+                </label>
+              </div>
+              <label style={{ fontSize: 12 }}>
+                <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Lining</span>
+                <select value={opts.lining} onChange={e => setOpts(p => ({...p, lining: e.target.value}))}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
+                  <option value="">None</option>
+                  <option value="standard">Standard</option>
+                  <option value="blackout">Blackout</option>
+                  <option value="thermal">Thermal</option>
+                </select>
+              </label>
+            </>
+          )}
+
+          <label style={{ fontSize: 12 }}>
+            <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Notes</span>
+            <input value={opts.notes} onChange={e => setOpts(p => ({...p, notes: e.target.value}))}
+              placeholder="Additional notes..."
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }} />
+          </label>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={addItem}
+              disabled={!m.width_inches && !m.height_inches}
+              className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 disabled:opacity-50"
+              style={{ flex: 1, padding: '12px 20px', borderRadius: 10, background: '#b8960c', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', minHeight: 48 }}>
+              <CheckCircle size={16} /> Add to Room 1
+            </button>
+            <button onClick={() => { setM({width_inches:0,height_inches:0,depth_inches:0,sill_depth:0,stack_space:0}); setOpts({mount_type:'inside',treatment:'',lining:'',notes:''}); }}
+              className="cursor-pointer transition-all hover:bg-[#f0ede8]"
+              style={{ padding: '12px 16px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 13, fontWeight: 600, color: '#777', minHeight: 48 }}>
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {/* Right: live SVG diagram */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          {(m.width_inches > 0 || m.height_inches > 0) ? (
+            <>
+              <div style={{ border: '1px solid #ece8e0', borderRadius: 12, overflow: 'hidden', background: '#fff', padding: 8, width: '100%' }}>
+                <MeasurementDiagram item={currentItem as any} width={380} height={300} />
+              </div>
+              <span style={{ fontSize: 11, color: '#888' }}>Live preview — updates as you type</span>
+            </>
+          ) : (
+            <div style={{ width: '100%', height: 300, borderRadius: 12, border: '2px dashed #ece8e0', background: '#faf9f7', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Ruler size={32} style={{ color: '#ddd' }} />
+              <span style={{ fontSize: 13, color: '#aaa', fontWeight: 500 }}>Enter measurements to see diagram</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
