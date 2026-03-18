@@ -9,6 +9,7 @@ import {
 import { API } from '../../../lib/api';
 import MeasurementDiagram from '../quotes/MeasurementDiagram';
 import dynamic from 'next/dynamic';
+import AnalysisApprovalFlow from './AnalysisApprovalFlow';
 
 const ThreeViewer = dynamic(() => import('./ThreeViewer'), { ssr: false });
 
@@ -598,6 +599,8 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   const [photos, setPhotos] = useState<PhotoEntry[]>([]);
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
   const [showGallery, setShowGallery] = useState(true);
+  // Approval flow toggle
+  const [showApprovalFlow, setShowApprovalFlow] = useState(false);
   // Design Mockup style preferences
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [measureInputMethod, setMeasureInputMethod] = useState<MeasureInputMethod>('photo');
@@ -808,7 +811,15 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       outline: '/vision/outline',
     };
 
-    const body: any = { image: imageData };
+    // If 3D model is loaded but no imageData, capture the canvas first
+    const analysisImage = imageData || '';
+    if (!analysisImage && model3D) {
+      setError('Use the Capture button in the 3D viewer first, then Analyze.');
+      setLoading(false);
+      return;
+    }
+
+    const body: any = { image: analysisImage };
     if ((mode === 'measure' || mode === 'mockup') && preferences.trim()) {
       body.preferences = preferences.trim();
     }
@@ -1401,12 +1412,69 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
 
   const renderResults = () => {
     if (!result) return null;
-    switch (mode) {
-      case 'measure': return renderMeasureResults(result);
-      case 'upholstery': return renderUpholsteryResults(result);
-      case 'mockup': return renderMockupResults(result);
-      case 'outline': return renderOutlineResults(result);
+
+    // Show approval flow for measure and upholstery modes
+    if (showApprovalFlow && (mode === 'measure' || mode === 'upholstery')) {
+      return (
+        <div>
+          <button
+            onClick={() => setShowApprovalFlow(false)}
+            className="flex items-center gap-1 cursor-pointer hover:bg-[#f0ede8] transition-colors"
+            style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777', marginBottom: 12 }}
+          >
+            <ArrowRight size={12} style={{ transform: 'rotate(180deg)' }} /> Back to Raw Results
+          </button>
+          <AnalysisApprovalFlow
+            result={result}
+            imageData={imageData}
+            onRedetect={() => { setResult(null); setShowApprovalFlow(false); }}
+            onFinalize={(data) => {
+              if (onSaveQuote) {
+                data.items.forEach(item => onSaveQuote({
+                  type: item.type,
+                  description: item.description,
+                  measurements: { width_inches: item.width_inches, height_inches: item.height_inches },
+                  mount_type: item.mount_type,
+                  treatment: item.treatment,
+                  lining: item.lining,
+                  source: 'ai_approval_flow',
+                }));
+              }
+            }}
+            onAddToQuote={(data) => {
+              if (onSaveQuote) onSaveQuote(data);
+            }}
+          />
+        </div>
+      );
     }
+
+    // Raw results view with "Start Approval Flow" button for measure/upholstery
+    return (
+      <div>
+        {(mode === 'measure' || mode === 'upholstery') && (
+          <button
+            onClick={() => setShowApprovalFlow(true)}
+            className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:brightness-110"
+            style={{
+              height: 42, fontSize: 12, borderRadius: 10, marginBottom: 14,
+              background: 'linear-gradient(135deg, #b8960c, #d4af37)',
+              color: '#fff', border: 'none', boxShadow: '0 2px 8px #b8960c30',
+            }}
+          >
+            <CheckCircle size={14} /> Start Step-by-Step Approval Flow
+          </button>
+        )}
+        {(() => {
+          switch (mode) {
+            case 'measure': return renderMeasureResults(result);
+            case 'upholstery': return renderUpholsteryResults(result);
+            case 'mockup': return renderMockupResults(result);
+            case 'outline': return renderOutlineResults(result);
+          }
+        })()}
+      </div>
+    );
   };
 
   /* ── Render ── */
@@ -1814,6 +1882,29 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
               onCapture={(dataUrl) => {
                 // Save capture as the imageData so user can also analyze it as a photo
                 setImageData(dataUrl);
+              }}
+              onExportData={(data) => {
+                // Export 3D measurements + treatment areas as quote line items
+                if (onSaveQuote) {
+                  const items = [
+                    ...data.measurements.map(m => ({
+                      type: 'measurement',
+                      description: m.label,
+                      measurements: { width_inches: m.value_inches },
+                      source: '3d_scan',
+                      calibrated: m.calibrated,
+                    })),
+                    ...data.treatmentAreas.map(ta => ({
+                      type: 'drapery',
+                      description: ta.label,
+                      measurements: { width_inches: ta.width_inches, height_inches: ta.height_inches },
+                      source: '3d_scan',
+                    })),
+                  ];
+                  items.forEach(item => onSaveQuote(item));
+                }
+                // Also set image for potential AI analysis
+                if (data.screenshot) setImageData(data.screenshot);
               }}
             />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
