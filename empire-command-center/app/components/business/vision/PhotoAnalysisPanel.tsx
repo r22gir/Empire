@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import { API } from '../../../lib/api';
 import MeasurementDiagram from '../quotes/MeasurementDiagram';
+import dynamic from 'next/dynamic';
+
+const ThreeViewer = dynamic(() => import('./ThreeViewer'), { ssr: false });
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -785,7 +788,8 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     }
     setError('');
     const url = URL.createObjectURL(file);
-    setModel3D(url);
+    // Append extension as hash so ThreeViewer can detect format from blob URL
+    setModel3D(`${url}#.${ext}`);
     setResult(null);
   };
 
@@ -1801,37 +1805,29 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           </div>
         )}
 
-        {/* 3D Model preview */}
+        {/* 3D Model viewer */}
         {model3D && !imageData && !showCamera && !(mode === 'measure' && measureInputMethod === 'manual') && (
           <div style={{ marginBottom: 16 }}>
-            <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '2px solid #16a34a', background: '#f0fdf4', padding: '32px 20px', textAlign: 'center' }}>
-              <Box size={48} style={{ color: '#16a34a', margin: '0 auto 12px' }} />
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#16a34a', marginBottom: 4 }}>3D Model Loaded</div>
-              <div style={{ fontSize: 12, color: '#777' }}>Polycam scan ready for analysis</div>
-              <button
-                onClick={() => { setModel3D(null); setResult(null); }}
-                className="flex items-center justify-center cursor-pointer hover:bg-white transition-colors"
-                style={{
-                  position: 'absolute', top: 8, right: 8,
-                  width: 28, height: 28, borderRadius: 8,
-                  background: 'rgba(255,255,255,0.9)', border: '1px solid #bbf7d0',
-                }}
-              >
-                <X size={14} className="text-[#999]" />
-              </button>
-            </div>
+            <ThreeViewer
+              modelUrl={model3D}
+              height={400}
+              onCapture={(dataUrl) => {
+                // Save capture as the imageData so user can also analyze it as a photo
+                setImageData(dataUrl);
+              }}
+            />
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button
                 onClick={() => { setModel3D(null); setResult(null); }}
                 className="flex items-center gap-1.5 cursor-pointer transition-colors hover:bg-[#f0ede8]"
-                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
+                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777', minHeight: 44 }}
               >
                 <X size={12} /> Remove
               </button>
               <button
                 onClick={() => fileRef.current?.click()}
                 className="flex items-center gap-1.5 cursor-pointer transition-colors hover:bg-[#f0ede8]"
-                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
+                style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777', minHeight: 44 }}
               >
                 <Upload size={12} /> Add Photo Instead
               </button>
