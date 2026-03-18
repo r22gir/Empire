@@ -352,10 +352,7 @@ async def analyze_photo_for_quote(body: dict):
         customer_name=customer_name,
         location=location,
         lining=lining,
-        room_info={
-            "type": analysis.get("room_type"),
-            "style": analysis.get("style"),
-        },
+
     )
 
     # ── GATE 1: Post-analysis verification ──
