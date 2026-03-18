@@ -107,7 +107,7 @@ async def send_quote_email(req: QuoteEmailRequest):
     if qr.fixed_count > 0:
         html = qr.cleaned  # Use auto-fixed version
 
-    subject = f"Your Quote #{req.quote_number} from RG's Drapery & Upholstery"
+    subject = f"Your Quote #{req.quote_number} from Empire Workroom"
 
     sent = await send_email(req.to_email, subject, html)
 
@@ -133,7 +133,7 @@ async def send_invoice_email(req: InvoiceEmailRequest):
     if data.get("balance_due") is None:
         data["balance_due"] = data["total"]
     html = render_invoice_sent(data)
-    subject = f"Invoice #{req.invoice_number} from RG's Drapery & Upholstery"
+    subject = f"Invoice #{req.invoice_number} from Empire Workroom"
 
     sent = await send_email(req.to_email, subject, html)
 

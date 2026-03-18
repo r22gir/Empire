@@ -659,9 +659,17 @@ async def delete_quote(quote_id: str):
     return {"status": "deleted", "id": quote_id}
 
 
+class SendQuoteRequest(BaseModel):
+    to_email: Optional[str] = None  # Override recipient; defaults to customer_email
+
+
 @router.post("/{quote_id}/send")
-async def send_quote(quote_id: str):
-    """Mark quote as sent."""
+async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
+    """Generate PDF, email it to client, and mark quote as sent.
+
+    If no to_email is provided, uses the customer_email from the quote.
+    If no email address is available, marks as sent without emailing.
+    """
     quote = _load_quote(quote_id)
 
     # Quality gate: final check before marking as sent
@@ -676,11 +684,106 @@ async def send_quote(quote_id: str):
             "issues": [{"check": i.check, "severity": i.severity.value, "message": i.message} for i in qr.issues],
         })
 
+    # Determine recipient
+    to_email = (body.to_email if body and body.to_email else None) or quote.get("customer_email", "")
+
+    # Generate PDF
+    pdf_bytes = None
+    try:
+        from weasyprint import HTML as WeasyHTML
+        pdf_response = await generate_pdf(quote_id, skip_verification=True)
+        if hasattr(pdf_response, 'body'):
+            pdf_bytes = pdf_response.body
+        else:
+            # Read from saved file
+            pdf_path = os.path.join(
+                os.path.expanduser("~/empire-repo/backend/data/quotes/pdf"),
+                f"{quote['quote_number']}.pdf"
+            )
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as f:
+                    pdf_bytes = f.read()
+    except Exception as e:
+        logger.warning(f"PDF generation failed during send: {e}")
+
+    # Email the quote with PDF attachment
+    email_sent = False
+    if to_email:
+        try:
+            from app.services.email.sender import send_email, SENDGRID_API_KEY, SENDGRID_FROM_EMAIL
+            from app.services.email.templates import render_quote_sent
+
+            # Build line items for email
+            line_items = []
+            for item in quote.get("line_items", []):
+                line_items.append({
+                    "description": item.get("description", ""),
+                    "qty": item.get("quantity", 1),
+                    "unit_price": item.get("rate", 0),
+                    "total": item.get("amount", 0),
+                })
+            # If no line items but rooms exist, build from rooms
+            if not line_items:
+                for room in (quote.get("rooms") or []):
+                    for w in room.get("windows", []):
+                        line_items.append({
+                            "description": f"{room.get('name', 'Room')} - {w.get('name', 'Window')}",
+                            "qty": 1,
+                            "unit_price": w.get("total", w.get("price", 0)),
+                            "total": w.get("total", w.get("price", 0)),
+                        })
+
+            html_body = render_quote_sent({
+                "customer_name": quote.get("customer_name", "Valued Customer"),
+                "quote_number": quote.get("quote_number", ""),
+                "project_description": quote.get("project_description", quote.get("project_name", "")),
+                "line_items": line_items,
+                "total": quote.get("total", 0),
+                "quote_url": f"https://studio.empirebox.store/quotes/{quote_id}",
+            })
+
+            subject = f"Your Quote #{quote['quote_number']} from Empire Workroom"
+
+            # Send with PDF attachment if available
+            if pdf_bytes and SENDGRID_API_KEY:
+                from sendgrid import SendGridAPIClient
+                from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+
+                message = Mail(
+                    from_email=SENDGRID_FROM_EMAIL,
+                    to_emails=to_email,
+                    subject=subject,
+                    html_content=html_body,
+                )
+                attachment = Attachment(
+                    FileContent(base64.b64encode(pdf_bytes).decode()),
+                    FileName(f"{quote['quote_number']}.pdf"),
+                    FileType("application/pdf"),
+                    Disposition("attachment"),
+                )
+                message.attachment = attachment
+                sg = SendGridAPIClient(SENDGRID_API_KEY)
+                response = sg.send(message)
+                email_sent = response.status_code < 300
+            else:
+                # Fallback: send without attachment
+                email_sent = await send_email(to_email, subject, html_body)
+        except Exception as e:
+            logger.error(f"Email send failed for quote {quote_id}: {e}")
+
+    # Mark as sent
     quote["status"] = "sent"
     quote["sent_at"] = datetime.utcnow().isoformat()
     quote["updated_at"] = datetime.utcnow().isoformat()
     _save_quote(quote)
-    return {"status": "sent", "quote": quote}
+
+    return {
+        "status": "sent",
+        "email_sent": email_sent,
+        "to_email": to_email or "(no email address)",
+        "pdf_generated": pdf_bytes is not None,
+        "quote": quote,
+    }
 
 
 @router.post("/{quote_id}/accept")

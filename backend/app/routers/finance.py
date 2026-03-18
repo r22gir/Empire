@@ -455,7 +455,7 @@ def create_invoice_from_quote(request: Request, quote_id: str):
     with open(quote_file) as f:
         quote = json.load(f)
 
-    # Extract line items from rooms
+    # Extract line items from rooms or flat line_items
     line_items = []
     for room in (quote.get("rooms") or []):
         room_name = room.get("name", "Room")
@@ -465,6 +465,18 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 "quantity": 1,
                 "unit_price": window.get("total", 0),
                 "total": window.get("total", 0),
+            })
+    # Fallback: use flat line_items if no rooms
+    if not line_items:
+        for item in (quote.get("line_items") or []):
+            qty = item.get("quantity", 1)
+            rate = item.get("rate", item.get("unit_price", 0))
+            amt = item.get("amount", qty * rate)
+            line_items.append({
+                "description": item.get("description", "Item"),
+                "quantity": qty,
+                "unit_price": rate,
+                "total": amt,
             })
 
     subtotal = quote.get("subtotal", 0)
@@ -551,6 +563,7 @@ def create_invoice_from_job(request: Request, job_id: str):
             if quote_file.exists():
                 with open(quote_file) as f:
                     quote = json.load(f)
+                # Try rooms structure first
                 for room in (quote.get("rooms") or []):
                     room_name = room.get("name", "Room")
                     for window in room.get("windows", []):
@@ -560,6 +573,18 @@ def create_invoice_from_job(request: Request, job_id: str):
                             "quantity": 1,
                             "unit_price": item_total,
                             "total": item_total,
+                        })
+                # Fallback: use flat line_items if no rooms
+                if not line_items:
+                    for item in (quote.get("line_items") or []):
+                        qty = item.get("quantity", 1)
+                        rate = item.get("rate", item.get("unit_price", 0))
+                        amt = item.get("amount", qty * rate)
+                        line_items.append({
+                            "description": item.get("description", "Item"),
+                            "quantity": qty,
+                            "unit_price": rate,
+                            "total": amt,
                         })
                 subtotal = quote.get("subtotal", 0) or sum(i.get("total", 0) for i in line_items)
 

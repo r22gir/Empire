@@ -1,6 +1,12 @@
 """
 Main FastAPI application entry point for EmpireBox backend.
 """
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env before anything reads os.getenv
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.rate_limiter import limiter

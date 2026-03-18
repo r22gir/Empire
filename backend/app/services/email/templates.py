@@ -38,7 +38,7 @@ def _base_wrapper(content: str, preheader: str = "") -> str:
 <!-- Gold header bar -->
 <tr><td style="background-color:#b8960c;padding:24px 32px;text-align:center;">
 <h1 style="margin:0;font-size:24px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">{biz.business_name}</h1>
-<p style="margin:4px 0 0;font-size:13px;color:rgba(255,255,255,0.85);font-style:italic;">RG's Drapery &amp; Upholstery</p>
+<p style="margin:4px 0 0;font-size:13px;color:rgba(255,255,255,0.85);font-style:italic;">Custom Drapery &amp; Upholstery</p>
 </td></tr>
 <!-- Content area -->
 <tr><td style="padding:32px;">
@@ -97,7 +97,7 @@ def _footer(extra_line: str = "") -> str:
     return f"""\
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="padding:24px 32px;background-color:#f9f7f3;border-top:1px solid #e8e4de;text-align:center;">
-<p style="margin:0;font-size:14px;font-weight:600;color:#b8960c;">RG's Drapery &amp; Upholstery</p>
+<p style="margin:0;font-size:14px;font-weight:600;color:#b8960c;">{biz.business_name}</p>
 <p style="margin:6px 0 0;font-size:12px;color:#999;">Washington, DC Metro Area</p>
 <p style="margin:4px 0 0;font-size:12px;color:#999;">Powered by {biz.business_name}</p>
 {extra}
@@ -279,7 +279,7 @@ We have received your payment. Thank you for your business!
 We appreciate your trust in our work. If you need anything else, we're just a call away.
 </p>"""
 
-    footer = _footer("RG's Drapery &amp; Upholstery &mdash; Quality craftsmanship since day one")
+    footer = _footer(f"{biz.business_name} &mdash; Quality craftsmanship since day one")
     html = _base_wrapper(content, preheader=f"Payment of {amount} received — thank you!")
     html = html.replace("</table>\n</td></tr>\n</table>\n</body>",
                          f"{footer}</table>\n</td></tr>\n</table>\n</body>")

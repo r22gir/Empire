@@ -70,7 +70,7 @@ class InnovationDesk(BaseDesk):
             f"Request: {task.title}\n"
             f"Details: {task.description[:500]}\n\n"
             f"Empire operates:\n"
-            f"1. RG's Drapery & Upholstery (Washington DC) — custom window treatments\n"
+            f"1. Empire Workroom (Washington DC) — custom drapery & upholstery\n"
             f"2. CraftForge (woodwork/CNC) — custom furniture and CNC projects\n"
             f"3. EmpireBox SaaS Platform (Lite $29, Pro $79, Empire $199)\n\n"
             f"Analyze: key competitors, their pricing, their weaknesses, "

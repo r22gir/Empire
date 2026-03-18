@@ -25,7 +25,7 @@ SMTP_FROM = os.getenv("SMTP_FROM", "")
 
 
 def _sendgrid_configured() -> bool:
-    return bool(SENDGRID_API_KEY)
+    return bool(os.getenv("SENDGRID_API_KEY", "") or SENDGRID_API_KEY)
 
 
 def _smtp_configured() -> bool:
@@ -48,13 +48,16 @@ async def _send_via_sendgrid(to: str, subject: str, html_body: str) -> bool:
         from sendgrid import SendGridAPIClient
         from sendgrid.helpers.mail import Mail
 
+        api_key = os.getenv("SENDGRID_API_KEY", "") or SENDGRID_API_KEY
+        from_email = os.getenv("SENDGRID_FROM_EMAIL", "") or SENDGRID_FROM_EMAIL
+
         message = Mail(
-            from_email=SENDGRID_FROM_EMAIL,
+            from_email=from_email,
             to_emails=to,
             subject=subject,
             html_content=html_body,
         )
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg = SendGridAPIClient(api_key)
         response = sg.send(message)
         if response.status_code < 300:
             logger.info("Email sent via SendGrid to %s: %s (status %s)", to, subject, response.status_code)
@@ -121,6 +124,7 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
 
     Returns True on success, False on failure or missing config.
     """
+    # Re-check env vars at call time (modules may load before .env is sourced)
     if _sendgrid_configured():
         return await _send_via_sendgrid(to, subject, html_body)
 
@@ -128,7 +132,10 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
         return await _send_via_smtp(to, subject, html_body)
 
     logger.warning(
-        "Email not configured — set SENDGRID_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASSWORD/SMTP_FROM. "
-        "Email to %s not sent.", to
+        "Email not configured — SENDGRID_API_KEY=%s, SMTP_HOST=%s. "
+        "Email to %s not sent.",
+        "SET" if os.getenv("SENDGRID_API_KEY") else "EMPTY",
+        "SET" if os.getenv("SMTP_HOST") else "EMPTY",
+        to,
     )
     return False
