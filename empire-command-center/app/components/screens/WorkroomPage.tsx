@@ -4,13 +4,14 @@ import { API } from '../../lib/api';
 import {
   Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
-  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard
+  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler
 } from 'lucide-react';
 import QuoteActions from '../business/quotes/QuoteActions';
 import QuickQuoteBuilder from '../business/quotes/QuickQuoteBuilder';
 import { QuickQuotePanel, QuotePhasePipeline } from '../business/quotes/QuotePipeline';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+import YardageCalculator from '../business/quotes/YardageCalculator';
 
 // Lazy-load business modules (they'll be created by the build agents)
 const FinanceDashboard = lazy(() => import('../business/finance/FinanceDashboard'));
@@ -190,40 +191,161 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
 // -- Overview Section --
 
 function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes: any[]; stats: any; onNavigate: (s: Section) => void; onSelectQuote?: (id: string) => void }) {
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [finance, setFinance] = useState<any>(null);
+  const [inventory, setInventory] = useState<any>(null);
+
+  useEffect(() => {
+    // Fetch real data for dashboard
+    fetch(`${API}/crm/customers?limit=5&sort_by=updated_at&sort_dir=desc`).then(r => r.json()).then(d => setCustomers(d.customers || [])).catch(() => {});
+    fetch(`${API}/jobs/`).then(r => r.json()).then(d => setJobs(Array.isArray(d) ? d : d.jobs || [])).catch(() => {});
+    fetch(`${API}/finance/dashboard?range=this_month`).then(r => r.json()).then(d => setFinance(d)).catch(() => {});
+    fetch(`${API}/inventory/dashboard`).then(r => r.json()).then(d => setInventory(d)).catch(() => {});
+  }, []);
+
+  const activeJobs = jobs.filter(j => j.status !== 'completed' && j.status !== 'cancelled');
+  const completedJobs = jobs.filter(j => j.status === 'completed');
+  const overdueJobs = jobs.filter(j => j.due_date && new Date(j.due_date) < new Date() && j.status !== 'completed');
+
+  // Job stage counts for at-a-glance
+  const stageCounts = {
+    pending: jobs.filter(j => j.status === 'pending').length,
+    scheduled: jobs.filter(j => j.status === 'scheduled').length,
+    in_progress: jobs.filter(j => j.status === 'in_progress').length,
+    completed: completedJobs.length,
+  };
+
+  // Build activity feed from quotes + jobs
+  const activities: { text: string; time: string; color: string; icon: React.ReactNode }[] = [];
+  quotes.slice(0, 5).forEach(q => {
+    activities.push({
+      text: `Quote ${q.quote_number || 'Q'} ${q.status === 'accepted' ? 'accepted by' : q.status === 'sent' ? 'sent to' : 'created for'} ${q.customer_name || 'Customer'} — $${(q.total || 0).toLocaleString()}`,
+      time: q.created_at || q.updated_at || '',
+      color: q.status === 'accepted' ? '#16a34a' : q.status === 'sent' ? '#2563eb' : '#b8960c',
+      icon: <ClipboardList size={14} />,
+    });
+  });
+  jobs.slice(0, 3).forEach(j => {
+    activities.push({
+      text: `Job "${j.title}" ${j.status === 'completed' ? 'completed' : j.status === 'in_progress' ? 'in progress' : 'created'} — ${j.customer_name || 'Customer'}`,
+      time: j.updated_at || j.created_at || '',
+      color: j.status === 'completed' ? '#16a34a' : j.status === 'in_progress' ? '#d97706' : '#777',
+      icon: <Calendar size={14} />,
+    });
+  });
+  activities.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+
+  const revenue = finance?.revenue?.amount || stats.pipeline || 0;
+  const customerCount = finance?.customers?.total || customers.length || 0;
+
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
-      <div className="flex items-center gap-3 mb-1">
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Empire Workroom</h1>
+    <div style={{ maxWidth: 1060, margin: '0 auto' }} className="px-4 sm:px-9 py-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-3">
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Empire Workroom</h1>
+          <span style={{ fontSize: 11, color: '#b8960c', fontWeight: 600, padding: '3px 10px', borderRadius: 20, background: '#fdf8eb', border: '1px solid #f0e6c0' }}>
+            Custom Drapery & Upholstery
+          </span>
+        </div>
         <span style={{ fontSize: 13, color: '#aaa' }} suppressHydrationWarning>
-          {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
         </span>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-6">
-        <KPI icon={<DollarSign size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Pipeline" value={`$${stats.pipeline.toLocaleString()}`} sub={`${quotes.length} quotes`} onClick={() => onNavigate('quotes')} />
-        <KPI icon={<ClipboardList size={18} />} iconBg="#fef3c7" iconColor="#d97706" label="Open Quotes" value={String(stats.openQuotes)} sub="Awaiting approval" onClick={() => onNavigate('quotes')} />
-        <KPI icon={<TrendingUp size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Accepted" value={String(stats.accepted)} sub="Ready to produce" />
-        <KPI icon={<Calendar size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="In Production" value="--" sub="Active jobs" onClick={() => onNavigate('jobs')} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 mb-6">
+        <KPI icon={<DollarSign size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Revenue Pipeline" value={`$${revenue.toLocaleString()}`} sub={`${quotes.length} quotes total`} onClick={() => onNavigate('quotes')} />
+        <KPI icon={<Calendar size={18} />} iconBg="#eff6ff" iconColor="#2563eb" label="Active Jobs" value={String(activeJobs.length)} sub={overdueJobs.length > 0 ? `${overdueJobs.length} overdue` : 'On track'} onClick={() => onNavigate('jobs')} />
+        <KPI icon={<ClipboardList size={18} />} iconBg="#fef3c7" iconColor="#d97706" label="Open Quotes" value={String(stats.openQuotes)} sub={`$${stats.pipeline.toLocaleString()} value`} onClick={() => onNavigate('quotes')} />
+        <KPI icon={<Users size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Customers" value={String(customerCount)} sub={`${customers.length} recent`} onClick={() => onNavigate('customers')} />
       </div>
 
-      {/* Quick links */}
-      <div className="section-label" style={{ marginBottom: 8 }}>Quick Access</div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <QuickLink icon={<DollarSign size={18} />} label="Finance Dashboard" desc="Revenue, expenses, P&L" color="#16a34a" onClick={() => onNavigate('finance')} />
-        <QuickLink icon={<FileText size={18} />} label="Invoices" desc="Create & manage invoices" color="#b8960c" onClick={() => onNavigate('invoices')} />
-        <QuickLink icon={<Users size={18} />} label="Customers" desc="CRM & client directory" color="#2563eb" onClick={() => onNavigate('customers')} />
-        <QuickLink icon={<Camera size={18} />} label="AI Analysis" desc="Photo measure & mockups" color="#7c3aed" onClick={() => onNavigate('analysis')} />
+      {/* Quick Actions */}
+      <div className="flex flex-wrap gap-3 mb-6">
+        <button onClick={() => onNavigate('quotes')} className="flex items-center gap-2 cursor-pointer hover:brightness-95 transition-all active:scale-[0.98]"
+          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.3)' }}>
+          <Plus size={16} /> New Quote
+        </button>
+        <button onClick={() => onNavigate('customers')} className="flex items-center gap-2 cursor-pointer hover:brightness-95 transition-all active:scale-[0.98]"
+          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.3)' }}>
+          <Users size={16} /> New Customer
+        </button>
+        <button onClick={() => onNavigate('jobs')} className="flex items-center gap-2 cursor-pointer hover:bg-[#f5f3ef] transition-all"
+          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#fff', color: '#555', border: '1.5px solid #ece8e0' }}>
+          <Calendar size={16} /> New Job
+        </button>
+        <button onClick={() => onNavigate('invoices')} className="flex items-center gap-2 cursor-pointer hover:bg-[#f5f3ef] transition-all"
+          style={{ minHeight: 44, padding: '0 20px', fontSize: 13, fontWeight: 700, borderRadius: 12, background: '#fff', color: '#555', border: '1.5px solid #ece8e0' }}>
+          <FileText size={16} /> Send Invoice
+        </button>
       </div>
 
-      {/* Recent Quotes + Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="empire-card">
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 12 }} className="flex items-center gap-2">
+      {/* Jobs at a Glance */}
+      {jobs.length > 0 && (
+        <div className="mb-6">
+          <div className="section-label" style={{ marginBottom: 10 }}>Jobs at a Glance</div>
+          <div className="flex gap-3 flex-wrap">
+            {[
+              { label: 'Pending', count: stageCounts.pending, color: '#777', bg: '#f0ede8' },
+              { label: 'Scheduled', count: stageCounts.scheduled, color: '#2563eb', bg: '#eff6ff' },
+              { label: 'In Progress', count: stageCounts.in_progress, color: '#d97706', bg: '#fffbeb' },
+              { label: 'Completed', count: stageCounts.completed, color: '#16a34a', bg: '#f0fdf4' },
+            ].map(stage => (
+              <button key={stage.label} onClick={() => onNavigate('jobs')}
+                className="cursor-pointer hover:shadow-md transition-all"
+                style={{ padding: '12px 20px', borderRadius: 12, background: stage.bg, border: 'none', minWidth: 100, textAlign: 'center' }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: stage.color }}>{stage.count}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: stage.color, opacity: 0.8 }}>{stage.label}</div>
+              </button>
+            ))}
+            {overdueJobs.length > 0 && (
+              <button onClick={() => onNavigate('jobs')}
+                className="cursor-pointer hover:shadow-md transition-all"
+                style={{ padding: '12px 20px', borderRadius: 12, background: '#fef2f2', border: '1.5px solid #fecaca', minWidth: 100, textAlign: 'center' }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#dc2626' }}>{overdueJobs.length}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#dc2626' }}>Overdue</div>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+        {/* Recent Activity Feed */}
+        <div className="empire-card" style={{ minHeight: 280 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
+            <TrendingUp size={15} className="text-[#b8960c]" /> Recent Activity
+          </h3>
+          <div className="space-y-2">
+            {activities.slice(0, 6).map((a, i) => (
+              <div key={i} className="flex items-start gap-3" style={{ padding: '10px 12px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
+                <span className="mt-0.5 shrink-0" style={{ color: a.color }}>{a.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <div style={{ fontSize: 12, color: '#555', lineHeight: 1.4 }}>{a.text}</div>
+                  {a.time && (
+                    <div style={{ fontSize: 9, color: '#bbb', marginTop: 3 }} suppressHydrationWarning>
+                      {new Date(a.time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {activities.length === 0 && (
+              <div style={{ fontSize: 12, color: '#aaa', textAlign: 'center', padding: '24px 0' }}>No recent activity</div>
+            )}
+          </div>
+        </div>
+
+        {/* Recent Quotes */}
+        <div className="empire-card" style={{ minHeight: 280 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
             <ClipboardList size={15} className="text-[#b8960c]" /> Recent Quotes
           </h3>
           <div className="space-y-2">
-            {quotes.slice(0, 5).map((q, i) => (
+            {quotes.slice(0, 6).map((q, i) => (
               <div key={i} onClick={() => onSelectQuote?.(q.id)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0' }} className="hover:border-[#b8960c] hover:bg-[#fdf8eb] transition-all cursor-pointer flex items-center justify-between">
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{q.quote_number || `Q-${i + 1}`}</div>
@@ -235,37 +357,61 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
                 </div>
               </div>
             ))}
-            {quotes.length === 0 && <div style={{ fontSize: 12, color: '#aaa', textAlign: 'center', padding: '16px 0' }}>No quotes yet</div>}
+            {quotes.length === 0 && <div style={{ fontSize: 12, color: '#aaa', textAlign: 'center', padding: '24px 0' }}>No quotes yet</div>}
           </div>
         </div>
+      </div>
 
+      {/* Bottom Row: Inventory + Business Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Inventory Summary */}
         <div className="empire-card">
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 12 }} className="flex items-center gap-2">
-            <Package size={15} className="text-[#16a34a]" /> Business Summary
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
+            <Package size={15} className="text-[#16a34a]" /> Inventory
+          </h3>
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div style={{ textAlign: 'center', padding: '10px 6px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#16a34a' }}>{inventory?.total_items || 0}</div>
+              <div style={{ fontSize: 9, fontWeight: 600, color: '#16a34a', opacity: 0.8 }}>Items</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: '10px 6px', borderRadius: 10, background: inventory?.low_stock_count > 0 ? '#fffbeb' : '#faf9f7', border: `1px solid ${inventory?.low_stock_count > 0 ? '#fde68a' : '#ece8e0'}` }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: inventory?.low_stock_count > 0 ? '#d97706' : '#777' }}>{inventory?.low_stock_count || 0}</div>
+              <div style={{ fontSize: 9, fontWeight: 600, color: inventory?.low_stock_count > 0 ? '#d97706' : '#999' }}>Low Stock</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: '10px 6px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#b8960c' }}>${(inventory?.total_value || 0).toLocaleString()}</div>
+              <div style={{ fontSize: 9, fontWeight: 600, color: '#999' }}>Value</div>
+            </div>
+          </div>
+          {inventory?.low_stock_count > 0 && (
+            <button onClick={() => onNavigate('inventory')} className="w-full cursor-pointer hover:bg-[#fef3c7] transition-colors"
+              style={{ padding: '8px 12px', borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', fontSize: 11, fontWeight: 600, color: '#d97706', textAlign: 'center' }}>
+              {inventory.low_stock_count} items need reorder
+            </button>
+          )}
+          {!inventory?.low_stock_count && (
+            <button onClick={() => onNavigate('inventory')} className="w-full cursor-pointer hover:bg-[#f5f3ef] transition-colors"
+              style={{ padding: '8px 12px', borderRadius: 8, background: '#faf9f7', border: '1px solid #ece8e0', fontSize: 11, fontWeight: 600, color: '#777', textAlign: 'center' }}>
+              View All Inventory
+            </button>
+          )}
+        </div>
+
+        {/* Business Summary */}
+        <div className="empire-card">
+          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14 }} className="flex items-center gap-2">
+            <BarChart3 size={15} className="text-[#7c3aed]" /> Business Summary
           </h3>
           <div className="space-y-2">
             <InfoRow label="Total Pipeline" value={`$${stats.pipeline.toLocaleString()}`} color="#b8960c" />
             <InfoRow label="Open Quotes" value={String(stats.openQuotes)} color="#d97706" />
-            <InfoRow label="Accepted" value={String(stats.accepted)} color="#16a34a" />
-            <InfoRow label="Active Customers" value={String(new Set(quotes.map(q => q.customer_name)).size)} color="#7c3aed" />
+            <InfoRow label="Accepted Quotes" value={String(stats.accepted)} color="#16a34a" />
+            <InfoRow label="Active Jobs" value={String(activeJobs.length)} color="#2563eb" />
           </div>
-          <div style={{ marginTop: 16, padding: 12, borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-            <div className="section-label" style={{ color: '#16a34a', marginBottom: 6 }}>Quick Actions</div>
-            <div className="flex flex-wrap gap-2 mt-2">
-              <button onClick={() => onNavigate('quotes')} style={{ fontSize: 10, padding: '6px 12px', borderRadius: 8, background: '#b8960c', color: '#fff', fontWeight: 700, cursor: 'pointer', border: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }} className="hover:opacity-90 transition-opacity">
-                <Zap size={10} /> Quick Quote
-              </button>
-              <button onClick={() => onNavigate('invoices')} style={{ fontSize: 10, padding: '6px 12px', borderRadius: 8, background: '#b8960c', color: '#fff', fontWeight: 700, cursor: 'pointer', border: 'none' }} className="hover:opacity-90 transition-opacity">
-                New Invoice
-              </button>
-              <button onClick={() => onNavigate('customers')} style={{ fontSize: 10, padding: '6px 12px', borderRadius: 8, border: '1px solid #ece8e0', color: '#555', fontWeight: 700, cursor: 'pointer', background: 'transparent' }} className="hover:bg-[#f5f3ef] transition-colors">
-                View Customers
-              </button>
-              <button onClick={() => onNavigate('finance')} style={{ fontSize: 10, padding: '6px 12px', borderRadius: 8, border: '1px solid #ece8e0', color: '#555', fontWeight: 700, cursor: 'pointer', background: 'transparent' }} className="hover:bg-[#f5f3ef] transition-colors">
-                P&L Report
-              </button>
-            </div>
-          </div>
+          <button onClick={() => onNavigate('finance')} className="w-full cursor-pointer hover:bg-[#f5f3ef] transition-colors mt-3"
+            style={{ padding: '8px 12px', borderRadius: 8, background: '#faf9f7', border: '1px solid #ece8e0', fontSize: 11, fontWeight: 600, color: '#777', textAlign: 'center' }}>
+            View Full Financial Dashboard
+          </button>
         </div>
       </div>
     </div>
@@ -353,7 +499,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
             className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:border-[#16a34a] hover:text-[#16a34a]"
             style={{ minHeight: 44, padding: '0 14px', fontSize: 13, borderRadius: 10, background: '#faf9f7', color: '#555', border: '1.5px solid #ece8e0' }}
           >
-            <DollarSign size={14} /> Calculator
+            <Ruler size={14} /> Yardage Calc
           </button>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search quotes..."
@@ -369,25 +515,10 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
         </div>
       )}
 
-      {/* Quick Quote Calculator (dimensions-based ballpark) */}
+      {/* Yardage Calculator (the $199/mo feature) */}
       {showQuickCalc && (
         <div style={{ marginBottom: 20 }}>
-          <QuickQuotePanel onPromote={async (data) => {
-            const name = prompt('Customer name for full quote:');
-            if (!name) return;
-            try {
-              const res = await fetch(API + '/quotes/quick/promote', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ customer_name: name, quick_quote_data: data }),
-              });
-              const result = await res.json();
-              if (result.quote?.id) {
-                setPipelineQuoteId(result.quote.id);
-                setShowQuickCalc(false);
-              }
-            } catch (e) { console.error(e); }
-          }} />
+          <YardageCalculator onClose={() => setShowQuickCalc(false)} />
         </div>
       )}
 

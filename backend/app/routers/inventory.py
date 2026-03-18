@@ -17,6 +17,7 @@ class ItemCreate(BaseModel):
     name: str
     sku: Optional[str] = None
     category: str
+    subcategory: Optional[str] = None
     quantity: float = 0
     unit: str = "yards"
     min_stock: float = 0
@@ -32,6 +33,7 @@ class ItemUpdate(BaseModel):
     name: Optional[str] = None
     sku: Optional[str] = None
     category: Optional[str] = None
+    subcategory: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
     min_stock: Optional[float] = None
@@ -369,4 +371,185 @@ def inventory_dashboard():
             "by_category": by_category,
             "by_business": by_business,
             "vendor_count": vendor_count,
+        }
+
+
+# ── Auto-Categorization ────────────────────────────────────────────
+
+# Workroom-specific category rules: keyword list → (category, subcategory)
+CATEGORY_RULES = [
+    # Order matters — more specific matches first
+    (["roman shade", "roman blind"],                          "Roman Shades", None),
+    (["cornice", "pelmet", "lambrequin"],                     "Cornices & Valances", None),
+    (["valance", "swag", "jabots", "cascade"],                "Cornices & Valances", None),
+    (["drape", "curtain", "panel", "rod pocket", "pinch pleat",
+      "grommet", "tab top", "ripple fold", "ripplefold",
+      "sheers", "sheer", "goblet", "shower curtain",
+      "stationary panel"],                                    "Drapery", None),
+    (["pillow", "cushion", "bolster", "throw", "pouffe"],     "Pillows & Cushions", None),
+    (["duvet", "comforter", "coverlet", "bed sheet",
+      "bed skirt", "sham", "bedspread", "bedding",
+      "crib sheet", "foot"],                                  "Bedding", None),
+    (["shade", "roller shade", "flat shade", "blind",
+      "wood shade"],                                          "Roman Shades", None),
+    (["upholster", "sofa", "chair", "bench", "ottoman",
+      "headboard", "arm cover", "slipcover", "slip cover",
+      "reupholster", "booth", "seat cover", "carpeting",
+      "lamp", "down envelope", "covers", "wall panel",
+      "wall upholstery"],                                     "Upholstery", None),
+    (["fabric", "lining", "linen", "silk", "velvet",
+      "cotton", "material", "blackout", "interlining",
+      "sateen", "batiste", "voile", "flannel", "bump",
+      "english bump", "dupioni", "raffia"],                   "Fabric & Materials", None),
+    (["rod", "bracket", "finial", "ring", "track",
+      "motor", "clip", "hook", "mount", "baton",
+      "clutch", "traverse", "elbow", "lutron",
+      "somfy", "motorized", "ripplefold hardware"],           "Hardware", None),
+    (["cord", "fringe", "tape", "trim", "tassel",
+      "welt", "gimp", "braid", "insert", "accessori"],       "Trim & Notions", None),
+    (["install", "delivery", "pickup", "pick up",
+      "removal", "takedown"],                                 "Installation", None),
+    (["alter", "repair", "hem", "shorten", "resize",
+      "fix", "modification"],                                 "Alterations & Repairs", None),
+    (["foam", "padding"],                                     "Foam & Padding", None),
+    (["table cloth"],                                         "Bedding", "Table Linens"),
+    (["furniture", "table", "built in", "wall unit",
+      "woodwork", "custom furniture"],                        "Custom Furniture", None),
+    (["consult", "design fee", "staging", "draftsperson",
+      "interior designer", "interior paint", "paint",
+      "art work", "measurement", "miscelaneous",
+      "merchandise"],                                         "Other Services", None),
+    (["otww", "wholesale"],                                   "OTWW Wholesale", None),
+]
+
+
+def _categorize_item(name: str, sku: str, notes: str) -> tuple:
+    """Return (category, subcategory) for an inventory item using keyword matching."""
+    # Build a combined search string from all available fields
+    search_text = " ".join([
+        (name or ""),
+        (sku or ""),
+        (notes or ""),
+    ]).lower()
+
+    for keywords, category, subcategory in CATEGORY_RULES:
+        for kw in keywords:
+            if kw in search_text:
+                return category, subcategory
+
+    return "Other Services", None
+
+
+@router.get("/categories")
+def get_categories():
+    """Return category tree with item counts."""
+    with get_db() as conn:
+        # Ensure subcategory column exists
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(inventory_items)").fetchall()]
+        has_sub = "subcategory" in cols
+
+        if has_sub:
+            rows = conn.execute(
+                """SELECT category, subcategory, COUNT(*) as count
+                   FROM inventory_items
+                   GROUP BY category, subcategory
+                   ORDER BY category, subcategory"""
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT category, NULL as subcategory, COUNT(*) as count
+                   FROM inventory_items
+                   GROUP BY category
+                   ORDER BY category"""
+            ).fetchall()
+
+        # Build tree
+        tree = {}
+        for r in rows:
+            cat = r["category"] or "Uncategorized"
+            sub = r["subcategory"] if has_sub else None
+            if cat not in tree:
+                tree[cat] = {"name": cat, "count": 0, "subcategories": []}
+            tree[cat]["count"] += r["count"]
+            if sub:
+                tree[cat]["subcategories"].append({"name": sub, "count": r["count"]})
+
+        return {"categories": list(tree.values()), "total_categories": len(tree)}
+
+
+@router.post("/auto-categorize")
+def auto_categorize():
+    """Auto-categorize all inventory items using workroom-specific keyword rules."""
+    with get_db() as conn:
+        # Ensure subcategory column exists
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(inventory_items)").fetchall()]
+        if "subcategory" not in cols:
+            conn.execute("ALTER TABLE inventory_items ADD COLUMN subcategory TEXT")
+
+        # Remove CHECK constraint on category by recreating the table
+        # First check if the constraint still exists
+        schema = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='inventory_items'"
+        ).fetchone()[0]
+        if "CHECK" in schema and "category IN" in schema:
+            conn.execute("""CREATE TABLE inventory_items_new (
+                id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+                name TEXT NOT NULL,
+                sku TEXT UNIQUE,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                quantity REAL DEFAULT 0,
+                unit TEXT DEFAULT 'yards',
+                min_stock REAL DEFAULT 0,
+                cost_per_unit REAL DEFAULT 0,
+                sell_price REAL DEFAULT 0,
+                vendor TEXT,
+                location TEXT,
+                notes TEXT,
+                business TEXT DEFAULT 'workroom' CHECK (business IN ('workroom', 'craftforge')),
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )""")
+            conn.execute("""INSERT INTO inventory_items_new
+                (id, name, sku, category, quantity, unit, min_stock,
+                 cost_per_unit, sell_price, vendor, location, notes, business,
+                 created_at, updated_at)
+                SELECT id, name, sku, category, quantity, unit, min_stock,
+                 cost_per_unit, sell_price, vendor, location, notes, business,
+                 created_at, updated_at
+                FROM inventory_items""")
+            conn.execute("DROP TABLE inventory_items")
+            conn.execute("ALTER TABLE inventory_items_new RENAME TO inventory_items")
+
+        # Read all items and categorize
+        items = conn.execute(
+            "SELECT id, name, sku, notes FROM inventory_items"
+        ).fetchall()
+
+        categorized = 0
+        uncategorized = 0
+        results = []
+
+        for item in items:
+            cat, subcat = _categorize_item(item["name"], item["sku"], item["notes"])
+            conn.execute(
+                "UPDATE inventory_items SET category = ?, subcategory = ?, updated_at = datetime('now') WHERE id = ?",
+                (cat, subcat, item["id"])
+            )
+            if cat != "Other Services":
+                categorized += 1
+            else:
+                uncategorized += 1
+            results.append({
+                "id": item["id"],
+                "name": item["name"],
+                "category": cat,
+                "subcategory": subcat,
+            })
+
+        return {
+            "categorized": categorized,
+            "uncategorized": uncategorized,
+            "total": len(items),
+            "results": results,
         }
