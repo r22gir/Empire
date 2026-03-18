@@ -792,7 +792,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   /* ── Analysis ── */
 
   const analyze = async () => {
-    if (!imageData) { setError('Please upload a photo first.'); return; }
+    if (!imageData && !model3D) { setError('Please upload a photo or 3D model first.'); return; }
     setLoading(true);
     setError('');
     setResult(null);
@@ -2056,7 +2056,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                 <Sparkles size={16} />
                 {mode === 'mockup' && selectedStyles.length > 0
                   ? `Generate ${selectedStyles.length} Design Mockup${selectedStyles.length > 1 ? 's' : ''}`
-                  : 'Analyze Photo'}
+                  : imageData ? 'Analyze Photo' : model3D ? 'Analyze 3D Model' : 'Upload a photo or 3D model first'}
               </>
             )}
           </button>
