@@ -414,6 +414,108 @@ def get_phase_status(quote_id: str) -> Dict[str, Any]:
     }
 
 
+def edit_item_in_pipeline(
+    quote_id: str, item_index: int, updates: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Edit an item's measurements/details within the phase pipeline.
+
+    Allows the founder to correct dimensions, change item type, update
+    quantities, or add notes during any review phase. Recalculates
+    yardage after dimension changes.
+
+    Args:
+        quote_id: The quote ID.
+        item_index: Index of the item to edit (0-based).
+        updates: Dict of fields to update (width, height, depth, quantity,
+                 item_type, name, notes, construction, condition, special_features).
+
+    Returns:
+        The updated quote dict.
+    """
+    quote = _load_phase_quote(quote_id)
+    items = quote.get("items", [])
+
+    if item_index < 0 or item_index >= len(items):
+        raise IndexError(
+            f"Item index {item_index} out of range. Quote has {len(items)} items."
+        )
+
+    item = items[item_index]
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Track what changed for audit
+    changes = []
+
+    # Update dimensions
+    dims = item.get("dimensions", {})
+    for dim_key in ("width", "height", "depth"):
+        if dim_key in updates and updates[dim_key] is not None:
+            old_val = dims.get(dim_key, 0)
+            dims[dim_key] = updates[dim_key]
+            if old_val != updates[dim_key]:
+                changes.append(f"{dim_key}: {old_val} → {updates[dim_key]}")
+    item["dimensions"] = dims
+
+    # Update scalar fields
+    for field in ("quantity", "name", "notes", "construction", "condition"):
+        if field in updates and updates[field] is not None:
+            old_val = item.get(field, "")
+            item[field] = updates[field]
+            if old_val != updates[field]:
+                changes.append(f"{field}: {old_val} → {updates[field]}")
+
+    # Update item type
+    if "item_type" in updates and updates["item_type"] is not None:
+        old_type = item.get("type", "")
+        item["type"] = updates["item_type"]
+        if old_type != updates["item_type"]:
+            changes.append(f"type: {old_type} → {updates['item_type']}")
+
+    # Update special features
+    if "special_features" in updates and updates["special_features"] is not None:
+        item["special_features"] = updates["special_features"]
+        changes.append(f"special_features updated")
+
+    # Recalculate yardage if dimensions or type changed
+    dim_changed = any(k in updates for k in ("width", "height", "depth", "item_type"))
+    if dim_changed:
+        try:
+            opts = {}
+            if item.get("cushion_count"):
+                opts["cushion_count"] = item["cushion_count"]
+            if any("tuft" in f.lower() for f in item.get("special_features", [])):
+                opts["tufted"] = True
+            yardage = calculate_yardage(item.get("type", "accent_chair"), dims, opts)
+            item["_yardage"] = yardage
+            changes.append(f"yardage recalculated: {yardage.get('yards', 0):.1f} yards")
+        except Exception as e:
+            logger.warning("Yardage recalc failed for item %d: %s", item_index, e)
+
+    # Store edit history
+    if changes:
+        edit_log = item.get("_edit_history", [])
+        edit_log.append({
+            "edited_at": now,
+            "changes": changes,
+            "source": "founder_review",
+        })
+        item["_edit_history"] = edit_log
+
+    items[item_index] = item
+    quote["items"] = items
+    quote["updated_at"] = now
+
+    _save_phase_quote(quote)
+
+    logger.info(
+        "Quote %s item %d edited: %s",
+        quote.get("quote_number", quote_id),
+        item_index,
+        ", ".join(changes) if changes else "no changes",
+    )
+    return quote
+
+
 def promote_quick_to_full(quick_quote_data: Dict[str, Any], customer_name: str) -> Dict[str, Any]:
     """Promote a quick quote to a full phase-pipeline quote.
 

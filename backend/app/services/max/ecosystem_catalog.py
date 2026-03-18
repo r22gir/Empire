@@ -1,8 +1,8 @@
 """
 Empire Ecosystem Catalog — Auto-generated from full codebase scan.
 MAX uses this to answer questions about any Empire product, service, or feature.
-Last updated: 2026-03-18
-Source: Full codebase audit (396 commits, 44 screens, 35 tools, 18 desks, 7 databases)
+Last updated: 2026-03-18 (v5.1 — post tool-fix + knowledge build)
+Source: Full codebase audit (422+ commits, 44 screens, 37 tools, 18 desks, 7 databases)
 """
 
 from datetime import datetime
@@ -727,7 +727,7 @@ EMPIRE_CATALOG = {
         "total_memories": 3041,
         "total_ai_calls": 1049,
         "total_desks": 18,
-        "total_tools": 35,
+        "total_tools": 37,
         "total_products": 22,
         "total_screens": 44,
         "total_api_endpoints": 350,
@@ -762,23 +762,54 @@ def get_catalog_summary() -> str:
     """Return a formatted summary for the system prompt."""
     stats = EMPIRE_CATALOG["stats"]
     products = EMPIRE_CATALOG["products"]
+    desks = EMPIRE_CATALOG.get("desks", {})
+    tools = EMPIRE_CATALOG.get("tools", {})
     active = sum(1 for p in products.values() if p.get("status") == "active")
     dev = sum(1 for p in products.values() if p.get("status") == "dev")
     placeholder = sum(1 for p in products.values() if p.get("status") == "placeholder")
 
     lines = [
-        f"Empire Ecosystem: {stats['total_products']} products ({active} active, {dev} in development, {placeholder} placeholder)",
-        f"Desks: {stats['total_desks']} | Tools: {stats['total_tools']} | Screens: {stats['total_screens']}",
-        f"Data: {stats['total_customers']} customers, {stats['total_inventory_items']} inventory items, {stats['total_tasks']} tasks, {stats['total_memories']} memories",
-        f"AI Calls: {stats['total_ai_calls']} logged | Databases: {stats['total_databases']} ({stats['total_db_tables']} tables)",
+        f"Empire Ecosystem: {stats['total_products']} products ({active} active, {dev} dev, {placeholder} placeholder)",
+        f"Desks: {stats['total_desks']} | Tools: {stats['total_tools']} | Screens: {stats['total_screens']} | Endpoints: ~{stats['total_api_endpoints']}",
+        f"Data: {stats['total_customers']} customers, {stats['total_inventory_items']} inventory, {stats['total_tasks']} tasks, {stats['total_vendors']} vendors",
         "",
-        "Products:",
+        "Active Products:",
     ]
     for key, p in products.items():
         if p.get("status") == "active":
-            lines.append(f"  ✅ {p['name']}: {p.get('description', '')[:80]}")
+            lines.append(f"  - {p['name']}: {p.get('description', '')[:80]}")
+    lines.append("")
+    lines.append("In Development:")
     for key, p in products.items():
         if p.get("status") == "dev":
-            lines.append(f"  🔧 {p['name']}: {p.get('description', '')[:80]}")
+            lines.append(f"  - {p['name']}: {p.get('description', '')[:80]}")
+
+    # Desk roster summary
+    lines.append("")
+    lines.append("AI Desks (18):")
+    for key, d in desks.items():
+        agent = d.get("agent_name", "")
+        model = d.get("model", "grok")
+        lines.append(f"  - {d.get('name', key)} ({agent}) → {model}")
+
+    # Tool categories summary
+    lines.append("")
+    lines.append("Tool Categories (37 total):")
+    for cat_key, cat_data in tools.items():
+        if isinstance(cat_data, dict) and "items" in cat_data:
+            item_names = [i.get("name", "") for i in cat_data["items"] if isinstance(i, dict)]
+            lines.append(f"  - {cat_data.get('name', cat_key)}: {', '.join(item_names[:6])}")
+        elif isinstance(cat_data, list):
+            item_names = [i.get("name", "") for i in cat_data if isinstance(i, dict)]
+            lines.append(f"  - {cat_key}: {', '.join(item_names[:6])}")
+
+    # Recent capabilities (Phase 0 additions)
+    lines.append("")
+    lines.append("Recent Capabilities (v5.1):")
+    lines.append("  - env_get/env_set: Manage .env variables securely")
+    lines.append("  - db_query: Read-only SQLite queries on empire.db")
+    lines.append("  - file_edit: Fuzzy match + line-number mode")
+    lines.append("  - shell_execute: Expanded allowlist (python3, sqlite3, sudo systemctl)")
+    lines.append("  - Quote phase pipeline: 6-phase with founder review gates")
 
     return "\n".join(lines)

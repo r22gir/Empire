@@ -449,6 +449,62 @@ async def mockup(req: ImageRequest):
     return analysis
 
 
+# ── /room-scan — Multi-window detection for entire room ────
+
+ROOM_SCAN_PROMPT = """You are a professional window treatment consultant analyzing a room photo.
+
+Identify EVERY window, door, and opening in this photo that could receive a window treatment.
+
+For EACH window/opening found:
+1. Estimate dimensions using reference objects (doors=80" tall, outlets 4.5" plates, ceiling=96")
+2. Identify the window type (single-hung, double-hung, casement, picture, bay, arched, sliding door, French door)
+3. Note current treatments if any
+4. Note any obstructions (furniture, outlets, vents)
+5. Suggest suitable treatment types
+
+Return JSON only:
+{
+  "room_type": string,
+  "ceiling_height_inches": number,
+  "windows": [
+    {
+      "id": number,
+      "label": string (e.g., "Left window", "Bay center panel"),
+      "type": string,
+      "width_inches": number,
+      "height_inches": number,
+      "sill_height_from_floor": number,
+      "current_treatment": string | null,
+      "obstructions": string[],
+      "suggested_treatments": string[],
+      "confidence": number (0-100),
+      "notes": string
+    }
+  ],
+  "total_windows": number,
+  "room_notes": string,
+  "reference_objects_used": string[],
+  "overall_confidence": number
+}"""
+
+
+@router.post("/room-scan")
+async def room_scan(req: ImageRequest):
+    """Scan an entire room photo to detect all windows and estimate dimensions.
+
+    Returns structured data for each window found, ready to feed into the
+    quote builder as individual line items.
+    """
+    data = await call_vision(ROOM_SCAN_PROMPT, req.image, max_tokens=6000)
+
+    # Ensure windows array exists
+    if "windows" not in data:
+        data["windows"] = []
+    data["total_windows"] = len(data.get("windows", []))
+
+    return data
+
+
 # ── /imagine — Standalone image generation ─────────────────
 
 @router.post("/imagine")

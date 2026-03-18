@@ -1,5 +1,5 @@
-# MAX AI — COMPLETE BRAIN v3.1
-## Last Updated: 2026-03-08
+# MAX AI — COMPLETE BRAIN v5.1
+## Last Updated: 2026-03-18
 
 ## FIRST RUN PROTOCOL
 On every new session MAX must:
@@ -11,238 +11,177 @@ On every new session MAX must:
 ## THE FOUNDER
 - Name: RG (GitHub: r22gir)
 - Languages: English + Spanish
-- Business: Custom drapery / window treatments (WorkroomForge)
+- Business: Custom drapery / window treatments (Empire Workroom) + woodwork (WoodCraft)
 - Vision: EmpireBox = OS for resellers and service businesses
 - Style: Direct, fast-moving, ambitious. Builds late at night.
 - Preference: Dark UI, gold/amber accents, no fluff
 
 ## THE HARDWARE — EmpireDell (Primary Dev Machine)
-- Device: Dell PowerEdge / Precision (EmpireDell)
+- Device: Dell PowerEdge (EmpireDell)
 - CPU: Intel Xeon E5-2650 v3 (10-core, 20 threads)
 - RAM: 32 GB
-- OS: Ubuntu (kernel 6.17.0-14-generic)
-- NOTE: Data migrated FROM Beelink EQR5 TO EmpireDell. Beelink is no longer the primary machine.
+- GPU: Quadro K600 (nouveau driver — UNSTABLE)
+- OS: Ubuntu 24.04 (kernel 6.17.0-19-generic)
+- NOTE: Data migrated FROM Beelink EQR5 TO EmpireDell. Beelink retired.
 
 ## CRITICAL BANS
-1. sensors-detect — CRASHES the machine (Super I/O scan incompatible with AMD Ryzen 7 5825U on kernel 6.17)
+1. sensors-detect — CRASHES the machine
 2. pkill node — too broad, use pkill -f next-server
 3. Broad pkill -f in scripts — use port-specific kills (caused system crash Feb 24, 2026)
 
-## SERVICES AND PORTS
-- 3000: Empire App (unified dashboard) ~/Empire/empire-app
-- 3001: WorkroomForge ~/Empire/workroomforge
-- 3002: LuxeForge ~/Empire/luxeforge_web
-- 3009: Founder Dashboard (MAX command center) ~/Empire/founder_dashboard
-- 7878: OpenClaw AI ~/Empire/openclaw
-- 8000: FastAPI Backend ~/Empire/backend
-- 8080: Homepage ~/Empire/homepage
-- 11434: Ollama (optional, disabled by default)
+## SERVICES AND PORTS (CURRENT — March 2026)
+| Service | Port | Systemd | Status |
+|---------|------|---------|--------|
+| Backend API (FastAPI) | 8000 | empire-backend | Active |
+| Command Center (Next.js) | 3005 | empire-cc | Active |
+| OpenClaw AI | 7878 | empire-openclaw | Available |
+| Ollama LLM | 11434 | ollama | Available |
+| RecoveryForge | 3077 | — | Running |
+| RelistApp | 3007 | — | Dev |
+| AMP | 3003 | — | Dev |
+
+### RETIRED / LEGACY Ports
+- 3000: Empire App (replaced by Command Center 3005)
+- 3001: WorkroomForge (merged into CC)
+- 3002: LuxeForge (merged into CC)
+- 3009: Founder Dashboard (replaced by CC)
+- 3006: RESERVED (do not use)
 
 ## TECH STACK
-- Frontend: Next.js 14+ React/TypeScript
-- Backend: FastAPI Python 3.12
-- Database: SQLite (brain), PostgreSQL 14+ (Docker, stopped)
-- Cache: Redis 6+ (Docker, stopped)
-- AI: xAI Grok (cloud primary), Claude (cloud secondary), Ollama (local, optional)
-- Mobile: Flutter (MarketForge app)
-- Repo: github.com/r22gir/Empire (ACTIVE — push confirmed Mar 2)
-- Branch: main (all work merged)
+- Frontend: Next.js 14, React 18, TypeScript, Tailwind CSS
+- Backend: FastAPI, Python 3.12, SQLite
+- AI: xAI Grok (primary) → Claude → Groq → OpenClaw → Ollama
+- Icons: lucide-react across all apps
+- Fonts: Outfit (UI) + JetBrains Mono (code)
+- Repo: github.com/r22gir/Empire (private, main branch)
+- Cloudflare Tunnel: studio.empirebox.store, api.empirebox.store
 
-## BACKUP STRATEGY (as of Mar 2)
-- GitHub: r22gir/Empire — main branch, all work merged and pushed
-- Google Drive: empirebox2026@gmail.com — rclone configured, full sync done
-- Local NVMe: primary working copy (fast, reliable)
-- External USB 1TB: backup-only (NOT for live operations)
-- Scripts: ~/Empire/scripts/backup-gdrive.sh, ~/Empire/scripts/backup-check.sh
+## AI MODEL ROUTING
+- Default: xAI Grok (all general tasks)
+- Atlas (CodeForge): Claude Opus 4.6
+- Raven (Analytics), Phoenix (Quality): Claude Sonnet 4.6
+- Fallback chain: Grok → Claude → Groq → OpenClaw → Ollama
 
-## MAX BRAIN STORAGE
-- Location: ~/Empire/backend/data/brain/memories.db (LOCAL NVMe)
-- 205 memories, 156KB — SQLite, grows safely
-- Batch learning: DISABLED (was causing crashes with Ollama + USB)
-- Real-time learning: DISABLED (needs Ollama or cloud LLM alternative)
-- brain_config.py updated to local-first (no external drive dependency)
+## 18 AI DESKS
+1. Kai (Forge) — Workroom operations, quotes
+2. Sofia (Market) — Marketplace ops, eBay, Facebook
+3. Nova (Marketing) — Social media, content
+4. Luna (Support) — Customer support, tickets
+5. Aria (Sales) — Sales pipeline, leads
+6. Sage (Finance) — Invoices, payments, P&L
+7. Elena (Clients) — CRM, client relationships
+8. Marcus (Contractors) — Contractor management
+9. Orion (IT) — Infrastructure, services, monitoring
+10. Atlas (CodeForge) — Code agent (Claude Opus 4.6)
+11. Zara (Website/Intake) — Website + LuxeForge intake
+12. Raven (Legal/Analytics) — Business metrics, forecasting
+13. Phoenix (Lab/Quality) — AI accuracy monitoring
+14. Spark (Innovation) — Market scanning
+15. CostTrackerDesk — Token usage monitoring
+16. LeadForge — Lead capture
+17. ShipForge — Shipping management
+18. EmpirePay — Payment processing
 
-## ALL PRODUCTS (27+ confirmed from GitHub PRs + local code)
+## 37 TOOLS (v5.1 — post Phase 0 fix)
+### Data Tools
+file_read, file_write, file_edit, file_append, search_quotes, get_quote, get_tasks, get_desk_status
 
-### Core Platform
-- EmpireBox: The platform/hardware/brand (Core)
-- OpenClaw: Central AI brain local LLM (exists ~/Empire/openclaw)
-- MAX: Founder AI assistant (LIVE — 12 desks, brain, tools)
-- EmpireAssist: Telegram bot (LIVE — voice + text + documents)
-- Setup Portal: Customer onboarding (PR #9 merged)
-- License System: Subscription keys (PR #9 merged)
+### Action Tools
+create_task, run_desk_task, create_quick_quote, select_proposal, open_quote_builder, photo_to_quote
 
-### Live Products
-- WorkroomForge: Drapery workroom management (LIVE, port 3001)
-- LuxeForge: Customer portal + AI photo + measurement tool (LIVE, port 3002)
-- Founder Dashboard: MAX command center (LIVE, port 3009)
-- Empire App: Unified all-in-one dashboard (port 3000)
+### Communication Tools
+send_telegram, send_quote_telegram, send_email, send_quote_email
 
-### Built / Merged (on GitHub main)
-- MarketForge: Multi-channel listing tool (PR #6, backend 28 endpoints)
-- ContractorForge: Universal multi-tenant SaaS (PR #11 merged)
-- SupportForge: AI customer support platform (PR #16 merged)
-- MarketF: P2P marketplace 8% fees (PR #10 merged)
-- ShipForge: Shipping via EasyPost (PR #9 merged)
-- Economic Intelligence System: Cost tracking + quality eval (PR #14 merged)
-- Empire Wallet: Crypto payments — Solana/USDC/EMPIRE token (PR #40 merged)
-- Amazon SP-API: MarketF integration scaffolding (PR #38 merged)
-- Voice Service: STT/TTS with Telegram + SDK (PR #31 merged)
-- Chat Backup System: Auto backup + decision unification (PR #35 merged)
-- Docker configs: Local-build Dockerfiles for all services (PR #32 merged)
+### Research Tools
+web_search, web_read, search_images
 
-### Specced / Planned
-- LeadForge: AI lead gen in ContractorForge/LuxeForge
-- VeteranForge: VA disability telehealth (legal done, pitch deck exists)
-- ContentForge: Content management (referenced in Issue #42)
-- ForgeCRM: CRM freemium model
-- SocialForge: Social media semi-auto
-- LLCFactory: Business formation (Northwest Agents)
-- ApostApp: Document filler / forms
-- RelistApp: Automated relisting
-- RecoveryForge: AI hard drive file recovery
-- ElectricForge: Electrician template
-- LandscapeForge: Landscaping template
+### System Tools
+shell_execute, git_ops, service_manager, get_services_health, get_system_stats, env_get, env_set, db_query
 
-## QB-REPLACEMENT DASHBOARD (Built March 8, 2026)
-Full QuickBooks replacement built into Command Center (port 3009).
+### Dev Tools
+create_contact, search_contacts
 
-### New Database Tables (empire.db)
-- customers, invoices, payments, expenses, inventory_items, vendors
+### Tool Access Levels
+- L1: Auto-execute (file_read, shell safe commands, get_services_health)
+- L2: Telegram confirm (file_write, service restart)
+- L3: PIN required (destructive operations)
 
-### New Backend API Endpoints
-- /api/v1/finance/dashboard — P&L overview, revenue, expenses, outstanding
-- /api/v1/finance/invoices — CRUD, create from quote, PDF generation
-- /api/v1/finance/payments — Record payments (cash/check/card/zelle/venmo/wire)
-- /api/v1/finance/expenses — Track by category (fabric, hardware, labor, shipping, etc.)
-- /api/v1/crm/customers — Full CRM, import from quotes, pipeline
-- /api/v1/inventory/items — Materials tracking, low-stock alerts
-- /api/v1/inventory/vendors — Vendor management with lead times
+## COMMAND CENTER (port 3005 — empire-command-center)
+Unified Next.js dashboard replacing all legacy apps.
+- 4 main tabs: MAX (gold), Workroom (green), CraftForge (yellow), Platform (blue)
+- 44 screen components
+- SSE streaming for MAX chat
+- Quote Builder: 5-step wizard (Customer → Photos → Rooms → Options → Review)
+- Vision Analysis: Photo analyzer with multi-tier mockup generation
+- Chat History: Save, load, rename, delete conversations
 
-### Command Center UI (Workroom tab)
-Sidebar nav: Overview → Finance → Invoices → Expenses → Customers → Quotes → Inventory → Jobs
-All wired to backend APIs. Lazy-loaded business modules for performance.
+## QUOTE INTELLIGENCE SYSTEM (QIS)
+### Track 1 — Quick Quote
+Instant ballpark from dimensions + material + complexity → 3 tiers (Essential/Designer/Premium)
 
-### What's Still Coming
-- Job scheduling / production calendar
-- Ticket system UI (backend exists)
-- Shipping UI (backend exists)
-- CraftForge real data wiring
+### Track 2 — Multi-Phase Pipeline (6 phases)
+0. Intake (auto-approved)
+1. AI Vision Analysis → founder review
+2. Measurements & Materials → founder review (EDITABLE)
+3. Pricing & Labor → founder review
+4. Profit & Margin → founder review
+5. Client Quote PDF → founder approve to send
 
-## GITHUB STATUS (as of Mar 2)
-- Repo: ACTIVE, accepting pushes
-- Default branch: main (fully merged with release/v1.0.0-alpha.1)
-- Total merged PRs: 28 (#2–#48)
-- Open PRs: 2 (#44 WorkroomForge wiring, #46 LuxeForge camera)
-- Open Issues: 5 (#34, #41, #42, #43, #45)
-- 4 unmerged copilot branches: docs salvaged to ~/Empire/docs/salvaged/
-- 19 copilot/ branches total on remote
+### Pricing Engine
+- 17 item types in quick price table
+- 4 complexity multipliers (simple→luxury: 1.0→2.25x)
+- 4 fabric grades: A ($15/yd) → D ($120/yd)
+- 25+ labor rate categories
+- 8 upgrade types (tufting, welting, nailhead, motorized, etc.)
+- Tax rates: DC 6%, MD 6%, VA 5.3%
+- Deposit: 50%
+- Tier multipliers: A (1.0x), B (2.0x fabric), C (3.5x fabric)
 
-## ZERO TO HERO — The Killer Feature
-Idea to operational business in 3-14 days:
-1. OpenClaw conversation intake 30 min
-2. LLCFactory formation (Northwest Registered Agents)
-3. Stripe Connect onboarding
-4. SocialForge semi-auto accounts (FB IG Twitter LinkedIn)
-5. Business tools activation
-6. EmpireAssist setup Telegram bot
-7. HERO STATUS — taking orders
+## BUSINESS NAMES (CANONICAL)
+- **Empire Workroom** = drapery & upholstery business (NOT "RG's Drapery")
+- **WoodCraft** = woodwork & CNC business
+- **WorkroomForge** = quote builder software
+- **CraftForge** = woodwork software module
+- **LuxeForge** = client/designer intake portal
+- **MarketForge** = marketplace operations
+- **SocialForge** = social media management
+- **SupportForge** = customer support & ticketing
+- **RecoveryForge** = AI file recovery tool
+- **OpenClaw** = skills-augmented local AI
 
-## HARDWARE BUNDLES
-- Budget Mobile 349: Xiaomi Redmi Note 13 + Lite 12mo
-- Seeker Pro 599: Solana Seeker + Pro 12mo (MOST POPULAR)
-- Full Empire 899: Seeker + Beelink Mini PC + Empire 12mo
-- All loss-leaders. Profit from subscription renewals.
+## DATABASE (empire.db)
+- customers: 113 rows
+- inventory_items: 156 rows
+- tasks: 139 rows
+- vendors: 51 rows
+- invoices: 9
+- payments: 2
+- expenses: 6
+- jobs: 4
+- memories: 3041
+- ai_calls: 1049+
+- Total tables: 38
 
-## WORKROOMFORGE PRICING
-Base per sqft: Ripplefold 45 | Pinch Pleat 38 | Rod Pocket 28 | Grommet 32 | Roman 55 | Roller 42
-Lining per sqft: Unlined 0 | Standard 8 | Blackout 15 | Thermal 12 | Interlining 18
-Hardware per window: Rod Std 45 | Rod Deco 85 | Track Basic 65 | Track Ripple 95
-Motors per window: Somfy 285 | Lutron 425 | Generic 185
-Formula: (base x sqft + lining x sqft + hardware + motor) x qty
-
-## WORKROOM CUSTOMERS
-- Emily Rodriguez: 22600 VIP Repeat High Value
-- Sarah Mitchell: 12400 VIP Repeat
-- Maria Gonzalez: 8900 Designer Referral
-- David Chen: 4200 New
-- James Wilson: 3100 Inactive
-Vendors: Rowley Company, Somfy, Lutron, Kirsch
-Pipeline: 31900 total
-
-## REVENUE MODEL Year 3
-- Conservative: 3.4M - 5.2M
-- Moderate: 8.6M
-- Aspirational: 17.2M
-
-## CRASH HISTORY
-- Feb 23: Ollama LLaVA OOM — removed Ollama temporarily
-- Feb 24: Aggressive pkill in launch-all.sh — fixed to safe port kills
-- Feb 25: Too many Next.js servers — max 3 at a time
-- Mar 2: System crash — suspected USB power surge during Ollama writes
-  - Fix: kernel downgraded to 6.8 LTS, amdgpu.gpu_recovery=1 added
-  - Fix: brain storage moved to local NVMe (no USB dependency)
+## FINANCE SYSTEM (QB Replacement)
+- P&L dashboard, invoices, payments, expenses
+- Auto-generate invoice from quote
+- Revenue pipeline: $1,900 verified
+- Stripe wired (test keys active)
 
 ## DESIGN SYSTEM
-- Background: 080810 void black
-- Gold: C9A84C / D4AF37 primary accent
-- Purple: 8B5CF6 MAX/AI accent
-- Fonts: Outfit display + JetBrains Mono code
+- Background: #05050d void black
+- Gold: #D4AF37 primary accent
+- Purple: #8B5CF6 MAX/AI accent
+- Fonts: Outfit (UI) + JetBrains Mono (code)
 - Dark theme ONLY
 
-## 12-TRACK MAX UPGRADE (completed Mar 1)
-1. Chart rendering — ContentAnalyzer parses chart JSON blocks
-2. Quick Quote — create_quick_quote tool, auto-prices by treatment
-3. Mockup overlay SVG — before/after with retracted panels + hardware
-4. Batch learning — every 5 messages triggers learn_from_exchange
-5. Telegram memory — _telegram_history dict, last 10 exchanges
-6. Inline PDF display — DocumentCanvas wired to quick quote
-7. Stat-pill contrast — 0.04 → 0.08 opacity
-8. Command bar — 3x bigger textarea, larger buttons, drag-drop files
-9. Voice agent — AudioContext resume fix, better errors
-10. Live ticker — Crypto, News, Sports below command bar
-11. Web research images — search_images tool via Unsplash
-12. Desk integration — ForgeDesk AI vision, run_desk_task tool
+## SAAS TIERS
+- Lite $29/mo — 50K tokens
+- Pro $79/mo — 200K tokens
+- Empire $199/mo — 1M tokens
+- Founder — Unlimited
 
-## OPEN QUESTIONS
-- RecoveryForge: AI file recovery tool — RESEARCH NEEDED
-- AMP Project Actitud Mental Positiva: files at ~/Empire/amp/
-- ContentForge: Referenced in GitHub Issue #42 but no code yet
-- Docker: 32 containers ALL STOPPED — need control panel per product
-- Learning strategy: Need to choose cloud LLM vs Ollama vs pattern-matching
-- External drive: inventory contents next time plugged in
-
-## COPILOTFORGE CHAT SAVING
-- Need to save Claude chats same as CoPilotForge saves chats
-- Archive location: ~/Empire/docs/CHAT_ARCHIVE/
-- Salvaged chat summaries: ~/Empire/docs/salvaged/ (Feb 16-18)
-- Always save session summary before closing
-
-## AUTO-SYNC (updated nightly by brain_sync)
-Last sync: 2026-03-08 15:07
-
-### Database Counts (empire.db)
-- tasks: 45
-- customers: 10
-- invoices: 0
-- payments: 0
-- expenses: 6
-- inventory_items: 7
-- vendors: 4
-- contacts: 0
-- desk_configs: 15
-- task_activity: 52
-
-### File Storage
-- Quote JSONs: 26
-- Inbox messages: 32
-- Brain memories: 1073
-
-### Finance Snapshot
-- Revenue: $0 | Expenses: $5,380 | Outstanding: $0 | Net: $-5,380
-
-### Active Tasks by Desk
-- website: 1, research: 1
-
-### System
-- Backend routers loaded: 42
+## RECENT SESSION LOG
+- v5.0 (Mar 18 AM): CRM bug fix, inventory categorization, yardage calc, Kanban job board, dashboard KPIs
+- v5.0 (Mar 18 PM): Tool execution fix — shell allowlist, file_edit fuzzy+line mode, env/db tools, 12/12 tests passing (commit ec0a091)
+- v5.1 (Mar 18 EVE): Knowledge build, quote pipeline API, system prompt update, vision+chat enhancements

@@ -6,7 +6,7 @@ PDF generation via POST /api/v1/quotes/{id}/pdf.
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime, timedelta
 import json
 import uuid
@@ -459,6 +459,20 @@ class PhaseApprovalRequest(BaseModel):
 class PhaseRejectionRequest(BaseModel):
     reason: str = ""
 
+class PhaseItemEditRequest(BaseModel):
+    """Edit an item's measurements/details within the phase pipeline."""
+    item_index: int = 0
+    width: Optional[float] = None
+    height: Optional[float] = None
+    depth: Optional[float] = None
+    quantity: Optional[int] = None
+    item_type: Optional[str] = None
+    name: Optional[str] = None
+    notes: Optional[str] = None
+    construction: Optional[str] = None
+    condition: Optional[str] = None
+    special_features: Optional[List[str]] = None
+
 
 @router.post("/quick")
 async def quick_quote_endpoint(payload: QuickQuoteRequest):
@@ -553,6 +567,27 @@ async def retry_phase_endpoint(quote_id: str):
     except FileNotFoundError:
         raise HTTPException(404, f"Quote {quote_id} not found")
     except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.patch("/phase/item/{quote_id}")
+async def edit_phase_item(quote_id: str, payload: PhaseItemEditRequest):
+    """Edit an item's measurements/details within the phase pipeline.
+
+    Allows the founder to correct AI-detected dimensions, change item type,
+    update quantities, or add notes during the review phase.
+    Automatically recalculates yardage and pricing after edits.
+    """
+    from app.services.quote_engine.quote_phases import edit_item_in_pipeline
+
+    try:
+        updates = payload.model_dump(exclude_unset=True)
+        item_index = updates.pop("item_index", 0)
+        quote = edit_item_in_pipeline(quote_id, item_index, updates)
+        return {"status": "updated", "quote": quote}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    except (ValueError, IndexError) as e:
         raise HTTPException(400, str(e))
 
 
