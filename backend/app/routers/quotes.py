@@ -602,6 +602,48 @@ async def get_phase_status_endpoint(quote_id: str):
         raise HTTPException(404, f"Quote {quote_id} not found")
 
 
+@router.get("/{quote_id}/intake-photos")
+async def get_quote_intake_photos(quote_id: str):
+    """Return the photos array from a quote's JSON file, with proper URLs.
+    If the quote has an intake_project_id, also look up that project's photos from intake.db.
+    """
+    quote = _load_quote(quote_id)
+    photos = quote.get("photos", [])
+    intake_project_id = quote.get("intake_project_id")
+
+    # If the quote has an intake_project_id, also look up photos from intake.db
+    if intake_project_id:
+        try:
+            import sqlite3
+            db_path = os.path.expanduser("~/empire-repo/backend/data/intake.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT photos FROM intake_projects WHERE id = ?",
+                (intake_project_id,),
+            ).fetchone()
+            conn.close()
+
+            if row:
+                import json as _json
+                db_photos_raw = _json.loads(row["photos"] or "[]")
+                # Build a set of filenames already in the quote photos
+                existing = {p.get("filename") for p in photos}
+                for p in db_photos_raw:
+                    fname = p.get("filename", "")
+                    if fname and fname not in existing:
+                        photos.append({
+                            "filename": fname,
+                            "url": f"/intake_uploads/{intake_project_id}/{fname}",
+                            "original_name": p.get("original_name", fname),
+                            "uploaded_at": p.get("uploaded_at", ""),
+                        })
+        except Exception as e:
+            logger.warning(f"Could not load intake photos for project {intake_project_id}: {e}")
+
+    return {"quote_id": quote_id, "intake_project_id": intake_project_id, "photos": photos, "count": len(photos)}
+
+
 @router.get("/{quote_id}")
 async def get_quote(quote_id: str):
     """Get a single quote by ID."""

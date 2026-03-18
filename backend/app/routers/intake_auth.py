@@ -695,6 +695,22 @@ async def convert_to_quote(request: Request, project_id: str):
         payload = quotes_mod.QuoteCreate(**quote_data)
         result = await quotes_mod.create_quote(payload)
 
+        # Attach photos and intake_project_id to the quote JSON file
+        quote_obj = result.get("quote", {})
+        quote_id = quote_obj.get("id")
+        if quote_id:
+            quote_photos = []
+            for p in photos_raw:
+                quote_photos.append({
+                    "filename": p.get("filename", ""),
+                    "url": f"/intake_uploads/{project_id}/{p.get('filename', '')}",
+                    "original_name": p.get("original_name", p.get("filename", "")),
+                    "uploaded_at": p.get("uploaded_at", ""),
+                })
+            quote_obj["intake_project_id"] = project_id
+            quote_obj["photos"] = quote_photos
+            quotes_mod._save_quote(quote_obj)
+
         # Update intake project status
         conn2 = get_db()
         conn2.execute(
@@ -713,3 +729,45 @@ async def convert_to_quote(request: Request, project_id: str):
     except Exception as e:
         logger.error(f"Failed to convert intake to quote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@limiter.limit("30/minute")
+@router.get("/admin/projects-with-photos")
+async def admin_projects_with_photos(request: Request):
+    """Return intake projects that have photos, for the QuoteBuilder to list."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT p.id, p.name, p.intake_code, p.status, p.photos, p.created_at,
+               u.name as customer_name
+        FROM intake_projects p
+        LEFT JOIN intake_users u ON p.user_id = u.id
+        WHERE p.photos IS NOT NULL AND p.photos != '[]' AND p.photos != ''
+        ORDER BY p.created_at DESC
+    """).fetchall()
+    conn.close()
+
+    results = []
+    for row in rows:
+        project = dict(row)
+        photos_raw = json.loads(project.get("photos") or "[]")
+        if not photos_raw:
+            continue
+        photos_out = []
+        for p in photos_raw:
+            photos_out.append({
+                "url": f"/intake_uploads/{project['id']}/{p.get('filename', '')}",
+                "filename": p.get("filename", ""),
+                "original_name": p.get("original_name", p.get("filename", "")),
+            })
+        results.append({
+            "id": project["id"],
+            "name": project.get("name"),
+            "intake_code": project.get("intake_code"),
+            "status": project.get("status"),
+            "customer_name": project.get("customer_name"),
+            "photo_count": len(photos_out),
+            "photos": photos_out,
+            "created_at": project.get("created_at"),
+        })
+
+    return {"projects": results, "count": len(results)}

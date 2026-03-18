@@ -43,27 +43,27 @@ def _build_message(to: str, subject: str, html_body: str) -> MIMEMultipart:
 
 
 async def _send_via_sendgrid(to: str, subject: str, html_body: str) -> bool:
-    """Send email using SendGrid API."""
+    """Send email using SendGrid v3 API via httpx."""
     try:
-        from sendgrid import SendGridAPIClient
-        from sendgrid.helpers.mail import Mail
-
+        import httpx
         api_key = os.getenv("SENDGRID_API_KEY", "") or SENDGRID_API_KEY
         from_email = os.getenv("SENDGRID_FROM_EMAIL", "") or SENDGRID_FROM_EMAIL
-
-        message = Mail(
-            from_email=from_email,
-            to_emails=to,
-            subject=subject,
-            html_content=html_body,
+        r = httpx.post(
+            "https://api.sendgrid.com/v3/mail/send",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "personalizations": [{"to": [{"email": to}]}],
+                "from": {"email": from_email, "name": "Empire Workroom"},
+                "subject": subject,
+                "content": [{"type": "text/html", "value": html_body}],
+            },
+            timeout=30,
         )
-        sg = SendGridAPIClient(api_key)
-        response = sg.send(message)
-        if response.status_code < 300:
-            logger.info("Email sent via SendGrid to %s: %s (status %s)", to, subject, response.status_code)
+        if r.status_code < 300:
+            logger.info("Email sent via SendGrid to %s: %s (status %s)", to, subject, r.status_code)
             return True
         else:
-            logger.error("SendGrid returned status %s for %s", response.status_code, to)
+            logger.error("SendGrid returned %s for %s: %s", r.status_code, to, r.text)
             return False
     except Exception as e:
         logger.error("SendGrid send failed for %s: %s", to, e)
