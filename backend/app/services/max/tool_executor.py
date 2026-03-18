@@ -1185,23 +1185,51 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("get_services_health")
 def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Check which Empire services are running."""
-    services = {
-        "backend": {"port": 8000, "url": "http://localhost:8000/api/v1/system/stats"},
-        "command_center": {"port": 3005, "url": "http://localhost:3005"},
-        "recoveryforge": {"port": 3077, "url": "http://localhost:3077"},
-        "relistapp": {"port": 3007, "url": "http://localhost:3007"},
-        "ollama": {"port": 11434, "url": "http://localhost:11434/"},
-        "openclaw": {"port": 7878, "url": "http://localhost:7878/health"},
+    """Check which Empire services are running using systemd + port checks."""
+    import socket
+
+    # Systemd services — check via systemctl first
+    systemd_services = {
+        "backend": {"port": 8000, "systemd": "empire-backend", "description": "FastAPI Backend API"},
+        "command_center": {"port": 3005, "systemd": "empire-cc", "description": "Command Center (Next.js)"},
+        "openclaw": {"port": 7878, "systemd": "empire-openclaw", "description": "OpenClaw AI Server"},
+    }
+    # Port-only services
+    port_services = {
+        "ollama": {"port": 11434, "description": "Ollama LLM Server"},
+        "recoveryforge": {"port": 3077, "description": "RecoveryForge"},
+        "relistapp": {"port": 3007, "description": "RelistApp"},
     }
 
     results = {}
-    for name, svc in services.items():
+
+    # Backend is always online if this code is executing
+    results["backend"] = {"status": "online", "port": 8000, "description": "FastAPI Backend API", "type": "systemd"}
+
+    # Other systemd services
+    for name, svc in systemd_services.items():
+        if name == "backend":
+            continue
         try:
-            r = httpx.get(svc["url"], timeout=2)
-            results[name] = {"status": "online", "port": svc["port"]}
+            import subprocess as _sp
+            r = _sp.run(["systemctl", "is-active", svc["systemd"]], capture_output=True, text=True, timeout=5)
+            is_active = r.stdout.strip() == "active"
+            results[name] = {"status": "online" if is_active else "offline", "port": svc["port"], "description": svc["description"], "type": "systemd"}
         except Exception:
-            results[name] = {"status": "offline", "port": svc["port"]}
+            # Fallback to port check
+            try:
+                with socket.create_connection(("127.0.0.1", svc["port"]), timeout=2):
+                    results[name] = {"status": "online", "port": svc["port"], "description": svc["description"], "type": "port"}
+            except Exception:
+                results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
+
+    # Port-only services
+    for name, svc in port_services.items():
+        try:
+            with socket.create_connection(("127.0.0.1", svc["port"]), timeout=2):
+                results[name] = {"status": "online", "port": svc["port"], "description": svc["description"], "type": "port"}
+        except Exception:
+            results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
 
     online = sum(1 for s in results.values() if s["status"] == "online")
     return ToolResult(tool="get_services_health", success=True, result={
@@ -2010,13 +2038,16 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
 ALLOWED_COMMANDS = [
     "ls", "cat", "head", "tail", "wc", "df", "du", "free",
     "ps", "uptime", "date", "whoami", "pwd", "find", "grep",
-    "echo", "sort", "uniq", "tee", "touch", "mkdir",
+    "echo", "sort", "uniq", "tee", "touch", "mkdir", "cp", "mv",
+    "hostname", "id", "env", "printenv",
+    "python3", "sqlite3",
     "git status", "git log", "git diff", "git branch", "git add", "git commit", "git push", "git pull", "git stash",
     "curl", "wget", "pip", "pip3", "npm", "npx",
-    "systemctl status", "systemctl restart", "systemctl is-active", "systemctl start", "systemctl stop",
+    "sudo systemctl", "systemctl status", "systemctl restart", "systemctl is-active", "systemctl start", "systemctl stop",
     "journalctl",
     "ollama list", "ollama ps",
     "docker ps", "docker images",
+    "chmod 600",
 ]
 
 BLOCKED_PATTERNS = [
@@ -2216,7 +2247,7 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 - **shell_execute** — Execute a safe, allowlisted shell command. Blocked patterns are rejected.
   `{"tool": "shell_execute", "command": "git status"}`
   `{"tool": "shell_execute", "command": "df -h"}`
-  Allowed commands: ls, cat, head, tail, wc, echo, sort, uniq, tee, touch, mkdir, df, du, free, ps, uptime, date, whoami, pwd, find, grep, git (all operations), curl, wget, pip, pip3, npm, npx, systemctl (status/restart/start/stop/is-active), journalctl, ollama list/ps, docker ps/images.
+  Allowed commands: ls, cat, head, tail, wc, echo, sort, uniq, tee, touch, mkdir, cp, mv, df, du, free, ps, uptime, date, whoami, hostname, pwd, find, grep, python3, sqlite3, git (all operations), curl, wget, pip, pip3, npm, npx, sudo systemctl, systemctl (status/restart/start/stop/is-active), journalctl, ollama list/ps, docker ps/images, chmod 600.
   BLOCKED: rm -rf, rm -r, pkill -f, kill -9, killall, dd, mkfs, fdisk, sudo rm, chmod 777, sensors-detect, eval, exec, pipe to sh/bash.
 
 ### Autonomous Execution
@@ -2249,14 +2280,31 @@ Then after seeing results, use the quote_id:
 
 ### Development Tools (Atlas / Orion)
 - **file_read** — Read a file with optional line range. `{{"tool": "file_read", "path": "backend/app/main.py", "line_start": 1, "line_end": 50}}`
-- **file_write** — Write content to a file. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
-- **file_edit** — Replace a string in a file. Use `old_str: "__APPEND__"` to append instead. `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
-- **file_append** — Append content to a file (never truncates). Safe for .env files. `{{"tool": "file_append", "path": "backend/.env", "content": "NEW_KEY=value"}}`
+- **file_write** — Write content to a file. Auto-backups existing files. `{{"tool": "file_write", "path": "backend/app/routers/new.py", "content": "..."}}`
+- **file_edit** — Replace a string in a file. Supports exact match, fuzzy whitespace match, and line_number mode. Use `old_str: "__APPEND__"` to append instead.
+  `{{"tool": "file_edit", "path": "backend/app/main.py", "old_str": "old code", "new_str": "new code"}}`
+  Line number mode: `{{"tool": "file_edit", "path": "file.py", "line_number": 42, "new_str": "replacement line"}}`
+- **file_append** — Append content to end of a file (never truncates). Safe for .env files. `{{"tool": "file_append", "path": "backend/.env", "content": "NEW_KEY=value"}}`
+- **env_get** — List .env variable names (not values) or check if a specific variable exists.
+  `{{"tool": "env_get"}}` or `{{"tool": "env_get", "name": "ANTHROPIC_API_KEY"}}`
+- **env_set** — Add or update an env variable in .env. `{{"tool": "env_set", "name": "MY_KEY", "value": "my_value"}}`
+- **db_query** — Run a read-only SQLite query on empire.db (SELECT only).
+  `{{"tool": "db_query", "query": "SELECT COUNT(*) as cnt FROM customers"}}`
 - **git_ops** — Git operations. `{{"tool": "git_ops", "command": "status|diff|add|commit|push|log", "args": "optional args"}}`
 - **service_manager** — Manage Empire services. `{{"tool": "service_manager", "command": "status|restart|logs|start|stop", "service": "backend|cc|openclaw|ollama|recoveryforge|relistapp|all"}}`
 - **package_manager** — Install packages or build. `{{"tool": "package_manager", "command": "pip_install|npm_install|npm_build|pip_list|npm_list", "package": "...", "project_dir": "..."}}`
 - **test_runner** — Run tests and health checks. `{{"tool": "test_runner", "command": "endpoint|all|build|health", "url": "...", "method": "GET"}}`
 - **project_scaffold** — Create new files from templates. `{{"tool": "project_scaffold", "command": "router|component|desk|page", "name": "..."}}`
+
+### TOOL USAGE PRIORITY
+For simple single-tool tasks, use the tool DIRECTLY — do NOT delegate to a desk:
+- File reads/writes → file_read, file_write, file_edit, file_append
+- Shell commands → shell_execute
+- Service checks → get_services_health or service_manager
+- Git operations → git_ops
+- Database queries → db_query
+- .env management → env_get, env_set
+Only delegate to a desk (run_desk_task) for complex multi-step tasks that require AI reasoning.
 """
 
 
@@ -2348,19 +2396,33 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     # Safety: prevent accidental truncation of existing files
     if os.path.exists(path):
+        import shutil
         old_size = os.path.getsize(path)
         new_size = len(content.encode('utf-8'))
-        if old_size > 1000 and new_size < (old_size * 0.5):
+
+        # Always backup before overwrite
+        backup_path = f"{path}.bak-{int(_time.time())}"
+        shutil.copy2(path, backup_path)
+
+        # Critical files: block if < 30% of original (likely truncation)
+        basename = os.path.basename(path)
+        critical_basenames = ["main.py", "ai_router.py", "system_prompt.py", ".env"]
+        if basename in critical_basenames and old_size > 500 and new_size < (old_size * 0.3):
+            log_execution("file_write", params, "critical truncation blocked", desk=desk, success=False)
+            return ToolResult(
+                tool="file_write",
+                success=False,
+                error=f"BLOCKED: New content ({new_size} bytes) is less than 30% of critical file ({old_size} bytes). Use file_edit for partial changes.",
+            )
+
+        # Normal files: block only if < 10% (obviously corrupted)
+        if old_size > 1000 and new_size < (old_size * 0.1):
             log_execution("file_write", params, "truncation blocked", desk=desk, success=False)
             return ToolResult(
                 tool="file_write",
                 success=False,
-                error=f"BLOCKED: New content ({new_size} bytes) is less than 50% of existing file ({old_size} bytes). This looks like accidental truncation. Use file_edit for partial changes.",
+                error=f"BLOCKED: New content ({new_size} bytes) is less than 10% of existing file ({old_size} bytes). This looks like accidental truncation. Use file_edit for partial changes.",
             )
-        # Always backup before overwrite
-        import shutil
-        backup_path = path + '.bak'
-        shutil.copy2(path, backup_path)
 
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -2409,24 +2471,95 @@ def _file_edit(params: dict, desk: Optional[str] = None) -> ToolResult:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
 
-        if old_str not in content:
-            log_execution("file_edit", params, "old_str not found", desk=desk, success=False)
-            return ToolResult(tool="file_edit", success=False, error="old_str not found in file")
+        # Line number mode: edit by line number instead of string match
+        line_number = params.get("line_number")
+        if line_number is not None:
+            lines = content.split("\n")
+            ln = int(line_number)
+            if ln < 1 or ln > len(lines):
+                return ToolResult(tool="file_edit", success=False, error=f"Line {ln} out of range (file has {len(lines)} lines)")
+            old_line = lines[ln - 1]
+            lines[ln - 1] = new_str
+            new_content = "\n".join(lines)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            duration = int((_time.time() - start) * 1000)
+            log_execution("file_edit", params, {"line": ln, "mode": "line_number"}, access_level=2, desk=desk, success=True, duration_ms=duration)
+            return ToolResult(tool="file_edit", success=True, result={
+                "path": path, "mode": "line_number", "line": ln,
+                "diff_preview": f"-{old_line[:80]}\n+{new_str[:80]}",
+            })
 
-        new_content = content.replace(old_str, new_str, 1)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(new_content)
+        # Standard string match mode
+        if old_str in content:
+            new_content = content.replace(old_str, new_str, 1)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            old_lines = old_str.strip().split("\n")
+            new_lines = new_str.strip().split("\n")
+            preview = f"-{old_lines[0][:80]}\n+{new_lines[0][:80]}"
+            duration = int((_time.time() - start) * 1000)
+            log_execution("file_edit", params, {"replacements": 1}, access_level=2, desk=desk, success=True, duration_ms=duration)
+            return ToolResult(tool="file_edit", success=True, result={
+                "path": path, "replacements": 1, "diff_preview": preview,
+            })
 
-        # Build a short diff preview
-        old_lines = old_str.strip().split("\n")
-        new_lines = new_str.strip().split("\n")
-        preview = f"-{old_lines[0][:80]}\n+{new_lines[0][:80]}"
+        # Fuzzy match: try stripping whitespace
+        content_lines = content.split("\n")
+        old_stripped = old_str.strip()
+        for i, line in enumerate(content_lines):
+            if line.strip() == old_stripped:
+                content_lines[i] = content_lines[i].replace(line.strip(), new_str.strip())
+                new_content = "\n".join(content_lines)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                duration = int((_time.time() - start) * 1000)
+                log_execution("file_edit", params, {"mode": "fuzzy_whitespace", "line": i + 1}, access_level=2, desk=desk, success=True, duration_ms=duration)
+                return ToolResult(tool="file_edit", success=True, result={
+                    "path": path, "replacements": 1, "mode": "fuzzy_whitespace",
+                    "diff_preview": f"-{line[:80]}\n+{new_str.strip()[:80]}",
+                    "note": f"Fuzzy matched at line {i + 1} (whitespace difference)",
+                })
 
-        duration = int((_time.time() - start) * 1000)
-        log_execution("file_edit", params, {"replacements": 1}, access_level=2, desk=desk, success=True, duration_ms=duration)
-        return ToolResult(tool="file_edit", success=True, result={
-            "path": path, "replacements": 1, "diff_preview": preview,
-        })
+        # Multi-line fuzzy: try matching stripped multi-line blocks
+        old_lines_stripped = [l.strip() for l in old_str.strip().split("\n") if l.strip()]
+        if len(old_lines_stripped) > 1:
+            for i in range(len(content_lines) - len(old_lines_stripped) + 1):
+                window = [content_lines[i + j].strip() for j in range(len(old_lines_stripped))]
+                if window == old_lines_stripped:
+                    for j in range(len(old_lines_stripped)):
+                        content_lines[i + j] = ""  # Clear matched lines
+                    content_lines[i] = new_str  # Insert replacement at first line
+                    # Remove the emptied lines
+                    new_content = "\n".join(l for idx, l in enumerate(content_lines) if not (i < idx < i + len(old_lines_stripped) and l == ""))
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    duration = int((_time.time() - start) * 1000)
+                    log_execution("file_edit", params, {"mode": "fuzzy_multiline", "line": i + 1}, access_level=2, desk=desk, success=True, duration_ms=duration)
+                    return ToolResult(tool="file_edit", success=True, result={
+                        "path": path, "replacements": 1, "mode": "fuzzy_multiline",
+                        "note": f"Fuzzy matched {len(old_lines_stripped)} lines starting at line {i + 1}",
+                    })
+
+        # No match found — return nearby lines to help retry
+        from difflib import SequenceMatcher
+        best_ratio = 0
+        best_line_num = 0
+        best_line = ""
+        search_first_line = old_str.strip().split("\n")[0].strip()
+        for i, line in enumerate(content_lines):
+            ratio = SequenceMatcher(None, search_first_line, line.strip()).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_line_num = i + 1
+                best_line = line
+
+        hint = ""
+        if best_ratio > 0.5:
+            hint = f" Closest match at line {best_line_num} ({int(best_ratio*100)}% similar): '{best_line.strip()[:100]}'"
+
+        log_execution("file_edit", params, "old_str not found", desk=desk, success=False)
+        return ToolResult(tool="file_edit", success=False, error=f"old_str not found in file.{hint} Try using line_number mode instead.")
     except Exception as e:
         log_execution("file_edit", params, str(e), desk=desk, success=False)
         return ToolResult(tool="file_edit", success=False, error=str(e))
@@ -2465,6 +2598,115 @@ def _file_append(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         log_execution("file_append", params, str(e), desk=desk, success=False)
         return ToolResult(tool="file_append", success=False, error=str(e))
+
+
+@tool("env_get")
+def _env_get(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """List .env variable names (not values) or check if a specific variable exists."""
+    env_path = os.path.expanduser("~/empire-repo/backend/.env")
+    var_name = params.get("name", "").strip()
+
+    try:
+        with open(env_path, "r") as f:
+            lines = f.readlines()
+
+        env_vars = []
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                name = line.split("=", 1)[0].strip()
+                has_value = bool(line.split("=", 1)[1].strip())
+                env_vars.append({"name": name, "set": has_value})
+
+        if var_name:
+            found = next((v for v in env_vars if v["name"] == var_name), None)
+            if found:
+                return ToolResult(tool="env_get", success=True, result={"name": var_name, "exists": True, "set": found["set"]})
+            return ToolResult(tool="env_get", success=True, result={"name": var_name, "exists": False})
+
+        return ToolResult(tool="env_get", success=True, result={"variables": env_vars, "count": len(env_vars)})
+    except Exception as e:
+        return ToolResult(tool="env_get", success=False, error=str(e))
+
+
+@tool("env_set")
+def _env_set(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Add or update an env variable in .env file. Level 2 — logged."""
+    env_path = os.path.expanduser("~/empire-repo/backend/.env")
+    var_name = params.get("name", "").strip()
+    var_value = params.get("value", "").strip()
+
+    if not var_name:
+        return ToolResult(tool="env_set", success=False, error="Variable name is required")
+    if not var_value:
+        return ToolResult(tool="env_set", success=False, error="Variable value is required")
+
+    try:
+        lines = []
+        replaced = False
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+
+            for i, line in enumerate(lines):
+                if line.strip().startswith(f"{var_name}="):
+                    lines[i] = f"{var_name}={var_value}\n"
+                    replaced = True
+                    break
+
+        if not replaced:
+            lines.append(f"{var_name}={var_value}\n")
+
+        with open(env_path, "w") as f:
+            f.writelines(lines)
+
+        os.chmod(env_path, 0o600)
+        log_execution("env_set", {"name": var_name}, "set", access_level=2, desk=desk, success=True)
+        return ToolResult(tool="env_set", success=True, result={
+            "name": var_name, "action": "replaced" if replaced else "added",
+        })
+    except Exception as e:
+        return ToolResult(tool="env_set", success=False, error=str(e))
+
+
+@tool("db_query")
+def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Run a read-only SQLite query on empire.db. Only SELECT statements allowed."""
+    import sqlite3
+    query = params.get("query", "").strip()
+    if not query:
+        return ToolResult(tool="db_query", success=False, error="query is required")
+
+    # Safety: only allow SELECT
+    if not query.upper().startswith("SELECT"):
+        return ToolResult(tool="db_query", success=False, error="Only SELECT queries are allowed")
+
+    # Block dangerous patterns
+    dangerous = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "ATTACH", "DETACH"]
+    query_upper = query.upper()
+    for d in dangerous:
+        if d in query_upper:
+            return ToolResult(tool="db_query", success=False, error=f"Query contains blocked keyword: {d}")
+
+    db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+    try:
+        conn = sqlite3.connect(db_path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query)
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        data = [dict(r) for r in rows[:100]]  # Cap at 100 rows
+        conn.close()
+
+        log_execution("db_query", {"query": query[:200]}, {"rows": len(data)}, desk=desk, success=True)
+        return ToolResult(tool="db_query", success=True, result={
+            "columns": columns, "rows": data, "count": len(data),
+            "note": f"Showing {len(data)} of {len(rows)} rows" if len(rows) > 100 else None,
+        })
+    except Exception as e:
+        return ToolResult(tool="db_query", success=False, error=str(e))
 
 
 @tool("git_ops")
@@ -2614,19 +2856,26 @@ def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "systemd_unit": systemd_unit,
             })
 
-        elif command == "restart" and systemd_unit:
+        elif command in ("restart", "start", "stop") and systemd_unit:
             try:
+                # Try without sudo first, fallback to sudo
                 r = subprocess.run(
-                    ["systemctl", "restart", systemd_unit],
+                    ["systemctl", command, systemd_unit],
                     capture_output=True, text=True, timeout=30,
                 )
+                if r.returncode != 0 and "Access denied" in (r.stderr or "") or "authentication required" in (r.stderr or "").lower():
+                    # Retry with sudo
+                    r = subprocess.run(
+                        ["sudo", "systemctl", command, systemd_unit],
+                        capture_output=True, text=True, timeout=30,
+                    )
                 success = r.returncode == 0
                 results.append({
-                    "name": svc_name, "action": "restart", "success": success,
+                    "name": svc_name, "action": command, "success": success,
                     "output": (r.stdout + r.stderr)[:500],
                 })
             except Exception as e:
-                results.append({"name": svc_name, "action": "restart", "success": False, "error": str(e)})
+                results.append({"name": svc_name, "action": command, "success": False, "error": str(e)})
 
         elif command == "logs":
             # Try journalctl for systemd services first
