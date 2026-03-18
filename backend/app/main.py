@@ -127,6 +127,12 @@ load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 # ApostApp — Document apostille & authentication service (DC/MD/VA)
 load_router("app.routers.apostapp", "/api/v1", ["apostapp"])
 
+# Notes-to-Quote extraction + diagrams
+load_router("app.routers.notes_extraction", "/api/v1", ["notes-extraction"])
+
+# Unified Photo Storage
+load_router("app.routers.photos", "/api/v1", ["photos"])
+
 # Vision analysis (measurement, mockup, outline, upholstery, image gen)
 load_router("app.routers.vision", "", ["vision"])
 

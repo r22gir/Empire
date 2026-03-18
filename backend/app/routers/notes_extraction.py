@@ -1,0 +1,276 @@
+"""
+Notes-to-Quote extraction router.
+Upload photos of handwritten field notes → structured quote data.
+Also serves architectural measurement diagrams.
+"""
+import os
+import json
+import uuid
+import tempfile
+import logging
+from pathlib import Path
+from datetime import datetime
+
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from pydantic import BaseModel
+from typing import Optional
+
+from app.services.vision.notes_extractor import notes_extractor
+from app.services.vision.diagram_generator import diagram_generator
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/quotes", tags=["notes-extraction"])
+
+QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+UPLOADS_DIR = os.path.expanduser("~/empire-repo/backend/data/notes_uploads")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(QUOTES_DIR, exist_ok=True)
+
+COUNTER_FILE = os.path.join(QUOTES_DIR, "_counter.json")
+
+
+def _next_quote_number() -> str:
+    year = datetime.utcnow().year
+    counter = {"year": year, "seq": 0}
+    if os.path.exists(COUNTER_FILE):
+        with open(COUNTER_FILE) as f:
+            counter = json.load(f)
+        if counter.get("year") != year:
+            counter = {"year": year, "seq": 0}
+    counter["seq"] += 1
+    with open(COUNTER_FILE, "w") as f:
+        json.dump(counter, f)
+    return f"EST-{year}-{counter['seq']:03d}"
+
+
+# ── Schemas ──────────────────────────────────────────
+
+class DiagramRequest(BaseModel):
+    item: dict  # {type, subtype, measurements, treatment, mount_type, ...}
+
+
+class DraftQuoteRequest(BaseModel):
+    customer: dict  # {name, email, phone, address}
+    project: Optional[dict] = None
+    items: list  # extracted items with measurements
+    customer_match: Optional[dict] = None
+    tax_rate: float = 0.06
+    notes: Optional[str] = None
+
+
+# ── Notes Extraction ─────────────────────────────────
+
+@router.post("/from-notes")
+async def extract_from_notes(files: list[UploadFile] = File(...)):
+    """
+    Upload 1-5 photos of handwritten field notes.
+    Returns structured extraction with customer matching and confidence scores.
+    """
+    if len(files) > 5:
+        raise HTTPException(400, "Maximum 5 images allowed")
+    if not files:
+        raise HTTPException(400, "At least one image is required")
+
+    # Save uploaded files
+    saved_paths = []
+    for f in files:
+        if not f.content_type or not f.content_type.startswith("image/"):
+            # Be lenient — accept anything, Grok will handle it
+            pass
+        suffix = Path(f.filename or "photo.jpg").suffix or ".jpg"
+        filename = f"notes_{uuid.uuid4().hex[:8]}{suffix}"
+        filepath = os.path.join(UPLOADS_DIR, filename)
+        content = await f.read()
+        with open(filepath, "wb") as out:
+            out.write(content)
+        saved_paths.append(filepath)
+        logger.info(f"Saved notes upload: {filepath} ({len(content)} bytes)")
+
+    # Extract
+    try:
+        result = await notes_extractor.extract_from_photos(saved_paths)
+    except Exception as e:
+        logger.error(f"Extraction failed: {e}")
+        raise HTTPException(500, f"Extraction failed: {str(e)}")
+
+    # Generate diagrams for each item that has measurements
+    for i, item in enumerate(result.get("items", [])):
+        m = item.get("measurements", {})
+        if m.get("width_inches") or m.get("height_inches"):
+            try:
+                diagram = diagram_generator.generate(item)
+                result["items"][i]["diagram_svg"] = diagram["svg"]
+                result["items"][i]["diagram_summary"] = diagram["summary"]
+            except Exception as e:
+                logger.warning(f"Diagram generation failed for item {i}: {e}")
+
+    result["uploaded_files"] = [os.path.basename(p) for p in saved_paths]
+    return result
+
+
+@router.post("/from-notes/create-draft")
+async def create_draft_from_notes(payload: DraftQuoteRequest):
+    """
+    Create an actual quote record from reviewed extraction data.
+    Called after the user reviews and edits the extraction results.
+    """
+    quote_id = str(uuid.uuid4())
+    quote_number = _next_quote_number()
+
+    # Build line items from extracted items
+    line_items = []
+    for item in payload.items:
+        m = item.get("measurements", {})
+        width = m.get("width_inches", 0)
+        height = m.get("height_inches", 0)
+
+        desc_parts = []
+        if item.get("room"):
+            desc_parts.append(item["room"])
+        if item.get("type"):
+            desc_parts.append(item["type"].replace("_", " ").title())
+        if item.get("subtype"):
+            desc_parts.append(f"({item['subtype'].replace('_', ' ')})")
+        if width and height:
+            desc_parts.append(f"- {width}\"×{height}\"")
+        if item.get("fabric", {}).get("name"):
+            desc_parts.append(f"[{item['fabric']['name']}]")
+        if item.get("lining"):
+            desc_parts.append(f"+ {item['lining']} lining")
+
+        description = " ".join(desc_parts) or "Custom item"
+        price = item.get("price_noted") or 0
+        qty = item.get("quantity", 1)
+
+        line_items.append({
+            "description": description,
+            "quantity": qty,
+            "unit": "ea",
+            "rate": price,
+            "amount": round(price * qty, 2),
+            "category": "labor",
+        })
+
+    # Compute financials
+    subtotal = round(sum(i["amount"] for i in line_items), 2)
+    tax_rate = payload.tax_rate
+    tax_amount = round(subtotal * tax_rate, 2)
+    total = round(subtotal + tax_amount, 2)
+
+    # Use matched customer if available
+    customer = payload.customer or {}
+    if payload.customer_match and payload.customer_match.get("matched_name"):
+        cm = payload.customer_match
+        customer["name"] = cm.get("matched_name") or customer.get("name", "")
+        if cm.get("matched_email"):
+            customer["email"] = cm["matched_email"]
+        if cm.get("matched_phone"):
+            customer["phone"] = cm["matched_phone"]
+        if cm.get("matched_address"):
+            customer["address"] = cm["matched_address"]
+
+    # Build diagrams for PDF inclusion
+    diagrams = []
+    for item in payload.items:
+        m = item.get("measurements", {})
+        if m.get("width_inches") or m.get("height_inches"):
+            try:
+                d = diagram_generator.generate(item)
+                diagrams.append(d)
+            except Exception:
+                diagrams.append(None)
+        else:
+            diagrams.append(None)
+
+    quote = {
+        "id": quote_id,
+        "quote_number": quote_number,
+        "status": "draft",
+        "source": "notes_extraction",
+        "customer_name": customer.get("name", ""),
+        "customer_email": customer.get("email"),
+        "customer_phone": customer.get("phone"),
+        "customer_address": customer.get("address"),
+        "project_name": (payload.project or {}).get("location", ""),
+        "project_description": (payload.project or {}).get("general_notes", ""),
+        "line_items": line_items,
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
+        "discount_amount": 0,
+        "total": total,
+        "deposit": {
+            "deposit_percent": 50.0,
+            "deposit_amount": round(total * 0.5, 2),
+        },
+        "valid_days": 30,
+        "notes": payload.notes or "Created from field notes extraction",
+        "extracted_items": payload.items,  # Keep raw extraction for reference
+        "diagrams": [d["svg"] if d else None for d in diagrams],
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+    # Save quote JSON
+    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
+    with open(quote_path, "w") as f:
+        json.dump(quote, f, indent=2, default=str)
+
+    # Link any notes upload photos to the quote in unified photo storage
+    try:
+        from pathlib import Path as _Path
+        import shutil as _shutil
+        quote_photo_dir = _Path(os.path.expanduser("~/empire-repo/backend/data/photos/quote")) / quote_id
+        quote_photo_dir.mkdir(parents=True, exist_ok=True)
+        notes_dir = _Path(UPLOADS_DIR)
+        for up_file in (payload.items[0] if payload.items else {}).get("_uploaded_files", []):
+            src = notes_dir / up_file
+            if src.exists():
+                _shutil.copy2(str(src), str(quote_photo_dir / f"notes_{src.name}"))
+    except Exception:
+        pass  # Non-critical — photos still in notes_uploads
+
+    logger.info(f"Draft quote created: {quote_number} ({quote_id}), total=${total}")
+
+    return {
+        "quote_id": quote_id,
+        "quote_number": quote_number,
+        "total": total,
+        "status": "draft",
+        "items_count": len(line_items),
+    }
+
+
+# ── Diagram Generation ───────────────────────────────
+
+@router.post("/diagrams/generate", tags=["diagrams"])
+async def generate_diagram(payload: DiagramRequest):
+    """Generate an architectural measurement diagram for an item."""
+    try:
+        result = diagram_generator.generate(payload.item)
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Diagram generation failed: {str(e)}")
+
+
+@router.get("/diagrams/generate", tags=["diagrams"])
+async def generate_diagram_for_quote(quote_id: str, item_index: int = 0):
+    """Generate diagram for a specific item in an existing quote."""
+    quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
+    if not os.path.exists(quote_path):
+        raise HTTPException(404, f"Quote {quote_id} not found")
+
+    with open(quote_path) as f:
+        quote = json.load(f)
+
+    items = quote.get("extracted_items") or []
+    if item_index >= len(items):
+        raise HTTPException(404, f"Item index {item_index} not found (quote has {len(items)} items)")
+
+    item = items[item_index]
+    try:
+        result = diagram_generator.generate(item)
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"Diagram generation failed: {str(e)}")

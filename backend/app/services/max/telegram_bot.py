@@ -964,6 +964,91 @@ class TelegramBot:
                 except Exception as _ve:
                     logger.warning(f"Vision /measure call failed, falling back to AI estimation: {_ve}")
 
+                # ── Notes-to-Quote extraction shortcut ──
+                _user_caption = (update.message.caption or "").lower()
+                _notes_keywords = ["extract", "quote", "notes", "measurements", "read this", "read my", "field notes", "create quote from"]
+                if any(kw in _user_caption for kw in _notes_keywords):
+                    try:
+                        await update.message.reply_text("📋 Reading your field notes...")
+                        async with httpx.AsyncClient(timeout=120) as _nc:
+                            with open(dest, "rb") as _nf:
+                                _nr = await _nc.post(
+                                    "http://localhost:8000/api/v1/quotes/from-notes",
+                                    files={"files": (dest.name, _nf, "image/jpeg")},
+                                )
+                        if _nr.status_code == 200:
+                            _nd = _nr.json()
+                            _items = _nd.get("items", [])
+                            _cust = _nd.get("customer", {})
+                            _match = _nd.get("customer_match")
+                            _lines = []
+                            _total = 0
+                            for _ni, _nit in enumerate(_items):
+                                _nm = _nit.get("measurements", {})
+                                _nw = _nm.get("width_inches", "?")
+                                _nh = _nm.get("height_inches", "?")
+                                _np = _nit.get("price_noted") or 0
+                                _total += _np
+                                _desc = f"{_nit.get('room', '')} {_nit.get('type', '')}".strip()
+                                _sub = _nit.get("subtype", "")
+                                if _sub:
+                                    _desc += f", {_sub.replace('_', ' ')}"
+                                _lin = _nit.get("lining", "")
+                                if _lin:
+                                    _desc += f", {_lin}"
+                                _lines.append(f"• {_desc}: {_nw}×{_nh}" + (f" — ${_np:,.0f}" if _np else ""))
+
+                            _cname = _cust.get("name") or "Unknown"
+                            _match_str = ""
+                            if _match and _match.get("matched_name"):
+                                _match_str = f" (matched in CRM ✅)"
+                            _summary = f"📋 <b>Extracted from your notes:</b>\n"
+                            _summary += f"Customer: {_cname}{_match_str}\n"
+                            _summary += f"{len(_items)} items found:\n"
+                            _summary += "\n".join(_lines)
+                            if _total > 0:
+                                _summary += f"\nTotal estimate: ${_total:,.0f}"
+
+                            # Create draft quote
+                            async with httpx.AsyncClient(timeout=30) as _dc:
+                                _dr = await _dc.post(
+                                    "http://localhost:8000/api/v1/quotes/from-notes/create-draft",
+                                    json={
+                                        "customer": _cust,
+                                        "project": _nd.get("project"),
+                                        "items": _items,
+                                        "customer_match": _match,
+                                        "tax_rate": 0.06,
+                                    },
+                                )
+                            if _dr.status_code == 200:
+                                _dd = _dr.json()
+                                _qnum = _dd.get("quote_number", "?")
+                                _qtotal = _dd.get("total", 0)
+                                _qid = _dd.get("quote_id", "")
+                                _summary += f"\n\nDraft quote <b>{_qnum}</b> created (${_qtotal:,.2f})"
+                                _summary += f"\n\n→ <a href='https://studio.empirebox.store/quotes/{_qid}'>Open in Command Center</a>"
+                                _summary += "\n\nReply <b>confirm</b> to finalize or open CC to edit."
+
+                                # Save photo to unified storage linked to quote
+                                try:
+                                    from pathlib import Path as _QPath
+                                    _q_photo_dir = _QPath(os.path.expanduser("~/empire-repo/backend/data/photos/quote")) / _qid
+                                    _q_photo_dir.mkdir(parents=True, exist_ok=True)
+                                    shutil.copy2(str(dest), str(_q_photo_dir / f"telegram_{dest.name}"))
+                                    # Write metadata
+                                    import json as _json_mod
+                                    with open(str(_q_photo_dir / f"telegram_{dest.name}.meta.json"), "w") as _mf:
+                                        _json_mod.dump({"source": "telegram", "entity_type": "quote", "entity_id": _qid, "uploaded_at": datetime.now().isoformat()}, _mf)
+                                except Exception as _pe:
+                                    logger.warning(f"Failed to save photo to unified storage: {_pe}")
+
+                            await update.message.reply_html(_summary)
+                            await self._send_voice_reply(update, _summary.replace("<b>", "").replace("</b>", "").replace("<a href='", "").replace("'>", " ").replace("</a>", ""))
+                            return
+                    except Exception as _ne:
+                        logger.warning(f"Notes extraction failed, falling back to normal flow: {_ne}")
+
                 caption = update.message.caption or (
                     "Analyze this image. If it shows a window, window treatment, curtain, drape, "
                     "or furniture that might need upholstery or a window treatment quote, "
