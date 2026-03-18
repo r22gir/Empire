@@ -670,7 +670,7 @@ EMPIRE_CATALOG = {
     },
 
     "history": {
-        "total_commits": 396,
+        "total_commits": 422,
         "key_milestones": [
             {"date": "2026-02", "event": "Empire project started on Beelink EQR5"},
             {"date": "2026-02-24", "event": "System crash from pkill -f — lesson learned"},
@@ -700,7 +700,7 @@ EMPIRE_CATALOG = {
     ],
 
     "stats": {
-        "total_commits": 396,
+        "total_commits": 422,
         "total_customers": 113,
         "total_inventory_items": 156,
         "total_tasks": 139,
@@ -717,7 +717,7 @@ EMPIRE_CATALOG = {
         "total_tools": 35,
         "total_products": 22,
         "total_screens": 44,
-        "total_api_endpoint_groups": 35,
+        "total_api_endpoints": 350,
         "total_databases": 7,
         "total_db_tables": 38,
         "total_intake_users": 3,
