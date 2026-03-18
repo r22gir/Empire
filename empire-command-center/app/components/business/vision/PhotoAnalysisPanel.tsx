@@ -3,7 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Camera, Upload, Loader2, Ruler, Armchair, Paintbrush, ClipboardList,
-  X, CheckCircle, AlertTriangle, Sparkles, TriangleAlert, Info, Box, Video,
+  X, CheckCircle, AlertTriangle, Sparkles, TriangleAlert, Info, Video,
   ArrowRight, Plus, ImageIcon, Trash2, Eye, Printer, Share2, FileDown, FileText
 } from 'lucide-react';
 import { API } from '../../../lib/api';
@@ -361,7 +361,6 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   const [dragActive, setDragActive] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const [model3D, setModel3D] = useState<string | null>(null);
   // Multi-photo organizer
   const [photos, setPhotos] = useState<PhotoEntry[]>([]);
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null);
@@ -369,7 +368,6 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   // Design Mockup style preferences
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const file3DRef = useRef<HTMLInputElement>(null);
   const multiFileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -542,22 +540,6 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
     };
   }, [cameraStream]);
-
-  /* ── 3D File ── */
-
-  const handle3DUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    if (!['glb', 'gltf', 'obj', 'ply', 'usdz'].includes(ext || '')) {
-      setError('Supported 3D formats: GLB, GLTF, OBJ, PLY, USDZ');
-      return;
-    }
-    setError('');
-    const url = URL.createObjectURL(file);
-    setModel3D(url);
-    setResult(null);
-  };
 
   /* ── Analysis ── */
 
@@ -1296,13 +1278,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
         />
-        <input
-          ref={file3DRef}
-          type="file"
-          accept=".glb,.gltf,.obj,.ply,.usdz"
-          className="hidden"
-          onChange={handle3DUpload}
-        />
+        {/* 3D file input removed — use photos only */}
         <input
           ref={multiFileRef}
           type="file"
@@ -1394,7 +1370,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         )}
 
         {/* Three input method buttons */}
-        {!imageData && !showCamera && !model3D && (
+        {!imageData && !showCamera && photos.length === 0 && (
           <div style={{ marginBottom: 16 }}>
             <label style={{ fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
               Choose Input Method
@@ -1445,9 +1421,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                 <span style={{ fontSize: 10, color: '#999', textAlign: 'center' }}>JPG, PNG up to 20 MB</span>
               </button>
 
-              {/* Polycam 3D */}
+              {/* Multiple Photos */}
               <button
-                onClick={() => file3DRef.current?.click()}
+                onClick={() => multiFileRef.current?.click()}
                 className="flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
                 style={{
                   padding: compact ? '20px 12px' : '28px 16px',
@@ -1460,10 +1436,10 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                   className="flex items-center justify-center"
                   style={{ width: 48, height: 48, borderRadius: 14, background: '#16a34a', color: '#fff' }}
                 >
-                  <Box size={22} />
+                  <ImageIcon size={22} />
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>Polycam 3D</span>
-                <span style={{ fontSize: 10, color: '#999', textAlign: 'center' }}>GLB, GLTF, OBJ, PLY</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>Multiple Photos</span>
+                <span style={{ fontSize: 10, color: '#999', textAlign: 'center' }}>Select several at once</span>
               </button>
             </div>
           </div>
@@ -1508,7 +1484,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                 style={{ width: '100%', maxHeight: compact ? 200 : 320, objectFit: 'contain', display: 'block', background: '#f5f3ef' }}
               />
               <button
-                onClick={() => { setImageData(''); setModel3D(null); setResult(null); }}
+                onClick={() => { setImageData(''); setResult(null); }}
                 className="flex items-center justify-center cursor-pointer hover:bg-[#f0ede8] transition-colors"
                 style={{
                   position: 'absolute', top: 8, right: 8,
@@ -1545,41 +1521,11 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           </div>
         )}
 
-        {/* 3D Model preview */}
-        {model3D && !imageData && !showCamera && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '2px solid #16a34a', background: '#f0fdf4', padding: '32px 20px', textAlign: 'center' }}>
-              <Box size={48} style={{ color: '#16a34a', margin: '0 auto 12px' }} />
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#16a34a', marginBottom: 4 }}>3D Model Loaded</div>
-              <div style={{ fontSize: 12, color: '#777' }}>Polycam scan ready for analysis</div>
-              <button
-                onClick={() => { setModel3D(null); setResult(null); }}
-                className="flex items-center justify-center cursor-pointer hover:bg-white transition-colors"
-                style={{
-                  position: 'absolute', top: 8, right: 8,
-                  width: 28, height: 28, borderRadius: 8,
-                  background: 'rgba(255,255,255,0.9)', border: '1px solid #bbf7d0',
-                }}
-              >
-                <X size={14} className="text-[#999]" />
-              </button>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button
-                onClick={() => { setModel3D(null); setResult(null); }}
-                className="flex items-center gap-1.5 cursor-pointer transition-colors hover:bg-[#f0ede8]"
-                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
-              >
-                <X size={12} /> Remove
-              </button>
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-1.5 cursor-pointer transition-colors hover:bg-[#f0ede8]"
-                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
-              >
-                <Upload size={12} /> Add Photo Instead
-              </button>
-            </div>
+        {/* Upload prompt when no photo and not showing input methods (e.g. photos in queue but none selected) */}
+        {!imageData && !showCamera && photos.length > 0 && !activePhotoId && (
+          <div style={{ marginBottom: 16, padding: 24, borderRadius: 14, border: '2px dashed #ece8e0', background: '#faf9f7', textAlign: 'center' }}>
+            <ImageIcon size={36} style={{ color: '#ccc', margin: '0 auto 8px' }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#888' }}>Select a photo from the queue above to analyze</div>
           </div>
         )}
 
@@ -1773,7 +1719,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         {!result && (
           <button
             onClick={analyze}
-            disabled={loading || (!imageData && !model3D)}
+            disabled={loading || !imageData}
             className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:brightness-110 disabled:opacity-50 active:scale-[0.98]"
             style={{
               height: compact ? 40 : 46,
