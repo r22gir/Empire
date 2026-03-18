@@ -299,7 +299,7 @@ export default function InventorySection() {
 
       {/* Items Grid */}
       {!loading && items.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {items.map(item => {
             const isLow = item.min_stock > 0 && item.quantity < item.min_stock;
             const isOut = item.quantity === 0;

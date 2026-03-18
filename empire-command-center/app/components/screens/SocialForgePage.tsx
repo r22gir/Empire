@@ -397,7 +397,7 @@ export default function SocialForgePage() {
                 <div className="section-label">Upcoming Scheduled Posts</div>
                 <button
                   onClick={() => setTab('compose')}
-                  style={{ padding: '6px 14px', fontSize: 11, fontWeight: 600, background: '#ec4899', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                  style={{ padding: '10px 16px', fontSize: 12, fontWeight: 600, background: '#ec4899', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, minHeight: 44 }}
                   className="hover:bg-[#db2777] transition-colors"
                 >
                   <Plus size={12} /> New Post
@@ -474,7 +474,7 @@ export default function SocialForgePage() {
                     if (calendarMonth === 0) { setCalendarMonth(11); setCalendarYear(y => y - 1); }
                     else setCalendarMonth(m => m - 1);
                   }}
-                  style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #ece8e0', borderRadius: 8, background: '#fff', cursor: 'pointer' }}
+                  style={{ padding: '10px 14px', fontSize: 12, border: '1px solid #ece8e0', borderRadius: 8, background: '#fff', cursor: 'pointer', minHeight: 44 }}
                   className="hover:border-[#ec4899] transition-colors"
                 >
                   &larr;
@@ -487,7 +487,7 @@ export default function SocialForgePage() {
                     if (calendarMonth === 11) { setCalendarMonth(0); setCalendarYear(y => y + 1); }
                     else setCalendarMonth(m => m + 1);
                   }}
-                  style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #ece8e0', borderRadius: 8, background: '#fff', cursor: 'pointer' }}
+                  style={{ padding: '10px 14px', fontSize: 12, border: '1px solid #ece8e0', borderRadius: 8, background: '#fff', cursor: 'pointer', minHeight: 44 }}
                   className="hover:border-[#ec4899] transition-colors"
                 >
                   &rarr;

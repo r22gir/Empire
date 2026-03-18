@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, User, DollarSign, FileText, CreditCard, MessageSquare, AlertCircle } from 'lucide-react';
+import { ArrowLeft, User, DollarSign, FileText, CreditCard, MessageSquare, AlertCircle, Pencil, Save, X } from 'lucide-react';
 import { API } from '../../../lib/api';
 import DataTable, { Column } from '../shared/DataTable';
 import KPICard from '../shared/KPICard';
@@ -39,6 +39,9 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   const [tab, setTab] = useState<Tab>('quotes');
   const [tabData, setTabData] = useState<any[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', address: '', notes: '' });
+  const [saving, setSaving] = useState(false);
 
   const fetchCustomer = useCallback(async () => {
     setLoading(true);
@@ -75,6 +78,32 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
   useEffect(() => { fetchCustomer(); }, [fetchCustomer]);
   useEffect(() => { fetchTabData(tab); }, [tab, fetchTabData]);
+
+  const startEdit = () => {
+    if (!customer) return;
+    setEditForm({ name: customer.name, email: customer.email || '', phone: customer.phone || '', address: customer.address || '', notes: customer.notes || '' });
+    setEditing(true);
+  };
+
+  const cancelEdit = () => { setEditing(false); };
+
+  const saveEdit = async () => {
+    if (!customer) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/crm/customers/${customerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setCustomer({ ...customer, ...editForm, ...(updated || {}) });
+        setEditing(false);
+      }
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
 
   const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: 'quotes', label: 'Quotes', icon: <FileText size={14} /> },
@@ -171,14 +200,44 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
           <div className="w-12 h-12 rounded-full bg-[#fdf8eb] flex items-center justify-center shrink-0">
             <User size={24} className="text-[#b8960c]" />
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-[#1a1a1a]">{customer.name}</h1>
-            <div className="flex flex-wrap gap-4 mt-1 text-sm text-[#999]">
-              {customer.email && <span>{customer.email}</span>}
-              {customer.phone && <span>{customer.phone}</span>}
-              {customer.address && <span>{customer.address}</span>}
+          {editing ? (
+            <div className="flex-1 space-y-3">
+              <input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full px-3 py-2 text-lg font-bold rounded-lg border border-[#ece8e0] bg-white focus:border-[#b8960c] outline-none" placeholder="Name" />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <input value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                  className="px-3 py-1.5 text-sm rounded-lg border border-[#ece8e0] bg-white focus:border-[#b8960c] outline-none" placeholder="Email" />
+                <input value={editForm.phone} onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))}
+                  className="px-3 py-1.5 text-sm rounded-lg border border-[#ece8e0] bg-white focus:border-[#b8960c] outline-none" placeholder="Phone" />
+                <input value={editForm.address} onChange={e => setEditForm(f => ({ ...f, address: e.target.value }))}
+                  className="px-3 py-1.5 text-sm rounded-lg border border-[#ece8e0] bg-white focus:border-[#b8960c] outline-none" placeholder="Address" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={saveEdit} disabled={saving}
+                  className="flex items-center gap-1 px-4 py-2 text-sm font-semibold rounded-lg bg-[#b8960c] text-white hover:bg-[#a6850b] transition-colors" style={{ minHeight: 44 }}>
+                  <Save size={14} /> {saving ? 'Saving...' : 'Save'}
+                </button>
+                <button onClick={cancelEdit}
+                  className="flex items-center gap-1 px-4 py-2 text-sm font-semibold rounded-lg border border-[#ece8e0] text-[#999] hover:bg-[#f5f3ef] transition-colors" style={{ minHeight: 44 }}>
+                  <X size={14} /> Cancel
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-[#1a1a1a]">{customer.name}</h1>
+                <button onClick={startEdit} className="p-1.5 rounded-lg text-[#999] hover:text-[#b8960c] hover:bg-[#fdf8eb] transition-colors" title="Edit customer">
+                  <Pencil size={14} />
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-4 mt-1 text-sm text-[#999]">
+                {customer.email && <span>{customer.email}</span>}
+                {customer.phone && <span>{customer.phone}</span>}
+                {customer.address && <span>{customer.address}</span>}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Stats Row */}
@@ -206,7 +265,13 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
         {/* Tab Content */}
         {tab === 'notes' ? (
           <div className="empire-card flat" style={{ padding: 20 }}>
-            <p className="text-sm text-[#555] whitespace-pre-wrap">{customer.notes || 'No notes for this customer.'}</p>
+            {editing ? (
+              <textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                rows={6} className="w-full px-3 py-2 text-sm rounded-lg border border-[#ece8e0] bg-white focus:border-[#b8960c] outline-none resize-y"
+                placeholder="Add notes about this customer..." />
+            ) : (
+              <p className="text-sm text-[#555] whitespace-pre-wrap">{customer.notes || 'No notes for this customer.'}</p>
+            )}
           </div>
         ) : (
           tabData.length === 0 && !tabLoading ? (
