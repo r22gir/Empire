@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Ruler, RotateCcw, Camera, Tag, Loader2, CheckCircle, Scissors, Crosshair, FileText, Trash2, Circle, Spline, Square, Pentagon } from 'lucide-react';
+import { Ruler, RotateCcw, Camera, Tag, Loader2, CheckCircle, Scissors, Crosshair, FileText, Trash2, Circle, Spline, Square, Pentagon, Undo2, Redo2, X, ChevronDown, ChevronRight, Edit3 } from 'lucide-react';
 import type * as THREE_NS from 'three';
 
 /* ═══════════════════════════════════════════════════════════
@@ -96,6 +96,43 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
   const [archCenter, setArchCenter] = useState<any>(null);
   // For rectangle mode: just 2 corner clicks
   const [rectCorners, setRectCorners] = useState<any[]>([]);
+
+  // Selection & editing
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  const [expandedAreaId, setExpandedAreaId] = useState<string | null>(null);
+  const [editingLabel, setEditingLabel] = useState('');
+
+  // Undo/redo history
+  type HistoryAction =
+    | { type: 'add_area'; area: TreatmentArea }
+    | { type: 'delete_area'; area: TreatmentArea; index: number }
+    | { type: 'edit_area'; id: string; prev: TreatmentArea; next: TreatmentArea }
+    | { type: 'add_measurement'; measurement: Measurement }
+    | { type: 'delete_measurement'; measurement: Measurement; index: number };
+  const [undoStack, setUndoStack] = useState<HistoryAction[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryAction[]>([]);
+
+  const pushUndo = useCallback((action: HistoryAction) => {
+    setUndoStack(prev => [...prev.slice(-9), action]); // keep last 10
+    setRedoStack([]); // clear redo on new action
+  }, []);
+
+  // ── Add treatment area with undo tracking ──
+  const addTreatmentArea = useCallback((area: TreatmentArea) => {
+    setTreatmentAreas(prev => [...prev, area]);
+    pushUndo({ type: 'add_area', area });
+  }, [pushUndo]);
+
+  // ── Delete treatment area by id with undo tracking ──
+  const deleteTreatmentAreaById = useCallback((id: string) => {
+    setTreatmentAreas(prev => {
+      const idx = prev.findIndex(a => a.id === id);
+      if (idx === -1) return prev;
+      pushUndo({ type: 'delete_area', area: prev[idx], index: idx });
+      return prev.filter(a => a.id !== id);
+    });
+    if (selectedAreaId === id) { setSelectedAreaId(null); setExpandedAreaId(null); }
+  }, [pushUndo, selectedAreaId]);
 
   // Helpers
   const toInches = (raw: number) => scaleFactor ? Math.round(raw * scaleFactor * 10) / 10 : null;
@@ -338,7 +375,7 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
           const wRaw = Math.abs(c2.x - c1.x) || Math.abs(c2.z - c1.z);
           const hRaw = Math.abs(c2.y - c1.y) || Math.abs(c2.z - c1.z);
           const label = treatmentLabel.trim() || `Treatment Area ${treatmentAreas.length + 1}`;
-          setTreatmentAreas(prev => [...prev, { id: Date.now().toString(), label, points: newCorners, widthRaw: wRaw, heightRaw: hRaw }]);
+          addTreatmentArea({ id: Date.now().toString(), label, points: newCorners, widthRaw: wRaw, heightRaw: hRaw });
           setRectCorners([]);
           setTreatmentLabel('');
         }
@@ -388,7 +425,7 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
             const wRaw = radius * 2;
             const hRaw = radius;
             const label = treatmentLabel.trim() || `Arch ${treatmentAreas.length + 1}`;
-            setTreatmentAreas(prev => [...prev, { id: Date.now().toString(), label, points: [archCenter, pt], widthRaw: wRaw, heightRaw: hRaw }]);
+            addTreatmentArea({ id: Date.now().toString(), label, points: [archCenter, pt], widthRaw: wRaw, heightRaw: hRaw });
           }
           setArchCenter(null);
           setTreatmentLabel('');
@@ -415,7 +452,7 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
         addLine(newPts[newPts.length - 2], pt, 0xb8960c, 'isTreatment');
       }
     }
-  }, [toolMode, treatmentShape, measurePoints, calibratePoints, currentTreatmentPts, rectCorners, archCenter, raycast, addMarker, addLine]);
+  }, [toolMode, treatmentShape, measurePoints, calibratePoints, currentTreatmentPts, rectCorners, archCenter, raycast, addMarker, addLine, addTreatmentArea, treatmentAreas, treatmentLabel]);
 
   // ── Double-click to finish treatment area (polygon or curve) ──
   const handleDoubleClick = useCallback(() => {
@@ -454,7 +491,7 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
       const hRaw = Math.max(...ys) - Math.min(...ys) || Math.max(...zs) - Math.min(...zs);
 
       const label = treatmentLabel.trim() || `Curved Area ${treatmentAreas.length + 1}`;
-      setTreatmentAreas(prev => [...prev, { id: Date.now().toString(), label, points: [...currentTreatmentPts], widthRaw: wRaw, heightRaw: hRaw }]);
+      addTreatmentArea({ id: Date.now().toString(), label, points: [...currentTreatmentPts], widthRaw: wRaw, heightRaw: hRaw });
     } else {
       // Polygon mode: close and fill
       addLine(currentTreatmentPts[currentTreatmentPts.length - 1], currentTreatmentPts[0], 0xb8960c, 'isTreatment');
@@ -477,12 +514,12 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
       const hRaw = Math.max(...ys) - Math.min(...ys) || Math.max(...zs) - Math.min(...zs);
 
       const label = treatmentLabel.trim() || `Treatment Area ${treatmentAreas.length + 1}`;
-      setTreatmentAreas(prev => [...prev, { id: Date.now().toString(), label, points: [...currentTreatmentPts], widthRaw: wRaw, heightRaw: hRaw }]);
+      addTreatmentArea({ id: Date.now().toString(), label, points: [...currentTreatmentPts], widthRaw: wRaw, heightRaw: hRaw });
     }
 
     setCurrentTreatmentPts([]);
     setTreatmentLabel('');
-  }, [toolMode, treatmentShape, currentTreatmentPts, treatmentLabel, treatmentAreas, addLine]);
+  }, [toolMode, treatmentShape, currentTreatmentPts, treatmentLabel, treatmentAreas, addLine, addTreatmentArea]);
 
   // ── Apply calibration ──
   const applyCalibration = () => {
@@ -549,6 +586,100 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
     });
   };
 
+  // ── Delete selected area ──
+  const deleteSelectedArea = useCallback(() => {
+    if (!selectedAreaId) return;
+    deleteTreatmentAreaById(selectedAreaId);
+  }, [selectedAreaId, deleteTreatmentAreaById]);
+
+  // ── Undo ──
+  const undo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const action = undoStack[undoStack.length - 1];
+    setUndoStack(prev => prev.slice(0, -1));
+    setRedoStack(prev => [...prev, action]);
+
+    switch (action.type) {
+      case 'add_area':
+        setTreatmentAreas(prev => prev.filter(a => a.id !== action.area.id));
+        break;
+      case 'delete_area':
+        setTreatmentAreas(prev => {
+          const next = [...prev];
+          next.splice(action.index, 0, action.area);
+          return next;
+        });
+        break;
+      case 'edit_area':
+        setTreatmentAreas(prev => prev.map(a => a.id === action.id ? action.prev : a));
+        break;
+      case 'add_measurement':
+        setMeasurements(prev => prev.filter(m => m !== action.measurement));
+        break;
+      case 'delete_measurement':
+        setMeasurements(prev => {
+          const next = [...prev];
+          next.splice(action.index, 0, action.measurement);
+          return next;
+        });
+        break;
+    }
+  }, [undoStack]);
+
+  // ── Redo ──
+  const redo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const action = redoStack[redoStack.length - 1];
+    setRedoStack(prev => prev.slice(0, -1));
+    setUndoStack(prev => [...prev, action]);
+
+    switch (action.type) {
+      case 'add_area':
+        setTreatmentAreas(prev => [...prev, action.area]);
+        break;
+      case 'delete_area':
+        setTreatmentAreas(prev => prev.filter(a => a.id !== action.area.id));
+        break;
+      case 'edit_area':
+        setTreatmentAreas(prev => prev.map(a => a.id === action.id ? action.next : a));
+        break;
+      case 'add_measurement':
+        setMeasurements(prev => [...prev, action.measurement]);
+        break;
+      case 'delete_measurement':
+        setMeasurements(prev => prev.filter(m => m !== action.measurement));
+        break;
+    }
+  }, [redoStack]);
+
+  // ── Keyboard shortcuts ──
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      // Delete/Backspace: remove selected area
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedAreaId) {
+        e.preventDefault();
+        deleteSelectedArea();
+      }
+      // Ctrl+Z: undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      // Ctrl+Shift+Z or Ctrl+Y: redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
+      // Escape: deselect
+      if (e.key === 'Escape') {
+        setSelectedAreaId(null);
+        setExpandedAreaId(null);
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [selectedAreaId, deleteSelectedArea, undo, redo]);
+
   // ── Cursor ──
   const cursor = toolMode === 'none' ? 'grab' : 'crosshair';
 
@@ -586,6 +717,16 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
       </div>
       {/* Toolbar row 2 */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        {undoStack.length > 0 && (
+          <TBtn active={false} color="#555" onClick={undo}>
+            <Undo2 size={14} /> Undo
+          </TBtn>
+        )}
+        {redoStack.length > 0 && (
+          <TBtn active={false} color="#555" onClick={redo}>
+            <Redo2 size={14} /> Redo
+          </TBtn>
+        )}
         <TBtn active={false} color="#777" onClick={resetView}>
           <RotateCcw size={14} /> Reset View
         </TBtn>
@@ -773,7 +914,10 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
                   {formatDist(m.distRaw)}
                 </span>
                 <span style={{ color: '#999', fontSize: 11, flex: 1 }}>{m.label}</span>
-                <button onClick={() => setMeasurements(prev => prev.filter((_, idx) => idx !== i))}
+                <button onClick={() => {
+                    pushUndo({ type: 'delete_measurement', measurement: m, index: i });
+                    setMeasurements(prev => prev.filter((_, idx) => idx !== i));
+                  }}
                   className="cursor-pointer hover:text-[#dc2626] transition-colors"
                   style={{ background: 'none', border: 'none', color: '#ccc', padding: 2 }}>
                   <Trash2 size={11} />
@@ -788,28 +932,89 @@ export default function ThreeViewer({ modelUrl, width = 500, height = 400, onCap
       {treatmentAreas.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-            Treatment Areas
+            Treatment Areas ({treatmentAreas.length})
+            {selectedAreaId && <span style={{ color: '#999', fontWeight: 400, marginLeft: 6 }}>Press Delete to remove selected</span>}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {treatmentAreas.map((ta, i) => (
-              <div key={ta.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, background: '#faf5ff', border: '1px solid #e9d5ff', fontSize: 12 }}>
-                <Scissors size={12} style={{ color: '#7c3aed', flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <span style={{ fontWeight: 600, color: '#1a1a1a' }}>{ta.label}</span>
-                  <span style={{ color: '#777', marginLeft: 8, fontSize: 11 }}>
-                    {formatDist(ta.widthRaw)} W × {formatDist(ta.heightRaw)} H
-                    {scaleFactor && (
-                      <> · {Math.round((toInches(ta.widthRaw)! * toInches(ta.heightRaw)!) / 144 * 10) / 10} sq ft</>
-                    )}
-                  </span>
+            {treatmentAreas.map((ta) => {
+              const isSelected = selectedAreaId === ta.id;
+              const isExpanded = expandedAreaId === ta.id;
+              return (
+                <div key={ta.id}>
+                  <div
+                    onClick={() => {
+                      setSelectedAreaId(isSelected ? null : ta.id);
+                      if (!isSelected) setExpandedAreaId(null);
+                    }}
+                    className="cursor-pointer transition-all"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: isExpanded ? '8px 8px 0 0' : 8, fontSize: 12,
+                      background: isSelected ? '#ede9fe' : '#faf5ff',
+                      border: `1.5px solid ${isSelected ? '#7c3aed' : '#e9d5ff'}`,
+                      boxShadow: isSelected ? '0 0 0 2px #7c3aed30' : 'none',
+                    }}
+                  >
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setExpandedAreaId(isExpanded ? null : ta.id); setSelectedAreaId(ta.id); }}
+                      style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#7c3aed' }}
+                    >
+                      {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    </button>
+                    <Scissors size={12} style={{ color: '#7c3aed', flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <span style={{ fontWeight: 600, color: '#1a1a1a' }}>{ta.label}</span>
+                      <span style={{ color: '#777', marginLeft: 8, fontSize: 11 }}>
+                        {formatDist(ta.widthRaw)} W × {formatDist(ta.heightRaw)} H
+                        {scaleFactor && (
+                          <> · {Math.round((toInches(ta.widthRaw)! * toInches(ta.heightRaw)!) / 144 * 10) / 10} sq ft</>
+                        )}
+                      </span>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteTreatmentAreaById(ta.id); }}
+                      className="cursor-pointer hover:text-[#dc2626] transition-colors"
+                      title="Delete area"
+                      style={{ background: 'none', border: 'none', color: isSelected ? '#dc2626' : '#ccc', padding: 2 }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                  {/* Expanded edit panel */}
+                  {isExpanded && (
+                    <div style={{ padding: '10px 12px', background: '#f8f5ff', border: '1.5px solid #e9d5ff', borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <label style={{ fontSize: 10, fontWeight: 600, color: '#7c3aed', display: 'block', marginBottom: 3 }}>Label</label>
+                          <input
+                            value={editingLabel || ta.label}
+                            onChange={e => setEditingLabel(e.target.value)}
+                            onFocus={() => setEditingLabel(ta.label)}
+                            onBlur={() => {
+                              if (editingLabel && editingLabel !== ta.label) {
+                                const prev = { ...ta };
+                                const next = { ...ta, label: editingLabel };
+                                pushUndo({ type: 'edit_area', id: ta.id, prev, next });
+                                setTreatmentAreas(areas => areas.map(a => a.id === ta.id ? next : a));
+                              }
+                              setEditingLabel('');
+                            }}
+                            style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid #e9d5ff', fontSize: 12, background: '#fff' }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#777' }}>
+                        <span>Width: <strong style={{ color: '#1a1a1a' }}>{formatDist(ta.widthRaw)}</strong></span>
+                        <span>Height: <strong style={{ color: '#1a1a1a' }}>{formatDist(ta.heightRaw)}</strong></span>
+                        <span>Points: <strong style={{ color: '#1a1a1a' }}>{ta.points.length}</strong></span>
+                        {scaleFactor && (
+                          <span>Area: <strong style={{ color: '#1a1a1a' }}>{Math.round((toInches(ta.widthRaw)! * toInches(ta.heightRaw)!) / 144 * 10) / 10} sq ft</strong></span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => setTreatmentAreas(prev => prev.filter((_, idx) => idx !== i))}
-                  className="cursor-pointer hover:text-[#dc2626] transition-colors"
-                  style={{ background: 'none', border: 'none', color: '#ccc', padding: 2 }}>
-                  <Trash2 size={11} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
