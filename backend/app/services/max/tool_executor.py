@@ -1829,28 +1829,49 @@ def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("run_desk_task")
 def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Submit a task to the AI desk system for autonomous handling."""
+    """Submit a task to the AI desk system for autonomous handling.
+
+    Calls desk_manager directly (no HTTP loopback) to avoid deadlocking
+    when called from within the same uvicorn process.
+    """
     title = params.get("title", "").strip()
     if not title:
         return ToolResult(tool="run_desk_task", success=False, error="Task title is required")
 
     try:
-        resp = httpx.post(
-            "http://localhost:8000/api/v1/max/ai-desks/tasks",
-            json={
-                "title": title,
-                "description": params.get("description", title),
-                "priority": params.get("priority", "normal"),
-                "customer_name": params.get("customer_name"),
-                "source": "max_tool",
-            },
-            timeout=120,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
+        import asyncio
+        import concurrent.futures
+
+        async def _submit():
+            from app.services.max.desks.desk_manager import desk_manager
+            desk_manager.initialize()
+            task = await desk_manager.submit_task(
+                title=title,
+                description=params.get("description", title),
+                priority=params.get("priority", "normal"),
+                source="max_tool",
+            )
+            return {
+                "id": task.id,
+                "title": task.title,
+                "state": task.state.value if hasattr(task.state, "value") else str(task.state),
+                "result": task.result,
+                "desk": getattr(task, "desk_id", None) or "auto",
+            }
+
+        # Run async desk call from sync context — use thread to avoid event loop deadlock
+        try:
+            loop = asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                data = pool.submit(asyncio.run, _submit()).result(timeout=90)
+        except RuntimeError:
+            data = asyncio.run(_submit())
+
+        if data.get("state") == "completed":
             return ToolResult(tool="run_desk_task", success=True, result=data)
         else:
-            return ToolResult(tool="run_desk_task", success=False, error=f"Desk API error: {resp.status_code}")
+            return ToolResult(tool="run_desk_task", success=False,
+                            result=data, error=data.get("result", "Task did not complete"))
     except Exception as e:
         return ToolResult(tool="run_desk_task", success=False, error=f"Desk task failed: {e}")
 
