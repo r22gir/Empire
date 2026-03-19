@@ -12,6 +12,8 @@ import dynamic from 'next/dynamic';
 import AnalysisApprovalFlow from './AnalysisApprovalFlow';
 
 const ThreeViewer = dynamic(() => import('./ThreeViewer'), { ssr: false });
+const CushionBuilder = dynamic(() => import('../upholstery/CushionBuilder'), { ssr: false });
+const FurnitureCatalog = dynamic(() => import('../upholstery/FurnitureCatalog'), { ssr: false });
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -601,6 +603,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   const [showGallery, setShowGallery] = useState(true);
   // Approval flow toggle
   const [showApprovalFlow, setShowApprovalFlow] = useState(false);
+  // Upholstery tools
+  const [showCushionBuilder, setShowCushionBuilder] = useState(false);
+  const [showFurnitureCatalog, setShowFurnitureCatalog] = useState(false);
   // Design Mockup style preferences
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [measureInputMethod, setMeasureInputMethod] = useState<MeasureInputMethod>('photo');
@@ -1122,6 +1127,68 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
             />
           </div>
         </>
+      )}
+
+      {/* Upholstery Tools */}
+      <SectionHeader>UPHOLSTERY TOOLS</SectionHeader>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <button
+          onClick={() => { setShowFurnitureCatalog(true); setShowCushionBuilder(false); }}
+          className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: '#7c3aed', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', minHeight: 44 }}
+        >
+          <Armchair size={14} /> Furniture Catalog
+        </button>
+        <button
+          onClick={() => { setShowCushionBuilder(true); setShowFurnitureCatalog(false); }}
+          className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: 'linear-gradient(135deg, #b8960c, #d4af37)', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', minHeight: 44 }}
+        >
+          <Edit3 size={14} /> Cushion Builder
+        </button>
+      </div>
+
+      {showFurnitureCatalog && (
+        <div style={{ marginBottom: 14 }}>
+          <FurnitureCatalog
+            suggestedType={data.furniture_type?.toLowerCase().replace(/\s+/g, '_')}
+            onSelect={() => {}}
+            onMeasurementsComplete={(measData) => {
+              if (onSaveQuote) {
+                onSaveQuote({
+                  type: measData.furnitureType,
+                  description: `${measData.furnitureType} reupholstery`,
+                  measurements: measData.measurements,
+                  cushion_count: measData.cushionCount,
+                  source: 'furniture_catalog',
+                  notes: measData.notes,
+                });
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {showCushionBuilder && (
+        <div style={{ marginBottom: 14 }}>
+          <CushionBuilder
+            onAddToQuote={(cushionData) => {
+              if (onSaveQuote) {
+                onSaveQuote({
+                  type: 'cushion',
+                  description: `${cushionData.cushionType} - ${cushionData.shape} ${cushionData.style}`,
+                  measurements: cushionData.dimensions,
+                  quantity: cushionData.quantity,
+                  materials: cushionData.materials,
+                  costs: cushionData.costs,
+                  totalPerUnit: cushionData.totalPerUnit,
+                  totalAll: cushionData.totalAll,
+                  source: 'cushion_builder',
+                });
+              }
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -1964,6 +2031,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
 
         {/* Upholstery info panel */}
         {mode === 'upholstery' && (
+          <>
           <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 12, background: '#faf5ff', border: '1px solid #e9d5ff' }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
               What Upholstery Analysis Generates:
@@ -1990,7 +2058,67 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
             <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(124,58,237,0.08)', fontSize: 10, color: '#6b21a8', lineHeight: 1.5 }}>
               Tip: Take photos from multiple angles — front, side, cushion close-up — for the most accurate estimate. Add all to the photo queue.
             </div>
+            {/* Quick access to upholstery tools */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button
+                onClick={() => { setShowFurnitureCatalog(prev => !prev); setShowCushionBuilder(false); }}
+                className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
+                style={{ flex: 1, padding: '8px 12px', borderRadius: 8, background: showFurnitureCatalog ? '#7c3aed' : '#faf9f7', color: showFurnitureCatalog ? '#fff' : '#7c3aed', fontSize: 11, fontWeight: 700, border: `1px solid ${showFurnitureCatalog ? '#7c3aed' : '#e9d5ff'}`, minHeight: 40 }}
+              >
+                <Armchair size={13} /> Furniture Catalog
+              </button>
+              <button
+                onClick={() => { setShowCushionBuilder(prev => !prev); setShowFurnitureCatalog(false); }}
+                className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
+                style={{ flex: 1, padding: '8px 12px', borderRadius: 8, background: showCushionBuilder ? '#b8960c' : '#faf9f7', color: showCushionBuilder ? '#fff' : '#b8960c', fontSize: 11, fontWeight: 700, border: `1px solid ${showCushionBuilder ? '#b8960c' : '#f5ecd0'}`, minHeight: 40 }}
+              >
+                <Edit3 size={13} /> Cushion Builder
+              </button>
+            </div>
           </div>
+
+          {showFurnitureCatalog && !result && (
+            <div style={{ marginBottom: 14 }}>
+              <FurnitureCatalog
+                onSelect={() => {}}
+                onMeasurementsComplete={(measData) => {
+                  if (onSaveQuote) {
+                    onSaveQuote({
+                      type: measData.furnitureType,
+                      description: `${measData.furnitureType} reupholstery`,
+                      measurements: measData.measurements,
+                      cushion_count: measData.cushionCount,
+                      source: 'furniture_catalog',
+                    });
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {showCushionBuilder && !result && (
+            <div style={{ marginBottom: 14 }}>
+              <CushionBuilder
+                compact
+                onAddToQuote={(cushionData) => {
+                  if (onSaveQuote) {
+                    onSaveQuote({
+                      type: 'cushion',
+                      description: `${cushionData.cushionType} - ${cushionData.shape} ${cushionData.style}`,
+                      measurements: cushionData.dimensions,
+                      quantity: cushionData.quantity,
+                      materials: cushionData.materials,
+                      costs: cushionData.costs,
+                      totalPerUnit: cushionData.totalPerUnit,
+                      totalAll: cushionData.totalAll,
+                      source: 'cushion_builder',
+                    });
+                  }
+                }}
+              />
+            </div>
+          )}
+          </>
         )}
 
         {/* Design Mockup Style Selector */}
