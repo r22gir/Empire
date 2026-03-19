@@ -7,6 +7,9 @@ import {
   Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle
 } from 'lucide-react';
 import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
+import dynamic from 'next/dynamic';
+
+const CushionBuilder = dynamic(() => import('../business/upholstery/CushionBuilder'), { ssr: false });
 
 interface CustomerInfo {
   name: string;
@@ -893,6 +896,7 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
   const [m, setM] = useState({ width_inches: 0, height_inches: 0, depth_inches: 0, sill_depth: 0, stack_space: 0 });
   const [opts, setOpts] = useState({ mount_type: 'inside', treatment: '', lining: '', notes: '' });
   const [addedCount, setAddedCount] = useState(0);
+  const [showCushionBuilder, setShowCushionBuilder] = useState(false);
 
   const isWindow = ['window', 'cornice', 'valance', 'roman_shade'].includes(itemType);
   const isFurniture = ['sofa', 'chair'].includes(itemType);
@@ -965,6 +969,48 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
           ))}
         </div>
       </div>
+
+      {/* Cushion Builder (full wizard) */}
+      {isCushion && (
+        <div style={{ marginBottom: 16 }}>
+          <button
+            onClick={() => setShowCushionBuilder(!showCushionBuilder)}
+            className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:brightness-110"
+            style={{
+              height: 44, fontSize: 12, borderRadius: 10, marginBottom: showCushionBuilder ? 12 : 0,
+              background: showCushionBuilder ? '#7c3aed' : 'linear-gradient(135deg, #7c3aed, #a855f7)',
+              color: '#fff', border: 'none', boxShadow: '0 2px 8px #7c3aed30',
+            }}>
+            <Box size={14} /> {showCushionBuilder ? 'Hide Cushion Builder' : 'Open Cushion Builder (Detailed Specs)'}
+          </button>
+          {showCushionBuilder && (
+            <div style={{ border: '1.5px solid #e9d5ff', borderRadius: 12, padding: 16, background: '#faf5ff' }}>
+              <CushionBuilder
+                onAddToQuote={(data: any) => {
+                  onAddItem({
+                    type: 'cushion',
+                    width: data.dimensions?.width ? `${data.dimensions.width}"` : '',
+                    height: data.dimensions?.height ? `${data.dimensions.height}"` : '',
+                    depth: data.dimensions?.depth ? `${data.dimensions.depth}"` : '',
+                    description: `${data.cushionType || 'Cushion'} — ${data.shape || ''} ${data.fill || ''} ${data.edge || ''}`.trim(),
+                    quantity: data.quantity || 1,
+                    cushionData: data,
+                  });
+                  setAddedCount(c => c + 1);
+                  setShowCushionBuilder(false);
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick entry heading for cushions */}
+      {isCushion && !showCushionBuilder && (
+        <div style={{ fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+          Or enter dimensions manually
+        </div>
+      )}
 
       {/* Form + live diagram side by side */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 16 }}>
