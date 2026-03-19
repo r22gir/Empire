@@ -105,9 +105,9 @@ class CodeForgeDesk(BaseDesk):
 
         combined = f"{task.title} {task.description}"
         paths = self._extract_paths(combined)
+        logger.info(f"[CodeForge] _handle_read paths={paths} from: {combined!r}")
 
         if paths:
-            # Direct path priority: if the file exists on disk, read it immediately
             target = paths[0]
             if os.path.isfile(target):
                 task.actions.append(DeskAction(action="file_read", detail=f"Direct read: {target}"))
@@ -118,12 +118,10 @@ class CodeForgeDesk(BaseDesk):
                 else:
                     return await self.fail_task(task, r.error or "File read failed")
             else:
-                # Path was given but doesn't exist — report clearly
                 return await self.fail_task(
                     task, f"File not found: {target}"
                 )
         else:
-            # No explicit path found — fall back to AI to determine what to read
             try:
                 result = await self.ai_execute_task(task)
                 return await self.complete_task(task, result)
