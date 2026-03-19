@@ -4,6 +4,8 @@ Agent: Atlas. Handles code creation, editing, testing, and version control.
 Precise, methodical — always reads before writing, always tests after changing.
 """
 import logging
+import os
+import re
 from .base_desk import BaseDesk, DeskTask, DeskAction
 
 logger = logging.getLogger("max.desks.codeforge")
@@ -51,25 +53,77 @@ class CodeForgeDesk(BaseDesk):
             logger.error(f"CodeForgeDesk task failed: {e}")
             return await self.fail_task(task, str(e))
 
+    @staticmethod
+    def _expand_path(path: str) -> str:
+        """Expand ~ and ~/ to full home directory path."""
+        return os.path.expanduser(path)
+
+    @staticmethod
+    def _extract_paths(text: str) -> list[str]:
+        """Extract file paths from text, expanding ~ to home dir."""
+        # Match ~/..., /home/..., or relative backend/empire-command-center paths
+        raw = re.findall(
+            r'(?:~/[\w/.\-]+|/home/\w+/[\w/.\-]+|(?:backend|frontend|empire-command-center)/[\w/.\-]+)',
+            text,
+        )
+        expanded = []
+        for p in raw:
+            p = os.path.expanduser(p)
+            # Relative paths: prepend repo root
+            if not os.path.isabs(p):
+                p = os.path.join(os.path.expanduser("~/empire-repo"), p)
+            expanded.append(p)
+        return expanded
+
+    @staticmethod
+    def _format_file_content(content: str, path: str) -> str:
+        """Format file content with smart truncation.
+
+        - Files ≤ 500 lines: return in full.
+        - Files > 500 lines: first 200 + last 50, with skip note.
+        """
+        lines = content.split('\n')
+        total = len(lines)
+
+        if total <= 500:
+            return f"**{path}** ({total} lines)\n```\n{content}\n```"
+
+        head = '\n'.join(lines[:200])
+        tail = '\n'.join(lines[-50:])
+        skipped = total - 250
+        return (
+            f"**{path}** ({total} lines — showing first 200 + last 50, {skipped} lines skipped)\n"
+            f"```\n{head}\n```\n\n"
+            f"... ({skipped} lines skipped) ...\n\n"
+            f"```\n{tail}\n```"
+        )
+
     async def _handle_read(self, task: DeskTask) -> DeskTask:
-        """Read files — use file_read tool directly."""
+        """Read files — direct path priority, ~ expansion, full content."""
         task.actions.append(DeskAction(action="file_read", detail="Reading requested files"))
         from app.services.max.tool_executor import execute_tool
 
-        # Extract file path from task description
         combined = f"{task.title} {task.description}"
-        # Try to find a file path in the description
-        import re
-        paths = re.findall(r'(?:~/empire-repo/|backend/|frontend/|empire-command-center/)[\w/.\-]+', combined)
+        paths = self._extract_paths(combined)
+
         if paths:
-            r = execute_tool({"tool": "file_read", "path": paths[0]}, desk="codeforge")
-            if r.success and r.result:
-                content = r.result.get("content", str(r.result))[:3000]
-                return await self.complete_task(task, content)
+            # Direct path priority: if the file exists on disk, read it immediately
+            target = paths[0]
+            if os.path.isfile(target):
+                task.actions.append(DeskAction(action="file_read", detail=f"Direct read: {target}"))
+                r = execute_tool({"tool": "file_read", "path": target}, desk="codeforge")
+                if r.success and r.result:
+                    raw = r.result.get("content", str(r.result))
+                    return await self.complete_task(task, self._format_file_content(raw, target))
+                else:
+                    return await self.fail_task(task, r.error or "File read failed")
             else:
-                return await self.fail_task(task, r.error or "File read failed")
+                # Path was given but doesn't exist — report clearly
+                return await self.fail_task(
+                    task, f"File not found: {target}"
+                )
         else:
-            # Fall back to AI to determine what to read
+            # No explicit path found — fall back to AI to determine what to read
             try:
                 result = await self.ai_execute_task(task)
                 return await self.complete_task(task, result)
@@ -79,9 +133,7 @@ class CodeForgeDesk(BaseDesk):
     async def _handle_scaffold(self, task: DeskTask) -> DeskTask:
         """Create new files — use file_write tool directly."""
         task.actions.append(DeskAction(action="scaffold", detail="Creating new project files"))
-        # Scaffold requires AI to generate the content, then we write it
         try:
-            # Ask AI to generate the file content
             ai_result = await self.ai_call(
                 f"Generate the code for this task. Output ONLY the file content, no explanations:\n\n"
                 f"Task: {task.title}\nDetails: {task.description}\n\n"
@@ -91,8 +143,6 @@ class CodeForgeDesk(BaseDesk):
             if not ai_result:
                 return await self.fail_task(task, "AI failed to generate code")
 
-            # Parse and write files
-            import re
             file_blocks = re.findall(
                 r'--- FILE: (.+?) ---\n(.*?)--- END FILE ---',
                 ai_result, re.DOTALL,
@@ -100,7 +150,7 @@ class CodeForgeDesk(BaseDesk):
             if file_blocks:
                 written = []
                 for path, content in file_blocks:
-                    r = self.write_file(path.strip(), content)
+                    r = self.write_file(self._expand_path(path.strip()), content)
                     if r["success"]:
                         written.append(path.strip())
                     else:
@@ -110,8 +160,7 @@ class CodeForgeDesk(BaseDesk):
                 else:
                     return await self.fail_task(task, "All file writes failed")
             else:
-                # Single file — try to extract path from task
-                paths = re.findall(r'(?:~/empire-repo/|backend/|empire-command-center/)[\w/.\-]+', f"{task.title} {task.description}")
+                paths = self._extract_paths(f"{task.title} {task.description}")
                 if paths:
                     r = self.write_file(paths[0], ai_result)
                     if r["success"]:
@@ -127,28 +176,25 @@ class CodeForgeDesk(BaseDesk):
         """Edit existing files — read first, then use AI to generate edit, then write."""
         task.actions.append(DeskAction(action="file_edit", detail="Reading then editing files"))
         from app.services.max.tool_executor import execute_tool
-        import re
 
-        # Extract file paths
         combined = f"{task.title} {task.description}"
-        paths = re.findall(r'(?:~/empire-repo/|backend/|empire-command-center/)[\w/.\-]+', combined)
+        paths = self._extract_paths(combined)
 
         if paths:
-            # Read the file first
-            r = execute_tool({"tool": "file_read", "path": paths[0]}, desk="codeforge")
+            target = paths[0]
+            r = execute_tool({"tool": "file_read", "path": target}, desk="codeforge")
             if r.success and r.result:
                 current_content = r.result.get("content", "")
-                # Ask AI what to change
                 ai_result = await self.ai_call(
                     f"Edit this file to complete the task. Output ONLY the complete new file content.\n\n"
                     f"Task: {task.title}\nDetails: {task.description}\n\n"
-                    f"Current file ({paths[0]}):\n```\n{current_content[:6000]}\n```\n\n"
+                    f"Current file ({target}):\n```\n{current_content[:6000]}\n```\n\n"
                     f"Output the complete updated file content, nothing else."
                 )
                 if ai_result:
-                    w = self.write_file(paths[0], ai_result)
+                    w = self.write_file(target, ai_result)
                     if w["success"]:
-                        return await self.complete_task(task, f"Edited {paths[0]}")
+                        return await self.complete_task(task, f"Edited {target}")
                     else:
                         return await self.fail_task(task, w["error"] or "Write failed")
                 else:
@@ -156,7 +202,6 @@ class CodeForgeDesk(BaseDesk):
             else:
                 return await self.fail_task(task, r.error or "Could not read file")
         else:
-            # No clear file path — let AI figure it out
             try:
                 result = await self.ai_execute_task(task)
                 return await self.complete_task(task, result)
