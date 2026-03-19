@@ -24,8 +24,8 @@ export function useSystemData() {
       // Check real service endpoints in parallel
       const checks = [
         { name: 'backend', url: API + '/system/stats' },
-        { name: 'ollama', url: 'http://localhost:11434/api/tags' },
-        { name: 'openclaw', url: 'http://localhost:7878/health' },
+        { name: 'ollama', url: API + '/ollama/models' },
+        { name: 'openclaw', url: API + '/openclaw/health' },
       ];
       const results: Record<string, string> = {};
       await Promise.all(checks.map(async (svc) => {
