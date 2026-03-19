@@ -247,6 +247,118 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ MAX Monitor: {e}")
 
+    # ── Autonomous Startup Probes ──
+    # Run immediate health check + brain context warm-up on boot
+    asyncio.create_task(_startup_probes())
+
+
+async def _startup_probes():
+    """Run autonomous probes immediately after startup.
+
+    1. Warm up brain context cache so first user message is fast
+    2. Run immediate service health check
+    3. Check for pending urgent tasks and attempt execution
+    4. Log startup event to MAX memory
+    """
+    import asyncio
+    await asyncio.sleep(5)  # Let all services finish initializing
+
+    startup_time = __import__('datetime').datetime.now()
+    print("🧠 Running autonomous startup probes...")
+
+    # 1. Warm up brain context
+    try:
+        from app.services.max.system_prompt import get_max_brain_context
+        ctx = get_max_brain_context()
+        print(f"  ✓ Brain context warmed: {len(ctx)} chars")
+    except Exception as e:
+        print(f"  ✗ Brain context warm-up: {e}")
+
+    # 2. Immediate service health check
+    try:
+        import socket
+        services = {"Backend API": 8000, "Command Center": 3005, "OpenClaw": 7878, "Ollama": 11434}
+        online = []
+        offline = []
+        for name, port in services.items():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.5)
+                s.connect(("127.0.0.1", port))
+                s.close()
+                online.append(name)
+            except (ConnectionRefusedError, OSError):
+                offline.append(name)
+        print(f"  ✓ Services: {len(online)} online, {len(offline)} offline")
+        if offline:
+            print(f"    Offline: {', '.join(offline)}")
+    except Exception as e:
+        print(f"  ✗ Health check: {e}")
+
+    # 3. Check for pending urgent tasks and attempt immediate execution
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            urgent_rows = conn.execute(
+                """SELECT id, title, desk FROM tasks
+                   WHERE status = 'todo' AND priority IN ('urgent', 'high')
+                   ORDER BY created_at ASC LIMIT 3""",
+            ).fetchall()
+
+        if urgent_rows:
+            print(f"  ⚡ Found {len(urgent_rows)} urgent/high tasks — attempting execution")
+            try:
+                from app.services.max.desks.desk_manager import desk_manager
+                desk_manager.initialize()
+                for row in urgent_rows:
+                    try:
+                        task = await desk_manager.submit_task(
+                            title=row["title"],
+                            description=f"Auto-executing urgent task {row['id']} on startup",
+                            priority="high",
+                            source="startup_probe",
+                        )
+                        state = task.state.value if hasattr(task.state, 'value') else str(task.state)
+                        print(f"    → {row['title']}: {state}")
+                        # Update the original task status
+                        if state == "completed":
+                            with get_db() as conn2:
+                                conn2.execute(
+                                    "UPDATE tasks SET status = 'done', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                    (row["id"],),
+                                )
+                    except Exception as te:
+                        print(f"    → {row['title']}: failed ({te})")
+            except Exception as me:
+                print(f"  ✗ Task execution: {me}")
+        else:
+            print("  ✓ No urgent tasks pending")
+    except Exception as e:
+        print(f"  ✗ Task check: {e}")
+
+    # 4. Log startup to MAX memory
+    try:
+        from app.services.max.brain.memory_store import MemoryStore
+        store = MemoryStore()
+        store.add_memory(
+            category="session_update",
+            subcategory="startup",
+            subject=f"MAX started {startup_time.strftime('%Y-%m-%d %H:%M')}",
+            content=f"Backend started at {startup_time.isoformat()}. "
+                    f"Services online: {', '.join(online) if online else 'checking...'}. "
+                    f"Offline: {', '.join(offline) if offline else 'none'}. "
+                    f"Urgent tasks: {len(urgent_rows) if 'urgent_rows' in dir() else 'unknown'}.",
+            importance=6,
+            source="startup",
+            tags=["startup", "auto", "session_update"],
+        )
+        print("  ✓ Startup logged to MAX memory")
+    except Exception as e:
+        print(f"  ✗ Memory log: {e}")
+
+    elapsed = (__import__('datetime').datetime.now() - startup_time).total_seconds()
+    print(f"🧠 Startup probes complete ({elapsed:.1f}s)")
+
 
 if __name__ == "__main__":
     import uvicorn
