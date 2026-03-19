@@ -39,7 +39,7 @@ class MarketDesk(BaseDesk):
         self.pending_shipments: list[dict] = []
         self.inventory_alerts: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route marketplace task to appropriate handler."""
         await self.accept_task(task)
 

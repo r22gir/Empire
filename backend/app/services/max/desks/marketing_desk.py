@@ -50,7 +50,7 @@ class MarketingDesk(BaseDesk):
         self.draft_posts: list[dict] = []
         self.active_campaigns: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route marketing task to appropriate handler."""
         await self.accept_task(task)
 

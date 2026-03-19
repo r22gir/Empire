@@ -15,6 +15,7 @@ import uuid
 import os
 import shutil
 import logging
+from pathlib import Path
 
 from app.middleware.rate_limiter import limiter
 
@@ -696,17 +697,54 @@ async def convert_to_quote(request: Request, project_id: str):
         result = await quotes_mod.create_quote(payload)
 
         # Attach photos and intake_project_id to the quote JSON file
+        # AND copy photos into the unified photos store so QuoteReview can find them
         quote_obj = result.get("quote", {})
         quote_id = quote_obj.get("id")
         if quote_id:
+            import shutil
+            from datetime import datetime as dt
+
+            intake_uploads_dir = Path(os.path.expanduser("~/empire-repo/backend/data/intake_uploads")) / project_id
+            photos_dest_dir = Path(os.path.expanduser("~/empire-repo/backend/data/photos/quote")) / quote_id
+            photos_dest_dir.mkdir(parents=True, exist_ok=True)
+
             quote_photos = []
             for p in photos_raw:
+                src_filename = p.get("filename", "")
+                if not src_filename:
+                    continue
+                src_path = intake_uploads_dir / src_filename
+                if not src_path.exists():
+                    logger.warning(f"Intake photo not found: {src_path}")
+                    continue
+
+                # Copy photo to unified store
+                dest_filename = f"intake_{dt.utcnow().strftime('%Y%m%d_%H%M%S')}_{src_filename}"
+                dest_path = photos_dest_dir / dest_filename
+                shutil.copy2(str(src_path), str(dest_path))
+
+                # Write metadata sidecar
+                meta = {
+                    "original_name": p.get("original_name", src_filename),
+                    "source": "intake",
+                    "size": dest_path.stat().st_size,
+                    "content_type": "image/jpeg",
+                    "uploaded_at": p.get("uploaded_at", dt.utcnow().isoformat()),
+                    "entity_type": "quote",
+                    "entity_id": quote_id,
+                    "intake_project_id": project_id,
+                }
+                with open(str(dest_path) + ".meta.json", "w") as mf:
+                    json.dump(meta, mf, indent=2)
+
                 quote_photos.append({
-                    "filename": p.get("filename", ""),
-                    "url": f"/intake_uploads/{project_id}/{p.get('filename', '')}",
-                    "original_name": p.get("original_name", p.get("filename", "")),
+                    "filename": dest_filename,
+                    "url": f"/api/v1/photos/serve/quote/{quote_id}/{dest_filename}",
+                    "original_name": p.get("original_name", src_filename),
                     "uploaded_at": p.get("uploaded_at", ""),
                 })
+                logger.info(f"Copied intake photo to quote: {src_filename} -> quote/{quote_id}/{dest_filename}")
+
             quote_obj["intake_project_id"] = project_id
             quote_obj["photos"] = quote_photos
             quotes_mod._save_quote(quote_obj)

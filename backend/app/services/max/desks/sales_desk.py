@@ -45,7 +45,7 @@ class SalesDesk(BaseDesk):
         self.pipeline: list[dict] = []
         self.pending_followups: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route task to the appropriate sales handler."""
         await self.accept_task(task)
 

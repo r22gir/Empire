@@ -53,7 +53,7 @@ class ForgeDesk(BaseDesk):
         self.pending_followups: list[dict] = []
         self.pending_reminders: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route task to the appropriate handler based on content."""
         await self.accept_task(task)
 

@@ -54,7 +54,7 @@ class AnalyticsDesk(BaseDesk):
             logger.error(f"Metrics query failed: {e}")
             return {}
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Generate analytics report."""
         task.state = TaskState.IN_PROGRESS
         task.actions.append(DeskAction(action="started", detail="Pulling metrics"))

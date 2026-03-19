@@ -32,7 +32,7 @@ class ClientsDesk(BaseDesk):
         super().__init__()
         self.recent_lookups: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         await self.accept_task(task)
         combined = f"{task.title} {task.description}".lower()
 

@@ -35,7 +35,7 @@ class InnovationDesk(BaseDesk):
         self.scans: list[dict] = []
         self.suggestions: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """All innovation tasks are AI-driven."""
         await self.accept_task(task)
 

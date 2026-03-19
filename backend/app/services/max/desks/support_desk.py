@@ -57,7 +57,7 @@ class SupportDesk(BaseDesk):
         self.open_tickets: list[dict] = []
         self.resolved_tickets: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route support task to appropriate handler."""
         await self.accept_task(task)
 

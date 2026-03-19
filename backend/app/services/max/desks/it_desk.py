@@ -113,7 +113,7 @@ class ITDesk(BaseDesk):
         self.incidents: list[dict] = []
         self.health_checks: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         await self.accept_task(task)
         combined = f"{task.title} {task.description}".lower()
 

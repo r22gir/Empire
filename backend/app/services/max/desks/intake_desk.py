@@ -45,7 +45,7 @@ class IntakeDesk(BaseDesk):
                 return keyword, business
         return "general", "workroom"  # Default to workroom
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Process an intake submission."""
         task.state = TaskState.IN_PROGRESS
         task.actions.append(DeskAction(action="started", detail="Processing intake submission"))

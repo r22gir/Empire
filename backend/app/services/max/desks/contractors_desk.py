@@ -34,7 +34,7 @@ class ContractorsDesk(BaseDesk):
         self.assignments: list[dict] = []
         self.pending_payments: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         await self.accept_task(task)
         combined = f"{task.title} {task.description}".lower()
 

@@ -6,6 +6,7 @@ Also provides backward-compatible methods (get_all_desks, create_task,
 complete_task, fail_task, get_task, get_all_tasks, get_stats) that were
 previously on the legacy DeskManager class, so router endpoints keep working.
 """
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -110,7 +111,16 @@ class AIDeskManager:
         if desk_id:
             desk = self.router.get_desk(desk_id)
             logger.info(f"Task '{title}' → {desk.desk_name}: {reason}")
-            return await desk.handle_task(task)
+            try:
+                return await asyncio.wait_for(desk.handle_task(task), timeout=60.0)
+            except asyncio.TimeoutError:
+                task.state = TaskState.FAILED
+                task.result = "Task timed out — try a simpler request or use Claude Code for complex tasks"
+                task.completed_at = datetime.utcnow().isoformat()
+                if task in desk.active_tasks:
+                    desk.active_tasks.remove(task)
+                logger.error(f"Task '{title}' TIMED OUT after 60s on {desk.desk_name}")
+                return task
         else:
             # No desk matched — send to founder inbox
             task.state = TaskState.ESCALATED

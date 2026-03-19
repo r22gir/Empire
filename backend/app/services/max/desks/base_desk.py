@@ -137,8 +137,22 @@ class BaseDesk(ABC):
         except Exception as e:
             logger.warning(f"Failed to log desk action to brain: {e}")
 
-    @abstractmethod
     async def handle_task(self, task: DeskTask) -> DeskTask:
+        """Wrapper that logs entry/exit and delegates to _handle_task."""
+        logger.info(f"[{self.desk_name}] ▶ START handle_task: {task.title} (id={task.id})")
+        start = datetime.utcnow()
+        try:
+            result = await self._handle_task(task)
+            elapsed = (datetime.utcnow() - start).total_seconds()
+            logger.info(f"[{self.desk_name}] ✓ END handle_task: {task.title} ({elapsed:.1f}s, state={result.state.value})")
+            return result
+        except Exception as e:
+            elapsed = (datetime.utcnow() - start).total_seconds()
+            logger.error(f"[{self.desk_name}] ✗ CRASH handle_task: {task.title} ({elapsed:.1f}s) — {e}")
+            raise
+
+    @abstractmethod
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Process a task. Must be implemented by each desk.
 
         Should update task.state, task.result, and task.actions.

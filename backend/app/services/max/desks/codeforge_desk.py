@@ -30,7 +30,7 @@ class CodeForgeDesk(BaseDesk):
         self.files_changed: list[str] = []
         self.commits: list[str] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         await self.accept_task(task)
         combined = f"{task.title} {task.description}".lower()
 

@@ -42,7 +42,7 @@ class QualityDesk(BaseDesk):
             logger.error(f"Quality metrics failed: {e}")
             return {"total_responses": 0, "flagged_responses": 0, "accuracy_pct": 100.0}
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Run quality check and generate report."""
         task.state = TaskState.IN_PROGRESS
         task.actions.append(DeskAction(action="started", detail="Running quality audit"))

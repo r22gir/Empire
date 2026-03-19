@@ -42,7 +42,7 @@ class FinanceDesk(BaseDesk):
         self.expenses: list[dict] = []
         self.payments: list[dict] = []
 
-    async def handle_task(self, task: DeskTask) -> DeskTask:
+    async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route finance task to appropriate handler."""
         await self.accept_task(task)
 
