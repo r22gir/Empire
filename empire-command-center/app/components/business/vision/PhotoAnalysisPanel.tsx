@@ -183,16 +183,16 @@ interface SavedSession {
    ═══════════════════════════════════════════════════════════ */
 
 function ConfidenceBar({ value, color = '#b8960c' }: { value: number; color?: string }) {
-  const pct = Math.round(value * 100);
+  const pct = Math.min(Math.round(value * 100), 100);
   const label = pct >= 90 ? 'Very High' : pct >= 75 ? 'High' : pct >= 60 ? 'Moderate' : pct >= 40 ? 'Low' : 'Very Low';
   const barColor = pct >= 75 ? '#16a34a' : pct >= 50 ? color : pct >= 30 ? '#d97706' : '#dc2626';
   return (
-    <div>
+    <div style={{ overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <div style={{ flex: 1, height: 8, borderRadius: 4, background: '#ece8e0' }}>
-          <div style={{ width: `${pct}%`, height: '100%', borderRadius: 4, background: barColor, transition: 'width 0.6s ease' }} />
+        <div style={{ flex: 1, height: 8, borderRadius: 4, background: '#ece8e0', overflow: 'hidden', minWidth: 0 }}>
+          <div style={{ width: `${pct}%`, maxWidth: '100%', height: '100%', borderRadius: 4, background: barColor, transition: 'width 0.6s ease' }} />
         </div>
-        <span style={{ fontSize: 12, fontWeight: 700, color: barColor, minWidth: 42, textAlign: 'right' }}>{pct}%</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: barColor, minWidth: 42, textAlign: 'right', flexShrink: 0 }}>{pct}%</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontSize: 11, fontWeight: 600, color: barColor }}>{label} Confidence</span>
