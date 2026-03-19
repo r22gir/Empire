@@ -145,7 +145,7 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
   };
 
   return (
-    <aside className="w-[320px] bg-[var(--panel)] border-l border-[var(--border)] flex flex-col shrink-0 overflow-y-auto p-4 gap-3">
+    <aside className="w-[320px] h-full bg-[var(--panel)] border-l border-[var(--border)] flex flex-col shrink-0 overflow-y-auto p-4 gap-3">
 
       {/* ── v6.0 INTELLIGENCE CARDS ── */}
       <IntelligenceCards collapsed={!!collapsed.intelligence} onToggle={() => toggle('intelligence')} />

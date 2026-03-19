@@ -291,7 +291,7 @@ export default function CommandCenter() {
         </div>
 
         {!clientView && (
-          <div className="hidden md:block">
+          <div className="hidden md:block h-full overflow-hidden">
             <RightPanel
               desks={sys.desks}
               briefing={sys.briefing}
