@@ -657,15 +657,15 @@ async def generate_design_pdf(design_id: str):
   <h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Cost Summary</h3>
   <table>
     <tbody>
-      <tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">${material_cost:,.2f}</td></tr>
-      <tr><td style="padding:4px 8px;color:#666">CNC Time</td><td style="padding:4px 8px;text-align:right;color:#666">${cnc_time_cost:,.2f}</td></tr>
-      <tr><td style="padding:4px 8px;color:#666">Labor</td><td style="padding:4px 8px;text-align:right;color:#666">${labor_cost:,.2f}</td></tr>
+      {'<tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{material_cost:,.2f}</td></tr>' if material_cost else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">CNC Time</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{cnc_time_cost:,.2f}</td></tr>' if cnc_time_cost else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Labor</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{labor_cost:,.2f}</td></tr>' if labor_cost else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Overhead</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{overhead:,.2f}</td></tr>' if overhead else ''}
       <tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">${subtotal:,.2f}</td></tr>
-      <tr><td style="padding:4px 8px;color:#666">Margin ({margin_pct}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${margin_amount:,.2f}</td></tr>
+      {'<tr><td style="padding:4px 8px;color:#666">Margin (' + f'{margin_pct}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${margin_amount:,.2f}</td></tr>' if margin_amount else ''}
       <tr><td style="padding:4px 8px;color:#666">Tax ({tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>
       <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>
-      <tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due ({deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>
+      {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct else ''}
     </tbody>
   </table>
 </div>
