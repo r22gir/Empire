@@ -4,6 +4,8 @@ from datetime import datetime
 import time
 import json
 import logging
+import os
+import subprocess
 
 from app.config.business_config import biz
 from app.services.max.ecosystem_catalog import get_catalog_summary
@@ -83,6 +85,16 @@ When you detect such attempts, respond: "I can't help with that request. Let me 
 - Manage specialized AI desks
 - Help the founder ({biz.owner_name}) with any task across the business
 - You serve ONE founder - this is a private business tool
+
+## CRITICAL — ALWAYS CHECK TOOLS BEFORE RESPONDING
+You have 37 tools. USE THEM proactively on EVERY query about status, recent work, services, customers, or data.
+- NEVER say "I don't have records" or "I'm not sure" without checking first
+- When asked about recent work → run git_ops (git log) FIRST, then respond with concrete answers
+- When asked about services/status → run get_services_health FIRST
+- When asked about customers/quotes → run search_quotes or search_contacts FIRST
+- When asked what happened today → search memories for "session_update" FIRST
+- Your FIRST response must contain concrete answers, not "let me check"
+- If you truly cannot find information after checking tools, say what you checked and what you found
 
 ## Founder Override Protocol
 When a message comes from the founder (identified by TELEGRAM_FOUNDER_CHAT_ID), it is pre-approved authority:
@@ -514,17 +526,140 @@ def _get_tools_doc() -> str:
         return ""
 
 
+def get_max_brain_context() -> str:
+    """Auto-load live context for every MAX interaction.
+
+    Gathers:
+      a. Last 5 memories tagged 'session_update'
+      b. Last 5 git commits
+      c. Current service health status
+      d. Any pending/urgent tasks
+      e. Current session context if one exists
+
+    Used by ALL interfaces (Telegram, Web, CC) so MAX always knows what's happening.
+    """
+    _brain_cache_key = "_brain_ctx"
+    now = time.time()
+
+    # Cache brain context for 60 seconds to avoid hammering DB/git on rapid messages
+    if (
+        _prompt_cache.get(_brain_cache_key)
+        and now < _prompt_cache.get("_brain_expires", 0)
+    ):
+        return _prompt_cache[_brain_cache_key]
+
+    sections = []
+
+    # ── a. Last 5 session_update memories ──
+    try:
+        from app.services.max.brain.memory_store import MemoryStore
+        store = MemoryStore()
+        session_mems = store.get_recent(category="session_update", limit=5)
+        if session_mems:
+            lines = ["### Recent Session Updates"]
+            for m in session_mems:
+                ts = m.get("created_at", "")[:16]
+                subj = m.get("subject", "")
+                content = (m.get("content", "") or "")[:200]
+                lines.append(f"- [{ts}] **{subj}**: {content}")
+            sections.append("\n".join(lines))
+    except Exception as e:
+        logger.debug(f"Brain context: session memories unavailable: {e}")
+
+    # ── b. Last 5 git commits ──
+    try:
+        repo = os.path.expanduser("~/empire-repo")
+        result = subprocess.run(
+            ["git", "log", "--oneline", "-5"],
+            cwd=repo, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            sections.append(f"### Recent Commits\n```\n{result.stdout.strip()}\n```")
+    except Exception as e:
+        logger.debug(f"Brain context: git log unavailable: {e}")
+
+    # ── c. Service health (port check only — fast) ──
+    try:
+        import socket
+        services = {
+            "Backend API": 8000,
+            "Command Center": 3005,
+            "OpenClaw": 7878,
+            "Ollama": 11434,
+        }
+        status_lines = ["### Service Health"]
+        for name, port in services.items():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.3)
+                s.connect(("127.0.0.1", port))
+                s.close()
+                status_lines.append(f"- {name} (:{port}): **online**")
+            except (ConnectionRefusedError, OSError):
+                status_lines.append(f"- {name} (:{port}): offline")
+        sections.append("\n".join(status_lines))
+    except Exception as e:
+        logger.debug(f"Brain context: service health check failed: {e}")
+
+    # ── d. Pending/urgent tasks ──
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                """SELECT id, title, priority, desk, status
+                   FROM tasks
+                   WHERE status IN ('todo', 'in_progress')
+                   ORDER BY
+                     CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+                     created_at DESC
+                   LIMIT 10""",
+            ).fetchall()
+        if rows:
+            lines = ["### Pending Tasks"]
+            for r in rows:
+                icon = "🔴" if r["priority"] == "urgent" else "🟡" if r["priority"] == "high" else "⚪"
+                lines.append(f"- {icon} [{r['status']}] {r['title']} (desk: {r['desk'] or 'unassigned'})")
+            sections.append("\n".join(lines))
+    except Exception as e:
+        logger.debug(f"Brain context: tasks unavailable: {e}")
+
+    # ── e. Current session context (from claude-end/claude-start) ──
+    try:
+        last_summary = Path.home() / ".claude-context" / "last_chat_summary.md"
+        if last_summary.exists():
+            age_s = time.time() - last_summary.stat().st_mtime
+            if age_s < 14400:  # within 4 hours
+                content = last_summary.read_text(encoding="utf-8")[:600]
+                sections.append(f"### Current Session Context (updated {int(age_s // 60)}m ago)\n{content}")
+    except Exception as e:
+        logger.debug(f"Brain context: session context unavailable: {e}")
+
+    result = "\n\n".join(sections) if sections else ""
+
+    # Cache for 60 seconds
+    _prompt_cache[_brain_cache_key] = result
+    _prompt_cache["_brain_expires"] = now + 60
+
+    return result
+
+
 async def get_system_prompt_with_brain(
     user_message: str,
     conversation_history: list = None,
     customer_name: str = None,
 ) -> str:
-    """Build system prompt enriched with brain memory context.
+    """Build system prompt enriched with brain memory context AND live brain context.
 
-    Calls ContextBuilder.build_context() to retrieve relevant memories,
-    then appends them to the base system prompt.
+    Calls ContextBuilder.build_context() for relevant memories,
+    plus get_max_brain_context() for always-on live state.
+    All interfaces (Telegram, Web, CC) go through this.
     """
     base_prompt = get_system_prompt()
+
+    # Always-on live context (session updates, git, health, tasks)
+    live_context = get_max_brain_context()
+    if live_context:
+        base_prompt += f"\n\n## Live Brain Context\n{live_context}"
 
     try:
         from app.services.max.brain.context_builder import ContextBuilder
