@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { API } from '../../../lib/api';
 import {
-  Plus, X, Trash2, Calculator, Send, Loader2, PenTool
+  Plus, X, Trash2, Calculator, Send, Loader2, PenTool, FileDown, Mail
 } from 'lucide-react';
 import DataTable, { Column } from '../shared/DataTable';
 import StatusBadge from '../shared/StatusBadge';
@@ -122,14 +122,19 @@ export default function QuoteBuilderSection() {
         deposit_percent: depositPct,
         notes: notes || undefined,
       };
-      await fetch(`${API}/craftforge/designs`, {
+      const resp = await fetch(`${API}/craftforge/designs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      const created = await resp.json();
       resetForm();
       setView('list');
       fetchDesigns();
+      // Offer immediate PDF download
+      if (created?.id && confirm('Quote saved! Download PDF now?')) {
+        handleDownloadPDF(created.id);
+      }
     } catch (e) {
       console.error('Failed to create design:', e);
     } finally {
@@ -151,6 +156,46 @@ export default function QuoteBuilderSection() {
   const addCNC = () => setCncJobs(prev => [...prev, emptyCNC()]);
   const removeCNC = (idx: number) => setCncJobs(prev => prev.filter((_, i) => i !== idx));
 
+  // PDF download
+  const handleDownloadPDF = async (designId: string) => {
+    try {
+      const resp = await fetch(`${API}/craftforge/designs/${designId}/pdf`, { method: 'POST' });
+      if (!resp.ok) throw new Error('PDF generation failed');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `quote-${designId.slice(0, 8)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('PDF download failed:', e);
+      alert('PDF generation failed — check backend logs');
+    }
+  };
+
+  // Email quote
+  const handleEmailQuote = async (designId: string, email?: string) => {
+    const toEmail = email || prompt('Enter customer email:');
+    if (!toEmail) return;
+    try {
+      const resp = await fetch(`${API}/craftforge/designs/${designId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_email: toEmail }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Send failed');
+      }
+      alert('Quote sent!');
+      fetchDesigns();
+    } catch (e: any) {
+      console.error('Email failed:', e);
+      alert(`Email failed: ${e.message}`);
+    }
+  };
+
   // List view
   if (view === 'list') {
     const filtered = designs.filter(d => {
@@ -169,6 +214,26 @@ export default function QuoteBuilderSection() {
       { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status || 'concept'} /> },
       { key: 'total', label: 'Total', sortable: true, render: (row) => <span style={{ fontSize: 12, fontWeight: 700, color: '#b8960c' }}>{row.total != null ? `$${Number(row.total).toFixed(2)}` : '--'}</span> },
       { key: 'created_at', label: 'Created', render: (row) => <span style={{ fontSize: 11, color: '#999' }} suppressHydrationWarning>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '--'}</span> },
+      { key: 'actions', label: '', render: (row) => (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDownloadPDF(row.id); }}
+            title="Download PDF"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#b8960c' }}
+            className="hover:text-[#a68500]"
+          >
+            <FileDown size={15} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleEmailQuote(row.id, row.customer_email); }}
+            title="Email Quote"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#2563eb' }}
+            className="hover:text-[#1d4ed8]"
+          >
+            <Mail size={15} />
+          </button>
+        </div>
+      )},
     ];
 
     return (

@@ -500,3 +500,322 @@ async def list_customers():
             if not customers[name]["last_order"] or created > customers[name]["last_order"]:
                 customers[name]["last_order"] = created
     return {"customers": list(customers.values()), "total": len(customers)}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  PDF — Generate professional quote PDF for a design
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _load_woodcraft_config() -> dict:
+    cfg_path = os.path.join(os.path.dirname(__file__), "..", "config", "woodcraft_business.json")
+    try:
+        with open(cfg_path) as f:
+            return json.load(f)
+    except Exception:
+        return {"business_name": "WoodCraft by Empire", "business_email": "", "business_phone": "", "business_address": "", "business_website": ""}
+
+
+@router.post("/designs/{design_id}/pdf")
+async def generate_design_pdf(design_id: str):
+    """Generate a professional PDF quote for a CraftForge design."""
+    design = _load(DESIGNS_DIR, design_id)
+    cfg = _load_woodcraft_config()
+
+    biz_name = cfg.get("business_name", "WoodCraft by Empire")
+    biz_tagline = cfg.get("business_tagline", "CNC & Custom Fabrication")
+    biz_phone = cfg.get("business_phone", "")
+    biz_email = cfg.get("business_email", "")
+    biz_address = cfg.get("business_address", "")
+    biz_website = cfg.get("business_website", "")
+    tax_rate = cfg.get("tax_rate", 0.06)
+
+    biz_contact_lines = [l for l in [biz_phone, biz_email, biz_address, biz_website] if l]
+    biz_contact_html = "<br>".join(f'<span style="font-size:0.82em;color:#555">{l}</span>' for l in biz_contact_lines)
+
+    design_number = design.get("design_number", "CF-000")
+    created_date = design.get("created_at", "")[:10]
+    valid_days = cfg.get("quote_valid_days", 30)
+    try:
+        expires = (datetime.fromisoformat(design["created_at"]) + timedelta(days=valid_days)).strftime("%Y-%m-%d")
+    except Exception:
+        expires = ""
+
+    # Materials table
+    materials = design.get("materials", [])
+    mat_html = ""
+    for m in materials:
+        name = m.get("name", "") if isinstance(m, dict) else getattr(m, "name", "")
+        qty = m.get("quantity", 0) if isinstance(m, dict) else getattr(m, "quantity", 0)
+        unit = m.get("unit", "ea") if isinstance(m, dict) else getattr(m, "unit", "ea")
+        cost = m.get("cost_per_unit", 0) if isinstance(m, dict) else getattr(m, "cost_per_unit", 0)
+        total = qty * cost
+        if name:
+            mat_html += f"""<tr>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee">{name}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{qty} {unit}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${cost:,.2f}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${total:,.2f}</td>
+            </tr>"""
+
+    # CNC operations table
+    cnc_jobs = design.get("cnc_jobs", [])
+    cnc_rate = cfg.get("cnc_rate_per_min", 1.50)
+    cnc_html = ""
+    for j in cnc_jobs:
+        machine = j.get("machine", "") if isinstance(j, dict) else getattr(j, "machine", "")
+        op = j.get("operation", "") if isinstance(j, dict) else getattr(j, "operation", "")
+        tool = j.get("tool", "") if isinstance(j, dict) else getattr(j, "tool", "")
+        mins = j.get("estimated_time_min", 0) if isinstance(j, dict) else getattr(j, "estimated_time_min", 0)
+        cost = mins * cnc_rate
+        if mins > 0:
+            cnc_html += f"""<tr>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee">{machine}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee">{op.replace('-', ' ')}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee">{tool or '--'}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{mins} min</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${cost:,.2f}</td>
+            </tr>"""
+
+    # Dimensions
+    dims = ""
+    if design.get("width") or design.get("height") or design.get("depth"):
+        dim_unit = design.get("unit", "in")
+        parts = []
+        if design.get("width"): parts.append(f'{design["width"]}{dim_unit} W')
+        if design.get("height"): parts.append(f'{design["height"]}{dim_unit} H')
+        if design.get("depth"): parts.append(f'{design["depth"]}{dim_unit} D')
+        dims = f'<p style="margin:4px 0;font-size:0.88em;color:#555"><strong>Dimensions:</strong> {" × ".join(parts)}</p>'
+
+    # Costs
+    material_cost = design.get("material_cost", 0)
+    cnc_time_cost = design.get("cnc_time_cost", 0)
+    labor_cost = design.get("labor_cost", 0)
+    overhead = design.get("overhead", 0)
+    subtotal = design.get("subtotal", 0)
+    margin_pct = design.get("margin_percent", 40)
+    margin_amount = subtotal * (margin_pct / 100)
+    total = design.get("total", 0) or (subtotal + margin_amount)
+    tax_amount = total * tax_rate
+    grand_total = total + tax_amount
+    deposit_pct = design.get("deposit_percent", 50)
+    deposit_amount = grand_total * (deposit_pct / 100)
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{design_number}</title>
+<style>
+  @page {{ size: letter; margin: 0.5in 0.6in; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #222; max-width: 800px; margin: 0 auto; padding: 0; font-size: 12px; line-height: 1.45; }}
+  h1 {{ color: #1a1a2e; margin: 0; font-size: 28px; letter-spacing: -0.5px; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
+  th {{ background: #3d2e1a; color: #d4a636; padding: 8px 6px; text-align: left; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.5px; }}
+</style></head><body>
+
+<!-- HEADER -->
+<div style="border-bottom:3px solid #d4a636;padding-bottom:14px;margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start">
+    <div>
+      <h1>{biz_name}</h1>
+      <p style="margin:4px 0 0;color:#888;font-size:0.85em">{biz_tagline}</p>
+      <p style="margin:6px 0 0;line-height:1.6">{biz_contact_html}</p>
+    </div>
+    <div style="text-align:right;padding-top:4px">
+      <div style="background:#3d2e1a;color:#d4a636;padding:8px 16px;border-radius:6px;font-weight:700;font-size:1.1em;letter-spacing:1px;display:inline-block;margin-bottom:8px">ESTIMATE</div>
+      <p style="margin:3px 0;color:#333;font-size:0.9em;font-weight:600">{design_number}</p>
+      <p style="margin:3px 0;color:#666;font-size:0.82em">Date: {created_date}</p>
+      <p style="margin:3px 0;color:#666;font-size:0.82em">Valid until: {expires}</p>
+    </div>
+  </div>
+</div>
+
+<!-- CLIENT -->
+<div style="display:flex;gap:16px;margin-bottom:16px">
+  <div style="flex:1;padding:14px 18px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
+    <p style="margin:0 0 6px;font-size:0.75em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Prepared For</p>
+    <p style="margin:0;font-weight:700;font-size:1.05em;color:#1a1a2e">{design.get('customer_name', 'Customer')}</p>
+    {f'<p style="margin:3px 0 0;color:#555;font-size:0.88em">{design["customer_email"]}</p>' if design.get('customer_email') else ''}
+    {f'<p style="margin:2px 0 0;color:#555;font-size:0.88em">{design["customer_phone"]}</p>' if design.get('customer_phone') else ''}
+  </div>
+  <div style="flex:1;padding:14px 18px;background:#fffcf0;border-radius:8px;border:1px solid #f0e6c0">
+    <p style="margin:0 0 6px;font-size:0.75em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Project</p>
+    <p style="margin:0;font-weight:600;color:#1a1a2e">{design.get('name', 'Custom Project')}</p>
+    <p style="margin:4px 0 0;color:#777;font-size:0.82em">{design.get('category', '').replace('-', ' ').title()} &middot; {design.get('style', '').replace('-', ' ').title()}</p>
+    {dims}
+    <p style="margin:4px 0 0;color:#777;font-size:0.82em">Primary Material: {design.get('primary_material', 'MDF')}</p>
+  </div>
+</div>
+
+{f'<p style="color:#555;margin-bottom:16px">{design["description"]}</p>' if design.get('description') else ''}
+
+<!-- MATERIALS -->
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost:,.2f}</div></div>' if mat_html else ''}
+
+<!-- CNC OPERATIONS -->
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">CNC Operations</h3><table><thead><tr><th>Machine</th><th>Operation</th><th>Tool</th><th style="text-align:center">Time</th><th style="text-align:right">Cost</th></tr></thead><tbody>' + cnc_html + f'</tbody></table><div style="text-align:right;font-size:0.8em;color:#888">@ ${cnc_rate:.2f}/min</div><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">CNC Total: ${cnc_time_cost:,.2f}</div></div>' if cnc_html else ''}
+
+<!-- COST BREAKDOWN -->
+<div style="margin-top:20px;padding:16px 20px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
+  <h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Cost Summary</h3>
+  <table>
+    <tbody>
+      <tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">${material_cost:,.2f}</td></tr>
+      <tr><td style="padding:4px 8px;color:#666">CNC Time</td><td style="padding:4px 8px;text-align:right;color:#666">${cnc_time_cost:,.2f}</td></tr>
+      <tr><td style="padding:4px 8px;color:#666">Labor</td><td style="padding:4px 8px;text-align:right;color:#666">${labor_cost:,.2f}</td></tr>
+      {'<tr><td style="padding:4px 8px;color:#666">Overhead</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{overhead:,.2f}</td></tr>' if overhead else ''}
+      <tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">${subtotal:,.2f}</td></tr>
+      <tr><td style="padding:4px 8px;color:#666">Margin ({margin_pct}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${margin_amount:,.2f}</td></tr>
+      <tr><td style="padding:4px 8px;color:#666">Tax ({tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>
+      <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>
+      <tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due ({deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>
+    </tbody>
+  </table>
+</div>
+
+{f'<div style="margin-top:12px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666"><strong>Notes:</strong> {design["notes"]}</div>' if design.get('notes') else ''}
+
+<!-- ACCEPTANCE -->
+<div style="margin-top:36px;padding:24px 20px;border:2px solid #d4a636;border-radius:10px;page-break-inside:avoid">
+  <p style="margin:0 0 12px;font-size:0.78em;text-transform:uppercase;letter-spacing:0.5px;color:#d4a636;font-weight:700">Acceptance</p>
+  <p style="margin:0 0 20px;font-size:0.85em;color:#555">By signing below, I accept this estimate and authorize {biz_name} to proceed with the work described above.</p>
+  <div style="display:flex;gap:40px;margin-top:16px">
+    <div style="flex:1"><div style="border-bottom:1px solid #333;height:40px"></div><p style="margin:6px 0 0;font-size:0.78em;color:#888">Client Signature</p></div>
+    <div style="width:160px"><div style="border-bottom:1px solid #333;height:40px"></div><p style="margin:6px 0 0;font-size:0.78em;color:#888">Date</p></div>
+  </div>
+</div>
+
+<!-- FOOTER -->
+<div style="margin-top:28px;padding-top:12px;border-top:1px solid #eee;text-align:center">
+  <p style="margin:0;color:#aaa;font-size:0.72em">{biz_name} &middot; {biz_tagline}</p>
+  <p style="margin:2px 0 0;color:#ccc;font-size:0.65em">Estimate {design_number} &middot; Generated {created_date}</p>
+</div>
+</body></html>"""
+
+    try:
+        from weasyprint import HTML as WeasyHTML
+        pdf_bytes = WeasyHTML(string=html).write_pdf()
+    except Exception as e:
+        logger.error(f"WeasyPrint PDF generation failed: {e}")
+        raise HTTPException(500, f"PDF generation failed: {str(e)}")
+
+    pdf_dir = os.path.join(DATA_DIR, "pdf")
+    os.makedirs(pdf_dir, exist_ok=True)
+    pdf_path = os.path.join(pdf_dir, f"{design_number}.pdf")
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+
+    logger.info(f"CraftForge PDF: {design_number} ({len(pdf_bytes)} bytes)")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{design_number}.pdf"'},
+    )
+
+
+@router.get("/designs/{design_id}/pdf")
+async def download_design_pdf(design_id: str):
+    """Download existing PDF or generate on the fly."""
+    design = _load(DESIGNS_DIR, design_id)
+    design_number = design.get("design_number", design_id)
+    pdf_path = os.path.join(DATA_DIR, "pdf", f"{design_number}.pdf")
+    if os.path.exists(pdf_path):
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{design_number}.pdf"'},
+        )
+    return await generate_design_pdf(design_id)
+
+
+class SendDesignRequest(BaseModel):
+    to_email: Optional[str] = None
+
+
+@router.post("/designs/{design_id}/send")
+async def send_design_quote(design_id: str, body: Optional[SendDesignRequest] = None):
+    """Generate PDF and email it to the customer."""
+    design = _load(DESIGNS_DIR, design_id)
+    to_email = (body.to_email if body and body.to_email else None) or design.get("customer_email", "")
+
+    if not to_email:
+        raise HTTPException(400, "No email address — provide to_email or set customer_email on the design")
+
+    # Generate PDF
+    pdf_response = await generate_design_pdf(design_id)
+    pdf_bytes = pdf_response.body if hasattr(pdf_response, "body") else None
+    if not pdf_bytes:
+        design_number = design.get("design_number", design_id)
+        pdf_path = os.path.join(DATA_DIR, "pdf", f"{design_number}.pdf")
+        if os.path.exists(pdf_path):
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+
+    # Send email
+    cfg = _load_woodcraft_config()
+    biz_name = cfg.get("business_name", "WoodCraft by Empire")
+    design_number = design.get("design_number", "CF-000")
+    customer_name = design.get("customer_name", "Valued Customer")
+    project_name = design.get("name", "Custom Project")
+    total = design.get("total", 0)
+
+    html_body = f"""
+    <div style="font-family:'Helvetica Neue',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <div style="border-bottom:3px solid #d4a636;padding-bottom:12px;margin-bottom:20px">
+        <h1 style="margin:0;color:#3d2e1a;font-size:24px">{biz_name}</h1>
+        <p style="margin:4px 0 0;color:#888;font-size:13px">{cfg.get('business_tagline', 'CNC & Custom Fabrication')}</p>
+      </div>
+      <p style="font-size:15px;color:#333">Hi {customer_name},</p>
+      <p style="font-size:14px;color:#555;line-height:1.6">
+        Thank you for your interest! Please find attached your estimate for <strong>{project_name}</strong>.
+      </p>
+      <div style="margin:20px 0;padding:16px;background:#fffcf0;border:1px solid #f0e6c0;border-radius:8px;text-align:center">
+        <p style="margin:0;font-size:13px;color:#888">Estimate {design_number}</p>
+        <p style="margin:8px 0 0;font-size:24px;font-weight:700;color:#d4a636">${total:,.2f}</p>
+      </div>
+      <p style="font-size:14px;color:#555">
+        If you have any questions or would like to proceed, just reply to this email or give us a call.
+      </p>
+      <p style="font-size:14px;color:#333;font-weight:600">Best regards,<br>{biz_name}</p>
+    </div>"""
+
+    email_sent = False
+    try:
+        import base64 as b64
+        sendgrid_key = os.environ.get("SENDGRID_API_KEY", "")
+        sendgrid_from = os.environ.get("SENDGRID_FROM_EMAIL", cfg.get("business_email", ""))
+
+        if pdf_bytes and sendgrid_key:
+            from sendgrid import SendGridAPIClient
+            from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+
+            message = Mail(
+                from_email=sendgrid_from,
+                to_emails=to_email,
+                subject=f"Your Estimate from {biz_name} — {design_number}",
+                html_content=html_body,
+            )
+            attachment = Attachment(
+                FileContent(b64.b64encode(pdf_bytes).decode()),
+                FileName(f"{design_number}.pdf"),
+                FileType("application/pdf"),
+                Disposition("attachment"),
+            )
+            message.attachment = attachment
+            sg = SendGridAPIClient(sendgrid_key)
+            response = sg.send(message)
+            email_sent = response.status_code < 300
+        else:
+            from app.services.email.sender import send_email
+            email_sent = await send_email(to_email, f"Your Estimate from {biz_name} — {design_number}", html_body)
+    except Exception as e:
+        logger.error(f"Failed to send CraftForge quote email: {e}")
+
+    # Mark as sent
+    design["status"] = "sent"
+    design["sent_at"] = datetime.utcnow().isoformat()
+    design["sent_to"] = to_email
+    design["updated_at"] = datetime.utcnow().isoformat()
+    _save(DESIGNS_DIR, design_id, design)
+
+    return {"sent": True, "email_sent": email_sent, "to": to_email, "design_number": design_number}
