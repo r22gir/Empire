@@ -367,6 +367,18 @@ function DimensionDrawing({ imageData, width, height, windowType }: {
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.fillText(typeLabel, wx + 13, wy + 21);
+
+      // "AI ESTIMATE" badge (top-right of image)
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      const estLabel = '⚠ AI ESTIMATE — Verify before quoting';
+      const estTw = ctx.measureText(estLabel).width;
+      ctx.fillStyle = 'rgba(217,119,6,0.92)';
+      ctx.beginPath();
+      ctx.roundRect(dw - estTw - 20, 6, estTw + 14, 20, 4);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(estLabel, dw - 13, 20);
     };
     img.src = imageData;
   }, [imageData, width, height, windowType]);
@@ -374,9 +386,12 @@ function DimensionDrawing({ imageData, width, height, windowType }: {
   return (
     <div ref={containerRef} style={{ borderRadius: 12, overflow: 'hidden', border: '2px solid #2563eb', marginBottom: 14 }}>
       <canvas ref={overlayCanvasRef} style={{ width: '100%', display: 'block' }} />
-      <div style={{ padding: '8px 12px', background: '#eff6ff', borderTop: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb' }}>AI Dimension Drawing</span>
-        <span style={{ fontSize: 10, color: '#1e40af' }}>{width}" W x {height}" H</span>
+      <div style={{ padding: '8px 12px', background: '#fffbeb', borderTop: '1px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#d97706' }}>
+          <TriangleAlert size={12} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 4 }} />
+          AI Estimate — Not a verified measurement
+        </span>
+        <span style={{ fontSize: 10, color: '#92400e' }}>~{width}" W x ~{height}" H</span>
       </div>
     </div>
   );
@@ -1103,9 +1118,15 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         </>
       )}
 
+      <div style={{ padding: '8px 12px', marginBottom: 10, borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <TriangleAlert size={14} style={{ color: '#d97706', flexShrink: 0 }} />
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#92400e' }}>
+          These dimensions are AI estimates from photo analysis. Always verify with a tape measure before quoting.
+        </span>
+      </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-        <MetricBox label="Width" value={`${data.width_inches}"`} color="#2563eb" />
-        <MetricBox label="Height" value={`${data.height_inches}"`} color="#2563eb" />
+        <MetricBox label="Width (AI Estimate)" value={`~${data.width_inches}"`} color="#2563eb" sub="verify before quoting" />
+        <MetricBox label="Height (AI Estimate)" value={`~${data.height_inches}"`} color="#2563eb" sub="verify before quoting" />
       </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
         <MetricBox label="Window Type" value={data.window_type || 'Standard'} />
@@ -1148,15 +1169,21 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
 
   const renderUpholsteryResults = (data: UpholsteryResult) => (
     <div>
+      <div style={{ padding: '8px 12px', marginBottom: 10, borderRadius: 8, background: '#fffbeb', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <TriangleAlert size={14} style={{ color: '#d97706', flexShrink: 0 }} />
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#92400e' }}>
+          AI estimates from photo analysis. Verify yardage and dimensions before ordering materials.
+        </span>
+      </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
         <MetricBox label="Furniture Type" value={data.furniture_type || 'Unknown'} color="#7c3aed" />
         <MetricBox label="Style" value={data.style || 'Standard'} color="#7c3aed" />
       </div>
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-        <MetricBox label="Cushions" value={String(data.cushion_count ?? '—')} />
-        <MetricBox label="Plain Fabric" value={`${data.fabric_yards_plain ?? '—'} yd`} sub="yardage" />
-        <MetricBox label="Patterned Fabric" value={`${data.fabric_yards_patterned ?? '—'} yd`} sub="yardage" />
+        <MetricBox label="Cushions (AI Est.)" value={String(data.cushion_count ?? '—')} sub="verify count" />
+        <MetricBox label="Plain Fabric (AI Est.)" value={`~${data.fabric_yards_plain ?? '—'} yd`} sub="estimate" />
+        <MetricBox label="Patterned (AI Est.)" value={`~${data.fabric_yards_patterned ?? '—'} yd`} sub="estimate" />
       </div>
 
       <SectionHeader>LABOR ESTIMATE</SectionHeader>
