@@ -642,6 +642,18 @@ def create_invoice_from_job(request: Request, job_id: str):
 def invoice_pdf(request: Request, invoice_id: str):
     """Generate a branded PDF for an invoice."""
     import weasyprint
+    import json as _json
+
+    # Load business contact info
+    _biz_cfg_path = Path(__file__).resolve().parent.parent / "config" / "business.json"
+    try:
+        _biz_cfg = _json.loads(_biz_cfg_path.read_text())
+    except Exception:
+        _biz_cfg = {}
+    _biz_phone = _biz_cfg.get("business_phone", "")
+    _biz_email = _biz_cfg.get("business_email", "")
+    _biz_address = _biz_cfg.get("business_address", "")
+    _biz_website = _biz_cfg.get("business_website", "")
 
     with get_db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -722,6 +734,9 @@ def invoice_pdf(request: Request, invoice_id: str):
   <div>
     <div class="logo">Empire <span>Workroom</span></div>
     <div style="font-size:9pt;color:#666;margin-top:4px">Custom Window Treatments & Upholstery</div>
+    <div style="font-size:8pt;color:#888;margin-top:6px;line-height:1.6">
+      {_biz_phone}<br>{_biz_email}<br>{_biz_address}
+    </div>
   </div>
   <div class="invoice-title">
     <h1>INVOICE</h1>
@@ -767,7 +782,7 @@ def invoice_pdf(request: Request, invoice_id: str):
 
 <div class="footer">
   Empire Workroom &mdash; Thank you for your business<br>
-  Questions? Contact us at your convenience.
+  {_biz_phone} &bull; {_biz_email} &bull; {_biz_website}
 </div>
 
 </body></html>"""

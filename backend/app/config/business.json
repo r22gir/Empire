@@ -1,8 +1,12 @@
 {
   "business_name": "Empire Workroom",
-  "business_tagline": "Founder's Command Center",
+  "business_tagline": "Custom Window Treatments & Upholstery",
   "industry": "custom_drapery",
   "owner_name": "rg",
+  "business_phone": "(202) 555-0147",
+  "business_email": "workroom@empirebox.store",
+  "business_address": "Washington, DC Metro Area",
+  "business_website": "https://studio.empirebox.store",
   "timezone": "America/New_York",
   "currency": "USD",
   "tax_rate": 0.06,
