@@ -136,6 +136,9 @@ load_router("app.routers.photos", "/api/v1", ["photos"])
 # Vision analysis (measurement, mockup, outline, upholstery, image gen)
 load_router("app.routers.vision", "", ["vision"])
 
+# AI Analysis Sessions (save/load for PhotoAnalysisPanel)
+load_router("app.routers.analysis_sessions", "/api/v1", ["analysis-sessions"])
+
 # LuxeForge Measurements router
 try:
     from app.models.luxeforge_measurement import ImageMeasurement  # noqa: ensure model is registered

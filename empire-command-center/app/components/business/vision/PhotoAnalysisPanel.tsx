@@ -648,6 +648,11 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
 
   // Session restored banner
   const [sessionRestored, setSessionRestored] = useState(false);
+  // Backend session persistence
+  const [backendSessionId, setBackendSessionId] = useState<string | null>(null);
+  const [savedSessions, setSavedSessions] = useState<any[]>([]);
+  const [showLoadDialog, setShowLoadDialog] = useState(false);
+  const [savingToBackend, setSavingToBackend] = useState(false);
 
   useEffect(() => {
     if (initialImage) setImageData(initialImage);
@@ -726,6 +731,68 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     setShowCushionBuilder(false);
     setShowFurnitureCatalog(false);
     setModel3D(null);
+    setBackendSessionId(null);
+  }, []);
+
+  // ── Backend save ──
+  const saveToBackend = useCallback(async () => {
+    setSavingToBackend(true);
+    try {
+      const payload = {
+        session_id: backendSessionId || undefined,
+        mode, image_data: imageData, photos, active_photo_id: activePhotoId,
+        all_results: allResults, result,
+        measure_input_method: measureInputMethod,
+        selected_styles: selectedStyles, preferences,
+        customer_name: customerName || null,
+        customer_email: customerEmail || null,
+        job_id: jobId || null,
+      };
+      const res = await fetch(`${API}/analysis-sessions/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBackendSessionId(data.session_id);
+        return data;
+      }
+    } catch { /* backend save is non-blocking */ }
+    finally { setSavingToBackend(false); }
+    return null;
+  }, [backendSessionId, mode, imageData, photos, activePhotoId, allResults, result, measureInputMethod, selectedStyles, preferences, customerName, customerEmail, jobId]);
+
+  // ── Backend load list ──
+  const loadSessionList = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/analysis-sessions/list?limit=20`);
+      if (res.ok) {
+        const data = await res.json();
+        setSavedSessions(data.sessions || []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Backend load session ──
+  const loadFromBackend = useCallback(async (sessionId: string) => {
+    try {
+      const res = await fetch(`${API}/analysis-sessions/${sessionId}`);
+      if (!res.ok) return;
+      const s = await res.json();
+      setMode(s.mode || 'measure');
+      setImageData(s.image_data || '');
+      setPhotos(s.photos || []);
+      setActivePhotoId(s.active_photo_id || null);
+      setAllResults(s.all_results || {});
+      setResult(s.result || null);
+      setMeasureInputMethod(s.measure_input_method || 'photo');
+      setSelectedStyles(s.selected_styles || []);
+      setPreferences(s.preferences || '');
+      setBackendSessionId(sessionId);
+      setSessionRestored(true);
+      setShowLoadDialog(false);
+    } catch { /* ignore */ }
   }, []);
 
   // Sync active photo's results with allResults
@@ -1691,7 +1758,8 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           {/* Session controls */}
           {hasUnsavedWork && (
             <button
-              onClick={() => {
+              onClick={async () => {
+                // Save to localStorage
                 try {
                   const session: SavedSession = {
                     mode, imageData, photos, activePhotoId, allResults, result,
@@ -1699,20 +1767,31 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                     savedAt: new Date().toISOString(),
                   };
                   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-                  // Save named session too
-                  const sessions = JSON.parse(localStorage.getItem('empire_ai_sessions_list') || '[]');
-                  sessions.unshift({ name: `Session ${new Date().toLocaleString()}`, savedAt: new Date().toISOString(), photoCount: photos.length });
-                  localStorage.setItem('empire_ai_sessions_list', JSON.stringify(sessions.slice(0, 10)));
-                  alert('Session saved!');
-                } catch { alert('Could not save session'); }
+                } catch { /* ignore */ }
+                // Save to backend
+                const saved = await saveToBackend();
+                if (saved) {
+                  alert(`Session saved to server (${saved.session_id.slice(0, 8)}…)`);
+                } else {
+                  alert('Saved locally (server unavailable)');
+                }
               }}
+              disabled={savingToBackend}
               className="flex items-center gap-1 cursor-pointer hover:bg-[#f0ede8] transition-colors"
               style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
-              title="Save session"
+              title="Save session to server"
             >
-              <Save size={12} /> Save
+              <Save size={12} /> {savingToBackend ? 'Saving...' : 'Save'}
             </button>
           )}
+          <button
+            onClick={async () => { await loadSessionList(); setShowLoadDialog(true); }}
+            className="flex items-center gap-1 cursor-pointer hover:bg-[#f0ede8] transition-colors"
+            style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
+            title="Load a saved session"
+          >
+            <FolderOpen size={12} /> Load
+          </button>
           <button
             onClick={clearSession}
             className="flex items-center gap-1 cursor-pointer hover:bg-[#f0ede8] transition-colors"
@@ -2593,6 +2672,58 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           </div>
         )}
       </div>
+
+      {/* ── Load Session Dialog ── */}
+      {showLoadDialog && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+        }} onClick={() => setShowLoadDialog(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#fff', borderRadius: 16, width: '100%', maxWidth: 480,
+            maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+          }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <FolderOpen size={16} style={{ color: '#b8960c' }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', flex: 1 }}>Load Saved Session</span>
+              <button onClick={() => setShowLoadDialog(false)} className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: 4 }}>
+              {savedSessions.length === 0 ? (
+                <div style={{ padding: 30, textAlign: 'center', fontSize: 13, color: '#999' }}>
+                  No saved sessions found
+                </div>
+              ) : (
+                savedSessions.map(s => (
+                  <button key={s.session_id}
+                    onClick={() => loadFromBackend(s.session_id)}
+                    className="w-full cursor-pointer hover:bg-[#fdf8eb] transition-colors"
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+                      background: 'none', border: 'none',
+                      borderBottom: '1px solid #f0ede8',
+                      textAlign: 'left', width: '100%',
+                    }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{s.title}</div>
+                      <div style={{ fontSize: 11, color: '#999' }}>
+                        {s.photo_count} photo{s.photo_count !== 1 ? 's' : ''} · {s.result_count} analysis mode{s.result_count !== 1 ? 's' : ''}
+                        {s.customer_name ? ` · ${s.customer_name}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 10, color: '#bbb', flexShrink: 0 }}>
+                      {new Date(s.updated_at).toLocaleDateString()}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
