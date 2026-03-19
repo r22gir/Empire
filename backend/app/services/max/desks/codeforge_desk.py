@@ -52,31 +52,116 @@ class CodeForgeDesk(BaseDesk):
             return await self.fail_task(task, str(e))
 
     async def _handle_read(self, task: DeskTask) -> DeskTask:
-        """Read files — Atlas's first step before any edit."""
+        """Read files — use file_read tool directly."""
         task.actions.append(DeskAction(action="file_read", detail="Reading requested files"))
-        try:
-            result = await self.ai_execute_task(task)
-            return await self.complete_task(task, result)
-        except Exception as e:
-            return await self.fail_task(task, str(e))
+        from app.services.max.tool_executor import execute_tool
+
+        # Extract file path from task description
+        combined = f"{task.title} {task.description}"
+        # Try to find a file path in the description
+        import re
+        paths = re.findall(r'(?:~/empire-repo/|backend/|frontend/|empire-command-center/)[\w/.\-]+', combined)
+        if paths:
+            r = execute_tool({"tool": "file_read", "path": paths[0]}, desk="codeforge")
+            if r.success and r.result:
+                content = r.result.get("content", str(r.result))[:3000]
+                return await self.complete_task(task, content)
+            else:
+                return await self.fail_task(task, r.error or "File read failed")
+        else:
+            # Fall back to AI to determine what to read
+            try:
+                result = await self.ai_execute_task(task)
+                return await self.complete_task(task, result)
+            except Exception as e:
+                return await self.fail_task(task, str(e))
 
     async def _handle_scaffold(self, task: DeskTask) -> DeskTask:
-        """Create new files from templates."""
+        """Create new files — use file_write tool directly."""
         task.actions.append(DeskAction(action="scaffold", detail="Creating new project files"))
+        # Scaffold requires AI to generate the content, then we write it
         try:
-            result = await self.ai_execute_task(task)
-            return await self.complete_task(task, result)
+            # Ask AI to generate the file content
+            ai_result = await self.ai_call(
+                f"Generate the code for this task. Output ONLY the file content, no explanations:\n\n"
+                f"Task: {task.title}\nDetails: {task.description}\n\n"
+                f"If multiple files are needed, output each as:\n"
+                f"--- FILE: path/relative/to/empire-repo ---\n<content>\n--- END FILE ---"
+            )
+            if not ai_result:
+                return await self.fail_task(task, "AI failed to generate code")
+
+            # Parse and write files
+            import re
+            file_blocks = re.findall(
+                r'--- FILE: (.+?) ---\n(.*?)--- END FILE ---',
+                ai_result, re.DOTALL,
+            )
+            if file_blocks:
+                written = []
+                for path, content in file_blocks:
+                    r = self.write_file(path.strip(), content)
+                    if r["success"]:
+                        written.append(path.strip())
+                    else:
+                        task.actions.append(DeskAction(action="file_write_failed", detail=f"{path}: {r['error']}", success=False))
+                if written:
+                    return await self.complete_task(task, f"Created {len(written)} file(s): {', '.join(written)}")
+                else:
+                    return await self.fail_task(task, "All file writes failed")
+            else:
+                # Single file — try to extract path from task
+                paths = re.findall(r'(?:~/empire-repo/|backend/|empire-command-center/)[\w/.\-]+', f"{task.title} {task.description}")
+                if paths:
+                    r = self.write_file(paths[0], ai_result)
+                    if r["success"]:
+                        return await self.complete_task(task, f"Created {paths[0]}")
+                    else:
+                        return await self.fail_task(task, r["error"] or "Write failed")
+                else:
+                    return await self.complete_task(task, f"Generated code:\n{ai_result[:2000]}")
         except Exception as e:
             return await self.fail_task(task, str(e))
 
     async def _handle_edit(self, task: DeskTask) -> DeskTask:
-        """Edit existing files — always reads first."""
+        """Edit existing files — read first, then use AI to generate edit, then write."""
         task.actions.append(DeskAction(action="file_edit", detail="Reading then editing files"))
-        try:
-            result = await self.ai_execute_task(task)
-            return await self.complete_task(task, result)
-        except Exception as e:
-            return await self.fail_task(task, str(e))
+        from app.services.max.tool_executor import execute_tool
+        import re
+
+        # Extract file paths
+        combined = f"{task.title} {task.description}"
+        paths = re.findall(r'(?:~/empire-repo/|backend/|empire-command-center/)[\w/.\-]+', combined)
+
+        if paths:
+            # Read the file first
+            r = execute_tool({"tool": "file_read", "path": paths[0]}, desk="codeforge")
+            if r.success and r.result:
+                current_content = r.result.get("content", "")
+                # Ask AI what to change
+                ai_result = await self.ai_call(
+                    f"Edit this file to complete the task. Output ONLY the complete new file content.\n\n"
+                    f"Task: {task.title}\nDetails: {task.description}\n\n"
+                    f"Current file ({paths[0]}):\n```\n{current_content[:6000]}\n```\n\n"
+                    f"Output the complete updated file content, nothing else."
+                )
+                if ai_result:
+                    w = self.write_file(paths[0], ai_result)
+                    if w["success"]:
+                        return await self.complete_task(task, f"Edited {paths[0]}")
+                    else:
+                        return await self.fail_task(task, w["error"] or "Write failed")
+                else:
+                    return await self.fail_task(task, "AI failed to generate edit")
+            else:
+                return await self.fail_task(task, r.error or "Could not read file")
+        else:
+            # No clear file path — let AI figure it out
+            try:
+                result = await self.ai_execute_task(task)
+                return await self.complete_task(task, result)
+            except Exception as e:
+                return await self.fail_task(task, str(e))
 
     async def _handle_test(self, task: DeskTask) -> DeskTask:
         """Run tests and health checks."""
