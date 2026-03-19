@@ -1027,6 +1027,10 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           p.id === activePhotoId ? { ...p, results: { ...p.results, [mode]: data } } : p
         ));
       }
+      // Auto-launch approval flow for measure/upholstery
+      if (mode === 'measure' || mode === 'upholstery') {
+        setShowApprovalFlow(true);
+      }
       onAnalysisComplete?.(mode, data);
     } catch (err: any) {
       setError(err.message || 'Analysis failed. Please try again.');
@@ -1717,7 +1721,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
               color: '#fff', border: 'none', boxShadow: '0 2px 8px #b8960c30',
             }}
           >
-            <CheckCircle size={14} /> Start Step-by-Step Approval Flow
+            <CheckCircle size={14} /> Review & Approve (4-Phase Flow)
           </button>
         )}
         {(() => {

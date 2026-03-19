@@ -277,39 +277,44 @@ export default function AnalysisApprovalFlow({ result, imageData, onRedetect, on
   const total = Math.round((subtotal + tax) * 100) / 100;
 
   // ── Phase label ──
-  const phases: { id: Phase; label: string }[] = [
-    { id: 1, label: 'Items' },
-    { id: 2, label: 'Measurements' },
-    { id: 3, label: 'Yardage' },
-    { id: 4, label: 'Pricing' },
+  const phases: { id: Phase; label: string; desc: string }[] = [
+    { id: 1, label: 'Items', desc: 'Review detected items' },
+    { id: 2, label: 'Measurements', desc: 'Verify & adjust dimensions' },
+    { id: 3, label: 'Yardage', desc: 'Calculate fabric needs' },
+    { id: 4, label: 'Pricing', desc: 'Set rates & finalize' },
   ];
 
   return (
     <div>
       {/* ── Progress bar ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
-        {phases.map((p, i) => {
-          const done = approved[p.id];
-          const active = phase === p.id;
-          return (
-            <React.Fragment key={p.id}>
-              <button
-                onClick={() => { if (done || active) goBack(p.id); }}
-                className="flex items-center gap-1.5 cursor-pointer transition-all"
-                style={{
-                  padding: '5px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600, border: 'none',
-                  background: active ? '#b8960c' : done ? '#dcfce7' : 'transparent',
-                  color: active ? '#fff' : done ? '#16a34a' : '#999',
-                }}>
-                {done && !active ? <CheckCircle size={12} /> : <span>{p.id}.</span>}
-                {' '}{p.label}
-              </button>
-              {i < phases.length - 1 && (
-                <div style={{ width: 20, height: 2, background: done ? '#16a34a' : '#ddd', borderRadius: 1 }} />
-              )}
-            </React.Fragment>
-          );
-        })}
+      <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+          {phases.map((p, i) => {
+            const done = approved[p.id];
+            const active = phase === p.id;
+            return (
+              <React.Fragment key={p.id}>
+                <button
+                  onClick={() => { if (done || active) goBack(p.id); }}
+                  className="flex items-center gap-1.5 cursor-pointer transition-all"
+                  style={{
+                    padding: '5px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600, border: 'none',
+                    background: active ? '#b8960c' : done ? '#dcfce7' : 'transparent',
+                    color: active ? '#fff' : done ? '#16a34a' : '#999',
+                  }}>
+                  {done && !active ? <CheckCircle size={12} /> : <span>{p.id}.</span>}
+                  {' '}{p.label}
+                </button>
+                {i < phases.length - 1 && (
+                  <div style={{ width: 20, height: 2, background: done ? '#16a34a' : '#ddd', borderRadius: 1 }} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 10, color: '#999', paddingLeft: 2 }}>
+          Phase {phase}/4: {phases.find(p => p.id === phase)?.desc}
+        </div>
       </div>
 
       {/* ═══════ PHASE 1: ITEMS ═══════ */}
