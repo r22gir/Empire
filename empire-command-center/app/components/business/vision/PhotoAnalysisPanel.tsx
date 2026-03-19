@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   Camera, Upload, Loader2, Ruler, Armchair, Paintbrush, ClipboardList,
   X, CheckCircle, AlertTriangle, Sparkles, TriangleAlert, Info, Box, Video,
-  ArrowRight, Plus, ImageIcon, Trash2, Eye, Printer, Share2, FileDown, FileText, Edit3
+  ArrowRight, Plus, ImageIcon, Trash2, Eye, Printer, Share2, FileDown, FileText, Edit3,
+  Save, FolderOpen, RotateCcw
 } from 'lucide-react';
 import { API } from '../../../lib/api';
 import MeasurementDiagram from '../quotes/MeasurementDiagram';
@@ -161,6 +162,21 @@ const MANUAL_ITEM_TYPES: { key: ManualItemType; label: string; icon: string }[] 
   { key: 'roman_shade', label: 'Roman Shade', icon: '🪟' },
   { key: 'other', label: 'Other', icon: '📏' },
 ];
+
+const SESSION_KEY = 'empire_ai_analysis_session';
+
+interface SavedSession {
+  mode: AnalysisMode;
+  imageData: string;
+  photos: PhotoEntry[];
+  activePhotoId: string | null;
+  allResults: Record<string, any>;
+  result: any;
+  measureInputMethod: MeasureInputMethod;
+  selectedStyles: string[];
+  preferences: string;
+  savedAt: string;
+}
 
 /* ═══════════════════════════════════════════════════════════
    Helpers
@@ -615,9 +631,87 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Session restored banner
+  const [sessionRestored, setSessionRestored] = useState(false);
+
   useEffect(() => {
     if (initialImage) setImageData(initialImage);
   }, [initialImage]);
+
+  // ── Restore session from localStorage on mount ──
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SESSION_KEY);
+      if (!raw) return;
+      const saved: SavedSession = JSON.parse(raw);
+      if (!saved.imageData && (!saved.photos || saved.photos.length === 0)) return;
+      // Restore state
+      setMode(saved.mode || 'measure');
+      setImageData(saved.imageData || '');
+      setPhotos(saved.photos || []);
+      setActivePhotoId(saved.activePhotoId || null);
+      setAllResults(saved.allResults || {});
+      setResult(saved.result || null);
+      setMeasureInputMethod(saved.measureInputMethod || 'photo');
+      setSelectedStyles(saved.selectedStyles || []);
+      setPreferences(saved.preferences || '');
+      setSessionRestored(true);
+    } catch { /* corrupted data, ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Auto-save session to localStorage (debounced) ──
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      try {
+        const session: SavedSession = {
+          mode, imageData, photos, activePhotoId, allResults, result,
+          measureInputMethod, selectedStyles, preferences,
+          savedAt: new Date().toISOString(),
+        };
+        // Only save if there's actual work
+        if (imageData || photos.length > 0 || Object.keys(allResults).length > 0) {
+          localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+        }
+      } catch { /* quota exceeded or private mode, ignore */ }
+    }, 500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [mode, imageData, photos, activePhotoId, allResults, result, measureInputMethod, selectedStyles, preferences]);
+
+  // ── Navigation warning (beforeunload) ──
+  const hasUnsavedWork = imageData.length > 0 || photos.length > 0;
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedWork) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [hasUnsavedWork]);
+
+  // ── Clear session ──
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY);
+    setMode('measure');
+    setImageData('');
+    setPhotos([]);
+    setActivePhotoId(null);
+    setAllResults({});
+    setResult(null);
+    setMeasureInputMethod('photo');
+    setSelectedStyles([]);
+    setPreferences('');
+    setError('');
+    setSessionRestored(false);
+    setShowApprovalFlow(false);
+    setShowCushionBuilder(false);
+    setShowFurnitureCatalog(false);
+    setModel3D(null);
+  }, []);
 
   // Sync active photo's results with allResults
   const activePhoto = photos.find(p => p.id === activePhotoId);
@@ -1567,6 +1661,39 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Session controls */}
+          {hasUnsavedWork && (
+            <button
+              onClick={() => {
+                try {
+                  const session: SavedSession = {
+                    mode, imageData, photos, activePhotoId, allResults, result,
+                    measureInputMethod, selectedStyles, preferences,
+                    savedAt: new Date().toISOString(),
+                  };
+                  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+                  // Save named session too
+                  const sessions = JSON.parse(localStorage.getItem('empire_ai_sessions_list') || '[]');
+                  sessions.unshift({ name: `Session ${new Date().toLocaleString()}`, savedAt: new Date().toISOString(), photoCount: photos.length });
+                  localStorage.setItem('empire_ai_sessions_list', JSON.stringify(sessions.slice(0, 10)));
+                  alert('Session saved!');
+                } catch { alert('Could not save session'); }
+              }}
+              className="flex items-center gap-1 cursor-pointer hover:bg-[#f0ede8] transition-colors"
+              style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
+              title="Save session"
+            >
+              <Save size={12} /> Save
+            </button>
+          )}
+          <button
+            onClick={clearSession}
+            className="flex items-center gap-1 cursor-pointer hover:bg-[#f0ede8] transition-colors"
+            style={{ padding: '4px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#777' }}
+            title="Clear session and start fresh"
+          >
+            <RotateCcw size={12} /> New
+          </button>
           {photos.length > 0 && completedSteps.length > 0 && (
             <button
               onClick={createQuoteFromAnalysis}
@@ -1587,6 +1714,35 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           )}
         </div>
       </div>
+
+      {/* Session restored banner */}
+      {sessionRestored && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '10px 20px', background: '#eff6ff', borderBottom: '1px solid #bfdbfe',
+        }}>
+          <div style={{ fontSize: 12, color: '#1e40af', fontWeight: 600 }}>
+            <FolderOpen size={13} style={{ display: 'inline', verticalAlign: -2, marginRight: 6 }} />
+            Previous session restored ({photos.length} photo{photos.length !== 1 ? 's' : ''})
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSessionRestored(false)}
+              className="cursor-pointer hover:brightness-110 transition-all"
+              style={{ padding: '4px 12px', borderRadius: 6, background: '#2563eb', color: '#fff', fontSize: 11, fontWeight: 700, border: 'none' }}
+            >
+              Continue
+            </button>
+            <button
+              onClick={() => { clearSession(); setSessionRestored(false); }}
+              className="cursor-pointer hover:bg-[#dbeafe] transition-colors"
+              style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#fff', fontSize: 11, fontWeight: 600, color: '#2563eb' }}
+            >
+              Start Fresh
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ padding: compact ? '14px 16px' : '20px' }}>
 
