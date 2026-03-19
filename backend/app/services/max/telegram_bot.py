@@ -25,6 +25,97 @@ logger = logging.getLogger("max.telegram")
 
 _memory_store = MemoryStore()
 
+# ── URL and research pattern detection for auto-memory sync ──
+_URL_PATTERN = _re.compile(r'https?://[^\s<>"\')\]]+')
+_CODE_PATTERN = _re.compile(r'```[\s\S]+?```')
+_RESEARCH_KEYWORDS = [
+    "research", "found", "discovered", "according to", "study", "analysis",
+    "report", "data shows", "results", "findings", "recommend", "library",
+    "framework", "tool", "technique", "method", "approach", "solution",
+    "architecture", "implementation", "integration", "api", "endpoint",
+    "specification", "documentation", "tutorial", "guide", "reference",
+]
+
+
+def _should_auto_save_to_memory(user_msg: str, ai_response: str) -> bool:
+    """Determine if a conversation exchange contains knowledge worth saving."""
+    combined = (user_msg + " " + ai_response).lower()
+    # Contains URLs
+    if _URL_PATTERN.search(ai_response) or _URL_PATTERN.search(user_msg):
+        return True
+    # Contains code snippets
+    if _CODE_PATTERN.search(ai_response):
+        return True
+    # User explicitly asked for research/info
+    user_lower = user_msg.lower()
+    if any(kw in user_lower for kw in ["research", "find", "look up", "search for", "investigate", "analyze", "report on", "look into"]):
+        return True
+    # Response contains substantial research keywords (at least 2 matches)
+    keyword_hits = sum(1 for kw in _RESEARCH_KEYWORDS if kw in combined)
+    if keyword_hits >= 2:
+        return True
+    return False
+
+
+def _extract_topic_tags(user_msg: str, ai_response: str) -> list[str]:
+    """Extract topic tags from a conversation exchange."""
+    tags = []
+    combined = (user_msg + " " + ai_response).lower()
+    tag_map = {
+        "presentation": ["presentation", "slides", "animation", "drawing"],
+        "remote-access": ["remote", "vpn", "tailscale", "tunnel", "mobile access"],
+        "infrastructure": ["port", "server", "restart", "service", "deploy"],
+        "ai-models": ["ollama", "grok", "claude", "model", "token", "llm"],
+        "frontend": ["next.js", "react", "ui", "dashboard", "command center"],
+        "backend": ["fastapi", "endpoint", "api", "router", "backend"],
+        "business": ["quote", "customer", "revenue", "pricing", "workroom"],
+        "security": ["auth", "pin", "voiceprint", "access control", "security"],
+        "troubleshooting": ["error", "crash", "freeze", "502", "down", "fix"],
+    }
+    for tag, keywords in tag_map.items():
+        if any(kw in combined for kw in keywords):
+            tags.append(tag)
+    # Extract URLs as tags
+    urls = _URL_PATTERN.findall(user_msg + " " + ai_response)
+    if urls:
+        tags.append("has-urls")
+    return tags[:10]  # Cap at 10 tags
+
+
+def _auto_save_exchange_to_memory(
+    user_msg: str, ai_response: str, source: str = "telegram", chat_id: str = ""
+):
+    """Auto-save a valuable conversation exchange to the shared memory store."""
+    try:
+        if not _should_auto_save_to_memory(user_msg, ai_response):
+            return
+        tags = _extract_topic_tags(user_msg, ai_response)
+        tags.append(f"source:{source}")
+        # Build a concise content summary
+        urls = _URL_PATTERN.findall(user_msg + " " + ai_response)
+        url_section = "\nURLs: " + ", ".join(urls) if urls else ""
+        # Truncate to keep memory entries manageable
+        content = (
+            f"Q: {user_msg[:300]}\n"
+            f"A: {ai_response[:800]}"
+            f"{url_section}"
+        )
+        subject = user_msg[:120].strip()
+        _memory_store.add_memory(
+            category="research",
+            content=content,
+            subject=subject,
+            subcategory=source,
+            importance=6,
+            source=source,
+            tags=tags,
+            conversation_id=f"{source}-{chat_id}" if chat_id else source,
+        )
+        logger.info(f"Auto-saved exchange to memory (source={source}, tags={tags})")
+    except Exception as e:
+        logger.warning(f"Auto-save to memory failed: {e}")
+
+
 # ── Per-chat conversation history — persisted to disk ──
 _MAX_HISTORY = 30  # Keep last 30 exchanges per chat (was 10)
 _TELEGRAM_CHAT_DIR = Path.home() / "empire-repo" / "backend" / "data" / "chats" / "telegram"
@@ -829,6 +920,9 @@ class TelegramBot:
                         )
                         sent_files.add(latest_pdf)
 
+            # Auto-save valuable exchanges to shared memory store
+            _auto_save_exchange_to_memory(text, plain_text, source="telegram", chat_id=chat_id or "")
+
             # Send voice reply (TTS)
             await self._send_voice_reply(update, plain_text)
 
@@ -900,6 +994,9 @@ class TelegramBot:
 
                 # 5b. Send Grok's response as voice note (TTS)
                 await self._send_voice_reply(update, plain_text)
+
+                # 5c. Auto-save valuable exchanges to shared memory store
+                _auto_save_exchange_to_memory(transcript, plain_text, source="telegram", chat_id=voice_chat_id or "")
 
                 # 6. Silent background classification
                 try:

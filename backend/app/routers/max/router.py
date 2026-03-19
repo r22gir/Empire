@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
-from app.services.max.telegram_bot import telegram_bot
+from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
@@ -284,6 +284,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
         token_tracker.log_chat(response.model_used, input_text, final_content, "chat", conv_id)
 
+        # Auto-save valuable exchanges to shared memory store (web/CC conversations)
+        _channel_source = request.channel or "web"
+        if _channel_source != "telegram":  # Telegram auto-save handled in telegram_bot.py
+            background_tasks.add_task(
+                _auto_save_exchange_to_memory,
+                request.message, final_content, _channel_source, conv_id,
+            )
+
         resp = ChatResponse(
             response=sanitize_output(final_content),
             model_used=response.model_used,
@@ -458,6 +466,13 @@ async def chat_stream(request: ChatRequest):
             # Log token usage
             input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
             token_tracker.log_chat(model_used, input_text, full_response, "chat/stream", conv_id)
+
+            # Auto-save valuable exchanges to shared memory store (web/CC streaming)
+            _stream_channel = request.channel or "web"
+            if _stream_channel != "telegram":  # Telegram auto-save handled in telegram_bot.py
+                _auto_save_exchange_to_memory(
+                    request.message, full_response, _stream_channel, conv_id,
+                )
 
             yield f"data: {json.dumps({'type': 'done', 'model_used': model_used, 'conversation_id': conv_id})}\n\n"
         except Exception as e:
