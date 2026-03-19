@@ -179,11 +179,49 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             if not tool_calls:
                 break
 
+            # File/git tool calls from main chat get re-routed to CodeForge desk
+            # because Atlas (Opus) handles path expansion, validation, and smart truncation
+            _CODEFORGE_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
+
             round_results = []
             for tc in tool_calls:
                 # Inject image_filename into quote tools so uploaded photos flow through
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
+
+                # Auto-reroute file/git tools to CodeForge desk
+                if tc.get("tool") in _CODEFORGE_TOOLS and not request.desk:
+                    tool_name = tc["tool"]
+                    path = tc.get("path", "")
+                    desc_parts = [f"Tool: {tool_name}"]
+                    if path:
+                        desc_parts.append(f"Path: {path}")
+                    if tc.get("content"):
+                        desc_parts.append(f"Content: {tc['content'][:500]}")
+                    if tc.get("command"):
+                        desc_parts.append(f"Command: {tc['command']}")
+                    if tc.get("old_str"):
+                        desc_parts.append(f"Replace: {tc['old_str'][:200]} → {tc.get('new_str', '')[:200]}")
+                    if tc.get("args"):
+                        desc_parts.append(f"Args: {tc['args']}")
+
+                    # Build descriptive title for CodeForge
+                    if tool_name == "file_read":
+                        title = f"Read {path}" if path else "Read file"
+                    elif tool_name == "file_write":
+                        title = f"Create {path}" if path else "Write file"
+                    elif tool_name == "file_edit":
+                        title = f"Edit {path}" if path else "Edit file"
+                    elif tool_name == "file_append":
+                        title = f"Append to {path}" if path else "Append to file"
+                    elif tool_name == "git_ops":
+                        title = f"Git {tc.get('command', 'status')}"
+                    else:
+                        title = tool_name
+
+                    logger.info(f"[chat] Auto-routing {tool_name} to CodeForge: {title}")
+                    tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
+
                 result = execute_tool(tc, desk=request.desk, access_context=_ac_context)
                 entry = {"tool": result.tool, "success": result.success, "result": result.result, "error": result.error}
                 round_results.append(entry)
@@ -403,11 +441,47 @@ async def chat_stream(request: ChatRequest):
                 if not tool_calls:
                     break
 
+                # File/git tool calls from main chat get re-routed to CodeForge desk
+                _CODEFORGE_TOOLS_STREAM = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
+
                 round_results = []
                 for tc in tool_calls:
                     # Inject image_filename into quote tools so uploaded photos flow through
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
+
+                    # Auto-reroute file/git tools to CodeForge desk
+                    if tc.get("tool") in _CODEFORGE_TOOLS_STREAM and not request.desk:
+                        tool_name = tc["tool"]
+                        path = tc.get("path", "")
+                        desc_parts = [f"Tool: {tool_name}"]
+                        if path:
+                            desc_parts.append(f"Path: {path}")
+                        if tc.get("content"):
+                            desc_parts.append(f"Content: {tc['content'][:500]}")
+                        if tc.get("command"):
+                            desc_parts.append(f"Command: {tc['command']}")
+                        if tc.get("old_str"):
+                            desc_parts.append(f"Replace: {tc['old_str'][:200]} → {tc.get('new_str', '')[:200]}")
+                        if tc.get("args"):
+                            desc_parts.append(f"Args: {tc['args']}")
+
+                        if tool_name == "file_read":
+                            title = f"Read {path}" if path else "Read file"
+                        elif tool_name == "file_write":
+                            title = f"Create {path}" if path else "Write file"
+                        elif tool_name == "file_edit":
+                            title = f"Edit {path}" if path else "Edit file"
+                        elif tool_name == "file_append":
+                            title = f"Append to {path}" if path else "Append to file"
+                        elif tool_name == "git_ops":
+                            title = f"Git {tc.get('command', 'status')}"
+                        else:
+                            title = tool_name
+
+                        logger.info(f"[stream] Auto-routing {tool_name} to CodeForge: {title}")
+                        tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
+
                     result = execute_tool(tc, desk=request.desk, access_context=_stream_ac_context)
                     round_results.append(result)
                     tool_results_list.append(result)
