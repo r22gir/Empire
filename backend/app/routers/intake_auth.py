@@ -663,8 +663,11 @@ async def convert_to_quote(request: Request, project_id: str):
             })
 
     # Build quote payload
+    # Use project name as customer_name (project is typically named after the client)
+    # Fall back to intake user name, then generic label
+    customer_name = project.get("name") or project.get("user_name") or "Intake Client"
     quote_data = {
-        "customer_name": project.get("user_name") or "Intake Client",
+        "customer_name": customer_name,
         "customer_email": project.get("user_email") or "",
         "customer_phone": project.get("user_phone") or "",
         "customer_address": project.get("address") or "",
@@ -746,6 +749,7 @@ async def convert_to_quote(request: Request, project_id: str):
                 logger.info(f"Copied intake photo to quote: {src_filename} -> quote/{quote_id}/{dest_filename}")
 
             quote_obj["intake_project_id"] = project_id
+            quote_obj["intake_code"] = project.get("intake_code", "")
             quote_obj["photos"] = quote_photos
             quotes_mod._save_quote(quote_obj)
 

@@ -440,7 +440,8 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
   const filtered = quotes.filter(q => {
     if (filter !== 'all' && q.status !== filter) return false;
     if (search && !((q.customer_name || '').toLowerCase().includes(search.toLowerCase()) ||
-                    (q.quote_number || '').toLowerCase().includes(search.toLowerCase()))) return false;
+                    (q.quote_number || '').toLowerCase().includes(search.toLowerCase()) ||
+                    (q.intake_code || '').toLowerCase().includes(search.toLowerCase()))) return false;
     return true;
   });
 
@@ -563,7 +564,14 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
             <React.Fragment key={i}>
               <tr className="cursor-pointer hover:bg-[#fdf8eb] transition-colors" onClick={() => setViewingQuoteId(q.id)}>
                 <td style={{ fontWeight: 600, color: '#1a1a1a' }}>{q.quote_number || `Q-${i + 1}`}</td>
-                <td>{q.customer_name || '--'}</td>
+                <td>
+                  {q.customer_name || '--'}
+                  {q.intake_code && (
+                    <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 6px', borderRadius: 6, background: '#eff6ff', border: '1px solid #bfdbfe', color: '#2563eb', fontWeight: 600 }}>
+                      {q.intake_code}
+                    </span>
+                  )}
+                </td>
                 <td style={{ fontWeight: 700, color: '#b8960c', textAlign: 'right' }}>${(q.total || 0).toLocaleString()}</td>
                 <td><StatusBadge status={q.status} /></td>
                 <td style={{ fontFamily: 'monospace', color: '#999', fontSize: 10 }} suppressHydrationWarning>
