@@ -590,6 +590,16 @@ async def generate_design_pdf(design_id: str):
         if design.get("depth"): parts.append(f'{design["depth"]}{dim_unit} D')
         dims = f'<p style="margin:4px 0;font-size:0.88em;color:#555"><strong>Dimensions:</strong> {" × ".join(parts)}</p>'
 
+    # PDF visibility toggles (saved from frontend)
+    pdf_show = design.get("pdf_show", {})
+    show_line_items = pdf_show.get("lineItems", True)
+    show_materials = pdf_show.get("materials", True)
+    show_cnc = pdf_show.get("cncOps", True)
+    show_dims = pdf_show.get("dimensions", True)
+    show_notes = pdf_show.get("notes", True)
+    show_tax = pdf_show.get("tax", True)
+    show_deposit = pdf_show.get("deposit", True)
+
     # Costs
     material_cost = design.get("material_cost", 0)
     cnc_time_cost = design.get("cnc_time_cost", 0)
@@ -644,29 +654,29 @@ async def generate_design_pdf(design_id: str):
     <p style="margin:0 0 6px;font-size:0.75em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Project</p>
     <p style="margin:0;font-weight:600;color:#1a1a2e">{design.get('name', 'Custom Project')}</p>
     {f'<p style="margin:4px 0 0;color:#777;font-size:0.82em">{design["description"]}</p>' if design.get('description') else ''}
-    {dims}
+    {dims if show_dims else ''}
   </div>
 </div>
 
 <!-- MATERIALS -->
-{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost * margin_mult:,.2f}</div></div>' if mat_html else ''}
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost * margin_mult:,.2f}</div></div>' if mat_html and show_materials else ''}
 
 <!-- CNC OPERATIONS -->
-{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">CNC Operations</h3><table><thead><tr><th>Machine</th><th>Operation</th><th>Tool</th><th style="text-align:center">Time</th></tr></thead><tbody>' + cnc_html + '</tbody></table></div>' if cnc_html else ''}
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">CNC Operations</h3><table><thead><tr><th>Machine</th><th>Operation</th><th>Tool</th><th style="text-align:center">Time</th></tr></thead><tbody>' + cnc_html + '</tbody></table></div>' if cnc_html and show_cnc else ''}
 
 <!-- PRICING -->
 <div style="margin-top:20px;padding:16px 20px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
   <table>
     <tbody>
       <tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">${total:,.2f}</td></tr>
-      <tr><td style="padding:4px 8px;color:#666">Tax ({tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>
-      <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>
-      {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Tax (' + f'{tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>' if show_tax else ''}
+      <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${(grand_total if show_tax else total):,.2f}</td></tr>
+      {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct and show_deposit else ''}
     </tbody>
   </table>
 </div>
 
-{f'<div style="margin-top:12px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666"><strong>Notes:</strong> {design["notes"]}</div>' if design.get('notes') else ''}
+{f'<div style="margin-top:12px;padding:12px 16px;background:#f8f8f8;border-radius:8px;font-size:0.88em;color:#666"><strong>Notes:</strong> {design["notes"]}</div>' if design.get('notes') and show_notes else ''}
 
 <!-- ACCEPTANCE -->
 <div style="margin-top:36px;padding:24px 20px;border:2px solid #d4a636;border-radius:10px;page-break-inside:avoid">

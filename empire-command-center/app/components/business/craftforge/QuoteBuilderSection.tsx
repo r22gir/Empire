@@ -89,6 +89,19 @@ export default function QuoteBuilderSection() {
   const [depositPct, setDepositPct] = useState<number>(50);
   const [notes, setNotes] = useState('');
 
+  // PDF visibility toggles — what the client sees on the quote/invoice
+  const [pdfShow, setPdfShow] = useState({
+    lineItems: true,
+    materials: true,
+    cncOps: true,
+    dimensions: true,
+    photos: false,
+    notes: true,
+    deposit: true,
+    tax: true,
+  });
+  const togglePdf = (key: keyof typeof pdfShow) => setPdfShow(prev => ({ ...prev, [key]: !prev[key] }));
+
   // Photo upload state
   const [photos, setPhotos] = useState<{ file?: File; url?: string; name: string }[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -148,6 +161,7 @@ export default function QuoteBuilderSection() {
     setMargin(design.margin_percent ?? 40);
     setDepositPct(design.deposit_percent ?? 50);
     setNotes(design.notes || '');
+    if (design.pdf_show) setPdfShow({ lineItems: true, materials: true, cncOps: true, dimensions: true, photos: false, notes: true, deposit: true, tax: true, ...design.pdf_show });
 
     // Determine job type from existing data
     const hasCNC = (design.cnc_jobs || []).some((j: any) => j.estimated_time_min > 0);
@@ -156,27 +170,42 @@ export default function QuoteBuilderSection() {
     else if (hasCNC) setJobType('cnc');
     else setJobType('general');
 
-    // Load line items from materials (for general woodwork, materials ARE line items)
+    // Load materials — for general jobs, materials map to line items only (not both)
     const mats = design.materials || [];
-    if (mats.length > 0) {
-      setLineItems(mats.map((m: any) => ({
-        description: m.name || '',
-        quantity: m.quantity || 1,
-        unit: m.unit || 'ea',
-        unit_price: m.cost_per_unit || 0,
-        material: m.type || '',
-        dimensions: '',
-        finish: '',
-      })));
+    const lineItemsRaw = design.line_items || [];
+    if (hasCNC) {
+      // CNC/mixed: materials go into materials section, line items separate
       setMaterials(mats.length > 0 ? mats.map((m: any) => ({
         name: m.name || '',
         quantity: m.quantity || 1,
         unit: m.unit || 'ea',
         cost_per_unit: m.cost_per_unit || 0,
       })) : [emptyMaterial()]);
+      setLineItems(lineItemsRaw.length > 0 ? lineItemsRaw.map((li: any) => ({
+        description: li.description || '',
+        quantity: li.quantity || 1,
+        unit: li.unit || 'ea',
+        unit_price: li.unit_price || 0,
+        material: li.material || '',
+        dimensions: li.dimensions || '',
+        finish: li.finish || '',
+      })) : [emptyLineItem()]);
     } else {
-      setLineItems([emptyLineItem()]);
-      setMaterials([emptyMaterial()]);
+      // General woodwork: materials ARE the line items — load into lineItems only
+      if (mats.length > 0) {
+        setLineItems(mats.map((m: any) => ({
+          description: m.name || '',
+          quantity: m.quantity || 1,
+          unit: m.unit || 'ea',
+          unit_price: m.cost_per_unit || 0,
+          material: m.type || '',
+          dimensions: '',
+          finish: '',
+        })));
+      } else {
+        setLineItems([emptyLineItem()]);
+      }
+      setMaterials([emptyMaterial()]);  // Empty — no double counting
     }
 
     const cnc = design.cnc_jobs || [];
@@ -232,6 +261,7 @@ export default function QuoteBuilderSection() {
     margin_percent: margin,
     deposit_percent: depositPct,
     notes: notes || undefined,
+    pdf_show: pdfShow,
   });
 
   const handleSubmit = async () => {
@@ -821,6 +851,34 @@ export default function QuoteBuilderSection() {
             <div>
               <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Notes / Special Instructions</label>
               <textarea className="form-input" rows={3} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Additional notes, special instructions, delivery details..." />
+            </div>
+
+            {/* PDF visibility toggles */}
+            <div className="mt-4 pt-3" style={{ borderTop: '1px solid #ece8e0' }}>
+              <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-2">Show on Quote / Invoice</label>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {([
+                  ['lineItems', 'Line Items'],
+                  ['materials', 'Materials Table'],
+                  ['cncOps', 'CNC Operations'],
+                  ['dimensions', 'Dimensions'],
+                  ['notes', 'Notes'],
+                  ['tax', 'Tax'],
+                  ['deposit', 'Deposit Due'],
+                  ['photos', 'Photos'],
+                ] as [keyof typeof pdfShow, string][]).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer text-[12px] text-[#555]">
+                    <input
+                      type="checkbox"
+                      checked={pdfShow[key]}
+                      onChange={() => togglePdf(key)}
+                      className="rounded"
+                      style={{ accentColor: '#b8960c', width: 16, height: 16 }}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
         )}
