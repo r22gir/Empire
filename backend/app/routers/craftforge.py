@@ -540,7 +540,11 @@ async def generate_design_pdf(design_id: str):
     except Exception:
         expires = ""
 
-    # Materials table
+    # Margin multiplier — bake margin into client-facing prices
+    margin_pct_val = design.get("margin_percent", 40)
+    margin_mult = 1 + (margin_pct_val / 100)
+
+    # Materials table (prices shown to client include margin)
     materials = design.get("materials", [])
     mat_html = ""
     for m in materials:
@@ -548,13 +552,14 @@ async def generate_design_pdf(design_id: str):
         qty = m.get("quantity", 0) if isinstance(m, dict) else getattr(m, "quantity", 0)
         unit = m.get("unit", "ea") if isinstance(m, dict) else getattr(m, "unit", "ea")
         cost = m.get("cost_per_unit", 0) if isinstance(m, dict) else getattr(m, "cost_per_unit", 0)
-        total = qty * cost
+        client_price = cost * margin_mult  # margin baked in
+        line_total = qty * client_price
         if name:
             mat_html += f"""<tr>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee">{name}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{qty} {unit}</td>
-                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${cost:,.2f}</td>
-                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${total:,.2f}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${client_price:,.2f}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${line_total:,.2f}</td>
             </tr>"""
 
     # CNC operations table
@@ -573,7 +578,6 @@ async def generate_design_pdf(design_id: str):
                 <td style="padding:6px 8px;border-bottom:1px solid #eee">{op.replace('-', ' ')}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee">{tool or '--'}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{mins} min</td>
-                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${cost:,.2f}</td>
             </tr>"""
 
     # Dimensions
@@ -594,7 +598,8 @@ async def generate_design_pdf(design_id: str):
     subtotal = design.get("subtotal", 0)
     margin_pct = design.get("margin_percent", 40)
     margin_amount = subtotal * (margin_pct / 100)
-    total = design.get("total", 0) or (subtotal + margin_amount)
+    # Always recompute — stored total may not include margin
+    total = subtotal + margin_amount
     tax_amount = total * tax_rate
     grand_total = total + tax_amount
     deposit_pct = design.get("deposit_percent", 50)
@@ -638,31 +643,22 @@ async def generate_design_pdf(design_id: str):
   <div style="flex:1;padding:14px 18px;background:#fffcf0;border-radius:8px;border:1px solid #f0e6c0">
     <p style="margin:0 0 6px;font-size:0.75em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Project</p>
     <p style="margin:0;font-weight:600;color:#1a1a2e">{design.get('name', 'Custom Project')}</p>
-    <p style="margin:4px 0 0;color:#777;font-size:0.82em">{design.get('category', '').replace('-', ' ').title()} &middot; {design.get('style', '').replace('-', ' ').title()}</p>
+    {f'<p style="margin:4px 0 0;color:#777;font-size:0.82em">{design["description"]}</p>' if design.get('description') else ''}
     {dims}
-    <p style="margin:4px 0 0;color:#777;font-size:0.82em">Primary Material: {design.get('primary_material', 'MDF')}</p>
   </div>
 </div>
 
-{f'<p style="color:#555;margin-bottom:16px">{design["description"]}</p>' if design.get('description') else ''}
-
 <!-- MATERIALS -->
-{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost:,.2f}</div></div>' if mat_html else ''}
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost * margin_mult:,.2f}</div></div>' if mat_html else ''}
 
 <!-- CNC OPERATIONS -->
-{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">CNC Operations</h3><table><thead><tr><th>Machine</th><th>Operation</th><th>Tool</th><th style="text-align:center">Time</th><th style="text-align:right">Cost</th></tr></thead><tbody>' + cnc_html + f'</tbody></table><div style="text-align:right;font-size:0.8em;color:#888">@ ${cnc_rate:.2f}/min</div><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">CNC Total: ${cnc_time_cost:,.2f}</div></div>' if cnc_html else ''}
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">CNC Operations</h3><table><thead><tr><th>Machine</th><th>Operation</th><th>Tool</th><th style="text-align:center">Time</th></tr></thead><tbody>' + cnc_html + '</tbody></table></div>' if cnc_html else ''}
 
-<!-- COST BREAKDOWN -->
+<!-- PRICING -->
 <div style="margin-top:20px;padding:16px 20px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
-  <h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 12px;text-transform:uppercase;letter-spacing:0.5px">Cost Summary</h3>
   <table>
     <tbody>
-      {'<tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{material_cost:,.2f}</td></tr>' if material_cost else ''}
-      {'<tr><td style="padding:4px 8px;color:#666">CNC Time</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{cnc_time_cost:,.2f}</td></tr>' if cnc_time_cost else ''}
-      {'<tr><td style="padding:4px 8px;color:#666">Labor</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{labor_cost:,.2f}</td></tr>' if labor_cost else ''}
-      {'<tr><td style="padding:4px 8px;color:#666">Overhead</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{overhead:,.2f}</td></tr>' if overhead else ''}
-      <tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">${subtotal:,.2f}</td></tr>
-      {'<tr><td style="padding:4px 8px;color:#666">Margin (' + f'{margin_pct}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${margin_amount:,.2f}</td></tr>' if margin_amount else ''}
+      <tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">${total:,.2f}</td></tr>
       <tr><td style="padding:4px 8px;color:#666">Tax ({tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>
       <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>
       {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct else ''}

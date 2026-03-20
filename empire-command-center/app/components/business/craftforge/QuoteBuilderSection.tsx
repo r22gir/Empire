@@ -807,18 +807,15 @@ export default function QuoteBuilderSection() {
               </div>
             </div>
 
-            <div className="mb-3">
-              <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Margin: {margin}%</label>
-              <input type="range" min={0} max={80} step={5} value={margin} onChange={e => setMargin(Number(e.target.value))}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-                style={{ accentColor: '#b8960c' }} />
-            </div>
-
-            <div className="mb-3">
-              <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Deposit: {depositPct}%</label>
-              <input type="range" min={0} max={100} step={10} value={depositPct} onChange={e => setDepositPct(Number(e.target.value))}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-                style={{ accentColor: '#b8960c' }} />
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Margin (%)</label>
+                <input className="form-input" type="number" min={0} max={100} step={1} value={margin || ''} onChange={e => setMargin(Number(e.target.value))} placeholder="40" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Deposit (%)</label>
+                <input className="form-input" type="number" min={0} max={100} step={1} value={depositPct || ''} onChange={e => setDepositPct(Number(e.target.value))} placeholder="50" />
+              </div>
             </div>
 
             <div>
@@ -829,21 +826,25 @@ export default function QuoteBuilderSection() {
         )}
       </div>
 
-      {/* Running Total (always visible) */}
+      {/* Running Total (always visible) — shows full pricing formula */}
       <div className="empire-card flat mb-4" style={{ background: '#fafaf8', border: '2px solid #ece8e0' }}>
+        <div className="text-[9px] font-semibold text-[#bbb] uppercase tracking-wide mb-2">Pricing Breakdown</div>
         <div className="space-y-1">
           {showLineItems && lineItemTotal > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Line Items</span><span>${lineItemTotal.toFixed(2)}</span></div>}
           {showMaterials && materialCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Materials</span><span>${materialCost.toFixed(2)}</span></div>}
           {showCNC && cncTimeCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>CNC Time</span><span>${cncTimeCost.toFixed(2)}</span></div>}
           {laborCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Labor</span><span>${laborCost.toFixed(2)}</span></div>}
           {overhead > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Overhead</span><span>${overhead.toFixed(2)}</span></div>}
-          <div className="flex justify-between text-[12px] text-[#777]"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-          {margin > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Margin ({margin}%)</span><span>${marginAmount.toFixed(2)}</span></div>}
+          <div className="flex justify-between text-[12px] font-semibold text-[#555]" style={{ borderTop: '1px solid #e8e4dc', paddingTop: 4, marginTop: 4 }}><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
+          {margin > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>+ Margin ({margin}%)</span><span>${marginAmount.toFixed(2)}</span></div>}
           <div className="flex justify-between text-[14px] font-bold text-[#1a1a1a]" style={{ borderTop: '2px solid #d4a636', paddingTop: 8, marginTop: 4 }}>
             <span>Total</span><span style={{ color: '#b8960c' }}>${total.toFixed(2)}</span>
           </div>
           {depositPct > 0 && <div className="flex justify-between text-[12px] font-semibold text-[#2563eb]">
             <span>Deposit Due ({depositPct}%)</span><span>${deposit.toFixed(2)}</span>
+          </div>}
+          {depositPct > 0 && <div className="flex justify-between text-[11px] text-[#999]">
+            <span>Balance Due</span><span>${(total - deposit).toFixed(2)}</span>
           </div>}
         </div>
       </div>
