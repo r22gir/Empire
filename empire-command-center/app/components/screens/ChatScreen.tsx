@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2 } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal } from 'lucide-react';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
@@ -59,17 +59,60 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
+  const [codeMode, setCodeMode] = useState(false);
+  const [codeTask, setCodeTask] = useState<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const codePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingContent]);
+  }, [messages, streamingContent, codeTask]);
+
+  // Poll code task status
+  useEffect(() => {
+    if (!codeTask || codeTask.state === 'completed' || codeTask.state === 'error') {
+      if (codePollRef.current) { clearInterval(codePollRef.current); codePollRef.current = null; }
+      return;
+    }
+    codePollRef.current = setInterval(async () => {
+      try {
+        const r = await fetch(`${API}/max/code-task/${codeTask.id}/status`);
+        if (r.ok) {
+          const data = await r.json();
+          setCodeTask(data);
+          if (data.state === 'completed' || data.state === 'error') {
+            if (codePollRef.current) clearInterval(codePollRef.current);
+          }
+        }
+      } catch { /* offline */ }
+    }, 2000);
+    return () => { if (codePollRef.current) clearInterval(codePollRef.current); };
+  }, [codeTask?.id, codeTask?.state]);
+
+  const submitCodeTask = async (prompt: string) => {
+    try {
+      const r = await fetch(`${API}/max/code-task`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        setCodeTask({ id: data.task_id, state: data.state, prompt, log: [], files_changed: [] });
+      }
+    } catch { /* offline */ }
+  };
 
   const handleSend = () => {
     if (!input.trim() && !attachedImage) return;
+    if (codeMode) {
+      submitCodeTask(input.trim());
+      setInput('');
+      return;
+    }
     onSend(input, attachedImage);
     setInput('');
     setAttachedImage(null);
@@ -160,41 +203,32 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--chat-bg)' }}>
 
-      {/* MAX Header */}
+      {/* MAX Header — compact bold line */}
       <div style={{
-        padding: '28px 36px 20px',
+        padding: '6px 0',
         textAlign: 'center',
         flexShrink: 0,
         borderBottom: '1px solid var(--border)',
         background: 'var(--card-bg)',
       }}>
-        <h1 style={{
-          fontSize: 26,
-          fontWeight: 300,
-          letterSpacing: 6,
+        <span style={{
+          fontSize: 14,
+          fontWeight: 900,
+          letterSpacing: 2,
           color: 'var(--text)',
-          margin: 0,
           fontFamily: "'Inter', sans-serif",
         }}>
-          M A X
-        </h1>
-        <p style={{
-          fontSize: 13,
-          color: '#aaa',
-          marginTop: 4,
-          fontWeight: 400,
-        }}>
-          Your empire. One voice.
-        </p>
+          MAX
+        </span>
       </div>
 
       {/* Messages */}
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        padding: '16px 12px',
+        padding: '8px 10px',
       }}
-      className="sm:!px-9 sm:!py-6">
+      className="sm:!px-9 sm:!py-6 pb-10 md:!pb-6">
         {messages.map((msg, i) => (
           <div key={msg.id || i} style={{
             marginBottom: 16,
@@ -323,6 +357,87 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </div>
         ))}
 
+        {/* Code Task progress card */}
+        {codeTask && codeTask.state !== 'dismissed' && (
+          <div style={{
+            marginBottom: 16,
+            maxWidth: '90%',
+            borderRadius: 14,
+            border: codeTask.state === 'error' ? '1.5px solid var(--red)' : '1.5px solid #b8960c',
+            background: codeTask.state === 'error' ? '#fef2f2' : '#fffdf7',
+            overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <div style={{
+              padding: '10px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              borderBottom: '1px solid #f0e6c0',
+              background: codeTask.state === 'error' ? '#fef2f2' : '#fdf8eb',
+            }}>
+              <Terminal size={14} style={{ color: codeTask.state === 'error' ? '#dc2626' : '#b8960c' }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: codeTask.state === 'error' ? '#dc2626' : '#b8960c', flex: 1 }}>
+                Code Mode — {codeTask.state === 'queued' ? 'Queued' : codeTask.state === 'running' ? 'Atlas Working...' : codeTask.state === 'completed' ? 'Done' : 'Error'}
+              </span>
+              {(codeTask.state === 'running' || codeTask.state === 'queued') && (
+                <Loader2 size={14} style={{ color: '#b8960c', animation: 'spin 1s linear infinite' }} />
+              )}
+              {(codeTask.state === 'completed' || codeTask.state === 'error') && (
+                <button onClick={() => setCodeTask({ ...codeTask, state: 'dismissed' })} style={{
+                  background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600, color: '#999',
+                }}>Dismiss</button>
+              )}
+            </div>
+
+            {/* Prompt */}
+            <div style={{ padding: '8px 16px', fontSize: 11, color: '#888', borderBottom: '1px solid #f5f0e0' }}>
+              {codeTask.prompt?.slice(0, 120)}{codeTask.prompt?.length > 120 ? '...' : ''}
+            </div>
+
+            {/* Live log */}
+            {codeTask.log?.length > 0 && (
+              <div style={{ padding: '8px 16px', maxHeight: 120, overflowY: 'auto' }}>
+                {codeTask.log.slice(-5).map((l: any, i: number) => (
+                  <div key={i} style={{ fontSize: 10, color: '#666', display: 'flex', gap: 6, marginBottom: 3 }}>
+                    <span style={{ color: '#b8960c', fontWeight: 700, textTransform: 'uppercase', fontSize: 9, minWidth: 50 }}>{l.action}</span>
+                    <span>{l.detail}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Result */}
+            {codeTask.state === 'completed' && codeTask.result && (
+              <div style={{ padding: '10px 16px', fontSize: 13, color: '#333', lineHeight: 1.6, whiteSpace: 'pre-wrap', maxHeight: 300, overflowY: 'auto', borderTop: '1px solid #f0e6c0' }}>
+                {codeTask.result}
+              </div>
+            )}
+
+            {/* Files changed */}
+            {codeTask.state === 'completed' && codeTask.files_changed?.length > 0 && (
+              <div style={{ padding: '8px 16px', borderTop: '1px solid #f0e6c0', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {codeTask.files_changed.map((f: string, i: number) => (
+                  <span key={i} style={{ fontSize: 9, padding: '2px 8px', borderRadius: 6, background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#16a34a', fontFamily: 'monospace' }}>{f}</span>
+                ))}
+              </div>
+            )}
+
+            {/* Error */}
+            {codeTask.state === 'error' && (
+              <div style={{ padding: '10px 16px' }}>
+                <div style={{ fontSize: 12, color: '#dc2626', marginBottom: 6 }}>{codeTask.error}</div>
+                <button
+                  onClick={() => { setCodeTask(null); submitCodeTask(codeTask.prompt); }}
+                  style={{ fontSize: 11, fontWeight: 600, color: '#b8960c', background: 'none', border: '1px solid #b8960c', borderRadius: 8, padding: '4px 12px', cursor: 'pointer' }}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Streaming indicator */}
         {isStreaming && (
           <div style={{ marginBottom: 16, maxWidth: '75%' }}>
@@ -371,8 +486,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       </div>
 
       {/* Input area */}
-      <div style={{
-        padding: '12px 12px 8px',
+      <div className="px-3 pt-2 pb-1 md:px-3 md:pt-3 md:pb-2" style={{
         flexShrink: 0,
         background: 'var(--chat-bg)',
       }}>
@@ -482,14 +596,36 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             {recording ? <MicOff size={17} /> : <Mic size={17} />}
           </button>
 
+          {/* Code Mode toggle */}
+          <button
+            onClick={() => setCodeMode(!codeMode)}
+            title={codeMode ? 'Code Mode ON — click to disable' : 'Code Mode — send to Atlas/Opus'}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: codeMode ? '#1a1a1a' : 'var(--card-bg)',
+              border: codeMode ? '1.5px solid #b8960c' : '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: codeMode ? '#b8960c' : 'var(--dim)',
+              flexShrink: 0,
+              transition: 'all 0.2s',
+            }}
+          >
+            <Terminal size={17} />
+          </button>
+
           {/* Text input */}
           <div style={{
             flex: 1,
-            background: '#fff',
-            border: `1px solid ${inputFocused ? 'var(--gold)' : 'var(--border)'}`,
+            background: codeMode ? '#fdf8eb' : '#fff',
+            border: `1.5px solid ${codeMode ? '#b8960c' : inputFocused ? 'var(--gold)' : 'var(--border)'}`,
             borderRadius: 14,
-            transition: 'border-color 0.2s, box-shadow 0.2s',
-            boxShadow: inputFocused ? '0 0 0 3px rgba(184,150,12,0.1)' : 'none',
+            transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
+            boxShadow: codeMode ? '0 0 0 3px rgba(184,150,12,0.12)' : inputFocused ? '0 0 0 3px rgba(184,150,12,0.1)' : 'none',
             display: 'flex',
             alignItems: 'flex-end',
           }}>
@@ -500,7 +636,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               onKeyDown={handleKeyDown}
               onFocus={() => setInputFocused(true)}
               onBlur={() => setInputFocused(false)}
-              placeholder="Message MAX..."
+              placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : 'Message MAX...'}
               rows={1}
               style={{
                 flex: 1,
@@ -549,9 +685,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </button>
         </div>
 
-        {/* Quick actions */}
-        <div style={{
-          display: 'flex',
+        {/* Quick actions — hidden on mobile */}
+        <div className="hidden md:flex" style={{
           gap: 8,
           marginTop: 14,
           paddingBottom: 4,
@@ -601,11 +736,15 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       </div>
 
-      {/* Pulse animation for recording */}
+      {/* Animations */}
       <style>{`
         @keyframes pulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.7; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>

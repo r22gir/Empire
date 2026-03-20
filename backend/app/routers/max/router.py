@@ -1250,6 +1250,39 @@ async def get_desk_daily_report():
     return {"report": report}
 
 
+# ── Code Mode — Async Code Tasks ─────────────────────────────────────
+
+
+class CodeTaskRequest(BaseModel):
+    prompt: str
+
+
+@router.post("/code-task")
+async def submit_code_task(request: CodeTaskRequest):
+    """Submit an async code task to CodeForge/Atlas.
+    Returns immediately with task ID. Poll status via GET /code-task/{id}/status.
+    """
+    from app.services.max.code_task_runner import code_task_runner
+
+    task = code_task_runner.submit(request.prompt)
+    return {
+        "task_id": task.id,
+        "state": task.state.value,
+        "message": "Task submitted to Atlas (CodeForge). Poll /code-task/{id}/status for progress.",
+    }
+
+
+@router.get("/code-task/{task_id}/status")
+async def get_code_task_status(task_id: str):
+    """Get status and live progress log of an async code task."""
+    from app.services.max.code_task_runner import code_task_runner
+
+    task = code_task_runner.get_task(task_id)
+    if not task:
+        raise HTTPException(404, f"Code task '{task_id}' not found")
+    return task.to_dict()
+
+
 # ── TTS (Text-to-Speech) ─────────────────────────────────────────────
 
 
