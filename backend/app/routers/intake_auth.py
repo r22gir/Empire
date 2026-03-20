@@ -142,6 +142,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ResetPasswordRequest(BaseModel):
+    email: str
+    new_password: str
+
+
 class ProjectCreate(BaseModel):
     name: str
     address: Optional[str] = None
@@ -225,6 +230,24 @@ async def login(request: Request, req: LoginRequest):
         "token": token,
         "user": {"id": user["id"], "name": user["name"], "email": user["email"], "role": user["role"], "company": user["company"]},
     }
+
+
+@limiter.limit("5/minute")
+@router.post("/reset-password")
+async def reset_password(request: Request, req: ResetPasswordRequest):
+    """Simple password reset — verifies email exists, sets new password."""
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    conn = get_db()
+    user = conn.execute("SELECT id FROM intake_users WHERE email = ?", (req.email.lower().strip(),)).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="No account found with that email")
+    new_hash = pwd_context.hash(req.new_password)
+    conn.execute("UPDATE intake_users SET password_hash = ? WHERE id = ?", (new_hash, user["id"]))
+    conn.commit()
+    conn.close()
+    return {"status": "ok", "message": "Password has been reset"}
 
 
 @limiter.limit("30/minute")

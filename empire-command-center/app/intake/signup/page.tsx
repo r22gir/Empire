@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Crown } from 'lucide-react';
+import { Crown, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { signup } from '../../lib/intake-auth';
 
@@ -10,6 +10,7 @@ export default function IntakeSignup() {
   const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', company: '', role: 'client' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const set = (field: string, val: string) => setForm(f => ({ ...f, [field]: val }));
 
@@ -71,8 +72,18 @@ export default function IntakeSignup() {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Password *</label>
-                <input type="password" required value={form.password} onChange={e => set('password', e.target.value)}
-                  className="form-input" placeholder="6+ characters" />
+                <div className="relative">
+                  <input type={showPassword ? 'text' : 'password'} required value={form.password} onChange={e => set('password', e.target.value)}
+                    className="form-input" style={{ paddingRight: 44 }} placeholder="6+ characters" />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-0 top-0 h-full px-3 flex items-center text-[#999] hover:text-[#666] transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-1.5">Company / Studio</label>
