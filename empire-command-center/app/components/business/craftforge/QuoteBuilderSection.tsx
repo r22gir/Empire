@@ -3,7 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { API } from '../../../lib/api';
 import {
   Plus, X, Trash2, Calculator, Send, Loader2, PenTool, FileDown, Mail,
-  ChevronDown, ChevronRight, Upload, Image as ImageIcon, Save, ArrowLeft
+  ChevronDown, ChevronRight, Upload, Image as ImageIcon, Save, ArrowLeft,
+  CheckCircle, FileText, ClipboardList, DollarSign, Percent
 } from 'lucide-react';
 import DataTable, { Column } from '../shared/DataTable';
 import StatusBadge from '../shared/StatusBadge';
@@ -58,6 +59,7 @@ export default function QuoteBuilderSection() {
   const [submitting, setSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingNumber, setEditingNumber] = useState<string>('');
+  const [editingStatus, setEditingStatus] = useState<string>('draft');
 
   // Collapsible sections
   const [sectionsOpen, setSectionsOpen] = useState({
@@ -85,8 +87,11 @@ export default function QuoteBuilderSection() {
   const [cncJobs, setCncJobs] = useState<CNCJobRow[]>([emptyCNC()]);
   const [laborCost, setLaborCost] = useState<number>(0);
   const [overhead, setOverhead] = useState<number>(0);
-  const [margin, setMargin] = useState<number>(40);
-  const [depositPct, setDepositPct] = useState<number>(50);
+  const [margin, setMargin] = useState<number>(0);
+  const [depositPct, setDepositPct] = useState<number>(0);
+  const [taxRate, setTaxRate] = useState<number>(0);
+  const [discountAmount, setDiscountAmount] = useState<number>(0);
+  const [discountType, setDiscountType] = useState<'$' | '%'>('$');
   const [notes, setNotes] = useState('');
 
   // PDF visibility toggles — what the client sees on the quote/invoice
@@ -120,13 +125,28 @@ export default function QuoteBuilderSection() {
 
   useEffect(() => { fetchDesigns(); }, [fetchDesigns]);
 
-  // Auto-calculate costs
+  // Determine visibility flags
+  const showCNC = jobType === 'cnc' || jobType === 'mixed';
+  const showLineItems = jobType === 'general' || jobType === 'mixed';
+  const showMaterials = jobType === 'cnc' || jobType === 'mixed';
+
+  // Auto-calculate costs — fixed to avoid double-counting
   const lineItemTotal = lineItems.reduce((sum, li) => sum + (li.quantity * li.unit_price), 0);
   const materialCost = materials.reduce((sum, m) => sum + (m.quantity * m.cost_per_unit), 0);
   const cncTimeCost = cncJobs.reduce((sum, j) => sum + (j.estimated_time_min * CNC_RATE), 0);
-  const subtotal = lineItemTotal + materialCost + cncTimeCost + laborCost + overhead;
+
+  // Only count what's visible based on job type
+  const itemsCost = showLineItems ? lineItemTotal : 0;
+  const matsCost = showMaterials ? materialCost : 0;
+  const cncCost = showCNC ? cncTimeCost : 0;
+
+  const subtotal = itemsCost + matsCost + cncCost + laborCost + overhead;
   const marginAmount = subtotal * (margin / 100);
-  const total = subtotal + marginAmount;
+  const afterMargin = subtotal + marginAmount;
+  const discountValue = discountType === '%' ? afterMargin * (discountAmount / 100) : discountAmount;
+  const afterDiscount = afterMargin - discountValue;
+  const taxAmount = afterDiscount * (taxRate / 100);
+  const total = afterDiscount + taxAmount;
   const deposit = total * (depositPct / 100);
 
   const resetForm = () => {
@@ -135,8 +155,9 @@ export default function QuoteBuilderSection() {
     setWidth(0); setHeight(0); setDepth(0); setDimUnit('in');
     setLineItems([emptyLineItem()]);
     setMaterials([emptyMaterial()]); setCncJobs([emptyCNC()]);
-    setLaborCost(0); setOverhead(0); setMargin(40); setDepositPct(50); setNotes('');
-    setEditingId(null); setEditingNumber('');
+    setLaborCost(0); setOverhead(0); setMargin(0); setDepositPct(0); setNotes('');
+    setTaxRate(0); setDiscountAmount(0); setDiscountType('$');
+    setEditingId(null); setEditingNumber(''); setEditingStatus('draft');
     setPhotos([]); setAiResults([]);
   };
 
@@ -144,6 +165,7 @@ export default function QuoteBuilderSection() {
   const loadDesign = (design: any) => {
     setEditingId(design.id);
     setEditingNumber(design.design_number || '');
+    setEditingStatus(design.status || 'draft');
     setCustomerName(design.customer_name || '');
     setCustomerEmail(design.customer_email || '');
     setCustomerPhone(design.customer_phone || '');
@@ -158,8 +180,11 @@ export default function QuoteBuilderSection() {
     setDimUnit(design.unit || 'in');
     setLaborCost(design.labor_cost || 0);
     setOverhead(design.overhead || 0);
-    setMargin(design.margin_percent ?? 40);
-    setDepositPct(design.deposit_percent ?? 50);
+    setMargin(design.margin_percent ?? 0);
+    setDepositPct(design.deposit_percent ?? 0);
+    setTaxRate((design.tax_rate || 0) <= 1 ? (design.tax_rate || 0) * 100 : (design.tax_rate || 0));
+    setDiscountAmount(design.discount_amount || 0);
+    setDiscountType(design.discount_type === 'percent' ? '%' : '$');
     setNotes(design.notes || '');
     if (design.pdf_show) setPdfShow({ lineItems: true, materials: true, cncOps: true, dimensions: true, photos: false, notes: true, deposit: true, tax: true, ...design.pdf_show });
 
@@ -192,7 +217,18 @@ export default function QuoteBuilderSection() {
       })) : [emptyLineItem()]);
     } else {
       // General woodwork: materials ARE the line items — load into lineItems only
-      if (mats.length > 0) {
+      if (lineItemsRaw.length > 0) {
+        // Prefer line_items if they exist
+        setLineItems(lineItemsRaw.map((li: any) => ({
+          description: li.description || '',
+          quantity: li.quantity || 1,
+          unit: li.unit || 'ea',
+          unit_price: li.unit_price || 0,
+          material: li.material || '',
+          dimensions: li.dimensions || '',
+          finish: li.finish || '',
+        })));
+      } else if (mats.length > 0) {
         setLineItems(mats.map((m: any) => ({
           description: m.name || '',
           quantity: m.quantity || 1,
@@ -251,6 +287,12 @@ export default function QuoteBuilderSection() {
       }
       return { ...m, type: 'wood', total: (m as MaterialRow).quantity * (m as MaterialRow).cost_per_unit };
     }),
+    line_items: showLineItems ? lineItems.filter(li => li.description.trim()).map(li => ({
+      description: li.description,
+      quantity: li.quantity,
+      unit: li.unit,
+      unit_price: li.unit_price,
+    })) : [],
     cnc_jobs: (jobType === 'cnc' || jobType === 'mixed') ? cncJobs.filter(j => j.estimated_time_min > 0) : [],
     material_cost: jobType === 'general' ? lineItemTotal : materialCost,
     cnc_time_cost: (jobType === 'cnc' || jobType === 'mixed') ? cncTimeCost : 0,
@@ -260,6 +302,10 @@ export default function QuoteBuilderSection() {
     total,
     margin_percent: margin,
     deposit_percent: depositPct,
+    tax_rate: taxRate / 100,
+    tax_amount: taxAmount,
+    discount_amount: discountAmount,
+    discount_type: discountType === '%' ? 'percent' : 'dollar',
     notes: notes || undefined,
     pdf_show: pdfShow,
   });
@@ -362,6 +408,68 @@ export default function QuoteBuilderSection() {
     }
   };
 
+  // Accept quote
+  const handleAcceptQuote = async (designId: string) => {
+    if (!confirm('Mark this quote as accepted?')) return;
+    try {
+      const resp = await fetch(`${API}/craftforge/designs/${designId}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Accept failed');
+      }
+      alert('Quote accepted!');
+      if (editingId === designId) setEditingStatus('accepted');
+      fetchDesigns();
+    } catch (e: any) {
+      console.error('Accept failed:', e);
+      alert(`Accept failed: ${e.message}`);
+    }
+  };
+
+  // Create invoice
+  const handleCreateInvoice = async (designId: string) => {
+    if (!confirm('Create an invoice from this quote?')) return;
+    try {
+      const resp = await fetch(`${API}/craftforge/designs/${designId}/create-invoice`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Create invoice failed');
+      }
+      alert('Invoice created!');
+      if (editingId === designId) setEditingStatus('invoiced');
+      fetchDesigns();
+    } catch (e: any) {
+      console.error('Create invoice failed:', e);
+      alert(`Create invoice failed: ${e.message}`);
+    }
+  };
+
+  // Create job
+  const handleCreateJob = async (designId: string) => {
+    if (!confirm('Create a job from this quote?')) return;
+    try {
+      const resp = await fetch(`${API}/craftforge/designs/${designId}/create-job`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || 'Create job failed');
+      }
+      alert('Job created!');
+      fetchDesigns();
+    } catch (e: any) {
+      console.error('Create job failed:', e);
+      alert(`Create job failed: ${e.message}`);
+    }
+  };
+
   // Photo upload
   const handlePhotoUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -427,7 +535,7 @@ export default function QuoteBuilderSection() {
       { key: 'name', label: 'Design', sortable: true, render: (row) => <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{row.name || 'Untitled'}</span> },
       { key: 'customer_name', label: 'Customer', sortable: true },
       { key: 'category', label: 'Category', render: (row) => <span className="capitalize">{row.category || '--'}</span> },
-      { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status || 'concept'} /> },
+      { key: 'status', label: 'Status', render: (row) => <StatusBadge status={row.status || 'draft'} /> },
       { key: 'total', label: 'Total', sortable: true, render: (row) => <span style={{ fontSize: 12, fontWeight: 700, color: '#b8960c' }}>{row.total != null ? `$${Number(row.total).toFixed(2)}` : '--'}</span> },
       { key: 'created_at', label: 'Created', render: (row) => <span style={{ fontSize: 11, color: '#999' }} suppressHydrationWarning>{row.created_at ? new Date(row.created_at).toLocaleDateString() : '--'}</span> },
       { key: 'actions', label: '', render: (row) => (
@@ -447,6 +555,30 @@ export default function QuoteBuilderSection() {
             className="hover:text-[#1d4ed8]"
           >
             <Mail size={15} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleAcceptQuote(row.id); }}
+            title="Accept Quote"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#16a34a' }}
+            className="hover:text-[#15803d]"
+          >
+            <CheckCircle size={15} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleCreateInvoice(row.id); }}
+            title="Create Invoice"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#2563eb' }}
+            className="hover:text-[#1d4ed8]"
+          >
+            <FileText size={15} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleCreateJob(row.id); }}
+            title="Create Job"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#9333ea' }}
+            className="hover:text-[#7e22ce]"
+          >
+            <ClipboardList size={15} />
           </button>
         </div>
       )},
@@ -492,19 +624,46 @@ export default function QuoteBuilderSection() {
 
   // ── CREATE / EDIT FORM ──
   const isEditing = view === 'edit' && editingId;
-  const showCNC = jobType === 'cnc' || jobType === 'mixed';
-  const showLineItems = jobType === 'general' || jobType === 'mixed';
-  const showMaterials = jobType === 'cnc' || jobType === 'mixed';
 
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '24px 36px' }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
-        <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
-          <Calculator size={20} className="text-[#b8960c]" />
-          {isEditing ? `Edit ${editingNumber}` : 'New Quote'}
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }} className="flex items-center gap-2">
+            <Calculator size={20} className="text-[#b8960c]" />
+            {isEditing ? `Edit ${editingNumber}` : 'New Quote'}
+          </h2>
+          {isEditing && <StatusBadge status={editingStatus || 'draft'} />}
+        </div>
         <div className="flex items-center gap-2">
+          {isEditing && (editingStatus === 'draft' || editingStatus === 'sent') && (
+            <button
+              onClick={() => handleAcceptQuote(editingId)}
+              title="Accept Quote"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#16a34a', background: '#fff', borderRadius: 10, border: '1px solid #ece8e0', cursor: 'pointer', minHeight: 44 }}
+            >
+              <CheckCircle size={14} /> Accept
+            </button>
+          )}
+          {isEditing && editingStatus === 'accepted' && (
+            <button
+              onClick={() => handleCreateInvoice(editingId)}
+              title="Create Invoice"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#2563eb', background: '#fff', borderRadius: 10, border: '1px solid #ece8e0', cursor: 'pointer', minHeight: 44 }}
+            >
+              <FileText size={14} /> Invoice
+            </button>
+          )}
+          {isEditing && (editingStatus === 'accepted' || editingStatus === 'invoiced') && (
+            <button
+              onClick={() => handleCreateJob(editingId)}
+              title="Create Job"
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '8px 12px', fontSize: 12, fontWeight: 600, color: '#9333ea', background: '#fff', borderRadius: 10, border: '1px solid #ece8e0', cursor: 'pointer', minHeight: 44 }}
+            >
+              <ClipboardList size={14} /> Job
+            </button>
+          )}
           {isEditing && (
             <button
               onClick={() => handleDownloadPDF(editingId)}
@@ -829,22 +988,45 @@ export default function QuoteBuilderSection() {
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Labor Cost ($)</label>
-                <input className="form-input" type="number" min={0} step={5} value={laborCost || ''} onChange={e => setLaborCost(Number(e.target.value))} placeholder="0.00" />
+                <input className="form-input" type="number" min={0} step={0.01} value={laborCost || ''} onChange={e => setLaborCost(Number(e.target.value))} placeholder="0" />
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Overhead ($)</label>
-                <input className="form-input" type="number" min={0} step={5} value={overhead || ''} onChange={e => setOverhead(Number(e.target.value))} placeholder="0.00" />
+                <input className="form-input" type="number" min={0} step={0.01} value={overhead || ''} onChange={e => setOverhead(Number(e.target.value))} placeholder="0" />
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
                 <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Margin (%)</label>
-                <input className="form-input" type="number" min={0} max={100} step={1} value={margin || ''} onChange={e => setMargin(Number(e.target.value))} placeholder="40" />
+                <input className="form-input" type="number" min={0} max={100} step={0.5} value={margin || ''} onChange={e => setMargin(Number(e.target.value))} placeholder="0" />
               </div>
               <div>
+                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Tax (%)</label>
+                <input className="form-input" type="number" min={0} max={100} step={0.01} value={taxRate || ''} onChange={e => setTaxRate(Number(e.target.value))} placeholder="0" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
                 <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Deposit (%)</label>
-                <input className="form-input" type="number" min={0} max={100} step={1} value={depositPct || ''} onChange={e => setDepositPct(Number(e.target.value))} placeholder="50" />
+                <input className="form-input" type="number" min={0} max={100} step={1} value={depositPct || ''} onChange={e => setDepositPct(Number(e.target.value))} placeholder="0" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Discount</label>
+                <div className="flex gap-1">
+                  <input className="form-input" style={{ flex: 1 }} type="number" min={0} step={0.01} value={discountAmount || ''} onChange={e => setDiscountAmount(Number(e.target.value))} placeholder="0" />
+                  <button
+                    onClick={() => setDiscountType(discountType === '$' ? '%' : '$')}
+                    style={{
+                      padding: '6px 10px', fontSize: 12, fontWeight: 700,
+                      color: '#fff', background: '#b8960c',
+                      borderRadius: 6, border: 'none', cursor: 'pointer',
+                      minWidth: 36, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                    title={`Toggle discount type (currently ${discountType})`}
+                  >
+                    {discountType === '$' ? <DollarSign size={14} /> : <Percent size={14} />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -888,15 +1070,19 @@ export default function QuoteBuilderSection() {
       <div className="empire-card flat mb-4" style={{ background: '#fafaf8', border: '2px solid #ece8e0' }}>
         <div className="text-[9px] font-semibold text-[#bbb] uppercase tracking-wide mb-2">Pricing Breakdown</div>
         <div className="space-y-1">
-          {showLineItems && lineItemTotal > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Line Items</span><span>${lineItemTotal.toFixed(2)}</span></div>}
-          {showMaterials && materialCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Materials</span><span>${materialCost.toFixed(2)}</span></div>}
-          {showCNC && cncTimeCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>CNC Time</span><span>${cncTimeCost.toFixed(2)}</span></div>}
+          {itemsCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Line Items</span><span>${itemsCost.toFixed(2)}</span></div>}
+          {matsCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Materials</span><span>${matsCost.toFixed(2)}</span></div>}
+          {cncCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>CNC Time</span><span>${cncCost.toFixed(2)}</span></div>}
           {laborCost > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Labor</span><span>${laborCost.toFixed(2)}</span></div>}
           {overhead > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Overhead</span><span>${overhead.toFixed(2)}</span></div>}
-          <div className="flex justify-between text-[12px] font-semibold text-[#555]" style={{ borderTop: '1px solid #e8e4dc', paddingTop: 4, marginTop: 4 }}><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-          {margin > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>+ Margin ({margin}%)</span><span>${marginAmount.toFixed(2)}</span></div>}
-          <div className="flex justify-between text-[14px] font-bold text-[#1a1a1a]" style={{ borderTop: '2px solid #d4a636', paddingTop: 8, marginTop: 4 }}>
-            <span>Total</span><span style={{ color: '#b8960c' }}>${total.toFixed(2)}</span>
+          <div className="flex justify-between text-[12px] text-[#555]" style={{ borderTop: '1px solid #e8e4dc', paddingTop: 6, marginTop: 4 }}>
+            <span>Subtotal</span><span>${subtotal.toFixed(2)}</span>
+          </div>
+          {margin > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Margin {margin}%</span><span>+${marginAmount.toFixed(2)}</span></div>}
+          {discountAmount > 0 && <div className="flex justify-between text-[12px] text-[#dc2626]"><span>Discount{discountType === '%' ? ` ${discountAmount}%` : ''}</span><span>-${discountValue.toFixed(2)}</span></div>}
+          {taxRate > 0 && <div className="flex justify-between text-[12px] text-[#777]"><span>Tax {taxRate}%</span><span>+${taxAmount.toFixed(2)}</span></div>}
+          <div className="flex justify-between text-[14px] font-bold text-[#1a1a1a]" style={{ borderTop: '1px solid #e8e4dc', paddingTop: 8, marginTop: 4 }}>
+            <span>TOTAL</span><span style={{ color: '#b8960c' }}>${total.toFixed(2)}</span>
           </div>
           {depositPct > 0 && <div className="flex justify-between text-[12px] font-semibold text-[#2563eb]">
             <span>Deposit Due ({depositPct}%)</span><span>${deposit.toFixed(2)}</span>

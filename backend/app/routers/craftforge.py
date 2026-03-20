@@ -115,8 +115,11 @@ class DesignCreate(BaseModel):
     tax_amount: float = 0.0
     discount_amount: float = 0.0
     total: float = 0.0
-    deposit_percent: float = 50.0
-    margin_percent: float = 40.0
+    deposit_percent: float = 0.0
+    margin_percent: float = 0.0
+    discount_type: str = "dollar"  # dollar or percent
+    line_items: list[dict] = Field(default_factory=list)  # general woodwork line items
+    status: str = "draft"  # quote status: draft, sent, accepted, invoiced
 
     # Linked quote (if from Empire Workroom)
     linked_quote_id: Optional[str] = None
@@ -150,6 +153,12 @@ class DesignUpdate(BaseModel):
     tax_rate: Optional[float] = None
     tax_amount: Optional[float] = None
     total: Optional[float] = None
+    overhead: Optional[float] = None
+    margin_percent: Optional[float] = None
+    deposit_percent: Optional[float] = None
+    discount_amount: Optional[float] = None
+    discount_type: Optional[str] = None
+    line_items: Optional[list[dict]] = None
     notes: Optional[str] = None
     linked_quote_id: Optional[str] = None
     linked_quote_number: Optional[str] = None
@@ -234,21 +243,12 @@ async def create_design(design: DesignCreate):
     data = {
         "id": design_id,
         "design_number": design_number,
-        "status": "concept",  # concept, designing, ready, cutting, finishing, complete
+        "status": design.status,  # draft, sent, accepted, invoiced
         **design.model_dump(),
         "created_at": datetime.utcnow().isoformat(),
         "updated_at": datetime.utcnow().isoformat(),
     }
-    # Auto-compute financials
-    data["material_cost"] = sum(m.get("total", 0) if isinstance(m, dict) else m.total for m in (design.materials or []))
-    data["cnc_time_cost"] = sum(
-        (j.get("estimated_time_min", 0) if isinstance(j, dict) else j.estimated_time_min) * 1.50  # $1.50/min CNC time
-        for j in (design.cnc_jobs or [])
-    )
-    data["subtotal"] = data["material_cost"] + data["cnc_time_cost"] + data["labor_cost"]
-    data["tax_amount"] = data["subtotal"] * data["tax_rate"]
-    data["total"] = data["subtotal"] + data["tax_amount"] - data["discount_amount"]
-
+    # Store EXACTLY what the frontend sends — no auto-calculation
     _save(DESIGNS_DIR, design_id, data)
     return data
 
@@ -541,7 +541,7 @@ async def generate_design_pdf(design_id: str):
         expires = ""
 
     # Margin multiplier — bake margin into client-facing prices
-    margin_pct_val = design.get("margin_percent", 40)
+    margin_pct_val = design.get("margin_percent", 0)
     margin_mult = 1 + (margin_pct_val / 100)
 
     # Materials table (prices shown to client include margin)
@@ -600,20 +600,19 @@ async def generate_design_pdf(design_id: str):
     show_tax = pdf_show.get("tax", True)
     show_deposit = pdf_show.get("deposit", True)
 
-    # Costs
+    # Costs — use exactly what the design has, no auto-calc
     material_cost = design.get("material_cost", 0)
     cnc_time_cost = design.get("cnc_time_cost", 0)
     labor_cost = design.get("labor_cost", 0)
     overhead = design.get("overhead", 0)
     subtotal = design.get("subtotal", 0)
-    margin_pct = design.get("margin_percent", 40)
-    margin_amount = subtotal * (margin_pct / 100)
-    # Always recompute — stored total may not include margin
-    total = subtotal + margin_amount
-    tax_amount = total * tax_rate
-    grand_total = total + tax_amount
-    deposit_pct = design.get("deposit_percent", 50)
-    deposit_amount = grand_total * (deposit_pct / 100)
+    discount_amount = design.get("discount_amount", 0)
+    design_tax_rate = design.get("tax_rate", 0)
+    tax_amount = design.get("tax_amount", 0)
+    total = design.get("total", 0)
+    deposit_pct = design.get("deposit_percent", 0)
+    grand_total = total
+    deposit_amount = grand_total * (deposit_pct / 100) if deposit_pct > 0 else 0
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{design_number}</title>
@@ -668,10 +667,15 @@ async def generate_design_pdf(design_id: str):
 <div style="margin-top:20px;padding:16px 20px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
   <table>
     <tbody>
-      <tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">${total:,.2f}</td></tr>
-      {'<tr><td style="padding:4px 8px;color:#666">Tax (' + f'{tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>' if show_tax else ''}
-      <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${(grand_total if show_tax else total):,.2f}</td></tr>
-      {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct and show_deposit else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{material_cost:,.2f}</td></tr>' if material_cost > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Labor</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{labor_cost:,.2f}</td></tr>' if labor_cost > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">CNC Machine Time</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{cnc_time_cost:,.2f}</td></tr>' if cnc_time_cost > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Overhead</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{overhead:,.2f}</td></tr>' if overhead > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{subtotal:,.2f}</td></tr>' if subtotal > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#c00">Discount</td><td style="padding:4px 8px;text-align:right;color:#c00">-$' + f'{discount_amount:,.2f}</td></tr>' if discount_amount > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Tax (' + f'{design_tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>' if design_tax_rate > 0 and show_tax else ''}
+      <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>
+      {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct:.0f}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct > 0 and show_deposit else ''}
     </tbody>
   </table>
 </div>
@@ -825,3 +829,199 @@ async def send_design_quote(design_id: str, body: Optional[SendDesignRequest] = 
     _save(DESIGNS_DIR, design_id, design)
 
     return {"sent": True, "email_sent": email_sent, "to": to_email, "design_number": design_number}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  QUOTE LIFECYCLE — Accept, Invoice, Job creation
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.post("/designs/{design_id}/accept")
+async def accept_design(design_id: str):
+    """Mark a quote as accepted by the customer."""
+    data = _load(DESIGNS_DIR, design_id)
+    data["status"] = "accepted"
+    data["accepted_at"] = datetime.utcnow().isoformat()
+    data["updated_at"] = datetime.utcnow().isoformat()
+    _save(DESIGNS_DIR, design_id, data)
+    return data
+
+
+@router.post("/designs/{design_id}/create-invoice")
+async def create_invoice_from_design(design_id: str):
+    """Create a unified finance invoice from a CraftForge design."""
+    from app.db.database import get_db, dict_row
+
+    design = _load(DESIGNS_DIR, design_id)
+
+    # Build line items from both materials and line_items
+    inv_line_items = []
+    for m in (design.get("materials") or []):
+        name = m.get("name", "") if isinstance(m, dict) else ""
+        qty = m.get("quantity", 1) if isinstance(m, dict) else 1
+        cost = m.get("cost_per_unit", 0) if isinstance(m, dict) else 0
+        total_val = qty * cost
+        if name and total_val > 0:
+            inv_line_items.append({
+                "description": name,
+                "quantity": qty,
+                "unit_price": cost,
+                "total": total_val,
+            })
+    for li in (design.get("line_items") or []):
+        desc = li.get("description", "")
+        qty = li.get("quantity", 1)
+        price = li.get("unit_price", 0)
+        total_val = qty * price
+        if desc and total_val > 0:
+            inv_line_items.append({
+                "description": desc,
+                "quantity": qty,
+                "unit_price": price,
+                "total": total_val,
+            })
+
+    # Add labor if set
+    labor = design.get("labor_cost", 0)
+    if labor > 0:
+        inv_line_items.append({"description": "Labor", "quantity": 1, "unit_price": labor, "total": labor})
+
+    # Add overhead if set
+    oh = design.get("overhead", 0)
+    if oh > 0:
+        inv_line_items.append({"description": "Overhead", "quantity": 1, "unit_price": oh, "total": oh})
+
+    # Add CNC time if set
+    cnc_cost = design.get("cnc_time_cost", 0)
+    if cnc_cost > 0:
+        inv_line_items.append({"description": "CNC Machine Time", "quantity": 1, "unit_price": cnc_cost, "total": cnc_cost})
+
+    subtotal = design.get("subtotal", 0)
+    tax_rate = design.get("tax_rate", 0)
+    tax_amount = round(subtotal * tax_rate, 2) if tax_rate > 0 else 0
+    total = design.get("total", 0)
+
+    with get_db() as conn:
+        # Find or create customer
+        customer_id = None
+        customer_name = design.get("customer_name", "")
+        customer_email = design.get("customer_email", "")
+
+        if customer_email:
+            cust = conn.execute("SELECT id FROM customers WHERE email = ?", (customer_email,)).fetchone()
+            if cust:
+                customer_id = dict_row(cust)["id"]
+        if not customer_id and customer_name:
+            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
+            if cust:
+                customer_id = dict_row(cust)["id"]
+
+        if not customer_id and customer_name:
+            # Create customer
+            conn.execute(
+                """INSERT INTO customers (id, name, email, phone, address, type, total_revenue, lifetime_quotes, source, business)
+                   VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'residential', 0, 0, 'direct', 'woodcraft')""",
+                (customer_name, customer_email, design.get("customer_phone", ""), design.get("customer_address", ""))
+            )
+            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
+            if cust:
+                customer_id = dict_row(cust)["id"]
+
+        # Generate invoice number
+        year = datetime.now().year
+        row = conn.execute(
+            "SELECT invoice_number FROM invoices WHERE invoice_number LIKE ? ORDER BY invoice_number DESC LIMIT 1",
+            (f"INV-{year}-%",)
+        ).fetchone()
+        if row:
+            last_num = int(dict_row(row)["invoice_number"].split("-")[-1])
+            inv_number = f"INV-{year}-{last_num + 1:03d}"
+        else:
+            inv_number = f"INV-{year}-001"
+
+        due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+
+        conn.execute(
+            """INSERT INTO invoices
+               (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
+            (
+                inv_number,
+                customer_id,
+                design_id,
+                subtotal,
+                tax_rate,
+                tax_amount,
+                total,
+                total,
+                json.dumps(inv_line_items),
+                f"Generated from WoodCraft design {design.get('design_number', design_id)}",
+                due,
+            )
+        )
+
+        inv_row = conn.execute("SELECT * FROM invoices WHERE invoice_number = ?", (inv_number,)).fetchone()
+        invoice = dict_row(inv_row)
+        invoice["line_items"] = json.loads(invoice["line_items"]) if invoice.get("line_items") else []
+
+    # Update design status
+    design["status"] = "invoiced"
+    design["invoice_id"] = invoice["id"]
+    design["invoice_number"] = inv_number
+    design["updated_at"] = datetime.utcnow().isoformat()
+    _save(DESIGNS_DIR, design_id, design)
+
+    return {"invoice": invoice, "design_id": design_id}
+
+
+@router.post("/designs/{design_id}/create-job")
+async def create_job_from_design(design_id: str):
+    """Create a production job in the finance system from a CraftForge design."""
+    from app.db.database import get_db, dict_row
+
+    design = _load(DESIGNS_DIR, design_id)
+
+    # Find customer
+    customer_id = None
+    customer_name = design.get("customer_name", "")
+    customer_email = design.get("customer_email", "")
+
+    with get_db() as conn:
+        if customer_email:
+            cust = conn.execute("SELECT id FROM customers WHERE email = ?", (customer_email,)).fetchone()
+            if cust:
+                customer_id = dict_row(cust)["id"]
+        if not customer_id and customer_name:
+            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
+            if cust:
+                customer_id = dict_row(cust)["id"]
+
+        job_id = str(uuid.uuid4())[:16]
+
+        conn.execute(
+            """INSERT INTO jobs
+               (id, title, customer_id, quote_id, status, job_type, priority,
+                estimated_hours, materials_cost, labor_cost, notes, address)
+               VALUES (?, ?, ?, ?, 'pending', 'fabrication', 'normal', ?, ?, ?, ?, ?)""",
+            (
+                job_id,
+                f"{design.get('name', 'CraftForge Job')} — {design.get('design_number', '')}",
+                customer_id,
+                design_id,
+                round(sum(j.get("estimated_time_min", 0) for j in (design.get("cnc_jobs") or []) if isinstance(j, dict)) / 60, 1),
+                design.get("material_cost", 0),
+                design.get("labor_cost", 0),
+                design.get("notes", ""),
+                design.get("customer_address", ""),
+            )
+        )
+
+        job_row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        job = dict_row(job_row) if job_row else {"id": job_id}
+
+    # Update design
+    design["job_id"] = job_id
+    design["updated_at"] = datetime.utcnow().isoformat()
+    _save(DESIGNS_DIR, design_id, design)
+
+    return {"job": job, "design_id": design_id}
