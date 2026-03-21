@@ -121,15 +121,18 @@ class CodeTaskRunner:
             task.add_log("planning", "Reading codebase and planning changes...")
 
             # Build initial prompt for Atlas
+            import os
+            repo_root = os.path.expanduser("~/empire-repo")
             prompt = (
                 "You are Atlas (CodeForge), handling a Code Mode task from the founder. "
                 "You have tools available — use them to read, write, and edit files. "
                 "Execute tool calls one at a time using ```tool blocks.\n\n"
+                f"IMPORTANT: The repository root is {repo_root}. Always use this as the base for all file paths.\n\n"
                 "Available tools:\n"
-                "- file_read: {\"tool\": \"file_read\", \"path\": \"/absolute/path\"}\n"
-                "- file_write: {\"tool\": \"file_write\", \"path\": \"/absolute/path\", \"content\": \"...\"}\n"
-                "- file_edit: {\"tool\": \"file_edit\", \"path\": \"/absolute/path\", \"old_str\": \"...\", \"new_str\": \"...\"}\n"
-                "- file_append: {\"tool\": \"file_append\", \"path\": \"/absolute/path\", \"content\": \"...\"}\n"
+                f"- file_read: {{\"tool\": \"file_read\", \"path\": \"{repo_root}/backend/app/main.py\"}}\n"
+                f"- file_write: {{\"tool\": \"file_write\", \"path\": \"{repo_root}/path/to/file\", \"content\": \"...\"}}\n"
+                f"- file_edit: {{\"tool\": \"file_edit\", \"path\": \"{repo_root}/path/to/file\", \"old_str\": \"...\", \"new_str\": \"...\"}}\n"
+                f"- file_append: {{\"tool\": \"file_append\", \"path\": \"{repo_root}/path/to/file\", \"content\": \"...\"}}\n"
                 "- git_ops: {\"tool\": \"git_ops\", \"command\": \"status|diff|log|add\", \"args\": \"...\"}\n\n"
                 "IMPORTANT: Use ONE tool call per response. I will execute it and give you the result. "
                 "Then you can use the next tool. When you are DONE, write your final answer with "

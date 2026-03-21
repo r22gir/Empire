@@ -636,33 +636,21 @@ def get_max_brain_context() -> str:
     except Exception as e:
         logger.debug(f"Brain context: session context unavailable: {e}")
 
-    # ── f. Cross-channel conversation context ──
+    # ── f. Cross-channel conversation context (from unified store) ──
     # Load recent messages from ALL channels so MAX knows what was said everywhere
     try:
-        chats_dir = Path.home() / "empire-repo" / "backend" / "data" / "chats"
-        cross_lines = ["### Recent Cross-Channel Activity"]
-        has_activity = False
-        for channel_dir in ["telegram", "founder"]:
-            channel_path = chats_dir / channel_dir
-            if not channel_path.exists():
-                continue
-            # Get most recent chat file
-            chat_files = sorted(channel_path.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
-            for cf in chat_files[:1]:  # Most recent chat per channel
-                age_s = time.time() - cf.stat().st_mtime
-                if age_s > 7200:  # Skip if older than 2 hours
-                    continue
-                data = json.loads(cf.read_text(encoding="utf-8"))
-                msgs = data.get("messages", [])[-4:]  # Last 4 messages
-                if msgs:
-                    has_activity = True
-                    ch_label = "Telegram" if channel_dir == "telegram" else "Web/CC"
-                    cross_lines.append(f"**{ch_label}** (last {int(age_s // 60)}m ago):")
-                    for m in msgs:
-                        role = m.get("role", "?")
-                        content = (m.get("content", "") or "")[:150]
-                        cross_lines.append(f"  - {role}: {content}")
-        if has_activity:
+        from app.services.max.unified_message_store import unified_store
+        cross_ctx = unified_store.get_cross_channel_context(limit_per_channel=4, hours=2)
+        if cross_ctx:
+            cross_lines = ["### Recent Cross-Channel Activity"]
+            channel_labels = {"telegram": "Telegram", "web": "Web/CC", "cc": "Command Center"}
+            for ch, msgs in cross_ctx.items():
+                ch_label = channel_labels.get(ch, ch.title())
+                cross_lines.append(f"**{ch_label}**:")
+                for m in msgs:
+                    role = m.get("role", "?")
+                    content = (m.get("content", "") or "")[:150]
+                    cross_lines.append(f"  - {role}: {content}")
             sections.append("\n".join(cross_lines))
     except Exception as e:
         logger.debug(f"Brain context: cross-channel context unavailable: {e}")

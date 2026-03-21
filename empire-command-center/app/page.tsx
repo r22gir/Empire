@@ -242,6 +242,7 @@ export default function CommandCenter() {
           onSend={handleSendMessage}
           onStop={chat.stopStreaming}
           onScreenChange={handleScreenChange}
+          setOnMessageComplete={chat.setOnMessageComplete}
         />
       );
     }

@@ -83,6 +83,34 @@
 
 ---
 
+## MAX Communications Audit + Voice Support (2026-03-21)
+
+### Diagnosis Completed
+- All 4 communication paths traced: Web MAX, Telegram, Code Mode, Cross-channel
+- Full reports: `docs/audit/max-communications-diagnosis.md` + `max-communications-fix-plan.md`
+
+### Critical Fix: STT Silent Failure
+- `ChatScreen.tsx:176` checked `data.success` but backend returns `{text, language, filename}` — no `success` field
+- Mic recorded audio, got valid transcript, then SILENTLY DROPPED IT
+- Fixed: changed `if (data.success && data.text)` to `if (data.text)`
+
+### Full Voice Mode Implemented
+- **Voice Mode toggle** (Headphones button) — hands-free conversation
+- **Auto-play TTS**: AI responses auto-spoken via xAI Grok Rex voice
+- **Auto-listen**: After TTS finishes, mic auto-starts for continuous conversation
+- **Auto-send**: In voice mode, transcribed text auto-sends (no manual send needed)
+- **Push-to-talk**: Hold Spacebar (when textarea not focused) to record
+- **Voice status indicator**: Header shows "Listening...", "Speaking...", or "Voice Mode"
+- **Stop button**: Click Stop in header or toggle off to exit voice mode
+- **Interrupt support**: Turning off voice mode stops TTS + recording immediately
+
+### Files Modified
+- `ChatScreen.tsx` — STT fix, full voice mode UI + logic
+- `useChat.ts` — `onMessageComplete` callback + `setOnMessageComplete` export
+- `page.tsx` — Wire `setOnMessageComplete` prop to ChatScreen
+
+---
+
 ## Files Modified During Audit
 1. `backend/app/services/max/ai_router.py` — timeout increases
 2. `systemd/empire-backend.service` — uvicorn configuration
@@ -90,6 +118,11 @@
 4. `empire-command-center/app/quote/[id]/page.tsx` — customer quote acceptance page (new)
 5. `empire-command-center/app/globals.css` — spinner animation + quote page overflow fix
 6. `backend/app/routers/quotes.py` — fixed email quote_url to point to acceptance page
+7. `empire-command-center/app/components/screens/ChatScreen.tsx` — STT fix + full voice mode
+8. `empire-command-center/app/hooks/useChat.ts` — onMessageComplete callback
+9. `empire-command-center/app/page.tsx` — wire voice mode callback
+10. `docs/audit/max-communications-diagnosis.md` — full 4-path diagnosis (new)
+11. `docs/audit/max-communications-fix-plan.md` — fix plan (new)
 
 ---
 

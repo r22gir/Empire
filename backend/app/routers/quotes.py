@@ -368,6 +368,125 @@ async def analyze_photo_for_quote(body: dict):
     }
 
 
+@router.post("/from-rooms")
+async def create_quote_from_rooms(body: dict):
+    """Create a priced quote from rooms data (frontend Quote Builder).
+
+    Converts rooms with items+dimensions into analyzed_items format,
+    runs through the full QIS pricing pipeline (yardage, tiers, line items).
+    """
+    from app.services.quote_engine.quote_assembler import assemble_quote
+
+    customer_name = body.get("customer_name", "Customer")
+    customer_email = body.get("customer_email", "")
+    customer_phone = body.get("customer_phone", "")
+    customer_address = body.get("customer_address", "")
+    rooms = body.get("rooms", [])
+    options = body.get("options", {})
+    photos = body.get("photos", [])
+
+    if not rooms:
+        raise HTTPException(400, "At least one room with items is required")
+
+    location = body.get("location", "DC")
+    lining = options.get("lining_type", "standard")
+    fabric_grade = options.get("fabric_grade", "A")
+    features = options.get("features", {})
+
+    # Convert rooms data to analyzed_items format for pricing engine
+    analyzed_items = []
+    for room in rooms:
+        room_name = room.get("name", "Room")
+        for item in room.get("items", []):
+            dims = item.get("dimensions", {})
+            width = _parse_dim(dims.get("width", item.get("width", 0)))
+            height = _parse_dim(dims.get("height", item.get("height", 0)))
+            depth = _parse_dim(dims.get("depth", item.get("depth", 0)))
+
+            item_type = item.get("type", "accent_chair")
+            quantity = int(item.get("quantity", 1))
+            notes = item.get("notes", "")
+
+            special_features = []
+            if features.get("tufting"): special_features.append("tufting")
+            if features.get("welting"): special_features.append("welting")
+            if features.get("nailhead"): special_features.append("nailhead trim")
+            if features.get("skirt"): special_features.append("skirt")
+            if features.get("contrast_piping"): special_features.append("contrast piping")
+            if features.get("pattern_match"): special_features.append("pattern match")
+
+            cushion_count = 0
+            if "3cushion" in item_type: cushion_count = 3
+            elif "2cushion" in item_type: cushion_count = 2
+            elif "cushion" in item_type.lower() or "seat" in item_type.lower(): cushion_count = 1
+
+            analyzed_items.append({
+                "name": f"{room_name} - {item_type.replace('_', ' ').title()}",
+                "type": item_type,
+                "dimensions": {"width": width, "height": height, "depth": depth},
+                "quantity": quantity,
+                "construction": "",
+                "condition": "",
+                "special_features": special_features,
+                "cushion_count": cushion_count,
+            })
+
+    if not analyzed_items:
+        raise HTTPException(400, "No items found in rooms data")
+
+    quote = assemble_quote(
+        analyzed_items=analyzed_items,
+        customer_name=customer_name,
+        location=location,
+        lining=lining,
+    )
+
+    # Enrich with customer info and options
+    quote["customer_email"] = customer_email
+    quote["customer_phone"] = customer_phone
+    quote["customer_address"] = customer_address
+    quote["fabric_grade"] = fabric_grade
+    quote["photos"] = photos
+    quote["rooms"] = rooms
+    quote["options"] = options
+
+    if options.get("rush_order"):
+        for tier_key in quote.get("tiers", {}):
+            tier = quote["tiers"][tier_key]
+            rush_amount = round(tier.get("subtotal", 0) * 0.20, 2)
+            # Add rush surcharge to last item's line_items (line_items live inside items, not at tier level)
+            if tier.get("items"):
+                tier["items"][-1].get("line_items", []).append({
+                    "category": "surcharge",
+                    "description": "Rush Order Surcharge (20%)",
+                    "quantity": 1, "unit": "ea",
+                    "rate": rush_amount, "amount": rush_amount,
+                })
+            tier["subtotal"] = round(tier["subtotal"] + rush_amount, 2)
+            tier["tax"] = round(tier["subtotal"] * tier.get("tax_rate", 0.06), 2)
+            tier["total"] = round(tier["subtotal"] + tier["tax"], 2)
+            tier["deposit"] = round(tier["total"] * 0.5, 2)
+
+    # Save
+    os.makedirs(QUOTES_DIR, exist_ok=True)
+    with open(os.path.join(QUOTES_DIR, f"{quote['id']}.json"), "w") as f:
+        json.dump(quote, f, indent=2, default=str)
+
+    return {"status": "success", "quote": quote}
+
+
+def _parse_dim(val) -> float:
+    """Parse dimension to float (handles strings, ints, empty)."""
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        try:
+            return float(val) if val.strip() else 0.0
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
 @router.get("/pricing-tables")
 async def get_pricing_tables():
     """Get all pricing tables for the founder pricing editor."""

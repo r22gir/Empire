@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones } from 'lucide-react';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
@@ -52,24 +52,172 @@ interface Props {
   onSend: (msg: string, imageFilename?: string | null) => void;
   onStop: () => void;
   onScreenChange?: (screen: string) => void;
+  setOnMessageComplete?: (cb: ((msg: Message) => void) | null) => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange, setOnMessageComplete }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [codeMode, setCodeMode] = useState(false);
   const [codeTask, setCodeTask] = useState<any>(null);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [ttsPlaying, setTtsPlaying] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const codePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voiceModeRef = useRef(false);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent, codeTask]);
+
+  // Keep voiceMode ref in sync
+  useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+
+  // Strip markdown for TTS (remove **, *, ```, tool blocks, links)
+  const stripForTTS = (text: string) => {
+    return text
+      .replace(/```[\s\S]*?```/g, '')  // code blocks
+      .replace(/\*\*(.*?)\*\*/g, '$1')  // bold
+      .replace(/\*(.*?)\*/g, '$1')  // italic
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')  // links
+      .replace(/#+\s/g, '')  // headings
+      .replace(/\n{3,}/g, '\n\n')  // excess newlines
+      .trim();
+  };
+
+  // Auto-play TTS when voice mode is on and AI responds
+  const playTTSWithCallback = useCallback(async (text: string, onEnd?: () => void) => {
+    const clean = stripForTTS(text);
+    if (!clean || clean.length < 3) { onEnd?.(); return; }
+    try {
+      setTtsPlaying(true);
+      const res = await fetch(API + '/max/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: clean.slice(0, 2000), voice: 'rex' }),
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        ttsAudioRef.current = audio;
+        audio.onended = () => {
+          setTtsPlaying(false);
+          ttsAudioRef.current = null;
+          URL.revokeObjectURL(url);
+          onEnd?.();
+        };
+        audio.onerror = () => {
+          setTtsPlaying(false);
+          ttsAudioRef.current = null;
+          onEnd?.();
+        };
+        audio.play();
+      } else {
+        setTtsPlaying(false);
+        onEnd?.();
+      }
+    } catch {
+      setTtsPlaying(false);
+      onEnd?.();
+    }
+  }, []);
+
+  // Start recording for voice mode (returns promise that resolves with transcript)
+  const startVoiceCapture = useCallback(() => {
+    if (mediaRecorderRef.current?.state === 'recording') return;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const fd = new FormData();
+        fd.append('audio', blob, 'recording.webm');
+        try {
+          const res = await fetch(API.replace('/api/v1', '') + '/api/transcribe', { method: 'POST', body: fd });
+          const data = await res.json();
+          if (data.text && voiceModeRef.current) {
+            // In voice mode: auto-send the transcript
+            onSend(data.text);
+          } else if (data.text) {
+            setInput(prev => prev + (prev ? ' ' : '') + data.text);
+            textareaRef.current?.focus();
+          }
+        } catch { /* silent */ }
+        setRecording(false);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    }).catch(() => { /* mic permission denied */ });
+  }, [onSend]);
+
+  // Register message complete callback for voice auto-play
+  useEffect(() => {
+    if (!setOnMessageComplete) return;
+    if (voiceMode) {
+      setOnMessageComplete((msg: Message) => {
+        if (!voiceModeRef.current) return;
+        // Auto-play TTS, then auto-listen
+        playTTSWithCallback(msg.content, () => {
+          if (voiceModeRef.current) {
+            // Start listening again for continuous voice loop
+            startVoiceCapture();
+          }
+        });
+      });
+    } else {
+      setOnMessageComplete(null);
+    }
+    return () => { setOnMessageComplete?.(null); };
+  }, [voiceMode, setOnMessageComplete, playTTSWithCallback, startVoiceCapture]);
+
+  // Push-to-talk: spacebar (when textarea not focused)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !inputFocused && !e.repeat && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault();
+        if (!recording) startVoiceCapture();
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && recording && !inputFocused && document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault();
+        mediaRecorderRef.current?.stop();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
+  }, [recording, inputFocused, startVoiceCapture]);
+
+  // Stop TTS when voice mode turned off
+  const toggleVoiceMode = useCallback(() => {
+    setVoiceMode(prev => {
+      const next = !prev;
+      if (!next) {
+        // Turning off — stop any playing TTS
+        if (ttsAudioRef.current) {
+          ttsAudioRef.current.pause();
+          ttsAudioRef.current = null;
+          setTtsPlaying(false);
+        }
+        // Stop recording if active
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+      }
+      return next;
+    });
+  }, []);
 
   // Poll code task status
   useEffect(() => {
@@ -157,47 +305,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const toggleRecording = useCallback(async () => {
     if (recording) {
       mediaRecorderRef.current?.stop();
-      setRecording(false);
       return;
     }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = e => chunks.push(e.data);
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunks, { type: 'audio/webm' });
-        const fd = new FormData();
-        fd.append('audio', blob, 'recording.webm');
-        try {
-          const res = await fetch(API.replace('/api/v1', '') + '/api/transcribe', { method: 'POST', body: fd });
-          const data = await res.json();
-          if (data.success && data.text) {
-            setInput(prev => prev + (prev ? ' ' : '') + data.text);
-            textareaRef.current?.focus();
-          }
-        } catch { /* silent */ }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setRecording(true);
-    } catch { /* mic permission denied */ }
-  }, [recording]);
+    startVoiceCapture();
+  }, [recording, startVoiceCapture]);
 
   const playTTS = async (text: string) => {
-    try {
-      const res = await fetch(API + '/max/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text.slice(0, 2000), voice: 'rex' }),
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        new Audio(url).play();
-      }
-    } catch { /* silent */ }
+    playTTSWithCallback(text);
   };
 
   return (
@@ -220,6 +334,31 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         }}>
           MAX
         </span>
+        {voiceMode && (
+          <span style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#7c3aed',
+            marginLeft: 10,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+          }}>
+            <Headphones size={12} />
+            {ttsPlaying ? 'Speaking...' : recording ? 'Listening...' : 'Voice Mode'}
+            {' · '}
+            <button
+              onClick={toggleVoiceMode}
+              style={{
+                background: 'none', border: 'none', color: '#7c3aed',
+                cursor: 'pointer', fontSize: 11, fontWeight: 600, textDecoration: 'underline',
+                padding: 0,
+              }}
+            >
+              Stop
+            </button>
+          </span>
+        )}
       </div>
 
       {/* Messages */}
@@ -594,6 +733,41 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             }}
           >
             {recording ? <MicOff size={17} /> : <Mic size={17} />}
+          </button>
+
+          {/* Voice Mode toggle */}
+          <button
+            onClick={toggleVoiceMode}
+            title={voiceMode ? 'Voice Mode ON — auto-speak + auto-listen (click to disable)' : 'Voice Mode — hands-free conversation'}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              background: voiceMode ? '#1a0a2e' : 'var(--card-bg)',
+              border: voiceMode ? '1.5px solid #7c3aed' : '1px solid var(--border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: voiceMode ? '#7c3aed' : 'var(--dim)',
+              flexShrink: 0,
+              transition: 'all 0.2s',
+              position: 'relative',
+            }}
+          >
+            <Headphones size={17} />
+            {voiceMode && (
+              <span style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: ttsPlaying ? '#7c3aed' : recording ? '#ef4444' : '#22c55e',
+                animation: (ttsPlaying || recording) ? 'pulse 1.5s infinite' : 'none',
+              }} />
+            )}
           </button>
 
           {/* Code Mode toggle */}

@@ -182,6 +182,13 @@ def _append_and_save(chat_id: str, role: str, content: str, **meta):
     except Exception as e:
         logger.warning(f"MemoryStore write failed: {e}")
 
+    # Save to unified cross-channel store
+    try:
+        from app.services.max.unified_message_store import unified_store
+        unified_store.add_message(f"telegram-{chat_id}", "telegram", role, content)
+    except Exception as e:
+        logger.warning(f"Unified message store write failed: {e}")
+
 
 class TelegramBot:
     """Telegram bot for MAX <-> Founder communication with voice/photo/text."""

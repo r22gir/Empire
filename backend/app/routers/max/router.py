@@ -304,6 +304,18 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(final_content))
         background_tasks.add_task(conversation_tracker.check_and_summarize, conv_id)
 
+        # Save to unified cross-channel store
+        try:
+            from app.services.max.unified_message_store import unified_store
+            unified_store.add_message(conv_id, request.channel or "web", "user", request.message)
+            unified_store.add_message(
+                conv_id, request.channel or "web", "assistant", strip_tool_blocks(final_content),
+                model=response.model_used,
+                tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None
+            )
+        except Exception as _ums_err:
+            logger.warning(f"Unified message store write failed: {_ums_err}")
+
         # Learning: real-time (every exchange) or batch (every N messages)
         if REALTIME_LEARNING_ENABLED:
             background_tasks.add_task(
@@ -410,6 +422,13 @@ async def chat_stream(request: ChatRequest):
     # Conversation tracking ID
     conv_id = request.conversation_id or str(uuid.uuid4())
     conversation_tracker.add_message(conv_id, "user", request.message)
+
+    # Save user message to unified cross-channel store
+    try:
+        from app.services.max.unified_message_store import unified_store
+        unified_store.add_message(conv_id, request.channel or "web", "user", request.message)
+    except Exception as _ums_err:
+        logger.warning(f"Unified message store (stream user) failed: {_ums_err}")
 
     # Resolve access control user for streaming
     _stream_ac_context = None
@@ -523,6 +542,17 @@ async def chat_stream(request: ChatRequest):
                 conversation_tracker.check_and_summarize(conv_id),
                 "summarization"
             ))
+
+            # Save assistant response to unified cross-channel store
+            try:
+                from app.services.max.unified_message_store import unified_store
+                unified_store.add_message(
+                    conv_id, request.channel or "web", "assistant", strip_tool_blocks(full_response),
+                    model=model_used,
+                    tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None
+                )
+            except Exception as _ums_err:
+                logger.warning(f"Unified message store (stream assistant) failed: {_ums_err}")
             # Learning: real-time (every exchange) or batch (every N messages)
             if REALTIME_LEARNING_ENABLED:
                 asyncio.create_task(_safe_background(
@@ -547,6 +577,78 @@ async def chat_stream(request: ChatRequest):
                 _auto_save_exchange_to_memory(
                     request.message, full_response, _stream_channel, conv_id,
                 )
+
+            # ── Streaming quality checks (mirrors non-streaming /chat endpoint) ──
+            _q_channel = Channel.TELEGRAM if (request.channel == "telegram") else Channel.CHAT
+
+            # 1. Grounding verification for web-sourced responses
+            _grounding_events = []
+            if tool_results_list:
+                # Convert result objects to dicts for verify_web_response
+                _tool_dicts = [{"tool": r.tool, "success": r.success, "result": r.result, "error": r.error} for r in tool_results_list]
+                _has_web = any(td["tool"] in ("web_search", "web_read") for td in _tool_dicts)
+                if _has_web:
+                    try:
+                        _verification = verify_web_response(full_response, _tool_dicts)
+                        if _verification.claims_stripped > 0:
+                            logger.info(f"[stream] Grounding: {_verification.claims_verified} verified, {_verification.claims_stripped} stripped, {_verification.phantom_citations_removed} phantom citations removed")
+                            full_response = _verification.verified
+                            _grounding_events.append({
+                                "type": "quality_fix",
+                                "source": "grounding",
+                                "claims_verified": _verification.claims_verified,
+                                "claims_stripped": _verification.claims_stripped,
+                                "phantom_citations_removed": _verification.phantom_citations_removed,
+                            })
+                        log_to_audit(
+                            user_query=request.message,
+                            verification=_verification,
+                            model_used=model_used,
+                        )
+                    except Exception as _gv_err:
+                        logger.warning(f"[stream] Grounding verification failed: {_gv_err}")
+
+            # 2. Quality engine validation
+            try:
+                _qr = quality_engine.validate(full_response, channel=_q_channel, founder_override=founder)
+                if _qr.fixed_count > 0:
+                    logger.info(f"[stream] Quality engine fixed {_qr.fixed_count} issues in {_q_channel.value} response")
+                    _original_len = len(full_response)
+                    full_response = _qr.cleaned
+                    yield f"data: {json.dumps({'type': 'quality_fix', 'source': 'quality_engine', 'original_length': _original_len, 'cleaned_length': len(full_response), 'issues': [str(i) for i in _qr.issues]})}\n\n"
+                    # Update conversation tracker with cleaned version
+                    conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
+            except Exception as _qe_err:
+                logger.warning(f"[stream] Quality engine failed: {_qe_err}")
+                _qr = None
+
+            # Emit grounding events (after quality engine so all fixes are sequential)
+            for _ge in _grounding_events:
+                yield f"data: {json.dumps(_ge)}\n\n"
+
+            # 3. Accuracy monitor audit log
+            try:
+                from app.services.max.accuracy_monitor import accuracy_monitor
+                _issues = _qr.issues if _qr else []
+                _fixed = _qr.fixed_count if _qr else 0
+                _severity = _qr.severity if _qr else None
+                accuracy_monitor.log_audit(
+                    user_query=request.message,
+                    response_text=full_response,
+                    verification=type('V', (), {
+                        'claims_found': len(_issues),
+                        'claims_verified': len(_issues) - len([i for i in _issues if i.severity.value == 'critical']),
+                        'claims_stripped': _fixed,
+                        'phantom_citations_removed': 0,
+                    })(),
+                    model_used=model_used,
+                    channel=_q_channel.value,
+                    output_type="chat/stream",
+                    quality_severity=_severity,
+                    fixed_by_engine=_fixed,
+                )
+            except Exception as _am_err:
+                logger.debug(f"[stream] Quality audit log failed: {_am_err}")
 
             yield f"data: {json.dumps({'type': 'done', 'model_used': model_used, 'conversation_id': conv_id})}\n\n"
         except Exception as e:

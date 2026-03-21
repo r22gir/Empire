@@ -193,6 +193,40 @@ async def search_chats(q: str, user_id: str = "founder"):
     return {"results": results, "count": len(results), "query": q}
 
 
+# ── Cross-Channel Unified Store Endpoints ─────────────────────
+# These MUST be defined before /{chat_id} to avoid route conflicts
+
+
+@router.get("/cross-channel")
+async def cross_channel_messages(channel: str = None, hours: int = 24, limit: int = 50):
+    """Get messages across all channels from unified store."""
+    from app.services.max.unified_message_store import unified_store
+    if channel:
+        msgs = unified_store.get_recent_by_channel(channel, limit=limit, hours=hours)
+    else:
+        ctx = unified_store.get_cross_channel_context(limit_per_channel=limit, hours=hours)
+        msgs = []
+        for ch_msgs in ctx.values():
+            msgs.extend(ch_msgs)
+        msgs.sort(key=lambda m: m.get("created_at", ""))
+    return {"messages": msgs, "count": len(msgs)}
+
+
+@router.get("/cross-channel/stats")
+async def cross_channel_stats():
+    """Get message counts by channel from unified store."""
+    from app.services.max.unified_message_store import unified_store
+    return unified_store.get_stats()
+
+
+@router.get("/cross-channel/search")
+async def cross_channel_search(q: str, channel: str = None, limit: int = 20):
+    """Search messages across all channels."""
+    from app.services.max.unified_message_store import unified_store
+    results = unified_store.search_messages(q, channel=channel, limit=limit)
+    return {"results": results, "count": len(results), "query": q}
+
+
 @router.get("/{chat_id}")
 async def load_chat(chat_id: str, user_id: str = "founder"):
     chat_file = CHATS_DIR / user_id / f"{chat_id}.json"

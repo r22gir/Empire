@@ -156,6 +156,7 @@ export function useChat() {
       };
       updateMessages([...newMsgs, assistantMsg]);
       setStreamingContent('');
+      if (onMessageCompleteRef.current) onMessageCompleteRef.current(assistantMsg);
     } catch (e: any) {
       if (e.name === 'AbortError') {
         if (accumulated) {
@@ -183,9 +184,14 @@ export function useChat() {
 
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
 
+  const onMessageCompleteRef = useRef<((msg: Message) => void) | null>(null);
+  const setOnMessageComplete = useCallback((cb: ((msg: Message) => void) | null) => {
+    onMessageCompleteRef.current = cb;
+  }, []);
+
   return {
     messages, isStreaming, streamingContent, streamingModel,
-    sendMessage, stopStreaming, loadMessages,
+    sendMessage, stopStreaming, loadMessages, setOnMessageComplete,
     chatId: chatIdRef.current,
   };
 }

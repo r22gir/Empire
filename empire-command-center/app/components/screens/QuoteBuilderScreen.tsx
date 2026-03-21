@@ -67,9 +67,12 @@ interface QuoteOptions {
 }
 
 const ITEM_TYPES = [
-  'sofa', 'loveseat', 'chair', 'dining_chair', 'ottoman', 'bench', 'headboard', 'sectional',
-  'drapery', 'roman_shade', 'valance', 'cornice',
-  'cushion', 'throw_pillow', 'bedskirt', 'duvet', 'table_runner', 'placemats',
+  'sofa_3cushion', 'sofa_2cushion', 'loveseat', 'accent_chair', 'wingback_chair', 'club_chair',
+  'dining_chair_seat', 'dining_chair_full', 'ottoman_small', 'ottoman_large',
+  'bench', 'headboard', 'sectional', 'banquette',
+  'drapery', 'roman_shade', 'valance', 'cornice', 'swag',
+  'seat_cushion', 'back_cushion', 'throw_pillow',
+  'bedskirt', 'duvet', 'table_runner', 'placemats',
 ];
 
 type QuoteInputMethod = 'photos' | '3dscan' | 'manual' | 'intake';
@@ -435,25 +438,23 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         },
       };
 
-      // Try analyze-photo endpoint if we have photos, otherwise create quote
-      let res: Response;
-      if (uploadedFilenames.length > 0) {
-        res = await fetch(API + '/quotes/analyze-photo', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        res = await fetch(API + '/quotes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      }
+      // Use from-rooms endpoint which runs full pricing pipeline (yardage + tiers)
+      const res = await fetch(API + '/quotes/from-rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
       if (res.ok) {
         const data = await res.json();
-        setResult(data);
+        // Unwrap: endpoint returns {status, quote} — use the quote object
+        const quote = data.quote || data;
+        // Convert tiers object {A:{...}, B:{...}, C:{...}} to array for ResultView
+        if (quote.tiers && !Array.isArray(quote.tiers)) {
+          const tierKeys = ['A', 'B', 'C'];
+          quote.tiers = tierKeys.map(k => quote.tiers[k]).filter(Boolean);
+        }
+        setResult(quote);
       } else {
         const errData = await res.json().catch(() => null);
         setError(errData?.detail || `Server error ${res.status}`);
