@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 # Load .env before anything reads os.getenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.rate_limiter import limiter
 from slowapi.errors import RateLimitExceeded
