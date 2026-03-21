@@ -70,18 +70,39 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     setLoading(false);
   };
 
-  // Load existing photos for this quote
+  // Load existing photos for this quote (from intake transfer or photo store)
   useEffect(() => {
     if (!quote?.id) return;
+    const intakePhotos: UploadedPhoto[] = (quote.photos || []).map((p: any) => ({
+      filename: p.filename || p.original_name || 'photo',
+      path: p.url || p.path || '',
+      size: 0,
+      source: 'intake',
+      analyzing: false,
+      analysis: null,
+    }));
+    if (intakePhotos.length) {
+      setUploadedPhotos(prev => {
+        const existing = new Set(prev.map(p => p.filename));
+        return [...prev, ...intakePhotos.filter(p => !existing.has(p.filename))];
+      });
+    }
+    // Also try photo store
     fetch(`${API}/photos/quote/${quote.id}`)
       .then(r => r.json())
       .then(data => {
         if (data.photos?.length) {
-          setUploadedPhotos(data.photos.map((p: UploadedPhoto) => ({ ...p, analyzing: false, analysis: null })));
+          setUploadedPhotos(prev => {
+            const existing = new Set(prev.map(p => p.filename));
+            const newPhotos = data.photos
+              .filter((p: UploadedPhoto) => !existing.has(p.filename))
+              .map((p: UploadedPhoto) => ({ ...p, analyzing: false, analysis: null }));
+            return [...prev, ...newPhotos];
+          });
         }
       })
       .catch(() => {});
-  }, [quote?.id]);
+  }, [quote?.id, quote?.photos]);
 
   const handlePhotoUpload = useCallback(async (fileList: FileList | File[]) => {
     if (!quote?.id) return;
@@ -262,27 +283,18 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         style={{ display: 'none' }} onChange={e => e.target.files && handlePhotoUpload(e.target.files)} />
 
       {/* Photo area */}
-      {(quote.photos && quote.photos.length > 0) || uploadedPhotos.length > 0 ? (
+      {uploadedPhotos.length > 0 ? (
         <div className="empire-card" style={{ padding: 12, marginTop: 16, marginBottom: 20, borderRadius: 14 }}>
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
-            {/* Existing quote photos */}
-            {quote.photos?.map((photo, pi) => (
-              <div key={`q-${pi}`} style={{ position: 'relative', flexShrink: 0 }}>
-                <img
-                  src={`${API}/files/images/${photo.filename}`}
-                  alt={`Photo ${pi + 1}`}
-                  onClick={() => setPreviewPhoto(`${API}/files/images/${photo.filename}`)}
-                  style={{ height: 160, width: 200, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: '1px solid #e5e0d8' }}
-                />
-              </div>
-            ))}
-            {/* Uploaded photos */}
-            {uploadedPhotos.map((photo, pi) => (
+            {/* All photos (intake + uploaded) with analyze buttons */}
+            {uploadedPhotos.map((photo, pi) => {
+              const photoUrl = photo.path?.startsWith('/api/') ? `${API_BASE}${photo.path}` : `${API_BASE}${photo.path}`;
+              return (
               <div key={`u-${pi}`} style={{ position: 'relative', flexShrink: 0 }}>
                 <img
-                  src={`${API_BASE}${photo.path}`}
-                  alt={`Upload ${pi + 1}`}
-                  onClick={() => setPreviewPhoto(`${API_BASE}${photo.path}`)}
+                  src={photoUrl}
+                  alt={`Photo ${pi + 1}`}
+                  onClick={() => setPreviewPhoto(photoUrl)}
                   style={{ height: 160, width: 200, objectFit: 'cover', borderRadius: 8, cursor: 'pointer', border: '1px solid #e5e0d8' }}
                 />
                 <button
@@ -319,7 +331,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                   <div style={{ marginTop: 4, fontSize: 11, color: '#dc2626', padding: '2px 4px' }}>{photo.analysis.error}</div>
                 )}
               </div>
-            ))}
+            );})}
             {/* Add more button */}
             <button
               onClick={() => fileInputRef.current?.click()}

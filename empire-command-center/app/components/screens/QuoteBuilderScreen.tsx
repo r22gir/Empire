@@ -137,6 +137,51 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Load existing quote data when editQuoteId is provided
+  useEffect(() => {
+    if (!editQuoteId) return;
+    fetch(`${API}/quotes/${editQuoteId}`)
+      .then(r => r.json())
+      .then(q => {
+        // Pre-fill customer
+        if (q.customer_name || q.customer_email) {
+          setCustomer({
+            name: q.customer_name || '',
+            email: q.customer_email || '',
+            phone: q.customer_phone || '',
+            address: q.customer_address || '',
+          });
+        }
+        // Pre-fill photos from quote
+        if (q.photos?.length) {
+          const quotePhotos: PhotoFile[] = q.photos.map((p: any) => ({
+            preview: `${API_BASE}${p.url || p.path}`,
+            serverUrl: `${API_BASE}${p.url || p.path}`,
+            originalName: p.original_name || p.filename,
+            fromIntake: true,
+          }));
+          setPhotos(quotePhotos);
+        }
+        // Pre-fill rooms if they exist
+        if (q.rooms?.length) {
+          setRooms(q.rooms.map((r: any) => ({
+            id: crypto.randomUUID(),
+            name: r.name || 'Room',
+            items: (r.windows || []).map((w: any) => ({
+              id: crypto.randomUUID(),
+              type: w.treatmentType || 'drapery',
+              name: w.name || 'Window',
+              width: w.width || 0,
+              height: w.height || 0,
+              quantity: w.quantity || 1,
+              notes: w.description || '',
+            })),
+          })));
+        }
+      })
+      .catch(() => {});
+  }, [editQuoteId]);
+
   // Fetch intake projects when entering Photos step
   useEffect(() => {
     if (step === 2) {

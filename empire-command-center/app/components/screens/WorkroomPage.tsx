@@ -437,6 +437,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
     }
   }, [initialQuoteId]);
   const [showBuilder, setShowBuilder] = useState(false);
+  const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
   const filtered = quotes.filter(q => {
     if (filter !== 'all' && q.status !== filter) return false;
     if (search && !((q.customer_name || '').toLowerCase().includes(search.toLowerCase()) ||
@@ -451,7 +452,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
   if (showBuilder) {
     return (
       <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 size={24} className="text-[#b8960c] animate-spin" /></div>}>
-        <QuoteBuilderScreen onBack={() => setShowBuilder(false)} />
+        <QuoteBuilderScreen onBack={() => { setShowBuilder(false); setBuilderQuoteId(null); }} editQuoteId={builderQuoteId || undefined} />
       </Suspense>
     );
   }
@@ -468,7 +469,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
           <ArrowLeft size={16} /> Back to Quotes
         </button>
         <Suspense fallback={<div className="flex items-center justify-center py-20"><Loader2 size={24} className="text-[#b8960c] animate-spin" /></div>}>
-          <QuoteReviewScreen quoteId={viewingQuoteId} onOpenBuilder={() => { setViewingQuoteId(null); setShowBuilder(true); }} />
+          <QuoteReviewScreen quoteId={viewingQuoteId} onOpenBuilder={() => { setBuilderQuoteId(viewingQuoteId); setViewingQuoteId(null); setShowBuilder(true); }} />
         </Suspense>
       </div>
     );
