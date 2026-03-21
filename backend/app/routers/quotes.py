@@ -778,7 +778,7 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
                 "project_description": quote.get("project_description", quote.get("project_name", "")),
                 "line_items": line_items,
                 "total": quote.get("total", 0),
-                "quote_url": f"https://studio.empirebox.store/quotes/{quote_id}",
+                "quote_url": f"https://studio.empirebox.store/quote/{quote_id}",
             })
 
             subject = f"Your Quote #{quote['quote_number']} from Empire Workroom"

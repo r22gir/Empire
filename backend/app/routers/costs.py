@@ -14,6 +14,12 @@ async def cost_overview(days: int = Query(30, ge=1, le=365)):
     return token_tracker.get_stats(days)
 
 
+@router.get("/costs/summary")
+async def cost_summary(days: int = Query(30, ge=1, le=365)):
+    """Alias for /costs/overview — returns full dashboard summary."""
+    return token_tracker.get_stats(days)
+
+
 @router.get("/costs/today")
 async def cost_today():
     """Today's cost summary."""

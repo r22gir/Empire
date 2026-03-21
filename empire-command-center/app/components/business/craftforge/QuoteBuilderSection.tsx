@@ -4,7 +4,7 @@ import { API } from '../../../lib/api';
 import {
   Plus, X, Trash2, Calculator, Send, Loader2, PenTool, FileDown, Mail,
   ChevronDown, ChevronRight, Upload, Image as ImageIcon, Save, ArrowLeft,
-  CheckCircle, FileText, ClipboardList, DollarSign, Percent
+  CheckCircle, FileText, ClipboardList, DollarSign, Percent, Pencil, Search, Check
 } from 'lucide-react';
 import DataTable, { Column } from '../shared/DataTable';
 import StatusBadge from '../shared/StatusBadge';
@@ -68,6 +68,40 @@ export default function QuoteBuilderSection() {
   const toggleSection = (key: keyof typeof sectionsOpen) =>
     setSectionsOpen(prev => ({ ...prev, [key]: !prev[key] }));
 
+  // CRM customer lookup
+  const [allCustomers, setAllCustomers] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedCrmId, setSelectedCrmId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`${API}/crm/customers?limit=500`).then(r => r.json())
+      .then(data => setAllCustomers(data.customers || data || []))
+      .catch(() => {});
+  }, []);
+
+  const handleCustomerNameChange = (value: string) => {
+    setCustomerName(value);
+    setSelectedCrmId(null);
+    if (value.length >= 2 && allCustomers.length > 0) {
+      const q = value.toLowerCase();
+      const matches = allCustomers.filter((c: any) => c.name?.toLowerCase().includes(q)).slice(0, 6);
+      setSuggestions(matches);
+      setShowSuggestions(matches.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const selectCustomer = (c: any) => {
+    setCustomerName(c.name || '');
+    setCustomerEmail(c.email || '');
+    setCustomerPhone(c.phone || '');
+    setCustomerAddress(c.address || '');
+    setSelectedCrmId(c.id);
+    setShowSuggestions(false);
+  };
+
   // Form state
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
@@ -96,19 +130,19 @@ export default function QuoteBuilderSection() {
 
   // PDF visibility toggles — what the client sees on the quote/invoice
   const [pdfShow, setPdfShow] = useState({
-    lineItems: true,
-    materials: true,
-    cncOps: true,
-    dimensions: true,
+    lineItems: false,
+    materials: false,
+    cncOps: false,
+    dimensions: false,
     photos: false,
-    notes: true,
-    deposit: true,
-    tax: true,
+    notes: false,
+    deposit: false,
+    tax: false,
   });
   const togglePdf = (key: keyof typeof pdfShow) => setPdfShow(prev => ({ ...prev, [key]: !prev[key] }));
 
   // Photo upload state
-  const [photos, setPhotos] = useState<{ file?: File; url?: string; name: string }[]>([]);
+  const [photos, setPhotos] = useState<{ file?: File; url?: string; name: string; serverUrl?: string; includeInPdf?: boolean }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [aiResults, setAiResults] = useState<any[]>([]);
 
@@ -186,7 +220,7 @@ export default function QuoteBuilderSection() {
     setDiscountAmount(design.discount_amount || 0);
     setDiscountType(design.discount_type === 'percent' ? '%' : '$');
     setNotes(design.notes || '');
-    if (design.pdf_show) setPdfShow({ lineItems: true, materials: true, cncOps: true, dimensions: true, photos: false, notes: true, deposit: true, tax: true, ...design.pdf_show });
+    if (design.pdf_show) setPdfShow({ lineItems: false, materials: false, cncOps: false, dimensions: false, photos: false, notes: false, deposit: false, tax: false, ...design.pdf_show });
 
     // Determine job type from existing data
     const hasCNC = (design.cnc_jobs || []).some((j: any) => j.estimated_time_min > 0);
@@ -256,8 +290,10 @@ export default function QuoteBuilderSection() {
     const existingPhotos = design.photos || [];
     if (existingPhotos.length > 0) {
       setPhotos(existingPhotos.map((p: any) => ({
-        url: typeof p === 'string' ? p : p.url || p.path || '',
-        name: typeof p === 'string' ? p : p.original_name || p.filename || 'photo',
+        url: typeof p === 'string' ? `${API}${p}` : (p.url?.startsWith('http') ? p.url : `${API}${p.url || p.serverUrl || p.path || ''}`),
+        serverUrl: typeof p === 'string' ? p : p.serverUrl || p.path || p.url || '',
+        name: typeof p === 'string' ? p.split('/').pop() || 'photo' : p.name || p.original_name || p.filename || 'photo',
+        includeInPdf: p.includeInPdf !== false,
       })));
     } else {
       setPhotos([]);
@@ -270,9 +306,9 @@ export default function QuoteBuilderSection() {
   // Build request body from form state
   const buildBody = () => ({
     customer_name: customerName,
-    customer_email: customerEmail || undefined,
-    customer_phone: customerPhone || undefined,
-    customer_address: customerAddress || undefined,
+    customer_email: customerEmail || '',
+    customer_phone: customerPhone || '',
+    customer_address: customerAddress || '',
     name: designName,
     description: description || undefined,
     category,
@@ -307,6 +343,7 @@ export default function QuoteBuilderSection() {
     discount_amount: discountAmount,
     discount_type: discountType === '%' ? 'percent' : 'dollar',
     notes: notes || undefined,
+    photos: photos.filter(p => p.serverUrl).map(p => ({ serverUrl: p.serverUrl, name: p.name, includeInPdf: p.includeInPdf !== false })),
     pdf_show: pdfShow,
   });
 
@@ -470,11 +507,38 @@ export default function QuoteBuilderSection() {
     }
   };
 
-  // Photo upload
+  // Photo upload — uploads to server immediately
   const handlePhotoUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const newPhotos = Array.from(files).map(f => ({ file: f, name: f.name, url: URL.createObjectURL(f) }));
-    setPhotos(prev => [...prev, ...newPhotos]);
+    setUploading(true);
+    const entityId = editingId || 'new-' + Date.now();
+    try {
+      const formData = new FormData();
+      Array.from(files).forEach(f => formData.append('files', f));
+      formData.append('entity_type', 'craftforge');
+      formData.append('entity_id', entityId);
+      formData.append('source', 'cc');
+      const resp = await fetch(`${API}/photos/upload`, { method: 'POST', body: formData });
+      if (resp.ok) {
+        const result = await resp.json();
+        const uploaded = (result.photos || []).map((p: any) => ({
+          name: p.filename,
+          url: `${API}${p.path}`,
+          serverUrl: p.path,
+          includeInPdf: true,
+        }));
+        setPhotos(prev => [...prev, ...uploaded]);
+      } else {
+        // Fallback to local preview
+        const newPhotos = Array.from(files).map(f => ({ file: f, name: f.name, url: URL.createObjectURL(f), includeInPdf: true }));
+        setPhotos(prev => [...prev, ...newPhotos]);
+      }
+    } catch {
+      const newPhotos = Array.from(files).map(f => ({ file: f, name: f.name, url: URL.createObjectURL(f), includeInPdf: true }));
+      setPhotos(prev => [...prev, ...newPhotos]);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handlePhotoDrop = (e: React.DragEvent) => {
@@ -579,6 +643,27 @@ export default function QuoteBuilderSection() {
             className="hover:text-[#7e22ce]"
           >
             <ClipboardList size={15} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); loadDesign(row); }}
+            title="Edit Quote"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#b8960c' }}
+            className="hover:text-[#a68500]"
+          >
+            <Pencil size={15} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`Delete ${row.design_number || 'this quote'}?`)) {
+                fetch(`${API}/craftforge/designs/${row.id}`, { method: 'DELETE' }).then(() => fetchDesigns());
+              }
+            }}
+            title="Delete Quote"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#dc2626' }}
+            className="hover:text-[#b91c1c]"
+          >
+            <Trash2 size={15} />
           </button>
         </div>
       )},
@@ -708,10 +793,48 @@ export default function QuoteBuilderSection() {
         <SectionHeader label="Customer & Job Info" sectionKey="customer" />
         {sectionsOpen.customer && (
           <div className="mt-3">
+            {selectedCrmId && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+                <Check size={14} className="text-green-600" />
+                <span style={{ fontSize: 12, color: '#15803d', fontWeight: 500 }}>Loaded from CRM</span>
+                <button onClick={() => { setSelectedCrmId(null); setCustomerName(''); setCustomerEmail(''); setCustomerPhone(''); setCustomerAddress(''); }} style={{ marginLeft: 'auto', fontSize: 11, color: '#999', cursor: 'pointer', background: 'none', border: 'none' }}>Clear</button>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3 mb-3">
-              <div>
+              <div style={{ position: 'relative' }}>
                 <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Customer Name *</label>
-                <input className="form-input" value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer name" />
+                <div style={{ position: 'relative' }}>
+                  <input className="form-input" value={customerName}
+                    onChange={e => handleCustomerNameChange(e.target.value)}
+                    onFocus={() => { if (suggestions.length > 0 && !selectedCrmId) setShowSuggestions(true); }}
+                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                    placeholder="Start typing to search CRM..."
+                    style={{ paddingRight: 30 }}
+                  />
+                  <Search size={14} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#ccc', pointerEvents: 'none' }} />
+                </div>
+                {showSuggestions && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: '#fff', border: '1px solid #e5e0d8', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', marginTop: 4, maxHeight: 220, overflowY: 'auto' }}>
+                    {suggestions.map(c => (
+                      <div key={c.id} onMouseDown={() => selectCustomer(c)}
+                        style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f5f3ef', display: 'flex', alignItems: 'center', gap: 10 }}
+                        className="hover:bg-[#fdf8eb]">
+                        <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#f5f0e6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#b8960c', flexShrink: 0 }}>
+                          {(c.name || '?')[0].toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{c.name}</div>
+                          <div style={{ fontSize: 10, color: '#999', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {[c.email, c.phone].filter(Boolean).join(' · ') || 'No contact info'}
+                          </div>
+                        </div>
+                        {c.total_revenue > 0 && (
+                          <div style={{ fontSize: 10, fontWeight: 600, color: '#b8960c' }}>${Number(c.total_revenue).toLocaleString()}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-[#999] uppercase tracking-wide mb-1">Email</label>
@@ -944,6 +1067,19 @@ export default function QuoteBuilderSection() {
                   >
                     <X size={10} />
                   </button>
+                  <label
+                    onClick={(e) => e.stopPropagation()}
+                    title={p.includeInPdf ? 'Included in PDF' : 'Not in PDF'}
+                    style={{ position: 'absolute', bottom: 2, left: 2, background: 'rgba(255,255,255,0.9)', borderRadius: 3, padding: '1px 3px', cursor: 'pointer', fontSize: 9, display: 'flex', alignItems: 'center', gap: 2 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={p.includeInPdf !== false}
+                      onChange={() => setPhotos(prev => prev.map((ph, pi) => pi === i ? { ...ph, includeInPdf: !ph.includeInPdf } : ph))}
+                      style={{ width: 12, height: 12 }}
+                    />
+                    PDF
+                  </label>
                   {p.file && (
                     <button
                       onClick={(e) => { e.stopPropagation(); analyzePhoto(i); }}

@@ -1,3 +1,8 @@
+# STATUS: PARTIAL — DB-backed CRUD and license generation are real.
+# Payment processing accepts a Stripe payment_intent_id but does NOT verify it
+# with the Stripe API — it trusts the caller and marks the order as paid.
+# To activate fully: add Stripe webhook verification in process_payment().
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional

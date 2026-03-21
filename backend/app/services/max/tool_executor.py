@@ -37,6 +37,10 @@ except ImportError:
 
 logger = logging.getLogger("max.tool_executor")
 
+# ── Dangerous Tool PIN Gate ───────────────────────────────────────
+DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
+FOUNDER_PIN = os.getenv("FOUNDER_PIN", "7777")
+
 TOOL_BLOCK_RE = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
 
 QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
@@ -116,6 +120,22 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                     summary = f"Tool '{tool_name}' requires PIN authorization"
                     access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
                     return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
+
+        # Dangerous tool PIN gate
+        if tool_name in DANGEROUS_TOOLS:
+            pin = (access_context or {}).get("pin")
+            if not pin:
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
+                )
+            if str(pin) != FOUNDER_PIN:
+                logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
+                return ToolResult(
+                    tool=tool_name, success=False,
+                    error="❌ Invalid PIN. Access denied."
+                )
+            logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
 
         # Tier check
         from app.middleware.tier_middleware import require_tool
@@ -2188,6 +2208,8 @@ To call a tool, include a tool block in your response:
   `{"tool": "get_tasks", "desk": "forge|sales|support|...", "status": "todo|in_progress|done"}`
 - **get_desk_status** — Get task counts across all desks
   `{"tool": "get_desk_status"}`
+- **search_conversations** — Search conversation history across all channels (Telegram, Web, CC). Searches brain memories, conversation summaries, and chat backups.
+  `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
 
 ### Action Tools
 - **create_quick_quote** — Create a quick quote with 3 stacked design proposals (Essential/Designer/Premium). Uses QT-CUSTOMER-DATE-NNN numbering. Total starts at $0 until a proposal is selected.

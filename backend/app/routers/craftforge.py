@@ -103,7 +103,7 @@ class DesignCreate(BaseModel):
     gcode_file: Optional[str] = None
     stl_file: Optional[str] = None
     preview_image: Optional[str] = None
-    photos: list[str] = Field(default_factory=list)
+    photos: list = Field(default_factory=list)  # list of dicts {serverUrl, name, includeInPdf} or strings
 
     # Financials
     material_cost: float = 0.0
@@ -119,6 +119,7 @@ class DesignCreate(BaseModel):
     margin_percent: float = 0.0
     discount_type: str = "dollar"  # dollar or percent
     line_items: list[dict] = Field(default_factory=list)  # general woodwork line items
+    pdf_show: dict = Field(default_factory=dict)  # PDF visibility toggles
     status: str = "draft"  # quote status: draft, sent, accepted, invoiced
 
     # Linked quote (if from Empire Workroom)
@@ -129,6 +130,10 @@ class DesignCreate(BaseModel):
 
 
 class DesignUpdate(BaseModel):
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_address: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
@@ -145,7 +150,7 @@ class DesignUpdate(BaseModel):
     gcode_file: Optional[str] = None
     stl_file: Optional[str] = None
     preview_image: Optional[str] = None
-    photos: Optional[list[str]] = None
+    photos: Optional[list] = None
     material_cost: Optional[float] = None
     cnc_time_cost: Optional[float] = None
     labor_cost: Optional[float] = None
@@ -162,6 +167,7 @@ class DesignUpdate(BaseModel):
     notes: Optional[str] = None
     linked_quote_id: Optional[str] = None
     linked_quote_number: Optional[str] = None
+    pdf_show: Optional[dict] = None
 
 
 class JobCreate(BaseModel):
@@ -279,10 +285,10 @@ async def get_design(design_id: str):
 async def update_design(design_id: str, update: DesignUpdate):
     data = _load(DESIGNS_DIR, design_id)
     for key, val in update.model_dump(exclude_unset=True).items():
-        if val is not None:
-            data[key] = val if not isinstance(val, list) else [
-                v.model_dump() if hasattr(v, "model_dump") else v for v in val
-            ]
+        if isinstance(val, list):
+            data[key] = [v.model_dump() if hasattr(v, "model_dump") else v for v in val]
+        else:
+            data[key] = val
     data["updated_at"] = datetime.utcnow().isoformat()
     _save(DESIGNS_DIR, design_id, data)
     return data
@@ -292,6 +298,26 @@ async def update_design(design_id: str, update: DesignUpdate):
 async def delete_design(design_id: str):
     _delete(DESIGNS_DIR, design_id)
     return {"deleted": True}
+
+
+# ── Quotes alias (returns same data as /designs) ─────────────
+
+@router.get("/quotes")
+async def list_quotes_alias(
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    customer: Optional[str] = None,
+    limit: int = 50,
+):
+    """Alias for /designs — CraftForge uses 'designs' as quotes."""
+    designs = _list_all(DESIGNS_DIR)
+    if status:
+        designs = [d for d in designs if d.get("status") == status]
+    if category:
+        designs = [d for d in designs if d.get("category") == category]
+    if customer:
+        designs = [d for d in designs if customer.lower() in d.get("customer_name", "").lower()]
+    return {"quotes": designs[:limit], "total": len(designs)}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -527,8 +553,6 @@ async def generate_design_pdf(design_id: str):
     biz_email = cfg.get("business_email", "")
     biz_address = cfg.get("business_address", "")
     biz_website = cfg.get("business_website", "")
-    tax_rate = cfg.get("tax_rate", 0.06)
-
     biz_contact_lines = [l for l in [biz_phone, biz_email, biz_address, biz_website] if l]
     biz_contact_html = "<br>".join(f'<span style="font-size:0.82em;color:#555">{l}</span>' for l in biz_contact_lines)
 
@@ -540,11 +564,7 @@ async def generate_design_pdf(design_id: str):
     except Exception:
         expires = ""
 
-    # Margin multiplier — bake margin into client-facing prices
-    margin_pct_val = design.get("margin_percent", 0)
-    margin_mult = 1 + (margin_pct_val / 100)
-
-    # Materials table (prices shown to client include margin)
+    # Materials table — show exactly what was entered, no auto-inflation
     materials = design.get("materials", [])
     mat_html = ""
     for m in materials:
@@ -552,14 +572,32 @@ async def generate_design_pdf(design_id: str):
         qty = m.get("quantity", 0) if isinstance(m, dict) else getattr(m, "quantity", 0)
         unit = m.get("unit", "ea") if isinstance(m, dict) else getattr(m, "unit", "ea")
         cost = m.get("cost_per_unit", 0) if isinstance(m, dict) else getattr(m, "cost_per_unit", 0)
-        client_price = cost * margin_mult  # margin baked in
-        line_total = qty * client_price
+        line_total = qty * cost
         if name:
             mat_html += f"""<tr>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee">{name}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{qty} {unit}</td>
-                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${client_price:,.2f}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${cost:,.2f}</td>
                 <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${line_total:,.2f}</td>
+            </tr>"""
+
+    # Line items table (general woodwork)
+    line_items = design.get("line_items", [])
+    li_html = ""
+    li_total = 0
+    for li in line_items:
+        desc = li.get("description", "")
+        qty = li.get("quantity", 0)
+        unit = li.get("unit", "ea")
+        price = li.get("unit_price", 0)
+        lt = qty * price
+        li_total += lt
+        if desc:
+            li_html += f"""<tr>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee">{desc}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{qty} {unit}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${price:,.2f}</td>
+                <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${lt:,.2f}</td>
             </tr>"""
 
     # CNC operations table
@@ -590,15 +628,43 @@ async def generate_design_pdf(design_id: str):
         if design.get("depth"): parts.append(f'{design["depth"]}{dim_unit} D')
         dims = f'<p style="margin:4px 0;font-size:0.88em;color:#555"><strong>Dimensions:</strong> {" × ".join(parts)}</p>'
 
+    # Photos for PDF — read files as base64
+    import base64 as b64
+    photos_base = os.path.expanduser("~/empire-repo/backend/data/photos")
+    photo_entries = design.get("photos", [])
+    photos_html = ""
+    show_photos = design.get("pdf_show", {}).get("photos", False)
+    if show_photos and photo_entries:
+        photo_imgs = []
+        for p in photo_entries:
+            if isinstance(p, dict) and not p.get("includeInPdf", True):
+                continue
+            server_url = p.get("serverUrl", "") if isinstance(p, dict) else (p if isinstance(p, str) else "")
+            # serverUrl is like /api/v1/photos/serve/craftforge/{id}/{filename}
+            parts = server_url.rstrip("/").split("/")
+            if len(parts) >= 3:
+                filename = parts[-1]
+                entity_id = parts[-2]
+                entity_type = parts[-3]
+                filepath = os.path.join(photos_base, entity_type, entity_id, filename)
+                if os.path.exists(filepath):
+                    with open(filepath, "rb") as fp:
+                        img_data = b64.b64encode(fp.read()).decode()
+                    ext = filename.rsplit(".", 1)[-1].lower()
+                    mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+                    photo_imgs.append(f'<img src="data:{mime};base64,{img_data}" style="max-width:280px;max-height:220px;object-fit:contain;border-radius:6px;border:1px solid #eee" />')
+        if photo_imgs:
+            photos_html = '<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Photos</h3><div style="display:flex;flex-wrap:wrap;gap:12px">' + "".join(photo_imgs) + '</div></div>'
+
     # PDF visibility toggles (saved from frontend)
     pdf_show = design.get("pdf_show", {})
-    show_line_items = pdf_show.get("lineItems", True)
-    show_materials = pdf_show.get("materials", True)
-    show_cnc = pdf_show.get("cncOps", True)
-    show_dims = pdf_show.get("dimensions", True)
-    show_notes = pdf_show.get("notes", True)
-    show_tax = pdf_show.get("tax", True)
-    show_deposit = pdf_show.get("deposit", True)
+    show_line_items = pdf_show.get("lineItems", False)
+    show_materials = pdf_show.get("materials", False)
+    show_cnc = pdf_show.get("cncOps", False)
+    show_dims = pdf_show.get("dimensions", False)
+    show_notes = pdf_show.get("notes", False)
+    show_tax = pdf_show.get("tax", False)
+    show_deposit = pdf_show.get("deposit", False)
 
     # Costs — use exactly what the design has, no auto-calc
     material_cost = design.get("material_cost", 0)
@@ -648,6 +714,7 @@ async def generate_design_pdf(design_id: str):
     <p style="margin:0;font-weight:700;font-size:1.05em;color:#1a1a2e">{design.get('customer_name', 'Customer')}</p>
     {f'<p style="margin:3px 0 0;color:#555;font-size:0.88em">{design["customer_email"]}</p>' if design.get('customer_email') else ''}
     {f'<p style="margin:2px 0 0;color:#555;font-size:0.88em">{design["customer_phone"]}</p>' if design.get('customer_phone') else ''}
+    {f'<p style="margin:2px 0 0;color:#555;font-size:0.88em">{design["customer_address"]}</p>' if design.get('customer_address') else ''}
   </div>
   <div style="flex:1;padding:14px 18px;background:#fffcf0;border-radius:8px;border:1px solid #f0e6c0">
     <p style="margin:0 0 6px;font-size:0.75em;text-transform:uppercase;letter-spacing:0.5px;color:#999;font-weight:600">Project</p>
@@ -657,21 +724,27 @@ async def generate_design_pdf(design_id: str):
   </div>
 </div>
 
+<!-- LINE ITEMS -->
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Line Items</h3><table><thead><tr><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead><tbody>' + li_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Line Items: ${li_total:,.2f}</div></div>' if li_html and show_line_items else ''}
+
 <!-- MATERIALS -->
-{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost * margin_mult:,.2f}</div></div>' if mat_html and show_materials else ''}
+{'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">Materials</h3><table><thead><tr><th>Material</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead><tbody>' + mat_html + f'</tbody></table><div style="text-align:right;font-weight:700;color:#3d2e1a;font-size:0.9em">Materials: ${material_cost:,.2f}</div></div>' if mat_html and show_materials else ''}
 
 <!-- CNC OPERATIONS -->
 {'<div style="margin-bottom:16px"><h3 style="font-size:0.9em;color:#3d2e1a;margin:0 0 8px;text-transform:uppercase;letter-spacing:0.5px">CNC Operations</h3><table><thead><tr><th>Machine</th><th>Operation</th><th>Tool</th><th style="text-align:center">Time</th></tr></thead><tbody>' + cnc_html + '</tbody></table></div>' if cnc_html and show_cnc else ''}
+
+<!-- PHOTOS -->
+{photos_html}
 
 <!-- PRICING -->
 <div style="margin-top:20px;padding:16px 20px;background:#f8f8f8;border-radius:8px;border:1px solid #eee">
   <table>
     <tbody>
-      {'<tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{material_cost:,.2f}</td></tr>' if material_cost > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Materials</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{material_cost:,.2f}</td></tr>' if material_cost > 0 and show_materials else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Labor</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{labor_cost:,.2f}</td></tr>' if labor_cost > 0 else ''}
-      {'<tr><td style="padding:4px 8px;color:#666">CNC Machine Time</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{cnc_time_cost:,.2f}</td></tr>' if cnc_time_cost > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">CNC Machine Time</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{cnc_time_cost:,.2f}</td></tr>' if cnc_time_cost > 0 and show_cnc else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Overhead</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{overhead:,.2f}</td></tr>' if overhead > 0 else ''}
-      {'<tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{subtotal:,.2f}</td></tr>' if subtotal > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{subtotal:,.2f}</td></tr>' if subtotal > 0 and (sum(1 for x in [material_cost, labor_cost, cnc_time_cost, overhead] if x > 0) > 1) else ''}
       {'<tr><td style="padding:4px 8px;color:#c00">Discount</td><td style="padding:4px 8px;text-align:right;color:#c00">-$' + f'{discount_amount:,.2f}</td></tr>' if discount_amount > 0 else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Tax (' + f'{design_tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>' if design_tax_rate > 0 and show_tax else ''}
       <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>

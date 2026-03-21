@@ -1,3 +1,8 @@
+# STATUS: PARTIAL — Docker SDK integration is real (docker.from_env()).
+# Start/stop/status endpoints work if Docker is running and containers exist.
+# Limitation: container names in PRODUCTS dict are aspirational — most containers
+# are not yet built or deployed. Gracefully returns "not_found" for missing containers.
+
 """Docker Product Manager — start/stop/status for EmpireBox product containers."""
 import logging
 from fastapi import APIRouter, HTTPException

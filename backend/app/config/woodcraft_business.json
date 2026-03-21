@@ -1,6 +1,6 @@
 {
   "business_name": "WoodCraft by Empire",
-  "business_tagline": "CNC & Custom Fabrication",
+  "business_tagline": "Craftsmanship You Can Trust",
   "industry": "woodworking_cnc",
   "owner_name": "RG",
   "business_phone": "(703) 213-6484",
@@ -9,10 +9,10 @@
   "business_website": "https://studio.empirebox.store",
   "timezone": "America/New_York",
   "currency": "USD",
-  "tax_rate": 0.06,
+  "tax_rate": 0,
   "cnc_rate_per_min": 1.50,
   "labor_rate": 55.0,
-  "default_margin_percent": 40,
-  "default_deposit_percent": 50,
+  "default_margin_percent": 0,
+  "default_deposit_percent": 0,
   "quote_valid_days": 30
 }

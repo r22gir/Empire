@@ -1,3 +1,8 @@
+# STATUS: PLACEHOLDER — This module contains scaffold endpoints only.
+# Real integration pending: eBay API, Facebook Marketplace API, Craigslist scraping.
+# All endpoints return hardcoded stub data; connect/disconnect do nothing.
+# No MarketplaceAccount model or credential storage is implemented.
+
 """
 Marketplace routes for connecting and managing marketplace accounts.
 """

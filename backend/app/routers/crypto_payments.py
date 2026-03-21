@@ -1,3 +1,8 @@
+# STATUS: FUNCTIONAL — Real DB-backed payment creation, invoice integration,
+# ledger tracking, and confirmation flow. Requires CRYPTO_MASTER_SEED env var.
+# Pending: automated blockchain monitoring / webhook handler to call /confirm
+# endpoints (currently relies on manual or external trigger).
+
 """
 Empire Crypto Payments Router — order-based and invoice-based crypto payment flows.
 

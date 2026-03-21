@@ -1,3 +1,9 @@
+# STATUS: PLACEHOLDER — This module contains scaffold endpoints only.
+# Real integration pending: EasyPost API (rates, label purchase, tracking all return simulated data).
+# The ShippingService uses hardcoded test rates and fake tracking events.
+# To activate: set EASYPOST_API_KEY and EASYPOST_TEST_MODE=false in .env,
+# then implement real easypost SDK calls in services/shipping_service.py.
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional

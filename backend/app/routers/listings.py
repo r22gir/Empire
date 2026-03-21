@@ -1,3 +1,8 @@
+# STATUS: PARTIAL — CRUD operations are real (DB-backed via listing_service.py).
+# Quality evaluation and economic tracking are wired up.
+# Publishing to marketplaces is a stub: publish_listing() returns mock URLs
+# and does not actually post to any external marketplace API.
+
 """
 Listing routes for CRUD operations and publishing.
 """

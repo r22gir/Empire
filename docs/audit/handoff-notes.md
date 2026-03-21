@@ -60,7 +60,15 @@
 - Command Center architecture reviewed (80+ components)
 - Mobile responsiveness confirmed (hamburger nav, responsive panels)
 - Design system documented
-- **NOT YET DONE:** Specific UX fixes, customer acceptance page, LuxeForge review
+- **DONE:** Customer quote acceptance page built at `/quote/[id]` (Next.js dynamic route)
+  - Displays full quote: business name, customer info, line items, totals, terms
+  - Accept button with confirmation → calls `POST /quotes/{id}/accept`
+  - Status badges (draft/sent/accepted/expired/declined)
+  - Expired quote detection with warning banner
+  - Mobile responsive (single-column on small screens)
+  - Matches Empire design system (warm white/gold palette, Inter font)
+- **DONE:** Fixed email quote URL: `/quotes/{id}` → `/quote/{id}` (now points to acceptance page)
+- **NOT YET DONE:** Specific UX fixes, LuxeForge review
 
 ---
 
@@ -79,6 +87,9 @@
 1. `backend/app/services/max/ai_router.py` — timeout increases
 2. `systemd/empire-backend.service` — uvicorn configuration
 3. `docs/audit/*` — all audit output files (new)
+4. `empire-command-center/app/quote/[id]/page.tsx` — customer quote acceptance page (new)
+5. `empire-command-center/app/globals.css` — spinner animation + quote page overflow fix
+6. `backend/app/routers/quotes.py` — fixed email quote_url to point to acceptance page
 
 ---
 

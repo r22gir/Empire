@@ -172,6 +172,19 @@ app.mount("/intake_uploads", StaticFiles(directory=_intake_uploads), name="intak
 async def root():
     return {"message": "EmpireBox API", "version": "1.0.0", "status": "operational"}
 
+
+# ── Alias routes (fix 404s for common frontend paths) ──────────────
+from fastapi.responses import RedirectResponse
+
+@app.get("/api/v1/invoices")
+async def invoices_alias(request: Request):
+    """Redirect /api/v1/invoices → /api/v1/finance/invoices."""
+    query = str(request.query_params)
+    target = "/api/v1/finance/invoices"
+    if query:
+        target += f"?{query}"
+    return RedirectResponse(url=target, status_code=307)
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "empirebox-backend"}

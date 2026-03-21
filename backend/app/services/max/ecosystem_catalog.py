@@ -1,8 +1,8 @@
 """
 Empire Ecosystem Catalog — Auto-generated from full codebase scan.
 MAX uses this to answer questions about any Empire product, service, or feature.
-Last updated: 2026-03-18 (v5.1 — post tool-fix + knowledge build)
-Source: Full codebase audit (422+ commits, 44 screens, 37 tools, 18 desks, 7 databases)
+Last updated: 2026-03-20 (v5.2 — accuracy audit)
+Source: Full codebase audit (422+ commits, 44 screens, 38 tools, 17 desks, 7 databases)
 """
 
 from datetime import datetime
@@ -423,6 +423,7 @@ EMPIRE_CATALOG = {
             "personality": "Budget-conscious, data-driven",
             "tools": ["cost_tracking", "budget_monitoring", "usage_analysis"],
             "preferred_model": None,
+            "status": "planned — not yet implemented as a desk class",
         },
     },
 
@@ -461,6 +462,7 @@ EMPIRE_CATALOG = {
         "package_manager": {"description": "Install packages or build (pip/npm)", "access_level": 2, "category": "dev"},
         "test_runner": {"description": "Run tests and health checks", "access_level": 1, "category": "dev"},
         "project_scaffold": {"description": "Create new files from templates (router/component/desk/page)", "access_level": 2, "category": "dev"},
+        "search_conversations": {"description": "Search conversation history across all channels (Telegram, Web, CC)", "access_level": 1, "category": "data"},
     },
 
     "services": {
@@ -726,8 +728,8 @@ EMPIRE_CATALOG = {
         "total_jobs": 4,
         "total_memories": 3041,
         "total_ai_calls": 1049,
-        "total_desks": 18,
-        "total_tools": 37,
+        "total_desks": 17,
+        "total_tools": 38,
         "total_products": 22,
         "total_screens": 44,
         "total_api_endpoints": 350,
@@ -786,7 +788,7 @@ def get_catalog_summary() -> str:
 
     # Desk roster summary
     lines.append("")
-    lines.append("AI Desks (18):")
+    lines.append("AI Desks (17):")
     for key, d in desks.items():
         agent = d.get("agent_name", "")
         model = d.get("model", "grok")
@@ -794,7 +796,7 @@ def get_catalog_summary() -> str:
 
     # Tool categories summary
     lines.append("")
-    lines.append("Tool Categories (37 total):")
+    lines.append("Tool Categories (38 total):")
     for cat_key, cat_data in tools.items():
         if isinstance(cat_data, dict) and "items" in cat_data:
             item_names = [i.get("name", "") for i in cat_data["items"] if isinstance(i, dict)]
@@ -805,11 +807,13 @@ def get_catalog_summary() -> str:
 
     # Recent capabilities (Phase 0 additions)
     lines.append("")
-    lines.append("Recent Capabilities (v5.1):")
+    lines.append("Recent Capabilities (v5.2):")
     lines.append("  - env_get/env_set: Manage .env variables securely")
     lines.append("  - db_query: Read-only SQLite queries on empire.db")
+    lines.append("  - search_conversations: Cross-channel conversation search (Telegram, Web, CC)")
     lines.append("  - file_edit: Fuzzy match + line-number mode")
     lines.append("  - shell_execute: Expanded allowlist (python3, sqlite3, sudo systemctl)")
     lines.append("  - Quote phase pipeline: 6-phase with founder review gates")
+    lines.append("  - Note: Ollama is often offline — OpenClaw and local LLM features may be unavailable")
 
     return "\n".join(lines)

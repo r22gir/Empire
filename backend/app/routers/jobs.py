@@ -212,6 +212,37 @@ def create_job_from_quote(quote_id: str):
         return {"job": _enrich_job(job_data), "quote_id": quote_id}
 
 
+# -- Kanban View ------------------------------------------------------------
+
+@router.get("/kanban")
+def jobs_kanban():
+    """Jobs grouped by status for kanban board view."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT j.*, c.name as customer_name
+               FROM jobs j LEFT JOIN customers c ON j.customer_id = c.id
+               ORDER BY j.priority DESC, j.created_at DESC"""
+        ).fetchall()
+
+        jobs = [_enrich_job(dict_row(r)) for r in rows]
+
+        # Group by status
+        columns = {}
+        for job in jobs:
+            status = job.get("status", "pending")
+            if status not in columns:
+                columns[status] = []
+            columns[status].append(job)
+
+        return {
+            "columns": [
+                {"status": s, "jobs": j, "count": len(j)}
+                for s, j in columns.items()
+            ],
+            "total": len(jobs),
+        }
+
+
 # -- CRUD -------------------------------------------------------------------
 
 @router.get("/")

@@ -12,6 +12,7 @@ import PaymentModule from '../business/payments/PaymentModule';
 // All data fetched live from backend
 interface LiveData {
   system: any;
+  metrics: any;
   models: any;
   health: any;
   brain: any;
@@ -39,8 +40,9 @@ export default function PlatformPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [system, models, health, brain, report, ollama, backup, telegram, docker] = await Promise.all([
+    const [system, metrics, models, health, brain, report, ollama, backup, telegram, docker] = await Promise.all([
       safeFetch(API + '/system/stats'),
+      safeFetch(API + '/system/metrics'),
       safeFetch(API + '/max/models'),
       safeFetch(API + '/max/health'),
       safeFetch(API + '/max/brain/status'),
@@ -52,6 +54,7 @@ export default function PlatformPage() {
     ]);
     setData({
       system,
+      metrics,
       models,
       health,
       brain,
@@ -73,7 +76,7 @@ export default function PlatformPage() {
   const cpu = data.system?.cpu?.percent ?? data.system?.cpu_percent ?? 0;
   const ram = data.system?.memory?.percent ?? 0;
   const disk = data.system?.disk?.percent ?? 0;
-  const uptime = data.system?.uptime || data.report?.system?.uptime || '--';
+  const uptime = data.system?.uptime || data.report?.system?.uptime || (data.metrics?.uptime_seconds ? `${Math.floor(data.metrics.uptime_seconds / 3600)}h ${Math.floor((data.metrics.uptime_seconds % 3600) / 60)}m` : '--');
   const cpuCores = data.system?.cpu?.cores || '--';
   const ramTotal = data.system?.memory?.total_gb?.toFixed(1) || '--';
   const diskTotal = data.system?.disk?.total_gb?.toFixed(0) || '--';
@@ -216,11 +219,16 @@ export default function PlatformPage() {
             </div>
           )) : (
             <>
-              {[
-                { name: 'Backend API', port: '8000', online: true },
-                { name: 'Command Center', port: '3005', online: true },
-                { name: 'Ollama', port: '11434', online: ollamaOnline },
-              ].map((s, i) => (
+              {(() => {
+                const ap = data.metrics?.active_ports || {};
+                const portMap: Record<string, string> = { '8000': 'Backend API', '3005': 'Command Center', '11434': 'Ollama', '7878': 'OpenClaw', '3077': 'RecoveryForge' };
+                const services = Object.keys(portMap).map(port => ({
+                  name: ap[port] && typeof ap[port] === 'string' ? ap[port] : portMap[port],
+                  port,
+                  online: ap[port] !== undefined ? !!ap[port] : (port === '8000' || port === '3005' ? true : port === '11434' ? ollamaOnline : false),
+                }));
+                return services;
+              })().map((s, i) => (
                 <div key={i} className="flex items-center justify-between" style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full" style={{ background: s.online ? '#16a34a' : '#d8d3cb' }} />

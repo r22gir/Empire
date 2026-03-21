@@ -14,6 +14,31 @@ from app.middleware.rate_limiter import limiter
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 
+# ── Business name normalisation ─────────────────────────────────────
+# The customers table stores short keys like "workroom", "woodcraft", "empire".
+# Quotes store full names like "Empire Workroom".  This map bridges both worlds.
+
+_BUSINESS_ALIASES: dict[str, str] = {
+    "empire workroom": "workroom",
+    "workroom":        "workroom",
+    "woodcraft":       "woodcraft",
+    "wood craft":      "woodcraft",
+    "empire":          "empire",     # catch-all / unspecified
+}
+
+_BUSINESS_DISPLAY: dict[str, str] = {
+    "workroom":  "Empire Workroom",
+    "woodcraft": "WoodCraft",
+    "empire":    "Empire",
+}
+
+
+def _normalise_business(raw: str | None) -> str:
+    """Return the canonical short key for a business name, or 'all' if None."""
+    if not raw:
+        return "all"
+    return _BUSINESS_ALIASES.get(raw.strip().lower(), raw.strip().lower())
+
 QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
 
 
@@ -213,6 +238,252 @@ def finance_dashboard(request: Request):
             "accounts_receivable_aging": aging,
             "recent_invoices": recent_invoices,
         }
+
+
+# ── Profit & Loss ────────────────────────────────────────────────────
+
+@limiter.limit("30/minute")
+@router.get("/pnl")
+def profit_and_loss(
+    request: Request,
+    business: Optional[str] = Query(None, description="Filter by business: Empire Workroom, WoodCraft, etc."),
+    period: str = Query("month", description="month, quarter, or year"),
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD (overrides period)"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (overrides period)"),
+):
+    """
+    Profit & Loss report, optionally filtered by business.
+
+    Revenue comes from the *payments* table (joined to customers for business filtering).
+    Expenses come from the *expenses* table (no business column — returns all expenses
+    unless a future migration adds one).
+    Quote stats are read from the JSON files in data/quotes/.
+    """
+    biz_key = _normalise_business(business)
+    now = datetime.now()
+
+    # ── Resolve date range ──────────────────────────────────────────
+    if start_date and end_date:
+        dt_start = start_date
+        dt_end = end_date
+        period_label = f"{start_date} to {end_date}"
+    elif period == "year":
+        dt_start = f"{now.year}-01-01"
+        dt_end = now.strftime("%Y-%m-%d")
+        period_label = str(now.year)
+    elif period == "quarter":
+        q = (now.month - 1) // 3
+        q_start_month = q * 3 + 1
+        dt_start = f"{now.year}-{q_start_month:02d}-01"
+        dt_end = now.strftime("%Y-%m-%d")
+        period_label = f"{now.year}-Q{q + 1}"
+    else:  # month (default)
+        dt_start = now.strftime("%Y-%m-01")
+        dt_end = now.strftime("%Y-%m-%d")
+        period_label = now.strftime("%Y-%m")
+
+    with get_db() as conn:
+        # ── Revenue (payments) ──────────────────────────────────────
+        if biz_key != "all":
+            rev_rows = dict_rows(conn.execute(
+                """SELECT p.method AS category, COALESCE(SUM(p.amount), 0) AS total
+                   FROM payments p
+                   LEFT JOIN customers c ON p.customer_id = c.id
+                   WHERE p.payment_date >= ? AND p.payment_date <= ?
+                     AND (c.business = ? OR (c.business IS NULL AND ? = 'empire'))
+                   GROUP BY p.method""",
+                (dt_start, dt_end, biz_key, biz_key),
+            ).fetchall())
+
+            rev_total_row = conn.execute(
+                """SELECT COALESCE(SUM(p.amount), 0) AS total
+                   FROM payments p
+                   LEFT JOIN customers c ON p.customer_id = c.id
+                   WHERE p.payment_date >= ? AND p.payment_date <= ?
+                     AND (c.business = ? OR (c.business IS NULL AND ? = 'empire'))""",
+                (dt_start, dt_end, biz_key, biz_key),
+            ).fetchone()
+        else:
+            rev_rows = dict_rows(conn.execute(
+                """SELECT method AS category, COALESCE(SUM(amount), 0) AS total
+                   FROM payments
+                   WHERE payment_date >= ? AND payment_date <= ?
+                   GROUP BY method""",
+                (dt_start, dt_end),
+            ).fetchall())
+
+            rev_total_row = conn.execute(
+                "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE payment_date >= ? AND payment_date <= ?",
+                (dt_start, dt_end),
+            ).fetchone()
+
+        revenue_total = round(rev_total_row["total"], 2)
+        revenue_by_cat = {r["category"]: round(r["total"], 2) for r in rev_rows}
+
+        # ── Expenses ────────────────────────────────────────────────
+        # expenses table has no business column, so we return all expenses
+        # regardless of business filter (noted in the response).
+        exp_rows = dict_rows(conn.execute(
+            """SELECT category, COALESCE(SUM(amount), 0) AS total
+               FROM expenses
+               WHERE expense_date >= ? AND expense_date <= ?
+               GROUP BY category ORDER BY total DESC""",
+            (dt_start, dt_end),
+        ).fetchall())
+
+        exp_total_row = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) AS total FROM expenses WHERE expense_date >= ? AND expense_date <= ?",
+            (dt_start, dt_end),
+        ).fetchone()
+
+        expenses_total = round(exp_total_row["total"], 2)
+        expenses_by_cat = {r["category"]: round(r["total"], 2) for r in exp_rows}
+
+        # ── Invoice stats ───────────────────────────────────────────
+        if biz_key != "all":
+            inv_paid = conn.execute(
+                """SELECT COUNT(*) AS cnt FROM invoices i
+                   LEFT JOIN customers c ON i.customer_id = c.id
+                   WHERE i.status = 'paid'
+                     AND i.paid_at >= ? AND i.paid_at <= ?
+                     AND (c.business = ? OR (c.business IS NULL AND ? = 'empire'))""",
+                (dt_start, dt_end, biz_key, biz_key),
+            ).fetchone()["cnt"]
+
+            inv_outstanding = conn.execute(
+                """SELECT COUNT(*) AS cnt, COALESCE(SUM(i.balance_due), 0) AS total
+                   FROM invoices i
+                   LEFT JOIN customers c ON i.customer_id = c.id
+                   WHERE i.status NOT IN ('paid', 'cancelled')
+                     AND (c.business = ? OR (c.business IS NULL AND ? = 'empire'))""",
+                (biz_key, biz_key),
+            ).fetchone()
+        else:
+            inv_paid = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM invoices WHERE status = 'paid' AND paid_at >= ? AND paid_at <= ?",
+                (dt_start, dt_end),
+            ).fetchone()["cnt"]
+
+            inv_outstanding = conn.execute(
+                """SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due), 0) AS total
+                   FROM invoices WHERE status NOT IN ('paid', 'cancelled')"""
+            ).fetchone()
+
+    # ── Quote stats (from JSON files) ───────────────────────────────
+    quotes_sent = 0
+    quotes_accepted = 0
+
+    if QUOTES_DIR.exists():
+        for qf in QUOTES_DIR.iterdir():
+            if not qf.name.endswith(".json") or qf.name.endswith("_verification.json"):
+                continue
+            try:
+                qdata = json.loads(qf.read_text())
+            except Exception:
+                continue
+
+            # Filter by business if requested
+            if biz_key != "all":
+                q_biz = _normalise_business(qdata.get("business_name"))
+                if q_biz != biz_key and q_biz != "all":
+                    continue
+
+            # Filter by date range (use created_at or sent_at)
+            q_date = (qdata.get("sent_at") or qdata.get("created_at") or "")[:10]
+            if q_date and (q_date < dt_start or q_date > dt_end):
+                continue
+
+            q_status = qdata.get("status", "")
+            if q_status in ("sent", "accepted", "proposal"):
+                quotes_sent += 1
+            if q_status == "accepted":
+                quotes_accepted += 1
+
+    conversion_rate = round(quotes_accepted / quotes_sent * 100, 1) if quotes_sent > 0 else 0.0
+
+    display_name = _BUSINESS_DISPLAY.get(biz_key, business or "All Businesses")
+
+    return {
+        "business": display_name,
+        "period": period_label,
+        "revenue": {
+            "total": revenue_total,
+            "by_category": revenue_by_cat,
+        },
+        "expenses": {
+            "total": expenses_total,
+            "by_category": expenses_by_cat,
+            "_note": "Expenses are not yet segmented by business" if biz_key != "all" else None,
+        },
+        "net_profit": round(revenue_total - expenses_total, 2),
+        "invoices_paid": inv_paid,
+        "invoices_outstanding": {
+            "count": inv_outstanding["cnt"],
+            "balance": round(inv_outstanding["total"], 2),
+        },
+        "quotes_sent": quotes_sent,
+        "quotes_accepted": quotes_accepted,
+        "conversion_rate": conversion_rate,
+    }
+
+
+# ── Transactions (combined payments + expenses) ──────────────────────
+
+@limiter.limit("30/minute")
+@router.get("/transactions")
+def list_transactions(
+    request: Request,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Recent transactions: payments (income) + expenses combined, sorted by date."""
+    clauses_p = []
+    clauses_e = []
+    params_p = []
+    params_e = []
+
+    if date_from:
+        clauses_p.append("payment_date >= ?")
+        params_p.append(date_from)
+        clauses_e.append("expense_date >= ?")
+        params_e.append(date_from)
+    if date_to:
+        clauses_p.append("payment_date <= ?")
+        params_p.append(date_to)
+        clauses_e.append("expense_date <= ?")
+        params_e.append(date_to)
+
+    where_p = (" WHERE " + " AND ".join(clauses_p)) if clauses_p else ""
+    where_e = (" WHERE " + " AND ".join(clauses_e)) if clauses_e else ""
+
+    with get_db() as conn:
+        payments = dict_rows(conn.execute(
+            f"""SELECT id, 'income' as type, amount, method as category,
+                       reference as description, payment_date as date, invoice_id, customer_id,
+                       created_at
+                FROM payments{where_p}
+                ORDER BY payment_date DESC LIMIT ?""",
+            params_p + [limit]
+        ).fetchall())
+
+        expenses = dict_rows(conn.execute(
+            f"""SELECT id, 'expense' as type, amount, category,
+                       description, expense_date as date, NULL as invoice_id, NULL as customer_id,
+                       created_at
+                FROM expenses{where_e}
+                ORDER BY expense_date DESC LIMIT ?""",
+            params_e + [limit]
+        ).fetchall())
+
+        # Merge and sort by date descending
+        transactions = sorted(
+            payments + expenses,
+            key=lambda t: t.get("date") or t.get("created_at") or "",
+            reverse=True,
+        )[:limit]
+
+        return {"transactions": transactions, "total": len(transactions)}
 
 
 # ── Invoices ─────────────────────────────────────────────────────────

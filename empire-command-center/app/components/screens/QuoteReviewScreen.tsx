@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API } from '../../lib/api';
 import { Quote } from '../../lib/types';
-import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera } from 'lucide-react';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2 } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
@@ -45,6 +45,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
+  const [creatingInvoice, setCreatingInvoice] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -215,6 +217,30 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     } else if (action === 'video') {
       showFeedback('Video call feature coming soon');
     }
+  };
+
+  const handleCreateInvoice = async () => {
+    if (!quote?.id) return;
+    setCreatingInvoice(true);
+    try {
+      const res = await fetch(`${API}/finance/invoices/from-quote/${quote.id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        showFeedback(err.detail || err.error || 'Failed to create invoice');
+        setCreatingInvoice(false);
+        return;
+      }
+      const data = await res.json();
+      const invNum = data.invoice_number || data.id || 'Created';
+      setInvoiceNumber(invNum);
+      showFeedback(`Invoice ${invNum} created!`);
+    } catch {
+      showFeedback('Failed to create invoice');
+    }
+    setCreatingInvoice(false);
   };
 
   return (
@@ -437,6 +463,34 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           animation: 'fadeIn 0.2s ease',
         }}>
           {actionFeedback}
+        </div>
+      )}
+
+      {/* Create Invoice button — shown when quote is accepted */}
+      {quote.status === 'accepted' && (
+        <div style={{ marginBottom: 12 }}>
+          {invoiceNumber ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px',
+              borderRadius: 12, background: '#f0fdf4', border: '1.5px solid #bbf7d0',
+            }}>
+              <Receipt size={18} className="text-[#16a34a]" />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a' }}>Invoice Created</div>
+                <div style={{ fontSize: 12, color: '#555' }}>{invoiceNumber}</div>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleCreateInvoice}
+              disabled={creatingInvoice}
+              className="w-full flex items-center justify-center gap-2 text-white text-[13px] font-bold cursor-pointer hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{ height: 44, padding: '0 20px', borderRadius: 12, background: '#b8960c', border: '2px solid #a08509' }}
+            >
+              {creatingInvoice ? <Loader2 size={18} className="animate-spin" /> : <Receipt size={18} />}
+              {creatingInvoice ? 'Creating Invoice...' : 'Create Invoice'}
+            </button>
+          )}
         </div>
       )}
 
