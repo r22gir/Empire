@@ -644,16 +644,8 @@ def invoice_pdf(request: Request, invoice_id: str):
     import weasyprint
     import json as _json
 
-    # Load business contact info
-    _biz_cfg_path = Path(__file__).resolve().parent.parent / "config" / "business.json"
-    try:
-        _biz_cfg = _json.loads(_biz_cfg_path.read_text())
-    except Exception:
-        _biz_cfg = {}
-    _biz_phone = _biz_cfg.get("business_phone", "")
-    _biz_email = _biz_cfg.get("business_email", "")
-    _biz_address = _biz_cfg.get("business_address", "")
-    _biz_website = _biz_cfg.get("business_website", "")
+    # Determine which business config to use (resolved after loading invoice below)
+    _config_dir = Path(__file__).resolve().parent.parent / "config"
 
     with get_db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
@@ -670,6 +662,42 @@ def invoice_pdf(request: Request, invoice_id: str):
             ).fetchone()
             if cust_row:
                 customer = dict_row(cust_row)
+
+    # Detect WoodCraft/CraftForge invoices for correct branding
+    _is_woodcraft = False
+    _notes = invoice.get("notes", "") or ""
+    if "WoodCraft" in _notes or "CraftForge" in _notes:
+        _is_woodcraft = True
+    elif invoice.get("quote_id"):
+        _cf_design_path = Path(__file__).resolve().parent.parent.parent / "data" / "craftforge" / "designs" / f"{invoice['quote_id']}.json"
+        if _cf_design_path.exists():
+            _is_woodcraft = True
+    if not _is_woodcraft and customer and customer.get("business") == "woodcraft":
+        _is_woodcraft = True
+
+    if _is_woodcraft:
+        _biz_cfg_path = _config_dir / "woodcraft_business.json"
+    else:
+        _biz_cfg_path = _config_dir / "business.json"
+
+    try:
+        _biz_cfg = _json.loads(_biz_cfg_path.read_text())
+    except Exception:
+        _biz_cfg = {}
+    _biz_name = _biz_cfg.get("business_name", "Empire Workroom")
+    _biz_tagline = _biz_cfg.get("business_tagline", "Custom Window Treatments & Upholstery")
+    _biz_phone = _biz_cfg.get("business_phone", "")
+    _biz_email = _biz_cfg.get("business_email", "")
+    _biz_address = _biz_cfg.get("business_address", "")
+    _biz_website = _biz_cfg.get("business_website", "")
+
+    # Set brand colors based on business
+    if _is_woodcraft:
+        _accent_color = "#d4a636"
+        _header_bg = "#3d2e1a"
+    else:
+        _accent_color = "#b8960c"
+        _header_bg = "#2c2416"
 
     # Build line items table
     items_html = ""
@@ -711,29 +739,29 @@ def invoice_pdf(request: Request, invoice_id: str):
 <style>
   @page {{ size: letter; margin: 0.75in; }}
   body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 11pt; line-height: 1.5; }}
-  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 3px solid #b8960c; }}
+  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; padding-bottom: 20px; border-bottom: 3px solid {_accent_color}; }}
   .logo {{ font-size: 24pt; font-weight: 800; color: #1a1a2e; }}
-  .logo span {{ color: #b8960c; }}
+  .logo span {{ color: {_accent_color}; }}
   .invoice-title {{ text-align: right; }}
-  .invoice-title h1 {{ margin: 0; font-size: 28pt; color: #b8960c; letter-spacing: 2px; }}
+  .invoice-title h1 {{ margin: 0; font-size: 28pt; color: {_accent_color}; letter-spacing: 2px; }}
   .invoice-number {{ font-size: 11pt; color: #666; margin-top: 4px; }}
   .status {{ display: inline-block; padding: 3px 12px; border-radius: 12px; font-size: 9pt; font-weight: 600; text-transform: uppercase; color: white; background: {status_color}; }}
   .info-grid {{ display: flex; justify-content: space-between; margin: 24px 0; }}
   .info-box {{ flex: 1; }}
-  .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: #b8960c; letter-spacing: 1px; }}
+  .info-box h3 {{ margin: 0 0 6px; font-size: 9pt; text-transform: uppercase; color: {_accent_color}; letter-spacing: 1px; }}
   table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
   thead {{ background: #f5f3ef; }}
-  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid #b8960c; }}
+  th {{ padding: 10px 12px; text-align: left; font-size: 9pt; text-transform: uppercase; color: #666; letter-spacing: 0.5px; border-bottom: 2px solid {_accent_color}; }}
   .totals {{ margin-left: auto; width: 280px; }}
   .totals tr td {{ padding: 6px 12px; }}
-  .totals .total-row {{ font-size: 14pt; font-weight: 700; color: #1a1a2e; border-top: 2px solid #b8960c; }}
+  .totals .total-row {{ font-size: 14pt; font-weight: 700; color: #1a1a2e; border-top: 2px solid {_accent_color}; }}
   .footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #e8e4dd; font-size: 9pt; color: #888; text-align: center; }}
 </style></head><body>
 
 <div class="header">
   <div>
-    <div class="logo">Empire <span>Workroom</span></div>
-    <div style="font-size:9pt;color:#666;margin-top:4px">Custom Window Treatments & Upholstery</div>
+    <div class="logo">{_biz_name.split()[0]} <span>{' '.join(_biz_name.split()[1:])}</span></div>
+    <div style="font-size:9pt;color:#666;margin-top:4px">{_biz_tagline}</div>
     <div style="font-size:8pt;color:#888;margin-top:6px;line-height:1.6">
       {_biz_phone}<br>{_biz_email}<br>{_biz_address}
     </div>
@@ -775,13 +803,13 @@ def invoice_pdf(request: Request, invoice_id: str):
   <tr><td>Tax ({invoice.get('tax_rate', 0)*100:.1f}%)</td><td style="text-align:right">${invoice.get('tax_amount', 0):,.2f}</td></tr>
   <tr class="total-row"><td>Total</td><td style="text-align:right">${invoice.get('total', 0):,.2f}</td></tr>
   <tr><td>Paid</td><td style="text-align:right">${invoice.get('amount_paid', 0):,.2f}</td></tr>
-  <tr style="font-weight:700;color:#b8960c"><td>Balance Due</td><td style="text-align:right">${invoice.get('balance_due', 0):,.2f}</td></tr>
+  <tr style="font-weight:700;color:{_accent_color}"><td>Balance Due</td><td style="text-align:right">${invoice.get('balance_due', 0):,.2f}</td></tr>
 </table>
 
 {"<div style='margin:20px 0;padding:12px;background:#f5f3ef;border-radius:8px;font-size:10pt'><strong>Notes:</strong> " + invoice.get('notes', '') + "</div>" if invoice.get('notes') else ""}
 
 <div class="footer">
-  Empire Workroom &mdash; Thank you for your business<br>
+  {_biz_name} &mdash; Thank you for your business<br>
   {_biz_phone} &bull; {_biz_email} &bull; {_biz_website}
 </div>
 

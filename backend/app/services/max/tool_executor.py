@@ -3274,3 +3274,167 @@ def _project_scaffold(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         log_execution("project_scaffold", params, str(e), access_level=2, desk=desk, success=False)
         return ToolResult(tool="project_scaffold", success=False, error=str(e))
+
+
+# ── CONVERSATION SEARCH ──────────────────────────────────────────────
+
+@tool("search_conversations")
+def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Search conversation history across all channels (Telegram, Web, CC).
+
+    Params:
+        query (str): keyword or phrase to search for
+        channel (str, optional): filter by channel — "telegram", "web", "cc"
+        date_from (str, optional): start date YYYY-MM-DD
+        date_to (str, optional): end date YYYY-MM-DD
+        limit (int, optional): max results (default 20, max 50)
+    """
+    start = _time.time()
+    query = params.get("query", "").strip()
+    channel = params.get("channel", "").strip().lower()
+    date_from = params.get("date_from", "")
+    date_to = params.get("date_to", "")
+    limit = min(int(params.get("limit", 20)), 50)
+
+    if not query:
+        return ToolResult(tool="search_conversations", success=False, error="query is required")
+
+    results = []
+
+    # 1. Search brain memories (conversation facts, intents, customer mentions)
+    try:
+        from app.services.max.brain.memory_store import MemoryStore
+        store = MemoryStore()
+        memories = store.search_memories(query=query, limit=limit)
+        for mem in memories:
+            created = mem.get("created_at", "")
+            # Date range filter
+            if date_from and created < date_from:
+                continue
+            if date_to and created > date_to + "T23:59:59":
+                continue
+            results.append({
+                "type": "memory",
+                "category": mem.get("category", ""),
+                "subject": mem.get("subject", ""),
+                "content": mem.get("content", "")[:500],
+                "source": mem.get("source", ""),
+                "date": created[:10] if created else "",
+                "importance": mem.get("importance", 1),
+            })
+    except Exception as e:
+        logger.warning(f"search_conversations: brain memory search failed: {e}")
+
+    # 2. Search conversation summaries
+    try:
+        from app.services.max.brain.brain_config import get_db_path
+        import sqlite3
+        conn = sqlite3.connect(get_db_path())
+        conn.row_factory = sqlite3.Row
+
+        conditions = ["(summary LIKE ? OR topics LIKE ? OR customers_mentioned LIKE ? OR key_decisions LIKE ?)"]
+        q_like = f"%{query}%"
+        sql_params = [q_like, q_like, q_like, q_like]
+
+        if date_from:
+            conditions.append("date >= ?")
+            sql_params.append(date_from)
+        if date_to:
+            conditions.append("date <= ?")
+            sql_params.append(date_to)
+
+        where = " AND ".join(conditions)
+        rows = conn.execute(
+            f"SELECT * FROM conversation_summaries WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            sql_params + [limit],
+        ).fetchall()
+
+        for row in rows:
+            r = dict(row)
+            results.append({
+                "type": "conversation_summary",
+                "date": r.get("date", ""),
+                "summary": r.get("summary", "")[:500],
+                "topics": r.get("topics", "[]"),
+                "customers_mentioned": r.get("customers_mentioned", "[]"),
+                "key_decisions": r.get("key_decisions", "[]"),
+                "message_count": r.get("message_count", 0),
+            })
+        conn.close()
+    except Exception as e:
+        logger.warning(f"search_conversations: summary search failed: {e}")
+
+    # 3. Search chat messages in the main chat backup database
+    try:
+        from app.database import DATABASE_URL
+        import sqlite3 as _sqlite3
+
+        # Only search if using SQLite (sync access)
+        if "sqlite" in DATABASE_URL:
+            db_path = DATABASE_URL.replace("sqlite:///", "").replace("sqlite://", "")
+            if not os.path.isabs(db_path):
+                db_path = os.path.join(os.path.expanduser("~/empire-repo/backend"), db_path)
+            if os.path.exists(db_path):
+                cconn = _sqlite3.connect(db_path)
+                cconn.row_factory = _sqlite3.Row
+
+                msg_conditions = ["m.content LIKE ?"]
+                msg_params = [q_like]
+
+                if channel:
+                    msg_conditions.append("s.source LIKE ?")
+                    msg_params.append(f"%{channel}%")
+                if date_from:
+                    msg_conditions.append("m.created_at >= ?")
+                    msg_params.append(date_from)
+                if date_to:
+                    msg_conditions.append("m.created_at <= ?")
+                    msg_params.append(date_to + "T23:59:59")
+
+                msg_where = " AND ".join(msg_conditions)
+                msg_rows = cconn.execute(
+                    f"""SELECT m.content, m.role, m.created_at, s.title, s.source, s.agent_name
+                        FROM chat_messages m
+                        JOIN chat_sessions s ON m.session_id = s.id
+                        WHERE {msg_where}
+                        ORDER BY m.created_at DESC LIMIT ?""",
+                    msg_params + [limit],
+                ).fetchall()
+
+                for row in msg_rows:
+                    r = dict(row)
+                    results.append({
+                        "type": "chat_message",
+                        "role": r.get("role", ""),
+                        "content": r.get("content", "")[:500],
+                        "channel": r.get("source", ""),
+                        "agent": r.get("agent_name", ""),
+                        "session_title": r.get("title", ""),
+                        "date": (r.get("created_at", "") or "")[:10],
+                    })
+                cconn.close()
+    except Exception as e:
+        logger.warning(f"search_conversations: chat backup search failed: {e}")
+
+    # Channel filter for memory/summary results if requested
+    if channel:
+        filtered = []
+        for r in results:
+            src = (r.get("source", "") + r.get("channel", "")).lower()
+            if r["type"] == "chat_message":
+                filtered.append(r)  # already filtered by SQL
+            elif channel in src or not src:
+                filtered.append(r)
+        results = filtered
+
+    # Sort by date descending
+    results.sort(key=lambda x: x.get("date", ""), reverse=True)
+    results = results[:limit]
+
+    duration = int((_time.time() - start) * 1000)
+    log_execution("search_conversations", params, {"count": len(results)}, access_level=1, desk=desk, success=True, duration_ms=duration)
+    return ToolResult(tool="search_conversations", success=True, result={
+        "query": query,
+        "count": len(results),
+        "results": results,
+    })
