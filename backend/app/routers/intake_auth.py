@@ -686,9 +686,8 @@ async def convert_to_quote(request: Request, project_id: str):
             })
 
     # Build quote payload
-    # Use project name as customer_name (project is typically named after the client)
-    # Fall back to intake user name, then generic label
-    customer_name = project.get("name") or project.get("user_name") or "Intake Client"
+    # Use intake user's real name as customer_name, project name is the job/location
+    customer_name = project.get("user_name") or project.get("name") or "Intake Client"
     quote_data = {
         "customer_name": customer_name,
         "customer_email": project.get("user_email") or "",

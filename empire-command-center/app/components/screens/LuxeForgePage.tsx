@@ -137,9 +137,11 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
       if (res.ok) {
         const data = await res.json();
         await fetchData(); // refresh to show updated status
-        // Navigate to Workroom → Quotes
-        if (onNavigate) {
-          onNavigate('workroom', 'dashboard', 'quotes');
+        const quoteNum = data.quote_number || data.quote_id || '';
+        if (confirm(`✅ Quote ${quoteNum} created!\n\nCustomer info and photos transferred.\n\nGo to Workroom Quotes now?`)) {
+          if (onNavigate) {
+            onNavigate('workroom', 'dashboard', 'quotes');
+          }
         }
       } else {
         const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
