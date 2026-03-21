@@ -399,7 +399,7 @@ class AIRouter:
 
     async def _grok_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 "https://api.x.ai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
@@ -411,7 +411,7 @@ class AIRouter:
 
     async def _grok_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.x.ai/v1/chat/completions",
@@ -440,7 +440,7 @@ class AIRouter:
 
     async def _claude_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None, model_id: str = "claude-sonnet-4-6") -> str:
         system_msg, api_messages = self._prepare_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": self.anthropic_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"},
@@ -452,7 +452,7 @@ class AIRouter:
 
     async def _claude_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None, model_id: str = "claude-sonnet-4-6") -> AsyncGenerator[str, None]:
         system_msg, api_messages = self._prepare_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.anthropic.com/v1/messages",
@@ -480,7 +480,7 @@ class AIRouter:
 
     async def _groq_chat(self, messages: List[AIMessage]) -> str:
         api_messages = self._prepare_openai_messages(messages)
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
@@ -492,7 +492,7 @@ class AIRouter:
 
     async def _groq_chat_stream(self, messages: List[AIMessage]) -> AsyncGenerator[str, None]:
         api_messages = self._prepare_openai_messages(messages)
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             async with client.stream(
                 "POST",
                 "https://api.groq.com/openai/v1/chat/completions",
