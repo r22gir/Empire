@@ -317,10 +317,16 @@ At current usage (1,582 req/30 days, $69): ~$2.30/day average. Sustainable for a
 - Added `--timeout-keep-alive 65 --limit-concurrency 20`
 - **Why:** Prevents connection drops during long AI requests and limits concurrent requests to prevent resource exhaustion.
 
-### Pending Fixes (Not Applied — Need Testing)
-- Jobs endpoint trailing slash normalization
-- Start Ollama for full fallback chain
-- Invoice flow end-to-end wiring
+### Verified During Audit
+- **Quote PDF branding** — "Empire Workroom" header, gold accents, clean layout. Professional quality. PASS.
+- **Invoice PDF branding** — "Empire Workroom" header, gold "INVOICE" badge, balance due highlighted. PASS.
+- **CraftForge/WoodCraft PDF branding** — "WoodCraft by Empire" header, acceptance/signature section. PASS.
+- **Jobs trailing slash** — Not a bug. FastAPI correctly 307-redirects `/jobs` → `/jobs/`. Frontend `fetch()` follows redirects automatically.
+- **LuxeForge Intake** — Clean 3-step landing page (Upload Photos → Measurements → Quote). Mobile responsive. PASS.
+
+### Pending (Need Manual Action)
+- Restart backend to apply timeout changes: `sudo systemctl restart empire-backend`
+- Start Ollama for full fallback chain: `sudo systemctl start ollama`
 
 ---
 
