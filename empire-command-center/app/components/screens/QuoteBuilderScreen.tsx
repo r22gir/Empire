@@ -53,27 +53,45 @@ interface Room {
   items: RoomItem[];
 }
 
+type ItemCategory = 'upholstery' | 'drapery';
+
 interface QuoteOptions {
   fabricGrade: 'A' | 'B' | 'C';
+  // Drapery options
   liningType: 'standard' | 'blackout' | 'interlining' | 'thermal' | 'none';
+  pleatType: 'pinch' | 'french' | 'euro' | 'cartridge' | 'ripplefold' | 'goblet' | 'box' | 'inverted_box' | 'rod_pocket' | 'tab_top' | 'grommet' | 'none';
+  contrastPiping: boolean;
+  patternMatch: boolean;
+  // Upholstery options
+  foamType: 'new' | 'reuse' | 'upgrade';
+  foamDensity: 'standard' | 'high' | 'premium';
   tufting: boolean;
   welting: boolean;
   nailhead: boolean;
   skirt: boolean;
-  contrastPiping: boolean;
-  patternMatch: boolean;
+  channeling: boolean;
+  // Shared
   rushOrder: boolean;
   delivery: boolean;
 }
 
-const ITEM_TYPES = [
+const UPHOLSTERY_TYPES = [
   'sofa_3cushion', 'sofa_2cushion', 'loveseat', 'accent_chair', 'wingback_chair', 'club_chair',
   'dining_chair_seat', 'dining_chair_full', 'ottoman_small', 'ottoman_large',
   'bench', 'headboard', 'sectional', 'banquette',
-  'drapery', 'roman_shade', 'valance', 'cornice', 'swag',
   'seat_cushion', 'back_cushion', 'throw_pillow',
   'bedskirt', 'duvet', 'table_runner', 'placemats',
 ];
+
+const DRAPERY_TYPES = [
+  'drapery', 'roman_shade', 'valance', 'cornice', 'swag',
+];
+
+const ITEM_TYPES = [...UPHOLSTERY_TYPES, ...DRAPERY_TYPES];
+
+function getItemCategory(type: string): ItemCategory {
+  return DRAPERY_TYPES.includes(type) ? 'drapery' : 'upholstery';
+}
 
 // Map AI-detected furniture names to ITEM_TYPES keys
 function mapFurnitureType(aiType: string): string {
@@ -104,19 +122,48 @@ function mapFurnitureType(aiType: string): string {
 
 type QuoteInputMethod = 'photos' | '3dscan' | 'manual' | 'intake';
 
-type ManualItemType = 'window' | 'sofa' | 'chair' | 'cushion' | 'pillow' | 'cornice' | 'valance' | 'roman_shade' | 'other';
+type ManualItemType = 'window' | 'drapery' | 'roman_shade' | 'cornice' | 'valance' | 'swag' |
+  'sofa' | 'loveseat' | 'chair' | 'sectional' | 'ottoman' | 'bench' | 'headboard' | 'banquette' |
+  'cushion' | 'pillow' | 'other';
 
-const MANUAL_ITEM_TYPES: { key: ManualItemType; label: string; icon: string }[] = [
-  { key: 'window', label: 'Window', icon: '🪟' },
-  { key: 'sofa', label: 'Sofa', icon: '🛋' },
-  { key: 'chair', label: 'Chair', icon: '💺' },
-  { key: 'cushion', label: 'Cushion', icon: '🛏' },
-  { key: 'pillow', label: 'Pillow', icon: '🛌' },
-  { key: 'cornice', label: 'Cornice', icon: '📐' },
-  { key: 'valance', label: 'Valance', icon: '🎪' },
-  { key: 'roman_shade', label: 'Roman Shade', icon: '🪟' },
-  { key: 'other', label: 'Other', icon: '📏' },
+interface ManualItemDef { key: ManualItemType; label: string; icon: string }
+interface ManualItemGroup { group: string; color: string; items: ManualItemDef[] }
+
+const MANUAL_ITEM_GROUPS: ManualItemGroup[] = [
+  {
+    group: 'Window Treatments', color: '#2563eb',
+    items: [
+      { key: 'drapery', label: 'Drapery', icon: '🪟' },
+      { key: 'roman_shade', label: 'Roman Shade', icon: '🪟' },
+      { key: 'cornice', label: 'Cornice', icon: '📐' },
+      { key: 'valance', label: 'Valance', icon: '🎪' },
+      { key: 'swag', label: 'Swag', icon: '🎀' },
+    ],
+  },
+  {
+    group: 'Furniture / Upholstery', color: '#b8960c',
+    items: [
+      { key: 'sofa', label: 'Sofa', icon: '🛋' },
+      { key: 'loveseat', label: 'Loveseat', icon: '🛋' },
+      { key: 'chair', label: 'Chair', icon: '💺' },
+      { key: 'sectional', label: 'Sectional', icon: '🛋' },
+      { key: 'ottoman', label: 'Ottoman', icon: '🪑' },
+      { key: 'bench', label: 'Bench', icon: '🪑' },
+      { key: 'headboard', label: 'Headboard', icon: '🛏' },
+      { key: 'banquette', label: 'Banquette', icon: '🪑' },
+    ],
+  },
+  {
+    group: 'Cushions & Soft Goods', color: '#7c3aed',
+    items: [
+      { key: 'cushion', label: 'Cushion', icon: '🛏' },
+      { key: 'pillow', label: 'Pillow', icon: '🛌' },
+      { key: 'other', label: 'Other', icon: '📏' },
+    ],
+  },
 ];
+
+const MANUAL_ITEM_TYPES = MANUAL_ITEM_GROUPS.flatMap(g => g.items);
 
 const STEPS = [
   { id: 1, label: 'Customer', icon: User },
@@ -147,9 +194,9 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
   const [rooms, setRooms] = useState<Room[]>([{ id: crypto.randomUUID(), name: 'Living Room', items: [] }]);
   const [options, setOptions] = useState<QuoteOptions>({
-    fabricGrade: 'B', liningType: 'standard',
-    tufting: false, welting: false, nailhead: false, skirt: false,
-    contrastPiping: false, patternMatch: false, rushOrder: false, delivery: false,
+    fabricGrade: 'B', liningType: 'standard', pleatType: 'pinch', contrastPiping: false, patternMatch: false,
+    foamType: 'new', foamDensity: 'standard', tufting: false, welting: false, nailhead: false, skirt: false, channeling: false,
+    rushOrder: false, delivery: false,
   });
 
   // Intake project loading
@@ -429,10 +476,11 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setRooms(prev => prev.map(r => r.id === roomId ? { ...r, name } : r));
   };
 
-  const addItem = (roomId: string) => {
+  const addItem = (roomId: string, category: ItemCategory = 'upholstery') => {
+    const defaultType = category === 'drapery' ? 'drapery' : 'sofa_3cushion';
     setRooms(prev => prev.map(r => r.id === roomId ? {
       ...r, items: [...r.items, {
-        id: crypto.randomUUID(), type: 'sofa', width: '', height: '', depth: '', quantity: 1, notes: '',
+        id: crypto.randomUUID(), type: defaultType, width: '', height: '', depth: '', quantity: 1, notes: '',
       }]
     } : r));
   };
@@ -477,11 +525,15 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         options: {
           fabric_grade: options.fabricGrade,
           lining_type: options.liningType,
+          pleat_type: options.pleatType,
+          foam_type: options.foamType,
+          foam_density: options.foamDensity,
           features: {
             tufting: options.tufting,
             welting: options.welting,
             nailhead: options.nailhead,
             skirt: options.skirt,
+            channeling: options.channeling,
             contrast_piping: options.contrastPiping,
             pattern_match: options.patternMatch,
           },
@@ -604,7 +656,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
             addItem={addItem} removeItem={removeItem} updateItem={updateItem}
           />
         )}
-        {step === 4 && <StepOptions options={options} setOptions={setOptions} />}
+        {step === 4 && <StepOptions options={options} setOptions={setOptions} rooms={rooms} />}
         {step === 5 && !result && (
           <StepReview customer={customer} photos={photos} rooms={rooms} options={options} totalItems={totalItems} />
         )}
@@ -996,8 +1048,8 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
   const [addedCount, setAddedCount] = useState(0);
   const [showCushionBuilder, setShowCushionBuilder] = useState(false);
 
-  const isWindow = ['window', 'cornice', 'valance', 'roman_shade'].includes(itemType);
-  const isFurniture = ['sofa', 'chair'].includes(itemType);
+  const isWindow = ['window', 'drapery', 'cornice', 'valance', 'roman_shade', 'swag'].includes(itemType);
+  const isFurniture = ['sofa', 'loveseat', 'chair', 'sectional', 'ottoman', 'bench', 'headboard', 'banquette'].includes(itemType);
   const isCushion = ['cushion', 'pillow'].includes(itemType);
 
   const updateM = (key: string, val: string) => {
@@ -1014,10 +1066,23 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
     description: opts.notes || undefined,
   };
 
+  // Map manual entry types to ITEM_TYPES keys
+  const manualToItemType = (t: ManualItemType): string => {
+    const map: Record<string, string> = {
+      window: 'drapery', drapery: 'drapery', roman_shade: 'roman_shade', cornice: 'cornice',
+      valance: 'valance', swag: 'swag',
+      sofa: 'sofa_3cushion', loveseat: 'loveseat', chair: 'accent_chair',
+      sectional: 'sectional', ottoman: 'ottoman_small', bench: 'bench',
+      headboard: 'headboard', banquette: 'banquette',
+      cushion: 'seat_cushion', pillow: 'throw_pillow', other: 'sofa_3cushion',
+    };
+    return map[t] || 'sofa_3cushion';
+  };
+
   const addItem = () => {
     if (!m.width_inches && !m.height_inches) return;
     onAddItem({
-      type: ITEM_TYPES.includes(itemType) ? itemType : 'sofa',
+      type: manualToItemType(itemType),
       width: m.width_inches ? `${m.width_inches}"` : '',
       height: m.height_inches ? `${m.height_inches}"` : '',
       depth: m.depth_inches ? `${m.depth_inches}"` : '',
@@ -1046,26 +1111,33 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
         </div>
       )}
 
-      {/* Item type selector */}
+      {/* Item type selector — grouped */}
       <div style={{ marginBottom: 16 }}>
         <label style={{ fontSize: 10, fontWeight: 700, color: '#777', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
           What are you measuring?
         </label>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {MANUAL_ITEM_TYPES.map(t => (
-            <button key={t.key} onClick={() => setItemType(t.key)}
-              className="cursor-pointer transition-all"
-              style={{
-                padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 600,
-                border: `1.5px solid ${itemType === t.key ? '#b8960c' : '#ece8e0'}`,
-                background: itemType === t.key ? '#fdf8e8' : '#faf9f7',
-                color: itemType === t.key ? '#b8960c' : '#777',
-                minHeight: 44,
-              }}>
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
+        {MANUAL_ITEM_GROUPS.map(group => (
+          <div key={group.group} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: group.color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>
+              {group.group}
+            </div>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              {group.items.map(t => (
+                <button key={t.key} onClick={() => setItemType(t.key)}
+                  className="cursor-pointer transition-all"
+                  style={{
+                    padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                    border: `1.5px solid ${itemType === t.key ? group.color : '#ece8e0'}`,
+                    background: itemType === t.key ? `${group.color}10` : '#faf9f7',
+                    color: itemType === t.key ? group.color : '#777',
+                    minHeight: 36,
+                  }}>
+                  {t.icon} {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Cushion Builder (full wizard) */}
@@ -1146,16 +1218,22 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
                   </select>
                 </label>
                 <label style={{ fontSize: 12 }}>
-                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Treatment</span>
+                  <span style={{ color: '#888', fontSize: 11, fontWeight: 600 }}>Pleat / Style</span>
                   <select value={opts.treatment} onChange={e => setOpts(p => ({...p, treatment: e.target.value}))}
                     style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', fontSize: 13, marginTop: 4, background: '#faf9f7', minHeight: 44 }}>
                     <option value="">--</option>
                     <option value="pinch_pleat">Pinch Pleat</option>
-                    <option value="rod_pocket">Rod Pocket</option>
-                    <option value="grommet">Grommet</option>
-                    <option value="tab_top">Tab Top</option>
+                    <option value="french_pleat">French Pleat</option>
+                    <option value="euro_pleat">Euro Pleat</option>
+                    <option value="cartridge_pleat">Cartridge Pleat</option>
                     <option value="ripplefold">Ripplefold</option>
-                    <option value="goblet">Goblet</option>
+                    <option value="goblet">Goblet Pleat</option>
+                    <option value="box_pleat">Box Pleat</option>
+                    <option value="inverted_box">Inverted Box Pleat</option>
+                    <option value="rod_pocket">Rod Pocket</option>
+                    <option value="tab_top">Tab Top</option>
+                    <option value="grommet">Grommet</option>
+                    <option value="flat">Flat / No Pleat</option>
                   </select>
                 </label>
               </div>
@@ -1326,9 +1404,11 @@ function AnalysisModal({ photo, items, analyzing, onToggleItem, onAddItems, onCl
 
 function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem }: {
   rooms: Room[]; addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
-  addItem: (roomId: string) => void; removeItem: (roomId: string, itemId: string) => void;
+  addItem: (roomId: string, category?: ItemCategory) => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
 }) {
+  const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -1350,11 +1430,31 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
               <GripVertical size={14} className="text-[#ccc]" />
               <input value={room.name} onChange={e => updateRoomName(room.id, e.target.value)}
                 style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 14, fontWeight: 600, color: '#1a1a1a' }} />
-              <button onClick={() => addItem(room.id)}
-                className="flex items-center gap-1 cursor-pointer transition-all hover:bg-[#fdf8eb]"
-                style={{ padding: '5px 10px', borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', fontSize: 10, fontWeight: 600, color: '#b8960c' }}>
-                <Plus size={12} /> Item
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button onClick={() => setAddMenuRoom(addMenuRoom === room.id ? null : room.id)}
+                  className="flex items-center gap-1 cursor-pointer transition-all hover:bg-[#fdf8eb]"
+                  style={{ padding: '5px 10px', borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', fontSize: 10, fontWeight: 600, color: '#b8960c' }}>
+                  <Plus size={12} /> Item
+                </button>
+                {addMenuRoom === room.id && (
+                  <div style={{
+                    position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 20,
+                    background: '#fff', border: '1.5px solid #ece8e0', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+                    overflow: 'hidden', minWidth: 180,
+                  }}>
+                    <button onClick={() => { addItem(room.id, 'upholstery'); setAddMenuRoom(null); }}
+                      className="flex items-center gap-2 w-full cursor-pointer transition-all hover:bg-[#fdf8eb]"
+                      style={{ padding: '10px 14px', border: 'none', background: 'none', fontSize: 12, fontWeight: 600, color: '#1a1a1a', borderBottom: '1px solid #f0ede8' }}>
+                      <Box size={14} style={{ color: '#b8960c' }} /> Furniture / Upholstery
+                    </button>
+                    <button onClick={() => { addItem(room.id, 'drapery'); setAddMenuRoom(null); }}
+                      className="flex items-center gap-2 w-full cursor-pointer transition-all hover:bg-[#eff6ff]"
+                      style={{ padding: '10px 14px', border: 'none', background: 'none', fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>
+                      <Layers size={14} style={{ color: '#2563eb' }} /> Drapery / Window Treatment
+                    </button>
+                  </div>
+                )}
+              </div>
               {rooms.length > 1 && (
                 <button onClick={() => removeRoom(room.id)}
                   className="cursor-pointer transition-all hover:bg-[#fef2f2] hover:text-[#dc2626]"
@@ -1368,18 +1468,26 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
             <div style={{ padding: room.items.length ? '12px 16px' : '0' }}>
               {room.items.length === 0 && (
                 <div style={{ padding: '20px 16px', textAlign: 'center', fontSize: 12, color: '#bbb' }}>
-                  No items yet — click "+ Item" to add
+                  No items yet — click "+ Item" to add furniture or drapery
                 </div>
               )}
-              {room.items.map((item, idx) => (
+              {room.items.map((item, idx) => {
+                const cat = getItemCategory(item.type);
+                const typeList = cat === 'drapery' ? DRAPERY_TYPES : UPHOLSTERY_TYPES;
+                const catColor = cat === 'drapery' ? '#2563eb' : '#b8960c';
+                const catLabel = cat === 'drapery' ? 'DRAPERY' : 'UPHOLSTERY';
+                return (
                 <div key={item.id} className="flex items-start gap-2" style={{ marginBottom: idx < room.items.length - 1 ? 10 : 0, paddingBottom: idx < room.items.length - 1 ? 10 : 0, borderBottom: idx < room.items.length - 1 ? '1px solid #f0ede8' : 'none' }}>
                   <div className="flex-1 grid grid-cols-6 gap-2">
-                    {/* Type */}
+                    {/* Category badge + Type */}
                     <div className="col-span-2">
-                      <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>TYPE</label>
+                      <div className="flex items-center gap-1.5" style={{ marginBottom: 2 }}>
+                        <span style={{ fontSize: 8, fontWeight: 700, color: catColor, background: `${catColor}12`, padding: '1px 5px', borderRadius: 4 }}>{catLabel}</span>
+                        <label style={{ fontSize: 9, fontWeight: 600, color: '#999' }}>TYPE</label>
+                      </div>
                       <select value={item.type} onChange={e => updateItem(room.id, item.id, 'type', e.target.value)}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }}>
-                        {ITEM_TYPES.map(t => (
+                        {typeList.map(t => (
                           <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
                         ))}
                       </select>
@@ -1388,19 +1496,19 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                     <div>
                       <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>W</label>
                       <input value={item.width} onChange={e => updateItem(room.id, item.id, 'width', e.target.value)}
-                        placeholder='48"' className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
+                        placeholder={cat === 'drapery' ? '48"' : '72"'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                     {/* H */}
                     <div>
                       <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>H</label>
                       <input value={item.height} onChange={e => updateItem(room.id, item.id, 'height', e.target.value)}
-                        placeholder='36"' className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
+                        placeholder={cat === 'drapery' ? '84"' : '36"'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                     {/* D */}
                     <div>
-                      <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>D</label>
+                      <label style={{ fontSize: 9, fontWeight: 600, color: '#999', display: 'block', marginBottom: 2 }}>{cat === 'drapery' ? 'PROJ' : 'D'}</label>
                       <input value={item.depth} onChange={e => updateItem(room.id, item.id, 'depth', e.target.value)}
-                        placeholder='32"' className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
+                        placeholder={cat === 'drapery' ? '6"' : '32"'} className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                     {/* Qty */}
                     <div>
@@ -1412,7 +1520,7 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                     {/* Notes row */}
                     <div className="col-span-5">
                       <input value={item.notes} onChange={e => updateItem(room.id, item.id, 'notes', e.target.value)}
-                        placeholder="Notes (fabric preference, condition, etc.)"
+                        placeholder={cat === 'drapery' ? 'Notes (fabric, mount type, motorization...)' : 'Notes (fabric preference, condition, existing foam...)'}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
                   </div>
@@ -1422,7 +1530,8 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                     <Trash2 size={13} />
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
@@ -1431,8 +1540,38 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
   );
 }
 
-function StepOptions({ options, setOptions }: { options: QuoteOptions; setOptions: (o: QuoteOptions) => void }) {
+function StepOptions({ options, setOptions, rooms }: { options: QuoteOptions; setOptions: (o: QuoteOptions) => void; rooms: Room[] }) {
   const toggle = (key: keyof QuoteOptions) => setOptions({ ...options, [key]: !options[key] });
+
+  // Determine which categories are present in the quote
+  const allItems = rooms.flatMap(r => r.items);
+  const hasUpholstery = allItems.some(it => getItemCategory(it.type) === 'upholstery');
+  const hasDrapery = allItems.some(it => getItemCategory(it.type) === 'drapery');
+
+  const checkBtn = (key: keyof QuoteOptions, label: string, accent = '#b8960c') => {
+    const isChecked = options[key] as boolean;
+    return (
+      <button key={key} onClick={() => toggle(key)}
+        className="flex items-center gap-2 cursor-pointer transition-all text-left"
+        style={{
+          padding: '10px 12px', borderRadius: 10,
+          border: `1.5px solid ${isChecked ? accent : '#ece8e0'}`,
+          background: isChecked ? `${accent}10` : '#faf9f7',
+          fontSize: 12, fontWeight: isChecked ? 600 : 400,
+          color: isChecked ? accent : '#777',
+        }}>
+        <div style={{
+          width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+          border: `2px solid ${isChecked ? accent : '#ddd'}`,
+          background: isChecked ? accent : '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {isChecked && <Check size={12} className="text-white" />}
+        </div>
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div>
@@ -1440,86 +1579,119 @@ function StepOptions({ options, setOptions }: { options: QuoteOptions; setOption
         Quote Options
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* Fabric Grade */}
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 8 }}>Fabric Grade</label>
-          <div className="flex gap-2">
-            {(['A', 'B', 'C'] as const).map(g => {
-              const isActive = options.fabricGrade === g;
-              const labels: Record<string, string> = { A: 'Standard', B: 'Designer', C: 'Premium' };
-              const colors: Record<string, string> = { A: '#16a34a', B: '#b8960c', C: '#7c3aed' };
-              return (
-                <button key={g} onClick={() => setOptions({ ...options, fabricGrade: g })}
-                  className="flex-1 cursor-pointer transition-all"
-                  style={{
-                    padding: '10px 8px', borderRadius: 10, textAlign: 'center', fontSize: 12, fontWeight: 600,
-                    border: `2px solid ${isActive ? colors[g] : '#ece8e0'}`,
-                    background: isActive ? `${colors[g]}10` : '#faf9f7',
-                    color: isActive ? colors[g] : '#777',
-                  }}>
-                  Grade {g}<br /><span style={{ fontSize: 10, fontWeight: 400 }}>{labels[g]}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Lining Type */}
-        <div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 8 }}>Lining Type</label>
-          <select value={options.liningType}
-            onChange={e => setOptions({ ...options, liningType: e.target.value as any })}
-            className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
-            <option value="none">No Lining</option>
-            <option value="standard">Standard Lining</option>
-            <option value="blackout">Blackout Lining</option>
-            <option value="interlining">Interlining</option>
-            <option value="thermal">Thermal Lining</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Special Features */}
-      <div style={{ marginTop: 24 }}>
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 10 }}>Special Features</label>
-        <div className="grid grid-cols-3 gap-2">
-          {([
-            { key: 'tufting', label: 'Tufting' },
-            { key: 'welting', label: 'Welting / Piping' },
-            { key: 'nailhead', label: 'Nailhead Trim' },
-            { key: 'skirt', label: 'Skirt / Kick Pleat' },
-            { key: 'contrastPiping', label: 'Contrast Piping' },
-            { key: 'patternMatch', label: 'Pattern Match' },
-          ] as const).map(feat => {
-            const isChecked = options[feat.key] as boolean;
+      {/* Fabric Grade — shared */}
+      <div style={{ marginBottom: 20 }}>
+        <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 8 }}>Fabric Grade</label>
+        <div className="flex gap-2">
+          {(['A', 'B', 'C'] as const).map(g => {
+            const isActive = options.fabricGrade === g;
+            const labels: Record<string, string> = { A: 'Standard', B: 'Designer', C: 'Premium' };
+            const colors: Record<string, string> = { A: '#16a34a', B: '#b8960c', C: '#7c3aed' };
             return (
-              <button key={feat.key} onClick={() => toggle(feat.key)}
-                className="flex items-center gap-2 cursor-pointer transition-all text-left"
+              <button key={g} onClick={() => setOptions({ ...options, fabricGrade: g })}
+                className="flex-1 cursor-pointer transition-all"
                 style={{
-                  padding: '10px 12px', borderRadius: 10,
-                  border: `1.5px solid ${isChecked ? '#b8960c' : '#ece8e0'}`,
-                  background: isChecked ? '#fdf8eb' : '#faf9f7',
-                  fontSize: 12, fontWeight: isChecked ? 600 : 400,
-                  color: isChecked ? '#b8960c' : '#777',
+                  padding: '10px 8px', borderRadius: 10, textAlign: 'center', fontSize: 12, fontWeight: 600,
+                  border: `2px solid ${isActive ? colors[g] : '#ece8e0'}`,
+                  background: isActive ? `${colors[g]}10` : '#faf9f7',
+                  color: isActive ? colors[g] : '#777',
                 }}>
-                <div style={{
-                  width: 18, height: 18, borderRadius: 5, flexShrink: 0,
-                  border: `2px solid ${isChecked ? '#b8960c' : '#ddd'}`,
-                  background: isChecked ? '#b8960c' : '#fff',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {isChecked && <Check size={12} className="text-white" />}
-                </div>
-                {feat.label}
+                Grade {g}<br /><span style={{ fontSize: 10, fontWeight: 400 }}>{labels[g]}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* Rush / Delivery */}
-      <div className="flex gap-3 mt-5">
+      {/* Upholstery Options */}
+      {hasUpholstery && (
+        <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, border: '1.5px solid #ece8e0', background: '#fdfcfa' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Box size={14} style={{ color: '#b8960c' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Upholstery Options</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-3">
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Foam</label>
+              <select value={options.foamType}
+                onChange={e => setOptions({ ...options, foamType: e.target.value as any })}
+                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
+                <option value="new">New Foam</option>
+                <option value="reuse">Reuse Existing Foam</option>
+                <option value="upgrade">Upgrade Foam (HD)</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Foam Density</label>
+              <select value={options.foamDensity}
+                onChange={e => setOptions({ ...options, foamDensity: e.target.value as any })}
+                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
+                <option value="standard">Standard (1.8 lb)</option>
+                <option value="high">High Density (2.5 lb)</option>
+                <option value="premium">Premium (HR 3.0+ lb)</option>
+              </select>
+            </div>
+          </div>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 8 }}>Detail Work</label>
+          <div className="grid grid-cols-3 gap-2">
+            {checkBtn('tufting', 'Tufting')}
+            {checkBtn('welting', 'Welting / Piping')}
+            {checkBtn('nailhead', 'Nailhead Trim')}
+            {checkBtn('skirt', 'Skirt / Kick Pleat')}
+            {checkBtn('channeling', 'Channeling')}
+          </div>
+        </div>
+      )}
+
+      {/* Drapery Options */}
+      {hasDrapery && (
+        <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, border: '1.5px solid #d6e4f0', background: '#fafcff' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Layers size={14} style={{ color: '#2563eb' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Drapery Options</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-3">
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Lining Type</label>
+              <select value={options.liningType}
+                onChange={e => setOptions({ ...options, liningType: e.target.value as any })}
+                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
+                <option value="none">No Lining</option>
+                <option value="standard">Standard Lining</option>
+                <option value="blackout">Blackout Lining</option>
+                <option value="interlining">Interlining</option>
+                <option value="thermal">Thermal Lining</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Pleat Type</label>
+              <select value={options.pleatType}
+                onChange={e => setOptions({ ...options, pleatType: e.target.value as any })}
+                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
+                <option value="pinch">Pinch Pleat</option>
+                <option value="french">French Pleat</option>
+                <option value="euro">Euro Pleat</option>
+                <option value="cartridge">Cartridge Pleat</option>
+                <option value="ripplefold">Ripplefold</option>
+                <option value="goblet">Goblet Pleat</option>
+                <option value="box">Box Pleat</option>
+                <option value="inverted_box">Inverted Box Pleat</option>
+                <option value="rod_pocket">Rod Pocket</option>
+                <option value="tab_top">Tab Top</option>
+                <option value="grommet">Grommet</option>
+                <option value="none">Flat / No Pleat</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {checkBtn('contrastPiping', 'Contrast Piping', '#2563eb')}
+            {checkBtn('patternMatch', 'Pattern Match', '#2563eb')}
+          </div>
+        </div>
+      )}
+
+      {/* Rush / Delivery — shared */}
+      <div className="flex gap-3">
         <button onClick={() => toggle('rushOrder')}
           className="flex-1 flex items-center gap-2 cursor-pointer transition-all"
           style={{
@@ -1537,7 +1709,7 @@ function StepOptions({ options, setOptions }: { options: QuoteOptions; setOption
           }}>
             {options.rushOrder && <Check size={12} className="text-white" />}
           </div>
-          Rush Order (+25%)
+          Rush Order (+20%)
         </button>
         <button onClick={() => toggle('delivery')}
           className="flex-1 flex items-center gap-2 cursor-pointer transition-all"
@@ -1566,11 +1738,17 @@ function StepOptions({ options, setOptions }: { options: QuoteOptions; setOption
 function StepReview({ customer, photos, rooms, options, totalItems }: {
   customer: CustomerInfo; photos: PhotoFile[]; rooms: Room[]; options: QuoteOptions; totalItems: number;
 }) {
+  const allItems = rooms.flatMap(r => r.items);
+  const hasUpholstery = allItems.some(it => getItemCategory(it.type) === 'upholstery');
+  const hasDrapery = allItems.some(it => getItemCategory(it.type) === 'drapery');
   const features = [
+    hasUpholstery && options.foamType !== 'new' && (options.foamType === 'reuse' ? 'Reuse Foam' : 'Upgrade Foam'),
+    hasUpholstery && options.foamType === 'new' && 'New Foam',
     options.tufting && 'Tufting',
     options.welting && 'Welting',
     options.nailhead && 'Nailhead',
     options.skirt && 'Skirt',
+    options.channeling && 'Channeling',
     options.contrastPiping && 'Contrast Piping',
     options.patternMatch && 'Pattern Match',
   ].filter(Boolean);
@@ -1633,9 +1811,18 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
 
       {/* Options */}
       <div className="flex flex-wrap gap-2 mt-4">
-        <span style={{ fontSize: 10, padding: '4px 10px', borderRadius: 6, background: '#fdf8eb', color: '#b8960c', fontWeight: 600, border: '1px solid #f5ecd0' }}>
-          {options.liningType === 'none' ? 'No Lining' : `${options.liningType.charAt(0).toUpperCase() + options.liningType.slice(1)} Lining`}
-        </span>
+        {hasDrapery && (
+          <>
+            <span style={{ fontSize: 10, padding: '4px 10px', borderRadius: 6, background: '#eff6ff', color: '#2563eb', fontWeight: 600, border: '1px solid #bfdbfe' }}>
+              {options.liningType === 'none' ? 'No Lining' : `${options.liningType.charAt(0).toUpperCase() + options.liningType.slice(1)} Lining`}
+            </span>
+            {options.pleatType !== 'none' && (
+              <span style={{ fontSize: 10, padding: '4px 10px', borderRadius: 6, background: '#eff6ff', color: '#2563eb', fontWeight: 600, border: '1px solid #bfdbfe' }}>
+                {options.pleatType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+              </span>
+            )}
+          </>
+        )}
         {features.map(f => (
           <span key={f as string} style={{ fontSize: 10, padding: '4px 10px', borderRadius: 6, background: '#f5f3ef', color: '#555', fontWeight: 600, border: '1px solid #ece8e0' }}>
             {f}
