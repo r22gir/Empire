@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Cornice face - serpentine/curved bottom -->
+  <path d="M18,28 L182,28 L182,60 Q160,80 140,60 Q120,42 100,65 Q80,42 60,60 Q40,80 18,60 Z" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Top edge detail -->
+  <line x1="18" y1="32" x2="182" y2="32" stroke="#333" stroke-width="0.75"/>
+  <!-- Side returns -->
+  <path d="M18,28 L12,24 L12,56 L18,60" fill="#f5f0e8" stroke="#333" stroke-width="1"/>
+  <path d="M182,28 L188,24 L188,56 L182,60" fill="#f5f0e8" stroke="#333" stroke-width="1"/>
+  <!-- Double welt along serpentine edge -->
+  <path d="M18,57 Q40,77 60,57 Q80,39 100,62 Q120,39 140,57 Q160,77 182,57" fill="none" stroke="#333" stroke-width="0.75"/>
+  <!-- Window frame suggestion -->
+  <rect x="25" y="84" width="150" height="98" rx="1" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="4,4"/>
+</svg>

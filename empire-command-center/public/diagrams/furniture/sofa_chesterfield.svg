@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Back - tall, curved -->
+  <path d="M20,35 Q100,20 180,35 L180,110 L20,110 Z" fill="#f5f0e8" stroke="#333" stroke-width="1.5" rx="5"/>
+  <!-- Tufting pattern on back -->
+  <circle cx="55" cy="55" r="2" fill="#333" stroke="none"/>
+  <circle cx="100" cy="50" r="2" fill="#333" stroke="none"/>
+  <circle cx="145" cy="55" r="2" fill="#333" stroke="none"/>
+  <circle cx="77" cy="75" r="2" fill="#333" stroke="none"/>
+  <circle cx="123" cy="75" r="2" fill="#333" stroke="none"/>
+  <circle cx="55" cy="95" r="2" fill="#333" stroke="none"/>
+  <circle cx="100" cy="90" r="2" fill="#333" stroke="none"/>
+  <circle cx="145" cy="95" r="2" fill="#333" stroke="none"/>
+  <!-- Diamond tufting lines -->
+  <line x1="55" y1="55" x2="77" y2="75" stroke="#333" stroke-width="0.5"/>
+  <line x1="100" y1="50" x2="77" y2="75" stroke="#333" stroke-width="0.5"/>
+  <line x1="100" y1="50" x2="123" y2="75" stroke="#333" stroke-width="0.5"/>
+  <line x1="145" y1="55" x2="123" y2="75" stroke="#333" stroke-width="0.5"/>
+  <line x1="77" y1="75" x2="55" y2="95" stroke="#333" stroke-width="0.5"/>
+  <line x1="77" y1="75" x2="100" y2="90" stroke="#333" stroke-width="0.5"/>
+  <line x1="123" y1="75" x2="100" y2="90" stroke="#333" stroke-width="0.5"/>
+  <line x1="123" y1="75" x2="145" y2="95" stroke="#333" stroke-width="0.5"/>
+  <!-- Seat -->
+  <rect x="20" y="110" width="160" height="28" rx="4" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Rolled arms -->
+  <ellipse cx="18" cy="85" rx="14" ry="55" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <ellipse cx="182" cy="85" rx="14" ry="55" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Arm tufting -->
+  <circle cx="14" cy="65" r="1.5" fill="#333"/>
+  <circle cx="14" cy="85" r="1.5" fill="#333"/>
+  <circle cx="14" cy="105" r="1.5" fill="#333"/>
+  <circle cx="186" cy="65" r="1.5" fill="#333"/>
+  <circle cx="186" cy="85" r="1.5" fill="#333"/>
+  <circle cx="186" cy="105" r="1.5" fill="#333"/>
+  <!-- Legs - turned/bun feet -->
+  <ellipse cx="35" cy="145" rx="5" ry="8" fill="none" stroke="#333" stroke-width="1.5"/>
+  <ellipse cx="165" cy="145" rx="5" ry="8" fill="none" stroke="#333" stroke-width="1.5"/>
+</svg>

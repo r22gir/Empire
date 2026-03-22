@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Back - rounded -->
+  <path d="M45,35 Q100,22 155,35 L155,105 Q100,110 45,105 Z" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Rounded arms -->
+  <path d="M45,40 Q20,45 18,70 Q16,100 25,120 L45,120 L45,40" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M155,40 Q180,45 182,70 Q184,100 175,120 L155,120 L155,40" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Seat cushion -->
+  <rect x="40" y="108" width="120" height="30" rx="6" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Legs - short bun -->
+  <ellipse cx="55" cy="148" rx="6" ry="5" fill="none" stroke="#333" stroke-width="1.5"/>
+  <ellipse cx="145" cy="148" rx="6" ry="5" fill="none" stroke="#333" stroke-width="1.5"/>
+</svg>

@@ -60,6 +60,7 @@ def list_customers(
     search: Optional[str] = None,
     type: Optional[str] = None,
     source: Optional[str] = None,
+    business: Optional[str] = None,
     sort_by: str = Query("name", description="name, total_revenue, created_at, lifetime_quotes"),
     sort_dir: str = Query("asc", description="asc or desc"),
     limit: int = Query(100, ge=1, le=500),
@@ -79,6 +80,9 @@ def list_customers(
     if source:
         clauses.append("source = ?")
         params.append(source)
+    if business:
+        clauses.append("business = ?")
+        params.append(business)
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
 

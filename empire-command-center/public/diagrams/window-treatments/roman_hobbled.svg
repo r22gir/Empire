@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Mounting board -->
+  <rect x="25" y="18" width="150" height="8" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Hobbled/teardrop folds -->
+  <path d="M30,26 L30,42 Q100,58 170,42 L170,26 Z" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M30,42 L30,65 Q100,82 170,65 L170,42 Q100,58 30,42" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M30,65 L30,88 Q100,105 170,88 L170,65 Q100,82 30,65" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M30,88 L30,111 Q100,128 170,111 L170,88 Q100,105 30,88" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M30,111 L30,134 Q100,151 170,134 L170,111 Q100,128 30,111" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M30,134 L30,157 Q100,174 170,157 L170,134 Q100,151 30,134" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Bottom edge -->
+  <path d="M30,157 L30,170 L170,170 L170,157 Q100,174 30,157" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Window sill -->
+  <rect x="20" y="178" width="160" height="5" rx="1" fill="none" stroke="#333" stroke-width="1"/>
+</svg>

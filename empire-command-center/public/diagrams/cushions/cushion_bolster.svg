@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Side view of bolster cushion (cylindrical) -->
+  <!-- Main body -->
+  <rect x="35" y="65" width="130" height="70" rx="35" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Left end circle -->
+  <ellipse cx="42" cy="100" rx="12" ry="35" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Left end gathered center -->
+  <circle cx="42" cy="100" r="5" fill="none" stroke="#333" stroke-width="0.75"/>
+  <!-- Left gathering lines -->
+  <line x1="42" y1="67" x2="42" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="32" y1="80" x2="38" y2="96" stroke="#333" stroke-width="0.4"/>
+  <line x1="52" y1="80" x2="46" y2="96" stroke="#333" stroke-width="0.4"/>
+  <line x1="42" y1="105" x2="42" y2="133" stroke="#333" stroke-width="0.4"/>
+  <line x1="32" y1="120" x2="38" y2="104" stroke="#333" stroke-width="0.4"/>
+  <line x1="52" y1="120" x2="46" y2="104" stroke="#333" stroke-width="0.4"/>
+  <!-- Right end circle -->
+  <ellipse cx="158" cy="100" rx="12" ry="35" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Right end gathered center -->
+  <circle cx="158" cy="100" r="5" fill="none" stroke="#333" stroke-width="0.75"/>
+  <!-- Right gathering lines -->
+  <line x1="158" y1="67" x2="158" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="148" y1="80" x2="154" y2="96" stroke="#333" stroke-width="0.4"/>
+  <line x1="168" y1="80" x2="162" y2="96" stroke="#333" stroke-width="0.4"/>
+  <line x1="158" y1="105" x2="158" y2="133" stroke="#333" stroke-width="0.4"/>
+  <line x1="148" y1="120" x2="154" y2="104" stroke="#333" stroke-width="0.4"/>
+  <line x1="168" y1="120" x2="162" y2="104" stroke="#333" stroke-width="0.4"/>
+</svg>

@@ -2,26 +2,18 @@
 import { useState, useEffect } from 'react';
 import { API } from '../../lib/api';
 import { BusinessTab } from '../../lib/types';
-import { Zap, DollarSign, ClipboardList, Package, Truck, Megaphone, Headphones, TrendingUp, Users, Shield, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
+import { Zap, Megaphone, Headphones, Users, Shield, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
 
 export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab }) {
-  const [quotes, setQuotes] = useState<any[]>([]);
   const [accuracy, setAccuracy] = useState<any>(null);
   const [accuracyLoading, setAccuracyLoading] = useState(true);
 
   useEffect(() => {
-    fetch(API + '/quotes?limit=10').then(r => r.json()).then(data => {
-      setQuotes(data.quotes || data || []);
-    }).catch(() => {});
-
     fetch(API + '/max/accuracy/stats?days=7')
       .then(r => r.json())
       .then(data => { setAccuracy(data); setAccuracyLoading(false); })
       .catch(() => { setAccuracyLoading(false); });
   }, []);
-
-  const openQuotes = quotes.filter(q => q.status !== 'accepted').length;
-  const pipeline = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0);
 
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-9 py-6" style={{ background: '#f5f2ed' }}>
@@ -36,29 +28,21 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
         </div>
       </div>
 
-      {/* KPI Cards - Row 1 */}
+      {/* KPI Cards - Owner / Platform overview (no business data) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 mb-4">
-        <KPI icon={<DollarSign size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Pipeline" value={`$${pipeline.toLocaleString()}`} sub={`${quotes.length} quotes total`} />
-        <KPI icon={<ClipboardList size={18} />} iconBg="#fef3c7" iconColor="#d97706" label="Open Quotes" value={String(openQuotes)} sub="Active proposals" />
-        <KPI icon={<Package size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Inventory" value="--" sub="Fabrics · Hardware · Motors" />
-        <KPI icon={<Truck size={18} />} iconBg="#dbeafe" iconColor="#2563eb" label="Shipments" value="--" sub="Check shipping status" />
-      </div>
-
-      {/* KPI Cards - Row 2 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <KPI icon={<Megaphone size={18} />} iconBg="#fce7f3" iconColor="#ec4899" label="Social" value="--" sub="SocialForge status" />
+        <KPI icon={<Shield size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Platform" value="Online" sub="All services running" />
         <KPI icon={<Headphones size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Support" value="0" sub="No open tickets" />
-        <KPI icon={<TrendingUp size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Revenue MTD" value="--" sub="Month to date" />
+        <KPI icon={<Megaphone size={18} />} iconBg="#fce7f3" iconColor="#ec4899" label="Social" value="--" sub="SocialForge status" />
         <KPI icon={<Users size={18} />} iconBg="#dbeafe" iconColor="#2563eb" label="Leads" value="--" sub="New inquiries" />
       </div>
 
-      {/* Business Summary Cards */}
+      {/* Business navigation cards (links only, no data leaks) */}
       <div className="section-label" style={{ marginBottom: 8 }}>Businesses</div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <BizCard name="Empire Workroom" icon="🏗" color="#16a34a"
-          stats={[`${quotes.length} quotes`, `$${pipeline.toLocaleString()} pipeline`]} />
+          stats={['Drapery & Upholstery', 'Open in left nav →']} />
         <BizCard name="WoodCraft" icon="🪵" color="#ca8a04"
-          stats={['AI design engine ready', 'Store integration pending']} />
+          stats={['CNC & Woodworking', 'Open in left nav →']} />
         <BizCard name="Platform" icon="🌐" color="#2563eb"
           stats={['All services monitored', 'AI routing active']} />
       </div>
@@ -139,7 +123,7 @@ export default function DashboardScreen({ activeTab }: { activeTab: BusinessTab 
       {/* Revenue chart placeholder */}
       <div className="empire-card" style={{ minHeight: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="text-center">
-          <TrendingUp size={36} className="text-[#d8d3cb] mx-auto mb-2" />
+          <Activity size={36} className="text-[#d8d3cb] mx-auto mb-2" />
           <div style={{ fontSize: 13, fontWeight: 600, color: '#aaa' }}>Revenue Chart · Monthly Trend</div>
           <div style={{ fontSize: 11, color: '#ccc', marginTop: 4 }}>Click to expand · All businesses combined</div>
         </div>

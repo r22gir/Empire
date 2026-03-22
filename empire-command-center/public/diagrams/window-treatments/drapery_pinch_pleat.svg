@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Rod -->
+  <line x1="10" y1="20" x2="190" y2="20" stroke="#333" stroke-width="2"/>
+  <!-- Rod finials -->
+  <circle cx="10" cy="20" r="4" fill="none" stroke="#333" stroke-width="1.5"/>
+  <circle cx="190" cy="20" r="4" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Left panel -->
+  <g>
+    <!-- Pinch pleats at top -->
+    <path d="M20,24 L20,28 Q22,26 24,24 Q26,26 28,28 L28,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M38,24 L38,28 Q40,26 42,24 Q44,26 46,28 L46,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M56,24 L56,28 Q58,26 60,24 Q62,26 64,28 L64,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M74,24 L74,28 Q76,26 78,24 Q80,26 82,28 L82,24" fill="none" stroke="#333" stroke-width="1"/>
+    <!-- Drape fabric -->
+    <path d="M20,24 Q18,100 22,185 L32,185 Q28,100 32,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+    <path d="M32,24 Q35,100 38,185 L48,185 Q44,100 46,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+    <path d="M46,24 Q50,100 55,185 L65,185 Q60,100 64,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+    <path d="M64,24 Q68,100 72,185 L82,185 Q78,100 82,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  </g>
+  <!-- Right panel -->
+  <g>
+    <path d="M118,24 L118,28 Q120,26 122,24 Q124,26 126,28 L126,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M136,24 L136,28 Q138,26 140,24 Q142,26 144,28 L144,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M154,24 L154,28 Q156,26 158,24 Q160,26 162,28 L162,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M172,24 L172,28 Q174,26 176,24 Q178,26 180,28 L180,24" fill="none" stroke="#333" stroke-width="1"/>
+    <path d="M118,24 Q116,100 118,185 L128,185 Q126,100 126,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+    <path d="M126,24 Q130,100 135,185 L145,185 Q140,100 144,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+    <path d="M144,24 Q148,100 152,185 L162,185 Q158,100 162,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+    <path d="M162,24 Q166,100 170,185 L180,185 Q176,100 180,24" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  </g>
+  <!-- Floor line -->
+  <line x1="15" y1="188" x2="185" y2="188" stroke="#333" stroke-width="0.5" stroke-dasharray="4,4"/>
+</svg>

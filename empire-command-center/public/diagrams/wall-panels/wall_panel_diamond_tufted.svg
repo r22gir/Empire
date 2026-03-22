@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Panel border -->
+  <rect x="20" y="15" width="160" height="170" rx="3" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Diamond tufting grid -->
+  <!-- Row 1 -->
+  <circle cx="60" cy="35" r="2" fill="#333"/>
+  <circle cx="100" cy="35" r="2" fill="#333"/>
+  <circle cx="140" cy="35" r="2" fill="#333"/>
+  <!-- Row 2 -->
+  <circle cx="40" cy="65" r="2" fill="#333"/>
+  <circle cx="80" cy="65" r="2" fill="#333"/>
+  <circle cx="120" cy="65" r="2" fill="#333"/>
+  <circle cx="160" cy="65" r="2" fill="#333"/>
+  <!-- Row 3 -->
+  <circle cx="60" cy="95" r="2" fill="#333"/>
+  <circle cx="100" cy="95" r="2" fill="#333"/>
+  <circle cx="140" cy="95" r="2" fill="#333"/>
+  <!-- Row 4 -->
+  <circle cx="40" cy="125" r="2" fill="#333"/>
+  <circle cx="80" cy="125" r="2" fill="#333"/>
+  <circle cx="120" cy="125" r="2" fill="#333"/>
+  <circle cx="160" cy="125" r="2" fill="#333"/>
+  <!-- Row 5 -->
+  <circle cx="60" cy="155" r="2" fill="#333"/>
+  <circle cx="100" cy="155" r="2" fill="#333"/>
+  <circle cx="140" cy="155" r="2" fill="#333"/>
+  <!-- Diamond lines R1-R2 -->
+  <line x1="60" y1="35" x2="40" y2="65" stroke="#333" stroke-width="0.4"/>
+  <line x1="60" y1="35" x2="80" y2="65" stroke="#333" stroke-width="0.4"/>
+  <line x1="100" y1="35" x2="80" y2="65" stroke="#333" stroke-width="0.4"/>
+  <line x1="100" y1="35" x2="120" y2="65" stroke="#333" stroke-width="0.4"/>
+  <line x1="140" y1="35" x2="120" y2="65" stroke="#333" stroke-width="0.4"/>
+  <line x1="140" y1="35" x2="160" y2="65" stroke="#333" stroke-width="0.4"/>
+  <!-- R2-R3 -->
+  <line x1="40" y1="65" x2="60" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="80" y1="65" x2="60" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="80" y1="65" x2="100" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="120" y1="65" x2="100" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="120" y1="65" x2="140" y2="95" stroke="#333" stroke-width="0.4"/>
+  <line x1="160" y1="65" x2="140" y2="95" stroke="#333" stroke-width="0.4"/>
+  <!-- R3-R4 -->
+  <line x1="60" y1="95" x2="40" y2="125" stroke="#333" stroke-width="0.4"/>
+  <line x1="60" y1="95" x2="80" y2="125" stroke="#333" stroke-width="0.4"/>
+  <line x1="100" y1="95" x2="80" y2="125" stroke="#333" stroke-width="0.4"/>
+  <line x1="100" y1="95" x2="120" y2="125" stroke="#333" stroke-width="0.4"/>
+  <line x1="140" y1="95" x2="120" y2="125" stroke="#333" stroke-width="0.4"/>
+  <line x1="140" y1="95" x2="160" y2="125" stroke="#333" stroke-width="0.4"/>
+  <!-- R4-R5 -->
+  <line x1="40" y1="125" x2="60" y2="155" stroke="#333" stroke-width="0.4"/>
+  <line x1="80" y1="125" x2="60" y2="155" stroke="#333" stroke-width="0.4"/>
+  <line x1="80" y1="125" x2="100" y2="155" stroke="#333" stroke-width="0.4"/>
+  <line x1="120" y1="125" x2="100" y2="155" stroke="#333" stroke-width="0.4"/>
+  <line x1="120" y1="125" x2="140" y2="155" stroke="#333" stroke-width="0.4"/>
+  <line x1="160" y1="125" x2="140" y2="155" stroke="#333" stroke-width="0.4"/>
+</svg>

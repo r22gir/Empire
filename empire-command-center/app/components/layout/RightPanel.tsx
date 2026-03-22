@@ -43,56 +43,70 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
     const section = activeSection || '';
 
     if (activeProduct === 'workroom' && section === 'inventory') {
-      const data = await safeFetch(`${API}/inventory/dashboard`);
+      const data = await safeFetch(`${API}/inventory/dashboard?business=workroom`);
       setContextData({ type: 'inventory', data });
     } else if (activeProduct === 'workroom' && (section === 'quotes' || section === '')) {
-      const data = await safeFetch(`${API}/quotes`);
+      const data = await safeFetch(`${API}/quotes?business=workroom`);
       setContextData({ type: 'quotes', data });
     } else if (activeProduct === 'workroom' && section === 'customers') {
-      const data = await safeFetch(`${API}/crm/customers?limit=5`);
+      const data = await safeFetch(`${API}/crm/customers?limit=5&business=workroom`);
       setContextData({ type: 'customers', data });
     } else if (activeProduct === 'workroom' && section === 'finance') {
-      const data = await safeFetch(`${API}/finance/dashboard`);
+      const data = await safeFetch(`${API}/finance/dashboard?business=workroom`);
       setContextData({ type: 'finance', data });
     } else if (activeProduct === 'owner') {
-      const [quotes, customers] = await Promise.all([
-        safeFetch(`${API}/quotes`),
-        safeFetch(`${API}/crm/customers?limit=3`),
-      ]);
-      setContextData({ type: 'owner', quotes, customers });
+      // Owner desk: no business data — only platform/personal context
+      setContextData({ type: 'owner' });
     } else {
       setContextData(null);
     }
   }, [activeProduct, activeSection, safeFetch]);
 
-  // Fetch module stats
+  // Fetch module stats — scoped to active business
   const fetchModuleStats = useCallback(async () => {
     const stats: Record<string, string> = {};
-    const [quotes, invoices, customers, inventory, tickets, costs, tasksDash] = await Promise.all([
-      safeFetch(`${API}/quotes`),
-      safeFetch(`${API}/finance/invoices?limit=1`),
-      safeFetch(`${API}/crm/customers?limit=1`),
-      safeFetch(`${API}/inventory/items?limit=1`),
-      safeFetch(`${API}/tickets/?status=open&limit=1`),
-      safeFetch(`${API}/costs/overview?days=30`),
-      safeFetch(`${API}/tasks/dashboard`),
-    ]);
-    stats.quotes = quotes ? `${(quotes.quotes || []).filter((q: any) => q.status !== 'accepted').length} open` : 'Offline';
-    stats.invoices = invoices ? `${invoices.total ?? 0} total` : 'Offline';
-    stats.crm = customers ? `${customers.total ?? 0} contacts` : 'Offline';
-    stats.inventory = inventory ? `${inventory.total ?? 0} items` : 'Offline';
-    stats.tickets = tickets ? `${tickets.total ?? 0} open` : 'Offline';
-    stats.costs = costs?.today?.cost_usd ? `$${costs.today.cost_usd.toFixed(2)} today` : 'Token tracking';
-    stats.shipping = '--';
-    stats.reports = 'Weekly ready';
-    if (tasksDash?.totals) {
-      const active = (tasksDash.totals.todo || 0) + (tasksDash.totals.in_progress || 0) + (tasksDash.totals.waiting || 0);
-      stats.tasks = `${active} active`;
+    const biz = activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : '';
+    const bizParam = biz ? `business=${biz}` : '';
+    const bizQ = biz ? `?${bizParam}` : '';
+    const bizAmp = biz ? `&${bizParam}` : '';
+
+    if (activeProduct === 'owner') {
+      // Owner desk: only show platform-level stats (AI costs, tickets, tasks)
+      const [tickets, costs, tasksDash] = await Promise.all([
+        safeFetch(`${API}/tickets/?status=open&limit=1`),
+        safeFetch(`${API}/costs/overview?days=30`),
+        safeFetch(`${API}/tasks/dashboard`),
+      ]);
+      stats.tickets = tickets ? `${tickets.total ?? 0} open` : 'Offline';
+      stats.costs = costs?.today?.cost_usd ? `$${costs.today.cost_usd.toFixed(2)} today` : 'Token tracking';
+      stats.reports = 'Weekly ready';
+      if (tasksDash?.totals) {
+        const active = (tasksDash.totals.todo || 0) + (tasksDash.totals.in_progress || 0) + (tasksDash.totals.waiting || 0);
+        stats.tasks = `${active} active`;
+      } else { stats.tasks = '--'; }
     } else {
-      stats.tasks = '--';
+      // Business module: scope all stats to that business
+      const [quotes, invoices, customers, inventory, costs, tasksDash] = await Promise.all([
+        safeFetch(`${API}/quotes${bizQ}`),
+        safeFetch(`${API}/finance/invoices?limit=1${bizAmp}`),
+        safeFetch(`${API}/crm/customers?limit=1${bizAmp}`),
+        safeFetch(`${API}/inventory/items?limit=1${bizAmp}`),
+        safeFetch(`${API}/costs/overview?days=30`),
+        safeFetch(`${API}/tasks/dashboard${bizQ}`),
+      ]);
+      stats.quotes = quotes ? `${(quotes.quotes || []).filter((q: any) => q.status !== 'accepted').length} open` : 'Offline';
+      stats.invoices = invoices ? `${invoices.total ?? 0} total` : 'Offline';
+      stats.crm = customers ? `${customers.total ?? 0} contacts` : 'Offline';
+      stats.inventory = inventory ? `${inventory.total ?? 0} items` : 'Offline';
+      stats.costs = costs?.today?.cost_usd ? `$${costs.today.cost_usd.toFixed(2)} today` : 'Token tracking';
+      stats.shipping = '--';
+      if (tasksDash?.totals) {
+        const active = (tasksDash.totals.todo || 0) + (tasksDash.totals.in_progress || 0) + (tasksDash.totals.waiting || 0);
+        stats.tasks = `${active} active`;
+      } else { stats.tasks = '--'; }
     }
     setModuleStats(stats);
-  }, [safeFetch]);
+  }, [safeFetch, activeProduct]);
 
   useEffect(() => {
     fetchModuleStats();
@@ -164,7 +178,7 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
         <FinanceContext data={contextData.data} />
       )}
       {contextData?.type === 'owner' && (
-        <OwnerContext quotes={contextData.quotes} customers={contextData.customers} />
+        <OwnerContext />
       )}
 
       {/* ── NAVIGATION HELPERS (context-aware) ── */}
@@ -331,18 +345,16 @@ function FinanceContext({ data }: { data: any }) {
   );
 }
 
-function OwnerContext({ quotes, customers }: { quotes: any; customers: any }) {
-  const allQuotes = quotes?.quotes || [];
-  const pipeline = allQuotes.reduce((s: number, q: any) => s + (q.total || 0), 0);
-  const totalCustomers = customers?.total ?? 0;
+function OwnerContext() {
   return (
     <div>
-      <div className="section-label mb-2">Empire Overview</div>
+      <div className="section-label mb-2">Owner Desk</div>
       <div className="grid grid-cols-2 gap-2 mb-2">
-        <MiniKPI label="Pipeline" value={`$${pipeline.toLocaleString()}`} color="#b8960c" />
-        <MiniKPI label="Quotes" value={String(allQuotes.length)} color="#2563eb" />
-        <MiniKPI label="Contacts" value={String(totalCustomers)} color="#7c3aed" />
         <MiniKPI label="Businesses" value="3" color="#16a34a" />
+        <MiniKPI label="AI Desks" value="12" color="#7c3aed" />
+      </div>
+      <div style={{ padding: '8px 10px', borderRadius: 10, background: '#fdf8eb', border: '1px solid #f0e6c0', fontSize: 10, color: '#b8960c', lineHeight: 1.4 }}>
+        Personal desk — business data lives in each module. Switch to Workroom or WoodCraft in the left nav.
       </div>
     </div>
   );
@@ -380,8 +392,9 @@ function NavigationHelper({ activeProduct, activeSection, onScreenChange, onModu
         .then(data => setAnalysisHistory(data.jobs || data || []))
         .catch(() => setAnalysisHistory([]));
     }
-    // Always fetch a few recent tasks for quick reference
-    fetch(`${API}/tasks/?limit=4`)
+    // Fetch recent tasks scoped to current business
+    const biz = activeProduct === 'workroom' ? '&business=workroom' : activeProduct === 'craft' ? '&business=woodcraft' : '';
+    fetch(`${API}/tasks/?limit=4${biz}`)
       .then(r => r.ok ? r.json() : { tasks: [] })
       .then(data => setRecentTasks((data.tasks || []).filter((t: any) => t.status !== 'done').slice(0, 3)))
       .catch(() => {});

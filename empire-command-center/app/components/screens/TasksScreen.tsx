@@ -89,7 +89,7 @@ function timeAgo(dateStr?: string): string {
 
 // ── Main Component ───────────────────────────────────────────────
 
-export default function TasksScreen() {
+export default function TasksScreen({ business }: { business?: string }) {
   // State
   const [tasks, setTasks] = useState<Task[]>([]);
   const [total, setTotal] = useState(0);
@@ -113,6 +113,7 @@ export default function TasksScreen() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
+      if (business) params.set('business', business);
       if (filterDesk) params.set('desk', filterDesk);
       if (filterStatus) params.set('status', filterStatus);
       if (filterPriority) params.set('priority', filterPriority);
@@ -141,10 +142,11 @@ export default function TasksScreen() {
   // ── Fetch dashboard ──
   const fetchDashboard = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/tasks/dashboard`);
+      const params = business ? `?business=${business}` : '';
+      const res = await fetch(`${API}/tasks/dashboard${params}`);
       if (res.ok) setDashboard(await res.json());
     } catch { /* offline */ }
-  }, []);
+  }, [business]);
 
   useEffect(() => { fetchTasks(); fetchDashboard(); }, [fetchTasks, fetchDashboard]);
 
@@ -389,6 +391,7 @@ export default function TasksScreen() {
         <CreateTaskDialog
           onClose={() => setShowCreateDialog(false)}
           onCreated={handleTaskCreated}
+          business={business}
         />
       )}
     </div>
@@ -872,7 +875,7 @@ function MetaField({ label, children }: { label: string; children: React.ReactNo
 
 // ── Create Task Dialog ───────────────────────────────────────────
 
-function CreateTaskDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateTaskDialog({ onClose, onCreated, business }: { onClose: () => void; onCreated: () => void; business?: string }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [desk, setDesk] = useState('forge');
@@ -894,6 +897,7 @@ function CreateTaskDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         title: title.trim(),
         description: description.trim() || undefined,
         desk,
+        business: business || undefined,
         priority,
         status,
         assigned_to: assignedTo.trim() || undefined,

@@ -32,7 +32,7 @@ interface PaymentForm {
   date: string;
 }
 
-const PAYMENT_METHODS = ['Cash', 'Check', 'Card', 'Zelle', 'Venmo', 'Wire'];
+const PAYMENT_METHODS = ['Cash', 'Check', 'Card', 'Zelle', 'Venmo', 'Wire', 'Crypto (USDT)', 'Crypto (BTC)'];
 
 const todayISO = () => {
   const d = new Date();

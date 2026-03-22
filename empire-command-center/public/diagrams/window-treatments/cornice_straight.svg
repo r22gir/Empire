@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Cornice face - straight -->
+  <rect x="18" y="28" width="164" height="50" rx="2" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Top edge detail/welt -->
+  <line x1="18" y1="32" x2="182" y2="32" stroke="#333" stroke-width="0.75"/>
+  <!-- Bottom edge detail/welt -->
+  <line x1="18" y1="74" x2="182" y2="74" stroke="#333" stroke-width="0.75"/>
+  <!-- Side returns (3D depth suggestion) -->
+  <path d="M18,28 L12,24 L12,74 L18,78" fill="#f5f0e8" stroke="#333" stroke-width="1"/>
+  <path d="M182,28 L188,24 L188,74 L182,78" fill="#f5f0e8" stroke="#333" stroke-width="1"/>
+  <!-- Fabric texture suggestion - subtle horizontal lines -->
+  <line x1="22" y1="45" x2="178" y2="45" stroke="#333" stroke-width="0.2"/>
+  <line x1="22" y1="55" x2="178" y2="55" stroke="#333" stroke-width="0.2"/>
+  <line x1="22" y1="65" x2="178" y2="65" stroke="#333" stroke-width="0.2"/>
+  <!-- Window frame suggestion -->
+  <rect x="25" y="84" width="150" height="98" rx="1" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="4,4"/>
+</svg>

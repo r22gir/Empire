@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Mounting board -->
+  <rect x="20" y="25" width="160" height="6" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Left jabot -->
+  <path d="M20,31 L20,120 L35,110 L35,95 L42,85 L42,31 Z" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Jabot fold lines -->
+  <line x1="26" y1="31" x2="26" y2="115" stroke="#333" stroke-width="0.5"/>
+  <line x1="33" y1="31" x2="33" y2="100" stroke="#333" stroke-width="0.5"/>
+  <!-- Right jabot -->
+  <path d="M180,31 L180,120 L165,110 L165,95 L158,85 L158,31 Z" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <line x1="174" y1="31" x2="174" y2="115" stroke="#333" stroke-width="0.5"/>
+  <line x1="167" y1="31" x2="167" y2="100" stroke="#333" stroke-width="0.5"/>
+  <!-- Center swag -->
+  <path d="M42,31 Q60,35 70,45 Q85,65 100,75 Q115,65 130,45 Q140,35 158,31" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Swag drape folds -->
+  <path d="M50,35 Q75,55 100,65 Q125,55 150,35" fill="none" stroke="#333" stroke-width="0.5"/>
+  <path d="M55,38 Q80,50 100,58 Q120,50 145,38" fill="none" stroke="#333" stroke-width="0.5"/>
+  <!-- Window frame suggestion -->
+  <rect x="25" y="80" width="150" height="100" rx="1" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="4,4"/>
+</svg>

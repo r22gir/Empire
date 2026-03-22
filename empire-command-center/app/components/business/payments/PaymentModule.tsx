@@ -55,14 +55,16 @@ const STATUS_COLORS: Record<string, { bg: string; color: string; label: string }
 const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ElementType; sub: string }[] = [
   { id: 'card', label: 'Credit/Debit Card', icon: CreditCard, sub: 'Visa, MC, Amex' },
   { id: 'paypal', label: 'PayPal', icon: DollarSign, sub: 'PayPal checkout' },
-  { id: 'crypto', label: 'Crypto', icon: Wallet, sub: '10% discount' },
+  { id: 'crypto', label: 'Crypto', icon: Wallet, sub: 'USDT, BTC + more • 10% off' },
   { id: 'invoice', label: 'Invoice', icon: FileText, sub: 'Pay Later / Net 30' },
   { id: 'zelle', label: 'Zelle / Wire', icon: Send, sub: 'Business transfers' },
 ];
 
-const CRYPTO_TOKENS = ['USDC', 'SOL', 'ETH', 'EMPIRE'];
-const CRYPTO_RATES: Record<string, number> = { USDC: 1, SOL: 0.0067, ETH: 0.00028, EMPIRE: 100 };
+const CRYPTO_TOKENS = ['USDT', 'BTC', 'USDC', 'SOL', 'ETH', 'EMPIRE'];
+const CRYPTO_RATES: Record<string, number> = { USDT: 1, BTC: 0.0000095, USDC: 1, SOL: 0.0067, ETH: 0.00028, EMPIRE: 100 };
 const WALLET_ADDRESSES: Record<string, string> = {
+  USDT: '0x7a3B...eF92',
+  BTC: 'bc1q...x7mR',
   USDC: '0x7a3B...eF92',
   SOL: 'Emp1r...x4Bz',
   ETH: '0x7a3B...eF92',

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     priority TEXT NOT NULL DEFAULT 'normal'
         CHECK (priority IN ('urgent', 'high', 'normal', 'low')),
     desk TEXT NOT NULL,
+    business TEXT,
     assigned_to TEXT,
     created_by TEXT DEFAULT 'founder',
     due_date TEXT,
@@ -129,7 +130,7 @@ CREATE TABLE IF NOT EXISTS payments (
     invoice_id TEXT,
     customer_id TEXT,
     amount REAL NOT NULL,
-    method TEXT DEFAULT 'check' CHECK (method IN ('cash', 'check', 'card', 'zelle', 'venmo', 'wire', 'other')),
+    method TEXT DEFAULT 'check' CHECK (method IN ('cash', 'check', 'card', 'zelle', 'venmo', 'wire', 'crypto', 'other')),
     reference TEXT, -- check number, transaction ID, etc.
     notes TEXT,
     payment_date TEXT DEFAULT (date('now')),

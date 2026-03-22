@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Mounting board -->
+  <rect x="25" y="18" width="150" height="8" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Top gathered section -->
+  <rect x="28" y="26" width="144" height="80" rx="1" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Vertical shirring lines -->
+  <line x1="64" y1="26" x2="64" y2="106" stroke="#333" stroke-width="0.5" stroke-dasharray="2,3"/>
+  <line x1="100" y1="26" x2="100" y2="106" stroke="#333" stroke-width="0.5" stroke-dasharray="2,3"/>
+  <line x1="136" y1="26" x2="136" y2="106" stroke="#333" stroke-width="0.5" stroke-dasharray="2,3"/>
+  <!-- Balloon poufs at bottom -->
+  <path d="M28,106 Q46,160 64,106" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M64,106 Q82,160 100,106" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M100,106 Q118,160 136,106" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <path d="M136,106 Q154,160 172,106" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Gathered rosettes at string points -->
+  <circle cx="64" cy="106" r="3" fill="none" stroke="#333" stroke-width="1"/>
+  <circle cx="100" cy="106" r="3" fill="none" stroke="#333" stroke-width="1"/>
+  <circle cx="136" cy="106" r="3" fill="none" stroke="#333" stroke-width="1"/>
+  <!-- Window sill -->
+  <rect x="20" y="178" width="160" height="5" rx="1" fill="none" stroke="#333" stroke-width="1"/>
+</svg>

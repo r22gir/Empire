@@ -42,7 +42,7 @@ class InvoiceEmailRequest(BaseModel):
     total: float = 0.0
     balance_due: Optional[float] = None
     payment_url: str = "#"
-    payment_methods: Optional[str] = "Check, Zelle, Cash, Credit Card"
+    payment_methods: Optional[str] = "Check, Zelle, Cash, Credit Card, Crypto (USDT/BTC)"
 
 
 class PaymentReceiptRequest(BaseModel):
@@ -202,7 +202,7 @@ async def preview_template(template: Literal["quote", "invoice", "receipt"]):
             "total": 1660.00,
             "balance_due": 830.00,
             "payment_url": "https://studio.empirebox.store/pay/INV-2026-0078",
-            "payment_methods": "Check, Zelle, Cash, Credit Card",
+            "payment_methods": "Check, Zelle, Cash, Credit Card, Crypto (USDT/BTC)",
         })
     else:
         html = render_payment_received({

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Panel border -->
+  <rect x="20" y="15" width="160" height="170" rx="3" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Vertical channels -->
+  <path d="M42,15 Q45,100 42,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M58,15 Q55,100 58,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M72,15 Q75,100 72,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M88,15 Q85,100 88,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M102,15 Q105,100 102,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M118,15 Q115,100 118,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M132,15 Q135,100 132,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M148,15 Q145,100 148,185" fill="none" stroke="#333" stroke-width="1"/>
+  <path d="M162,15 Q165,100 162,185" fill="none" stroke="#333" stroke-width="1"/>
+  <!-- Channel shadows for depth -->
+  <rect x="42" y="15" width="16" height="170" fill="#333" fill-opacity="0.03" stroke="none"/>
+  <rect x="72" y="15" width="16" height="170" fill="#333" fill-opacity="0.03" stroke="none"/>
+  <rect x="102" y="15" width="16" height="170" fill="#333" fill-opacity="0.03" stroke="none"/>
+  <rect x="132" y="15" width="16" height="170" fill="#333" fill-opacity="0.03" stroke="none"/>
+  <rect x="162" y="15" width="16" height="170" fill="#333" fill-opacity="0.03" stroke="none"/>
+</svg>

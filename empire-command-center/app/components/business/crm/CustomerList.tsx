@@ -451,7 +451,8 @@ export default function CustomerList({ onSelectCustomer, business }: CustomerLis
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/crm/customers`);
+      const params = business ? `?business=${business}` : '';
+      const res = await fetch(`${API}/crm/customers${params}`);
       if (!res.ok) throw new Error(`Failed to load customers (${res.status})`);
       const data = await res.json();
       setCustomers(Array.isArray(data) ? data : data.customers || data.items || []);
@@ -461,7 +462,7 @@ export default function CustomerList({ onSelectCustomer, business }: CustomerLis
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [business]);
 
   useEffect(() => {
     fetchCustomers();

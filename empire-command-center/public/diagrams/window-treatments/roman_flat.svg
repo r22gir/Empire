@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Mounting board -->
+  <rect x="25" y="18" width="150" height="8" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Flat shade body (down position) -->
+  <rect x="28" y="26" width="144" height="145" rx="1" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Horizontal fold lines (where shade would fold up) -->
+  <line x1="30" y1="55" x2="170" y2="55" stroke="#333" stroke-width="0.5" stroke-dasharray="3,4"/>
+  <line x1="30" y1="85" x2="170" y2="85" stroke="#333" stroke-width="0.5" stroke-dasharray="3,4"/>
+  <line x1="30" y1="115" x2="170" y2="115" stroke="#333" stroke-width="0.5" stroke-dasharray="3,4"/>
+  <line x1="30" y1="145" x2="170" y2="145" stroke="#333" stroke-width="0.5" stroke-dasharray="3,4"/>
+  <!-- Bottom bar weight -->
+  <rect x="28" y="168" width="144" height="5" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Window sill -->
+  <rect x="20" y="178" width="160" height="5" rx="1" fill="none" stroke="#333" stroke-width="1"/>
+</svg>

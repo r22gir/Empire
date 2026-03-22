@@ -174,7 +174,7 @@ def render_invoice_sent(invoice_data: dict) -> str:
     total = _fmt_money(invoice_data.get("total", 0))
     balance = _fmt_money(invoice_data.get("balance_due", invoice_data.get("total", 0)))
     payment_url = invoice_data.get("payment_url", "#")
-    methods = invoice_data.get("payment_methods", "Check, Zelle, Cash, Credit Card")
+    methods = invoice_data.get("payment_methods", "Check, Zelle, Cash, Credit Card, Crypto (USDT/BTC)")
 
     content = f"""\
 <p style="margin:0 0 16px;font-size:16px;color:#333;line-height:1.6;">

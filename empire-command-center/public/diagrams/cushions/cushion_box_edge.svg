@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Side view of box edge cushion -->
+  <!-- Top surface -->
+  <path d="M25,70 Q100,62 175,70" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Front face -->
+  <path d="M25,70 L25,115 Q100,122 175,115 L175,70 Q100,62 25,70" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Bottom surface -->
+  <path d="M25,115 Q100,122 175,115" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Welt/piping top -->
+  <path d="M25,72 Q100,64 175,72" fill="none" stroke="#333" stroke-width="0.75"/>
+  <!-- Welt/piping bottom -->
+  <path d="M25,113 Q100,120 175,113" fill="none" stroke="#333" stroke-width="0.75"/>
+  <!-- Box edge label line showing the boxing height -->
+  <line x1="185" y1="72" x2="185" y2="113" stroke="#333" stroke-width="0.5"/>
+  <line x1="182" y1="72" x2="188" y2="72" stroke="#333" stroke-width="0.5"/>
+  <line x1="182" y1="113" x2="188" y2="113" stroke="#333" stroke-width="0.5"/>
+</svg>

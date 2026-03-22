@@ -4,10 +4,11 @@ import { API } from '../../lib/api';
 import {
   ArrowLeft, ArrowRight, User, Camera, Layers, Settings, FileText,
   Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, GripVertical, Search,
-  Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle
+  Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle, BookOpen
 } from 'lucide-react';
 import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
 import dynamic from 'next/dynamic';
+import { DiagramCatalog, DiagramViewer, findDiagramMatch, DIAGRAM_MAP } from '../business/catalog';
 
 const CushionBuilder = dynamic(() => import('../business/upholstery/CushionBuilder'), { ssr: false });
 
@@ -56,109 +57,345 @@ interface Room {
 type ItemCategory = 'upholstery' | 'drapery';
 
 interface QuoteOptions {
-  fabricGrade: 'A' | 'B' | 'C';
+  fabricGrade: 'A' | 'B' | 'C' | 'D';
   // Drapery options
-  liningType: 'standard' | 'blackout' | 'interlining' | 'thermal' | 'none';
-  pleatType: 'pinch' | 'french' | 'euro' | 'cartridge' | 'ripplefold' | 'goblet' | 'box' | 'inverted_box' | 'rod_pocket' | 'tab_top' | 'grommet' | 'none';
+  liningType: string;  // unlined, standard_poly_cotton, blackout, interlining_bump, interlining_domette, interlining_flannel, thermal, sheer, privacy
+  pleatType: string;   // matches drapery subcategory
+  fullness: string;    // 2x, 2.5x, 3x, custom
+  hardwareType: string; // traverse_rod, decorative_rod_wood, motorized_somfy, etc.
+  finialStyle: string; // ball, spear, fleur_de_lis, crystal, etc.
+  leadingEdge: string; // plain, contrast_banding, gimp, braid, fringe, tassel_fringe, beaded, brush_fringe
+  bottomHem: string;   // double_fold_4in, double_fold_6in, double_fold_8in, weighted, chain_weighted, horsehair
+  returnSize: string;  // standard_3_5in, extended_6in, extended_8in, custom
+  stacking: string;    // left, right, split, one_way_left, one_way_right
+  tieback: string;     // none, fabric, rope, tassel, medallion, magnetic, holdback
   contrastPiping: boolean;
   patternMatch: boolean;
+  // Roman shade options
+  liftSystem: string;  // cord_lock, continuous_cord_loop, cordless, motorized_somfy, motorized_lutron, top_down_bottom_up, day_night_dual
+  valanceOption: string; // self_valance, separate_valance, no_valance
+  // Cornice options
+  corniceConstruction: string; // foam_core, wood_frame, padded, upholstered
+  corniceFace: string;  // flat_fabric, tufted, nailhead_outline, contrast_welt, double_welt, gimp
+  dustCover: string;    // none, self_fabric, lining
   // Upholstery options
-  foamType: 'new' | 'reuse' | 'upgrade';
-  foamDensity: 'standard' | 'high' | 'premium';
-  tufting: boolean;
-  welting: boolean;
-  nailhead: boolean;
-  skirt: boolean;
-  channeling: boolean;
+  foamType: string;     // high_density, medium_density, down_wrap, down_blend, spring_down, memory_foam, latex, reuse
+  foamThickness: number; // 1-6 inches
+  tufting: string;      // none, diamond, biscuit, channel_vertical, channel_horizontal, button, blind_button, deep_button
+  welting: string;      // self_welt, contrast_welt, double_welt, cord, micro_welt, none
+  nailheadFinish: string; // none, standard, french_natural, antique_brass, nickel, pewter, black, gunmetal, gold
+  nailheadSpacing: string; // standard, close, every_other, custom_pattern
+  skirtStyle: string;   // none, kick_pleat, box_pleat, gathered, tailored, bullion_fringe, waterfall
+  springs: string;      // eight_way_hand_tied, sinuous_zigzag, no_sag, pocket_coil
+  armStyle: string;     // track, english, rolled, flared, slope, pad, recessed
+  backStyle: string;    // tight, loose_cushion, tufted, channeled, pillow_back
+  legStyle: string;     // exposed_wood, exposed_metal, exposed_acrylic, skirted, bun_feet, turned, tapered, cabriole
+  // Wall panel options
+  panelMounting: string; // french_cleat, z_clip, velcro, direct_mount
+  // Bedding options
+  bedSkirtStyle: string; // box_pleat, kick_pleat, gathered, tailored, split_corner
+  shamSize: string;      // standard, euro, king, boudoir, neckroll
+  quiltingPattern: string; // diamond, channel, vermicelli, stipple, custom
+  monogram: boolean;
   // Shared
   rushOrder: boolean;
   delivery: boolean;
+  installationIncluded: boolean;
 }
 
 const UPHOLSTERY_TYPES = [
-  'sofa_3cushion', 'sofa_2cushion', 'loveseat', 'accent_chair', 'wingback_chair', 'club_chair',
-  'dining_chair_seat', 'dining_chair_full', 'ottoman_small', 'ottoman_large',
-  'bench', 'headboard', 'sectional', 'banquette',
-  'seat_cushion', 'back_cushion', 'throw_pillow',
-  'bedskirt', 'duvet', 'table_runner', 'placemats',
+  // Furniture
+  'sofa_3cushion', 'sofa_2cushion', 'sofa_chesterfield', 'sofa_tuxedo', 'sofa_camelback',
+  'sofa_lawson', 'sofa_english_arm', 'sofa_track_arm', 'sofa_mid_century',
+  'loveseat', 'settee', 'sectional', 'sectional_l', 'sectional_u',
+  'chair_wingback', 'chair_club', 'chair_barrel', 'chair_accent', 'chair_slipper',
+  'chair_bergere', 'chair_fauteuil', 'chair_parsons',
+  'dining_chair_seat', 'dining_chair_full', 'dining_chair_arm',
+  'bar_stool', 'chaise', 'daybed',
+  'ottoman_round', 'ottoman_square', 'ottoman_rectangular', 'ottoman_tufted_cube', 'ottoman_storage',
+  'bench_straight', 'bench_l_shaped', 'bench_u_booth', 'bench_curved_banquette',
+  'bench_semicircle', 'bench_window_seat', 'bench_storage',
+  'headboard_rectangular', 'headboard_arched', 'headboard_wingback', 'headboard_tufted',
+  'headboard_camelback', 'headboard_custom',
+  'banquette',
+  // Wall Panels
+  'wall_panel_flat', 'wall_panel_tufted_diamond', 'wall_panel_tufted_biscuit',
+  'wall_panel_channel_vertical', 'wall_panel_channel_horizontal',
+  'wall_panel_padded', 'wall_panel_wrapped', 'wall_panel_acoustic', 'wall_panel_cornice_topped',
+  // Cushions
+  'cushion_seat', 'cushion_back', 'cushion_throw', 'cushion_bolster',
+  'cushion_box_edge', 'cushion_waterfall', 'cushion_t_cushion', 'cushion_bullnose', 'cushion_knife_edge',
+  // Bedding
+  'duvet_cover', 'coverlet', 'quilt', 'bed_skirt', 'pillow_sham',
+  'decorative_pillow', 'bolster', 'bed_scarf',
+  // Table Linens
+  'tablecloth', 'table_runner', 'placemat', 'napkin', 'table_skirt',
 ];
 
 const DRAPERY_TYPES = [
-  'drapery', 'roman_shade', 'valance', 'cornice', 'swag',
+  // Drapery by pleat type
+  'drapery_pinch_pleat', 'drapery_french_pleat', 'drapery_euro_pleat',
+  'drapery_cartridge', 'drapery_box_pleat', 'drapery_inverted_box',
+  'drapery_goblet', 'drapery_butterfly', 'drapery_ripplefold',
+  'drapery_rod_pocket', 'drapery_tab_top', 'drapery_grommet',
+  'drapery_pencil_pleat', 'drapery_smocked', 'drapery_fan_pleat',
+  'drapery', // generic
+  // Roman Shades
+  'roman_flat', 'roman_hobbled', 'roman_european_relaxed', 'roman_balloon',
+  'roman_austrian', 'roman_london', 'roman_cascade', 'roman_waterfall', 'roman_tulip',
+  'roman_shade', // generic
+  // Valances
+  'valance_box_pleat', 'valance_inverted_box', 'valance_kingston', 'valance_cambridge',
+  'valance_scalloped', 'valance_arched', 'valance_serpentine', 'valance_balloon',
+  'valance_austrian', 'valance_london', 'valance_flat_board', 'valance_shaped',
+  'valance_pleated', 'valance_gathered', 'valance_swag_jabot', 'valance_cascades',
+  'valance_empire', 'valance_tab', 'valance_rod_pocket', 'valance_cornice_fabric',
+  'valance', // generic
+  // Cornices
+  'cornice_straight', 'cornice_arched', 'cornice_scalloped', 'cornice_serpentine',
+  'cornice_double_serpentine', 'cornice_pagoda', 'cornice_stepped', 'cornice_custom',
+  'cornice', // generic
+  // Sheers
+  'sheer',
 ];
 
 const ITEM_TYPES = [...UPHOLSTERY_TYPES, ...DRAPERY_TYPES];
 
 function getItemCategory(type: string): ItemCategory {
-  return DRAPERY_TYPES.includes(type) ? 'drapery' : 'upholstery';
+  if (DRAPERY_TYPES.includes(type)) return 'drapery';
+  if (type.startsWith('drapery') || type.startsWith('roman') || type.startsWith('valance') || type.startsWith('cornice') || type.startsWith('sheer')) return 'drapery';
+  return 'upholstery';
 }
 
 // Map AI-detected furniture names to ITEM_TYPES keys
 function mapFurnitureType(aiType: string): string {
   const t = (aiType || '').toLowerCase();
-  if (t.includes('bench') || t.includes('window seat')) return 'bench';
+  // Specific furniture matches
+  if (t.includes('chesterfield')) return 'sofa_chesterfield';
+  if (t.includes('tuxedo')) return 'sofa_tuxedo';
+  if (t.includes('camelback') && t.includes('sofa')) return 'sofa_camelback';
+  if (t.includes('lawson')) return 'sofa_lawson';
+  if (t.includes('mid century') || t.includes('mid-century')) return 'sofa_mid_century';
+  if (t.includes('track arm')) return 'sofa_track_arm';
+  if (t.includes('english arm')) return 'sofa_english_arm';
+  if (t.includes('sectional') && t.includes('u')) return 'sectional_u';
+  if (t.includes('sectional') && t.includes('l')) return 'sectional_l';
   if (t.includes('sectional')) return 'sectional';
+  if (t.includes('settee')) return 'settee';
   if (t.includes('loveseat') || t.includes('love seat')) return 'loveseat';
-  if (t.includes('wingback')) return 'wingback_chair';
-  if (t.includes('club chair')) return 'club_chair';
-  if (t.includes('accent chair') || t.includes('arm chair') || t.includes('armchair')) return 'accent_chair';
+  if (t.includes('wingback') && t.includes('chair')) return 'chair_wingback';
+  if (t.includes('wingback') && t.includes('head')) return 'headboard_wingback';
+  if (t.includes('club chair')) return 'chair_club';
+  if (t.includes('barrel chair')) return 'chair_barrel';
+  if (t.includes('slipper')) return 'chair_slipper';
+  if (t.includes('bergere')) return 'chair_bergere';
+  if (t.includes('fauteuil')) return 'chair_fauteuil';
+  if (t.includes('parsons')) return 'chair_parsons';
+  if (t.includes('bar stool')) return 'bar_stool';
+  if (t.includes('chaise')) return 'chaise';
+  if (t.includes('daybed')) return 'daybed';
+  if (t.includes('dining chair') && t.includes('arm')) return 'dining_chair_arm';
   if (t.includes('dining chair') && t.includes('seat')) return 'dining_chair_seat';
   if (t.includes('dining chair')) return 'dining_chair_full';
-  if (t.includes('ottoman')) return t.includes('large') ? 'ottoman_large' : 'ottoman_small';
-  if (t.includes('banquette')) return 'banquette';
-  if (t.includes('headboard')) return 'headboard';
+  if (t.includes('accent chair') || t.includes('arm chair') || t.includes('armchair')) return 'chair_accent';
+  if (t.includes('banquette') || t.includes('booth')) return 'bench_u_booth';
+  if (t.includes('window seat')) return 'bench_window_seat';
+  if (t.includes('bench') && t.includes('curved')) return 'bench_curved_banquette';
+  if (t.includes('bench') && t.includes('l')) return 'bench_l_shaped';
+  if (t.includes('bench') && t.includes('storage')) return 'bench_storage';
+  if (t.includes('bench')) return 'bench_straight';
+  if (t.includes('ottoman') && t.includes('round')) return 'ottoman_round';
+  if (t.includes('ottoman') && t.includes('tufted')) return 'ottoman_tufted_cube';
+  if (t.includes('ottoman') && t.includes('storage')) return 'ottoman_storage';
+  if (t.includes('ottoman')) return 'ottoman_rectangular';
+  if (t.includes('headboard') && t.includes('tufted')) return 'headboard_tufted';
+  if (t.includes('headboard') && t.includes('arch')) return 'headboard_arched';
+  if (t.includes('headboard')) return 'headboard_rectangular';
+  if (t.includes('wall panel') && t.includes('diamond')) return 'wall_panel_tufted_diamond';
+  if (t.includes('wall panel') && t.includes('channel')) return 'wall_panel_channel_vertical';
+  if (t.includes('wall panel') && t.includes('tufted')) return 'wall_panel_tufted_biscuit';
+  if (t.includes('wall panel') && t.includes('acoustic')) return 'wall_panel_acoustic';
+  if (t.includes('wall panel')) return 'wall_panel_flat';
   if (t.includes('sofa') || t.includes('couch')) return 'sofa_3cushion';
-  if (t.includes('cushion') && t.includes('back')) return 'back_cushion';
-  if (t.includes('cushion') || t.includes('seat pad')) return 'seat_cushion';
-  if (t.includes('pillow') || t.includes('throw')) return 'throw_pillow';
-  if (t.includes('chair')) return 'accent_chair';
+  if (t.includes('bolster')) return 'cushion_bolster';
+  if (t.includes('cushion') && t.includes('back')) return 'cushion_back';
+  if (t.includes('cushion') && t.includes('box')) return 'cushion_box_edge';
+  if (t.includes('cushion') || t.includes('seat pad')) return 'cushion_seat';
+  if (t.includes('pillow') || t.includes('throw')) return 'cushion_throw';
+  if (t.includes('duvet')) return 'duvet_cover';
+  if (t.includes('coverlet')) return 'coverlet';
+  if (t.includes('bed skirt') || t.includes('bedskirt')) return 'bed_skirt';
+  if (t.includes('sham')) return 'pillow_sham';
+  if (t.includes('chair')) return 'chair_accent';
+  // Window treatments
+  if (t.includes('pinch pleat')) return 'drapery_pinch_pleat';
+  if (t.includes('french pleat')) return 'drapery_french_pleat';
+  if (t.includes('euro pleat')) return 'drapery_euro_pleat';
+  if (t.includes('ripple')) return 'drapery_ripplefold';
+  if (t.includes('grommet')) return 'drapery_grommet';
+  if (t.includes('rod pocket')) return 'drapery_rod_pocket';
+  if (t.includes('goblet')) return 'drapery_goblet';
   if (t.includes('drapery') || t.includes('drape') || t.includes('curtain')) return 'drapery';
-  if (t.includes('roman shade')) return 'roman_shade';
+  if (t.includes('roman') && t.includes('hobble')) return 'roman_hobbled';
+  if (t.includes('roman') && t.includes('balloon')) return 'roman_balloon';
+  if (t.includes('roman') && t.includes('london')) return 'roman_london';
+  if (t.includes('roman') && t.includes('austrian')) return 'roman_austrian';
+  if (t.includes('roman shade') || t.includes('roman')) return 'roman_flat';
+  if (t.includes('swag') && t.includes('jabot')) return 'valance_swag_jabot';
   if (t.includes('valance')) return 'valance';
-  if (t.includes('cornice')) return 'cornice';
+  if (t.includes('serpentine') && t.includes('cornice')) return 'cornice_serpentine';
+  if (t.includes('cornice')) return 'cornice_straight';
+  if (t.includes('sheer')) return 'sheer';
   if (ITEM_TYPES.includes(t)) return t;
   return 'sofa_3cushion'; // safe default
 }
 
 type QuoteInputMethod = 'photos' | '3dscan' | 'manual' | 'intake';
 
-type ManualItemType = 'window' | 'drapery' | 'roman_shade' | 'cornice' | 'valance' | 'swag' |
-  'sofa' | 'loveseat' | 'chair' | 'sectional' | 'ottoman' | 'bench' | 'headboard' | 'banquette' |
-  'cushion' | 'pillow' | 'other';
+type ManualItemType = string;
 
 interface ManualItemDef { key: ManualItemType; label: string; icon: string }
 interface ManualItemGroup { group: string; color: string; items: ManualItemDef[] }
 
 const MANUAL_ITEM_GROUPS: ManualItemGroup[] = [
   {
-    group: 'Window Treatments', color: '#2563eb',
+    group: 'Drapery', color: '#2563eb',
     items: [
-      { key: 'drapery', label: 'Drapery', icon: '🪟' },
-      { key: 'roman_shade', label: 'Roman Shade', icon: '🪟' },
-      { key: 'cornice', label: 'Cornice', icon: '📐' },
-      { key: 'valance', label: 'Valance', icon: '🎪' },
-      { key: 'swag', label: 'Swag', icon: '🎀' },
+      { key: 'drapery_pinch_pleat', label: 'Pinch Pleat', icon: '🪟' },
+      { key: 'drapery_french_pleat', label: 'French Pleat', icon: '🪟' },
+      { key: 'drapery_euro_pleat', label: 'Euro Pleat', icon: '🪟' },
+      { key: 'drapery_goblet', label: 'Goblet', icon: '🪟' },
+      { key: 'drapery_cartridge', label: 'Cartridge', icon: '🪟' },
+      { key: 'drapery_ripplefold', label: 'Ripplefold', icon: '🪟' },
+      { key: 'drapery_rod_pocket', label: 'Rod Pocket', icon: '🪟' },
+      { key: 'drapery_grommet', label: 'Grommet', icon: '🪟' },
+      { key: 'drapery_tab_top', label: 'Tab Top', icon: '🪟' },
+      { key: 'drapery_box_pleat', label: 'Box Pleat', icon: '🪟' },
+      { key: 'drapery_inverted_box', label: 'Inverted Box', icon: '🪟' },
+      { key: 'drapery_butterfly', label: 'Butterfly', icon: '🪟' },
+      { key: 'drapery_pencil_pleat', label: 'Pencil Pleat', icon: '🪟' },
+      { key: 'drapery_smocked', label: 'Smocked', icon: '🪟' },
+      { key: 'sheer', label: 'Sheer', icon: '🪟' },
     ],
   },
   {
-    group: 'Furniture / Upholstery', color: '#b8960c',
+    group: 'Roman Shades', color: '#0891b2',
     items: [
-      { key: 'sofa', label: 'Sofa', icon: '🛋' },
+      { key: 'roman_flat', label: 'Flat Fold', icon: '🪟' },
+      { key: 'roman_hobbled', label: 'Hobbled/Teardrop', icon: '🪟' },
+      { key: 'roman_european_relaxed', label: 'European Relaxed', icon: '🪟' },
+      { key: 'roman_balloon', label: 'Balloon', icon: '🪟' },
+      { key: 'roman_austrian', label: 'Austrian', icon: '🪟' },
+      { key: 'roman_london', label: 'London', icon: '🪟' },
+      { key: 'roman_cascade', label: 'Cascade', icon: '🪟' },
+      { key: 'roman_waterfall', label: 'Waterfall', icon: '🪟' },
+      { key: 'roman_tulip', label: 'Tulip', icon: '🪟' },
+    ],
+  },
+  {
+    group: 'Valances & Cornices', color: '#7c3aed',
+    items: [
+      { key: 'valance_box_pleat', label: 'Box Pleat Valance', icon: '🎪' },
+      { key: 'valance_kingston', label: 'Kingston', icon: '🎪' },
+      { key: 'valance_scalloped', label: 'Scalloped', icon: '🎪' },
+      { key: 'valance_serpentine', label: 'Serpentine', icon: '🎪' },
+      { key: 'valance_swag_jabot', label: 'Swag & Jabot', icon: '🎪' },
+      { key: 'valance_balloon', label: 'Balloon Valance', icon: '🎪' },
+      { key: 'valance_empire', label: 'Empire', icon: '🎪' },
+      { key: 'cornice_straight', label: 'Straight Cornice', icon: '📐' },
+      { key: 'cornice_arched', label: 'Arched Cornice', icon: '📐' },
+      { key: 'cornice_serpentine', label: 'Serpentine Cornice', icon: '📐' },
+      { key: 'cornice_pagoda', label: 'Pagoda Cornice', icon: '📐' },
+    ],
+  },
+  {
+    group: 'Sofas & Seating', color: '#b8960c',
+    items: [
+      { key: 'sofa_3cushion', label: '3-Cushion Sofa', icon: '🛋' },
+      { key: 'sofa_2cushion', label: '2-Cushion Sofa', icon: '🛋' },
+      { key: 'sofa_chesterfield', label: 'Chesterfield', icon: '🛋' },
+      { key: 'sofa_tuxedo', label: 'Tuxedo', icon: '🛋' },
+      { key: 'sofa_camelback', label: 'Camelback', icon: '🛋' },
       { key: 'loveseat', label: 'Loveseat', icon: '🛋' },
-      { key: 'chair', label: 'Chair', icon: '💺' },
+      { key: 'settee', label: 'Settee', icon: '🛋' },
       { key: 'sectional', label: 'Sectional', icon: '🛋' },
-      { key: 'ottoman', label: 'Ottoman', icon: '🪑' },
-      { key: 'bench', label: 'Bench', icon: '🪑' },
-      { key: 'headboard', label: 'Headboard', icon: '🛏' },
-      { key: 'banquette', label: 'Banquette', icon: '🪑' },
+      { key: 'chaise', label: 'Chaise Lounge', icon: '🛋' },
+      { key: 'daybed', label: 'Daybed', icon: '🛏' },
     ],
   },
   {
-    group: 'Cushions & Soft Goods', color: '#7c3aed',
+    group: 'Chairs', color: '#16a34a',
     items: [
-      { key: 'cushion', label: 'Cushion', icon: '🛏' },
-      { key: 'pillow', label: 'Pillow', icon: '🛌' },
-      { key: 'other', label: 'Other', icon: '📏' },
+      { key: 'chair_wingback', label: 'Wingback', icon: '💺' },
+      { key: 'chair_club', label: 'Club Chair', icon: '💺' },
+      { key: 'chair_barrel', label: 'Barrel Chair', icon: '💺' },
+      { key: 'chair_accent', label: 'Accent Chair', icon: '💺' },
+      { key: 'chair_slipper', label: 'Slipper Chair', icon: '💺' },
+      { key: 'chair_bergere', label: 'Bergere', icon: '💺' },
+      { key: 'chair_parsons', label: 'Parsons Chair', icon: '💺' },
+      { key: 'dining_chair_full', label: 'Dining Chair', icon: '💺' },
+      { key: 'bar_stool', label: 'Bar Stool', icon: '💺' },
+    ],
+  },
+  {
+    group: 'Benches & Ottomans', color: '#d97706',
+    items: [
+      { key: 'bench_straight', label: 'Straight Bench', icon: '🪑' },
+      { key: 'bench_l_shaped', label: 'L-Shaped Bench', icon: '🪑' },
+      { key: 'bench_u_booth', label: 'U-Booth/Banquette', icon: '🪑' },
+      { key: 'bench_curved_banquette', label: 'Curved Banquette', icon: '🪑' },
+      { key: 'bench_window_seat', label: 'Window Seat', icon: '🪑' },
+      { key: 'ottoman_rectangular', label: 'Ottoman', icon: '🪑' },
+      { key: 'ottoman_tufted_cube', label: 'Tufted Cube Ottoman', icon: '🪑' },
+      { key: 'ottoman_storage', label: 'Storage Ottoman', icon: '🪑' },
+    ],
+  },
+  {
+    group: 'Headboards & Wall Panels', color: '#dc2626',
+    items: [
+      { key: 'headboard_tufted', label: 'Tufted Headboard', icon: '🛏' },
+      { key: 'headboard_rectangular', label: 'Rectangular Headboard', icon: '🛏' },
+      { key: 'headboard_arched', label: 'Arched Headboard', icon: '🛏' },
+      { key: 'headboard_wingback', label: 'Wingback Headboard', icon: '🛏' },
+      { key: 'wall_panel_flat', label: 'Flat Wall Panel', icon: '🧱' },
+      { key: 'wall_panel_tufted_diamond', label: 'Diamond Tufted Panel', icon: '🧱' },
+      { key: 'wall_panel_tufted_biscuit', label: 'Biscuit Tufted Panel', icon: '🧱' },
+      { key: 'wall_panel_channel_vertical', label: 'Channel Panel (Vert)', icon: '🧱' },
+      { key: 'wall_panel_channel_horizontal', label: 'Channel Panel (Horiz)', icon: '🧱' },
+      { key: 'wall_panel_padded', label: 'Padded Panel', icon: '🧱' },
+      { key: 'wall_panel_acoustic', label: 'Acoustic Panel', icon: '🧱' },
+    ],
+  },
+  {
+    group: 'Cushions & Pillows', color: '#7c3aed',
+    items: [
+      { key: 'cushion_seat', label: 'Seat Cushion', icon: '🛏' },
+      { key: 'cushion_back', label: 'Back Cushion', icon: '🛏' },
+      { key: 'cushion_box_edge', label: 'Box Edge Cushion', icon: '🛏' },
+      { key: 'cushion_t_cushion', label: 'T-Cushion', icon: '🛏' },
+      { key: 'cushion_bolster', label: 'Bolster', icon: '🛏' },
+      { key: 'cushion_throw', label: 'Throw Pillow', icon: '🛌' },
+      { key: 'decorative_pillow', label: 'Decorative Pillow', icon: '🛌' },
+    ],
+  },
+  {
+    group: 'Bedding', color: '#ec4899',
+    items: [
+      { key: 'duvet_cover', label: 'Duvet Cover', icon: '🛏' },
+      { key: 'coverlet', label: 'Coverlet', icon: '🛏' },
+      { key: 'quilt', label: 'Quilt', icon: '🛏' },
+      { key: 'bed_skirt', label: 'Bed Skirt', icon: '🛏' },
+      { key: 'pillow_sham', label: 'Pillow Sham', icon: '🛌' },
+      { key: 'bed_scarf', label: 'Bed Scarf', icon: '🛏' },
+    ],
+  },
+  {
+    group: 'Table Linens', color: '#0284c7',
+    items: [
+      { key: 'tablecloth', label: 'Tablecloth', icon: '🍽' },
+      { key: 'table_runner', label: 'Table Runner', icon: '🍽' },
+      { key: 'placemat', label: 'Placemat', icon: '🍽' },
+      { key: 'table_skirt', label: 'Table Skirt', icon: '🍽' },
     ],
   },
 ];
@@ -194,9 +431,26 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
   const [rooms, setRooms] = useState<Room[]>([{ id: crypto.randomUUID(), name: 'Living Room', items: [] }]);
   const [options, setOptions] = useState<QuoteOptions>({
-    fabricGrade: 'B', liningType: 'standard', pleatType: 'pinch', contrastPiping: false, patternMatch: false,
-    foamType: 'new', foamDensity: 'standard', tufting: false, welting: false, nailhead: false, skirt: false, channeling: false,
-    rushOrder: false, delivery: false,
+    fabricGrade: 'B',
+    // Drapery
+    liningType: 'standard_poly_cotton', pleatType: '', fullness: '2.5x',
+    hardwareType: '', finialStyle: '', leadingEdge: 'plain', bottomHem: 'double_fold_4in',
+    returnSize: 'standard_3_5in', stacking: 'split', tieback: 'none',
+    contrastPiping: false, patternMatch: false,
+    // Roman shade
+    liftSystem: 'cordless', valanceOption: 'self_valance',
+    // Cornice
+    corniceConstruction: 'foam_core', corniceFace: 'flat_fabric', dustCover: 'none',
+    // Upholstery
+    foamType: 'high_density', foamThickness: 4,
+    tufting: 'none', welting: 'self_welt', nailheadFinish: 'none', nailheadSpacing: 'standard',
+    skirtStyle: 'none', springs: 'eight_way_hand_tied', armStyle: 'track', backStyle: 'tight', legStyle: 'exposed_wood',
+    // Wall panel
+    panelMounting: 'french_cleat',
+    // Bedding
+    bedSkirtStyle: 'tailored', shamSize: 'standard', quiltingPattern: 'diamond', monogram: false,
+    // Shared
+    rushOrder: false, delivery: false, installationIncluded: false,
   });
 
   // Intake project loading
@@ -204,9 +458,14 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const [loadingIntake, setLoadingIntake] = useState(false);
   const [selectedIntakeId, setSelectedIntakeId] = useState<string | null>(null);
 
+  // Catalog browser
+  const [showCatalog, setShowCatalog] = useState(false);
+  const [catalogTargetRoom, setCatalogTargetRoom] = useState<string | null>(null);
+
   // Photo analysis
   const [analyzingPhoto, setAnalyzingPhoto] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisItem[] | null>(null);
+  const [analysisRaw, setAnalysisRaw] = useState<any>(null); // raw AI response for wizard
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [analysisPhotoIdx, setAnalysisPhotoIdx] = useState<number | null>(null);
 
@@ -296,6 +555,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const analyzePhoto = async (idx: number) => {
     setAnalyzingPhoto(idx);
     setAnalysisResult(null);
+    setAnalysisRaw(null);
     setShowAnalysis(true);
     setAnalysisPhotoIdx(idx);
 
@@ -362,6 +622,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
           }
         }
 
+        setAnalysisRaw(data); // store raw for wizard
         setAnalysisResult(items);
       } else {
         setAnalysisResult([]);
@@ -495,6 +756,23 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     } : r));
   };
 
+  // Add item from catalog diagram selection
+  const addItemFromCatalog = (diagramKey: string) => {
+    const roomId = catalogTargetRoom || rooms[0]?.id;
+    if (!roomId) return;
+    const category: ItemCategory = DIAGRAM_MAP[diagramKey]?.category === 'drapery' ? 'drapery' : 'upholstery';
+    // Map diagram key to closest ITEM_TYPES entry
+    const itemType = ITEM_TYPES.includes(diagramKey) ? diagramKey : (category === 'drapery' ? 'drapery' : 'sofa_3cushion');
+    setRooms(prev => prev.map(r => r.id === roomId ? {
+      ...r, items: [...r.items, {
+        id: crypto.randomUUID(), type: itemType, width: '', height: '', depth: '', quantity: 1,
+        notes: DIAGRAM_MAP[diagramKey]?.label || '',
+      }]
+    } : r));
+    setShowCatalog(false);
+    setCatalogTargetRoom(null);
+  };
+
   // -- Submit --
   const handleSubmit = async () => {
     setSubmitting(true);
@@ -524,21 +802,49 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         })),
         options: {
           fabric_grade: options.fabricGrade,
+          // Drapery
           lining_type: options.liningType,
           pleat_type: options.pleatType,
+          fullness: options.fullness,
+          hardware_type: options.hardwareType,
+          finial_style: options.finialStyle,
+          leading_edge: options.leadingEdge,
+          bottom_hem: options.bottomHem,
+          return_size: options.returnSize,
+          stacking: options.stacking,
+          tieback: options.tieback,
+          contrast_piping: options.contrastPiping,
+          pattern_match: options.patternMatch,
+          // Roman shade
+          lift_system: options.liftSystem,
+          valance_option: options.valanceOption,
+          // Cornice
+          cornice_construction: options.corniceConstruction,
+          cornice_face: options.corniceFace,
+          dust_cover: options.dustCover,
+          // Upholstery
           foam_type: options.foamType,
-          foam_density: options.foamDensity,
-          features: {
-            tufting: options.tufting,
-            welting: options.welting,
-            nailhead: options.nailhead,
-            skirt: options.skirt,
-            channeling: options.channeling,
-            contrast_piping: options.contrastPiping,
-            pattern_match: options.patternMatch,
-          },
+          foam_thickness: options.foamThickness,
+          tufting: options.tufting,
+          welting: options.welting,
+          nailhead_finish: options.nailheadFinish,
+          nailhead_spacing: options.nailheadSpacing,
+          skirt_style: options.skirtStyle,
+          springs: options.springs,
+          arm_style: options.armStyle,
+          back_style: options.backStyle,
+          leg_style: options.legStyle,
+          // Wall panel
+          panel_mounting: options.panelMounting,
+          // Bedding
+          bed_skirt_style: options.bedSkirtStyle,
+          sham_size: options.shamSize,
+          quilting_pattern: options.quiltingPattern,
+          monogram: options.monogram,
+          // Shared
           rush_order: options.rushOrder,
           delivery: options.delivery,
+          installation_included: options.installationIncluded,
         },
       };
 
@@ -634,27 +940,68 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               onManualItem={addManualItem}
             />
             {showAnalysis && (
-              <AnalysisModal
+              <AnalysisWizard
                 photo={analysisPhotoIdx !== null ? photos[analysisPhotoIdx] : null}
                 items={analysisResult}
+                rawResponse={analysisRaw}
                 analyzing={analyzingPhoto !== null}
-                onToggleItem={(idx) => {
-                  if (!analysisResult) return;
-                  const copy = [...analysisResult];
-                  copy[idx] = { ...copy[idx], checked: !copy[idx].checked };
-                  setAnalysisResult(copy);
+                onUpdateItems={setAnalysisResult}
+                onAddItems={(enrichedItems) => {
+                  if (!enrichedItems || enrichedItems.length === 0) return;
+                  const selected = enrichedItems.filter(it => it.checked);
+                  const newItems: RoomItem[] = selected.map(it => ({
+                    id: crypto.randomUUID(),
+                    type: ITEM_TYPES.includes(it.type) ? it.type : 'sofa_3cushion',
+                    width: it.width || '',
+                    height: it.height || '',
+                    depth: it.depth || '',
+                    quantity: 1,
+                    notes: [it.description, it.condition].filter(Boolean).join(' - '),
+                  }));
+                  setRooms(prev => {
+                    const copy = [...prev];
+                    copy[0] = { ...copy[0], items: [...copy[0].items, ...newItems] };
+                    return copy;
+                  });
+                  setShowAnalysis(false);
+                  setAnalysisResult(null);
+                  setAnalysisPhotoIdx(null);
                 }}
-                onAddItems={addAnalyzedItems}
-                onClose={() => { setShowAnalysis(false); setAnalysisResult(null); setAnalysisPhotoIdx(null); }}
+                onClose={() => { setShowAnalysis(false); setAnalysisResult(null); setAnalysisRaw(null); setAnalysisPhotoIdx(null); }}
               />
             )}
           </>
         )}
         {step === 3 && (
-          <StepRooms
-            rooms={rooms} addRoom={addRoom} removeRoom={removeRoom} updateRoomName={updateRoomName}
-            addItem={addItem} removeItem={removeItem} updateItem={updateItem}
-          />
+          <>
+            <StepRooms
+              rooms={rooms} addRoom={addRoom} removeRoom={removeRoom} updateRoomName={updateRoomName}
+              addItem={addItem} removeItem={removeItem} updateItem={updateItem}
+              onBrowseCatalog={(roomId) => { setCatalogTargetRoom(roomId); setShowCatalog(true); }}
+            />
+            {showCatalog && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)' }} onClick={() => setShowCatalog(false)} />
+                <div style={{ position: 'relative', width: '90%', maxWidth: 900, maxHeight: '85vh', overflow: 'auto', background: '#fff', borderRadius: 16, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', padding: 0 }}>
+                  <div style={{ position: 'sticky', top: 0, zIndex: 2, background: '#fff', padding: '16px 24px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>Product Catalog</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>Select a product to add to your quote</div>
+                    </div>
+                    <button onClick={() => setShowCatalog(false)} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div style={{ padding: 24 }}>
+                    <DiagramCatalog
+                      onSelect={(key) => addItemFromCatalog(key)}
+                      onQuickAdd={(key) => addItemFromCatalog(key)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
         {step === 4 && <StepOptions options={options} setOptions={setOptions} rooms={rooms} />}
         {step === 5 && !result && (
@@ -1068,15 +1415,9 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
 
   // Map manual entry types to ITEM_TYPES keys
   const manualToItemType = (t: ManualItemType): string => {
-    const map: Record<string, string> = {
-      window: 'drapery', drapery: 'drapery', roman_shade: 'roman_shade', cornice: 'cornice',
-      valance: 'valance', swag: 'swag',
-      sofa: 'sofa_3cushion', loveseat: 'loveseat', chair: 'accent_chair',
-      sectional: 'sectional', ottoman: 'ottoman_small', bench: 'bench',
-      headboard: 'headboard', banquette: 'banquette',
-      cushion: 'seat_cushion', pillow: 'throw_pillow', other: 'sofa_3cushion',
-    };
-    return map[t] || 'sofa_3cushion';
+    // Keys now directly match ITEM_TYPES — pass through
+    if (ITEM_TYPES.includes(t)) return t;
+    return 'sofa_3cushion';
   };
 
   const addItem = () => {
@@ -1293,38 +1634,138 @@ function QuoteManualEntry({ onAddItem }: { onAddItem: (item: any) => void }) {
   );
 }
 
-function AnalysisModal({ photo, items, analyzing, onToggleItem, onAddItems, onClose }: {
-  photo: PhotoFile | null; items: AnalysisItem[] | null; analyzing: boolean;
-  onToggleItem: (idx: number) => void; onAddItems: () => void; onClose: () => void;
+// ═══════════════════════════════════════════════════════════════
+// ANALYSIS WIZARD — 4-step guided AI analysis flow
+// ═══════════════════════════════════════════════════════════════
+const WIZARD_STEPS = [
+  { id: 1, label: 'Identify', desc: 'Confirm detected items' },
+  { id: 2, label: 'Measurements', desc: 'Verify dimensions' },
+  { id: 3, label: 'Scope', desc: 'Define the work' },
+  { id: 4, label: 'Pricing', desc: 'Review line items' },
+];
+
+const WORK_TYPES = [
+  'full_reupholster', 'cushion_replacement', 'slipcover', 'recover',
+  'repair', 'refinish_frame', 'new_foam_only', 'spring_retying',
+];
+
+function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, onAddItems, onClose }: {
+  photo: PhotoFile | null; items: AnalysisItem[] | null; rawResponse: any;
+  analyzing: boolean; onUpdateItems: (items: AnalysisItem[]) => void;
+  onAddItems: (items: AnalysisItem[]) => void; onClose: () => void;
 }) {
+  const [wizStep, setWizStep] = useState(1);
+  const [workTypes, setWorkTypes] = useState<Record<number, string>>({});
+  const [features, setFeatures] = useState<Record<number, string[]>>({});
+  const [pricingPreview, setPricingPreview] = useState<any>(null);
+  const [loadingPricing, setLoadingPricing] = useState(false);
+
+  const selectedItems = items?.filter(it => it.checked) || [];
+
+  // Toggle item selection (Step 1)
+  const toggleItem = (idx: number) => {
+    if (!items) return;
+    const copy = [...items];
+    copy[idx] = { ...copy[idx], checked: !copy[idx].checked };
+    onUpdateItems(copy);
+  };
+
+  // Update item field (Step 1-3)
+  const updateField = (idx: number, field: keyof AnalysisItem, value: any) => {
+    if (!items) return;
+    const copy = [...items];
+    copy[idx] = { ...copy[idx], [field]: value };
+    onUpdateItems(copy);
+  };
+
+  // Add a manual item
+  const addManualItem = () => {
+    if (!items) return;
+    onUpdateItems([...items, {
+      type: 'accent_chair', description: '', width: '', height: '', depth: '',
+      condition: '', checked: true,
+    }]);
+  };
+
+  // Fetch pricing preview (Step 4)
+  const fetchPricing = async () => {
+    setLoadingPricing(true);
+    try {
+      const previewItems = selectedItems.map(it => ({
+        name: it.type.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+        type: it.type,
+        dimensions: {
+          width: parseFloat(it.width || '0') || 0,
+          height: parseFloat(it.height || '0') || 0,
+          depth: parseFloat(it.depth || '0') || 0,
+        },
+        quantity: 1,
+        construction: '',
+        condition: it.condition || '',
+        special_features: features[items!.indexOf(it)] || [],
+      }));
+      const res = await fetch(`${API}/quotes/preview-pricing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: previewItems, lining: 'standard' }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPricingPreview(data.tiers);
+      }
+    } catch { /* */ }
+    setLoadingPricing(false);
+  };
+
+  // Auto-fetch pricing when entering Step 4
+  const goToStep = (s: number) => {
+    setWizStep(s);
+    if (s === 4 && !pricingPreview) fetchPricing();
+  };
+
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000,
       background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 24,
     }} onClick={onClose}>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: '#fff', borderRadius: 16, width: '100%', maxWidth: 600,
-          maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-        }}>
-        {/* Header */}
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Sparkles size={16} style={{ color: '#b8960c' }} />
-          <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', flex: 1 }}>AI Photo Analysis</span>
-          <button onClick={onClose} className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999', display: 'flex' }}>
-            <X size={18} />
-          </button>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 16, width: '100%', maxWidth: 720,
+        maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+      }}>
+        {/* Header with step indicator */}
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid #ece8e0' }}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={16} style={{ color: '#b8960c' }} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>AI-Guided Analysis</span>
+            </div>
+            <button onClick={onClose} className="cursor-pointer" style={{ background: 'none', border: 'none', color: '#999', display: 'flex' }}>
+              <X size={18} />
+            </button>
+          </div>
+          {!analyzing && items && items.length > 0 && (
+            <div className="flex gap-1">
+              {WIZARD_STEPS.map(s => (
+                <div key={s.id} className="flex-1" style={{
+                  padding: '6px 0', textAlign: 'center', fontSize: 10, fontWeight: 700,
+                  borderBottom: `3px solid ${wizStep === s.id ? '#b8960c' : wizStep > s.id ? '#16a34a' : '#ece8e0'}`,
+                  color: wizStep === s.id ? '#b8960c' : wizStep > s.id ? '#16a34a' : '#bbb',
+                }}>
+                  {wizStep > s.id ? <Check size={10} style={{ display: 'inline' }} /> : null} {s.label}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          {/* Photo preview */}
+          {/* Photo preview (compact) */}
           {photo && (
-            <div style={{ marginBottom: 16, borderRadius: 10, overflow: 'hidden', border: '1.5px solid #ece8e0', maxHeight: 200 }}>
-              <img src={photo.preview} alt="" style={{ width: '100%', maxHeight: 200, objectFit: 'contain', background: '#f5f3ef' }} />
+            <div style={{ marginBottom: 12, borderRadius: 8, overflow: 'hidden', border: '1px solid #ece8e0', maxHeight: 140 }}>
+              <img src={photo.preview} alt="" style={{ width: '100%', maxHeight: 140, objectFit: 'contain', background: '#f5f3ef' }} />
             </div>
           )}
 
@@ -1332,69 +1773,239 @@ function AnalysisModal({ photo, items, analyzing, onToggleItem, onAddItems, onCl
             <div style={{ textAlign: 'center', padding: '30px 0' }}>
               <Loader2 size={28} className="animate-spin mx-auto" style={{ color: '#b8960c' }} />
               <div style={{ fontSize: 13, fontWeight: 600, color: '#555', marginTop: 10 }}>Analyzing photo...</div>
-              <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>Detecting furniture items and dimensions</div>
+              <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>Detecting items, dimensions, and condition</div>
             </div>
           ) : items && items.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '24px 0', color: '#999', fontSize: 13 }}>
-              No items detected in this photo. Try another photo or add items manually.
+            <div style={{ textAlign: 'center', padding: '24px 0' }}>
+              <div style={{ color: '#999', fontSize: 13, marginBottom: 12 }}>No items detected. Add manually:</div>
+              <button onClick={addManualItem} className="flex items-center gap-1.5 mx-auto cursor-pointer" style={{ padding: '8px 16px', borderRadius: 8, border: '1.5px solid #b8960c', background: '#fdf8eb', color: '#b8960c', fontSize: 12, fontWeight: 700 }}>
+                <Plus size={14} /> Add Item Manually
+              </button>
             </div>
           ) : items && items.length > 0 ? (
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#555', marginBottom: 10 }}>
-                Detected Items ({items.length})
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => onToggleItem(idx)}
-                    className="cursor-pointer transition-all"
-                    style={{
-                      padding: '10px 14px', borderRadius: 10,
-                      border: `1.5px solid ${item.checked ? '#b8960c' : '#ece8e0'}`,
-                      background: item.checked ? '#fdf8eb' : '#faf9f7',
-                      display: 'flex', alignItems: 'center', gap: 10,
-                    }}>
-                    <div style={{
-                      width: 20, height: 20, borderRadius: 5, flexShrink: 0,
-                      border: `2px solid ${item.checked ? '#b8960c' : '#ddd'}`,
-                      background: item.checked ? '#b8960c' : '#fff',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    }}>
-                      {item.checked && <Check size={12} style={{ color: '#fff' }} />}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>
-                        {item.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+            <>
+              {/* ── STEP 1: IDENTIFY ── */}
+              {wizStep === 1 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Step 1: Confirm Detected Items</div>
+                  <div style={{ fontSize: 11, color: '#777', marginBottom: 12 }}>Check each item the AI found. Correct any misidentifications. Add anything missed.</div>
+                  <div className="flex flex-col gap-2">
+                    {items.map((item, idx) => (
+                      <div key={idx} style={{ padding: '10px 14px', borderRadius: 10, border: `1.5px solid ${item.checked ? '#b8960c' : '#ece8e0'}`, background: item.checked ? '#fdf8eb' : '#faf9f7' }}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div onClick={() => toggleItem(idx)} className="cursor-pointer" style={{ width: 20, height: 20, borderRadius: 5, border: `2px solid ${item.checked ? '#b8960c' : '#ddd'}`, background: item.checked ? '#b8960c' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            {item.checked && <Check size={12} style={{ color: '#fff' }} />}
+                          </div>
+                          <select value={item.type} onChange={e => updateField(idx, 'type', e.target.value)} className="form-input" style={{ flex: 1, fontSize: 12, padding: '5px 8px' }}>
+                            {ITEM_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                          </select>
+                        </div>
+                        <input value={item.description} onChange={e => updateField(idx, 'description', e.target.value)} placeholder="Description (style, color, material...)" className="form-input" style={{ width: '100%', fontSize: 11, padding: '5px 8px' }} />
                       </div>
-                      <div style={{ fontSize: 11, color: '#777' }}>
-                        {[
-                          item.description,
-                          item.condition && `Condition: ${item.condition}`,
-                          (item.width || item.height || item.depth) && `${[item.width, item.height, item.depth].filter(Boolean).join(' x ')}`,
-                        ].filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
+                  <button onClick={addManualItem} className="flex items-center gap-1 mt-3 cursor-pointer" style={{ padding: '6px 12px', borderRadius: 7, border: '1px dashed #ccc', background: 'transparent', fontSize: 11, fontWeight: 600, color: '#777' }}>
+                    <Plus size={12} /> Add Item AI Missed
+                  </button>
+                </div>
+              )}
+
+              {/* ── STEP 2: MEASUREMENTS ── */}
+              {wizStep === 2 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Step 2: Verify Measurements</div>
+                  <div style={{ fontSize: 11, color: '#777', marginBottom: 12 }}>Override AI estimates with your tape-measure numbers. All dimensions in inches.</div>
+                  <div className="flex flex-col gap-3">
+                    {selectedItems.map((item, si) => {
+                      const idx = items.indexOf(item);
+                      const diagKey = findDiagramMatch(item.type);
+                      const dims = {
+                        width: parseFloat(item.width || '0') || undefined,
+                        height: parseFloat(item.height || '0') || undefined,
+                        depth: parseFloat(item.depth || '0') || undefined,
+                      };
+                      const hasDims = dims.width || dims.height || dims.depth;
+                      return (
+                        <div key={idx} style={{ padding: '12px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#faf9f7' }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>
+                            {item.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                          </div>
+                          <div style={{ display: 'flex', gap: 16 }}>
+                            <div style={{ flex: 1 }}>
+                              <div className="grid grid-cols-3 gap-2">
+                                <label style={{ fontSize: 10 }}>
+                                  <span style={{ color: '#888', fontWeight: 600 }}>Width (in)</span>
+                                  <input value={item.width} onChange={e => updateField(idx, 'width', e.target.value)} placeholder="0" className="form-input" style={{ width: '100%', fontSize: 13, padding: '8px', marginTop: 2 }} />
+                                </label>
+                                <label style={{ fontSize: 10 }}>
+                                  <span style={{ color: '#888', fontWeight: 600 }}>Height (in)</span>
+                                  <input value={item.height} onChange={e => updateField(idx, 'height', e.target.value)} placeholder="0" className="form-input" style={{ width: '100%', fontSize: 13, padding: '8px', marginTop: 2 }} />
+                                </label>
+                                <label style={{ fontSize: 10 }}>
+                                  <span style={{ color: '#888', fontWeight: 600 }}>Depth (in)</span>
+                                  <input value={item.depth} onChange={e => updateField(idx, 'depth', e.target.value)} placeholder="0" className="form-input" style={{ width: '100%', fontSize: 13, padding: '8px', marginTop: 2 }} />
+                                </label>
+                              </div>
+                              {rawResponse?.confidence && (
+                                <div style={{ fontSize: 10, color: '#aaa', marginTop: 4 }}>AI confidence: {rawResponse.confidence}%</div>
+                              )}
+                            </div>
+                            {diagKey && (
+                              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                                <DiagramViewer
+                                  diagramKey={diagKey}
+                                  dimensions={hasDims ? dims : undefined}
+                                  showAnnotations={!!hasDims}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── STEP 3: CONDITION & SCOPE ── */}
+              {wizStep === 3 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Step 3: Define the Work</div>
+                  <div style={{ fontSize: 11, color: '#777', marginBottom: 12 }}>Select work type and any special features for each item.</div>
+                  <div className="flex flex-col gap-3">
+                    {selectedItems.map((item, si) => {
+                      const idx = items.indexOf(item);
+                      const itemFeatures = features[idx] || [];
+                      return (
+                        <div key={idx} style={{ padding: '12px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#faf9f7' }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 8 }}>
+                            {item.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                            {item.width && <span style={{ fontWeight: 400, color: '#888' }}> ({item.width} x {item.height} x {item.depth})</span>}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 mb-2">
+                            <label style={{ fontSize: 10 }}>
+                              <span style={{ color: '#888', fontWeight: 600 }}>Work Type</span>
+                              <select value={workTypes[idx] || 'full_reupholster'} onChange={e => setWorkTypes(p => ({ ...p, [idx]: e.target.value }))} className="form-input" style={{ width: '100%', fontSize: 12, padding: '8px', marginTop: 2 }}>
+                                {WORK_TYPES.map(w => <option key={w} value={w}>{w.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                              </select>
+                            </label>
+                            <label style={{ fontSize: 10 }}>
+                              <span style={{ color: '#888', fontWeight: 600 }}>Condition</span>
+                              <select value={item.condition || 'worn'} onChange={e => updateField(idx, 'condition', e.target.value)} className="form-input" style={{ width: '100%', fontSize: 12, padding: '8px', marginTop: 2 }}>
+                                <option value="good">Good</option>
+                                <option value="worn">Worn</option>
+                                <option value="damaged">Damaged</option>
+                                <option value="needs_foam">Needs New Foam</option>
+                                <option value="needs_springs">Needs Springs</option>
+                              </select>
+                            </label>
+                          </div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 4 }}>Special Features</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {['tufting', 'welting', 'nailhead', 'skirt', 'channeling', 'new_foam', 'spring_repair'].map(feat => {
+                              const isOn = itemFeatures.includes(feat);
+                              return (
+                                <button key={feat} onClick={() => {
+                                  setFeatures(p => {
+                                    const cur = p[idx] || [];
+                                    return { ...p, [idx]: isOn ? cur.filter(f => f !== feat) : [...cur, feat] };
+                                  });
+                                }} className="cursor-pointer transition-all" style={{
+                                  padding: '4px 10px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                                  border: `1px solid ${isOn ? '#b8960c' : '#ddd'}`, background: isOn ? '#fdf8eb' : '#fff', color: isOn ? '#b8960c' : '#888',
+                                }}>
+                                  {feat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── STEP 4: PRICING PREVIEW ── */}
+              {wizStep === 4 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Step 4: Review Pricing</div>
+                  <div style={{ fontSize: 11, color: '#777', marginBottom: 12 }}>3-tier pricing preview based on your approved items and measurements.</div>
+                  {loadingPricing ? (
+                    <div style={{ textAlign: 'center', padding: '20px 0' }}>
+                      <Loader2 size={24} className="animate-spin mx-auto" style={{ color: '#b8960c' }} />
+                      <div style={{ fontSize: 12, color: '#777', marginTop: 8 }}>Calculating pricing...</div>
+                    </div>
+                  ) : pricingPreview ? (
+                    <div>
+                      <div className="flex gap-2 mb-3">
+                        {TIERS.map(t => {
+                          const tier = pricingPreview[t.key];
+                          if (!tier) return null;
+                          return (
+                            <div key={t.key} className="flex-1 text-center" style={{ padding: '10px 8px', borderRadius: 10, border: `2px solid ${t.color}`, background: t.bg }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#777' }}>{t.key} · {t.label}</div>
+                              <div style={{ fontSize: 20, fontWeight: 700, color: t.color }}>${tier.total?.toLocaleString()}</div>
+                              <div style={{ fontSize: 9, color: '#888' }}>Deposit: ${tier.deposit?.toLocaleString()}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {/* Show line items for Tier A as reference */}
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 4 }}>Tier A Breakdown</div>
+                      {pricingPreview.A?.items?.map((item: any, i: number) => (
+                        <div key={i} style={{ marginBottom: 6, padding: '8px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7' }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>{item.name}</div>
+                          {item.line_items?.map((li: any, j: number) => (
+                            <div key={j} className="flex justify-between" style={{ fontSize: 10, color: '#555', padding: '1px 0' }}>
+                              <span>{li.description}</span>
+                              <span style={{ fontWeight: 600 }}>${li.amount?.toFixed(2)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between" style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a', borderTop: '1px solid #ece8e0', marginTop: 3, paddingTop: 3 }}>
+                            <span>Subtotal</span><span>${item.subtotal?.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      ))}
+                      <button onClick={fetchPricing} className="flex items-center gap-1 mt-2 cursor-pointer" style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', fontSize: 10, fontWeight: 600, color: '#777' }}>
+                        <Loader2 size={10} /> Recalculate
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>Failed to load pricing. <button onClick={fetchPricing} className="cursor-pointer" style={{ color: '#b8960c', fontWeight: 600, border: 'none', background: 'none' }}>Retry</button></div>
+                  )}
+                </div>
+              )}
+            </>
           ) : null}
         </div>
 
-        {/* Footer */}
-        {items && items.length > 0 && (
-          <div style={{ padding: '14px 20px', borderTop: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 11, color: '#999' }}>
-              {items.filter(it => it.checked).length} of {items.length} selected
-            </span>
-            <button
-              onClick={onAddItems}
-              disabled={items.filter(it => it.checked).length === 0}
-              className="flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all hover:bg-[#a08509]"
-              style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#b8960c', color: '#fff', fontSize: 12, fontWeight: 700 }}>
-              <Plus size={14} /> Add to Quote
-            </button>
+        {/* Footer with navigation */}
+        {items && items.length > 0 && !analyzing && (
+          <div style={{ padding: '12px 20px', borderTop: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              {wizStep > 1 && (
+                <button onClick={() => setWizStep(s => Math.max(1, s - 1) as any)} className="flex items-center gap-1 cursor-pointer" style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #ece8e0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#555' }}>
+                  <ArrowLeft size={14} /> Back
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 10, color: '#999' }}>Step {wizStep} of 4 · {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''}</div>
+            <div>
+              {wizStep < 4 ? (
+                <button onClick={() => goToStep(wizStep + 1 as any)} disabled={selectedItems.length === 0}
+                  className="flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all hover:brightness-110"
+                  style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#b8960c', color: '#fff', fontSize: 12, fontWeight: 700 }}>
+                  Approve & Continue <ArrowRight size={14} />
+                </button>
+              ) : (
+                <button onClick={() => onAddItems(items!)} disabled={selectedItems.length === 0}
+                  className="flex items-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all hover:brightness-110"
+                  style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontSize: 12, fontWeight: 700 }}>
+                  <Check size={14} /> Add to Quote
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1402,10 +2013,11 @@ function AnalysisModal({ photo, items, analyzing, onToggleItem, onAddItems, onCl
   );
 }
 
-function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem }: {
+function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog }: {
   rooms: Room[]; addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
   addItem: (roomId: string, category?: ItemCategory) => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
+  onBrowseCatalog: (roomId: string) => void;
 }) {
   const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
 
@@ -1449,8 +2061,13 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                     </button>
                     <button onClick={() => { addItem(room.id, 'drapery'); setAddMenuRoom(null); }}
                       className="flex items-center gap-2 w-full cursor-pointer transition-all hover:bg-[#eff6ff]"
-                      style={{ padding: '10px 14px', border: 'none', background: 'none', fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>
+                      style={{ padding: '10px 14px', border: 'none', background: 'none', fontSize: 12, fontWeight: 600, color: '#1a1a1a', borderBottom: '1px solid #f0ede8' }}>
                       <Layers size={14} style={{ color: '#2563eb' }} /> Drapery / Window Treatment
+                    </button>
+                    <button onClick={() => { onBrowseCatalog(room.id); setAddMenuRoom(null); }}
+                      className="flex items-center gap-2 w-full cursor-pointer transition-all hover:bg-[#fdf8eb]"
+                      style={{ padding: '10px 14px', border: 'none', background: 'none', fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>
+                      <BookOpen size={14} style={{ color: '#b8960c' }} /> Browse Catalog
                     </button>
                   </div>
                 )}
@@ -1476,8 +2093,17 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                 const typeList = cat === 'drapery' ? DRAPERY_TYPES : UPHOLSTERY_TYPES;
                 const catColor = cat === 'drapery' ? '#2563eb' : '#b8960c';
                 const catLabel = cat === 'drapery' ? 'DRAPERY' : 'UPHOLSTERY';
+                const diagramMatch = DIAGRAM_MAP[item.type] ? item.type : findDiagramMatch(item.type);
                 return (
                 <div key={item.id} className="flex items-start gap-2" style={{ marginBottom: idx < room.items.length - 1 ? 10 : 0, paddingBottom: idx < room.items.length - 1 ? 10 : 0, borderBottom: idx < room.items.length - 1 ? '1px solid #f0ede8' : 'none' }}>
+                  {/* Diagram thumbnail */}
+                  {diagramMatch && DIAGRAM_MAP[diagramMatch] && (
+                    <div style={{ width: 52, height: 52, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 12, overflow: 'hidden' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={DIAGRAM_MAP[diagramMatch].svg} alt="" style={{ maxWidth: 44, maxHeight: 44, objectFit: 'contain', opacity: 0.7 }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    </div>
+                  )}
                   <div className="flex-1 grid grid-cols-6 gap-2">
                     {/* Category badge + Type */}
                     <div className="col-span-2">
@@ -1573,6 +2199,17 @@ function StepOptions({ options, setOptions, rooms }: { options: QuoteOptions; se
     );
   };
 
+  const sel = (label: string, key: keyof QuoteOptions, opts: [string, string][], accent = '#b8960c') => (
+    <div key={key}>
+      <label style={{ fontSize: 11, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>{label}</label>
+      <select value={String(options[key] || '')}
+        onChange={e => setOptions({ ...options, [key]: key === 'foamThickness' ? Number(e.target.value) : e.target.value })}
+        className="form-input" style={{ width: '100%', fontSize: 12, padding: '8px 10px', borderColor: accent + '40' }}>
+        {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </div>
+  );
+
   return (
     <div>
       <div style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 16 }}>
@@ -1611,34 +2248,18 @@ function StepOptions({ options, setOptions, rooms }: { options: QuoteOptions; se
             <span style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Upholstery Options</span>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-3">
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Foam</label>
-              <select value={options.foamType}
-                onChange={e => setOptions({ ...options, foamType: e.target.value as any })}
-                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
-                <option value="new">New Foam</option>
-                <option value="reuse">Reuse Existing Foam</option>
-                <option value="upgrade">Upgrade Foam (HD)</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Foam Density</label>
-              <select value={options.foamDensity}
-                onChange={e => setOptions({ ...options, foamDensity: e.target.value as any })}
-                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
-                <option value="standard">Standard (1.8 lb)</option>
-                <option value="high">High Density (2.5 lb)</option>
-                <option value="premium">Premium (HR 3.0+ lb)</option>
-              </select>
-            </div>
-          </div>
-          <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 8 }}>Detail Work</label>
-          <div className="grid grid-cols-3 gap-2">
-            {checkBtn('tufting', 'Tufting')}
-            {checkBtn('welting', 'Welting / Piping')}
-            {checkBtn('nailhead', 'Nailhead Trim')}
-            {checkBtn('skirt', 'Skirt / Kick Pleat')}
-            {checkBtn('channeling', 'Channeling')}
+            {sel('Foam Type', 'foamType', [['high_density','High Density'],['medium_density','Medium Density'],['down_wrap','Down Wrap'],['down_blend','Down Blend'],['spring_down','Spring Down'],['memory_foam','Memory Foam'],['latex','Latex'],['reuse','Reuse Existing']])}
+            {sel('Foam Thickness', 'foamThickness', [['1','1"'],['2','2"'],['3','3"'],['4','4"'],['5','5"'],['6','6"']])}
+            {sel('Tufting', 'tufting', [['none','None'],['diamond','Diamond'],['biscuit','Biscuit'],['channel_vertical','Channel (Vertical)'],['channel_horizontal','Channel (Horizontal)'],['button','Button'],['blind_button','Blind Button'],['deep_button','Deep Button']])}
+            {sel('Welting', 'welting', [['self_welt','Self Welt'],['contrast_welt','Contrast Welt'],['double_welt','Double Welt'],['cord','Cord'],['micro_welt','Micro Welt'],['none','None']])}
+            {sel('Nailhead Finish', 'nailheadFinish', [['none','None'],['standard','Standard'],['french_natural','French Natural'],['antique_brass','Antique Brass'],['nickel','Nickel'],['pewter','Pewter'],['black','Black'],['gunmetal','Gunmetal'],['gold','Gold']])}
+            {sel('Nailhead Spacing', 'nailheadSpacing', [['standard','Standard'],['close','Close'],['every_other','Every Other'],['custom_pattern','Custom Pattern']])}
+            {sel('Skirt', 'skirtStyle', [['none','None'],['kick_pleat','Kick Pleat'],['box_pleat','Box Pleat'],['gathered','Gathered'],['tailored','Tailored'],['bullion_fringe','Bullion Fringe'],['waterfall','Waterfall']])}
+            {sel('Springs', 'springs', [['eight_way_hand_tied','8-Way Hand Tied'],['sinuous_zigzag','Sinuous/Zigzag'],['no_sag','No-Sag'],['pocket_coil','Pocket Coil']])}
+            {sel('Arm Style', 'armStyle', [['track','Track'],['english','English'],['rolled','Rolled'],['flared','Flared'],['slope','Slope'],['pad','Pad'],['recessed','Recessed']])}
+            {sel('Back Style', 'backStyle', [['tight','Tight'],['loose_cushion','Loose Cushion'],['tufted','Tufted'],['channeled','Channeled'],['pillow_back','Pillow Back']])}
+            {sel('Leg Style', 'legStyle', [['exposed_wood','Exposed Wood'],['exposed_metal','Exposed Metal'],['exposed_acrylic','Exposed Acrylic'],['skirted','Skirted'],['bun_feet','Bun Feet'],['turned','Turned'],['tapered','Tapered'],['cabriole','Cabriole']])}
+            {sel('Panel Mounting', 'panelMounting', [['french_cleat','French Cleat'],['z_clip','Z-Clip'],['velcro','Velcro'],['direct_mount','Direct Mount']])}
           </div>
         </div>
       )}
@@ -1648,44 +2269,24 @@ function StepOptions({ options, setOptions, rooms }: { options: QuoteOptions; se
         <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, border: '1.5px solid #d6e4f0', background: '#fafcff' }}>
           <div className="flex items-center gap-2 mb-3">
             <Layers size={14} style={{ color: '#2563eb' }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Drapery Options</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Drapery & Window Treatment Options</span>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-3">
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Lining Type</label>
-              <select value={options.liningType}
-                onChange={e => setOptions({ ...options, liningType: e.target.value as any })}
-                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
-                <option value="none">No Lining</option>
-                <option value="standard">Standard Lining</option>
-                <option value="blackout">Blackout Lining</option>
-                <option value="interlining">Interlining</option>
-                <option value="thermal">Thermal Lining</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 6 }}>Pleat Type</label>
-              <select value={options.pleatType}
-                onChange={e => setOptions({ ...options, pleatType: e.target.value as any })}
-                className="form-input" style={{ width: '100%', fontSize: 13, padding: '10px 12px' }}>
-                <option value="pinch">Pinch Pleat</option>
-                <option value="french">French Pleat</option>
-                <option value="euro">Euro Pleat</option>
-                <option value="cartridge">Cartridge Pleat</option>
-                <option value="ripplefold">Ripplefold</option>
-                <option value="goblet">Goblet Pleat</option>
-                <option value="box">Box Pleat</option>
-                <option value="inverted_box">Inverted Box Pleat</option>
-                <option value="rod_pocket">Rod Pocket</option>
-                <option value="tab_top">Tab Top</option>
-                <option value="grommet">Grommet</option>
-                <option value="none">Flat / No Pleat</option>
-              </select>
-            </div>
+            {sel('Lining', 'liningType', [['unlined','Unlined'],['standard_poly_cotton','Standard Poly-Cotton'],['blackout','Blackout'],['interlining_bump','Interlining (Bump)'],['interlining_domette','Interlining (Domette)'],['interlining_flannel','Interlining (Flannel)'],['thermal','Thermal'],['sheer','Sheer'],['privacy','Privacy']], '#2563eb')}
+            {sel('Fullness', 'fullness', [['2x','2x Standard'],['2.5x','2.5x (Recommended)'],['3x','3x Full'],['custom','Custom']], '#2563eb')}
+            {sel('Hardware', 'hardwareType', [['','Not Selected'],['traverse_rod','Traverse Rod'],['decorative_rod_wood','Decorative Rod (Wood)'],['decorative_rod_metal','Decorative Rod (Metal)'],['decorative_rod_acrylic','Decorative Rod (Acrylic)'],['ripplefold_track_silent_gliss','Ripplefold Track (Silent Gliss)'],['ripplefold_track_kirsch','Ripplefold Track (Kirsch)'],['motorized_somfy','Motorized (Somfy)'],['motorized_lutron','Motorized (Lutron)'],['motorized_hunter_douglas','Motorized (Hunter Douglas)'],['ceiling_mount','Ceiling Mount'],['double_rod','Double Rod'],['tension_rod','Tension Rod']], '#2563eb')}
+            {sel('Finial', 'finialStyle', [['','None'],['ball','Ball'],['spear','Spear'],['fleur_de_lis','Fleur-de-Lis'],['crystal','Crystal'],['urn','Urn'],['cage','Cage'],['leaf','Leaf'],['scroll','Scroll'],['square','Square'],['custom','Custom']], '#2563eb')}
+            {sel('Leading Edge', 'leadingEdge', [['plain','Plain'],['contrast_banding','Contrast Banding'],['gimp','Gimp'],['braid','Braid'],['fringe','Fringe'],['tassel_fringe','Tassel Fringe'],['beaded','Beaded'],['brush_fringe','Brush Fringe']], '#2563eb')}
+            {sel('Bottom Hem', 'bottomHem', [['double_fold_4in','Double Fold 4"'],['double_fold_6in','Double Fold 6"'],['double_fold_8in','Double Fold 8"'],['weighted','Weighted'],['chain_weighted','Chain Weighted'],['horsehair','Horsehair']], '#2563eb')}
+            {sel('Returns', 'returnSize', [['standard_3_5in','Standard 3.5"'],['extended_6in','Extended 6"'],['extended_8in','Extended 8"'],['custom','Custom']], '#2563eb')}
+            {sel('Stacking', 'stacking', [['left','Stack Left'],['right','Stack Right'],['split','Split (Center Open)'],['one_way_left','One-Way Left'],['one_way_right','One-Way Right']], '#2563eb')}
+            {sel('Tiebacks', 'tieback', [['none','None'],['fabric','Fabric'],['rope','Rope'],['tassel','Tassel'],['medallion','Medallion'],['magnetic','Magnetic'],['holdback','Holdback']], '#2563eb')}
+            {sel('Lift System', 'liftSystem', [['cordless','Cordless'],['cord_lock','Cord Lock'],['continuous_cord_loop','Continuous Loop'],['motorized_somfy','Motorized (Somfy)'],['motorized_lutron','Motorized (Lutron)'],['top_down_bottom_up','Top-Down/Bottom-Up'],['day_night_dual','Day/Night Dual']], '#2563eb')}
           </div>
           <div className="grid grid-cols-2 gap-2">
             {checkBtn('contrastPiping', 'Contrast Piping', '#2563eb')}
             {checkBtn('patternMatch', 'Pattern Match', '#2563eb')}
+            {checkBtn('installationIncluded', 'Include Installation', '#2563eb')}
           </div>
         </div>
       )}
@@ -1741,16 +2342,21 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
   const allItems = rooms.flatMap(r => r.items);
   const hasUpholstery = allItems.some(it => getItemCategory(it.type) === 'upholstery');
   const hasDrapery = allItems.some(it => getItemCategory(it.type) === 'drapery');
+  const fmt = (v: string) => v.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   const features = [
-    hasUpholstery && options.foamType !== 'new' && (options.foamType === 'reuse' ? 'Reuse Foam' : 'Upgrade Foam'),
-    hasUpholstery && options.foamType === 'new' && 'New Foam',
-    options.tufting && 'Tufting',
-    options.welting && 'Welting',
-    options.nailhead && 'Nailhead',
-    options.skirt && 'Skirt',
-    options.channeling && 'Channeling',
+    hasUpholstery && options.foamType && `Foam: ${fmt(options.foamType)}`,
+    hasUpholstery && options.foamThickness && `${options.foamThickness}" thick`,
+    hasUpholstery && options.tufting !== 'none' && `Tufting: ${fmt(options.tufting)}`,
+    hasUpholstery && options.welting !== 'none' && `Welting: ${fmt(options.welting)}`,
+    hasUpholstery && options.nailheadFinish !== 'none' && `Nailhead: ${fmt(options.nailheadFinish)}`,
+    hasUpholstery && options.skirtStyle !== 'none' && `Skirt: ${fmt(options.skirtStyle)}`,
+    hasDrapery && options.fullness && `Fullness: ${options.fullness}`,
+    hasDrapery && options.leadingEdge !== 'plain' && `Edge: ${fmt(options.leadingEdge)}`,
+    hasDrapery && options.hardwareType && `Hardware: ${fmt(options.hardwareType)}`,
     options.contrastPiping && 'Contrast Piping',
     options.patternMatch && 'Pattern Match',
+    options.installationIncluded && 'Installation',
+    options.monogram && 'Monogram',
   ].filter(Boolean);
 
   return (
@@ -1854,14 +2460,69 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+// RESULT VIEW — Transparent pricing with editable line items
+// ═══════════════════════════════════════════════════════════════
+const CATEGORY_STYLES: Record<string, { color: string; bg: string }> = {
+  fabric: { color: '#2563eb', bg: '#eff6ff' },
+  lining: { color: '#7c3aed', bg: '#faf5ff' },
+  labor: { color: '#b8960c', bg: '#fdf8eb' },
+  upgrade: { color: '#059669', bg: '#ecfdf5' },
+  foam: { color: '#059669', bg: '#ecfdf5' },
+  installation: { color: '#6b7280', bg: '#f3f4f6' },
+  surcharge: { color: '#dc2626', bg: '#fef2f2' },
+};
+
 function ResultView({ result }: { result: any }) {
-  const [selectedTier, setSelectedTier] = useState(1);
-  const proposals = result.design_proposals || result.proposals || result.tiers || [];
+  const [selectedTier, setSelectedTier] = useState(0);
+  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+  const [editableTiers, setEditableTiers] = useState<any[]>([]);
   const quoteNumber = result.quote_number || result.id || 'NEW';
+
+  // Initialize editable tiers from result
+  useEffect(() => {
+    const proposals = result.design_proposals || result.proposals || result.tiers || [];
+    if (Array.isArray(proposals)) {
+      setEditableTiers(JSON.parse(JSON.stringify(proposals)));
+    }
+  }, [result]);
+
+  const toggleExpand = (key: string) => setExpandedItems(p => ({ ...p, [key]: !p[key] }));
+
+  // Recalculate when a line item value changes
+  const updateLineItem = (tierIdx: number, itemIdx: number, liIdx: number, field: 'quantity' | 'rate', value: number) => {
+    setEditableTiers(prev => {
+      const tiers = JSON.parse(JSON.stringify(prev));
+      const li = tiers[tierIdx].items[itemIdx].line_items[liIdx];
+      li[field] = value;
+      li.amount = Math.round(li.quantity * li.rate * 100) / 100;
+      // Recalculate item subtotal
+      const item = tiers[tierIdx].items[itemIdx];
+      item.subtotal = Math.round(item.line_items.reduce((s: number, l: any) => s + l.amount, 0) * 100) / 100;
+      // Recalculate tier totals
+      const tier = tiers[tierIdx];
+      tier.subtotal = Math.round(tier.items.reduce((s: number, it: any) => s + it.subtotal, 0) * 100) / 100;
+      tier.tax = Math.round(tier.subtotal * (tier.tax_rate || 0.06) * 100) / 100;
+      tier.total = Math.round((tier.subtotal + tier.tax) * 100) / 100;
+      tier.deposit = Math.round(tier.total * 0.5 * 100) / 100;
+      return tiers;
+    });
+  };
+
+  if (editableTiers.length === 0) {
+    return (
+      <div style={{ padding: '20px 16px', borderRadius: 12, border: '1px solid #ece8e0', background: '#faf9f7' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>Quote Created — {quoteNumber}</div>
+        {result.total && <div style={{ fontSize: 22, fontWeight: 700, color: '#b8960c' }}>${result.total.toLocaleString()}</div>}
+      </div>
+    );
+  }
+
+  const activeTier = editableTiers[selectedTier];
 
   return (
     <div>
-      <div className="flex items-center gap-3 mb-5">
+      <div className="flex items-center gap-3 mb-4">
         <div className="w-8 h-8 rounded-lg bg-[#f0fdf4] flex items-center justify-center">
           <Check size={18} className="text-[#16a34a]" />
         </div>
@@ -1871,42 +2532,126 @@ function ResultView({ result }: { result: any }) {
         </div>
       </div>
 
-      {/* 3-tier pricing */}
-      {proposals.length > 0 ? (
-        <div className="flex gap-3">
-          {TIERS.map((t, i) => {
-            const p = proposals[i];
-            if (!p) return null;
-            const total = p.total || p.price || 0;
-            const isSelected = selectedTier === i;
+      {/* 3-tier selector cards */}
+      <div className="flex gap-2 mb-4">
+        {TIERS.map((t, i) => {
+          const tier = editableTiers[i];
+          if (!tier) return null;
+          const isSelected = selectedTier === i;
+          return (
+            <div key={t.key} onClick={() => setSelectedTier(i)}
+              className="flex-1 cursor-pointer text-center transition-all"
+              style={{
+                padding: '14px 8px', borderRadius: 12,
+                background: isSelected ? t.bg : '#faf9f7',
+                border: `2px solid ${isSelected ? t.color : '#ece8e0'}`,
+                boxShadow: isSelected ? '0 4px 16px rgba(0,0,0,0.06)' : 'none',
+              }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#777' }}>{t.key} · {t.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: t.color, margin: '4px 0' }}>${tier.total?.toLocaleString()}</div>
+              <div style={{ fontSize: 9, color: '#888' }}>Tax: ${tier.tax?.toFixed(2)} · Deposit: ${tier.deposit?.toLocaleString()}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Expanded line item breakdown */}
+      {activeTier && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+            {TIERS[selectedTier]?.label} Tier — Line Item Breakdown
+          </div>
+
+          {activeTier.items?.map((item: any, itemIdx: number) => {
+            const key = `${selectedTier}-${itemIdx}`;
+            const isOpen = expandedItems[key] !== false; // default open
             return (
-              <div key={t.key} onClick={() => setSelectedTier(i)}
-                className="flex-1 cursor-pointer text-center transition-all"
-                style={{
-                  padding: 20, borderRadius: 14, minHeight: 120,
-                  background: isSelected ? t.bg : '#faf9f7',
-                  border: `2px solid ${isSelected ? t.color : '#ece8e0'}`,
-                  borderLeftWidth: 4, borderLeftColor: t.color,
-                  boxShadow: isSelected ? '0 4px 16px rgba(0,0,0,0.08)' : 'none',
-                }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#777', letterSpacing: '0.03em' }}>{t.key} · {t.label}</div>
-                <div style={{ fontSize: 26, fontWeight: 700, color: t.color, margin: '8px 0' }}>${total.toLocaleString()}</div>
-                <div style={{ fontSize: 10, color: '#888' }}>Grade {t.key} fabric · {p.lining_type || 'Standard'} lining</div>
+              <div key={itemIdx} style={{ marginBottom: 8, borderRadius: 10, border: '1px solid #ece8e0', overflow: 'hidden' }}>
+                {/* Item header — click to expand/collapse */}
+                <div onClick={() => toggleExpand(key)} className="flex items-center justify-between cursor-pointer"
+                  style={{ padding: '10px 14px', background: '#f5f3ef' }}>
+                  <div className="flex items-center gap-2">
+                    <ChevronDown size={14} style={{ color: '#888', transform: isOpen ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s' }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{item.name}</span>
+                    {item.quantity > 1 && <span style={{ fontSize: 10, color: '#888' }}>x{item.quantity}</span>}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: TIERS[selectedTier]?.color || '#1a1a1a' }}>
+                    ${item.subtotal?.toFixed(2)}
+                  </span>
+                </div>
+
+                {/* Line items table */}
+                {isOpen && item.line_items && (
+                  <div style={{ padding: '8px 14px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #ece8e0' }}>
+                          <th style={{ textAlign: 'left', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', textTransform: 'uppercase' }}>Description</th>
+                          <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', width: 70, textTransform: 'uppercase' }}>Qty</th>
+                          <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', width: 80, textTransform: 'uppercase' }}>Rate</th>
+                          <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', width: 80, textTransform: 'uppercase' }}>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {item.line_items.map((li: any, liIdx: number) => {
+                          const catStyle = CATEGORY_STYLES[li.category] || { color: '#555', bg: '#f5f3ef' };
+                          return (
+                            <tr key={liIdx} style={{ borderBottom: '1px solid #f5f3ef' }}>
+                              <td style={{ padding: '6px 0', fontSize: 11, color: '#333' }}>
+                                <span style={{ fontSize: 8, fontWeight: 700, color: catStyle.color, background: catStyle.bg, padding: '1px 5px', borderRadius: 3, marginRight: 6, textTransform: 'uppercase' }}>
+                                  {li.category}
+                                </span>
+                                {li.description}
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '6px 0' }}>
+                                <input type="number" step="0.1" value={li.quantity}
+                                  onChange={e => updateLineItem(selectedTier, itemIdx, liIdx, 'quantity', parseFloat(e.target.value) || 0)}
+                                  style={{ width: 55, textAlign: 'right', fontSize: 11, padding: '3px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
+                                <span style={{ fontSize: 9, color: '#888', marginLeft: 2 }}>{li.unit}</span>
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '6px 0' }}>
+                                <span style={{ fontSize: 9, color: '#888', marginRight: 1 }}>$</span>
+                                <input type="number" step="0.01" value={li.rate}
+                                  onChange={e => updateLineItem(selectedTier, itemIdx, liIdx, 'rate', parseFloat(e.target.value) || 0)}
+                                  style={{ width: 60, textAlign: 'right', fontSize: 11, padding: '3px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
+                              </td>
+                              <td style={{ textAlign: 'right', padding: '6px 0', fontSize: 11, fontWeight: 600, color: '#1a1a1a' }}>
+                                ${li.amount?.toFixed(2)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {/* Item subtotal */}
+                    <div className="flex justify-between" style={{ padding: '6px 0', borderTop: '1.5px solid #ece8e0', marginTop: 4, fontSize: 12, fontWeight: 700, color: '#1a1a1a' }}>
+                      <span>Item Subtotal</span>
+                      <span>${item.subtotal?.toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
-        </div>
-      ) : (
-        <div style={{ padding: '20px 16px', borderRadius: 12, border: '1px solid #ece8e0', background: '#faf9f7' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 4 }}>Quote Created</div>
-          {result.total && (
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#b8960c' }}>${result.total.toLocaleString()}</div>
-          )}
-          <div style={{ fontSize: 12, color: '#777', marginTop: 4 }}>
-            {result.customer_name && `Customer: ${result.customer_name}`}
+
+          {/* Tier totals */}
+          <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#f5f3ef' }}>
+            <div className="flex justify-between mb-1" style={{ fontSize: 12, color: '#555' }}>
+              <span>Subtotal</span><span style={{ fontWeight: 600 }}>${activeTier.subtotal?.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between mb-1" style={{ fontSize: 12, color: '#555' }}>
+              <span>Tax ({((activeTier.tax_rate || 0.06) * 100).toFixed(1)}%)</span><span style={{ fontWeight: 600 }}>${activeTier.tax?.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between mb-1" style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', borderTop: '1.5px solid #ddd', paddingTop: 6 }}>
+              <span>Total</span><span>${activeTier.total?.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between" style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>
+              <span>50% Deposit Due</span><span>${activeTier.deposit?.toFixed(2)}</span>
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: '#aaa', marginTop: 2 }}>
-            Quote ID: {result.id || 'N/A'}
+
+          <div style={{ marginTop: 8, fontSize: 10, color: '#aaa', textAlign: 'center' }}>
+            Edit any quantity or rate above — totals recalculate live
           </div>
         </div>
       )}

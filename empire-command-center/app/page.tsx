@@ -226,7 +226,7 @@ export default function CommandCenter() {
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
-    if (activeScreen === 'tasks') return <TasksScreen />;
+    if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;
     if (activeScreen === 'tickets') return <Suspense fallback={<Loading />}><TicketsPage /></Suspense>;
     if (activeScreen === 'shipping') return <Suspense fallback={<Loading />}><ShippingPage /></Suspense>;
     if (activeScreen === 'costs') return <Suspense fallback={<Loading />}><CostTracker /></Suspense>;

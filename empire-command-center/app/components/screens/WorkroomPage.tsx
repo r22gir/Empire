@@ -62,7 +62,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
   }, [initialSection]);
 
   useEffect(() => {
-    fetch(API + '/quotes?limit=20').then(r => r.json()).then(data => {
+    fetch(API + '/quotes?limit=20&business=workroom').then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       const q = Array.isArray(raw) ? raw : [];
       setQuotes(q);
@@ -198,10 +198,10 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
 
   useEffect(() => {
     // Fetch real data for dashboard
-    fetch(`${API}/crm/customers?limit=5&sort_by=updated_at&sort_dir=desc`).then(r => r.json()).then(d => setCustomers(d.customers || [])).catch(() => {});
-    fetch(`${API}/jobs/`).then(r => r.json()).then(d => setJobs(Array.isArray(d) ? d : d.jobs || [])).catch(() => {});
-    fetch(`${API}/finance/dashboard?range=this_month`).then(r => r.json()).then(d => setFinance(d)).catch(() => {});
-    fetch(`${API}/inventory/dashboard`).then(r => r.json()).then(d => setInventory(d)).catch(() => {});
+    fetch(`${API}/crm/customers?limit=5&sort_by=updated_at&sort_dir=desc&business=workroom`).then(r => r.json()).then(d => setCustomers(d.customers || [])).catch(() => {});
+    fetch(`${API}/jobs/?business=workroom`).then(r => r.json()).then(d => setJobs(Array.isArray(d) ? d : d.jobs || [])).catch(() => {});
+    fetch(`${API}/finance/dashboard?range=this_month&business=workroom`).then(r => r.json()).then(d => setFinance(d)).catch(() => {});
+    fetch(`${API}/inventory/dashboard?business=workroom`).then(r => r.json()).then(d => setInventory(d)).catch(() => {});
   }, []);
 
   const activeJobs = jobs.filter(j => j.status !== 'completed' && j.status !== 'cancelled');
@@ -671,7 +671,7 @@ function TasksSection() {
 
   const fetchTasks = async () => {
     try {
-      const res = await fetch(`${API}/tasks/?limit=50`);
+      const res = await fetch(`${API}/tasks/?limit=50&business=workroom`);
       if (res.ok) {
         const data = await res.json();
         setTasks(data.tasks || data || []);
@@ -710,7 +710,7 @@ function TasksSection() {
     if (!newTitle.trim()) return;
     setSaving(true);
     try {
-      const body: any = { title: newTitle.trim(), priority: newPriority };
+      const body: any = { title: newTitle.trim(), priority: newPriority, business: 'workroom' };
       if (newDesc.trim()) body.description = newDesc.trim();
       if (newDesk) body.desk = newDesk;
       if (newDue) body.due_date = newDue;

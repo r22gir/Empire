@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Mounting board -->
+  <rect x="20" y="25" width="160" height="6" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <!-- Box pleat valance body -->
+  <rect x="20" y="31" width="160" height="55" rx="1" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Box pleat fold lines - showing inverted pleat pattern -->
+  <line x1="38" y1="31" x2="38" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="44" y1="31" x2="44" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="68" y1="31" x2="68" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="74" y1="31" x2="74" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="98" y1="31" x2="98" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="104" y1="31" x2="104" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="128" y1="31" x2="128" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="134" y1="31" x2="134" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="158" y1="31" x2="158" y2="86" stroke="#333" stroke-width="1"/>
+  <line x1="164" y1="31" x2="164" y2="86" stroke="#333" stroke-width="1"/>
+  <!-- Subtle shadow in pleat folds -->
+  <rect x="38" y="31" width="6" height="55" fill="#333" fill-opacity="0.05" stroke="none"/>
+  <rect x="68" y="31" width="6" height="55" fill="#333" fill-opacity="0.05" stroke="none"/>
+  <rect x="98" y="31" width="6" height="55" fill="#333" fill-opacity="0.05" stroke="none"/>
+  <rect x="128" y="31" width="6" height="55" fill="#333" fill-opacity="0.05" stroke="none"/>
+  <rect x="158" y="31" width="6" height="55" fill="#333" fill-opacity="0.05" stroke="none"/>
+  <!-- Bottom welting -->
+  <line x1="20" y1="84" x2="180" y2="84" stroke="#333" stroke-width="0.75"/>
+  <!-- Window frame suggestion -->
+  <rect x="25" y="92" width="150" height="90" rx="1" fill="none" stroke="#333" stroke-width="0.5" stroke-dasharray="4,4"/>
+</svg>

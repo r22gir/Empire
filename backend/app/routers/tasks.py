@@ -19,6 +19,7 @@ class TaskCreate(BaseModel):
     status: str = "todo"
     priority: str = "normal"
     desk: str
+    business: Optional[str] = None  # 'workroom', 'woodcraft', 'empire'
     assigned_to: Optional[str] = None
     created_by: str = "rg"
     due_date: Optional[str] = None
@@ -33,6 +34,7 @@ class TaskUpdate(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     desk: Optional[str] = None
+    business: Optional[str] = None
     assigned_to: Optional[str] = None
     due_date: Optional[str] = None
     tags: Optional[List[str]] = None
@@ -69,13 +71,20 @@ def _log_activity(conn, task_id: str, actor: str, action: str, detail: str = Non
 # ── Routes ───────────────────────────────────────────────────────────
 
 @router.get("/dashboard")
-def task_dashboard():
-    """Cross-desk summary: counts by status per desk."""
+def task_dashboard(business: Optional[str] = None):
+    """Cross-desk summary: counts by status per desk. Optionally filter by business."""
+    biz_clause = ""
+    biz_params: list = []
+    if business:
+        biz_clause = " AND business = ?"
+        biz_params = [business]
+
     with get_db() as conn:
         rows = conn.execute(
-            """SELECT desk, status, COUNT(*) as count
-               FROM tasks WHERE status != 'cancelled'
-               GROUP BY desk, status"""
+            f"""SELECT desk, status, COUNT(*) as count
+               FROM tasks WHERE status != 'cancelled'{biz_clause}
+               GROUP BY desk, status""",
+            biz_params,
         ).fetchall()
 
         summary = {}
@@ -86,9 +95,10 @@ def task_dashboard():
             summary[desk][r["status"]] = r["count"]
 
         totals = conn.execute(
-            """SELECT status, COUNT(*) as count
-               FROM tasks WHERE status != 'cancelled'
-               GROUP BY status"""
+            f"""SELECT status, COUNT(*) as count
+               FROM tasks WHERE status != 'cancelled'{biz_clause}
+               GROUP BY status""",
+            biz_params,
         ).fetchall()
 
         return {
@@ -100,6 +110,7 @@ def task_dashboard():
 @router.get("/")
 def list_tasks(
     desk: Optional[str] = None,
+    business: Optional[str] = None,
     status: Optional[str] = None,
     assigned_to: Optional[str] = None,
     priority: Optional[str] = None,
@@ -115,6 +126,9 @@ def list_tasks(
     if desk:
         clauses.append("desk = ?")
         params.append(desk)
+    if business:
+        clauses.append("business = ?")
+        params.append(business)
     if status:
         clauses.append("status = ?")
         params.append(status)
@@ -167,15 +181,16 @@ def create_task(task: TaskCreate):
     with get_db() as conn:
         cursor = conn.execute(
             """INSERT INTO tasks
-               (id, title, description, status, priority, desk, assigned_to,
+               (id, title, description, status, priority, desk, business, assigned_to,
                 created_by, due_date, tags, metadata, parent_task_id)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task.title,
                 task.description,
                 task.status,
                 task.priority,
                 task.desk,
+                task.business,
                 task.assigned_to,
                 task.created_by,
                 task.due_date,

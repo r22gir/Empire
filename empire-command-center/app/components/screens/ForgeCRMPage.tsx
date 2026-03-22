@@ -89,7 +89,7 @@ export default function ForgeCRMPage() {
       case 'customers':
         return (
           <Suspense fallback={<Loading />}>
-            <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} />
+            <CustomerList onSelectCustomer={(id) => setSelectedCustomerId(id)} business="woodcraft" />
           </Suspense>
         );
 

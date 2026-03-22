@@ -487,6 +487,37 @@ def _parse_dim(val) -> float:
     return 0.0
 
 
+@router.post("/preview-pricing")
+async def preview_pricing(body: dict):
+    """Preview tier pricing for items without creating/saving a quote.
+
+    Accepts the same item format as /from-rooms but returns only the tier
+    breakdown — no quote ID or persistence.
+    """
+    from app.services.quote_engine.tier_generator import generate_tiers
+    from app.services.quote_engine.yardage_calculator import calculate_yardage
+
+    items = body.get("items", [])
+    location = body.get("location", "DC")
+    lining = body.get("lining", "standard")
+
+    if not items:
+        raise HTTPException(400, "At least one item is required")
+
+    # Ensure each item has yardage calculated
+    for item in items:
+        if "yardage" not in item:
+            dims = item.get("dimensions", {})
+            opts = {}
+            if item.get("cushion_count"):
+                opts["cushion_count"] = item["cushion_count"]
+            yardage = calculate_yardage(item.get("type", "accent_chair"), dims, opts)
+            item["yardage"] = yardage
+
+    tiers = generate_tiers(items, location=location, lining_preference=lining)
+    return {"tiers": tiers}
+
+
 @router.get("/pricing-tables")
 async def get_pricing_tables():
     """Get all pricing tables for the founder pricing editor."""

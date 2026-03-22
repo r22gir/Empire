@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Back - straight, same height as arms -->
+  <rect x="15" y="40" width="170" height="60" rx="2" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Arms - same height as back (tuxedo style) -->
+  <rect x="15" y="40" width="18" height="100" rx="2" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <rect x="167" y="40" width="18" height="100" rx="2" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Seat cushions -->
+  <rect x="33" y="100" width="44" height="28" rx="3" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <rect x="78" y="100" width="44" height="28" rx="3" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <rect x="123" y="100" width="44" height="28" rx="3" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Back cushion divisions -->
+  <line x1="77" y1="45" x2="77" y2="98" stroke="#333" stroke-width="0.75" stroke-dasharray="2,3"/>
+  <line x1="123" y1="45" x2="123" y2="98" stroke="#333" stroke-width="0.75" stroke-dasharray="2,3"/>
+  <!-- Legs - slim modern -->
+  <rect x="25" y="132" width="4" height="22" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <rect x="171" y="132" width="4" height="22" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+</svg>

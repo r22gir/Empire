@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <!-- Top cushion -->
+  <rect x="25" y="60" width="150" height="50" rx="6" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Welting line -->
+  <line x1="28" y1="85" x2="172" y2="85" stroke="#333" stroke-width="0.5"/>
+  <!-- Base/skirt -->
+  <rect x="30" y="110" width="140" height="25" rx="3" fill="#f5f0e8" stroke="#333" stroke-width="1.5"/>
+  <!-- Legs -->
+  <rect x="38" y="135" width="6" height="18" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+  <rect x="156" y="135" width="6" height="18" rx="1" fill="none" stroke="#333" stroke-width="1.5"/>
+</svg>
