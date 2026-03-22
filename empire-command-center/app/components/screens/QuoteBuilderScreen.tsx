@@ -75,6 +75,33 @@ const ITEM_TYPES = [
   'bedskirt', 'duvet', 'table_runner', 'placemats',
 ];
 
+// Map AI-detected furniture names to ITEM_TYPES keys
+function mapFurnitureType(aiType: string): string {
+  const t = (aiType || '').toLowerCase();
+  if (t.includes('bench') || t.includes('window seat')) return 'bench';
+  if (t.includes('sectional')) return 'sectional';
+  if (t.includes('loveseat') || t.includes('love seat')) return 'loveseat';
+  if (t.includes('wingback')) return 'wingback_chair';
+  if (t.includes('club chair')) return 'club_chair';
+  if (t.includes('accent chair') || t.includes('arm chair') || t.includes('armchair')) return 'accent_chair';
+  if (t.includes('dining chair') && t.includes('seat')) return 'dining_chair_seat';
+  if (t.includes('dining chair')) return 'dining_chair_full';
+  if (t.includes('ottoman')) return t.includes('large') ? 'ottoman_large' : 'ottoman_small';
+  if (t.includes('banquette')) return 'banquette';
+  if (t.includes('headboard')) return 'headboard';
+  if (t.includes('sofa') || t.includes('couch')) return 'sofa_3cushion';
+  if (t.includes('cushion') && t.includes('back')) return 'back_cushion';
+  if (t.includes('cushion') || t.includes('seat pad')) return 'seat_cushion';
+  if (t.includes('pillow') || t.includes('throw')) return 'throw_pillow';
+  if (t.includes('chair')) return 'accent_chair';
+  if (t.includes('drapery') || t.includes('drape') || t.includes('curtain')) return 'drapery';
+  if (t.includes('roman shade')) return 'roman_shade';
+  if (t.includes('valance')) return 'valance';
+  if (t.includes('cornice')) return 'cornice';
+  if (ITEM_TYPES.includes(t)) return t;
+  return 'sofa_3cushion'; // safe default
+}
+
 type QuoteInputMethod = 'photos' | '3dscan' | 'manual' | 'intake';
 
 type ManualItemType = 'window' | 'sofa' | 'chair' | 'cushion' | 'pillow' | 'cornice' | 'valance' | 'roman_shade' | 'other';
@@ -248,7 +275,8 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         throw new Error('No photo source available');
       }
 
-      const res = await fetch(`${API}/vision/room-scan`, {
+      // Call upholstery endpoint for furniture detection + measurements
+      const res = await fetch(`${API}/vision/upholstery`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image: base64 }),
@@ -256,17 +284,37 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
       if (res.ok) {
         const data = await res.json();
-        // room-scan returns {windows: [{name, width_inches, height_inches, window_type, ...}], ...}
-        const windows = data.windows || data.items || data.detected_items || [];
-        const items: AnalysisItem[] = windows.map((it: any) => ({
-          type: it.window_type || it.type || it.item_type || 'drapery',
-          description: it.name || it.description || '',
-          width: it.width_inches ? `${it.width_inches}"` : (it.width || ''),
-          height: it.height_inches ? `${it.height_inches}"` : (it.height || ''),
-          depth: it.depth || it.dimensions?.depth || '',
-          condition: it.condition || it.notes || '',
-          checked: true,
-        }));
+        const items: AnalysisItem[] = [];
+
+        // Primary detected furniture piece
+        if (data.furniture_type) {
+          const dims = data.estimated_dimensions || {};
+          items.push({
+            type: mapFurnitureType(data.furniture_type),
+            description: [data.furniture_type, data.style].filter(Boolean).join(' — '),
+            width: dims.width ? `${dims.width}` : '',
+            height: dims.height ? `${dims.height}` : '',
+            depth: dims.depth ? `${dims.depth}` : '',
+            condition: data.questions?.join('; ') || '',
+            checked: true,
+          });
+        }
+
+        // Additional furniture from all_furniture array
+        if (data.all_furniture && Array.isArray(data.all_furniture)) {
+          for (const f of data.all_furniture) {
+            // Skip if it's the same as the primary piece
+            if (items.length === 1 && f.type?.toLowerCase() === data.furniture_type?.toLowerCase()) continue;
+            items.push({
+              type: mapFurnitureType(f.type || 'sofa'),
+              description: [f.type, f.condition].filter(Boolean).join(' — '),
+              width: '', height: '', depth: '',
+              condition: f.recommendation || '',
+              checked: true,
+            });
+          }
+        }
+
         setAnalysisResult(items);
       } else {
         setAnalysisResult([]);
