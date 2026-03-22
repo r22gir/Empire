@@ -802,7 +802,8 @@ async def admin_projects_with_photos(request: Request):
     conn = get_db()
     rows = conn.execute("""
         SELECT p.id, p.name, p.intake_code, p.status, p.photos, p.created_at,
-               u.name as customer_name
+               p.address, p.treatment as project_type,
+               u.name as customer_name, u.email as customer_email, u.phone as customer_phone
         FROM intake_projects p
         LEFT JOIN intake_users u ON p.user_id = u.id
         WHERE p.photos IS NOT NULL AND p.photos != '[]' AND p.photos != ''
@@ -829,6 +830,10 @@ async def admin_projects_with_photos(request: Request):
             "intake_code": project.get("intake_code"),
             "status": project.get("status"),
             "customer_name": project.get("customer_name"),
+            "customer_email": project.get("customer_email", ""),
+            "customer_phone": project.get("customer_phone", ""),
+            "address": project.get("address", ""),
+            "project_type": project.get("project_type", ""),
             "photo_count": len(photos_out),
             "photos": photos_out,
             "created_at": project.get("created_at"),

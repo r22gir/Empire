@@ -398,7 +398,11 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   const uploadPhoto = async (photo: PhotoFile): Promise<string | null> => {
     if (photo.uploadedFilename) return photo.uploadedFilename;
-    if (photo.fromIntake && photo.serverUrl) return photo.originalName || photo.serverUrl;
+    if (photo.fromIntake && photo.serverUrl) {
+      // Return the server-relative URL so the quote can reference the intake photo
+      const url = new URL(photo.serverUrl, window.location.origin);
+      return url.pathname; // e.g. /intake_uploads/{project_id}/photo.jpg
+    }
     if (!photo.file) return null;
     const form = new FormData();
     form.append('file', photo.file);
