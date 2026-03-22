@@ -56,7 +56,8 @@ def init_db():
             password_hash TEXT NOT NULL,
             company TEXT,
             role TEXT DEFAULT 'client',
-            created_at TEXT DEFAULT (datetime('now'))
+            created_at TEXT DEFAULT (datetime('now')),
+            deleted_at TEXT
         );
         CREATE TABLE IF NOT EXISTS intake_projects (
             id TEXT PRIMARY KEY,
@@ -78,11 +79,18 @@ def init_db():
             messages TEXT DEFAULT '[]',
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
+            deleted_at TEXT,
             FOREIGN KEY (user_id) REFERENCES intake_users(id)
         );
         CREATE INDEX IF NOT EXISTS idx_projects_user ON intake_projects(user_id);
         CREATE INDEX IF NOT EXISTS idx_projects_code ON intake_projects(intake_code);
     """)
+    # Additive migration for existing databases — add deleted_at columns
+    for table in ("intake_users", "intake_projects"):
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
+        except Exception:
+            pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -112,7 +120,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(credentials.credentials)
     conn = get_db()
-    user = conn.execute("SELECT * FROM intake_users WHERE id = ?", (payload["sub"],)).fetchone()
+    user = conn.execute("SELECT * FROM intake_users WHERE id = ? AND deleted_at IS NULL", (payload["sub"],)).fetchone()
     conn.close()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -322,7 +330,7 @@ async def create_project(request: Request, project: ProjectCreate, user=Depends(
 async def list_projects(request: Request, user=Depends(get_current_user)):
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM intake_projects WHERE user_id = ? ORDER BY created_at DESC", (user["id"],)
+        "SELECT * FROM intake_projects WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC", (user["id"],)
     ).fetchall()
     conn.close()
     projects = []
@@ -550,13 +558,14 @@ async def upload_scan(
 @limiter.limit("30/minute")
 @router.get("/admin/projects")
 async def admin_list_all_projects(request: Request):
-    """List all intake projects with user info (for founder dashboard)."""
+    """List all intake projects with user info (for founder dashboard). Excludes soft-deleted."""
     conn = get_db()
     rows = conn.execute("""
         SELECT p.*, u.name as user_name, u.email as user_email,
                u.company as user_company, u.role as user_role
         FROM intake_projects p
         LEFT JOIN intake_users u ON p.user_id = u.id
+        WHERE p.deleted_at IS NULL
         ORDER BY p.created_at DESC
     """).fetchall()
     conn.close()
@@ -566,10 +575,10 @@ async def admin_list_all_projects(request: Request):
 @limiter.limit("30/minute")
 @router.get("/admin/users")
 async def admin_list_all_users(request: Request):
-    """List all registered intake users (for founder dashboard)."""
+    """List all registered intake users (for founder dashboard). Excludes soft-deleted."""
     conn = get_db()
     rows = conn.execute(
-        "SELECT id, name, email, phone, company, role, created_at FROM intake_users ORDER BY created_at DESC"
+        "SELECT id, name, email, phone, company, role, created_at FROM intake_users WHERE deleted_at IS NULL ORDER BY created_at DESC"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -621,17 +630,71 @@ async def admin_update_user(request: Request, user_id: str, update: AdminUserUpd
 @limiter.limit("10/minute")
 @router.delete("/admin/users/{user_id}")
 async def admin_delete_user(request: Request, user_id: str):
-    """Admin: delete a user and their projects."""
+    """Admin: soft-delete a user and their projects (sets deleted_at timestamp)."""
     conn = get_db()
-    row = conn.execute("SELECT id FROM intake_users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT id FROM intake_users WHERE id = ? AND deleted_at IS NULL", (user_id,)).fetchone()
     if not row:
         conn.close()
         raise HTTPException(status_code=404, detail="User not found")
-    conn.execute("DELETE FROM intake_projects WHERE user_id = ?", (user_id,))
-    conn.execute("DELETE FROM intake_users WHERE id = ?", (user_id,))
+    conn.execute("UPDATE intake_projects SET deleted_at = datetime('now') WHERE user_id = ? AND deleted_at IS NULL", (user_id,))
+    conn.execute("UPDATE intake_users SET deleted_at = datetime('now') WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
-    return {"status": "deleted", "user_id": user_id}
+    return {"status": "archived", "user_id": user_id}
+
+
+@limiter.limit("10/minute")
+@router.post("/admin/users/{user_id}/restore")
+async def admin_restore_user(request: Request, user_id: str):
+    """Admin: restore a soft-deleted user and all their projects."""
+    conn = get_db()
+    row = conn.execute("SELECT id FROM intake_users WHERE id = ? AND deleted_at IS NOT NULL", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Archived user not found")
+    conn.execute("UPDATE intake_users SET deleted_at = NULL WHERE id = ?", (user_id,))
+    conn.execute("UPDATE intake_projects SET deleted_at = NULL WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "restored", "user_id": user_id}
+
+
+@limiter.limit("10/minute")
+@router.post("/admin/projects/{project_id}/restore")
+async def admin_restore_project(request: Request, project_id: str):
+    """Admin: restore a single soft-deleted project."""
+    conn = get_db()
+    row = conn.execute("SELECT id, user_id FROM intake_projects WHERE id = ? AND deleted_at IS NOT NULL", (project_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Archived project not found")
+    conn.execute("UPDATE intake_projects SET deleted_at = NULL WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+    return {"status": "restored", "project_id": project_id}
+
+
+@limiter.limit("30/minute")
+@router.get("/admin/archived")
+async def admin_list_archived(request: Request):
+    """Admin: list all soft-deleted users and their projects."""
+    conn = get_db()
+    user_rows = conn.execute(
+        "SELECT id, name, email, phone, company, role, created_at, deleted_at FROM intake_users WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+    ).fetchall()
+    project_rows = conn.execute("""
+        SELECT p.*, u.name as user_name, u.email as user_email,
+               u.company as user_company, u.role as user_role
+        FROM intake_projects p
+        LEFT JOIN intake_users u ON p.user_id = u.id
+        WHERE p.deleted_at IS NOT NULL
+        ORDER BY p.deleted_at DESC
+    """).fetchall()
+    conn.close()
+    return {
+        "users": [dict(r) for r in user_rows],
+        "projects": [dict(r) for r in project_rows],
+    }
 
 
 @limiter.limit("10/minute")
@@ -807,6 +870,7 @@ async def admin_projects_with_photos(request: Request):
         FROM intake_projects p
         LEFT JOIN intake_users u ON p.user_id = u.id
         WHERE p.photos IS NOT NULL AND p.photos != '[]' AND p.photos != ''
+          AND p.deleted_at IS NULL
         ORDER BY p.created_at DESC
     """).fetchall()
     conn.close()

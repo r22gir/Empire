@@ -300,6 +300,9 @@ def init_database():
         # Access control tables migration
         _migrate_access_control(conn)
 
+        # Intake soft-delete migration (adds deleted_at to intake tables)
+        _migrate_intake_soft_delete(conn)
+
         # Seed desk configs from desks.json if table is empty
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
@@ -359,6 +362,26 @@ def _migrate_access_control(conn):
                 ("Founder", founder_chat_id, pin_hash)
             )
             print(f"✓ Seeded founder access user (chat_id={founder_chat_id})")
+
+
+def _migrate_intake_soft_delete(conn):
+    """Add deleted_at column to intake_users and intake_projects tables. Safe to re-run."""
+    import sqlite3 as _sqlite3
+    INTAKE_DB = os.path.expanduser("~/empire-repo/backend/data/intake.db")
+    if not os.path.exists(INTAKE_DB):
+        return  # intake.db not yet created
+    intake_conn = _sqlite3.connect(INTAKE_DB)
+    added = 0
+    for table in ("intake_users", "intake_projects"):
+        try:
+            intake_conn.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
+            added += 1
+        except Exception:
+            pass  # Column already exists
+    if added:
+        intake_conn.commit()
+        print(f"  Intake soft-delete migration: added deleted_at to {added} table(s)")
+    intake_conn.close()
 
 
 def _seed_desks(conn):

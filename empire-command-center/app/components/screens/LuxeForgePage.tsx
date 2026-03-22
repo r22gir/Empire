@@ -5,7 +5,7 @@ import {
   Gem, RefreshCw, Users, FolderOpen, Camera, Ruler, Clock,
   CheckCircle2, FileText, MessageSquare, ChevronDown, ChevronUp,
   ExternalLink, Image, Maximize2, Send, AlertCircle, Eye, Scissors, Loader2,
-  Pencil, Trash2, X, Save, BookOpen, Download,
+  Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 
@@ -17,6 +17,7 @@ interface IntakeUser {
   company?: string;
   role: string;
   created_at: string;
+  deleted_at?: string;
 }
 
 interface IntakeProject {
@@ -39,6 +40,7 @@ interface IntakeProject {
   messages?: string;
   created_at: string;
   updated_at?: string;
+  deleted_at?: string;
   // Joined from user
   user_name?: string;
   user_email?: string;
@@ -80,9 +82,12 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   const [sendingToWorkroom, setSendingToWorkroom] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editUserData, setEditUserData] = useState<Partial<IntakeUser>>({});
-  const [activeTab, setActiveTab] = useState<'projects' | 'docs'>('projects');
+  const [activeTab, setActiveTab] = useState<'projects' | 'docs' | 'archived'>('projects');
   const [viewingPhoto, setViewingPhoto] = useState<{ url: string; name: string; projectName: string } | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [archivedUsers, setArchivedUsers] = useState<IntakeUser[]>([]);
+  const [archivedProjects, setArchivedProjects] = useState<IntakeProject[]>([]);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setRefreshing(true);
@@ -109,7 +114,19 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
     setRefreshing(false);
   }, []);
 
+  const fetchArchived = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/intake/admin/archived`);
+      if (res.ok) {
+        const data = await res.json();
+        setArchivedUsers(Array.isArray(data.users) ? data.users : []);
+        setArchivedProjects(Array.isArray(data.projects) ? data.projects : []);
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { if (activeTab === 'archived') fetchArchived(); }, [activeTab, fetchArchived]);
 
   const parseJSON = (str?: string): any[] => {
     if (!str) return [];
@@ -175,12 +192,38 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
   };
 
   const deleteUser = async (userId: string, userName: string) => {
-    if (!confirm(`Delete user "${userName}" and all their projects? This cannot be undone.`)) return;
+    if (!confirm(`Archive user "${userName}" and all their projects? They can be restored later.`)) return;
     try {
       const res = await fetch(`${API}/intake/admin/users/${userId}`, { method: 'DELETE' });
       if (res.ok) await fetchData();
-      else alert('Failed to delete user');
-    } catch { alert('Error deleting user'); }
+      else alert('Failed to archive user');
+    } catch { alert('Error archiving user'); }
+  };
+
+  const restoreUser = async (userId: string) => {
+    setRestoringId(userId);
+    try {
+      const res = await fetch(`${API}/intake/admin/users/${userId}/restore`, { method: 'POST' });
+      if (res.ok) {
+        await Promise.all([fetchData(), fetchArchived()]);
+      } else {
+        alert('Failed to restore user');
+      }
+    } catch { alert('Error restoring user'); }
+    setRestoringId(null);
+  };
+
+  const restoreProject = async (projectId: string) => {
+    setRestoringId(projectId);
+    try {
+      const res = await fetch(`${API}/intake/admin/projects/${projectId}/restore`, { method: 'POST' });
+      if (res.ok) {
+        await Promise.all([fetchData(), fetchArchived()]);
+      } else {
+        alert('Failed to restore project');
+      }
+    } catch { alert('Error restoring project'); }
+    setRestoringId(null);
   };
 
   return (
@@ -234,6 +277,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         {[
           { id: 'projects' as const, label: 'Projects', icon: <FolderOpen size={14} /> },
+          { id: 'archived' as const, label: `Archived${archivedUsers.length > 0 ? ` (${archivedUsers.length})` : ''}`, icon: <Archive size={14} /> },
           { id: 'docs' as const, label: 'Documentation', icon: <BookOpen size={14} /> },
         ].map(tab => (
           <button
@@ -256,6 +300,144 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
 
       {activeTab === 'docs' ? (
         <ProductDocs product="luxe" />
+      ) : activeTab === 'archived' ? (
+        /* ── Archived Tab ─────────────────────────────── */
+        <div>
+          {archivedUsers.length === 0 && archivedProjects.length === 0 ? (
+            <div style={{
+              textAlign: 'center', padding: 40, background: '#faf9f7',
+              border: '1px solid #ece8e0', borderRadius: 14,
+            }}>
+              <Archive size={32} style={{ color: '#ccc', marginBottom: 8 }} />
+              <div style={{ fontSize: 14, color: '#888' }}>No archived items</div>
+              <div style={{ fontSize: 12, color: '#bbb', marginTop: 4 }}>
+                Deleted users and projects will appear here for recovery
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* Archived Users */}
+              {archivedUsers.length > 0 && (
+                <div style={{
+                  background: '#faf9f7', border: '1px solid #ece8e0', borderRadius: 14,
+                  padding: '16px 20px',
+                }}>
+                  <div style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 12 }}>
+                    Archived Users ({archivedUsers.length})
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {archivedUsers.map(u => {
+                      const userArchivedProjects = archivedProjects.filter(p => p.user_id === u.id);
+                      return (
+                        <div key={u.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+                          background: '#fff', borderRadius: 10, border: '1px solid #e8e4dc',
+                          opacity: 0.75,
+                        }}>
+                          <div style={{
+                            width: 36, height: 36, borderRadius: 10, background: '#fee2e2',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                          }}>
+                            <Trash2 size={16} style={{ color: '#dc2626' }} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 14, fontWeight: 700, color: '#666' }}>{u.name}</span>
+                              <span style={{
+                                fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+                                background: '#fee2e2', color: '#dc2626', textTransform: 'uppercase',
+                              }}>
+                                Archived
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 12, color: '#999', marginTop: 2, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <span>{u.email}</span>
+                              {u.phone && <span>· {u.phone}</span>}
+                              {u.company && <span>· {u.company}</span>}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#bbb', marginTop: 3 }}>
+                              Deleted: {u.deleted_at ? new Date(u.deleted_at).toLocaleString() : '—'}
+                              {' · '}{userArchivedProjects.length} project{userArchivedProjects.length !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => restoreUser(u.id)}
+                            disabled={restoringId === u.id}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                              borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                              background: '#16a34a', color: '#fff',
+                              opacity: restoringId === u.id ? 0.5 : 1,
+                            }}
+                          >
+                            <RotateCcw size={13} />
+                            {restoringId === u.id ? 'Restoring...' : 'Restore'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Orphan archived projects (user not archived but project is) */}
+              {(() => {
+                const archivedUserIds = new Set(archivedUsers.map(u => u.id));
+                const orphanProjects = archivedProjects.filter(p => !archivedUserIds.has(p.user_id));
+                if (orphanProjects.length === 0) return null;
+                return (
+                  <div style={{
+                    background: '#faf9f7', border: '1px solid #ece8e0', borderRadius: 14,
+                    padding: '16px 20px',
+                  }}>
+                    <div style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600, marginBottom: 12 }}>
+                      Archived Projects ({orphanProjects.length})
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {orphanProjects.map(p => (
+                        <div key={p.id} style={{
+                          display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px',
+                          background: '#fff', borderRadius: 10, border: '1px solid #e8e4dc',
+                          opacity: 0.75,
+                        }}>
+                          <div style={{
+                            width: 36, height: 36, borderRadius: 10, background: '#fee2e2',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                          }}>
+                            <FolderOpen size={16} style={{ color: '#dc2626' }} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#666' }}>{p.name || p.intake_code}</div>
+                            <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>
+                              {p.user_name || 'Unknown user'} · {p.intake_code}
+                              {p.treatment && ` · ${TREATMENT_LABELS[p.treatment] || p.treatment}`}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#bbb', marginTop: 3 }}>
+                              Deleted: {p.deleted_at ? new Date(p.deleted_at).toLocaleString() : '—'}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => restoreProject(p.id)}
+                            disabled={restoringId === p.id}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                              borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                              background: '#16a34a', color: '#fff',
+                              opacity: restoringId === p.id ? 0.5 : 1,
+                            }}
+                          >
+                            <RotateCcw size={13} />
+                            {restoringId === p.id ? 'Restoring...' : 'Restore'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
       ) : (
       <>
 
