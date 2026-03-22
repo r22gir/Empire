@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/', label: 'Inicio' },
   { href: '/daily', label: 'Diario' },
   { href: '/retos', label: 'Retos' },
+  { href: '/biblioteca', label: 'Biblioteca' },
   { href: '/animo', label: 'Ánimo' },
   { href: '/perfil', label: 'Perfil' },
 ];

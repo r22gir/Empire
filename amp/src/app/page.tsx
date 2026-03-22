@@ -70,6 +70,24 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Mission ── */}
+      <section className="py-12 bg-gradient-to-b from-cream to-warmwhite">
+        <div className="max-w-3xl mx-auto px-4 text-center">
+          <h2 className="font-serif text-2xl md:text-3xl font-bold text-[#2D2A26] mb-4">Nuestra Misión</h2>
+          <p className="text-[#5C5650] leading-relaxed text-lg">
+            Motivar e inspirar a cada persona del mundo para que alcance su máximo potencial
+            a través de contenido de crecimiento personal de alta calidad, guiándolas en los momentos difíciles,
+            facilitándoles procesos de automotivación para que avancen hacia un siguiente nivel de plenitud
+            y prosperidad en las diferentes áreas de sus vidas.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3 mt-6">
+            {['Confianza', 'Empatía', 'Gratitud', 'Autenticidad', 'Amor Propio', 'Optimismo', 'Crecimiento'].map(v => (
+              <span key={v} className="px-3 py-1.5 rounded-full text-xs font-semibold bg-gold/10 text-gold-dark border border-gold/20">{v}</span>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ── 3 Pillars ── */}
       <section className="py-16 md:py-20">
         <div className="max-w-5xl mx-auto px-4">
@@ -122,8 +140,47 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Testimonials ── */}
+      {/* ── Nuestro Equipo ── */}
       <section className="py-16">
+        <div className="max-w-5xl mx-auto px-4">
+          <h2 className="font-serif text-3xl md:text-4xl font-bold text-center mb-3 text-[#2D2A26]">Nuestro Equipo</h2>
+          <p className="text-center text-[#9B9590] mb-10 text-lg">Coaches certificados comprometidos con tu transformación</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {[
+              { name: "Andrea Silva", role: "Mentora de Padres (0-12 años)", color: "#D4A030", icon: "🌻",
+                bio: "Profesional en Marketing y Negocios Internacionales. Certificada en Coaching Espiritual, Coaching Ontológico, PNL, Familias Conscientes (Mindvalley) y Liderazgo John C. Maxwell.",
+                focus: "Crianza consciente y desarrollo familiar" },
+              { name: "Dericielo Jimenez", role: "Coach de Vida para Mujeres", color: "#7CB98B", icon: "🌿",
+                bio: "Especialista en recuperación de trauma, sanación del abuso y reconstrucción de autoestima. Herramientas: PNL, meditación interior, danza y coaching espiritual.",
+                focus: "Sanación del abandono, abuso emocional y físico" },
+              { name: "Lina Valencia Trivino", role: "Coach de Vida (Duelo y Relaciones)", color: "#9B8EC4", icon: "💫",
+                bio: "ICF International Master Coach, Ingeniera Industrial, Máster en Ciencias Económicas y Sociales. Certificada en Coaching Espiritual, Coaching de Personalidad y PNL.",
+                focus: "Duelo, pérdida, conflictos de relación y transiciones de vida" },
+              { name: "Juan Diego Giraldo", role: "Coach de Negocios y Vida", color: "#D4A030", icon: "⚡",
+                bio: "Ingeniero de Sistemas, especializado en Gestión de Proyectos TI y Ciberseguridad. Certificado en Coaching de Personalidad, PNL y Propósito de Vida.",
+                focus: "Profesionales, emprendedores y bloqueo creativo" },
+            ].map((t, i) => (
+              <div key={i} className="bg-white rounded-3xl p-6 border border-gold-light/30 shadow-sm hover:shadow-md transition-all">
+                <div className="flex items-start gap-4 mb-3">
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0"
+                    style={{ background: t.color + '15' }}>
+                    {t.icon}
+                  </div>
+                  <div>
+                    <div className="font-serif font-bold text-lg text-[#2D2A26]">{t.name}</div>
+                    <div className="text-sm font-semibold" style={{ color: t.color }}>{t.role}</div>
+                  </div>
+                </div>
+                <p className="text-sm text-[#5C5650] leading-relaxed mb-2">{t.bio}</p>
+                <p className="text-xs text-[#9B9590]"><span className="font-bold">Enfoque:</span> {t.focus}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Testimonios ── */}
+      <section className="py-16 bg-gradient-to-b from-warmwhite to-cream">
         <div className="max-w-5xl mx-auto px-4">
           <h2 className="font-serif text-3xl font-bold text-center mb-10 text-[#2D2A26]">Historias de Transformación</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

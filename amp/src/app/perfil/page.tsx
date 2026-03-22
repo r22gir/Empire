@@ -4,7 +4,7 @@ import Navbar from '../../components/Navbar';
 import Footer from '../../components/Footer';
 import { COURSES, PILLAR_CONFIG } from '../../lib/data';
 import type { Pillar } from '../../lib/data';
-import { User, Flame, BookOpen, Trophy, Settings, Bell, Globe, LogOut, ChevronRight, Crown, Heart } from 'lucide-react';
+import { User, Trophy, Settings, Bell, Globe, LogOut, ChevronRight, Crown, Heart } from 'lucide-react';
 
 export default function PerfilPage() {
   const [name, setName] = useState('');
@@ -34,10 +34,6 @@ export default function PerfilPage() {
 
   const coursesStarted = COURSES.filter(c =>
     c.lessons.some((_, i) => completedLessons[`${c.id}-${i + 1}`])
-  );
-
-  const coursesCompleted = COURSES.filter(c =>
-    c.lessons.every((_, i) => completedLessons[`${c.id}-${i + 1}`])
   );
 
   return (
