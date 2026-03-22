@@ -624,6 +624,7 @@ def generate_pdf(result: PatternResult, project_name: str = "") -> bytes:
     c = canvas.Canvas(buf, pagesize=LETTER)
 
     margin = 0.5 * inch
+    overlap = 0.5 * inch  # ½" overlap zone on each tiled edge
     usable_w = LETTER_W - 2 * margin
     usable_h = LETTER_H - 2 * margin
 
@@ -656,15 +657,10 @@ def generate_pdf(result: PatternResult, project_name: str = "") -> bytes:
 
     # 1" verification square on title page
     y -= 30
-    c.setStrokeColor(black)
-    c.setLineWidth(1)
-    c.rect(margin, y - inch, inch, inch)
-    c.setFont("Helvetica", 7)
-    c.drawCentredString(margin + inch / 2, y - inch - 10, '1" verification square')
-    c.drawCentredString(margin + inch / 2, y - inch - 20, 'Measure to verify print scale')
+    _draw_verification_square(c, margin, y - inch)
+    y -= inch + 25
 
     # Piece summary
-    y -= 50
     c.setFont("Helvetica-Bold", 10)
     c.drawString(margin, y, "Pattern Pieces:")
     y -= 16
@@ -675,61 +671,123 @@ def generate_pdf(result: PatternResult, project_name: str = "") -> bytes:
 
     c.showPage()
 
-    # Generate each piece on tiled pages
+    # Generate each piece: assembly page + tiled pages
     for piece in result.pieces:
-        _draw_piece_tiled(c, piece, margin, usable_w, usable_h, project_name)
+        _draw_piece_tiled(c, piece, margin, usable_w, usable_h, overlap, project_name)
 
     c.save()
     return buf.getvalue()
 
 
+def _draw_verification_square(c: canvas.Canvas, x: float, y: float):
+    """Draw a 1" verification square with label."""
+    c.setStrokeColor(black)
+    c.setLineWidth(1)
+    c.rect(x, y, inch, inch)
+    c.setFont("Helvetica", 7)
+    c.drawCentredString(x + inch / 2, y - 10, '1" verification square — print at 100%')
+    c.drawCentredString(x + inch / 2, y - 20, 'DO NOT scale to fit')
+
+
 def _draw_piece_tiled(c: canvas.Canvas, piece: PatternPiece,
                       margin: float, usable_w: float, usable_h: float,
-                      project_name: str):
-    """Draw a pattern piece across tiled pages if it's larger than one page."""
-    # Convert piece dimensions to points
+                      overlap: float, project_name: str):
+    """
+    Draw a pattern piece across tiled pages with:
+    - ½" overlap zones for gluing
+    - Assembly cover page with thumbnail grid
+    - Registration crosshairs at overlap boundaries
+    - Trim lines in overlap zones
+    - Page labels with direction arrows (→ continues on page N)
+    - 1" verification square on every tiled page
+    - Smart rotation to minimize page count
+    - "Print at 100%" warning on every page
+    """
     piece_w_pts = piece.width_inches * PPI
     piece_h_pts = piece.height_inches * PPI
 
-    # Calculate grid of pages needed
-    cols = max(1, math.ceil(piece_w_pts / usable_w))
-    rows = max(1, math.ceil(piece_h_pts / usable_h))
+    # Smart rotation: try both orientations, pick one with fewer pages
+    # Effective tile size = usable area minus overlap on shared edges
+    tile_w = usable_w - overlap  # each tile contributes this much unique width
+    tile_h = usable_h - overlap  # each tile contributes this much unique height
 
-    # Center offset for the piece within the total tiled area
-    total_w = cols * usable_w
-    total_h = rows * usable_h
-    offset_x = (total_w - piece_w_pts) / 2
-    offset_y = (total_h - piece_h_pts) / 2
+    def _calc_grid(pw, ph):
+        """Calculate cols/rows needed for piece of size pw x ph (pts)."""
+        if pw <= usable_w and ph <= usable_h:
+            return 1, 1
+        c_ = 1 if pw <= usable_w else 1 + math.ceil((pw - usable_w) / tile_w)
+        r_ = 1 if ph <= usable_h else 1 + math.ceil((ph - usable_h) / tile_h)
+        return c_, r_
+
+    cols_normal, rows_normal = _calc_grid(piece_w_pts, piece_h_pts)
+    cols_rotated, rows_rotated = _calc_grid(piece_h_pts, piece_w_pts)
+
+    rotated = False
+    if cols_rotated * rows_rotated < cols_normal * rows_normal:
+        rotated = True
+        cols, rows = cols_rotated, rows_rotated
+        eff_w_pts, eff_h_pts = piece_h_pts, piece_w_pts
+    else:
+        cols, rows = cols_normal, rows_normal
+        eff_w_pts, eff_h_pts = piece_w_pts, piece_h_pts
+
+    total_pages = cols * rows
+
+    # ── Assembly Cover Page (for multi-page pieces) ──
+    if total_pages > 1:
+        _draw_assembly_page(c, piece, cols, rows, margin, usable_w, usable_h,
+                            rotated, project_name)
+
+    # ── Tile each page ──
+    # Center the piece within the total tiled area
+    total_tiled_w = usable_w + (cols - 1) * tile_w if cols > 1 else usable_w
+    total_tiled_h = usable_h + (rows - 1) * tile_h if rows > 1 else usable_h
+    off_x = (total_tiled_w - eff_w_pts) / 2
+    off_y = (total_tiled_h - eff_h_pts) / 2
 
     for row in range(rows):
         for col in range(cols):
-            # Viewport for this page
-            vp_x = col * usable_w - offset_x
-            vp_y = row * usable_h - offset_y
+            page_num = row * cols + col + 1
+
+            # Viewport origin in piece-space (points)
+            vp_x = col * tile_w - off_x
+            vp_y = row * tile_h - off_y
+
+            # Center of the piece for coordinate transforms
+            center_x = eff_w_pts / 2
+            center_y = eff_h_pts / 2
+
+            # Build coordinate transform: piece inches → page points
+            if rotated:
+                def to_page(px_in, py_in, _cx=center_x, _cy=center_y,
+                            _vx=vp_x, _vy=vp_y):
+                    # Rotate 90°: swap x/y
+                    rx = py_in * PPI
+                    ry = (piece.width_inches - px_in) * PPI
+                    # But we need to center in the rotated frame
+                    px = rx + _cx - eff_w_pts / 2 - _vx + margin
+                    py = ry + _cy - eff_h_pts / 2 - _vy + margin
+                    return px, py
+            else:
+                def to_page(px_in, py_in, _cx=center_x, _cy=center_y,
+                            _vx=vp_x, _vy=vp_y):
+                    px = (px_in * PPI) + _cx - _vx + margin
+                    py = (py_in * PPI) + _cy - _vy + margin
+                    return px, py
 
             c.saveState()
+
             # Clip to usable area
-            p = c.beginPath()
-            p.rect(margin, margin, usable_w, usable_h)
-            c.clipPath(p, stroke=0)
+            clip = c.beginPath()
+            clip.rect(margin, margin, usable_w, usable_h)
+            c.clipPath(clip, stroke=0)
 
-            # Transform: piece coordinates to page coordinates
-            # piece (0,0) is at center of piece
-            center_x = piece_w_pts / 2
-            center_y = piece_h_pts / 2
-
-            def to_page(px_in, py_in):
-                """Convert piece coords (inches) to page coords (points)."""
-                px = (px_in * PPI) + center_x - vp_x + margin
-                py = (py_in * PPI) + center_y - vp_y + margin
-                return px, py
-
-            # Draw cutting line (solid)
+            # Draw cutting line (solid black)
             c.setStrokeColor(black)
             c.setLineWidth(1.5)
             _draw_polygon(c, piece.cut_points, to_page)
 
-            # Draw seam line (dashed)
+            # Draw seam line (dashed gold/gray)
             c.setDash(4, 3)
             c.setStrokeColor(gray)
             c.setLineWidth(0.75)
@@ -744,42 +802,276 @@ def _draw_piece_tiled(c: canvas.Canvas, piece: PatternPiece,
                 c.line(px - 4, py - 4, px + 4, py + 4)
                 c.line(px - 4, py + 4, px + 4, py - 4)
 
-            # Grainline arrow (center of piece)
-            if piece.grainline_vertical:
-                gx, gy_top = to_page(0, piece.height_inches / 2 * 0.3 - center_y / PPI)
-                _, gy_bot = to_page(0, -piece.height_inches / 2 * 0.3 + center_y / PPI)
-                # Simplified: just draw a vertical arrow in the center area
-                cx_page = margin + usable_w / 2
+            # Grainline arrow (only on page containing center of piece)
+            center_page_col = cols // 2
+            center_page_row = rows // 2
+            if col == center_page_col and row == center_page_row:
+                gr_cx = margin + usable_w / 2
+                gr_cy = margin + usable_h / 2
                 arrow_len = min(60, usable_h * 0.3)
-                cy_page = margin + usable_h / 2
                 c.setStrokeColor(Color(0.6, 0.6, 0.6))
                 c.setLineWidth(0.5)
-                c.line(cx_page, cy_page - arrow_len / 2, cx_page, cy_page + arrow_len / 2)
-                # Arrowhead
-                c.line(cx_page, cy_page + arrow_len / 2, cx_page - 4, cy_page + arrow_len / 2 - 8)
-                c.line(cx_page, cy_page + arrow_len / 2, cx_page + 4, cy_page + arrow_len / 2 - 8)
+                if piece.grainline_vertical and not rotated or not piece.grainline_vertical and rotated:
+                    c.line(gr_cx, gr_cy - arrow_len / 2, gr_cx, gr_cy + arrow_len / 2)
+                    c.line(gr_cx, gr_cy + arrow_len / 2, gr_cx - 4, gr_cy + arrow_len / 2 - 8)
+                    c.line(gr_cx, gr_cy + arrow_len / 2, gr_cx + 4, gr_cy + arrow_len / 2 - 8)
+                else:
+                    c.line(gr_cx - arrow_len / 2, gr_cy, gr_cx + arrow_len / 2, gr_cy)
+                    c.line(gr_cx + arrow_len / 2, gr_cy, gr_cx + arrow_len / 2 - 8, gr_cy - 4)
+                    c.line(gr_cx + arrow_len / 2, gr_cy, gr_cx + arrow_len / 2 - 8, gr_cy + 4)
 
             c.restoreState()
 
-            # Page info outside clip area
+            # ── Registration marks & overlap zones (outside clip) ──
+            if total_pages > 1:
+                _draw_registration_marks(c, margin, usable_w, usable_h, overlap,
+                                         col, row, cols, rows)
+
+            # ── Page label & direction arrows ──
             c.setFont("Helvetica", 7)
             c.setFillColor(gray)
-            c.drawString(margin, margin - 10, f"{piece.name} — Cut {piece.cut_count} — Page {row * cols + col + 1}/{rows * cols}")
+            label = f"{piece.name} — Cut {piece.cut_count}"
+            if rotated:
+                label += " (rotated 90°)"
+            label += f" — Page {page_num}/{total_pages}"
+            c.drawString(margin, margin - 10, label)
             if project_name:
                 c.drawRightString(LETTER_W - margin, margin - 10, project_name)
 
-            # Registration marks for tiling
-            if cols > 1 or rows > 1:
-                c.setStrokeColor(black)
-                c.setLineWidth(0.5)
-                # Corner crosses
-                for cx, cy in [(margin, margin), (margin + usable_w, margin),
-                               (margin, margin + usable_h), (margin + usable_w, margin + usable_h)]:
-                    c.line(cx - 6, cy, cx + 6, cy)
-                    c.line(cx, cy - 6, cx, cy + 6)
+            # Direction arrows to adjacent pages
+            if total_pages > 1:
+                _draw_direction_arrows(c, margin, usable_w, usable_h,
+                                       col, row, cols, rows)
 
+            # Print warning
+            c.setFont("Helvetica-Bold", 7)
+            c.setFillColor(Color(0.8, 0, 0))
+            c.drawCentredString(LETTER_W / 2, LETTER_H - margin + 5,
+                                "PRINT AT 100% — DO NOT SCALE TO FIT")
             c.setFillColor(black)
+
+            # 1" verification square (bottom-right)
+            sq_x = LETTER_W - margin - inch - 4
+            sq_y = margin + 2
+            c.setStrokeColor(black)
+            c.setLineWidth(0.5)
+            c.rect(sq_x, sq_y, inch, inch)
+            c.setFont("Helvetica", 5)
+            c.drawCentredString(sq_x + inch / 2, sq_y - 7, '1" verify')
+
             c.showPage()
+
+
+def _draw_assembly_page(c: canvas.Canvas, piece: PatternPiece,
+                        cols: int, rows: int, margin: float,
+                        usable_w: float, usable_h: float,
+                        rotated: bool, project_name: str):
+    """Draw an assembly cover page showing how tiled pages fit together."""
+    total_pages = cols * rows
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin, LETTER_H - margin - 20, f"Assembly Guide: {piece.name}")
+    c.setFont("Helvetica", 10)
+    c.drawString(margin, LETTER_H - margin - 38,
+                 f"Cut {piece.cut_count} — {piece.width_inches:.2f}\" × {piece.height_inches:.2f}\"")
+    c.drawString(margin, LETTER_H - margin - 54,
+                 f"{cols} columns × {rows} rows = {total_pages} pages to assemble")
+    if rotated:
+        c.drawString(margin, LETTER_H - margin - 70,
+                     "Template rotated 90° for fewer pages")
+
+    # Print warning
+    c.setFont("Helvetica-Bold", 10)
+    c.setFillColor(Color(0.8, 0, 0))
+    c.drawString(margin, LETTER_H - margin - 90,
+                 "PRINT ALL PAGES AT 100% SCALE — DO NOT SCALE TO FIT")
+    c.setFillColor(black)
+
+    c.setFont("Helvetica", 9)
+    y_info = LETTER_H - margin - 115
+    instructions = [
+        "1. Print all pages at 100% (actual size). Verify with 1\" square on each page.",
+        "2. Trim along the trim lines in the overlap zones (shaded strips).",
+        "3. Align registration crosshairs (+) between adjacent pages.",
+        "4. Tape or glue pages together in the overlap zones.",
+        "5. Follow the direction arrows to locate adjacent pages.",
+        "6. Cut along the solid cutting line through all assembled pages.",
+    ]
+    for inst in instructions:
+        c.drawString(margin + 10, y_info, inst)
+        y_info -= 14
+
+    # Draw thumbnail grid
+    grid_top = y_info - 20
+    avail_w = usable_w - 40
+    avail_h = grid_top - margin - 40
+    cell_w = min(avail_w / cols, 80)
+    cell_h = min(avail_h / rows, 60)
+    # Keep aspect ratio of actual pages
+    page_aspect = LETTER_W / LETTER_H
+    if cell_w / cell_h > page_aspect:
+        cell_w = cell_h * page_aspect
+    else:
+        cell_h = cell_w / page_aspect
+
+    grid_w = cols * cell_w
+    grid_h = rows * cell_h
+    grid_x = margin + (usable_w - grid_w) / 2
+    grid_y = grid_top - grid_h
+
+    for r in range(rows):
+        for cc in range(cols):
+            x = grid_x + cc * cell_w
+            y = grid_y + (rows - 1 - r) * cell_h  # row 0 = bottom in PDF coords
+            page_n = r * cols + cc + 1
+
+            # Cell box
+            c.setStrokeColor(black)
+            c.setLineWidth(0.5)
+            c.setFillColor(Color(0.95, 0.95, 0.92))
+            c.rect(x, y, cell_w, cell_h, stroke=1, fill=1)
+
+            # Page number
+            c.setFillColor(black)
+            c.setFont("Helvetica-Bold", 10)
+            c.drawCentredString(x + cell_w / 2, y + cell_h / 2 - 4, str(page_n))
+
+    # Grid label
+    c.setFont("Helvetica", 8)
+    c.setFillColor(gray)
+    c.drawCentredString(margin + usable_w / 2, grid_y - 14, "Page layout (row 1 = top)")
+
+    # 1" verification square
+    _draw_verification_square(c, margin, margin + 30)
+
+    if project_name:
+        c.setFont("Helvetica", 7)
+        c.setFillColor(gray)
+        c.drawRightString(LETTER_W - margin, margin - 10, project_name)
+
+    c.setFillColor(black)
+    c.showPage()
+
+
+def _draw_registration_marks(c: canvas.Canvas, margin: float,
+                             usable_w: float, usable_h: float, overlap: float,
+                             col: int, row: int, cols: int, rows: int):
+    """Draw registration crosshairs and overlap zone shading on tile edges."""
+    mark_len = 8  # crosshair arm length in points
+
+    c.setStrokeColor(black)
+    c.setLineWidth(0.5)
+
+    # Overlap zone shading (light gray strips)
+    c.setFillColor(Color(0.92, 0.92, 0.90, 0.5))
+
+    # Left overlap (if not first column)
+    if col > 0:
+        c.rect(margin, margin, overlap, usable_h, stroke=0, fill=1)
+        # Trim line (dashed) at inner edge of overlap
+        c.setDash(2, 2)
+        c.setStrokeColor(Color(0.7, 0.7, 0.7))
+        c.line(margin + overlap, margin, margin + overlap, margin + usable_h)
+        c.setDash()
+        c.setStrokeColor(black)
+
+    # Right overlap (if not last column)
+    if col < cols - 1:
+        c.rect(margin + usable_w - overlap, margin, overlap, usable_h, stroke=0, fill=1)
+        c.setDash(2, 2)
+        c.setStrokeColor(Color(0.7, 0.7, 0.7))
+        c.line(margin + usable_w - overlap, margin,
+               margin + usable_w - overlap, margin + usable_h)
+        c.setDash()
+        c.setStrokeColor(black)
+
+    # Bottom overlap (if not first row)
+    if row > 0:
+        c.rect(margin, margin, usable_w, overlap, stroke=0, fill=1)
+        c.setDash(2, 2)
+        c.setStrokeColor(Color(0.7, 0.7, 0.7))
+        c.line(margin, margin + overlap, margin + usable_w, margin + overlap)
+        c.setDash()
+        c.setStrokeColor(black)
+
+    # Top overlap (if not last row)
+    if row < rows - 1:
+        c.rect(margin, margin + usable_h - overlap, usable_w, overlap, stroke=0, fill=1)
+        c.setDash(2, 2)
+        c.setStrokeColor(Color(0.7, 0.7, 0.7))
+        c.line(margin, margin + usable_h - overlap,
+               margin + usable_w, margin + usable_h - overlap)
+        c.setDash()
+        c.setStrokeColor(black)
+
+    c.setFillColor(black)
+
+    # Registration crosshairs at all four corners of usable area
+    corners = [
+        (margin, margin),
+        (margin + usable_w, margin),
+        (margin, margin + usable_h),
+        (margin + usable_w, margin + usable_h),
+    ]
+    c.setLineWidth(0.75)
+    for cx, cy in corners:
+        c.line(cx - mark_len, cy, cx + mark_len, cy)
+        c.line(cx, cy - mark_len, cx, cy + mark_len)
+        # Small circle at center for precise alignment
+        c.circle(cx, cy, 1.5, stroke=1, fill=0)
+
+    # Mid-edge crosshairs for better alignment on long edges
+    mid_positions = []
+    if usable_w > 4 * inch:
+        mid_positions.append((margin + usable_w / 2, margin))
+        mid_positions.append((margin + usable_w / 2, margin + usable_h))
+    if usable_h > 4 * inch:
+        mid_positions.append((margin, margin + usable_h / 2))
+        mid_positions.append((margin + usable_w, margin + usable_h / 2))
+
+    for mx, my in mid_positions:
+        c.line(mx - mark_len, my, mx + mark_len, my)
+        c.line(mx, my - mark_len, mx, my + mark_len)
+
+
+def _draw_direction_arrows(c: canvas.Canvas, margin: float,
+                           usable_w: float, usable_h: float,
+                           col: int, row: int, cols: int, rows: int):
+    """Draw arrows pointing to adjacent pages with page numbers."""
+    c.setFont("Helvetica", 6)
+    c.setFillColor(Color(0.4, 0.4, 0.4))
+
+    arrow_inset = 20  # distance from edge
+
+    # Right arrow → next column
+    if col < cols - 1:
+        next_page = row * cols + (col + 1) + 1
+        ax = margin + usable_w - arrow_inset
+        ay = margin + usable_h / 2
+        c.drawString(ax - 10, ay + 3, f"→ p.{next_page}")
+
+    # Left arrow ← previous column
+    if col > 0:
+        prev_page = row * cols + (col - 1) + 1
+        ax = margin + arrow_inset
+        ay = margin + usable_h / 2
+        c.drawString(ax - 10, ay + 3, f"p.{prev_page} ←")
+
+    # Up arrow ↑ next row (PDF y increases upward, but rows go top-down)
+    if row < rows - 1:
+        next_page = (row + 1) * cols + col + 1
+        ax = margin + usable_w / 2
+        ay = margin + usable_h - arrow_inset
+        c.drawCentredString(ax, ay, f"↑ p.{next_page}")
+
+    # Down arrow ↓ previous row
+    if row > 0:
+        prev_page = (row - 1) * cols + col + 1
+        ax = margin + usable_w / 2
+        ay = margin + arrow_inset
+        c.drawCentredString(ax, ay, f"↓ p.{prev_page}")
+
+    c.setFillColor(black)
 
 
 def _draw_polygon(c: canvas.Canvas, points, to_page_fn):
