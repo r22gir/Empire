@@ -379,7 +379,8 @@ export default function CostTracker() {
   const fmt = (n: number) => n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
   const fmtK = (n: number) => n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(0)}K` : String(n);
 
-  const chartData = stackedTrendData && view === 'daily' ? stackedTrendData : trendData;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const chartData: any[] = stackedTrendData && view === 'daily' ? stackedTrendData : trendData;
   const useStacked = !!stackedTrendData && view === 'daily';
 
   return (
@@ -477,7 +478,8 @@ export default function CostTracker() {
                       <YAxis tick={{ fill: '#999', fontSize: 10 }} tickFormatter={v => `$${v}`} />
                       <Tooltip
                         contentStyle={{ background: '#faf9f7', border: '1px solid #ece8e0', borderRadius: 14, boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}
-                        formatter={(v: unknown, name: string) => [`$${Number(v).toFixed(4)}`, useStacked ? name.charAt(0).toUpperCase() + name.slice(1) : 'Cost']}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        formatter={(v: any, name: any) => [`$${Number(v).toFixed(4)}`, useStacked && name ? String(name).charAt(0).toUpperCase() + String(name).slice(1) : 'Cost']}
                       />
                       {view === 'daily' && (
                         <ReferenceLine
