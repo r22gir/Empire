@@ -738,6 +738,13 @@ def _draw_piece_tiled(c: canvas.Canvas, piece: PatternPiece,
         _draw_assembly_page(c, piece, cols, rows, margin, usable_w, usable_h,
                             rotated, project_name)
 
+    # ── Compute bounding box of piece coordinates ──
+    all_pts = piece.cut_points if piece.cut_points else piece.seam_points
+    bb_min_x = min(p[0] for p in all_pts)
+    bb_min_y = min(p[1] for p in all_pts)
+    bb_max_x = max(p[0] for p in all_pts)
+    bb_max_y = max(p[1] for p in all_pts)
+
     # ── Tile each page ──
     # Center the piece within the total tiled area
     total_tiled_w = usable_w + (cols - 1) * tile_w if cols > 1 else usable_w
@@ -753,26 +760,21 @@ def _draw_piece_tiled(c: canvas.Canvas, piece: PatternPiece,
             vp_x = col * tile_w - off_x
             vp_y = row * tile_h - off_y
 
-            # Center of the piece for coordinate transforms
-            center_x = eff_w_pts / 2
-            center_y = eff_h_pts / 2
-
             # Build coordinate transform: piece inches → page points
+            # Maps piece bounding-box origin to (0,0) in tile space, then
+            # subtracts viewport offset and adds page margin.
             if rotated:
-                def to_page(px_in, py_in, _cx=center_x, _cy=center_y,
-                            _vx=vp_x, _vy=vp_y):
-                    # Rotate 90°: swap x/y
-                    rx = py_in * PPI
-                    ry = (piece.width_inches - px_in) * PPI
-                    # But we need to center in the rotated frame
-                    px = rx + _cx - eff_w_pts / 2 - _vx + margin
-                    py = ry + _cy - eff_h_pts / 2 - _vy + margin
+                def to_page(px_in, py_in, _vx=vp_x, _vy=vp_y,
+                            _bbminy=bb_min_y, _bbmaxx=bb_max_x):
+                    # 90° CCW rotation: piece_y → page_x, piece_x → page_y (inverted)
+                    px = (py_in - _bbminy) * PPI - _vx + margin
+                    py = (_bbmaxx - px_in) * PPI - _vy + margin
                     return px, py
             else:
-                def to_page(px_in, py_in, _cx=center_x, _cy=center_y,
-                            _vx=vp_x, _vy=vp_y):
-                    px = (px_in * PPI) + _cx - _vx + margin
-                    py = (py_in * PPI) + _cy - _vy + margin
+                def to_page(px_in, py_in, _vx=vp_x, _vy=vp_y,
+                            _bbminx=bb_min_x, _bbminy=bb_min_y):
+                    px = (px_in - _bbminx) * PPI - _vx + margin
+                    py = (py_in - _bbminy) * PPI - _vy + margin
                     return px, py
 
             c.saveState()
