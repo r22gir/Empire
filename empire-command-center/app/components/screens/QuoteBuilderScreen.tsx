@@ -720,7 +720,10 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         const data = await res.json();
         return data.filename || data.file_id || null;
       }
-    } catch { /* */ }
+      console.warn('Photo upload failed:', res.status, res.statusText);
+    } catch (err) {
+      console.warn('Photo upload error:', err);
+    }
     return null;
   };
 
@@ -870,7 +873,13 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         setError(errData?.detail || `Server error ${res.status}`);
       }
     } catch (e: any) {
-      setError(e.message || 'Network error');
+      const msg = e.message || 'Network error';
+      if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
+        setError(`Cannot reach the server (${API}). Check your connection or try again.`);
+      } else {
+        setError(msg);
+      }
+      console.error('Quote submit error:', e);
     }
     setSubmitting(false);
   };

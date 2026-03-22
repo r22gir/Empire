@@ -391,7 +391,8 @@ async def create_quote_from_rooms(body: dict):
     location = body.get("location", "DC")
     lining = options.get("lining_type", "standard")
     fabric_grade = options.get("fabric_grade", "A")
-    features = options.get("features", {})
+    # Support both flat options (frontend sends options.tufting) and nested (options.features.tufting)
+    features = options.get("features", options)
 
     # Convert rooms data to analyzed_items format for pricing engine
     analyzed_items = []
@@ -408,10 +409,10 @@ async def create_quote_from_rooms(body: dict):
             notes = item.get("notes", "")
 
             special_features = []
-            if features.get("tufting"): special_features.append("tufting")
-            if features.get("welting"): special_features.append("welting")
-            if features.get("nailhead"): special_features.append("nailhead trim")
-            if features.get("skirt"): special_features.append("skirt")
+            if features.get("tufting") and features.get("tufting") != "none": special_features.append("tufting")
+            if features.get("welting") and features.get("welting") != "none": special_features.append("welting")
+            if features.get("nailhead_finish") and features.get("nailhead_finish") != "none": special_features.append("nailhead trim")
+            if features.get("skirt_style") and features.get("skirt_style") != "none": special_features.append("skirt")
             if features.get("contrast_piping"): special_features.append("contrast piping")
             if features.get("pattern_match"): special_features.append("pattern match")
 
