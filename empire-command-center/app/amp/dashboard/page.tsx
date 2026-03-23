@@ -6,7 +6,7 @@ import AmpNav from '../../components/amp/AmpNav';
 import {
   Flame, Sun, Heart, Brain, Crown, BookOpen, Smile, Play, Pause,
   ChevronRight, Calendar, PenLine, Target, Sparkles, Video, Star,
-  Tag, ArrowRight, Clock,
+  Tag, ArrowRight, Clock, Search, CheckCircle, TrendingUp,
 } from 'lucide-react';
 
 const AMP_LOGO = 'https://actitudmentalpositivacom-43908122.hubspotpagebuilder.com/hubfs/main-logo-transparent-1.png';
@@ -80,15 +80,62 @@ export default function AmpDashboard() {
   const [gratitudeText, setGratitudeText] = useState('');
   const [journalSaved, setJournalSaved] = useState(false);
   const [expandedLesson, setExpandedLesson] = useState<number | null>(null);
+  const [apiAffirmation, setApiAffirmation] = useState<string | null>(null);
+  const [progressStats, setProgressStats] = useState({ lessons: 0, courses: 0 });
+  const [contentSearch, setContentSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
-  const todayAffirmation = AFFIRMATIONS[dayOfYear % AFFIRMATIONS.length];
+  const todayAffirmation = apiAffirmation || AFFIRMATIONS[dayOfYear % AFFIRMATIONS.length];
   const todayLesson = MICRO_LESSONS[dayOfYear % MICRO_LESSONS.length];
 
   useEffect(() => {
     if (!getAmpToken()) { router.push('/amp/login'); return; }
-    ampFetch('/me').then(u => { setUser(u); setLoading(false); }).catch(() => router.push('/amp/login'));
+    Promise.all([
+      ampFetch('/me'),
+      ampFetch('/content?type=affirmation&limit=100').catch(() => []),
+      ampFetch('/progress').catch(() => []),
+      ampFetch('/courses').catch(() => []),
+    ]).then(([u, affirmations, progress, courses]) => {
+      setUser(u);
+      // Pick today's affirmation from API content
+      if (Array.isArray(affirmations) && affirmations.length > 0) {
+        const idx = dayOfYear % affirmations.length;
+        setApiAffirmation(affirmations[idx]?.content_text || affirmations[idx]?.title || null);
+      }
+      // Compute progress stats
+      if (Array.isArray(progress)) {
+        const courseIds = new Set(progress.map((p: any) => p.course_id));
+        const completedCourses = Array.isArray(courses)
+          ? courses.filter((c: any) => {
+              const done = progress.filter((p: any) => p.course_id === c.id).length;
+              return done >= (c.lesson_count || Infinity);
+            }).length
+          : 0;
+        setProgressStats({ lessons: progress.length, courses: completedCourses });
+      }
+      setLoading(false);
+    }).catch(() => router.push('/amp/login'));
   }, [router]);
+
+  const searchContent = async () => {
+    if (!contentSearch.trim()) { setSearchResults(null); return; }
+    setSearching(true);
+    try {
+      const results = await ampFetch(`/content?limit=10`);
+      const filtered = Array.isArray(results)
+        ? results.filter((c: any) =>
+            c.title?.toLowerCase().includes(contentSearch.toLowerCase()) ||
+            c.description?.toLowerCase().includes(contentSearch.toLowerCase()) ||
+            c.pillar?.toLowerCase().includes(contentSearch.toLowerCase()) ||
+            c.type?.toLowerCase().includes(contentSearch.toLowerCase())
+          )
+        : [];
+      setSearchResults(filtered);
+    } catch { setSearchResults([]); }
+    setSearching(false);
+  };
 
   const saveMood = async () => {
     if (!selectedMood) return;
@@ -141,6 +188,63 @@ export default function AmpDashboard() {
               <Sparkles size={12} /> Repetir
             </button>
           </div>
+        </div>
+
+        {/* Progress Stats */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: '14px 12px', textAlign: 'center', border: '1px solid #F5EDE0' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#D4A030' }}>{user?.stats?.moods || 0}</div>
+            <div style={{ fontSize: 10, color: '#9B9590', fontWeight: 600, marginTop: 2 }}>Dias de Racha</div>
+          </div>
+          <div style={{ background: '#fff', borderRadius: 14, padding: '14px 12px', textAlign: 'center', border: '1px solid #F5EDE0' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#7CB98B' }}>{progressStats.lessons}</div>
+            <div style={{ fontSize: 10, color: '#9B9590', fontWeight: 600, marginTop: 2 }}>Lecciones</div>
+          </div>
+          <div style={{ background: '#fff', borderRadius: 14, padding: '14px 12px', textAlign: 'center', border: '1px solid #F5EDE0' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#9B8EC4' }}>{progressStats.courses}</div>
+            <div style={{ fontSize: 10, color: '#9B9590', fontWeight: 600, marginTop: 2 }}>Cursos Completos</div>
+          </div>
+        </div>
+
+        {/* Content Search */}
+        <div style={{ background: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, border: '1px solid #F5EDE0' }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Search size={14} style={{ position: 'absolute', left: 12, top: 11, color: '#9B9590' }} />
+              <input
+                value={contentSearch}
+                onChange={e => setContentSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && searchContent()}
+                placeholder="Buscar meditaciones, lecciones, afirmaciones..."
+                style={{ width: '100%', padding: '9px 12px 9px 34px', borderRadius: 10, border: '1px solid #F5EDE0', background: '#FFF9F0', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+              />
+            </div>
+            <button onClick={searchContent} disabled={searching}
+              style={{ background: '#D4A030', color: '#fff', border: 'none', borderRadius: 10, padding: '0 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {searching ? '...' : 'Buscar'}
+            </button>
+          </div>
+          {searchResults !== null && (
+            <div style={{ marginTop: 12 }}>
+              {searchResults.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#9B9590', textAlign: 'center', margin: '8px 0' }}>No se encontraron resultados</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {searchResults.map((item: any) => (
+                    <div key={item.id} style={{ background: '#FFF9F0', borderRadius: 10, padding: '10px 14px', borderLeft: `3px solid ${item.pillar === 'bienestar' ? '#7CB98B' : item.pillar === 'liderazgo' ? '#9B8EC4' : '#D4A030'}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#9B9590', textTransform: 'uppercase' }}>{item.type}</span>
+                        <span style={{ fontSize: 9, color: '#D5D0C8' }}>·</span>
+                        <span style={{ fontSize: 9, color: '#9B9590' }}>{item.pillar}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#2D2A26' }}>{item.title}</div>
+                      {item.description && <div style={{ fontSize: 11, color: '#9B9590', marginTop: 2 }}>{item.description}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Book Mentoring CTA */}
@@ -296,9 +400,10 @@ export default function AmpDashboard() {
         </div>
 
         {/* Quick Links */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
           {[
-            { label: 'Retos', icon: <Target size={18} />, href: '/amp/retos', color: '#D4A030' },
+            { label: 'Cursos', icon: <BookOpen size={18} />, href: '/amp/cursos', color: '#D4A030' },
+            { label: 'Retos', icon: <Target size={18} />, href: '/amp/retos', color: '#E07A5F' },
             { label: 'Animo', icon: <Calendar size={18} />, href: '/amp/animo', color: '#7CB98B' },
             { label: 'Mentoria', icon: <Video size={18} />, href: 'https://actitudmentalpositiva.com/', color: '#9B8EC4', external: true },
           ].map(link => (
