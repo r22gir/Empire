@@ -110,6 +110,7 @@ load_router("app.routers.accuracy", "/api/v1", ["accuracy"])
 # Finance, CRM, Inventory
 load_router("app.routers.finance", "/api/v1", ["finance"])
 load_router("app.routers.payments", "/api/v1", ["payments"])
+load_router("app.routers.crypto_checkout", "/api/v1", ["crypto-checkout"])
 load_router("app.routers.emails", "/api/v1", ["emails"])
 load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
