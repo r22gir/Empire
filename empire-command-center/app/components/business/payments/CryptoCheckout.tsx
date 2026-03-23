@@ -11,7 +11,7 @@ interface CryptoCheckoutProps {
 }
 
 interface CoinInfo {
-  coin: string;        // btc, eth, sol, usdt_trc20, usdc_eth
+  coin: string;        // btc, eth, sol, usdt_trc20, usdt_erc20
   label: string;       // "Bitcoin (BTC)"
   network: string;     // "Bitcoin"
   address: string;
@@ -38,7 +38,7 @@ const COIN_COLORS: Record<string, string> = {
   eth: '#627eea',
   sol: '#9945ff',
   usdt_trc20: '#26a17b',
-  usdc_eth: '#2775ca',
+  usdt_erc20: '#26a17b',
 };
 
 const COIN_ABBR: Record<string, string> = {
@@ -46,7 +46,11 @@ const COIN_ABBR: Record<string, string> = {
   eth: 'ETH',
   sol: 'SOL',
   usdt_trc20: 'USDT',
-  usdc_eth: 'USDC',
+  usdt_erc20: 'USDT',
+};
+
+const COIN_NOTES: Record<string, string> = {
+  usdt_trc20: 'TRC-20 recommended \u2014 lower fees',
 };
 
 const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
@@ -258,6 +262,9 @@ export default function CryptoCheckout({ invoiceId, onBack }: CryptoCheckoutProp
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#1f2937' }}>{coin.label.split(' (')[0]}</div>
                     <div style={{ fontSize: 11, color: MUTED, marginTop: 2 }}>{coin.network}</div>
+                    {COIN_NOTES[coin.coin] && (
+                      <div style={{ fontSize: 9, color: ACCENT, fontWeight: 600, marginTop: 3 }}>{COIN_NOTES[coin.coin]}</div>
+                    )}
                   </div>
                 </button>
               );
@@ -283,6 +290,15 @@ export default function CryptoCheckout({ invoiceId, onBack }: CryptoCheckoutProp
                 </div>
               )}
             </div>
+
+            {/* Coin-specific instructions */}
+            {activeCoin.coin.startsWith('usdt_') && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#166534', lineHeight: 1.5 }}>
+                Send <strong>USDT tokens</strong> on the <strong>{activeCoin.network}</strong> network.
+                {activeCoin.coin === 'usdt_trc20' && ' TRC-20 has the lowest fees.'}
+                {activeCoin.coin === 'usdt_erc20' && ' ERC-20 may have higher gas fees \u2014 TRC-20 is cheaper if available in your wallet.'}
+              </div>
+            )}
 
             {/* QR Code */}
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>

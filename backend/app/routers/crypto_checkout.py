@@ -24,11 +24,11 @@ router = APIRouter(prefix="/crypto-checkout", tags=["crypto-checkout"])
 # ── Wallet addresses from env ────────────────────────────────────────
 
 WALLETS = {
-    "btc":       {"env": "CRYPTO_BTC_ADDRESS",        "label": "Bitcoin (BTC)",       "network": "Bitcoin"},
-    "eth":       {"env": "CRYPTO_ETH_ADDRESS",        "label": "Ethereum (ETH)",      "network": "Ethereum (ERC-20)"},
-    "sol":       {"env": "CRYPTO_SOL_ADDRESS",        "label": "Solana (SOL)",        "network": "Solana"},
-    "usdt_trc20":{"env": "CRYPTO_USDT_TRC20_ADDRESS", "label": "USDT (TRC-20)",      "network": "Tron (TRC-20)"},
-    "usdc_eth":  {"env": "CRYPTO_USDC_ETH_ADDRESS",   "label": "USDC (ERC-20)",      "network": "Ethereum (ERC-20)"},
+    "btc":        {"env": "CRYPTO_BTC_ADDRESS",         "label": "Bitcoin (BTC)",       "network": "Bitcoin"},
+    "eth":        {"env": "CRYPTO_ETH_ADDRESS",         "label": "Ethereum (ETH)",      "network": "Ethereum (ERC-20)"},
+    "sol":        {"env": "CRYPTO_SOL_ADDRESS",         "label": "Solana (SOL)",        "network": "Solana"},
+    "usdt_trc20": {"env": "CRYPTO_USDT_TRC20_ADDRESS",  "label": "USDT (TRC-20)",      "network": "Tron (TRC-20)"},
+    "usdt_erc20": {"env": "CRYPTO_USDT_ERC20_ADDRESS",  "label": "USDT (ERC-20)",      "network": "Ethereum (ERC-20)"},
 }
 
 CRYPTO_DISCOUNT = 0.10  # 10% discount for crypto payments
@@ -172,7 +172,7 @@ async def crypto_checkout_details(request: Request, invoice_id: str):
             crypto_amount = round(discounted_total / prices[key], 8)
             coin_entry["crypto_amount"] = crypto_amount
             coin_entry["price_usd"] = prices[key]
-        elif key in ("usdt_trc20", "usdc_eth"):
+        elif key in ("usdt_trc20", "usdt_erc20"):
             # Stablecoins: 1:1 with USD
             coin_entry["crypto_amount"] = discounted_total
             coin_entry["price_usd"] = 1.0
