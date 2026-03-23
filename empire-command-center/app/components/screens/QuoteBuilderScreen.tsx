@@ -1891,13 +1891,21 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                             {item.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                             {item.width && <span style={{ fontWeight: 400, color: '#888' }}> ({item.width} x {item.height} x {item.depth})</span>}
                           </div>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 4 }}>Work Type</div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-3">
+                            {WORK_TYPES.map(w => {
+                              const isSelected = (workTypes[idx] || 'full_reupholster') === w;
+                              return (
+                                <button key={w} onClick={() => setWorkTypes(p => ({ ...p, [idx]: w }))} className="cursor-pointer transition-all text-left" style={{
+                                  padding: '6px 10px', borderRadius: 8, fontSize: 10, fontWeight: isSelected ? 700 : 500,
+                                  border: `1.5px solid ${isSelected ? '#b8960c' : '#ddd'}`, background: isSelected ? '#fdf8eb' : '#fff', color: isSelected ? '#b8960c' : '#666',
+                                }}>
+                                  {w.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                                </button>
+                              );
+                            })}
+                          </div>
                           <div className="grid grid-cols-2 gap-2 mb-2">
-                            <label style={{ fontSize: 10 }}>
-                              <span style={{ color: '#888', fontWeight: 600 }}>Work Type</span>
-                              <select value={workTypes[idx] || 'full_reupholster'} onChange={e => setWorkTypes(p => ({ ...p, [idx]: e.target.value }))} className="form-input" style={{ width: '100%', fontSize: 12, padding: '8px', marginTop: 2 }}>
-                                {WORK_TYPES.map(w => <option key={w} value={w}>{w.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-                              </select>
-                            </label>
                             <label style={{ fontSize: 10 }}>
                               <span style={{ color: '#888', fontWeight: 600 }}>Condition</span>
                               <select value={item.condition || 'worn'} onChange={e => updateField(idx, 'condition', e.target.value)} className="form-input" style={{ width: '100%', fontSize: 12, padding: '8px', marginTop: 2 }}>
@@ -1911,7 +1919,7 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                           </div>
                           <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 4 }}>Special Features</div>
                           <div className="flex flex-wrap gap-1.5">
-                            {['tufting', 'welting', 'nailhead', 'skirt', 'channeling', 'new_foam', 'spring_repair'].map(feat => {
+                            {['tufting', 'welting', 'nailhead', 'skirt', 'channeling', 'new_foam', 'spring_repair', 'webbing'].map(feat => {
                               const isOn = itemFeatures.includes(feat);
                               return (
                                 <button key={feat} onClick={() => {
