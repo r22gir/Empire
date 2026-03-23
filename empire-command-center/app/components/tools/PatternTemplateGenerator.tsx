@@ -105,7 +105,11 @@ function defaultsForShape(shape: ShapeConfig): Record<string, any> {
 }
 
 /* ── Component ───────────────────────────────────────────────── */
-export default function PatternTemplateGenerator() {
+interface PatternTemplateGeneratorProps {
+  onSave?: (shape: string, params: Record<string, any>, result: PatternResult, projectName: string) => void;
+}
+
+export default function PatternTemplateGenerator({ onSave }: PatternTemplateGeneratorProps = {}) {
   const [selectedShape, setSelectedShape] = useState<string>('sphere');
   const [formValues, setFormValues] = useState<Record<string, any>>(() =>
     defaultsForShape(SHAPES[0])
@@ -348,6 +352,19 @@ export default function PatternTemplateGenerator() {
             >
               <Plus className="w-4 h-4" />
               Add to Quote
+            </button>
+          )}
+
+          {/* Save Template (when embedded in TemplateModule) */}
+          {result && onSave && (
+            <button
+              className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl
+                         bg-[#16a34a] text-white font-medium text-sm
+                         hover:bg-[#15803d] transition-colors"
+              onClick={() => onSave(selectedShape, formValues, result, projectName)}
+            >
+              <FileText className="w-4 h-4" />
+              Save as Template
             </button>
           )}
 

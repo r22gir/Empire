@@ -211,6 +211,22 @@ CREATE TABLE IF NOT EXISTS jobs (
     FOREIGN KEY (customer_id) REFERENCES customers(id)
 );
 
+-- Saved pattern templates
+CREATE TABLE IF NOT EXISTS saved_patterns (
+    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+    name TEXT NOT NULL,
+    shape_type TEXT NOT NULL,
+    dimensions_json TEXT NOT NULL,
+    result_json TEXT,
+    customer_id TEXT,
+    job_id TEXT,
+    quote_id TEXT,
+    notes TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
+);
+
 -- Indexes for fast queries
 CREATE INDEX IF NOT EXISTS idx_tasks_desk ON tasks(desk);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
@@ -229,6 +245,10 @@ CREATE INDEX IF NOT EXISTS idx_inventory_business ON inventory_items(business);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_jobs_customer ON jobs(customer_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_scheduled ON jobs(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_saved_patterns_shape ON saved_patterns(shape_type);
+CREATE INDEX IF NOT EXISTS idx_saved_patterns_customer ON saved_patterns(customer_id);
+CREATE INDEX IF NOT EXISTS idx_saved_patterns_job ON saved_patterns(job_id);
+CREATE INDEX IF NOT EXISTS idx_saved_patterns_deleted ON saved_patterns(deleted_at);
 
 -- Access control: users
 CREATE TABLE IF NOT EXISTS access_users (
