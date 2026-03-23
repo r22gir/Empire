@@ -103,61 +103,78 @@ interface QuoteOptions {
   installationIncluded: boolean;
 }
 
-const UPHOLSTERY_TYPES = [
-  // Furniture
-  'sofa_3cushion', 'sofa_2cushion', 'sofa_chesterfield', 'sofa_tuxedo', 'sofa_camelback',
-  'sofa_lawson', 'sofa_english_arm', 'sofa_track_arm', 'sofa_mid_century',
-  'loveseat', 'settee', 'sectional', 'sectional_l', 'sectional_u',
-  'chair_wingback', 'chair_club', 'chair_barrel', 'chair_accent', 'chair_slipper',
-  'chair_bergere', 'chair_fauteuil', 'chair_parsons',
-  'dining_chair_seat', 'dining_chair_full', 'dining_chair_arm',
-  'bar_stool', 'chaise', 'daybed',
-  'ottoman_round', 'ottoman_square', 'ottoman_rectangular', 'ottoman_tufted_cube', 'ottoman_storage',
-  'bench_straight', 'bench_l_shaped', 'bench_u_booth', 'bench_curved_banquette',
-  'bench_semicircle', 'bench_window_seat', 'bench_storage',
-  'headboard_rectangular', 'headboard_arched', 'headboard_wingback', 'headboard_tufted',
-  'headboard_camelback', 'headboard_custom',
-  'banquette',
-  // Wall Panels
-  'wall_panel_flat', 'wall_panel_tufted_diamond', 'wall_panel_tufted_biscuit',
-  'wall_panel_channel_vertical', 'wall_panel_channel_horizontal',
-  'wall_panel_padded', 'wall_panel_wrapped', 'wall_panel_acoustic', 'wall_panel_cornice_topped',
-  // Cushions
-  'cushion_seat', 'cushion_back', 'cushion_throw', 'cushion_bolster',
-  'cushion_box_edge', 'cushion_waterfall', 'cushion_t_cushion', 'cushion_bullnose', 'cushion_knife_edge',
-  // Bedding
-  'duvet_cover', 'coverlet', 'quilt', 'bed_skirt', 'pillow_sham',
-  'decorative_pillow', 'bolster', 'bed_scarf',
-  // Table Linens
-  'tablecloth', 'table_runner', 'placemat', 'napkin', 'table_skirt',
+const UPHOLSTERY_GROUPS = [
+  { label: 'Sofas & Loveseats', items: [
+    'sofa_3cushion', 'sofa_2cushion', 'sofa_chesterfield', 'sofa_tuxedo', 'sofa_camelback',
+    'sofa_lawson', 'sofa_english_arm', 'sofa_track_arm', 'sofa_mid_century',
+    'loveseat', 'settee', 'sectional', 'sectional_l', 'sectional_u',
+  ]},
+  { label: 'Chairs', items: [
+    'chair_wingback', 'chair_club', 'chair_barrel', 'chair_accent', 'chair_slipper',
+    'chair_bergere', 'chair_fauteuil', 'chair_parsons',
+    'dining_chair_seat', 'dining_chair_full', 'dining_chair_arm',
+    'bar_stool', 'chaise', 'daybed',
+  ]},
+  { label: 'Ottomans & Benches', items: [
+    'ottoman_round', 'ottoman_square', 'ottoman_rectangular', 'ottoman_tufted_cube', 'ottoman_storage',
+    'bench_straight', 'bench_l_shaped', 'bench_u_booth', 'bench_curved_banquette',
+    'bench_semicircle', 'bench_window_seat', 'bench_storage', 'banquette',
+  ]},
+  { label: 'Headboards', items: [
+    'headboard_rectangular', 'headboard_arched', 'headboard_wingback', 'headboard_tufted',
+    'headboard_camelback', 'headboard_custom',
+  ]},
+  { label: 'Wall Panels', items: [
+    'wall_panel_flat', 'wall_panel_tufted_diamond', 'wall_panel_tufted_biscuit',
+    'wall_panel_channel_vertical', 'wall_panel_channel_horizontal',
+    'wall_panel_padded', 'wall_panel_wrapped', 'wall_panel_acoustic', 'wall_panel_cornice_topped',
+  ]},
+  { label: 'Cushions', items: [
+    'cushion_seat', 'cushion_back', 'cushion_throw', 'cushion_bolster',
+    'cushion_box_edge', 'cushion_waterfall', 'cushion_t_cushion', 'cushion_bullnose', 'cushion_knife_edge',
+  ]},
+  { label: 'Bedding', items: [
+    'duvet_cover', 'coverlet', 'quilt', 'bed_skirt', 'pillow_sham',
+    'decorative_pillow', 'bolster', 'bed_scarf',
+  ]},
+  { label: 'Table Linens', items: [
+    'tablecloth', 'table_runner', 'placemat', 'napkin', 'table_skirt',
+  ]},
 ];
 
-const DRAPERY_TYPES = [
-  // Drapery by pleat type
-  'drapery_pinch_pleat', 'drapery_french_pleat', 'drapery_euro_pleat',
-  'drapery_cartridge', 'drapery_box_pleat', 'drapery_inverted_box',
-  'drapery_goblet', 'drapery_butterfly', 'drapery_ripplefold',
-  'drapery_rod_pocket', 'drapery_tab_top', 'drapery_grommet',
-  'drapery_pencil_pleat', 'drapery_smocked', 'drapery_fan_pleat',
-  'drapery', // generic
-  // Roman Shades
-  'roman_flat', 'roman_hobbled', 'roman_european_relaxed', 'roman_balloon',
-  'roman_austrian', 'roman_london', 'roman_cascade', 'roman_waterfall', 'roman_tulip',
-  'roman_shade', // generic
-  // Valances
-  'valance_box_pleat', 'valance_inverted_box', 'valance_kingston', 'valance_cambridge',
-  'valance_scalloped', 'valance_arched', 'valance_serpentine', 'valance_balloon',
-  'valance_austrian', 'valance_london', 'valance_flat_board', 'valance_shaped',
-  'valance_pleated', 'valance_gathered', 'valance_swag_jabot', 'valance_cascades',
-  'valance_empire', 'valance_tab', 'valance_rod_pocket', 'valance_cornice_fabric',
-  'valance', // generic
-  // Cornices
-  'cornice_straight', 'cornice_arched', 'cornice_scalloped', 'cornice_serpentine',
-  'cornice_double_serpentine', 'cornice_pagoda', 'cornice_stepped', 'cornice_custom',
-  'cornice', // generic
-  // Sheers
-  'sheer',
+const UPHOLSTERY_TYPES = UPHOLSTERY_GROUPS.flatMap(g => g.items);
+
+const DRAPERY_GROUPS = [
+  { label: 'Drapery', items: [
+    'drapery_pinch_pleat', 'drapery_french_pleat', 'drapery_euro_pleat',
+    'drapery_cartridge', 'drapery_box_pleat', 'drapery_inverted_box',
+    'drapery_goblet', 'drapery_butterfly', 'drapery_ripplefold',
+    'drapery_rod_pocket', 'drapery_tab_top', 'drapery_grommet',
+    'drapery_pencil_pleat', 'drapery_smocked', 'drapery_fan_pleat',
+    'drapery',
+  ]},
+  { label: 'Roman Shades', items: [
+    'roman_flat', 'roman_hobbled', 'roman_european_relaxed', 'roman_balloon',
+    'roman_austrian', 'roman_london', 'roman_cascade', 'roman_waterfall', 'roman_tulip',
+    'roman_shade',
+  ]},
+  { label: 'Valances', items: [
+    'valance_box_pleat', 'valance_inverted_box', 'valance_kingston', 'valance_cambridge',
+    'valance_scalloped', 'valance_arched', 'valance_serpentine', 'valance_balloon',
+    'valance_austrian', 'valance_london', 'valance_flat_board', 'valance_shaped',
+    'valance_pleated', 'valance_gathered', 'valance_swag_jabot', 'valance_cascades',
+    'valance_empire', 'valance_tab', 'valance_rod_pocket', 'valance_cornice_fabric',
+    'valance',
+  ]},
+  { label: 'Cornices', items: [
+    'cornice_straight', 'cornice_arched', 'cornice_scalloped', 'cornice_serpentine',
+    'cornice_double_serpentine', 'cornice_pagoda', 'cornice_stepped', 'cornice_custom',
+    'cornice',
+  ]},
+  { label: 'Sheers', items: ['sheer'] },
 ];
+
+const DRAPERY_TYPES = DRAPERY_GROUPS.flatMap(g => g.items);
 
 const ITEM_TYPES = [...UPHOLSTERY_TYPES, ...DRAPERY_TYPES];
 
@@ -1806,7 +1823,11 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                             {item.checked && <Check size={12} style={{ color: '#fff' }} />}
                           </div>
                           <select value={item.type} onChange={e => updateField(idx, 'type', e.target.value)} className="form-input" style={{ flex: 1, fontSize: 12, padding: '5px 8px' }}>
-                            {ITEM_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                            {[...UPHOLSTERY_GROUPS, ...DRAPERY_GROUPS].map(g => (
+                              <optgroup key={g.label} label={g.label}>
+                                {g.items.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                              </optgroup>
+                            ))}
                           </select>
                         </div>
                         <input value={item.description} onChange={e => updateField(idx, 'description', e.target.value)} placeholder="Description (style, color, material...)" className="form-input" style={{ width: '100%', fontSize: 11, padding: '5px 8px' }} />
@@ -2107,7 +2128,7 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
               )}
               {room.items.map((item, idx) => {
                 const cat = getItemCategory(item.type);
-                const typeList = cat === 'drapery' ? DRAPERY_TYPES : UPHOLSTERY_TYPES;
+                const typeGroups = cat === 'drapery' ? DRAPERY_GROUPS : UPHOLSTERY_GROUPS;
                 const catColor = cat === 'drapery' ? '#2563eb' : '#b8960c';
                 const catLabel = cat === 'drapery' ? 'DRAPERY' : 'UPHOLSTERY';
                 const diagramMatch = DIAGRAM_MAP[item.type] ? item.type : findDiagramMatch(item.type);
@@ -2130,8 +2151,12 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                       </div>
                       <select value={item.type} onChange={e => updateItem(room.id, item.id, 'type', e.target.value)}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }}>
-                        {typeList.map(t => (
-                          <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                        {typeGroups.map(g => (
+                          <optgroup key={g.label} label={g.label}>
+                            {g.items.map(t => (
+                              <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                     </div>
