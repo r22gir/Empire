@@ -2366,6 +2366,24 @@ def _build_line_items_html(line_items: list) -> str:
 
 
 @router.post("/{quote_id}/pdf")
+def _discount_html(quote: dict) -> str:
+    """Build discount row HTML showing percentage and dollar amount."""
+    amt = quote.get("discount_amount", 0)
+    dtype = quote.get("discount_type", "dollar")
+    subtotal = quote.get("subtotal", 0)
+    if dtype == "percent" and amt > 0:
+        dollar = round(subtotal * (amt / 100), 2)
+        label = f"Discount ({amt:g}%)"
+    else:
+        dollar = amt
+        pct = round(amt / subtotal * 100, 1) if subtotal > 0 and amt > 0 else 0
+        label = f"Discount ({pct:g}%)" if pct > 0 else "Discount"
+    return (
+        f"<tr><td colspan='8' style='padding:8px;text-align:right;color:#c00'>{label}</td>"
+        f"<td style='padding:8px;text-align:right;color:#c00'>-${dollar:,.2f}</td></tr>"
+    )
+
+
 async def generate_pdf(quote_id: str, skip_verification: bool = False):
     """Generate PDF for a quote with room-level detail, drawings, and mockups.
 
@@ -2673,7 +2691,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
   {f"<tr><td colspan='8' style='padding:10px 8px;text-align:right;color:#666;font-style:italic'>Treatment options range from</td><td style='padding:10px 8px;text-align:right;font-weight:700;color:#b8960c;font-size:1.1em;white-space:nowrap'>${quote['price_range_low']:,.0f} &ndash; ${quote['price_range_high']:,.0f}</td></tr>" if quote.get("price_range_low") else f"""
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Subtotal</td>
   <td style='padding:8px;text-align:right;color:#666'>${quote.get("subtotal", 0):.2f}</td></tr>
-  {"<tr><td colspan='8' style='padding:8px;text-align:right;color:#c00'>Discount</td><td style='padding:8px;text-align:right;color:#c00'>-$" + f"{quote['discount_amount']:.2f}</td></tr>" if quote.get('discount_amount') else ""}
+  {_discount_html(quote) if quote.get('discount_amount') else ""}
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Tax ({quote.get('tax_rate', 0) * 100:.1f}%)</td>
   <td style='padding:8px;text-align:right;color:#666'>${quote.get('tax_amount', 0):.2f}</td></tr>
   <tr><td colspan='8' style='padding:14px 8px;text-align:right;border-top:3px solid #b8960c'><strong style='font-size:1.15em;color:#1a1a2e'>Total</strong></td>

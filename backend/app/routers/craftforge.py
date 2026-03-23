@@ -673,6 +673,15 @@ async def generate_design_pdf(design_id: str):
     overhead = design.get("overhead", 0)
     subtotal = design.get("subtotal", 0)
     discount_amount = design.get("discount_amount", 0)
+    discount_type = design.get("discount_type", "dollar")
+    # Compute the actual dollar discount and label
+    if discount_type == "percent" and discount_amount > 0:
+        discount_dollar = round(subtotal * (discount_amount / 100), 2)
+        discount_label = f"Discount ({discount_amount:g}%)"
+    else:
+        discount_dollar = discount_amount
+        discount_pct_calc = round(discount_amount / subtotal * 100, 1) if subtotal > 0 and discount_amount > 0 else 0
+        discount_label = f"Discount ({discount_pct_calc:g}%)" if discount_pct_calc > 0 else "Discount"
     design_tax_rate = design.get("tax_rate", 0)
     tax_amount = design.get("tax_amount", 0)
     total = design.get("total", 0)
@@ -745,7 +754,7 @@ async def generate_design_pdf(design_id: str):
       {'<tr><td style="padding:4px 8px;color:#666">CNC Machine Time</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{cnc_time_cost:,.2f}</td></tr>' if cnc_time_cost > 0 and show_cnc else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Overhead</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{overhead:,.2f}</td></tr>' if overhead > 0 else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Subtotal</td><td style="padding:4px 8px;text-align:right;color:#666">$' + f'{subtotal:,.2f}</td></tr>' if subtotal > 0 and (sum(1 for x in [material_cost, labor_cost, cnc_time_cost, overhead] if x > 0) > 1) else ''}
-      {'<tr><td style="padding:4px 8px;color:#c00">Discount</td><td style="padding:4px 8px;text-align:right;color:#c00">-$' + f'{discount_amount:,.2f}</td></tr>' if discount_amount > 0 else ''}
+      {'<tr><td style="padding:4px 8px;color:#c00">' + discount_label + '</td><td style="padding:4px 8px;text-align:right;color:#c00">-$' + f'{discount_dollar:,.2f}</td></tr>' if discount_amount > 0 else ''}
       {'<tr><td style="padding:4px 8px;color:#666">Tax (' + f'{design_tax_rate*100:.1f}%)</td><td style="padding:4px 8px;text-align:right;color:#666">${tax_amount:,.2f}</td></tr>' if design_tax_rate > 0 and show_tax else ''}
       <tr style="border-top:3px solid #d4a636"><td style="padding:12px 8px;font-weight:700;font-size:1.1em;color:#1a1a2e">Total</td><td style="padding:12px 8px;text-align:right;font-weight:700;font-size:1.2em;color:#d4a636">${grand_total:,.2f}</td></tr>
       {'<tr><td style="padding:4px 8px;font-weight:600;color:#2563eb">Deposit Due (' + f'{deposit_pct:.0f}%)</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:#2563eb">${deposit_amount:,.2f}</td></tr>' if deposit_pct > 0 and show_deposit else ''}
