@@ -88,6 +88,9 @@ export default function SocialForgePage() {
   const [composeSaving, setComposeSaving] = useState(false);
   const [composeMediaName, setComposeMediaName] = useState('');
 
+  // Sync state
+  const [syncing, setSyncing] = useState(false);
+
   // Setup guide state
   const [guideAccount, setGuideAccount] = useState<any>(null);
   const [guideContent, setGuideContent] = useState('');
@@ -111,10 +114,15 @@ export default function SocialForgePage() {
         fetch(`${SF_API}/accounts`).then(r => { if (!r.ok) throw new Error('Accounts fetch failed'); return r.json(); }),
       ]);
 
-      // Set accounts from API
-      if (Array.isArray(accountsRes)) {
-        setConnectedAccounts(accountsRes);
-      }
+      // Set accounts from API — backend returns { accounts: [...], categories, progress }
+      const rawAccounts = Array.isArray(accountsRes) ? accountsRes : (accountsRes?.accounts || []);
+      setConnectedAccounts(rawAccounts.map((a: any) => ({
+        ...a,
+        connected: a.status === 'done' || a.status === 'active',
+        displayName: a.name || a.platform || '',
+        followers: a.followers || 0,
+        lastSync: a.updated_at || null,
+      })));
 
       // Separate posts by status
       const posts = Array.isArray(postsRes) ? postsRes : [];
@@ -325,6 +333,23 @@ export default function SocialForgePage() {
       setGuideVerified(false);
     }
     setGuideVerifying(false);
+  };
+
+  const handleSyncTokens = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(`${SF_API}/accounts/sync`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.synced?.length > 0) {
+          // Reload accounts to reflect updated statuses
+          await loadData();
+        }
+      }
+    } catch (e) {
+      console.error('Sync failed:', e);
+    }
+    setSyncing(false);
   };
 
   // Helpers
@@ -1058,12 +1083,22 @@ export default function SocialForgePage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h2 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Connected Accounts</h2>
-              <button
-                style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, background: '#ec4899', color: '#fff', borderRadius: 10, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
-                className="hover:bg-[#db2777] transition-colors"
-              >
-                <Plus size={14} /> Connect Account
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSyncTokens}
+                  disabled={syncing}
+                  style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, background: '#fff', color: '#16a34a', borderRadius: 10, border: '1px solid #bbf7d0', cursor: syncing ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                  className="hover:bg-[#f0fdf4] transition-colors"
+                >
+                  <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> {syncing ? 'Syncing...' : 'Sync Tokens'}
+                </button>
+                <button
+                  style={{ padding: '8px 16px', fontSize: 12, fontWeight: 600, background: '#ec4899', color: '#fff', borderRadius: 10, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                  className="hover:bg-[#db2777] transition-colors"
+                >
+                  <Plus size={14} /> Connect Account
+                </button>
+              </div>
             </div>
 
             {/* Summary Cards */}

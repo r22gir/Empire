@@ -561,6 +561,44 @@ async def update_account(account_id: str, data: AccountUpdate):
     return {"updated": True, "account_id": account_id}
 
 
+@router.post("/accounts/sync")
+async def sync_accounts():
+    """Check configured social tokens and auto-update accounts.json with connection status."""
+    from app.services.social_service import get_social_accounts
+
+    live = await get_social_accounts()
+    accounts = _load_accounts()
+    synced = []
+
+    # Map live check results to accounts.json entries
+    mapping = {
+        "instagram": {"category": "social", "platform_match": "instagram"},
+        "facebook":  {"category": "social", "platform_match": "facebook"},
+    }
+
+    for platform, info in live.items():
+        if not info.get("connected"):
+            continue
+        m = mapping.get(platform)
+        if not m:
+            continue
+        for a in accounts:
+            if a.get("category") == m["category"] and m["platform_match"] in a.get("id", "").lower():
+                a["status"] = "done"
+                handle = info.get("handle") or info.get("page") or ""
+                if handle:
+                    a["handle"] = handle
+                a["notes"] = f"Auto-synced {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} — token verified via Graph API"
+                a["updated_at"] = datetime.utcnow().isoformat()
+                synced.append({"id": a["id"], "platform": platform, "handle": handle})
+                break
+
+    if synced:
+        _save_accounts(accounts)
+
+    return {"synced": synced, "live_status": live}
+
+
 @router.post("/accounts/ai-guide")
 async def ai_setup_guide(data: AIContentRequest):
     """Get AI guidance for setting up a specific platform account, using business profile."""
