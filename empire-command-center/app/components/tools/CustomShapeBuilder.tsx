@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { API } from '../../lib/api';
 import {
   Ruler, Download, RefreshCw, Scissors, Info, FileText, Save,
-  Minus, CornerDownRight, Square, Circle, Semicircle as SemicircleIcon,
+  Minus, CornerDownRight, Square, Circle,
 } from 'lucide-react';
 
 /* ── Types ───────────────────────────────────────────────────── */
@@ -40,6 +40,7 @@ interface CalculationResult {
 
 interface CustomShapeBuilderProps {
   onSave?: (shapeType: string, dimensions: Record<string, any>, result: any) => void;
+  initialPreset?: string;
 }
 
 /* ── Shape Presets ───────────────────────────────────────────── */
@@ -379,10 +380,11 @@ function generatePreviewSvg(
 }
 
 /* ── Component ───────────────────────────────────────────────── */
-export default function CustomShapeBuilder({ onSave }: CustomShapeBuilderProps) {
-  const [selectedShape, setSelectedShape] = useState<string>('straight_bench');
+export default function CustomShapeBuilder({ onSave, initialPreset }: CustomShapeBuilderProps) {
+  const initShape = initialPreset && SHAPES.find(s => s.id === initialPreset) ? initialPreset : 'straight_bench';
+  const [selectedShape, setSelectedShape] = useState<string>(initShape);
   const [formValues, setFormValues] = useState<Record<string, any>>(() =>
-    defaultsForShape(SHAPES[0])
+    defaultsForShape(SHAPES.find(s => s.id === initShape) || SHAPES[0])
   );
   const [seatbacks, setSeatbacks] = useState<Record<string, boolean>>({});
   const [seatbackHeight, setSeatbackHeight] = useState<number>(18);

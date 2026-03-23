@@ -11,6 +11,8 @@ import dynamic from 'next/dynamic';
 import { DiagramCatalog, DiagramViewer, findDiagramMatch, DIAGRAM_MAP } from '../business/catalog';
 
 const CushionBuilder = dynamic(() => import('../business/upholstery/CushionBuilder'), { ssr: false });
+const CustomShapeBuilder = dynamic(() => import('../tools/CustomShapeBuilder'), { ssr: false });
+const DraperyHardwareModule = dynamic(() => import('../business/drapery/DraperyHardwareModule'), { ssr: false });
 
 interface CustomerInfo {
   name: string;
@@ -118,7 +120,7 @@ const UPHOLSTERY_GROUPS = [
   { label: 'Ottomans & Benches', items: [
     'ottoman_round', 'ottoman_square', 'ottoman_rectangular', 'ottoman_tufted_cube', 'ottoman_storage',
     'bench_straight', 'bench_l_shaped', 'bench_u_booth', 'bench_curved_banquette',
-    'bench_semicircle', 'bench_window_seat', 'bench_storage', 'banquette',
+    'bench_semicircle', 'bench_mixed', 'bench_window_seat', 'bench_storage', 'banquette',
   ]},
   { label: 'Headboards', items: [
     'headboard_rectangular', 'headboard_arched', 'headboard_wingback', 'headboard_tufted',
@@ -177,6 +179,21 @@ const DRAPERY_GROUPS = [
 const DRAPERY_TYPES = DRAPERY_GROUPS.flatMap(g => g.items);
 
 const ITEM_TYPES = [...UPHOLSTERY_TYPES, ...DRAPERY_TYPES];
+
+// Map bench types in Quote Builder → Custom Shape Builder presets
+const BENCH_SHAPE_MAP: Record<string, string> = {
+  bench_straight: 'straight_bench',
+  bench_l_shaped: 'l_bench',
+  bench_u_booth: 'u_booth',
+  bench_curved_banquette: 'curved_banquette',
+  bench_semicircle: 'semicircle',
+  bench_mixed: 'l_bench',  // closest available preset — mixed shapes use L-bench as starting point
+  banquette: 'curved_banquette',
+};
+
+function isBenchType(type: string): boolean {
+  return type in BENCH_SHAPE_MAP;
+}
 
 function getItemCategory(type: string): ItemCategory {
   if (DRAPERY_TYPES.includes(type)) return 'drapery';
@@ -478,6 +495,13 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   // Catalog browser
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogTargetRoom, setCatalogTargetRoom] = useState<string | null>(null);
+
+  // Custom Shape Builder modal for bench items
+  const [showShapeBuilder, setShowShapeBuilder] = useState(false);
+  const [shapeBuilderTarget, setShapeBuilderTarget] = useState<{ roomId: string; itemId: string; preset: string } | null>(null);
+
+  // Drapery hardware config
+  const [hardwareConfig, setHardwareConfig] = useState<Record<string, any>>({});
 
   // Photo analysis
   const [analyzingPhoto, setAnalyzingPhoto] = useState<number | null>(null);
@@ -1004,6 +1028,13 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               rooms={rooms} addRoom={addRoom} removeRoom={removeRoom} updateRoomName={updateRoomName}
               addItem={addItem} removeItem={removeItem} updateItem={updateItem}
               onBrowseCatalog={(roomId) => { setCatalogTargetRoom(roomId); setShowCatalog(true); }}
+              onOpenShapeBuilder={(roomId, itemId, itemType) => {
+                const preset = BENCH_SHAPE_MAP[itemType];
+                if (preset) {
+                  setShapeBuilderTarget({ roomId, itemId, preset });
+                  setShowShapeBuilder(true);
+                }
+              }}
             />
             {showCatalog && (
               <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1027,9 +1058,54 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                 </div>
               </div>
             )}
+            {/* Custom Shape Builder modal for bench items */}
+            {showShapeBuilder && shapeBuilderTarget && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)' }} onClick={() => setShowShapeBuilder(false)} />
+                <div style={{ position: 'relative', width: '95%', maxWidth: 1100, maxHeight: '90vh', overflow: 'auto', background: '#fff', borderRadius: 16, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', padding: 0 }}>
+                  <div style={{ position: 'sticky', top: 0, zIndex: 2, background: '#fff', padding: '16px 24px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>Custom Shape Builder</div>
+                      <div style={{ fontSize: 12, color: '#888' }}>Configure dimensions, seatbacks, and cushion layout for this bench</div>
+                    </div>
+                    <button onClick={() => setShowShapeBuilder(false)} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div style={{ padding: 24 }}>
+                    <CustomShapeBuilder
+                      initialPreset={shapeBuilderTarget.preset}
+                      onSave={(shapeType, dims, result) => {
+                        // Update the bench item's notes with shape builder results
+                        const { roomId, itemId } = shapeBuilderTarget;
+                        const summary = [
+                          `Shape: ${shapeType.replace(/_/g, ' ')}`,
+                          dims.length ? `L: ${dims.length}"` : '',
+                          dims.length_a ? `A: ${dims.length_a}" B: ${dims.length_b}"` : '',
+                          dims.length_c ? `C: ${dims.length_c}"` : '',
+                          dims.depth ? `D: ${dims.depth}"` : '',
+                          dims.radius ? `R: ${dims.radius}" Arc: ${dims.arc_degrees}°` : '',
+                          result?.linear_feet ? `${result.linear_feet.toFixed(1)} lin ft` : '',
+                          result?.square_footage ? `${result.square_footage.toFixed(1)} sq ft` : '',
+                          result?.fabric_yardage_54 ? `${result.fabric_yardage_54.toFixed(2)} yd fabric` : '',
+                        ].filter(Boolean).join(' | ');
+                        updateItem(roomId, itemId, 'notes', summary);
+                        // Update dimensions from shape builder
+                        if (dims.length) updateItem(roomId, itemId, 'width', String(dims.length));
+                        if (dims.length_a) updateItem(roomId, itemId, 'width', String(dims.length_a));
+                        if (dims.depth) updateItem(roomId, itemId, 'depth', String(dims.depth));
+                        if (dims.height) updateItem(roomId, itemId, 'height', String(dims.height));
+                        setShowShapeBuilder(false);
+                        setShapeBuilderTarget(null);
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
-        {step === 4 && <StepOptions options={options} setOptions={setOptions} rooms={rooms} />}
+        {step === 4 && <StepOptions options={options} setOptions={setOptions} rooms={rooms} hardwareConfig={hardwareConfig} setHardwareConfig={setHardwareConfig} />}
         {step === 5 && !result && (
           <StepReview customer={customer} photos={photos} rooms={rooms} options={options} totalItems={totalItems} />
         )}
@@ -2051,11 +2127,12 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
   );
 }
 
-function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog }: {
+function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder }: {
   rooms: Room[]; addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
   addItem: (roomId: string, category?: ItemCategory) => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
   onBrowseCatalog: (roomId: string) => void;
+  onOpenShapeBuilder?: (roomId: string, itemId: string, itemType: string) => void;
 }) {
   const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
 
@@ -2185,12 +2262,24 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                         onChange={e => updateItem(room.id, item.id, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
-                    {/* Notes row */}
-                    <div className="col-span-5">
+                    {/* Notes row + Shape Builder button for bench items */}
+                    <div className={isBenchType(item.type) ? 'col-span-4' : 'col-span-5'}>
                       <input value={item.notes} onChange={e => updateItem(room.id, item.id, 'notes', e.target.value)}
                         placeholder={cat === 'drapery' ? 'Notes (fabric, mount type, motorization...)' : 'Notes (fabric preference, condition, existing foam...)'}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
+                    {isBenchType(item.type) && (
+                      <div className="col-span-1">
+                        <button
+                          onClick={() => onOpenShapeBuilder?.(room.id, item.id, item.type)}
+                          className="flex items-center gap-1 cursor-pointer transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c] w-full justify-center"
+                          style={{ padding: '5px 6px', borderRadius: 7, border: '1.5px solid #ece8e0', background: '#faf9f7', fontSize: 9, fontWeight: 700, color: '#b8960c' }}
+                          title="Open Custom Shape Builder — configure multi-segment dimensions, seatbacks, and cushion layout"
+                        >
+                          <Ruler size={12} /> Shape Builder
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <button onClick={() => removeItem(room.id, item.id)}
                     className="cursor-pointer transition-all hover:bg-[#fef2f2] hover:text-[#dc2626] mt-4"
@@ -2208,7 +2297,10 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
   );
 }
 
-function StepOptions({ options, setOptions, rooms }: { options: QuoteOptions; setOptions: (o: QuoteOptions) => void; rooms: Room[] }) {
+function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareConfig }: {
+  options: QuoteOptions; setOptions: (o: QuoteOptions) => void; rooms: Room[];
+  hardwareConfig?: Record<string, any>; setHardwareConfig?: (c: Record<string, any>) => void;
+}) {
   const toggle = (key: keyof QuoteOptions) => setOptions({ ...options, [key]: !options[key] });
 
   // Determine which categories are present in the quote
@@ -2330,6 +2422,15 @@ function StepOptions({ options, setOptions, rooms }: { options: QuoteOptions; se
             {checkBtn('patternMatch', 'Pattern Match', '#2563eb')}
             {checkBtn('installationIncluded', 'Include Installation', '#2563eb')}
           </div>
+          {/* Drapery Hardware Configuration Module */}
+          {setHardwareConfig && (
+            <div style={{ marginTop: 16 }}>
+              <DraperyHardwareModule
+                config={hardwareConfig || {}}
+                onChange={(cfg) => setHardwareConfig(cfg)}
+              />
+            </div>
+          )}
         </div>
       )}
 
