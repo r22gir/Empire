@@ -133,6 +133,7 @@ load_router("app.routers.notes_extraction", "/api/v1", ["notes-extraction"])
 
 # Pattern Template Generator — sewing pattern math + PDF export
 load_router("app.routers.pattern_templates", "/api/v1/patterns", ["patterns"])
+load_router("app.routers.custom_shapes", "/api/v1", ["custom-shapes"])
 
 # Unified Photo Storage
 load_router("app.routers.photos", "/api/v1", ["photos"])

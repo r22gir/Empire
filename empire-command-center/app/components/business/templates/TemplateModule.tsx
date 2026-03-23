@@ -6,6 +6,7 @@ import {
   Copy, Pencil, Trash2, X, Save, Loader2, ChevronLeft,
 } from 'lucide-react';
 import PatternTemplateGenerator from '../../tools/PatternTemplateGenerator';
+import CustomShapeBuilder from '../../tools/CustomShapeBuilder';
 
 /* ── Types ───────────────────────────────────────────────────── */
 interface PatternPiece {
@@ -94,6 +95,7 @@ export default function TemplateModule() {
   const [search, setSearch] = useState('');
   const [shapeFilter, setShapeFilter] = useState('');
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showShapeBuilder, setShowShapeBuilder] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<SavedTemplate | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -241,6 +243,32 @@ export default function TemplateModule() {
           </div>
           <PatternTemplateGenerator
             onSave={handleSaveFromGenerator}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Render: Custom Shape Builder ──────────────────────────── */
+  if (showShapeBuilder) {
+    return (
+      <div className="flex-1 overflow-y-auto" style={{ background: '#faf9f7' }}>
+        <div className="p-4 sm:p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              onClick={() => setShowShapeBuilder(false)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[#e8e4dc] bg-white
+                         hover:bg-gray-50 text-sm font-medium text-[#2D2A26] transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Back to Templates
+            </button>
+          </div>
+          <CustomShapeBuilder
+            onSave={(shapeType, dims, result) => {
+              handleSaveFromGenerator(shapeType, dims, result, `Custom ${shapeType.replace(/_/g, ' ')}`);
+              setShowShapeBuilder(false);
+            }}
           />
         </div>
       </div>
@@ -435,14 +463,24 @@ export default function TemplateModule() {
             <Ruler className="w-6 h-6 text-[#16a34a]" />
             <h1 className="text-xl sm:text-2xl font-bold text-[#2D2A26]">Pattern Templates</h1>
           </div>
-          <button
-            onClick={() => setShowGenerator(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#16a34a] text-white
-                       font-medium text-sm hover:bg-[#15803d] transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Template
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowShapeBuilder(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#b8960c] text-[#b8960c]
+                         font-medium text-sm hover:bg-[#fdf8eb] transition-colors"
+            >
+              <Square className="w-4 h-4" />
+              Custom Shape
+            </button>
+            <button
+              onClick={() => setShowGenerator(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#16a34a] text-white
+                         font-medium text-sm hover:bg-[#15803d] transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Template
+            </button>
+          </div>
         </div>
 
         {/* Search + Filter Bar */}
