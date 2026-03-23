@@ -305,6 +305,121 @@ CREATE INDEX IF NOT EXISTS idx_access_audit_created ON access_audit(created_at);
 DESKS_JSON_PATH = Path(__file__).resolve().parent.parent / "config" / "desks.json"
 
 
+def _init_chat_backup_tables():
+    """Initialize chat_backup tables in the SQLAlchemy-managed database (empirebox.db).
+
+    The chat_backup router uses SQLAlchemy ORM via app.database, which points to
+    empirebox.db (SQLite). We create the tables with raw SQL here so they exist
+    on first startup. Safe to re-run (uses IF NOT EXISTS).
+    """
+    import sqlite3 as _sqlite3
+
+    try:
+        from app.database import DATABASE_URL
+        # Extract SQLite path from URL like "sqlite:///./empirebox.db"
+        if not DATABASE_URL.startswith("sqlite"):
+            print("  chat_backup tables: skipping (non-SQLite database)")
+            return
+        db_path = DATABASE_URL.replace("sqlite:///", "")
+        if not db_path or db_path == ":memory:":
+            db_path = "./empirebox.db"
+    except Exception:
+        db_path = "./empirebox.db"
+
+    CHAT_BACKUP_SQL = """
+    -- Chat sessions: stores chat session metadata and backup tracking
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        source TEXT NOT NULL DEFAULT 'copilot',
+        external_id TEXT,
+        ai_model TEXT,
+        agent_name TEXT,
+        tags TEXT NOT NULL DEFAULT '[]',
+        session_metadata TEXT NOT NULL DEFAULT '{}',
+        is_backed_up INTEGER DEFAULT 0,
+        backup_location TEXT,
+        last_backup_at TEXT,
+        is_active INTEGER DEFAULT 1,
+        is_archived INTEGER DEFAULT 0,
+        started_at TEXT NOT NULL DEFAULT (datetime('now')),
+        ended_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT
+    );
+
+    -- Chat messages: individual messages within a session
+    CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        sequence_number INTEGER NOT NULL,
+        token_count INTEGER,
+        ai_model TEXT,
+        completion_tokens INTEGER,
+        prompt_tokens INTEGER,
+        "references" TEXT NOT NULL DEFAULT '[]',
+        message_metadata TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+    );
+
+    -- Decision contexts: unified context synthesized from chat sessions
+    CREATE TABLE IF NOT EXISTS decision_contexts (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        category TEXT,
+        summary TEXT NOT NULL,
+        key_decisions TEXT NOT NULL DEFAULT '[]',
+        action_items TEXT NOT NULL DEFAULT '[]',
+        context_data TEXT NOT NULL DEFAULT '{}',
+        source_session_ids TEXT NOT NULL DEFAULT '[]',
+        source_count INTEGER NOT NULL DEFAULT 0,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        status TEXT NOT NULL DEFAULT 'active',
+        valid_from TEXT DEFAULT (datetime('now')),
+        valid_until TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT
+    );
+
+    -- Disruption events: tracks workflow disruptions (model switches, etc.)
+    CREATE TABLE IF NOT EXISTS disruption_events (
+        id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        description TEXT,
+        session_id TEXT,
+        previous_state TEXT NOT NULL DEFAULT '{}',
+        new_state TEXT NOT NULL DEFAULT '{}',
+        impact_level TEXT NOT NULL DEFAULT 'low',
+        resolved INTEGER DEFAULT 0,
+        resolution_notes TEXT,
+        occurred_at TEXT DEFAULT (datetime('now')),
+        resolved_at TEXT,
+        FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+    );
+
+    -- Indexes for chat_backup tables
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_sequence ON chat_messages(session_id, sequence_number);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_source ON chat_sessions(source);
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_active ON chat_sessions(is_active);
+    CREATE INDEX IF NOT EXISTS idx_decision_contexts_status ON decision_contexts(status);
+    CREATE INDEX IF NOT EXISTS idx_decision_contexts_priority ON decision_contexts(priority);
+    CREATE INDEX IF NOT EXISTS idx_disruption_events_session ON disruption_events(session_id);
+    CREATE INDEX IF NOT EXISTS idx_disruption_events_resolved ON disruption_events(resolved);
+    """
+
+    try:
+        conn = _sqlite3.connect(db_path)
+        conn.executescript(CHAT_BACKUP_SQL)
+        conn.close()
+        print(f"✓ Chat backup tables initialized in {db_path}")
+    except Exception as e:
+        print(f"✗ Chat backup table init failed (non-fatal): {e}")
+
+
 def init_database():
     """Create all tables and seed desk configs."""
     # Ensure data directory exists
@@ -327,6 +442,9 @@ def init_database():
         count = conn.execute("SELECT COUNT(*) FROM desk_configs").fetchone()[0]
         if count == 0 and DESKS_JSON_PATH.exists():
             _seed_desks(conn)
+
+    # Initialize chat_backup tables in SQLAlchemy database (empirebox.db)
+    _init_chat_backup_tables()
 
 
 def _migrate_pipeline_columns(conn):

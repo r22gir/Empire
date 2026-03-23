@@ -151,7 +151,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             setInput(prev => prev + (prev ? ' ' : '') + data.text);
             textareaRef.current?.focus();
           }
-        } catch { /* silent */ }
+        } catch (err) { console.warn('STT transcription failed:', err); }
         setRecording(false);
       };
       recorder.start();

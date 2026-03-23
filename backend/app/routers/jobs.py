@@ -245,6 +245,7 @@ def jobs_kanban():
 
 # -- CRUD -------------------------------------------------------------------
 
+@router.get("")
 @router.get("/")
 def list_jobs(
     status: Optional[str] = None,
@@ -291,6 +292,7 @@ def list_jobs(
         return {"jobs": jobs, "total": total, "limit": limit, "offset": offset}
 
 
+@router.post("")
 @router.post("/")
 def create_job(job: JobCreate):
     """Create a new job."""

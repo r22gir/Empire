@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import json
 import uuid
 import os
+from pathlib import Path
 import base64
 import httpx
 import logging
@@ -2365,7 +2366,6 @@ def _build_line_items_html(line_items: list) -> str:
     return html
 
 
-@router.post("/{quote_id}/pdf")
 def _discount_html(quote: dict) -> str:
     """Build discount row HTML showing percentage and dollar amount."""
     amt = quote.get("discount_amount", 0)
@@ -2384,6 +2384,7 @@ def _discount_html(quote: dict) -> str:
     )
 
 
+@router.post("/{quote_id}/pdf")
 async def generate_pdf(quote_id: str, skip_verification: bool = False):
     """Generate PDF for a quote with room-level detail, drawings, and mockups.
 

@@ -223,9 +223,51 @@ async def api_transcribe(file: UploadFile = FileParam(...), language: str = "es"
 
 
 # Telegram Bot + Desk Scheduler auto-start
+#
+# When running with multiple uvicorn workers (--workers N), each worker fires
+# its own "startup" event.  Singleton services like the Telegram polling loop
+# must only run in ONE worker, otherwise they fight over getUpdates and crash.
+# We use a simple file-lock: the first worker to acquire it becomes the
+# "primary" and starts all singleton background services.
+#
+_WORKER_LOCK_PATH = Path("/tmp/empire_primary_worker.lock")
+_worker_lock_file = None  # keep reference so the lock is held for process lifetime
+
+
+def _acquire_primary_worker_lock() -> bool:
+    """Try to become the primary worker by acquiring an exclusive file lock.
+
+    Returns True if this process now holds the lock (i.e. is the primary).
+    The lock is held for the lifetime of the process via the module-level
+    ``_worker_lock_file`` reference.
+    """
+    import fcntl
+    global _worker_lock_file
+    try:
+        _worker_lock_file = open(_WORKER_LOCK_PATH, "w")
+        fcntl.flock(_worker_lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _worker_lock_file.write(str(os.getpid()))
+        _worker_lock_file.flush()
+        return True
+    except (OSError, IOError):
+        # Another worker already holds the lock
+        if _worker_lock_file:
+            _worker_lock_file.close()
+            _worker_lock_file = None
+        return False
+
+
 @app.on_event("startup")
 async def start_background_services():
     import asyncio
+
+    is_primary = _acquire_primary_worker_lock()
+
+    if not is_primary:
+        print("⏭ Secondary worker — skipping singleton background services")
+        return
+
+    print("★ Primary worker — starting singleton background services")
 
     # Telegram Bot
     try:

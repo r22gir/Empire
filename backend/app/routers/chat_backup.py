@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import tempfile
 import os
 
-from app.database import get_db
+from app.database import get_async_db as get_db
 from app.services.chat_backup_service import ChatBackupService
 from app.services.context_unification_service import ContextUnificationService
 from app.schemas.chat_backup import (
