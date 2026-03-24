@@ -695,6 +695,33 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       .catch(() => {});
   }, [editQuoteId]);
 
+  // Auto-save photo assignments when they change (debounced) — prevents lost room assignments
+  const photoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!editQuoteId || photos.length === 0) return;
+    // Skip initial load (first 2 seconds)
+    if (photoSaveTimerRef.current === undefined) {
+      photoSaveTimerRef.current = null;
+      return;
+    }
+    if (photoSaveTimerRef.current) clearTimeout(photoSaveTimerRef.current);
+    photoSaveTimerRef.current = setTimeout(() => {
+      const savedPhotos = photos.map(p => ({
+        url: p.uploadedFilename || p.serverUrl || p.preview,
+        original_name: p.originalName || p.preview.split('/').pop() || 'photo',
+        from_intake: p.fromIntake || false,
+        assigned_room_id: p.assignedRoomId || null,
+        assigned_item_id: p.assignedItemId || null,
+      }));
+      fetch(`${API}/quotes/${editQuoteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ photos: savedPhotos }),
+      }).catch(() => {});
+    }, 1500);
+    return () => { if (photoSaveTimerRef.current) clearTimeout(photoSaveTimerRef.current); };
+  }, [photos, editQuoteId]);
+
   // Load previously uploaded 3D scans on mount
   useEffect(() => {
     fetch(`${API}/photos/quote/3d_scans`)
@@ -893,7 +920,17 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setPhotos(prev => [...prev, ...newPhotos]);
   }, []);
 
-  const removePhoto = (idx: number) => {
+  const removePhoto = async (idx: number) => {
+    const photo = photos[idx];
+    // Delete from backend if this photo has been uploaded/stored
+    if (editQuoteId && photo) {
+      const filename = photo.originalName || photo.uploadedFilename?.split('/').pop() || photo.preview.split('/').pop();
+      if (filename) {
+        try {
+          await fetch(`${API}/photos/quote/${editQuoteId}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        } catch { /* best effort — still remove from UI */ }
+      }
+    }
     setPhotos(prev => {
       const copy = [...prev];
       if (!copy[idx].fromIntake && copy[idx].file) {

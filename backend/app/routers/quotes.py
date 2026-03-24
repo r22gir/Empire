@@ -125,6 +125,7 @@ class QuoteUpdate(BaseModel):
     status: Optional[str] = None
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
+    photos: Optional[list] = None
     rooms: Optional[list] = None
     ai_outlines: Optional[list] = None
     ai_mockups: Optional[list] = None
