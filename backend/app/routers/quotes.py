@@ -324,7 +324,7 @@ async def list_quotes(
     heavy tier/item data to keep the response small for list views."""
     quotes = []
     for fname in os.listdir(QUOTES_DIR):
-        if not fname.endswith(".json") or fname.startswith("_"):
+        if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
             continue
         with open(os.path.join(QUOTES_DIR, fname)) as f:
             q = json.load(f)
@@ -487,6 +487,21 @@ async def create_quote_from_rooms(body: dict):
         location=location,
         lining=lining,
     )
+
+    # If editing an existing quote, reuse its ID and quote_number
+    existing_quote_id = body.get("quote_id")
+    if existing_quote_id:
+        old_path = _quote_path(existing_quote_id)
+        if os.path.exists(old_path):
+            with open(old_path) as f:
+                old_quote = json.load(f)
+            quote["id"] = existing_quote_id
+            quote["quote_number"] = old_quote.get("quote_number", quote.get("quote_number"))
+            quote["created_at"] = old_quote.get("created_at", quote.get("created_at"))
+            # Remove the new auto-generated file if different ID
+            new_path = _quote_path(quote["id"])
+            if new_path != old_path and os.path.exists(new_path):
+                os.remove(new_path)
 
     # Enrich with customer info and options
     quote["customer_email"] = customer_email
@@ -892,6 +907,10 @@ async def delete_quote(quote_id: str):
     if not os.path.exists(path):
         raise HTTPException(404, f"Quote {quote_id} not found")
     os.remove(path)
+    # Also remove associated verification file if it exists
+    ver_path = os.path.join(QUOTES_DIR, f"{quote_id}_verification.json")
+    if os.path.exists(ver_path):
+        os.remove(ver_path)
     return {"status": "deleted", "id": quote_id}
 
 
@@ -1969,6 +1988,45 @@ def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
                     </div>"""
                 html += _build_upholstery_drawing(u)
             html += '</div>'
+
+        # Items table (new Quote Builder format — items[] instead of windows[]/upholstery[])
+        items = room.get("items", [])
+        if items and not regular_windows and not upholstery:
+            html += """<table style="margin-bottom:12px"><thead><tr>
+                <th>Item</th><th>Size</th><th>Fabric</th><th>Yardage</th><th>Qty</th>
+            </tr></thead><tbody>"""
+            for it in items:
+                dims = it.get("dimensions", {})
+                size_parts = [f'{dims.get("width", "")}' if dims.get("width") else '',
+                              f'{dims.get("height", "")}' if dims.get("height") else '',
+                              f'{dims.get("depth", "")}' if dims.get("depth") else '']
+                size_str = ' x '.join(p for p in size_parts if p)
+                if size_str:
+                    size_str += '"'
+
+                # Fabric name (client-safe: no cost/margin)
+                fabric_name = it.get("fabric_name", "")
+                backing_name = it.get("backing_fabric_name", "")
+                fabric_display = fabric_name
+                if backing_name:
+                    fabric_display += f"<br><span style='font-size:0.8em;color:#666'>Backing: {backing_name}</span>"
+
+                # Yardage
+                yards = it.get("fabric_yards_needed", 0)
+                backing_yards = it.get("backing_yards_needed", 0)
+                yard_display = f"{yards} yd" if yards else ""
+                if backing_yards:
+                    yard_display += f"<br><span style='font-size:0.8em;color:#666'>+ {backing_yards} yd backing</span>"
+
+                item_label = it.get("type", "item").replace("_", " ").title()
+                html += f"""<tr>
+                    <td style="padding:6px 8px;border-bottom:1px solid #eee">{item_label}</td>
+                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{size_str}</td>
+                    <td style="padding:6px 8px;border-bottom:1px solid #eee">{fabric_display or '—'}</td>
+                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{yard_display or '—'}</td>
+                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{it.get('quantity', 1)}</td>
+                </tr>"""
+            html += "</tbody></table>"
 
         if regular_windows or upholstery:
             html += f'<p style="text-align:right;font-weight:600;color:#333">Room Subtotal: ${room_total:,.2f}</p>'

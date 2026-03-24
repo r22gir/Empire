@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { CheckCircle, Mail, FileDown, FileText, Hammer, X, Loader2 } from 'lucide-react';
+import { CheckCircle, Mail, FileDown, FileText, Hammer, X, Loader2, Trash2 } from 'lucide-react';
 import { API } from '../../../lib/api';
 
 interface QuoteActionsProps {
@@ -15,6 +15,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [showEmailModal, setShowEmailModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -51,7 +52,8 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
         action === 'send' ? 'Quote sent via email' :
         action === 'pdf' ? 'PDF downloaded' :
         action === 'invoice' ? 'Invoice created from quote' :
-        action === 'job' ? 'Job created from quote' : 'Done',
+        action === 'job' ? 'Job created from quote' :
+        action === 'delete' ? 'Quote deleted' : 'Done',
         'success'
       );
       onAction?.(action, result);
@@ -71,7 +73,7 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
     if (compact) {
       return (
         <button
-          onClick={onClick}
+          onClick={(e) => { e.stopPropagation(); onClick(); }}
           disabled={isLoading || loadingAction !== null}
           title={label}
           className="inline-flex items-center justify-center transition-all disabled:opacity-50 cursor-pointer"
@@ -165,6 +167,13 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
           color="#16a34a"
           onClick={() => handleAction('job', `/jobs/from-quote/${quoteId}`)}
         />
+        <ActionBtn
+          id="delete"
+          label="Delete"
+          icon={<Trash2 size={14} />}
+          color="#dc2626"
+          onClick={() => setShowDeleteConfirm(true)}
+        />
       </div>
 
       {/* Email Modal */}
@@ -176,6 +185,34 @@ export default function QuoteActions({ quoteId, status, compact, onAction }: Quo
             handleAction('send', `/quotes/${quoteId}/send`, 'POST', { email });
           }}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="empire-card" style={{ padding: 0, width: '100%', maxWidth: 384, boxShadow: '0 20px 60px rgba(0,0,0,0.12)' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between" style={{ padding: '14px 20px', borderBottom: '1px solid #ece8e0' }}>
+              <h3 className="text-sm font-bold text-[#1a1a1a]">Delete Quote</h3>
+              <button onClick={() => setShowDeleteConfirm(false)} className="p-1.5 rounded-xl hover:bg-[#f0ede8] transition-colors cursor-pointer">
+                <X size={16} className="text-[#999]" />
+              </button>
+            </div>
+            <div style={{ padding: '16px 20px' }}>
+              <p className="text-sm text-[#555]">Are you sure you want to delete quote {quoteId}? This cannot be undone.</p>
+            </div>
+            <div className="flex items-center justify-end gap-2" style={{ padding: '12px 20px', borderTop: '1px solid #ece8e0' }}>
+              <button onClick={() => setShowDeleteConfirm(false)} className="px-3.5 py-2 text-xs font-medium text-[#999] hover:text-[#555] transition-colors cursor-pointer">
+                Cancel
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); handleAction('delete', `/quotes/${quoteId}`, 'DELETE'); }}
+                className="px-4 py-2.5 text-xs font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 transition-colors cursor-pointer"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

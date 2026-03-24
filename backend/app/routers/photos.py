@@ -59,6 +59,7 @@ def _extract_zip(
     """
     saved = []
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    seq = 0  # sequence counter for files within this zip
 
     with tempfile.TemporaryDirectory() as tmpdir:
         zip_path = Path(tmpdir) / "upload.zip"
@@ -80,15 +81,23 @@ def _extract_zip(
                         continue
 
                     # Extract to temp, then save with our naming
+                    seq += 1
                     data = zf.read(name)
                     original_name = Path(name).name
-                    out_name = f"{source}_{ts}_{uuid.uuid4().hex[:6]}{ext}"
+                    # Include sequence number so duplicate filenames are distinguishable
+                    out_name = f"{source}_{ts}_{seq:03d}_{uuid.uuid4().hex[:6]}{ext}"
                     out_path = dest_dir / out_name
                     out_path.write_bytes(data)
+
+                    # Build a human-friendly display name:
+                    # e.g. "3_23_2026.glb" → "#001 — 3_23_2026.glb"
+                    display_name = f"#{seq:03d} — {original_name}"
 
                     # Metadata sidecar
                     meta = {
                         "original_name": original_name,
+                        "display_name": display_name,
+                        "sequence": seq,
                         "source": source,
                         "size": len(data),
                         "content_type": _guess_mime(ext),
@@ -106,6 +115,8 @@ def _extract_zip(
                         "size": len(data),
                         "source": source,
                         "original_name": original_name,
+                        "display_name": display_name,
+                        "sequence": seq,
                     })
                     logger.info(f"Extracted from ZIP: {original_name} → {out_name} ({len(data)} bytes)")
 
@@ -218,6 +229,8 @@ async def list_photos(entity_type: str, entity_id: str):
                     "source": meta.get("source", "unknown"),
                     "uploaded_at": meta.get("uploaded_at"),
                     "original_name": meta.get("original_name"),
+                    "display_name": meta.get("display_name"),
+                    "sequence": meta.get("sequence"),
                 })
 
     # For quotes, also check if there are linked intake photos

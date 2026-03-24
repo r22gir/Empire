@@ -444,7 +444,7 @@ async def chat_stream(request: ChatRequest):
         model_used = "unknown"
         full_response = ""
         try:
-            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt):
+            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or ""):
                 model_used = m_used
                 safe_chunk = sanitize_output(chunk)
                 full_response += safe_chunk
@@ -526,7 +526,7 @@ async def chat_stream(request: ChatRequest):
 
                 yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
-                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt):
+                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or ""):
                     model_used = m_used
                     safe_chunk = sanitize_output(chunk)
                     followup_text += safe_chunk

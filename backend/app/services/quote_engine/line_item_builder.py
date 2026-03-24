@@ -22,6 +22,30 @@ from .yardage_calculator import calculate_yardage
 
 logger = logging.getLogger(__name__)
 
+# Drapery / window treatment types — these get lining
+DRAPERY_TYPES = {
+    "drapery_panel", "drapery", "roman_shade", "roller_shade",
+    "valance", "cornice", "swag", "sheer",
+}
+
+
+def _is_drapery(item_type: str) -> bool:
+    """Return True if item_type is a drapery / window treatment."""
+    t = item_type.lower()
+    return t in DRAPERY_TYPES or t.startswith("drapery_")
+
+
+def _calc_sq_ft(dims: dict) -> float:
+    """Calculate surface sq ft from dimensions (inches)."""
+    w = float(dims.get("width", 0) or 0)
+    h = float(dims.get("height", 0) or 0)
+    d = float(dims.get("depth", 0) or 0)
+    if w and d:
+        return round((w * d) / 144, 2)
+    elif w and h:
+        return round((w * h) / 144, 2)
+    return 0.0
+
 
 def build_line_items(
     item: Dict[str, Any],
@@ -94,18 +118,43 @@ def build_line_items(
         "amount": fabric_total,
     })
 
-    # ---- 2. Lining ----
-    if lining != "none":
-        lining_rate = lining_info["add_per_yard"]
-        lining_total = round(lining_rate * yards, 2)
-        line_items.append({
-            "category": "lining",
-            "description": f"{lining_info['name']} ({yards} yd)",
-            "quantity": yards,
-            "unit": "yd",
-            "rate": lining_rate,
-            "amount": lining_total,
-        })
+    # ---- 2. Lining (drapery only) OR sq ft pricing (upholstery) ----
+    if _is_drapery(item_type):
+        if lining != "none":
+            lining_rate = lining_info["add_per_yard"]
+            lining_total = round(lining_rate * yards, 2)
+            line_items.append({
+                "category": "lining",
+                "description": f"{lining_info['name']} ({yards} yd)",
+                "quantity": yards,
+                "unit": "yd",
+                "rate": lining_rate,
+                "amount": lining_total,
+            })
+    else:
+        # Upholstery — priced per sq ft, no lining
+        sq_ft = _calc_sq_ft(dims)
+        if sq_ft > 0:
+            line_items.append({
+                "category": "sqft",
+                "description": f"Upholstery ({sq_ft} sq ft)",
+                "quantity": sq_ft,
+                "unit": "sqft",
+                "rate": 0,
+                "amount": 0,
+            })
+        # Dacron (optional) — yardage from roll width
+        dacron_roll = item.get("dacron_roll_width", 0)
+        if dacron_roll and sq_ft > 0:
+            dacron_yards = round((sq_ft * 144) / dacron_roll / 36, 2)
+            line_items.append({
+                "category": "dacron",
+                "description": f"Dacron ({dacron_roll}\" wide roll — {dacron_yards} yd needed)",
+                "quantity": dacron_yards,
+                "unit": "yd",
+                "rate": 0,
+                "amount": 0,
+            })
 
     # ---- 3. Labor ----
     labor_dims = dict(dims)

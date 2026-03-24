@@ -36,8 +36,18 @@ class TaskComplexity(Enum):
     CRITICAL = "critical"  # fix, edit, code, file, git, build, deploy, read ~/
 
 
-def classify_complexity(message: str) -> TaskComplexity:
-    """Instant complexity classification — keyword matching + message length. No AI call."""
+def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) -> TaskComplexity:
+    """Instant complexity classification — keyword matching + message length. No AI call.
+
+    Parameters
+    ----------
+    source : str
+        Where the message came from (e.g. "voice", "web", "telegram").
+        Voice input gets escalated to MODERATE minimum.
+    turn_count : int
+        Number of back-and-forth messages in current session on same topic.
+        3+ turns without resolution → escalate to MODERATE.
+    """
     msg = message.lower().strip()
     words = msg.split()
 
@@ -45,6 +55,44 @@ def classify_complexity(message: str) -> TaskComplexity:
     critical_keywords = ['fix', 'edit', 'code', 'file', 'git', 'build', 'deploy', 'commit', 'push', 'pull', 'merge', 'rebase', 'scaffold', 'refactor']
     if any(kw in words for kw in critical_keywords) or msg.startswith('read ~/') or msg.startswith('cat ') or '```' in msg:
         return TaskComplexity.CRITICAL
+
+    # ── Escalation checks (floor = MODERATE) ──
+
+    # Memory/search queries need contextual reasoning
+    memory_patterns = ['what did i', 'my request', 'find my', 'remember when',
+                       'search for', 'look up', 'what was', 'did i ask',
+                       'last time', 'previous conversation', 'earlier today',
+                       'search our', 'search conversation', 'find conversation']
+    if any(p in msg for p in memory_patterns):
+        return TaskComplexity.COMPLEX
+
+    # Tool-triggering messages — Gemini Flash can't handle tool results well
+    tool_trigger_patterns = [
+        'create a task', 'create task', 'add a task', 'new task',
+        'create quote', 'create a quote', 'new quote',
+        'create invoice', 'send invoice', 'send email',
+        'search memory', 'search memories', 'check my',
+        'look up customer', 'find customer', 'customer list',
+        'schedule', 'set reminder', 'remind me',
+        'run report', 'generate report', 'show report',
+        'post to', 'send to telegram', 'send message',
+    ]
+    if any(p in msg for p in tool_trigger_patterns):
+        return TaskComplexity.MODERATE
+
+    # Voice transcriptions are less structured — need smarter model
+    if source == "voice":
+        # Check if it would otherwise be SIMPLE
+        simple_keywords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'ok', 'yes', 'no', 'bye', 'good morning', 'good night', 'status', 'ping', 'test']
+        if len(words) <= 3 and any(kw in msg for kw in simple_keywords):
+            return TaskComplexity.SIMPLE  # genuinely simple voice = keep cheap
+        return TaskComplexity.MODERATE  # everything else from voice → MODERATE min
+
+    # Multi-turn without resolution → escalate
+    if turn_count >= 3:
+        return TaskComplexity.MODERATE
+
+    # ── Standard classification ──
 
     # SIMPLE — greetings, short messages, status checks
     simple_keywords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'ok', 'yes', 'no', 'bye', 'good morning', 'good night', 'status', 'ping', 'test']
@@ -371,7 +419,7 @@ class AIRouter:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
         return None
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder") -> AIResponse:
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "") -> AIResponse:
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -393,7 +441,7 @@ class AIRouter:
 
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
-            complexity = classify_complexity(messages[-1].content if messages else "")
+            complexity = classify_complexity(messages[-1].content if messages else "", source=source)
             logger.info(f"[MAX] Classified as {complexity.value}, using tiered chain")
             providers_chain = self._build_complexity_chain(complexity)
 
@@ -514,7 +562,7 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder") -> AsyncGenerator[tuple[str, str], None]:
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "") -> AsyncGenerator[tuple[str, str], None]:
         # Per-desk model routing
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -536,7 +584,7 @@ class AIRouter:
 
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
-            complexity = classify_complexity(messages[-1].content if messages else "")
+            complexity = classify_complexity(messages[-1].content if messages else "", source=source)
             logger.info(f"[MAX] Stream classified as {complexity.value}, using tiered chain")
             providers_chain = self._build_complexity_chain(complexity)
 

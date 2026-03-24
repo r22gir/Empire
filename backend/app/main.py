@@ -135,6 +135,9 @@ load_router("app.routers.notes_extraction", "/api/v1", ["notes-extraction"])
 load_router("app.routers.pattern_templates", "/api/v1/patterns", ["patterns"])
 load_router("app.routers.custom_shapes", "/api/v1", ["custom-shapes"])
 
+# Fabric Library
+load_router("app.routers.fabrics", "/api/v1/fabrics", ["fabrics"])
+
 # Unified Photo Storage
 load_router("app.routers.photos", "/api/v1", ["photos"])
 

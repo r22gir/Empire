@@ -4,7 +4,7 @@ import { API } from '../../lib/api';
 import {
   Scissors, DollarSign, ClipboardList, TrendingUp, Calendar, Users,
   Package, FileText, Receipt, BarChart3, Truck, Headphones, Loader2, Zap, Camera, Lightbulb, Eye, ArrowLeft, Plus,
-  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler
+  CheckCircle2, Circle, Clock, Flag, Filter, Search, Sparkles, Send, X, Check, CreditCard, Ruler, Trash2
 } from 'lucide-react';
 import QuoteActions from '../business/quotes/QuoteActions';
 import QuickQuoteBuilder from '../business/quotes/QuickQuoteBuilder';
@@ -424,7 +424,8 @@ function OverviewSection({ quotes, stats, onNavigate, onSelectQuote }: { quotes:
 
 // -- Quotes Section --
 
-function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void }) {
+function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }: { quotes: any[]; initialQuoteId?: string | null; onClearInitial?: () => void }) {
+  const [quotes, setQuotes] = useState(initialQuotes);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [showQuickQuote, setShowQuickQuote] = useState(false);
@@ -432,6 +433,58 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
   const [pipelineQuoteId, setPipelineQuoteId] = useState<string | null>(null);
   const [analyzingQuoteId, setAnalyzingQuoteId] = useState<string | null>(null);
   const [viewingQuoteId, setViewingQuoteId] = useState<string | null>(initialQuoteId || null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
+
+  // Sync with parent quotes prop
+  useEffect(() => { setQuotes(initialQuotes); }, [initialQuotes]);
+
+  const filtered = quotes.filter(q => {
+    if (filter !== 'all' && q.status !== filter) return false;
+    if (search && !((q.customer_name || '').toLowerCase().includes(search.toLowerCase()) ||
+                    (q.quote_number || '').toLowerCase().includes(search.toLowerCase()) ||
+                    (q.intake_code || '').toLowerCase().includes(search.toLowerCase()))) return false;
+    return true;
+  });
+
+  const refetchQuotes = () => {
+    fetch(API + '/quotes?limit=50&business=workroom').then(r => r.json()).then(data => {
+      const raw = data.quotes || data || [];
+      setQuotes(Array.isArray(raw) ? raw : []);
+    }).catch(() => {});
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === filtered.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(filtered.map(q => q.id)));
+    }
+  };
+
+  const bulkDelete = async () => {
+    if (selected.size === 0) return;
+    if (!confirm(`Delete ${selected.size} quote${selected.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+    setDeleting(true);
+    for (const id of selected) {
+      try {
+        await fetch(`${API}/quotes/${id}`, { method: 'DELETE' });
+      } catch { /* skip failed */ }
+    }
+    setSelected(new Set());
+    setDeleting(false);
+    refetchQuotes();
+  };
 
   // Auto-open quote from external navigation
   useEffect(() => {
@@ -440,15 +493,6 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
       onClearInitial?.();
     }
   }, [initialQuoteId]);
-  const [showBuilder, setShowBuilder] = useState(false);
-  const [builderQuoteId, setBuilderQuoteId] = useState<string | null>(null);
-  const filtered = quotes.filter(q => {
-    if (filter !== 'all' && q.status !== filter) return false;
-    if (search && !((q.customer_name || '').toLowerCase().includes(search.toLowerCase()) ||
-                    (q.quote_number || '').toLowerCase().includes(search.toLowerCase()) ||
-                    (q.intake_code || '').toLowerCase().includes(search.toLowerCase()))) return false;
-    return true;
-  });
 
   const filters = ['all', 'draft', 'sent', 'accepted', 'proposal'];
 
@@ -542,20 +586,40 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div className="flex flex-wrap gap-1 mb-4">
+      {/* Filter tabs + bulk actions */}
+      <div className="flex flex-wrap items-center gap-1 mb-4">
         {filters.map(f => (
           <button key={f} onClick={() => setFilter(f)}
             className={`filter-tab ${filter === f ? 'active' : ''}`}>
             {f === 'all' ? 'All Status' : f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
+        {selected.size > 0 && (
+          <button
+            onClick={bulkDelete}
+            disabled={deleting}
+            className="flex items-center gap-1.5 cursor-pointer font-bold transition-all hover:bg-red-700 ml-auto"
+            style={{ minHeight: 36, padding: '0 14px', fontSize: 12, borderRadius: 10, background: '#dc2626', color: '#fff', border: 'none' }}
+          >
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            Delete {selected.size} Selected
+          </button>
+        )}
       </div>
 
       <div className="overflow-x-auto">
       <table className="empire-table">
         <thead>
           <tr>
+            <th style={{ width: 36 }}>
+              <input
+                type="checkbox"
+                checked={filtered.length > 0 && selected.size === filtered.length}
+                onChange={toggleSelectAll}
+                className="cursor-pointer"
+                style={{ width: 16, height: 16, accentColor: '#b8960c' }}
+              />
+            </th>
             <th>Quote #</th>
             <th>Customer</th>
             <th style={{ textAlign: 'right' }}>Total</th>
@@ -568,6 +632,15 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
           {filtered.map((q, i) => (
             <React.Fragment key={i}>
               <tr className="cursor-pointer hover:bg-[#fdf8eb] transition-colors" onClick={() => setViewingQuoteId(q.id)}>
+                <td onClick={e => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(q.id)}
+                    onChange={() => toggleSelect(q.id)}
+                    className="cursor-pointer"
+                    style={{ width: 16, height: 16, accentColor: '#b8960c' }}
+                  />
+                </td>
                 <td style={{ fontWeight: 600, color: '#1a1a1a' }}>{q.quote_number || `Q-${i + 1}`}</td>
                 <td>
                   {q.customer_name || '--'}
@@ -594,7 +667,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
                     >
                       <Eye size={14} />
                     </button>
-                    <QuoteActions quoteId={q.id} status={q.status || 'draft'} compact />
+                    <QuoteActions quoteId={q.id} status={q.status || 'draft'} compact onAction={(action) => { if (action === 'delete') refetchQuotes(); }} />
                     <button
                       onClick={(e) => { e.stopPropagation(); setPipelineQuoteId(pipelineQuoteId === q.id ? null : q.id); }}
                       title="Phase Pipeline"
@@ -614,7 +687,7 @@ function QuotesSection({ quotes, initialQuoteId, onClearInitial }: { quotes: any
               </tr>
               {analyzingQuoteId === q.id && (
                 <tr>
-                  <td colSpan={6} style={{ padding: 0 }}>
+                  <td colSpan={7} style={{ padding: 0 }}>
                     <div style={{ padding: '16px 20px', background: '#faf9f7', borderTop: '1px solid #ece8e0' }}>
                       <Suspense fallback={<div className="flex items-center justify-center py-8"><Loader2 size={20} className="text-[#7c3aed] animate-spin" /></div>}>
                         <PhotoAnalysisPanel compact onAnalysisComplete={(type: string, data: any) => {

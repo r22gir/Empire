@@ -3,7 +3,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { API } from '../../lib/api';
 import {
   ArrowLeft, ArrowRight, User, Camera, Layers, Settings, FileText,
-  Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, GripVertical, Search,
+  Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, ChevronUp, GripVertical, Search,
   Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle, BookOpen
 } from 'lucide-react';
 import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
@@ -14,6 +14,9 @@ const CushionBuilder = dynamic(() => import('../business/upholstery/CushionBuild
 const CustomShapeBuilder = dynamic(() => import('../tools/CustomShapeBuilder'), { ssr: false });
 const DraperyHardwareModule = dynamic(() => import('../business/drapery/DraperyHardwareModule'), { ssr: false });
 const ThreeViewer = dynamic(() => import('../business/vision/ThreeViewer'), { ssr: false });
+import PanelConfigurator, { DEFAULT_PANEL_CONFIG, type PanelConfig } from '../tools/PanelConfigurator';
+import FabricSelector, { type Fabric } from '../FabricSelector';
+import YardageCalculator from '../YardageCalculator';
 
 interface CustomerInfo {
   name: string;
@@ -29,6 +32,8 @@ interface PhotoFile {
   serverUrl?: string;
   originalName?: string;
   fromIntake?: boolean;
+  assignedRoomId?: string;
+  assignedItemId?: string;
 }
 
 interface AnalysisItem {
@@ -49,7 +54,25 @@ interface RoomItem {
   depth: string;
   quantity: number;
   notes: string;
+  panelConfig?: PanelConfig;
   _uploadPath?: string;
+  _3dUrl?: string;
+  _3dFilename?: string;
+  // Fabric selections
+  fabric?: Fabric | null;
+  fabricYards?: number;
+  fabricYardsOverride?: number | null;
+  backingFabric?: Fabric | null;
+  backingYards?: number;
+  backingYardsOverride?: number | null;
+}
+
+interface Scan3DFile {
+  url: string;
+  filename: string;
+  originalName: string;
+  assignedRoomId?: string;
+  assignedItemId?: string;
 }
 
 interface Room {
@@ -195,6 +218,51 @@ const BENCH_SHAPE_MAP: Record<string, string> = {
 
 function isBenchType(type: string): boolean {
   return type in BENCH_SHAPE_MAP;
+}
+
+// Human-friendly display names for item types that don't format well from slug
+const DISPLAY_NAMES: Record<string, string> = {
+  sofa_3cushion: 'Sofa 3-Cushion',
+  sofa_2cushion: 'Sofa 2-Cushion',
+  sectional_l: 'Sectional (L-Shape)',
+  sectional_u: 'Sectional (U-Shape)',
+  bench_straight: 'Restaurant Bench (Straight)',
+  bench_l_shaped: 'Restaurant Bench (L-Shape)',
+  bench_u_booth: 'Restaurant Bench (U-Booth)',
+  bench_curved_banquette: 'Curved Banquette',
+  bench_semicircle: 'Semicircle Bench',
+  bench_mixed: 'Custom Bench (Mixed)',
+  bench_window_seat: 'Window Seat',
+  bench_storage: 'Storage Bench',
+  dining_chair_seat: 'Dining Chair (Seat Only)',
+  dining_chair_full: 'Dining Chair (Full)',
+  dining_chair_arm: 'Dining Chair (with Arms)',
+  ottoman_tufted_cube: 'Tufted Cube Ottoman',
+  headboard_custom: 'Headboard (Custom Shape)',
+  wall_panel_tufted_diamond: 'Wall Panel — Diamond Tuft',
+  wall_panel_tufted_biscuit: 'Wall Panel — Biscuit Tuft',
+  wall_panel_channel_vertical: 'Wall Panel — Vertical Channel',
+  wall_panel_channel_horizontal: 'Wall Panel — Horizontal Channel',
+  wall_panel_cornice_topped: 'Wall Panel — Cornice Topped',
+  cushion_box_edge: 'Cushion — Box Edge',
+  cushion_t_cushion: 'T-Cushion',
+  cushion_knife_edge: 'Cushion — Knife Edge',
+  drapery_pinch_pleat: 'Drapery — Pinch Pleat',
+  drapery_french_pleat: 'Drapery — French Pleat',
+  drapery_euro_pleat: 'Drapery — Euro Pleat',
+  drapery_inverted_box: 'Drapery — Inverted Box Pleat',
+  drapery_ripplefold: 'Drapery — Ripplefold',
+  drapery_rod_pocket: 'Drapery — Rod Pocket',
+  drapery_tab_top: 'Drapery — Tab Top',
+  drapery_pencil_pleat: 'Drapery — Pencil Pleat',
+  drapery_fan_pleat: 'Drapery — Fan Pleat',
+  roman_european_relaxed: 'Roman Shade — European Relaxed',
+  cornice_double_serpentine: 'Cornice — Double Serpentine',
+};
+
+/** Format item type for display — use DISPLAY_NAMES if available, else auto-format */
+function formatItemType(t: string): string {
+  return DISPLAY_NAMES[t] || t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function getItemCategory(type: string): ItemCategory {
@@ -465,6 +533,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   const [customer, setCustomer] = useState<CustomerInfo>({ name: '', email: '', phone: '', address: '' });
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
+  const [scan3DFiles, setScan3DFiles] = useState<Scan3DFile[]>([]);
   const [rooms, setRooms] = useState<Room[]>([{ id: crypto.randomUUID(), name: 'Living Room', items: [] }]);
   const [options, setOptions] = useState<QuoteOptions>({
     fabricGrade: 'B',
@@ -508,6 +577,11 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   // 3D Viewer modal
   const [viewer3DItem, setViewer3DItem] = useState<{ itemId: string; roomId: string; url: string } | null>(null);
 
+  // Fabric selector modal
+  const [fabricSelectorOpen, setFabricSelectorOpen] = useState<{
+    roomId: string; itemId: string; mode: 'primary' | 'backing';
+  } | null>(null);
+
   // Photo analysis
   const [analyzingPhoto, setAnalyzingPhoto] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisItem[] | null>(null);
@@ -544,25 +618,42 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               serverUrl: absUrl,
               originalName: typeof p === 'string' ? photoPath.split('/').pop() || 'photo' : (p.original_name || p.filename || 'photo'),
               fromIntake: true,
+              assignedRoomId: typeof p === 'object' ? (p.assigned_room_id || undefined) : undefined,
+              assignedItemId: typeof p === 'object' ? (p.assigned_item_id || undefined) : undefined,
             };
           });
           setPhotos(quotePhotos);
         }
-        // Also load photos from photo store for this quote
+        // Also load photos from photo store for this quote — match room assignments from saved quote photos
         fetch(`${API}/photos/quote/${q.id}`)
           .then(r => r.json())
           .then(data => {
             if (data.photos?.length) {
+              // Build lookup from saved quote photos by filename/url for room assignments
+              const savedAssignments = new Map<string, { roomId?: string; itemId?: string }>();
+              (q.photos || []).forEach((sp: any) => {
+                if (typeof sp === 'object') {
+                  const key = sp.original_name || sp.url?.split('/').pop() || '';
+                  if (key && (sp.assigned_room_id || sp.assigned_item_id)) {
+                    savedAssignments.set(key, { roomId: sp.assigned_room_id, itemId: sp.assigned_item_id });
+                  }
+                }
+              });
               setPhotos(prev => {
                 const existing = new Set(prev.map(p => p.originalName));
                 const newPhotos = data.photos
                   .filter((p: any) => !existing.has(p.filename))
-                  .map((p: any) => ({
-                    preview: `${API_BASE}${p.path}`,
-                    serverUrl: `${API_BASE}${p.path}`,
-                    originalName: p.filename,
-                    fromIntake: true,
-                  }));
+                  .map((p: any) => {
+                    const assign = savedAssignments.get(p.original_name || p.filename) || {};
+                    return {
+                      preview: `${API_BASE}${p.path}`,
+                      serverUrl: `${API_BASE}${p.path}`,
+                      originalName: p.original_name || p.filename,
+                      fromIntake: true,
+                      assignedRoomId: assign.roomId || undefined,
+                      assignedItemId: assign.itemId || undefined,
+                    };
+                  });
                 return [...prev, ...newPhotos];
               });
             }
@@ -571,16 +662,22 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         // Pre-fill rooms if they exist (handles both items and windows format)
         if (q.rooms?.length) {
           setRooms(q.rooms.map((r: any) => ({
-            id: crypto.randomUUID(),
+            id: r.id || crypto.randomUUID(),
             name: r.name || 'Room',
             items: (r.items || r.windows || []).map((w: any) => ({
-              id: crypto.randomUUID(),
+              id: w.id || crypto.randomUUID(),
               type: w.type || w.treatmentType || 'sofa_3cushion',
               width: w.dimensions?.width || w.width || '',
               height: w.dimensions?.height || w.height || '',
               depth: w.dimensions?.depth || w.depth || '',
               quantity: w.quantity || 1,
               notes: w.notes || w.description || '',
+              ...(w.panel_config ? { panelConfig: w.panel_config } : {}),
+              ...(w.fabric_id ? { fabric: { id: w.fabric_id, code: w.fabric_code || '', name: w.fabric_name || '', color_pattern: null, material_type: null, supplier: null, cost_per_yard: w.fabric_cost_at_quote || 0, margin_percent: w.fabric_margin_at_quote || 0, width_inches: 54, pattern_repeat_v: 0, pattern_repeat_h: 0, backing_fabric_id: null, swatch_photo_path: null, notes: null } as Fabric } : {}),
+              ...(w.fabric_yards_needed ? { fabricYards: w.fabric_yards_needed } : {}),
+              ...(w.fabric_yards_override ? { fabricYardsOverride: w.fabric_yards_override } : {}),
+              ...(w.backing_fabric_id ? { backingFabric: { id: w.backing_fabric_id, code: w.backing_fabric_code || '', name: w.backing_fabric_name || '', color_pattern: null, material_type: 'Backing', supplier: null, cost_per_yard: 0, margin_percent: 0, width_inches: 54, pattern_repeat_v: 0, pattern_repeat_h: 0, backing_fabric_id: null, swatch_photo_path: null, notes: null } as Fabric } : {}),
+              ...(w.backing_yards_needed ? { backingYards: w.backing_yards_needed } : {}),
             })),
           })));
         }
@@ -597,6 +694,28 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       })
       .catch(() => {});
   }, [editQuoteId]);
+
+  // Load previously uploaded 3D scans on mount
+  useEffect(() => {
+    fetch(`${API}/photos/quote/3d_scans`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.photos?.length) {
+          const modelExts = ['.glb', '.gltf', '.obj', '.ply', '.usdz', '.stl', '.fbx'];
+          const models = data.photos.filter((p: any) => modelExts.some(e => p.filename?.toLowerCase().endsWith(e)));
+          setScan3DFiles(prev => {
+            const existing = new Set(prev.map(f => f.url));
+            const newFiles = models.filter((p: any) => !existing.has(`${API_BASE}${p.path}`)).map((p: any, i: number) => ({
+              url: `${API_BASE}${p.path}`,
+              filename: p.filename,
+              originalName: p.display_name || p.original_name || `#${String(i + 1).padStart(3, '0')} — ${p.filename}`,
+            }));
+            return [...prev, ...newFiles];
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch intake projects when entering Photos step
   useEffect(() => {
@@ -826,6 +945,31 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setRooms(prev => prev.map(r => r.id === roomId ? { ...r, name } : r));
   };
 
+  const moveRoom = (roomId: string, direction: 'up' | 'down') => {
+    setRooms(prev => {
+      const idx = prev.findIndex(r => r.id === roomId);
+      if (idx < 0) return prev;
+      const target = direction === 'up' ? idx - 1 : idx + 1;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+  };
+
+  const moveItem = (roomId: string, itemId: string, direction: 'up' | 'down') => {
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r;
+      const idx = r.items.findIndex(it => it.id === itemId);
+      if (idx < 0) return r;
+      const target = direction === 'up' ? idx - 1 : idx + 1;
+      if (target < 0 || target >= r.items.length) return r;
+      const items = [...r.items];
+      [items[idx], items[target]] = [items[target], items[idx]];
+      return { ...r, items };
+    }));
+  };
+
   const addItem = (roomId: string, category: ItemCategory = 'upholstery') => {
     const defaultType = category === 'drapery' ? 'drapery' : 'sofa_3cushion';
     setRooms(prev => prev.map(r => r.id === roomId ? {
@@ -867,15 +1011,22 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setSubmitting(true);
     setError('');
     try {
-      // Upload photos first
-      const uploadedPhotos: { url: string; original_name: string; from_intake?: boolean }[] = [];
-      for (const photo of photos) {
+      // Upload photos first, preserving index alignment with photos array
+      const savedPhotos: { url: string; original_name: string; from_intake?: boolean; assigned_room_id?: string | null; assigned_item_id?: string | null }[] = [];
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i];
         const fn = await uploadPhoto(photo);
-        if (fn) uploadedPhotos.push({
-          url: fn,
-          original_name: photo.originalName || photo.file?.name || fn.split('/').pop() || 'photo',
-          from_intake: photo.fromIntake || false,
-        });
+        // Even if upload returns null, keep the photo with its serverUrl so assignments persist
+        const url = fn || (photo.serverUrl ? new URL(photo.serverUrl, window.location.origin).pathname : null);
+        if (url) {
+          savedPhotos.push({
+            url,
+            original_name: photo.originalName || photo.file?.name || url.split('/').pop() || 'photo',
+            from_intake: photo.fromIntake || false,
+            assigned_room_id: photo.assignedRoomId || null,
+            assigned_item_id: photo.assignedItemId || null,
+          });
+        }
       }
 
       const payload = {
@@ -883,14 +1034,32 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         customer_email: customer.email,
         customer_phone: customer.phone,
         customer_address: customer.address,
-        photos: uploadedPhotos,
-        rooms: rooms.filter(r => r.items.length > 0).map(r => ({
+        photos: savedPhotos,
+        rooms: rooms.map(r => ({
+          id: r.id,
           name: r.name,
           items: r.items.map(it => ({
+            id: it.id,
             type: it.type,
             dimensions: { width: it.width, height: it.height, depth: it.depth },
             quantity: it.quantity,
             notes: it.notes,
+            ...(it.panelConfig && it.panelConfig.style !== 'flat' ? { panel_config: it.panelConfig } : {}),
+            ...(it.fabric ? {
+              fabric_id: it.fabric.id,
+              fabric_code: it.fabric.code,
+              fabric_name: `${it.fabric.name}${it.fabric.color_pattern ? ' — ' + it.fabric.color_pattern : ''}`,
+              fabric_yards_needed: it.fabricYardsOverride || it.fabricYards || 0,
+              fabric_yards_override: it.fabricYardsOverride || null,
+              fabric_cost_at_quote: it.fabric.cost_per_yard,
+              fabric_margin_at_quote: it.fabric.margin_percent,
+            } : {}),
+            ...(it.backingFabric ? {
+              backing_fabric_id: it.backingFabric.id,
+              backing_fabric_code: it.backingFabric.code,
+              backing_fabric_name: `${it.backingFabric.name}${it.backingFabric.color_pattern ? ' — ' + it.backingFabric.color_pattern : ''}`,
+              backing_yards_needed: it.backingYardsOverride || it.backingYards || 0,
+            } : {}),
           })),
         })),
         options: {
@@ -941,6 +1110,10 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         },
       };
 
+      // If editing, include the existing quote ID so backend updates instead of creating new
+      if (editQuoteId) {
+        (payload as any).quote_id = editQuoteId;
+      }
       // Use from-rooms endpoint which runs full pricing pipeline (yardage + tiers)
       const res = await fetch(API + '/quotes/from-rooms', {
         method: 'POST',
@@ -1039,6 +1212,24 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               selectedIntakeId={selectedIntakeId} onLoadIntake={loadIntakeProject}
               onAnalyze={analyzePhoto} analyzingPhoto={analyzingPhoto}
               onManualItem={addManualItem}
+              rooms={rooms}
+              onAssignPhotoRoom={(photoIdx, roomId) => {
+                setPhotos(prev => prev.map((p, i) => i === photoIdx ? { ...p, assignedRoomId: roomId || undefined, assignedItemId: roomId ? p.assignedItemId : undefined } : p));
+              }}
+              onAddRoom={() => {
+                const name = prompt('Room name:');
+                if (!name) return;
+                const newRoom: Room = { id: crypto.randomUUID(), name, items: [] };
+                setRooms(prev => [...prev, newRoom]);
+                return newRoom.id;
+              }}
+              scan3DFiles={scan3DFiles}
+              onAdd3DFile={(file) => setScan3DFiles(prev => [...prev, file])}
+              onAssign3DToRoom={(scanIdx, roomId) => {
+                setScan3DFiles(prev => prev.map((f, i) => i === scanIdx ? { ...f, assignedRoomId: roomId || undefined } : f));
+              }}
+              onPreview3D={(url) => setViewer3DItem({ itemId: '', roomId: '', url })}
+              onRemove3D={(idx) => setScan3DFiles(prev => prev.filter((_, i) => i !== idx))}
             />
             {showAnalysis && (
               <AnalysisWizard
@@ -1076,9 +1267,18 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         {step === 3 && (
           <>
             <StepRooms
-              rooms={rooms} addRoom={addRoom} removeRoom={removeRoom} updateRoomName={updateRoomName}
+              rooms={rooms} photos={photos} scan3DFiles={scan3DFiles} apiBase={API_BASE}
+              addRoom={addRoom} removeRoom={removeRoom} updateRoomName={updateRoomName}
               addItem={addItem} removeItem={removeItem} updateItem={updateItem}
               onBrowseCatalog={(roomId) => { setCatalogTargetRoom(roomId); setShowCatalog(true); }}
+              onSelectFabric={(roomId, itemId, mode) => setFabricSelectorOpen({ roomId, itemId, mode })}
+              onAssignPhotoToItem={(photoIndex, itemId, type) => {
+                if (type === 'photo') {
+                  setPhotos(prev => prev.map((p, i) => i === photoIndex ? { ...p, assignedItemId: itemId } : p));
+                } else {
+                  setScan3DFiles(prev => prev.map((f, i) => i === photoIndex ? { ...f, assignedItemId: itemId } : f));
+                }
+              }}
               onOpenShapeBuilder={(roomId, itemId, itemType) => {
                 const preset = BENCH_SHAPE_MAP[itemType];
                 if (preset) {
@@ -1130,6 +1330,29 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                 </div>
               </div>
             )}
+            {/* Fabric Selector modal */}
+            {fabricSelectorOpen && (
+              <FabricSelector
+                mode="owner"
+                filterType={fabricSelectorOpen.mode === 'backing' ? 'Backing' : undefined}
+                suggestedBackingId={(() => {
+                  if (fabricSelectorOpen.mode !== 'backing') return null;
+                  const room = rooms.find(r => r.id === fabricSelectorOpen.roomId);
+                  const item = room?.items.find(i => i.id === fabricSelectorOpen.itemId);
+                  return item?.fabric?.backing_fabric_id || null;
+                })()}
+                onSelect={(fabric) => {
+                  const { roomId, itemId, mode } = fabricSelectorOpen;
+                  if (mode === 'primary') {
+                    updateItem(roomId, itemId, 'fabric', fabric);
+                  } else {
+                    updateItem(roomId, itemId, 'backingFabric', fabric);
+                  }
+                  setFabricSelectorOpen(null);
+                }}
+                onClose={() => setFabricSelectorOpen(null)}
+              />
+            )}
             {/* Custom Shape Builder modal for bench items */}
             {showShapeBuilder && shapeBuilderTarget && (
               <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1175,61 +1398,6 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                 </div>
               </div>
             )}
-            {/* 3D Viewer Modal */}
-            {viewer3DItem && (
-              <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} onClick={() => setViewer3DItem(null)} />
-                <div style={{ position: 'relative', width: '95%', maxWidth: 1200, height: '85vh', background: '#fff', borderRadius: 16, boxShadow: '0 8px 40px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                  <div style={{ padding: '16px 24px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#f0fdf4', color: '#16a34a' }}>
-                        <Box size={16} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>3D Scan Viewer</div>
-                        <div style={{ fontSize: 12, color: '#888' }}>Measure, calibrate, and define treatment areas on your 3D scan</div>
-                      </div>
-                    </div>
-                    <button onClick={() => setViewer3DItem(null)} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
-                      <X size={16} />
-                    </button>
-                  </div>
-                  <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
-                    <ThreeViewer
-                      modelUrl={viewer3DItem.url}
-                      width={1160}
-                      height={600}
-                      onExportData={(data) => {
-                        const { roomId, itemId } = viewer3DItem;
-                        // Apply measurements to item dimensions
-                        if (data.measurements?.length > 0) {
-                          const m = data.measurements[0];
-                          if (m.value_inches) {
-                            updateItem(roomId, itemId, 'width', String(Math.round(m.value_inches)));
-                          }
-                          if (data.measurements.length > 1 && data.measurements[1].value_inches) {
-                            updateItem(roomId, itemId, 'height', String(Math.round(data.measurements[1].value_inches)));
-                          }
-                          if (data.measurements.length > 2 && data.measurements[2].value_inches) {
-                            updateItem(roomId, itemId, 'depth', String(Math.round(data.measurements[2].value_inches)));
-                          }
-                        }
-                        // Add treatment areas to notes
-                        if (data.treatmentAreas?.length > 0) {
-                          const areas = data.treatmentAreas.map((a: any) =>
-                            `${a.label}: ${Math.round(a.width_inches)}"×${Math.round(a.height_inches)}"`
-                          ).join(', ');
-                          const currentNotes = rooms.find(r => r.id === roomId)?.items.find(i => i.id === itemId)?.notes || '';
-                          const baseNote = currentNotes.split(' | Areas:')[0];
-                          updateItem(roomId, itemId, 'notes', `${baseNote} | Areas: ${areas}`);
-                        }
-                        setViewer3DItem(null);
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </>
         )}
         {step === 4 && <StepOptions options={options} setOptions={setOptions} rooms={rooms} hardwareConfig={hardwareConfig} setHardwareConfig={setHardwareConfig} />}
@@ -1239,6 +1407,46 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         {step === 5 && result && <ResultView result={result} />}
         {error && <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: 13 }}>{error}</div>}
       </div>
+
+      {/* 3D Viewer Modal — global, works from any step */}
+      {viewer3DItem && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} onClick={() => setViewer3DItem(null)} />
+          <div style={{ position: 'relative', width: '95%', maxWidth: 1200, height: '85vh', background: '#fff', borderRadius: 16, boxShadow: '0 8px 40px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <div style={{ padding: '16px 24px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#f0fdf4', color: '#16a34a' }}>
+                  <Box size={16} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>3D Scan Viewer</div>
+                  <div style={{ fontSize: 12, color: '#888' }}>Measure, calibrate, and define treatment areas</div>
+                </div>
+              </div>
+              <button onClick={() => setViewer3DItem(null)} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                <X size={16} />
+              </button>
+            </div>
+            <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
+              <ThreeViewer
+                modelUrl={viewer3DItem.url}
+                width={1160}
+                height={600}
+                onExportData={viewer3DItem.itemId ? (data) => {
+                  const { roomId, itemId } = viewer3DItem;
+                  if (data.measurements?.length > 0) {
+                    const m = data.measurements;
+                    if (m[0]?.value_inches) updateItem(roomId, itemId, 'width', String(Math.round(m[0].value_inches)));
+                    if (m[1]?.value_inches) updateItem(roomId, itemId, 'height', String(Math.round(m[1].value_inches)));
+                    if (m[2]?.value_inches) updateItem(roomId, itemId, 'depth', String(Math.round(m[2].value_inches)));
+                  }
+                  setViewer3DItem(null);
+                } : undefined}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigation buttons */}
       <div className="flex items-center justify-between mt-5">
@@ -1268,6 +1476,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
           </button>
         )}
       </div>
+
     </div>
   );
 }
@@ -1373,13 +1582,21 @@ function StepCustomer({ customer, setCustomer }: { customer: CustomerInfo; setCu
   );
 }
 
-function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, intakeProjects, loadingIntake, selectedIntakeId, onLoadIntake, onAnalyze, analyzingPhoto, onManualItem, apiBase }: {
+function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, intakeProjects, loadingIntake, selectedIntakeId, onLoadIntake, onAnalyze, analyzingPhoto, onManualItem, apiBase, rooms, onAssignPhotoRoom, onAddRoom, scan3DFiles, onAdd3DFile, onAssign3DToRoom, onPreview3D, onRemove3D }: {
   photos: PhotoFile[]; onAdd: (files: FileList | File[]) => void; onAddServerPhotos?: (photos: PhotoFile[]) => void; onRemove: (i: number) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   intakeProjects: any[]; loadingIntake: boolean; selectedIntakeId: string | null;
   onLoadIntake: (project: any) => void; onAnalyze: (idx: number) => void; analyzingPhoto: number | null;
   onManualItem: (item: any) => void;
   apiBase?: string;
+  rooms?: Room[];
+  onAssignPhotoRoom?: (photoIdx: number, roomId: string) => void;
+  onAddRoom?: () => string | undefined;
+  scan3DFiles?: Scan3DFile[];
+  onAdd3DFile?: (file: Scan3DFile) => void;
+  onAssign3DToRoom?: (scanIdx: number, roomId: string) => void;
+  onPreview3D?: (url: string) => void;
+  onRemove3D?: (scanIdx: number) => void;
 }) {
   const API_BASE = apiBase || '';
   const [dragOver, setDragOver] = useState(false);
@@ -1434,7 +1651,7 @@ function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, 
           {photos.length > 0 && (
             <div className="flex gap-3 flex-wrap mb-4">
               {photos.map((p, i) => (
-                <div key={i} style={{ position: 'relative', width: 120, height: 140, borderRadius: 12, overflow: 'hidden', border: '2px solid #ece8e0', background: '#f5f3ef' }}>
+                <div key={i} style={{ position: 'relative', width: 120, borderRadius: 12, overflow: 'hidden', border: '2px solid #ece8e0', background: '#f5f3ef' }}>
                   <img src={p.preview} alt="" style={{ width: '100%', height: 100, objectFit: 'cover' }} />
                   {p.fromIntake && (
                     <div style={{ position: 'absolute', top: 4, left: 4, fontSize: 8, fontWeight: 700, color: '#fff', background: '#b8960c', padding: '2px 5px', borderRadius: 4 }}>
@@ -1463,6 +1680,33 @@ function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, 
                       ? <><Loader2 size={11} className="animate-spin" /> Analyzing...</>
                       : <><Sparkles size={11} /> Analyze</>}
                   </button>
+                  {rooms && onAssignPhotoRoom && (
+                    <select
+                      value={p.assignedRoomId || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__new__') {
+                          const newId = onAddRoom?.();
+                          if (newId) onAssignPhotoRoom(i, newId);
+                        } else {
+                          onAssignPhotoRoom(i, val);
+                        }
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      style={{
+                        width: '100%', fontSize: 9, padding: '4px 6px', border: 'none',
+                        borderTop: '1px solid #ece8e0', background: p.assignedRoomId ? '#f0fdf4' : '#faf9f7',
+                        color: p.assignedRoomId ? '#16a34a' : '#999', fontWeight: 600, cursor: 'pointer',
+                        borderRadius: '0 0 10px 10px',
+                      }}
+                    >
+                      <option value="">Assign Room...</option>
+                      {rooms.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                      <option value="__new__">+ New Room</option>
+                    </select>
+                  )}
                 </div>
               ))}
             </div>
@@ -1541,23 +1785,26 @@ function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, 
                       const newPhotos: PhotoFile[] = images.map((p: any) => ({
                         preview: `${API_BASE}${p.path}`,
                         serverUrl: `${API_BASE}${p.path}`,
-                        originalName: p.original_name || p.filename,
+                        originalName: p.display_name || p.original_name || p.filename,
                         fromIntake: false,
                       }));
                       onAddServerPhotos(newPhotos);
                     }
-                    // Add first 3D model as item (or the zip itself if no models found)
-                    const primaryModel = models[0] || allFiles[0];
-                    const uploadedPath = primaryModel?.path || file.name;
-                    onManualItem({
-                      type: '3d_scan',
-                      description: `3D Scan: ${file.name}${allFiles.length > 1 ? ` (${allFiles.length} files extracted)` : ''}`,
-                      measurements: {},
-                      _file: file,
-                      _uploadPath: uploadedPath,
-                    });
-                    if (images.length > 0) {
-                      alert(`Extracted ${models.length} 3D model(s) and ${images.length} image(s) from ${file.name}`);
+                    // Store 3D models in scan list (not as room items)
+                    for (const model of models) {
+                      onAdd3DFile?.({
+                        url: `${API_BASE}${model.path}`,
+                        filename: model.filename,
+                        originalName: model.display_name || model.original_name || file.name,
+                      });
+                    }
+                    // If zip had no recognized models, add the primary file
+                    if (models.length === 0 && allFiles[0]) {
+                      onAdd3DFile?.({
+                        url: `${API_BASE}${allFiles[0].path}`,
+                        filename: allFiles[0].filename,
+                        originalName: allFiles[0].display_name || allFiles[0].original_name || file.name,
+                      });
                     }
                   } catch (err) {
                     console.error('[3D Upload] FAILED:', err);
@@ -1577,6 +1824,58 @@ function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, 
               Scan rooms with your phone&apos;s LiDAR sensor, then upload the exported model
             </div>
           </div>
+
+          {/* Uploaded 3D Files List */}
+          {scan3DFiles && scan3DFiles.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                Uploaded 3D Scans ({scan3DFiles.length})
+              </div>
+              {scan3DFiles.map((f, idx) => (
+                <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', marginBottom: 6, borderRadius: 10, border: '1px solid #d1fae5', background: '#f0fdf4' }}>
+                  <Box size={16} style={{ color: '#16a34a', flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#333', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {f.originalName}
+                  </span>
+                  <button
+                    onClick={() => onPreview3D?.(f.url)}
+                    className="cursor-pointer transition-all hover:bg-[#16a34a] hover:text-white"
+                    style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 6, border: '1px solid #16a34a', background: '#fff', color: '#16a34a' }}
+                  >
+                    <Eye size={12} style={{ display: 'inline', marginRight: 3 }} />Preview
+                  </button>
+                  {rooms && onAssign3DToRoom && (
+                    <select
+                      value={f.assignedRoomId || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '__new__') {
+                          const newId = onAddRoom?.();
+                          if (newId) onAssign3DToRoom(idx, newId);
+                        } else {
+                          onAssign3DToRoom(idx, val);
+                        }
+                      }}
+                      style={{ fontSize: 10, padding: '4px 8px', borderRadius: 6, border: '1px solid #d1fae5', background: f.assignedRoomId ? '#dcfce7' : '#fff', color: f.assignedRoomId ? '#16a34a' : '#999', fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      <option value="">Assign Room...</option>
+                      {rooms.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                      <option value="__new__">+ New Room</option>
+                    </select>
+                  )}
+                  <button
+                    onClick={() => onRemove3D?.(idx)}
+                    className="cursor-pointer transition-all hover:bg-[#dc2626] hover:text-white"
+                    style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #fca5a5', background: '#fff', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2073,7 +2372,7 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                           <select value={item.type} onChange={e => updateField(idx, 'type', e.target.value)} className="form-input" style={{ flex: 1, fontSize: 12, padding: '5px 8px' }}>
                             {[...UPHOLSTERY_GROUPS, ...DRAPERY_GROUPS].map(g => (
                               <optgroup key={g.label} label={g.label}>
-                                {g.items.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                                {g.items.map(t => <option key={t} value={t}>{formatItemType(t)}</option>)}
                               </optgroup>
                             ))}
                           </select>
@@ -2299,15 +2598,19 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
   );
 }
 
-function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D }: {
-  rooms: Room[]; addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
+function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
+  rooms: Room[]; photos?: PhotoFile[]; scan3DFiles?: Scan3DFile[]; apiBase?: string;
+  addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
   addItem: (roomId: string, category?: ItemCategory) => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
   onBrowseCatalog: (roomId: string) => void;
   onOpenShapeBuilder?: (roomId: string, itemId: string, itemType: string) => void;
   onView3D?: (roomId: string, itemId: string) => void;
+  onSelectFabric?: (roomId: string, itemId: string, mode: 'primary' | 'backing') => void;
+  onAssignPhotoToItem?: (photoIndex: number, itemId: string, type: 'photo' | 'scan') => void;
 }) {
   const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
+  const [dragOverItem, setDragOverItem] = useState<string | null>(null);
 
   return (
     <div>
@@ -2326,8 +2629,20 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
         {rooms.map(room => (
           <div key={room.id} style={{ border: '1.5px solid #ece8e0', borderRadius: 14, overflow: 'hidden' }}>
             {/* Room header */}
-            <div className="flex items-center gap-3" style={{ padding: '12px 16px', background: '#f5f3ef', borderBottom: '1px solid #ece8e0' }}>
-              <GripVertical size={14} className="text-[#ccc]" />
+            <div className="flex items-center gap-2" style={{ padding: '12px 16px', background: '#f5f3ef', borderBottom: '1px solid #ece8e0' }}>
+              {/* Move up/down */}
+              <div className="flex flex-col gap-0.5" style={{ flexShrink: 0 }}>
+                <button onClick={() => moveRoom(room.id, 'up')} disabled={rooms.indexOf(room) === 0}
+                  className="cursor-pointer transition-all hover:bg-[#fdf8eb] disabled:opacity-25 disabled:cursor-default"
+                  style={{ width: 22, height: 18, borderRadius: 4, border: '1px solid #ddd', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                  <ChevronUp size={12} className="text-[#999]" />
+                </button>
+                <button onClick={() => moveRoom(room.id, 'down')} disabled={rooms.indexOf(room) === rooms.length - 1}
+                  className="cursor-pointer transition-all hover:bg-[#fdf8eb] disabled:opacity-25 disabled:cursor-default"
+                  style={{ width: 22, height: 18, borderRadius: 4, border: '1px solid #ddd', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                  <ChevronDown size={12} className="text-[#999]" />
+                </button>
+              </div>
               <input value={room.name} onChange={e => updateRoomName(room.id, e.target.value)}
                 style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 14, fontWeight: 600, color: '#1a1a1a' }} />
               <div style={{ position: 'relative' }}>
@@ -2369,6 +2684,73 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
               )}
             </div>
 
+            {/* Room photos strip */}
+            {(() => {
+              const roomPhotos = (photos || []).filter(p => p.assignedRoomId === room.id);
+              const roomScans = (scan3DFiles || []).filter(f => f.assignedRoomId === room.id);
+              if (!roomPhotos.length && !roomScans.length) return null;
+              return (
+                <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0ede8', background: '#faf9f7' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 4 }}>
+                    <Camera size={10} style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />
+                    {roomPhotos.length + roomScans.length} photo{roomPhotos.length + roomScans.length !== 1 ? 's' : ''} assigned
+                    <span style={{ fontWeight: 400, color: '#bbb', marginLeft: 6 }}>drag onto item to assign</span>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto" style={{ paddingBottom: 2 }}>
+                    {roomPhotos.map((p, pi) => {
+                      const globalIdx = (photos || []).indexOf(p);
+                      return (
+                      <div key={`p-${pi}`} draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'photo', index: globalIdx }));
+                          e.dataTransfer.effectAllowed = 'link';
+                        }}
+                        title={p.assignedItemId ? `Assigned to item` : 'Drag onto an item to assign'}
+                        style={{
+                          width: 52, height: 52, borderRadius: 6, flexShrink: 0, cursor: 'grab',
+                          border: p.assignedItemId ? '2px solid #b8960c' : '1px solid #ece8e0',
+                          overflow: 'hidden', background: '#f5f3ef', position: 'relative',
+                        }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={p.preview || p.serverUrl || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                        {p.assignedItemId && (
+                          <div style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: '4px 0 0 0', background: '#b8960c', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Check size={8} className="text-white" />
+                          </div>
+                        )}
+                      </div>
+                      );
+                    })}
+                    {roomScans.map((f, si) => {
+                      const globalIdx = (scan3DFiles || []).indexOf(f);
+                      return (
+                      <div key={`s-${si}`} draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'scan', index: globalIdx }));
+                          e.dataTransfer.effectAllowed = 'link';
+                        }}
+                        title={f.assignedItemId ? 'Assigned to item' : 'Drag onto an item to assign'}
+                        style={{
+                          width: 52, height: 52, borderRadius: 6, flexShrink: 0, cursor: 'grab',
+                          border: f.assignedItemId ? '2px solid #16a34a' : '1px solid #bbf7d0',
+                          overflow: 'hidden', background: '#f0fdf4',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
+                        }}>
+                        <Box size={18} className="text-[#16a34a]" />
+                        {f.assignedItemId && (
+                          <div style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: '4px 0 0 0', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Check size={8} className="text-white" />
+                          </div>
+                        )}
+                      </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Items */}
             <div style={{ padding: room.items.length ? '12px 16px' : '0' }}>
               {room.items.length === 0 && (
@@ -2383,7 +2765,70 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                 const catLabel = cat === 'drapery' ? 'DRAPERY' : 'UPHOLSTERY';
                 const diagramMatch = DIAGRAM_MAP[item.type] ? item.type : findDiagramMatch(item.type);
                 return (
-                <div key={item.id} className="flex items-start gap-2" style={{ marginBottom: idx < room.items.length - 1 ? 10 : 0, paddingBottom: idx < room.items.length - 1 ? 10 : 0, borderBottom: idx < room.items.length - 1 ? '1px solid #f0ede8' : 'none' }}>
+                <div key={item.id} className="flex items-start gap-2"
+                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'link'; }}
+                  onDragEnter={() => setDragOverItem(item.id)}
+                  onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverItem(null); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverItem(null);
+                    try {
+                      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                      onAssignPhotoToItem?.(data.index, item.id, data.type);
+                    } catch {}
+                  }}
+                  style={{
+                    marginBottom: idx < room.items.length - 1 ? 10 : 0,
+                    paddingBottom: idx < room.items.length - 1 ? 10 : 0,
+                    borderBottom: idx < room.items.length - 1 ? '1px solid #f0ede8' : 'none',
+                    borderRadius: 8, padding: '6px 4px',
+                    outline: dragOverItem === item.id ? '2px dashed #b8960c' : 'none',
+                    background: dragOverItem === item.id ? '#fdf8eb' : 'transparent',
+                    transition: 'outline 0.15s, background 0.15s',
+                  }}>
+                  {/* Item-assigned photos */}
+                  {(() => {
+                    const itemPhotos = (photos || []).filter(p => p.assignedItemId === item.id);
+                    const itemScans = (scan3DFiles || []).filter(f => f.assignedItemId === item.id);
+                    if (!itemPhotos.length && !itemScans.length) return null;
+                    return (
+                      <div className="flex flex-col gap-1" style={{ flexShrink: 0, marginTop: 10 }}>
+                        {itemPhotos.map((p, pi) => (
+                          <div key={`ip-${pi}`} style={{
+                            width: 36, height: 36, borderRadius: 5, overflow: 'hidden',
+                            border: '2px solid #b8960c',
+                          }}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={p.preview || p.serverUrl || ''} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        ))}
+                        {itemScans.map((f, si) => (
+                          <div key={`is-${si}`} style={{
+                            width: 36, height: 36, borderRadius: 5,
+                            border: '2px solid #16a34a', background: '#f0fdf4',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <Box size={14} className="text-[#16a34a]" />
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {/* Move item up/down */}
+                  {room.items.length > 1 && (
+                    <div className="flex flex-col gap-0.5" style={{ flexShrink: 0, marginTop: 14 }}>
+                      <button onClick={() => moveItem(room.id, item.id, 'up')} disabled={idx === 0}
+                        className="cursor-pointer transition-all hover:bg-[#fdf8eb] disabled:opacity-20 disabled:cursor-default"
+                        style={{ width: 18, height: 14, borderRadius: 3, border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                        <ChevronUp size={10} className="text-[#aaa]" />
+                      </button>
+                      <button onClick={() => moveItem(room.id, item.id, 'down')} disabled={idx === room.items.length - 1}
+                        className="cursor-pointer transition-all hover:bg-[#fdf8eb] disabled:opacity-20 disabled:cursor-default"
+                        style={{ width: 18, height: 14, borderRadius: 3, border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                        <ChevronDown size={10} className="text-[#aaa]" />
+                      </button>
+                    </div>
+                  )}
                   {/* Diagram thumbnail */}
                   {diagramMatch && DIAGRAM_MAP[diagramMatch] && (
                     <div style={{ width: 52, height: 52, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 12, overflow: 'hidden' }}>
@@ -2404,7 +2849,7 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                         {typeGroups.map(g => (
                           <optgroup key={g.label} label={g.label}>
                             {g.items.map(t => (
-                              <option key={t} value={t}>{t.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                              <option key={t} value={t}>{formatItemType(t)}</option>
                             ))}
                           </optgroup>
                         ))}
@@ -2465,7 +2910,121 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                         </button>
                       </div>
                     )}
+                    {/* Fabric selection row */}
+                    <div className="col-span-6" style={{ marginTop: 4 }}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {!item.fabric ? (
+                          <button onClick={() => onSelectFabric?.(room.id, item.id, 'primary')}
+                            className="cursor-pointer transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c]"
+                            style={{
+                              padding: '5px 12px', borderRadius: 7,
+                              border: '1.5px solid #ece8e0', background: '#faf9f7',
+                              fontSize: 10, fontWeight: 700, color: '#b8960c',
+                              minHeight: 32,
+                            }}>
+                            Select Fabric
+                          </button>
+                        ) : (
+                          <>
+                            {/* Compact fabric card */}
+                            <div style={{
+                              display: 'flex', alignItems: 'center', gap: 6,
+                              padding: '4px 10px 4px 4px', borderRadius: 8,
+                              border: '1.5px solid #d4d0c8', background: '#faf9f7',
+                            }}>
+                              <div style={{
+                                width: 24, height: 24, borderRadius: 5, flexShrink: 0,
+                                background: '#ece8e0',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                <span style={{ fontSize: 10 }}>F</span>
+                              </div>
+                              <span style={{ fontSize: 11, fontWeight: 600, color: '#1a1a1a' }}>
+                                {item.fabric.code} {item.fabric.color_pattern || ''}
+                              </span>
+                              {item.fabric.cost_per_yard > 0 && (
+                                <span style={{ fontSize: 10, color: '#888' }}>
+                                  ${item.fabric.cost_per_yard.toFixed(2)}/yd
+                                </span>
+                              )}
+                              <button onClick={() => { updateItem(room.id, item.id, 'fabric', null); updateItem(room.id, item.id, 'fabricYards', undefined); updateItem(room.id, item.id, 'fabricYardsOverride', null); }}
+                                className="cursor-pointer transition-all hover:bg-[#fef2f2]"
+                                style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid #ece8e0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 2 }}>
+                                <X size={10} className="text-[#999]" />
+                              </button>
+                            </div>
+                            {/* Select Backing button */}
+                            {!item.backingFabric ? (
+                              <button onClick={() => onSelectFabric?.(room.id, item.id, 'backing')}
+                                className="cursor-pointer transition-all hover:bg-[#eff6ff] hover:border-[#2563eb]"
+                                style={{
+                                  padding: '5px 10px', borderRadius: 7,
+                                  border: '1.5px solid #dbeafe', background: '#f0f7ff',
+                                  fontSize: 10, fontWeight: 600, color: '#2563eb',
+                                  minHeight: 32,
+                                }}>
+                                + Backing
+                              </button>
+                            ) : (
+                              <div style={{
+                                display: 'flex', alignItems: 'center', gap: 6,
+                                padding: '4px 10px 4px 4px', borderRadius: 8,
+                                border: '1.5px solid #c7d2fe', background: '#f0f7ff',
+                              }}>
+                                <div style={{
+                                  width: 24, height: 24, borderRadius: 5, flexShrink: 0,
+                                  background: '#dbeafe',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}>
+                                  <span style={{ fontSize: 10, color: '#2563eb' }}>B</span>
+                                </div>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: '#1a1a1a' }}>
+                                  {item.backingFabric.code} {item.backingFabric.color_pattern || ''}
+                                </span>
+                                <button onClick={() => { updateItem(room.id, item.id, 'backingFabric', null); updateItem(room.id, item.id, 'backingYards', undefined); updateItem(room.id, item.id, 'backingYardsOverride', null); }}
+                                  className="cursor-pointer transition-all hover:bg-[#fef2f2]"
+                                  style={{ width: 18, height: 18, borderRadius: 4, border: '1px solid #c7d2fe', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', marginLeft: 2 }}>
+                                  <X size={10} className="text-[#999]" />
+                                </button>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {/* Yardage calculators */}
+                      {item.fabric && (
+                        <YardageCalculator
+                          fabric={item.fabric}
+                          itemWidth={item.width} itemHeight={item.height} itemDepth={item.depth}
+                          quantity={item.quantity}
+                          yardsOverride={item.fabricYardsOverride || null}
+                          onYardsCalculated={(y) => updateItem(room.id, item.id, 'fabricYards', y)}
+                          onYardsOverride={(y) => updateItem(room.id, item.id, 'fabricYardsOverride', y)}
+                        />
+                      )}
+                      {item.backingFabric && (
+                        <YardageCalculator
+                          fabric={item.backingFabric}
+                          itemWidth={item.width} itemHeight={item.height} itemDepth={item.depth}
+                          quantity={item.quantity}
+                          yardsOverride={item.backingYardsOverride || null}
+                          onYardsCalculated={(y) => updateItem(room.id, item.id, 'backingYards', y)}
+                          onYardsOverride={(y) => updateItem(room.id, item.id, 'backingYardsOverride', y)}
+                        />
+                      )}
+                    </div>
                   </div>
+                  {/* Panel Configurator for bench items */}
+                  {isBenchType(item.type) && (
+                    <div style={{ gridColumn: '1 / -1', marginTop: -4 }}>
+                      <PanelConfigurator
+                        backWidth={parseFloat(item.width) || 0}
+                        backHeight={parseFloat(item.height) || 0}
+                        config={item.panelConfig || DEFAULT_PANEL_CONFIG}
+                        onChange={(pc) => updateItem(room.id, item.id, 'panelConfig', pc)}
+                      />
+                    </div>
+                  )}
                   <button onClick={() => removeItem(room.id, item.id)}
                     className="cursor-pointer transition-all hover:bg-[#fef2f2] hover:text-[#dc2626] mt-4"
                     style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -2732,11 +3291,25 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
           <div key={room.id} style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>{room.name}</div>
             {room.items.map(item => (
-              <div key={item.id} className="flex items-center justify-between" style={{ padding: '4px 0', fontSize: 12, color: '#555' }}>
-                <span>{item.type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                  {item.width || item.height ? ` (${[item.width, item.height, item.depth].filter(Boolean).join(' x ')})` : ''}
-                </span>
-                <span style={{ fontWeight: 600 }}>x{item.quantity}</span>
+              <div key={item.id} style={{ padding: '4px 0', fontSize: 12, color: '#555' }}>
+                <div className="flex items-center justify-between">
+                  <span>{formatItemType(item.type)}
+                    {item.width || item.height ? ` (${[item.width, item.height, item.depth].filter(Boolean).join(' x ')})` : ''}
+                  </span>
+                  <span style={{ fontWeight: 600 }}>x{item.quantity}</span>
+                </div>
+                {item.fabric && (
+                  <div style={{ fontSize: 10, color: '#b8960c', marginTop: 1 }}>
+                    Fabric: {item.fabric.code} {item.fabric.name}{item.fabric.color_pattern ? ` — ${item.fabric.color_pattern}` : ''}
+                    {(item.fabricYardsOverride || item.fabricYards) ? ` | ${item.fabricYardsOverride || item.fabricYards} yd` : ''}
+                  </div>
+                )}
+                {item.backingFabric && (
+                  <div style={{ fontSize: 10, color: '#2563eb', marginTop: 1 }}>
+                    Backing: {item.backingFabric.code} {item.backingFabric.name}
+                    {(item.backingYardsOverride || item.backingYards) ? ` | ${item.backingYardsOverride || item.backingYards} yd` : ''}
+                  </div>
+                )}
               </div>
             ))}
           </div>
