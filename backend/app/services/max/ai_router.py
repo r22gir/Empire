@@ -94,11 +94,9 @@ def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) 
 
     # ── Standard classification ──
 
-    # SIMPLE — greetings, short messages, status checks
-    simple_keywords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'ok', 'yes', 'no', 'bye', 'good morning', 'good night', 'status', 'ping', 'test']
-    if len(words) <= 3 and any(kw in msg for kw in simple_keywords):
-        return TaskComplexity.SIMPLE
-    if len(words) <= 2:
+    # SIMPLE — ONLY single-word greetings and acknowledgments (Gemini Flash territory)
+    simple_greetings = ['hi', 'hello', 'hey', 'thanks', 'thank you', 'ok', 'yes', 'no', 'bye', 'good morning', 'good night', 'ping', 'test']
+    if len(words) <= 2 and any(msg == kw or msg.rstrip('!.') == kw for kw in simple_greetings):
         return TaskComplexity.SIMPLE
 
     # COMPLEX — analytical tasks
@@ -106,7 +104,7 @@ def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) 
     if any(kw in msg for kw in complex_keywords):
         return TaskComplexity.COMPLEX
 
-    # MODERATE — everything else
+    # MODERATE — everything else (Grok territory)
     return TaskComplexity.MODERATE
 
 
@@ -309,45 +307,48 @@ class AIRouter:
         return api_messages
 
     def _build_complexity_chain(self, complexity: TaskComplexity) -> list:
-        """Build provider chain based on task complexity. Returns list of (provider_type, model_override) tuples."""
+        """Build provider chain based on task complexity. Returns list of (provider_type, model_override) tuples.
+
+        Routing policy (owner-defined):
+        - Gemini Flash: ONLY single-word greetings and vision tasks (SIMPLE)
+        - Grok 3 Fast: DEFAULT for all normal conversation (MODERATE)
+        - Claude Sonnet: Analysis, quality writing, memory/search (COMPLEX)
+        - Claude Opus: Code Mode only (CRITICAL)
+        """
         providers_chain = []
 
         if complexity == TaskComplexity.SIMPLE:
-            # SIMPLE: Gemini FREE -> GPT-4.1 nano -> Groq -> GPT-4o-mini -> Sonnet
+            # SIMPLE: Gemini FREE (greetings only) -> Grok -> Groq -> Sonnet
             if self.gemini_key:
                 providers_chain.append(("gemini", None))
-            if self.openai_key:
-                providers_chain.append(("openai", "gpt-4.1-nano"))
+            if self.xai_key:
+                providers_chain.append(("grok", None))
             if self.groq_key:
                 providers_chain.append(("groq", None))
-            if self.openai_key:
-                providers_chain.append(("openai", "gpt-4o-mini"))
             if self.anthropic_key:
                 providers_chain.append(("claude", "claude-sonnet-4-6"))
 
         elif complexity == TaskComplexity.MODERATE:
-            # MODERATE: Groq -> GPT-4o-mini -> GPT-4.1 mini -> Gemini -> Sonnet
+            # MODERATE: Grok 3 Fast (DEFAULT) -> Groq -> Sonnet -> Gemini (last resort)
+            if self.xai_key:
+                providers_chain.append(("grok", None))
             if self.groq_key:
                 providers_chain.append(("groq", None))
-            if self.openai_key:
-                providers_chain.append(("openai", "gpt-4o-mini"))
-            if self.openai_key:
-                providers_chain.append(("openai", "gpt-4.1-mini"))
+            if self.anthropic_key:
+                providers_chain.append(("claude", "claude-sonnet-4-6"))
             if self.gemini_key:
                 providers_chain.append(("gemini", None))
-            if self.anthropic_key:
-                providers_chain.append(("claude", "claude-sonnet-4-6"))
 
         elif complexity == TaskComplexity.COMPLEX:
-            # COMPLEX: Claude Sonnet -> GPT-4o -> Grok -> GPT-4.1 mini
+            # COMPLEX: Claude Sonnet -> Grok -> GPT-4o -> Groq
             if self.anthropic_key:
                 providers_chain.append(("claude", "claude-sonnet-4-6"))
-            if self.openai_key:
-                providers_chain.append(("openai", "gpt-4o"))
             if self.xai_key:
                 providers_chain.append(("grok", None))
             if self.openai_key:
-                providers_chain.append(("openai", "gpt-4.1-mini"))
+                providers_chain.append(("openai", "gpt-4o"))
+            if self.groq_key:
+                providers_chain.append(("groq", None))
 
         else:  # CRITICAL
             # CRITICAL: Claude Opus -> Sonnet -> stop
