@@ -19,7 +19,7 @@ logger = logging.getLogger("max.code_task")
 
 # Tools Atlas is allowed to use in Code Mode
 ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner"}
-MAX_ITERATIONS = 15  # Safety cap on tool-call loops
+MAX_ITERATIONS = 8  # Safety cap on tool-call loops (reduced from 15 for performance)
 
 
 class CodeTaskState(str, Enum):
@@ -148,7 +148,7 @@ class CodeTaskRunner:
                 # Call Atlas
                 response = await asyncio.wait_for(
                     codeforge.ai_call(prompt),
-                    timeout=120,
+                    timeout=90,
                 )
 
                 if not response:

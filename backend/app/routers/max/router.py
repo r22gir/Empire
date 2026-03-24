@@ -1357,13 +1357,20 @@ async def get_desk_daily_report():
 
 class CodeTaskRequest(BaseModel):
     prompt: str
+    pin: str = ""
 
 
 @router.post("/code-task")
 async def submit_code_task(request: CodeTaskRequest):
     """Submit an async code task to CodeForge/Atlas.
-    Returns immediately with task ID. Poll status via GET /code-task/{id}/status.
+    Requires founder PIN. Returns immediately with task ID.
+    Poll status via GET /code-task/{id}/status.
     """
+    import os
+    founder_pin = os.getenv("FOUNDER_PIN", "7777")
+    if not request.pin or str(request.pin) != founder_pin:
+        raise HTTPException(status_code=403, detail="Invalid PIN. Code Mode requires founder authorization.")
+
     from app.services.max.code_task_runner import code_task_runner
 
     task = code_task_runner.submit(request.prompt)
@@ -1383,6 +1390,20 @@ async def get_code_task_status(task_id: str):
     if not task:
         raise HTTPException(404, f"Code task '{task_id}' not found")
     return task.to_dict()
+
+
+class VerifyPinRequest(BaseModel):
+    pin: str
+
+
+@router.post("/verify-pin")
+async def verify_pin(request: VerifyPinRequest):
+    """Verify founder PIN without performing any action. Used by Code Mode toggle."""
+    import os
+    founder_pin = os.getenv("FOUNDER_PIN", "7777")
+    if str(request.pin) == founder_pin:
+        return {"valid": True}
+    raise HTTPException(status_code=403, detail="Invalid PIN")
 
 
 # ── TTS (Text-to-Speech) ─────────────────────────────────────────────
