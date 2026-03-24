@@ -13,6 +13,7 @@ import { DiagramCatalog, DiagramViewer, findDiagramMatch, DIAGRAM_MAP } from '..
 const CushionBuilder = dynamic(() => import('../business/upholstery/CushionBuilder'), { ssr: false });
 const CustomShapeBuilder = dynamic(() => import('../tools/CustomShapeBuilder'), { ssr: false });
 const DraperyHardwareModule = dynamic(() => import('../business/drapery/DraperyHardwareModule'), { ssr: false });
+const ThreeViewer = dynamic(() => import('../business/vision/ThreeViewer'), { ssr: false });
 
 interface CustomerInfo {
   name: string;
@@ -48,6 +49,7 @@ interface RoomItem {
   depth: string;
   quantity: number;
   notes: string;
+  _uploadPath?: string;
 }
 
 interface Room {
@@ -503,6 +505,9 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   // Drapery hardware config
   const [hardwareConfig, setHardwareConfig] = useState<Record<string, any>>({});
 
+  // 3D Viewer modal
+  const [viewer3DItem, setViewer3DItem] = useState<{ itemId: string; roomId: string; url: string } | null>(null);
+
   // Photo analysis
   const [analyzingPhoto, setAnalyzingPhoto] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisItem[] | null>(null);
@@ -529,31 +534,65 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
             address: q.customer_address || '',
           });
         }
-        // Pre-fill photos from quote
+        // Pre-fill photos from quote (handles both string URLs and {url,path} objects)
         if (q.photos?.length) {
-          const quotePhotos: PhotoFile[] = q.photos.map((p: any) => ({
-            preview: `${API_BASE}${p.url || p.path}`,
-            serverUrl: `${API_BASE}${p.url || p.path}`,
-            originalName: p.original_name || p.filename,
-            fromIntake: true,
-          }));
+          const quotePhotos: PhotoFile[] = q.photos.map((p: any) => {
+            const photoPath = typeof p === 'string' ? p : (p.url || p.path || '');
+            const absUrl = photoPath.startsWith('http') ? photoPath : `${API_BASE}${photoPath}`;
+            return {
+              preview: absUrl,
+              serverUrl: absUrl,
+              originalName: typeof p === 'string' ? photoPath.split('/').pop() || 'photo' : (p.original_name || p.filename || 'photo'),
+              fromIntake: true,
+            };
+          });
           setPhotos(quotePhotos);
         }
-        // Pre-fill rooms if they exist
+        // Also load photos from photo store for this quote
+        fetch(`${API}/photos/quote/${q.id}`)
+          .then(r => r.json())
+          .then(data => {
+            if (data.photos?.length) {
+              setPhotos(prev => {
+                const existing = new Set(prev.map(p => p.originalName));
+                const newPhotos = data.photos
+                  .filter((p: any) => !existing.has(p.filename))
+                  .map((p: any) => ({
+                    preview: `${API_BASE}${p.path}`,
+                    serverUrl: `${API_BASE}${p.path}`,
+                    originalName: p.filename,
+                    fromIntake: true,
+                  }));
+                return [...prev, ...newPhotos];
+              });
+            }
+          })
+          .catch(() => {});
+        // Pre-fill rooms if they exist (handles both items and windows format)
         if (q.rooms?.length) {
           setRooms(q.rooms.map((r: any) => ({
             id: crypto.randomUUID(),
             name: r.name || 'Room',
-            items: (r.windows || []).map((w: any) => ({
+            items: (r.items || r.windows || []).map((w: any) => ({
               id: crypto.randomUUID(),
-              type: w.treatmentType || 'drapery',
-              name: w.name || 'Window',
-              width: w.width || 0,
-              height: w.height || 0,
+              type: w.type || w.treatmentType || 'sofa_3cushion',
+              width: w.dimensions?.width || w.width || '',
+              height: w.dimensions?.height || w.height || '',
+              depth: w.dimensions?.depth || w.depth || '',
               quantity: w.quantity || 1,
-              notes: w.description || '',
+              notes: w.notes || w.description || '',
             })),
           })));
+        }
+        // Pre-fill options if they exist
+        if (q.options) {
+          setOptions(prev => ({
+            ...prev,
+            fabricGrade: q.options.fabric_grade || prev.fabricGrade,
+            liningType: q.options.lining_type || prev.liningType,
+            tufting: q.options.tufting || prev.tufting,
+            welting: q.options.welting || prev.welting,
+          }));
         }
       })
       .catch(() => {});
@@ -682,7 +721,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
     const newItems: RoomItem[] = selected.map(it => ({
       id: crypto.randomUUID(),
-      type: ITEM_TYPES.includes(it.type) ? it.type : 'sofa',
+      type: ITEM_TYPES.includes(it.type) ? it.type : 'sofa_3cushion',
       width: it.width || '',
       height: it.height || '',
       depth: it.depth || '',
@@ -705,12 +744,13 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const addManualItem = (item: any) => {
     const newItem: RoomItem = {
       id: crypto.randomUUID(),
-      type: ITEM_TYPES.includes(item.type) ? item.type : 'sofa',
+      type: ITEM_TYPES.includes(item.type) ? item.type : 'sofa_3cushion',
       width: item.width || '',
       height: item.height || '',
       depth: item.depth || '',
       quantity: 1,
       notes: item.description || '',
+      _uploadPath: item._uploadPath,
     };
     setRooms(prev => {
       const copy = [...prev];
@@ -755,10 +795,15 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     if (!photo.file) return null;
     const form = new FormData();
     form.append('file', photo.file);
+    form.append('entity_type', 'quote');
+    form.append('entity_id', 'pending');
+    form.append('source', 'web');
     try {
-      const res = await fetch(API + '/files/upload', { method: 'POST', body: form });
+      const res = await fetch(API + '/photos/upload', { method: 'POST', body: form });
       if (res.ok) {
         const data = await res.json();
+        const uploaded = data.photos?.[0];
+        if (uploaded?.path) return uploaded.path;
         return data.filename || data.file_id || null;
       }
       console.warn('Photo upload failed:', res.status, res.statusText);
@@ -823,10 +868,14 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setError('');
     try {
       // Upload photos first
-      const uploadedFilenames: string[] = [];
+      const uploadedPhotos: { url: string; original_name: string; from_intake?: boolean }[] = [];
       for (const photo of photos) {
         const fn = await uploadPhoto(photo);
-        if (fn) uploadedFilenames.push(fn);
+        if (fn) uploadedPhotos.push({
+          url: fn,
+          original_name: photo.originalName || photo.file?.name || fn.split('/').pop() || 'photo',
+          from_intake: photo.fromIntake || false,
+        });
       }
 
       const payload = {
@@ -834,7 +883,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         customer_email: customer.email,
         customer_phone: customer.phone,
         customer_address: customer.address,
-        photos: uploadedFilenames,
+        photos: uploadedPhotos,
         rooms: rooms.filter(r => r.items.length > 0).map(r => ({
           name: r.name,
           items: r.items.map(it => ({
@@ -984,6 +1033,8 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
           <>
             <StepPhotos
               photos={photos} onAdd={handleFiles} onRemove={removePhoto} fileInputRef={fileInputRef}
+              onAddServerPhotos={(newPhotos) => setPhotos(prev => [...prev, ...newPhotos])}
+              apiBase={API_BASE}
               intakeProjects={intakeProjects} loadingIntake={loadingIntake}
               selectedIntakeId={selectedIntakeId} onLoadIntake={loadIntakeProject}
               onAnalyze={analyzePhoto} analyzingPhoto={analyzingPhoto}
@@ -1033,6 +1084,27 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                 if (preset) {
                   setShapeBuilderTarget({ roomId, itemId, preset });
                   setShowShapeBuilder(true);
+                }
+              }}
+              onView3D={(roomId, itemId) => {
+                const room = rooms.find(r => r.id === roomId);
+                const item = room?.items.find(i => i.id === itemId);
+                if (item?.notes?.startsWith('3D Scan:')) {
+                  const filename = item.notes.replace('3D Scan: ', '');
+                  if (item._uploadPath) {
+                    setViewer3DItem({ itemId, roomId, url: API_BASE + item._uploadPath });
+                  } else {
+                    // Fallback: search photos API for the file
+                    fetch(`${API}/photos/quote/3d_scans`)
+                      .then(r => r.json())
+                      .then(data => {
+                        const photos = data.photos || [];
+                        const match = photos.find((p: any) => p.original_name === filename || p.filename?.includes(filename.split('.')[0]));
+                        const url = match?.path || photos[photos.length - 1]?.path;
+                        if (url) setViewer3DItem({ itemId, roomId, url: API_BASE + url });
+                      })
+                      .catch(err => console.error('Failed to find 3D file:', err));
+                  }
                 }
               }}
             />
@@ -1097,6 +1169,61 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                         if (dims.height) updateItem(roomId, itemId, 'height', String(dims.height));
                         setShowShapeBuilder(false);
                         setShapeBuilderTarget(null);
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* 3D Viewer Modal */}
+            {viewer3DItem && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} onClick={() => setViewer3DItem(null)} />
+                <div style={{ position: 'relative', width: '95%', maxWidth: 1200, height: '85vh', background: '#fff', borderRadius: 16, boxShadow: '0 8px 40px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div style={{ padding: '16px 24px', borderBottom: '1px solid #ece8e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: '#f0fdf4', color: '#16a34a' }}>
+                        <Box size={16} />
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: '#1a1a1a' }}>3D Scan Viewer</div>
+                        <div style={{ fontSize: 12, color: '#888' }}>Measure, calibrate, and define treatment areas on your 3D scan</div>
+                      </div>
+                    </div>
+                    <button onClick={() => setViewer3DItem(null)} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div style={{ flex: 1, padding: 16, overflow: 'hidden' }}>
+                    <ThreeViewer
+                      modelUrl={viewer3DItem.url}
+                      width={1160}
+                      height={600}
+                      onExportData={(data) => {
+                        const { roomId, itemId } = viewer3DItem;
+                        // Apply measurements to item dimensions
+                        if (data.measurements?.length > 0) {
+                          const m = data.measurements[0];
+                          if (m.value_inches) {
+                            updateItem(roomId, itemId, 'width', String(Math.round(m.value_inches)));
+                          }
+                          if (data.measurements.length > 1 && data.measurements[1].value_inches) {
+                            updateItem(roomId, itemId, 'height', String(Math.round(data.measurements[1].value_inches)));
+                          }
+                          if (data.measurements.length > 2 && data.measurements[2].value_inches) {
+                            updateItem(roomId, itemId, 'depth', String(Math.round(data.measurements[2].value_inches)));
+                          }
+                        }
+                        // Add treatment areas to notes
+                        if (data.treatmentAreas?.length > 0) {
+                          const areas = data.treatmentAreas.map((a: any) =>
+                            `${a.label}: ${Math.round(a.width_inches)}"×${Math.round(a.height_inches)}"`
+                          ).join(', ');
+                          const currentNotes = rooms.find(r => r.id === roomId)?.items.find(i => i.id === itemId)?.notes || '';
+                          const baseNote = currentNotes.split(' | Areas:')[0];
+                          updateItem(roomId, itemId, 'notes', `${baseNote} | Areas: ${areas}`);
+                        }
+                        setViewer3DItem(null);
                       }}
                     />
                   </div>
@@ -1246,15 +1373,18 @@ function StepCustomer({ customer, setCustomer }: { customer: CustomerInfo; setCu
   );
 }
 
-function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loadingIntake, selectedIntakeId, onLoadIntake, onAnalyze, analyzingPhoto, onManualItem }: {
-  photos: PhotoFile[]; onAdd: (files: FileList | File[]) => void; onRemove: (i: number) => void;
+function StepPhotos({ photos, onAdd, onAddServerPhotos, onRemove, fileInputRef, intakeProjects, loadingIntake, selectedIntakeId, onLoadIntake, onAnalyze, analyzingPhoto, onManualItem, apiBase }: {
+  photos: PhotoFile[]; onAdd: (files: FileList | File[]) => void; onAddServerPhotos?: (photos: PhotoFile[]) => void; onRemove: (i: number) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   intakeProjects: any[]; loadingIntake: boolean; selectedIntakeId: string | null;
   onLoadIntake: (project: any) => void; onAnalyze: (idx: number) => void; analyzingPhoto: number | null;
   onManualItem: (item: any) => void;
+  apiBase?: string;
 }) {
+  const API_BASE = apiBase || '';
   const [dragOver, setDragOver] = useState(false);
   const [inputMethod, setInputMethod] = useState<QuoteInputMethod>('photos');
+  const [uploading3D, setUploading3D] = useState(false);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1377,29 +1507,71 @@ function StepPhotos({ photos, onAdd, onRemove, fileInputRef, intakeProjects, loa
               Upload a 3D Scan
             </div>
             <div style={{ fontSize: 12, color: '#777', marginBottom: 16 }}>
-              Supports GLB, GLTF, OBJ, PLY, USDZ from Polycam, LiDAR, or RealityScan
+              Supports GLB, GLTF, OBJ, PLY, USDZ, STL, FBX, or ZIP from Polycam, LiDAR, or RealityScan
             </div>
             <button
               onClick={() => {
                 const input = document.createElement('input');
                 input.type = 'file';
-                input.accept = '.glb,.gltf,.obj,.ply,.usdz';
-                input.onchange = (e: any) => {
+                input.accept = '.glb,.gltf,.obj,.ply,.usdz,.stl,.fbx,.zip';
+                input.onchange = async (e: any) => {
                   const file = e.target?.files?.[0];
-                  if (file) {
+                  console.log('[3D Upload] File selected:', file?.name, file?.size, 'bytes');
+                  if (!file) return;
+                  setUploading3D(true);
+                  const fd = new FormData();
+                  fd.append('files', file);
+                  fd.append('entity_type', 'quote');
+                  fd.append('entity_id', '3d_scans');
+                  fd.append('source', 'cc');
+                  const uploadUrl = `${API}/photos/upload`;
+                  console.log('[3D Upload] Uploading to:', uploadUrl);
+                  try {
+                    const res = await fetch(uploadUrl, { method: 'POST', body: fd });
+                    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+                    const data = await res.json();
+                    const allFiles = data.photos || [];
+                    // Separate 3D models from images
+                    const modelExts = ['.glb', '.gltf', '.obj', '.ply', '.usdz', '.stl', '.fbx'];
+                    const imageExts = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.gif', '.bmp'];
+                    const models = allFiles.filter((p: any) => modelExts.some(e => p.filename?.toLowerCase().endsWith(e)));
+                    const images = allFiles.filter((p: any) => imageExts.some(e => p.filename?.toLowerCase().endsWith(e)));
+                    // Add images to photos gallery
+                    if (images.length > 0 && onAddServerPhotos) {
+                      const newPhotos: PhotoFile[] = images.map((p: any) => ({
+                        preview: `${API_BASE}${p.path}`,
+                        serverUrl: `${API_BASE}${p.path}`,
+                        originalName: p.original_name || p.filename,
+                        fromIntake: false,
+                      }));
+                      onAddServerPhotos(newPhotos);
+                    }
+                    // Add first 3D model as item (or the zip itself if no models found)
+                    const primaryModel = models[0] || allFiles[0];
+                    const uploadedPath = primaryModel?.path || file.name;
                     onManualItem({
                       type: '3d_scan',
-                      description: `3D Scan: ${file.name}`,
+                      description: `3D Scan: ${file.name}${allFiles.length > 1 ? ` (${allFiles.length} files extracted)` : ''}`,
                       measurements: {},
                       _file: file,
+                      _uploadPath: uploadedPath,
                     });
+                    if (images.length > 0) {
+                      alert(`Extracted ${models.length} 3D model(s) and ${images.length} image(s) from ${file.name}`);
+                    }
+                  } catch (err) {
+                    console.error('[3D Upload] FAILED:', err);
+                    alert('Failed to upload 3D file. Check your connection and try again.');
+                  } finally {
+                    setUploading3D(false);
                   }
                 };
                 input.click();
               }}
+              disabled={uploading3D}
               className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 mx-auto"
-              style={{ padding: '12px 24px', borderRadius: 10, background: '#16a34a', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', minHeight: 48 }}>
-              <Upload size={16} /> Choose 3D File
+              style={{ padding: '12px 24px', borderRadius: 10, background: uploading3D ? '#86efac' : '#16a34a', color: '#fff', fontSize: 13, fontWeight: 700, border: 'none', minHeight: 48, opacity: uploading3D ? 0.8 : 1 }}>
+              {uploading3D ? <><Loader2 size={16} className="animate-spin" /> Uploading...</> : <><Upload size={16} /> Choose 3D File</>}
             </button>
             <div style={{ fontSize: 11, color: '#aaa', marginTop: 12 }}>
               Scan rooms with your phone&apos;s LiDAR sensor, then upload the exported model
@@ -2127,12 +2299,13 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
   );
 }
 
-function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder }: {
+function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D }: {
   rooms: Room[]; addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
   addItem: (roomId: string, category?: ItemCategory) => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
   onBrowseCatalog: (roomId: string) => void;
   onOpenShapeBuilder?: (roomId: string, itemId: string, itemType: string) => void;
+  onView3D?: (roomId: string, itemId: string) => void;
 }) {
   const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
 
@@ -2262,13 +2435,25 @@ function StepRooms({ rooms, addRoom, removeRoom, updateRoomName, addItem, remove
                         onChange={e => updateItem(room.id, item.id, 'quantity', Math.max(1, parseInt(e.target.value) || 1))}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
-                    {/* Notes row + Shape Builder button for bench items */}
-                    <div className={isBenchType(item.type) ? 'col-span-4' : 'col-span-5'}>
+                    {/* Notes row + Shape Builder / 3D Viewer buttons */}
+                    <div className={(isBenchType(item.type) || item.notes?.startsWith('3D Scan:')) ? 'col-span-4' : 'col-span-5'}>
                       <input value={item.notes} onChange={e => updateItem(room.id, item.id, 'notes', e.target.value)}
                         placeholder={cat === 'drapery' ? 'Notes (fabric, mount type, motorization...)' : 'Notes (fabric preference, condition, existing foam...)'}
                         className="form-input" style={{ width: '100%', fontSize: 11, padding: '6px 8px' }} />
                     </div>
-                    {isBenchType(item.type) && (
+                    {item.notes?.startsWith('3D Scan:') && (
+                      <div className="col-span-1">
+                        <button
+                          onClick={() => onView3D?.(room.id, item.id)}
+                          className="flex items-center gap-1 cursor-pointer transition-all hover:bg-[#f0fdf4] hover:border-[#16a34a] w-full justify-center"
+                          style={{ padding: '5px 6px', borderRadius: 7, border: '1.5px solid #bbf7d0', background: '#f0fdf4', fontSize: 9, fontWeight: 700, color: '#16a34a' }}
+                          title="Open 3D Viewer with measuring tools"
+                        >
+                          <Box size={12} /> View 3D
+                        </button>
+                      </div>
+                    )}
+                    {isBenchType(item.type) && !item.notes?.startsWith('3D Scan:') && (
                       <div className="col-span-1">
                         <button
                           onClick={() => onOpenShapeBuilder?.(room.id, item.id, item.type)}

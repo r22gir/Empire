@@ -130,12 +130,10 @@ def assemble_quote(
         "tiers": tiers,
     }
 
-    # Save to disk
-    os.makedirs(QUOTES_DIR, exist_ok=True)
-    filepath = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    with open(filepath, "w") as f:
-        json.dump(quote, f, indent=2, default=str)
-    logger.info("Quote %s saved to %s", quote_number, filepath)
+    # NOTE: caller is responsible for saving to disk after enriching
+    # with photos, rooms, options, etc.  Do NOT save here — the caller
+    # (quotes.py /from-rooms) adds fields and then saves the final version.
+    logger.info("Quote %s assembled (caller will save)", quote_number)
 
     return quote
 

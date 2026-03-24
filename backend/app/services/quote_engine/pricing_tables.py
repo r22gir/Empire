@@ -133,12 +133,87 @@ def get_fabric_price(grade: str, yards: float) -> float:
     return price
 
 
+def _normalize_item_type(item_type: str) -> str:
+    """Map expanded frontend item types to pricing table keys."""
+    if item_type in LABOR_RATES:
+        return item_type
+    # Sofa variants → sofa_3cushion
+    if item_type.startswith("sofa_") or item_type == "sofa":
+        return "sofa_3cushion"
+    # Chair variants → closest match
+    if item_type in ("chair_wingback",):
+        return "wingback_chair"
+    if item_type in ("chair_club", "chair_barrel"):
+        return "club_chair"
+    if item_type in ("chair_accent", "chair_slipper", "chair_bergere", "chair_fauteuil", "chair_parsons"):
+        return "accent_chair"
+    if item_type.startswith("dining_chair_"):
+        return "dining_chair_full" if "full" in item_type or "arm" in item_type else "dining_chair_seat"
+    if item_type in ("bar_stool",):
+        return "dining_chair_seat"
+    if item_type in ("chaise", "daybed"):
+        return "loveseat"
+    if item_type == "settee":
+        return "loveseat"
+    # Ottoman variants
+    if item_type.startswith("ottoman_"):
+        return "ottoman"
+    # Bench variants → bench_medium
+    if item_type.startswith("bench_"):
+        return "bench_medium"
+    # Sectional variants
+    if item_type.startswith("sectional"):
+        return "sectional_per_section"
+    # Headboard variants
+    if item_type.startswith("headboard_"):
+        return "headboard"
+    # Cushion variants
+    if item_type.startswith("cushion_"):
+        if "back" in item_type:
+            return "back_cushion"
+        if "throw" in item_type or "bolster" in item_type:
+            return "throw_pillow"
+        return "seat_cushion"
+    # Drapery variants → drapery_panel
+    if item_type.startswith("drapery_") or item_type == "drapery" or item_type == "sheer":
+        return "drapery_panel"
+    # Roman shade variants
+    if item_type.startswith("roman_"):
+        return "roman_shade"
+    # Valance variants
+    if item_type.startswith("valance_") or item_type == "valance":
+        return "valance"
+    # Cornice variants
+    if item_type.startswith("cornice_") or item_type == "cornice":
+        return "cornice"
+    # Wall panel → headboard (closest: per-sqft labor)
+    if item_type.startswith("wall_panel_"):
+        return "headboard"
+    # Bedding
+    if item_type in ("duvet_cover", "coverlet", "quilt", "bed_skirt", "bed_scarf"):
+        return "throw_pillow"
+    if item_type in ("pillow_sham", "decorative_pillow"):
+        return "throw_pillow"
+    if item_type == "bolster":
+        return "bolster"
+    # Table linens
+    if item_type in ("tablecloth", "table_runner", "placemat", "napkin", "table_skirt"):
+        return "throw_pillow"
+    # 3D scan fallback
+    if item_type == "3d_scan":
+        return "sofa_3cushion"
+    # Unknown — log and use accent_chair as safe default
+    logger.warning(f"Unknown item type '{item_type}', falling back to accent_chair")
+    return "accent_chair"
+
+
 def get_labor_cost(item_type: str, dimensions: Optional[Dict[str, float]] = None) -> float:
     """Calculate labor cost for *item_type* using optional *dimensions*.
 
     Dimensions dict may contain: width, height, depth (in inches),
     linear_ft, sqft, cushion_count, section_count, pleat_count, widths.
     """
+    item_type = _normalize_item_type(item_type)
     if item_type not in LABOR_RATES:
         raise ValueError(f"Unknown item type '{item_type}'. Valid: {list(LABOR_RATES.keys())}")
 

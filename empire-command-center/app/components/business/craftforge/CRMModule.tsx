@@ -7,7 +7,7 @@ import {
 import SearchBar from '../shared/SearchBar';
 import EmptyState from '../shared/EmptyState';
 
-export default function CRMModule() {
+export default function CRMModule({ onNavigate }: { onNavigate?: (section: string) => void } = {}) {
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -150,11 +150,18 @@ export default function CRMModule() {
                               </div>
                               <div className="flex items-center gap-3">
                                 <span style={{ fontSize: 12, fontWeight: 700, color: '#b8960c' }}>{d.total != null ? `$${Number(d.total).toFixed(2)}` : '--'}</span>
-                                <span className="status-pill" style={{
-                                  fontSize: 10,
-                                  background: d.status === 'complete' ? '#f0fdf4' : d.status === 'concept' ? '#f5f3ef' : '#eff6ff',
-                                  color: d.status === 'complete' ? '#16a34a' : d.status === 'concept' ? '#888' : '#2563eb',
-                                }}>
+                                <span
+                                  className="status-pill"
+                                  style={{
+                                    fontSize: 10,
+                                    cursor: d.status === 'invoiced' ? 'pointer' : 'default',
+                                    background: d.status === 'complete' ? '#f0fdf4' : d.status === 'invoiced' ? '#fef3c7' : d.status === 'concept' ? '#f5f3ef' : '#eff6ff',
+                                    color: d.status === 'complete' ? '#16a34a' : d.status === 'invoiced' ? '#92400e' : d.status === 'concept' ? '#888' : '#2563eb',
+                                    border: d.status === 'invoiced' ? '1px solid #fcd34d' : 'none',
+                                  }}
+                                  onClick={d.status === 'invoiced' && onNavigate ? (e) => { e.stopPropagation(); onNavigate('finance'); } : undefined}
+                                  title={d.status === 'invoiced' ? 'Click to view in Finance' : undefined}
+                                >
                                   {(d.status || 'concept').replace(/_/g, ' ')}
                                 </span>
                               </div>

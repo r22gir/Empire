@@ -68,6 +68,8 @@ def calculate_yardage(
     -------
     dict  ``{"yards": float, "calculation": str}``
     """
+    from .pricing_tables import _normalize_item_type
+    item_type = _normalize_item_type(item_type)
     dims = dimensions or {}
     opts = options or {}
     explanation_parts: list[str] = []

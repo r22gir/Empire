@@ -313,8 +313,15 @@ async def create_quote(payload: QuoteCreate):
 
 
 @router.get("")
-async def list_quotes(status: Optional[str] = None):
-    """List all quotes, optionally filtered by status."""
+async def list_quotes(
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    business: Optional[str] = None,
+    summary: bool = True,
+):
+    """List quotes with pagination.  When summary=true (default) strips
+    heavy tier/item data to keep the response small for list views."""
     quotes = []
     for fname in os.listdir(QUOTES_DIR):
         if not fname.endswith(".json") or fname.startswith("_"):
@@ -325,7 +332,41 @@ async def list_quotes(status: Optional[str] = None):
             continue
         quotes.append(q)
     quotes.sort(key=lambda q: q.get("created_at", ""), reverse=True)
-    return {"quotes": quotes, "count": len(quotes)}
+
+    total = len(quotes)
+    quotes = quotes[offset:offset + limit]
+
+    if summary:
+        # Strip heavy nested data — keep only what the list view needs
+        light = []
+        for q in quotes:
+            # Compute total from tier A (or first tier)
+            tier_total = 0
+            tiers = q.get("tiers", {})
+            if isinstance(tiers, dict):
+                first = tiers.get("A") or next(iter(tiers.values()), {})
+                tier_total = first.get("total", 0)
+            elif isinstance(tiers, list) and tiers:
+                tier_total = tiers[0].get("total", 0)
+
+            light.append({
+                "id": q.get("id"),
+                "quote_number": q.get("quote_number"),
+                "customer_name": q.get("customer_name"),
+                "customer_email": q.get("customer_email"),
+                "customer_phone": q.get("customer_phone"),
+                "project_name": q.get("project_name"),
+                "status": q.get("status"),
+                "total": tier_total,
+                "item_count": len(q.get("items", [])),
+                "intake_code": q.get("intake_code"),
+                "created_at": q.get("created_at"),
+                "updated_at": q.get("updated_at"),
+                "location": q.get("location"),
+            })
+        return {"quotes": light, "count": len(light), "total": total}
+
+    return {"quotes": quotes, "count": len(quotes), "total": total}
 
 
 # ── QIS (Quote Intelligence System) endpoints ──────────────────
@@ -353,8 +394,12 @@ async def analyze_photo_for_quote(body: dict):
         customer_name=customer_name,
         location=location,
         lining=lining,
-
     )
+
+    # Save to disk (assemble_quote no longer saves)
+    os.makedirs(QUOTES_DIR, exist_ok=True)
+    with open(os.path.join(QUOTES_DIR, f"{quote['id']}.json"), "w") as f:
+        json.dump(quote, f, indent=2, default=str)
 
     # ── GATE 1: Post-analysis verification ──
     from app.services.quote_engine.verification import verify_quote, save_verification

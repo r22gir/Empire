@@ -60,15 +60,15 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ElementTy
   { id: 'zelle', label: 'Zelle / Wire', icon: Send, sub: 'Business transfers' },
 ];
 
-const CRYPTO_TOKENS = ['USDT', 'BTC', 'USDC', 'SOL', 'ETH', 'EMPIRE'];
-const CRYPTO_RATES: Record<string, number> = { USDT: 1, BTC: 0.0000095, USDC: 1, SOL: 0.0067, ETH: 0.00028, EMPIRE: 100 };
-const WALLET_ADDRESSES: Record<string, string> = {
-  USDT: '0x7a3B...eF92',
-  BTC: 'bc1q...x7mR',
-  USDC: '0x7a3B...eF92',
-  SOL: 'Emp1r...x4Bz',
-  ETH: '0x7a3B...eF92',
-  EMPIRE: 'empire1...q8kz',
+// Crypto wallet addresses + tokens fetched from backend (no hardcoded addresses)
+const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store/api/v1'
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+
+// Map backend keys to display names
+const CRYPTO_DISPLAY: Record<string, string> = {
+  btc: 'BTC', eth: 'ETH', sol: 'SOL',
+  usdt_trc20: 'USDT (TRC-20)', usdt_erc20: 'USDT (ERC-20)', usdc_eth: 'USDC',
 };
 
 function genId() {
@@ -103,8 +103,26 @@ export default function PaymentModule({
   const [cardSuccess, setCardSuccess] = useState(false);
 
   // Crypto state
-  const [cryptoToken, setCryptoToken] = useState('USDC');
+  const [cryptoToken, setCryptoToken] = useState('');
   const [cryptoTimer, setCryptoTimer] = useState(1800);
+  const [cryptoAddresses, setCryptoAddresses] = useState<Record<string, { address: string; label: string; network: string }>>({});
+  const [cryptoLoading, setCryptoLoading] = useState(false);
+
+  // Fetch crypto addresses from backend
+  useEffect(() => {
+    if (method !== 'crypto') return;
+    setCryptoLoading(true);
+    fetch(`${API_BASE}/crypto-checkout/addresses`)
+      .then(res => res.ok ? res.json() : Promise.reject('Failed'))
+      .then(data => {
+        const addrs = data.addresses || {};
+        setCryptoAddresses(addrs);
+        const keys = Object.keys(addrs);
+        if (keys.length > 0 && !cryptoToken) setCryptoToken(keys[0]);
+      })
+      .catch(() => {})
+      .finally(() => setCryptoLoading(false));
+  }, [method]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Invoice state
   const [invoiceTerms, setInvoiceTerms] = useState<'net15' | 'net30' | 'net60'>('net30');
@@ -300,9 +318,35 @@ export default function PaymentModule({
 
   // ---- Crypto ----
   const renderCrypto = () => {
-    const tokenAmt = cryptoDiscount * (CRYPTO_RATES[cryptoToken] || 1);
+    const availableTokens = Object.keys(cryptoAddresses);
+    const activeAddr = cryptoAddresses[cryptoToken];
+    const displayName = CRYPTO_DISPLAY[cryptoToken] || cryptoToken.toUpperCase();
     const mins = Math.floor(cryptoTimer / 60);
     const secs = cryptoTimer % 60;
+
+    if (cryptoLoading) {
+      return (
+        <div style={sectionCard}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 40, color: MUTED }}>
+            <Loader2 size={18} className="animate-spin" /> Loading crypto options...
+          </div>
+        </div>
+      );
+    }
+
+    if (availableTokens.length === 0) {
+      return (
+        <div style={sectionCard}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <Wallet size={18} style={{ color: GOLD }} />
+            <span style={{ fontWeight: 600, fontSize: 15 }}>Crypto Payment</span>
+          </div>
+          <div style={{ color: MUTED, fontSize: 13, textAlign: 'center', padding: 20 }}>
+            No crypto wallets configured. Contact the business owner.
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div style={sectionCard}>
@@ -322,36 +366,40 @@ export default function PaymentModule({
         {/* Token selector */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 6 }}>Select Token</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {CRYPTO_TOKENS.map(t => (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {availableTokens.map(t => (
               <button key={t} onClick={() => setCryptoToken(t)} style={{
                 padding: '8px 16px', borderRadius: 8, border: `1.5px solid ${cryptoToken === t ? GOLD : BORDER}`,
                 background: cryptoToken === t ? GOLD_BG : '#fff', fontWeight: cryptoToken === t ? 600 : 400,
                 fontSize: 13, cursor: 'pointer', color: cryptoToken === t ? GOLD : '#374151', transition: 'all 0.15s',
               }}>
-                {t}
+                {CRYPTO_DISPLAY[t] || t.toUpperCase()}
               </button>
             ))}
           </div>
         </div>
 
         {/* Wallet address */}
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 4 }}>Send to Wallet Address</label>
-          <div style={{ fontFamily: 'monospace', fontSize: 14, background: PAGE_BG, padding: '10px 12px', borderRadius: 8, border: `1px solid ${BORDER}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span>{WALLET_ADDRESSES[cryptoToken]}</span>
-            <button onClick={() => { navigator.clipboard.writeText(WALLET_ADDRESSES[cryptoToken] || '').catch(() => {}); }}
-              style={{ border: 'none', background: 'none', cursor: 'pointer', color: MUTED }}><Copy size={14} /></button>
+        {activeAddr && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 4 }}>
+              Send to Wallet Address <span style={{ fontWeight: 400 }}>({activeAddr.network})</span>
+            </label>
+            <div style={{ fontFamily: 'monospace', fontSize: 13, background: PAGE_BG, padding: '10px 12px', borderRadius: 8, border: `1px solid ${BORDER}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', wordBreak: 'break-all' }}>
+              <span>{activeAddr.address}</span>
+              <button onClick={() => { navigator.clipboard.writeText(activeAddr.address).catch(() => {}); }}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: MUTED, flexShrink: 0, marginLeft: 8 }}><Copy size={14} /></button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Amount */}
         <div style={{ marginBottom: 16 }}>
           <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 4 }}>Amount</label>
           <div style={{ fontSize: 20, fontWeight: 700, color: '#111' }}>
-            {tokenAmt.toFixed(cryptoToken === 'EMPIRE' ? 0 : 6)} {cryptoToken}
+            ${cryptoDiscount.toFixed(2)} USD
           </div>
-          <div style={{ fontSize: 12, color: MUTED }}>${cryptoDiscount.toFixed(2)} USD (10% off)</div>
+          <div style={{ fontSize: 12, color: MUTED }}>Send equivalent in {displayName} (10% off)</div>
         </div>
 
         {/* QR + Timer row */}
@@ -361,7 +409,7 @@ export default function PaymentModule({
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, color: MUTED, flexShrink: 0,
           }}>
             <QrCode size={24} />
-            <span style={{ fontSize: 10 }}>{cryptoToken} QR</span>
+            <span style={{ fontSize: 10 }}>{displayName} QR</span>
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>

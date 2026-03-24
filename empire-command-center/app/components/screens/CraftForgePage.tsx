@@ -55,7 +55,7 @@ export default function WoodCraftPage({ initialSection }: CraftForgePageProps) {
       case 'inventory':
         return <Suspense fallback={<Loading />}><InventoryModule /></Suspense>;
       case 'customers':
-        return <Suspense fallback={<Loading />}><CRMModule /></Suspense>;
+        return <Suspense fallback={<Loading />}><CRMModule onNavigate={(s) => setSection(s as Section)} /></Suspense>;
       case 'finance':
         return <Suspense fallback={<Loading />}><FinanceModule /></Suspense>;
       case 'jobs':

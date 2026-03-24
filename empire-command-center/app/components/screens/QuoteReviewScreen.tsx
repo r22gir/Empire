@@ -73,14 +73,17 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   // Load existing photos for this quote (from intake transfer or photo store)
   useEffect(() => {
     if (!quote?.id) return;
-    const intakePhotos: UploadedPhoto[] = (quote.photos || []).map((p: any) => ({
-      filename: p.filename || p.original_name || 'photo',
-      path: p.url || p.path || '',
-      size: 0,
-      source: 'intake',
-      analyzing: false,
-      analysis: null,
-    }));
+    const intakePhotos: UploadedPhoto[] = (quote.photos || []).map((p: any) => {
+      const isString = typeof p === 'string';
+      return {
+        filename: isString ? (p.split('/').pop() || 'photo') : (p.filename || p.original_name || 'photo'),
+        path: isString ? p : (p.url || p.path || ''),
+        size: 0,
+        source: 'intake',
+        analyzing: false,
+        analysis: null,
+      };
+    });
     if (intakePhotos.length) {
       setUploadedPhotos(prev => {
         const existing = new Set(prev.map(p => p.filename));

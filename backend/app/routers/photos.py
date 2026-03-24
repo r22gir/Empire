@@ -5,10 +5,13 @@ All photos from all sources (intake, quote builder, telegram, web) go through he
 Storage layout: backend/data/photos/{entity_type}/{entity_id}/
 Entity types: quote, intake, telegram, general
 """
+import json
 import os
 import uuid
 import shutil
 import logging
+import zipfile
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -41,6 +44,91 @@ def _entity_dir(entity_type: str, entity_id: str) -> Path:
     return d
 
 
+def _extract_zip(
+    zip_bytes: bytes,
+    dest_dir: Path,
+    source: str,
+    entity_type: str,
+    entity_id: str,
+    allowed_exts: set,
+) -> list[dict]:
+    """Extract useful files from a ZIP archive into dest_dir.
+
+    Returns list of saved file dicts (same shape as normal uploads).
+    Skips hidden files, __MACOSX, and unsupported extensions.
+    """
+    saved = []
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = Path(tmpdir) / "upload.zip"
+        zip_path.write_bytes(zip_bytes)
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for info in zf.infolist():
+                    # Skip directories and Mac resource forks
+                    if info.is_dir():
+                        continue
+                    name = info.filename
+                    if "__MACOSX" in name or name.startswith("."):
+                        continue
+
+                    ext = Path(name).suffix.lower()
+                    if ext not in allowed_exts:
+                        logger.debug(f"Skipping unsupported file in ZIP: {name}")
+                        continue
+
+                    # Extract to temp, then save with our naming
+                    data = zf.read(name)
+                    original_name = Path(name).name
+                    out_name = f"{source}_{ts}_{uuid.uuid4().hex[:6]}{ext}"
+                    out_path = dest_dir / out_name
+                    out_path.write_bytes(data)
+
+                    # Metadata sidecar
+                    meta = {
+                        "original_name": original_name,
+                        "source": source,
+                        "size": len(data),
+                        "content_type": _guess_mime(ext),
+                        "uploaded_at": datetime.utcnow().isoformat(),
+                        "entity_type": entity_type,
+                        "entity_id": entity_id,
+                        "extracted_from_zip": True,
+                    }
+                    with open(str(out_path) + ".meta.json", "w") as mf:
+                        json.dump(meta, mf, indent=2)
+
+                    saved.append({
+                        "filename": out_name,
+                        "path": f"/api/v1/photos/serve/{entity_type}/{entity_id}/{out_name}",
+                        "size": len(data),
+                        "source": source,
+                        "original_name": original_name,
+                    })
+                    logger.info(f"Extracted from ZIP: {original_name} → {out_name} ({len(data)} bytes)")
+
+        except zipfile.BadZipFile:
+            logger.error("Uploaded file is not a valid ZIP")
+            raise HTTPException(400, "Uploaded file is not a valid ZIP archive")
+
+    return saved
+
+
+def _guess_mime(ext: str) -> str:
+    """Map file extension to MIME type."""
+    mime_map = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".webp": "image/webp", ".heic": "image/heic", ".gif": "image/gif",
+        ".bmp": "image/bmp", ".tiff": "image/tiff",
+        ".glb": "model/gltf-binary", ".gltf": "model/gltf+json",
+        ".obj": "model/obj", ".stl": "model/stl", ".fbx": "model/fbx",
+        ".ply": "application/x-ply", ".usdz": "model/vnd.usdz+zip",
+    }
+    return mime_map.get(ext, "application/octet-stream")
+
+
 @router.post("/upload")
 async def upload_photos(
     entity_type: str = Form(default="general"),
@@ -60,12 +148,26 @@ async def upload_photos(
     dest_dir = _entity_dir(entity_type, entity_id)
     saved = []
 
+    # File extensions we extract from zip archives
+    EXTRACTABLE = {".glb", ".gltf", ".obj", ".ply", ".usdz", ".stl", ".fbx",
+                   ".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif", ".bmp", ".tiff"}
+
     for f in files:
-        suffix = Path(f.filename or "photo.jpg").suffix or ".jpg"
+        suffix = Path(f.filename or "photo.jpg").suffix.lower() or ".jpg"
+        content = await f.read()
+
+        # ── ZIP handling: extract known file types ──
+        if suffix == ".zip":
+            logger.info(f"ZIP upload detected: {f.filename} ({len(content)} bytes)")
+            extracted = _extract_zip(content, dest_dir, source, entity_type, entity_id, EXTRACTABLE)
+            saved.extend(extracted)
+            logger.info(f"Extracted {len(extracted)} files from {f.filename}")
+            continue
+
+        # ── Normal file ──
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"{source}_{ts}_{uuid.uuid4().hex[:6]}{suffix}"
         filepath = dest_dir / filename
-        content = await f.read()
         with open(filepath, "wb") as out:
             out.write(content)
 
@@ -79,7 +181,6 @@ async def upload_photos(
             "entity_type": entity_type,
             "entity_id": entity_id,
         }
-        import json
         with open(str(filepath) + ".meta.json", "w") as mf:
             json.dump(meta, mf, indent=2)
 
@@ -225,7 +326,6 @@ async def link_photos(
                 if not dest.exists():
                     shutil.copy2(str(f), str(dest))
                     # Write meta
-                    import json
                     meta = {
                         "original_name": f.name,
                         "source": source_type,

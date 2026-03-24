@@ -129,6 +129,31 @@ class CryptoNotifyRequest(BaseModel):
     customer_email: Optional[str] = None
 
 
+# ── GET /crypto-checkout/addresses ────────────────────────────────────
+
+@router.get("/addresses")
+async def get_crypto_addresses():
+    """Return configured wallet addresses from .env. Only returns coins that have addresses set."""
+    result = {}
+    for key, wallet_info in WALLETS.items():
+        addr = os.getenv(wallet_info["env"], "")
+        if addr:
+            result[key] = {
+                "address": addr,
+                "label": wallet_info["label"],
+                "network": wallet_info["network"],
+            }
+    # Also include USDC if configured
+    usdc_addr = os.getenv("CRYPTO_USDC_ETH_ADDRESS", "")
+    if usdc_addr:
+        result["usdc_eth"] = {
+            "address": usdc_addr,
+            "label": "USDC (ERC-20)",
+            "network": "Ethereum (ERC-20)",
+        }
+    return {"addresses": result}
+
+
 # ── GET /crypto-checkout/{invoice_id} ────────────────────────────────
 
 @limiter.limit("30/minute")

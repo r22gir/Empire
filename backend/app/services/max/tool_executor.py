@@ -649,6 +649,12 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                         location=location,
                         lining=lining,
                     )
+                    # Save to disk (assemble_quote no longer auto-saves)
+                    import os, json as _json
+                    _qdir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+                    os.makedirs(_qdir, exist_ok=True)
+                    with open(os.path.join(_qdir, f"{qis_quote_data['id']}.json"), "w") as _qf:
+                        _json.dump(qis_quote_data, _qf, indent=2, default=str)
                     qis_tiers = qis_quote_data.get("tiers", {})
                     if qis_tiers:
                         design_proposals = _qis_tiers_to_design_proposals(qis_tiers, rooms)
@@ -1670,6 +1676,12 @@ def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                     location=location,
                     lining=lining,
                 )
+                # Save to disk (assemble_quote no longer auto-saves)
+                import os, json as _json
+                _qdir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+                os.makedirs(_qdir, exist_ok=True)
+                with open(os.path.join(_qdir, f"{qis_quote['id']}.json"), "w") as _qf:
+                    _json.dump(qis_quote, _qf, indent=2, default=str)
                 qis_tiers = qis_quote.get("tiers", {})
 
                 if qis_tiers:
