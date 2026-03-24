@@ -47,6 +47,36 @@ async def _safe_background(coro, label: str):
     except Exception as e:
         logger.warning(f"Background {label} failed: {e}")
 
+def _log_quality_metric(quality_result, model_used: str, channel: str):
+    """Log quality gate result to database for metrics."""
+    try:
+        import sqlite3
+        db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS quality_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT DEFAULT (datetime('now')),
+                category TEXT,
+                quality_level TEXT,
+                checks_performed TEXT,
+                warnings TEXT,
+                validation_time_ms REAL,
+                message_preview TEXT,
+                model_used TEXT,
+                channel TEXT
+            )
+        """)
+        conn.execute(
+            "INSERT INTO quality_metrics (category, quality_level, checks_performed, warnings, validation_time_ms, model_used, channel) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("chat", quality_result.level, ",".join(quality_result.checks_performed), ",".join(quality_result.warnings), quality_result.validation_time_ms, model_used, channel)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"Quality metric log failed: {e}")
+
+
 # Brain instances (shared across requests)
 conversation_tracker = ConversationTracker()
 
@@ -83,6 +113,7 @@ class ChatResponse(BaseModel):
     model_used: str
     fallback_used: bool = False
     tool_results: Optional[List[Dict[str, Any]]] = None
+    quality: Optional[Dict[str, Any]] = None
 
 
 class TaskCreateRequest(BaseModel):
@@ -342,11 +373,32 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                 request.message, final_content, _channel_source, conv_id,
             )
 
+        # Quality gate — confidence level check
+        try:
+            from app.services.max.quality_gate import validate_response, get_response_suffix, get_quality_badge
+            quality_result = validate_response(
+                final_content,
+                category=request.desk or "general",
+                tool_results=tool_results_list,
+                model_used=response.model_used,
+            )
+            quality_suffix = get_response_suffix(quality_result)
+            if quality_suffix:
+                final_content += quality_suffix
+            quality_badge = get_quality_badge(quality_result)
+
+            # Log quality metrics
+            _log_quality_metric(quality_result, response.model_used, request.channel or "web")
+        except Exception as qg_err:
+            logger.debug(f"Quality gate error (non-fatal): {qg_err}")
+            quality_badge = None
+
         resp = ChatResponse(
             response=sanitize_output(final_content),
             model_used=response.model_used,
             fallback_used=response.fallback_used,
             tool_results=tool_results_list if tool_results_list else None,
+            quality=quality_badge,
         )
         return resp
     except Exception as e:
@@ -650,7 +702,21 @@ async def chat_stream(request: ChatRequest):
             except Exception as _am_err:
                 logger.debug(f"[stream] Quality audit log failed: {_am_err}")
 
-            yield f"data: {json.dumps({'type': 'done', 'model_used': model_used, 'conversation_id': conv_id})}\n\n"
+            # Quality gate — confidence badge for streaming responses
+            _quality_badge = None
+            try:
+                from app.services.max.quality_gate import validate_response as _qg_validate, get_quality_badge as _qg_badge
+                _tool_dicts_for_qg = [{"tool": r.tool, "success": r.success, "result": r.result, "error": r.error} for r in tool_results_list] if tool_results_list else []
+                _qg_result = _qg_validate(full_response, category=request.desk or "general", tool_results=_tool_dicts_for_qg, model_used=model_used)
+                _quality_badge = _qg_badge(_qg_result)
+                _log_quality_metric(_qg_result, model_used, request.channel or "web")
+            except Exception as _qg_err:
+                logger.debug(f"[stream] Quality gate error: {_qg_err}")
+
+            _done_data = {'type': 'done', 'model_used': model_used, 'conversation_id': conv_id}
+            if _quality_badge:
+                _done_data['quality'] = _quality_badge
+            yield f"data: {json.dumps(_done_data)}\n\n"
         except Exception as e:
             logger.error(f"Stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
@@ -1350,6 +1416,41 @@ async def get_desk_daily_report():
     """Get end-of-day desk report."""
     report = await ai_desk_manager.generate_daily_report()
     return {"report": report}
+
+
+# ── Quality Gate Metrics ─────────────────────────────────────────────
+
+
+@router.get("/quality/metrics")
+async def get_quality_metrics():
+    """Get quality gate metrics for today."""
+    import sqlite3
+    db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("""
+            SELECT quality_level, COUNT(*) as count
+            FROM quality_metrics
+            WHERE date(timestamp) = date('now')
+            GROUP BY quality_level
+        """).fetchall()
+        total = conn.execute("""
+            SELECT COUNT(*) FROM quality_metrics WHERE date(timestamp) = date('now')
+        """).fetchone()[0]
+        conn.close()
+
+        breakdown = {r["quality_level"]: r["count"] for r in rows}
+        return {
+            "today_total": total,
+            "verified": breakdown.get("verified", 0),
+            "high": breakdown.get("high", 0),
+            "moderate": breakdown.get("moderate", 0),
+            "low": breakdown.get("low", 0),
+            "failed": breakdown.get("failed", 0),
+        }
+    except Exception as e:
+        return {"today_total": 0, "error": str(e)}
 
 
 # ── Code Mode — Async Code Tasks ─────────────────────────────────────

@@ -558,6 +558,23 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             }} suppressHydrationWarning>
               {msg.timestamp}
               {msg.model && <span style={{ opacity: 0.7 }}>{msg.model}</span>}
+              {msg.role === 'assistant' && msg.quality && (
+                <span
+                  title={`${msg.quality.label}${msg.quality.warnings?.length ? '\n' + msg.quality.warnings.join('\n') : ''}`}
+                  style={{
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    borderRadius: 6,
+                    background: msg.quality.color + '18',
+                    color: msg.quality.color,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {msg.quality.icon} {msg.quality.label}
+                </span>
+              )}
               {msg.role === 'assistant' && msg.content.length > 20 && (
                 <button
                   onClick={() => playTTS(msg.content)}

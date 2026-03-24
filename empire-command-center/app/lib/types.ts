@@ -10,6 +10,15 @@ export type ScreenMode = 'chat' | 'quote' | 'docs' | 'research' | 'video' | 'das
 export type SidebarIcon = 'chat' | 'dashboard' | 'desks' | 'inbox' | 'files' | 'search' | 'voice' | 'settings';
 export type RightTab = 'desks' | 'inbox' | 'system' | 'memory';
 
+export interface QualityBadge {
+  icon: string;
+  color: string;
+  label: string;
+  checks?: string[];
+  warnings?: string[];
+  validation_time_ms?: number;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
@@ -18,6 +27,7 @@ export interface Message {
   model?: string;
   latency?: string;
   toolResults?: ToolResult[];
+  quality?: QualityBadge;
 }
 
 export interface ToolResult {

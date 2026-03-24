@@ -161,6 +161,9 @@ export default function RightPanel({ desks, briefing, systemStats, activeScreen,
   return (
     <aside className="w-[320px] h-full bg-[var(--panel)] border-l border-[var(--border)] flex flex-col shrink-0 overflow-y-auto p-4 gap-3">
 
+      {/* ── QUALITY GATE ── */}
+      <QualityGateWidget collapsed={!!collapsed.quality} onToggle={() => toggle('quality')} />
+
       {/* ── v6.0 INTELLIGENCE CARDS ── */}
       <IntelligenceCards collapsed={!!collapsed.intelligence} onToggle={() => toggle('intelligence')} />
 
@@ -619,6 +622,57 @@ function SidebarAction({ label, icon, color, onClick }: { label: string; icon: R
    v6.0 Intelligence Cards
    Morning brief, weekly report, security, cost-per-desk
    ═══════════════════════════════════════════ */
+
+function QualityGateWidget({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const [metrics, setMetrics] = useState<any>(null);
+
+  useEffect(() => {
+    const load = () => {
+      fetch(`${API}/max/quality/metrics`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setMetrics(d); })
+        .catch(() => {});
+    };
+    load();
+    const iv = setInterval(load, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
+  return (
+    <div>
+      <button onClick={onToggle} className="flex items-center justify-between w-full mb-2 cursor-pointer">
+        <span className="section-label">Quality Gate</span>
+        {collapsed ? <ChevronDown size={12} className="text-[#ccc]" /> : <ChevronUp size={12} className="text-[#ccc]" />}
+      </button>
+      {!collapsed && metrics && (
+        <div style={{
+          padding: '10px 12px', borderRadius: 10,
+          background: 'var(--card-bg)', border: '1px solid var(--border)',
+          fontSize: 12, lineHeight: 1.6,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: 'var(--text)' }}>
+            Today: {metrics.today_total || 0} responses
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {(metrics.verified > 0 || metrics.high > 0) && (
+              <span style={{ color: '#22c55e', fontWeight: 600 }}>✅ {(metrics.verified || 0) + (metrics.high || 0)}</span>
+            )}
+            {metrics.moderate > 0 && (
+              <span style={{ color: '#eab308', fontWeight: 600 }}>🟡 {metrics.moderate}</span>
+            )}
+            {metrics.low > 0 && (
+              <span style={{ color: '#f97316', fontWeight: 600 }}>⚠️ {metrics.low}</span>
+            )}
+            {metrics.failed > 0 && (
+              <span style={{ color: '#ef4444', fontWeight: 600 }}>❌ {metrics.failed}</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function IntelligenceCards({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const [brief, setBrief] = useState<any>(null);

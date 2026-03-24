@@ -87,6 +87,7 @@ export function useChat() {
     abortRef.current = ctrl;
     let accumulated = '';
     let modelUsed = '';
+    let qualityBadge: any = undefined;
 
     try {
       const historySlice = newMsgs.slice(-20).map(m => ({ role: m.role, content: m.content }));
@@ -137,6 +138,7 @@ export function useChat() {
             } else if (ev.type === 'done') {
               modelUsed = ev.model_used || '';
               setStreamingModel(modelUsed);
+              if (ev.quality) qualityBadge = ev.quality;
               if (ev.conversation_id && !chatIdRef.current) chatIdRef.current = ev.conversation_id;
             } else if (ev.type === 'error') {
               accumulated += '\n\n*Error: ' + (ev.content || 'Unknown error') + '*';
@@ -153,6 +155,7 @@ export function useChat() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         model: modelUsed,
         toolResults: toolResults.length > 0 ? toolResults : undefined,
+        quality: qualityBadge,
       };
       updateMessages([...newMsgs, assistantMsg]);
       setStreamingContent('');
