@@ -68,12 +68,16 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [codeTask, setCodeTask] = useState<any>(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<string>(''); // Recording/uploading/transcribing status
+  const [aiStatus, setAiStatus] = useState<string>(''); // Thinking/tool status for all messages
+  const [recordingTimer, setRecordingTimer] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const codePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceModeRef = useRef(false);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -82,6 +86,43 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
   // Keep voiceMode ref in sync
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
+
+  // AI status pipeline — detect tool calls in streaming content
+  const TOOL_STATUS_MAP: Record<string, string> = {
+    search_conversations: '🔍 Searching past conversations...',
+    search_memories: '🔍 Checking memories...',
+    create_quote: '📋 Creating quote...',
+    create_quick_quote: '📋 Creating quote...',
+    photo_to_quote: '📋 Analyzing photo for quote...',
+    search_fabrics: '🔍 Looking up fabrics...',
+    calculate_yardage: '🧮 Calculating yardage...',
+    generate_pdf: '📄 Generating PDF...',
+    send_email: '📧 Sending email...',
+    file_read: '📂 Reading files...',
+    file_write: '📝 Writing files...',
+    file_edit: '📝 Editing files...',
+    git_ops: '🔧 Git operations...',
+    run_desk_task: '🔧 Working on it...',
+    db_query: '🗄️ Querying database...',
+    web_search: '🌐 Searching the web...',
+  };
+
+  useEffect(() => {
+    if (isStreaming) {
+      // Check for tool blocks in streaming content
+      const toolMatch = streamingContent?.match(/"tool"\s*:\s*"(\w+)"/);
+      if (toolMatch) {
+        const toolName = toolMatch[1];
+        setAiStatus(TOOL_STATUS_MAP[toolName] || '🔧 Working on it...');
+      } else if (!streamingContent || streamingContent.length < 5) {
+        setAiStatus('🧠 MAX is thinking...');
+      } else {
+        setAiStatus('');
+      }
+    } else {
+      setAiStatus('');
+    }
+  }, [isStreaming, streamingContent]);
 
   // Strip markdown for TTS (remove **, *, ```, tool blocks, links)
   const stripForTTS = (text: string) => {
@@ -142,26 +183,49 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       recorder.ondataavailable = e => chunks.push(e.data);
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
+        // Stop timer
+        if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null; }
+        setRecordingTimer(0);
+
+        setVoiceStatus('📤 Sending audio...');
         const blob = new Blob(chunks, { type: 'audio/webm' });
         const fd = new FormData();
         fd.append('audio', blob, 'recording.webm');
         try {
-          const res = await fetch(API.replace('/api/v1', '') + '/api/transcribe', { method: 'POST', body: fd });
+          setVoiceStatus('🔄 Transcribing...');
+          const res = await fetch(`${API}/voice/transcribe`, { method: 'POST', body: fd });
           const data = await res.json();
           if (data.text && voiceModeRef.current) {
             // In voice mode: auto-send the transcript
             onSend(data.text);
+            setVoiceStatus('');
           } else if (data.text) {
             setInput(prev => prev + (prev ? ' ' : '') + data.text);
+            setVoiceStatus('✅ Review, then tap Send');
             textareaRef.current?.focus();
+            // Clear status after 5 seconds
+            setTimeout(() => setVoiceStatus(prev => prev === '✅ Review, then tap Send' ? '' : prev), 5000);
+          } else {
+            setVoiceStatus('');
           }
-        } catch (err) { console.warn('STT transcription failed:', err); }
+        } catch (err) {
+          console.warn('STT transcription failed:', err);
+          setVoiceStatus('❌ Transcription failed');
+          setTimeout(() => setVoiceStatus(''), 3000);
+        }
         setRecording(false);
       };
       recorder.start();
       mediaRecorderRef.current = recorder;
       setRecording(true);
-    }).catch(() => { /* mic permission denied */ });
+      setVoiceStatus('🔴 Listening... tap to stop');
+      // Start timer
+      setRecordingTimer(0);
+      recordingTimerRef.current = setInterval(() => setRecordingTimer(t => t + 1), 1000);
+    }).catch(() => {
+      setVoiceStatus('❌ Microphone access denied');
+      setTimeout(() => setVoiceStatus(''), 3000);
+    });
   }, [onSend]);
 
   // Register message complete callback for voice auto-play
@@ -701,148 +765,64 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </div>
         )}
 
-        {/* Input row */}
+        {/* Voice Mode banner */}
+        {voiceMode && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            padding: '8px 16px', borderRadius: 10, marginBottom: 8,
+            background: '#1a0a2e', border: '1.5px solid #7c3aed',
+          }}>
+            <Headphones size={14} style={{ color: '#7c3aed' }} />
+            <span style={{ color: '#c4b5fd', fontSize: 12, fontWeight: 600 }}>
+              Voice Mode ON {ttsPlaying ? '— Speaking...' : recording ? '— Listening...' : '— Ready'}
+            </span>
+            <button onClick={toggleVoiceMode} style={{
+              background: 'none', border: 'none', color: '#7c3aed', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600, textDecoration: 'underline', marginLeft: 8,
+            }}>Turn Off</button>
+          </div>
+        )}
+
+        {/* Status bar — voice status + AI status */}
+        {(voiceStatus || aiStatus) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 14px', marginBottom: 6,
+            fontSize: 13, fontWeight: 500, color: 'var(--dim)',
+            background: 'var(--card-bg)', borderRadius: 8,
+            border: '1px solid var(--border)',
+            animation: 'pulse 2s infinite',
+          }}>
+            {voiceStatus && <span>{voiceStatus}{recording ? ` (${recordingTimer}s)` : ''}</span>}
+            {voiceStatus && aiStatus && <span style={{ color: 'var(--border)' }}>|</span>}
+            {aiStatus && <span>{aiStatus}</span>}
+          </div>
+        )}
+
+        {/* Input row: [Attach] [Input] [Mic] [Send] */}
         <div style={{
           display: 'flex',
           alignItems: 'flex-end',
-          gap: 10,
+          gap: 8,
         }}>
           {/* Attach button */}
           <button
             onClick={() => fileInputRef.current?.click()}
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: 'var(--card-bg)',
-              border: '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              color: 'var(--dim)',
-              flexShrink: 0,
-              transition: 'all 0.2s',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'var(--border-h)';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'var(--border)';
-              e.currentTarget.style.transform = 'none';
+              width: 44, height: 44, borderRadius: 12,
+              background: 'var(--card-bg)', border: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: 'var(--dim)', flexShrink: 0, transition: 'all 0.2s',
             }}
           >
             <Paperclip size={17} />
           </button>
 
-          {/* Mic button */}
-          <button
-            onClick={toggleRecording}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: recording ? 'var(--red)' : 'var(--card-bg)',
-              border: `1px solid ${recording ? 'var(--red)' : 'var(--border)'}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              color: recording ? '#fff' : 'var(--dim)',
-              flexShrink: 0,
-              transition: 'all 0.2s',
-              animation: recording ? 'pulse 1.5s infinite' : 'none',
-            }}
-            onMouseEnter={e => {
-              if (!recording) {
-                e.currentTarget.style.borderColor = 'var(--border-h)';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }
-            }}
-            onMouseLeave={e => {
-              if (!recording) {
-                e.currentTarget.style.borderColor = 'var(--border)';
-                e.currentTarget.style.transform = 'none';
-              }
-            }}
-          >
-            {recording ? <MicOff size={17} /> : <Mic size={17} />}
-          </button>
-
-          {/* Voice Mode toggle */}
-          <button
-            onClick={toggleVoiceMode}
-            title={voiceMode ? 'Voice Mode ON — auto-speak + auto-listen (click to disable)' : 'Voice Mode — hands-free conversation'}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: voiceMode ? '#1a0a2e' : 'var(--card-bg)',
-              border: voiceMode ? '1.5px solid #7c3aed' : '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              color: voiceMode ? '#7c3aed' : 'var(--dim)',
-              flexShrink: 0,
-              transition: 'all 0.2s',
-              position: 'relative',
-            }}
-          >
-            <Headphones size={17} />
-            {voiceMode && (
-              <span style={{
-                position: 'absolute',
-                top: -2,
-                right: -2,
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: ttsPlaying ? '#7c3aed' : recording ? '#ef4444' : '#22c55e',
-                animation: (ttsPlaying || recording) ? 'pulse 1.5s infinite' : 'none',
-              }} />
-            )}
-          </button>
-
-          {/* Code Mode toggle */}
-          <button
-            onClick={() => {
-              if (codeMode) {
-                setCodeMode(false);
-                setCodeModePin('');
-              } else if (codeModePin) {
-                setCodeMode(true);
-              } else {
-                setPinInput('');
-                setPinError('');
-                setShowPinModal(true);
-              }
-            }}
-            title={codeMode ? 'Code Mode ON — click to disable' : 'Code Mode — send to Atlas/Opus'}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: codeMode ? '#1a1a1a' : 'var(--card-bg)',
-              border: codeMode ? '1.5px solid #b8960c' : '1px solid var(--border)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              color: codeMode ? '#b8960c' : 'var(--dim)',
-              flexShrink: 0,
-              transition: 'all 0.2s',
-            }}
-          >
-            <Terminal size={17} />
-          </button>
-
           {/* Text input */}
           <div style={{
             flex: 1,
-            background: codeMode ? '#fdf8eb' : '#fff',
-            border: `1.5px solid ${codeMode ? '#b8960c' : inputFocused ? 'var(--gold)' : 'var(--border)'}`,
+            background: codeMode ? '#fdf8eb' : voiceMode ? '#f5f0ff' : '#fff',
+            border: `1.5px solid ${codeMode ? '#b8960c' : voiceMode ? '#7c3aed' : inputFocused ? 'var(--gold)' : 'var(--border)'}`,
             borderRadius: 14,
             transition: 'border-color 0.2s, box-shadow 0.2s, background 0.2s',
             boxShadow: codeMode ? '0 0 0 3px rgba(184,150,12,0.12)' : inputFocused ? '0 0 0 3px rgba(184,150,12,0.1)' : 'none',
@@ -859,49 +839,91 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               placeholder={codeMode ? 'Code Mode — describe what to build or fix...' : 'Message MAX...'}
               rows={1}
               style={{
-                flex: 1,
-                padding: '13px 18px',
-                border: 'none',
-                outline: 'none',
-                fontSize: 14,
-                fontFamily: "'Inter', sans-serif",
-                resize: 'none',
-                minHeight: 44,
-                maxHeight: 120,
-                background: 'transparent',
-                color: 'var(--text)',
-                lineHeight: 1.5,
+                flex: 1, padding: '13px 18px', border: 'none', outline: 'none',
+                fontSize: 14, fontFamily: "'Inter', sans-serif", resize: 'none',
+                minHeight: 44, maxHeight: 120, background: 'transparent',
+                color: 'var(--text)', lineHeight: 1.5,
               }}
             />
           </div>
+
+          {/* Mic button — primary, next to send */}
+          <button
+            onClick={toggleRecording}
+            title={recording ? 'Tap to stop recording' : 'Tap to record voice'}
+            style={{
+              width: 44, height: 44, borderRadius: 12,
+              background: recording ? '#ef4444' : 'var(--card-bg)',
+              border: `1.5px solid ${recording ? '#ef4444' : 'var(--border)'}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: recording ? '#fff' : 'var(--dim)',
+              flexShrink: 0, transition: 'all 0.2s',
+              animation: recording ? 'pulse 1.5s infinite' : 'none',
+              position: 'relative',
+            }}
+          >
+            {recording ? <MicOff size={18} /> : <Mic size={18} />}
+          </button>
 
           {/* Send button */}
           <button
             onClick={handleSend}
             disabled={isStreaming}
             style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              background: 'var(--text)',
-              border: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              width: 44, height: 44, borderRadius: 12,
+              background: 'var(--text)', border: 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
               cursor: isStreaming ? 'not-allowed' : 'pointer',
-              color: '#fff',
-              flexShrink: 0,
-              opacity: isStreaming ? 0.5 : 1,
-              transition: 'all 0.2s',
+              color: '#fff', flexShrink: 0,
+              opacity: isStreaming ? 0.5 : 1, transition: 'all 0.2s',
             }}
-            onMouseEnter={e => {
-              if (!isStreaming) e.currentTarget.style.background = 'var(--gold)';
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.background = 'var(--text)';
-            }}
+            onMouseEnter={e => { if (!isStreaming) e.currentTarget.style.background = 'var(--gold)'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'var(--text)'; }}
           >
             <ArrowUp size={20} />
+          </button>
+        </div>
+
+        {/* Secondary controls row: Voice Mode + Code Mode */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 16, marginTop: 8, paddingBottom: 2,
+        }}>
+          <button
+            onClick={toggleVoiceMode}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600,
+              color: voiceMode ? '#7c3aed' : 'var(--dim)',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <Headphones size={13} />
+            {voiceMode ? 'Voice Mode ON' : 'Voice Mode'}
+          </button>
+          <span style={{ color: 'var(--border)', fontSize: 10 }}>·</span>
+          <button
+            onClick={() => {
+              if (codeMode) {
+                setCodeMode(false);
+                setCodeModePin('');
+              } else if (codeModePin) {
+                setCodeMode(true);
+              } else {
+                setPinInput('');
+                setPinError('');
+                setShowPinModal(true);
+              }
+            }}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 12, fontWeight: 600,
+              color: codeMode ? '#b8960c' : 'var(--dim)',
+              display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <Terminal size={13} />
+            {codeMode ? 'Code Mode ON' : 'Code Mode'}
           </button>
         </div>
 

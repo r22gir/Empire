@@ -201,9 +201,8 @@ async def health():
 # ── STT endpoint (top-level for frontend compatibility) ──
 from fastapi import UploadFile, File as FileParam
 
-@app.post("/api/transcribe")
-async def api_transcribe(file: UploadFile = FileParam(...), language: str = "es"):
-    """Transcribe uploaded audio via Groq Whisper. Used by Command Center mic button."""
+async def _do_transcribe(upload: UploadFile, language: str = "en"):
+    """Shared transcription logic for both /api/transcribe and /api/v1/voice/transcribe."""
     from app.services.max.stt_service import stt_service
     from fastapi import HTTPException as _HTTPException
     import tempfile
@@ -212,17 +211,29 @@ async def api_transcribe(file: UploadFile = FileParam(...), language: str = "es"
     if not stt_service.is_configured:
         raise _HTTPException(status_code=503, detail="STT not configured — GROQ_API_KEY missing")
 
-    suffix = _Path(file.filename or "audio.webm").suffix or ".webm"
+    suffix = _Path(upload.filename or "audio.webm").suffix or ".webm"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        content = await file.read()
+        content = await upload.read()
         tmp.write(content)
         tmp_path = _Path(tmp.name)
 
     try:
         transcript = await stt_service.transcribe(tmp_path, language=language)
-        return {"text": transcript, "language": language, "filename": file.filename}
+        return {"text": transcript, "language": language, "filename": upload.filename}
     finally:
         tmp_path.unlink(missing_ok=True)
+
+
+@app.post("/api/transcribe")
+async def api_transcribe(file: UploadFile = FileParam(...), language: str = "en"):
+    """Transcribe uploaded audio via Groq Whisper (legacy endpoint, accepts 'file' field)."""
+    return await _do_transcribe(file, language)
+
+
+@app.post("/api/v1/voice/transcribe")
+async def api_voice_transcribe(audio: UploadFile = FileParam(...), language: str = "en"):
+    """Transcribe uploaded audio via Groq Whisper. Accepts 'audio' field name."""
+    return await _do_transcribe(audio, language)
 
 
 # Telegram Bot + Desk Scheduler auto-start
