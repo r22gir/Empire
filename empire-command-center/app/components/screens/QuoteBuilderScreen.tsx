@@ -640,9 +640,11 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                 }
               });
               setPhotos(prev => {
-                const existing = new Set(prev.map(p => p.originalName));
+                const existing = new Set(prev.map(p => p.originalName).filter(Boolean));
+                // Also include original_name variants in dedup check
+                prev.forEach(p => { if (p.serverUrl) existing.add(p.serverUrl.split('/').pop() || ''); });
                 const newPhotos = data.photos
-                  .filter((p: any) => !existing.has(p.filename))
+                  .filter((p: any) => !existing.has(p.filename) && !existing.has(p.original_name))
                   .map((p: any) => {
                     const assign = savedAssignments.get(p.original_name || p.filename) || {};
                     return {
@@ -756,6 +758,9 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     }
   }, [step]);
 
+  // Track deleted photo filenames so intake reload doesn't re-add them
+  const deletedPhotosRef = useRef<Set<string>>(new Set());
+
   // Load intake project photos and customer info
   const loadIntakeProject = (project: any) => {
     setSelectedIntakeId(project.id);
@@ -765,7 +770,15 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       originalName: p.original_name || p.filename,
       fromIntake: true,
     }));
-    setPhotos(prev => [...intakePhotos, ...prev.filter(p => !p.fromIntake)]);
+    setPhotos(prev => {
+      // Keep non-intake photos as-is; merge intake photos but skip deleted ones
+      const nonIntake = prev.filter(p => !p.fromIntake);
+      const existing = new Set(prev.map(p => p.originalName).filter(Boolean));
+      const filtered = intakePhotos.filter(p =>
+        !deletedPhotosRef.current.has(p.originalName || '') && !existing.has(p.originalName)
+      );
+      return [...prev.filter(p => p.fromIntake), ...filtered, ...nonIntake];
+    });
     // Auto-fill customer info
     if (project.customer_name) {
       setCustomer({
@@ -922,12 +935,15 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   const removePhoto = async (idx: number) => {
     const photo = photos[idx];
+    // Track deletion so intake reload won't re-add this photo
+    const photoName = photo?.originalName || photo?.uploadedFilename?.split('/').pop() || photo?.preview.split('/').pop() || '';
+    if (photoName) deletedPhotosRef.current.add(photoName);
+
     // Delete from backend if this photo has been uploaded/stored
     if (editQuoteId && photo) {
-      const filename = photo.originalName || photo.uploadedFilename?.split('/').pop() || photo.preview.split('/').pop();
-      if (filename) {
+      if (photoName) {
         try {
-          await fetch(`${API}/photos/quote/${editQuoteId}/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+          await fetch(`${API}/photos/quote/${editQuoteId}/${encodeURIComponent(photoName)}`, { method: 'DELETE' });
         } catch { /* best effort — still remove from UI */ }
       }
     }
