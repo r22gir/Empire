@@ -269,14 +269,31 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
                 continue
             if status and q.get("status") != status:
                 continue
+            # Resolve total: flat field → tiers.A → tiers.B → tiers.C
+            total = q.get("total") or 0
+            if not total:
+                tiers = q.get("tiers") or {}
+                for t in ("A", "B", "C"):
+                    tier = tiers.get(t)
+                    if tier and tier.get("subtotal"):
+                        total = tier["subtotal"]
+                        break
+            # Resolve items count: flat line_items → tiers items → rooms
+            items_count = len(q.get("line_items") or [])
+            if not items_count:
+                tiers = q.get("tiers") or {}
+                tier_a = tiers.get("A") or {}
+                items_count = len(tier_a.get("items") or [])
+            if not items_count:
+                items_count = sum(len(r.get("items") or r.get("windows") or []) for r in (q.get("rooms") or []))
             quotes.append({
                 "id": q["id"],
                 "quote_number": q.get("quote_number"),
                 "customer_name": q.get("customer_name"),
-                "total": q.get("total", 0),
+                "total": total,
                 "status": q.get("status"),
                 "created_at": q.get("created_at", "")[:10],
-                "items_count": len(q.get("line_items", [])),
+                "items_count": items_count,
             })
 
     quotes.sort(key=lambda x: x.get("created_at", ""), reverse=True)
