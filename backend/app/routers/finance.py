@@ -726,18 +726,36 @@ def create_invoice_from_quote(request: Request, quote_id: str):
     with open(quote_file) as f:
         quote = json.load(f)
 
-    # Extract line items from rooms or flat line_items
+    # Extract line items from tiers (furniture quotes), rooms/windows (drapery), or flat line_items
     line_items = []
-    for room in (quote.get("rooms") or []):
-        room_name = room.get("name", "Room")
-        for window in room.get("windows", []):
-            line_items.append({
-                "description": f"{room_name} - {window.get('name', 'Window')} - {window.get('treatment_type', 'Treatment')}",
-                "quantity": 1,
-                "unit_price": window.get("total", 0),
-                "total": window.get("total", 0),
-            })
-    # Fallback: use flat line_items if no rooms
+    selected_tier = quote.get("selected_tier") or "A"  # Default to tier A if none selected
+
+    # Strategy 1: Tiered pricing (furniture/upholstery quotes)
+    tiers = quote.get("tiers") or {}
+    tier_data = tiers.get(selected_tier) or tiers.get("A") or tiers.get("B") or tiers.get("C")
+    if tier_data and tier_data.get("items"):
+        for tier_item in tier_data["items"]:
+            for li in tier_item.get("line_items", []):
+                line_items.append({
+                    "description": li.get("description", "Item"),
+                    "quantity": li.get("quantity", 1),
+                    "unit_price": li.get("amount", 0),
+                    "total": li.get("amount", 0),
+                })
+
+    # Strategy 2: Rooms with windows (drapery quotes)
+    if not line_items:
+        for room in (quote.get("rooms") or []):
+            room_name = room.get("name", "Room")
+            for window in room.get("windows", []):
+                line_items.append({
+                    "description": f"{room_name} - {window.get('name', 'Window')} - {window.get('treatment_type', 'Treatment')}",
+                    "quantity": 1,
+                    "unit_price": window.get("total", 0),
+                    "total": window.get("total", 0),
+                })
+
+    # Strategy 3: Flat line_items array
     if not line_items:
         for item in (quote.get("line_items") or []):
             qty = item.get("quantity", 1)
@@ -750,15 +768,18 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 "total": amt,
             })
 
-    subtotal = quote.get("subtotal", 0)
-    # If subtotal is 0, try proposal_totals option A or sum line items
-    if subtotal == 0:
+    # Calculate subtotal: tier data > quote field > proposal_totals > sum of line items
+    subtotal = 0
+    if tier_data:
+        subtotal = tier_data.get("subtotal", 0) or 0
+    if not subtotal:
+        subtotal = quote.get("subtotal", 0) or 0
+    if not subtotal:
         proposal_totals = quote.get("proposal_totals", {})
         if proposal_totals:
-            # Use option A (budget) as default
             subtotal = proposal_totals.get("A", 0) or proposal_totals.get("B", 0) or proposal_totals.get("C", 0)
-        if subtotal == 0:
-            subtotal = sum(item.get("total", 0) for item in line_items)
+    if not subtotal:
+        subtotal = sum(item.get("total", 0) for item in line_items)
 
     tax_rate = quote.get("tax_rate", 0.06)
 

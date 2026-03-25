@@ -258,9 +258,10 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         return;
       }
       const data = await res.json();
-      const invNum = data.invoice_number || data.id || 'Created';
+      const inv = data.invoice || data;
+      const invNum = inv.invoice_number || inv.id || 'Created';
       setInvoiceNumber(invNum);
-      showFeedback(`Invoice ${invNum} created!`);
+      showFeedback(`Invoice ${invNum} created — $${(inv.total || 0).toFixed(2)}`);
     } catch {
       showFeedback('Failed to create invoice');
     }

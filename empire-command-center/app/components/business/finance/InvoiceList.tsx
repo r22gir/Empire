@@ -204,7 +204,7 @@ export default function InvoiceList() {
         throw new Error(`Failed to load invoices (${res.status})`);
       }
       const data = await res.json();
-      setInvoices(Array.isArray(data) ? data : data.items || []);
+      setInvoices(Array.isArray(data) ? data : data.invoices || data.items || []);
     } catch (err: any) {
       setError(null);
       setInvoices([]);
@@ -218,12 +218,12 @@ export default function InvoiceList() {
   const columns: Column[] = [
     { key: 'invoice_number', label: 'Invoice #', sortable: true },
     { key: 'customer_name', label: 'Customer', sortable: true },
-    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="font-bold text-[#1a1a1a]">{fmt(r.amount || 0)}</span> },
+    { key: 'total', label: 'Amount', sortable: true, render: (r) => <span className="font-bold text-[#1a1a1a]">{fmt(r.total || r.amount || 0)}</span> },
     { key: 'due_date', label: 'Due Date', sortable: true, render: (r) => (
       <span className="text-xs text-[#999]" suppressHydrationWarning>{r.due_date ? new Date(r.due_date).toLocaleDateString() : '\u2014'}</span>
     )},
     { key: 'status', label: 'Status', sortable: true, render: (r) => <StatusBadge status={r.status || 'draft'} /> },
-    { key: 'balance', label: 'Balance', sortable: true, render: (r) => <span className="font-bold text-[#b8960c]">{fmt(r.balance ?? r.amount ?? 0)}</span> },
+    { key: 'balance_due', label: 'Balance', sortable: true, render: (r) => <span className="font-bold text-[#b8960c]">{fmt(r.balance_due ?? r.balance ?? r.total ?? 0)}</span> },
   ];
 
   return (
