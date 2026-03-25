@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useMemo, useRef } from 'react';
-import { Printer } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 export type PanelStyle = 'flat' | 'vertical_channels' | 'horizontal_channels' | 'tufted' | 'spaced_panels';
 
@@ -423,10 +423,10 @@ function PanelEditor({ config, onChange, backWidth, backHeight, radioName }: {
   );
 }
 
-export default function PanelConfigurator({ backWidth, backHeight, config, onChange, itemType, itemLabel }: PanelConfiguratorProps) {
-  const printRef = useRef<HTMLDivElement>(null);
+export default function PanelConfigurator({ backWidth, backHeight, config, onChange, itemType }: PanelConfiguratorProps) {
   const multiShape = isMultiSection(itemType);
   const [activeSection, setActiveSection] = useState(0);
+  const [expanded, setExpanded] = useState(config.style !== 'flat');
 
   const set = (partial: Partial<PanelConfig>) => onChange({ ...config, ...partial });
 
@@ -448,54 +448,26 @@ export default function PanelConfigurator({ backWidth, backHeight, config, onCha
     onChange({ ...config, sections });
   };
 
-  const handlePrint = () => {
-    if (!printRef.current) return;
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
-    if (!printWindow) return;
-    const html = printRef.current.innerHTML;
-    printWindow.document.write(`<!DOCTYPE html><html><head>
-      <title>Back Panel Configuration${itemLabel ? ` — ${itemLabel}` : ''}</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Inter', -apple-system, sans-serif; padding: 24px; color: #1a1a1a; }
-        h2 { font-size: 16px; margin-bottom: 12px; color: #b8960c; }
-        .print-header { border-bottom: 2px solid #b8960c; padding-bottom: 8px; margin-bottom: 16px; }
-        .print-header h1 { font-size: 20px; }
-        .print-header .sub { font-size: 12px; color: #888; margin-top: 4px; }
-        svg { max-width: 100%; }
-        input, select, button { display: none; }
-        label { pointer-events: none; }
-        @media print { body { padding: 12px; } }
-      </style>
-    </head><body>
-      <div class="print-header">
-        <h1>Back Panel Configuration</h1>
-        <div class="sub">${itemLabel || ''} — ${backWidth}" W × ${backHeight}" H — ${new Date().toLocaleDateString()}</div>
-      </div>
-      ${html}
-    </body></html>`);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 300);
-  };
-
   return (
-    <div ref={printRef} style={{ marginTop: 10, border: '1px solid #f0e6c0', borderRadius: 10, background: '#fdf8eb', overflow: 'hidden' }}>
-      {/* Header — always open, with print button */}
-      <div
-        className="w-full flex items-center justify-between"
-        style={{ padding: '8px 12px', background: 'transparent', fontSize: 11, fontWeight: 700, color: '#b8960c' }}
+    <div style={{ marginTop: 10, border: '1px solid #f0e6c0', borderRadius: 10, background: '#fdf8eb', overflow: 'hidden' }}>
+      {/* Collapsible header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between cursor-pointer"
+        style={{ padding: '8px 12px', background: 'transparent', border: 'none', fontSize: 11, fontWeight: 700, color: '#b8960c' }}
       >
-        Back Panel Configuration
-        <button
-          onClick={handlePrint}
-          className="flex items-center gap-1 cursor-pointer hover:opacity-70 transition-opacity"
-          style={{ background: 'none', border: 'none', fontSize: 10, fontWeight: 600, color: '#b8960c', padding: '4px 8px' }}
-          title="Print / Share"
-        >
-          <Printer size={13} /> Print
-        </button>
-      </div>
+        <span>
+          Back Panel Configuration
+          {!expanded && config.style !== 'flat' && (
+            <span style={{ fontSize: 9, fontWeight: 500, color: '#999', marginLeft: 6 }}>
+              ({STYLES.find(s => s.value === config.style)?.label})
+            </span>
+          )}
+        </span>
+        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
 
+      {expanded && (
       <div style={{ padding: '0 12px 12px' }}>
         {/* Multi-section tabs for L/U shaped items */}
         {multiShape ? (
@@ -572,6 +544,7 @@ export default function PanelConfigurator({ backWidth, backHeight, config, onCha
           />
         )}
       </div>
+      )}
     </div>
   );
 }

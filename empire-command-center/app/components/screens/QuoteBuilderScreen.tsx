@@ -4,7 +4,7 @@ import { API } from '../../lib/api';
 import {
   ArrowLeft, ArrowRight, User, Camera, Layers, Settings, FileText,
   Plus, Trash2, Upload, X, Check, Loader2, ChevronDown, ChevronUp, GripVertical, Search,
-  Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle, BookOpen
+  Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle, BookOpen, Printer
 } from 'lucide-react';
 import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
 import dynamic from 'next/dynamic';
@@ -2723,17 +2723,112 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
   const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
   const [dragOverItem, setDragOverItem] = useState<string | null>(null);
 
+  // Print helper: generates a clean printable view for items
+  const printItems = (roomName: string, itemsToPrint: RoomItem[], allRooms?: boolean) => {
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!printWindow) return;
+
+    const itemsHtml = itemsToPrint.map(item => {
+      const pc = item.panelConfig;
+      const panelInfo = pc && pc.style !== 'flat' ? `
+        <div style="margin-top:12px;padding:10px;background:#fdf8eb;border:1px solid #f0e6c0;border-radius:8px;">
+          <div style="font-size:11px;font-weight:700;color:#b8960c;margin-bottom:6px;">Back Panel Configuration</div>
+          <div style="font-size:11px;color:#555;">
+            Style: <strong>${pc.style.replace(/_/g, ' ')}</strong>
+            ${pc.panelCount ? ` &bull; ${pc.panelCount} panels` : ''}
+            ${pc.panelWidth ? ` &bull; ${pc.panelWidth}" wide` : ''}
+            ${pc.gap ? ` &bull; ${pc.gap}" gap` : ''}
+            ${pc.rows ? ` &bull; ${pc.rows} rows × ${pc.columns} columns` : ''}
+            ${pc.tuftType && pc.style === 'tufted' ? ` &bull; ${pc.tuftType}` : ''}
+          </div>
+        </div>` : '';
+
+      const fabricInfo = item.fabric ? `
+        <div style="font-size:11px;color:#555;margin-top:4px;">
+          Fabric: <strong>${item.fabric.name || 'Selected'}</strong>
+          ${item.fabricYards ? ` &bull; ${item.fabricYards.toFixed(1)} yd` : ''}
+        </div>` : '';
+
+      const backingInfo = item.backingFabric ? `
+        <div style="font-size:11px;color:#555;">
+          Backing: <strong>${item.backingFabric.name || 'Selected'}</strong>
+          ${item.backingYards ? ` &bull; ${item.backingYards.toFixed(1)} yd` : ''}
+        </div>` : '';
+
+      return `
+        <div style="padding:12px;border:1px solid #ece8e0;border-radius:8px;margin-bottom:12px;background:#faf9f7;">
+          <div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:4px;">${formatItemType(item.type)}</div>
+          <div style="display:flex;gap:16px;font-size:11px;color:#666;">
+            ${item.width ? `<span>W: <strong>${item.width}"</strong></span>` : ''}
+            ${item.height ? `<span>H: <strong>${item.height}"</strong></span>` : ''}
+            ${item.depth ? `<span>D: <strong>${item.depth}"</strong></span>` : ''}
+            <span>Qty: <strong>${item.quantity}</strong></span>
+          </div>
+          ${item.notes ? `<div style="font-size:11px;color:#888;margin-top:4px;">${item.notes}</div>` : ''}
+          ${fabricInfo}${backingInfo}${panelInfo}
+        </div>`;
+    }).join('');
+
+    const title = allRooms ? 'All Items — Job Summary' : `${roomName} — Item Details`;
+    const roomsHtml = allRooms
+      ? rooms.map(r => `
+          <h2 style="font-size:15px;font-weight:700;color:#b8960c;margin:16px 0 8px;border-bottom:1px solid #ece8e0;padding-bottom:4px;">${r.name} (${r.items.length} items)</h2>
+          ${r.items.map(item => {
+            const pc = item.panelConfig;
+            const panelInfo = pc && pc.style !== 'flat' ? `
+              <div style="margin-top:8px;padding:8px;background:#fdf8eb;border:1px solid #f0e6c0;border-radius:6px;">
+                <div style="font-size:10px;font-weight:700;color:#b8960c;margin-bottom:4px;">Back Panel: ${pc.style.replace(/_/g, ' ')}${pc.panelCount ? ` — ${pc.panelCount} panels` : ''}</div>
+              </div>` : '';
+            return `
+              <div style="padding:10px;border:1px solid #ece8e0;border-radius:8px;margin-bottom:8px;background:#faf9f7;">
+                <div style="font-size:12px;font-weight:700;color:#1a1a1a;">${formatItemType(item.type)}</div>
+                <div style="font-size:11px;color:#666;">${[item.width && `W:${item.width}"`, item.height && `H:${item.height}"`, item.depth && `D:${item.depth}"`, `Qty:${item.quantity}`].filter(Boolean).join(' &bull; ')}</div>
+                ${item.notes ? `<div style="font-size:10px;color:#888;margin-top:2px;">${item.notes}</div>` : ''}
+                ${panelInfo}
+              </div>`;
+          }).join('')}
+        `).join('')
+      : itemsHtml;
+
+    printWindow.document.write(`<!DOCTYPE html><html><head>
+      <title>${title}</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', -apple-system, sans-serif; padding: 24px; color: #1a1a1a; max-width: 800px; margin: 0 auto; }
+        .header { border-bottom: 2px solid #b8960c; padding-bottom: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: baseline; }
+        .header h1 { font-size: 18px; color: #1a1a1a; }
+        .header .date { font-size: 11px; color: #888; }
+        @media print { body { padding: 12px; } }
+      </style>
+    </head><body>
+      <div class="header">
+        <h1>${title}</h1>
+        <span class="date">${new Date().toLocaleDateString()}</span>
+      </div>
+      ${roomsHtml}
+    </body></html>`);
+    printWindow.document.close();
+    setTimeout(() => printWindow.print(), 300);
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <div style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Rooms & Items
         </div>
-        <button onClick={addRoom}
-          className="flex items-center gap-1.5 cursor-pointer transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c]"
-          style={{ padding: '6px 12px', borderRadius: 8, border: '1.5px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#555' }}>
-          <Plus size={13} /> Add Room
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => printItems('All', rooms.flatMap(r => r.items), true)}
+            className="flex items-center gap-1.5 cursor-pointer transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c]"
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1.5px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#555' }}>
+            <Printer size={12} /> Print All
+          </button>
+          <button onClick={addRoom}
+            className="flex items-center gap-1.5 cursor-pointer transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c]"
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1.5px solid #ece8e0', background: '#faf9f7', fontSize: 11, fontWeight: 600, color: '#555' }}>
+            <Plus size={13} /> Add Room
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-5">
@@ -3138,11 +3233,19 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                       />
                     </div>
                   )}
-                  <button onClick={() => removeItem(room.id, item.id)}
-                    className="cursor-pointer transition-all hover:bg-[#fef2f2] hover:text-[#dc2626] mt-4"
-                    style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                    <Trash2 size={13} />
-                  </button>
+                  <div className="flex flex-col gap-1 mt-4" style={{ flexShrink: 0 }}>
+                    <button onClick={() => printItems(room.name, [item])}
+                      className="cursor-pointer transition-all hover:bg-[#fdf8eb] hover:text-[#b8960c]"
+                      style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', color: '#bbb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      title="Print this item">
+                      <Printer size={12} />
+                    </button>
+                    <button onClick={() => removeItem(room.id, item.id)}
+                      className="cursor-pointer transition-all hover:bg-[#fef2f2] hover:text-[#dc2626]"
+                      style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', color: '#ccc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
                 );
               })}
