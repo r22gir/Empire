@@ -2728,20 +2728,57 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
     const printWindow = window.open('', '_blank', 'width=900,height=700');
     if (!printWindow) return;
 
-    const itemsHtml = itemsToPrint.map(item => {
-      const pc = item.panelConfig;
-      const panelInfo = pc && pc.style !== 'flat' ? `
+    const buildPanelHtml = (pc: typeof DEFAULT_PANEL_CONFIG | undefined, w: string, h: string) => {
+      if (!pc || pc.style === 'flat') return '';
+      const bw = parseFloat(w) || 0;
+      const bh = parseFloat(h) || 0;
+      const styleName = pc.style.replace(/_/g, ' ');
+
+      // Calculate per-panel size
+      let panelSize = '';
+      if ((pc.style === 'vertical_channels' || pc.style === 'spaced_panels') && pc.panelCount > 0 && bw > 0) {
+        const pw = pc.equalDivide
+          ? ((bw - pc.gap * (pc.panelCount - 1)) / pc.panelCount).toFixed(1)
+          : (pc.panelWidth || 0).toFixed(1);
+        panelSize = `Each panel: ${pw}" W × ${bh}" H`;
+      } else if (pc.style === 'horizontal_channels' && pc.panelCount > 0 && bh > 0) {
+        const ph = pc.equalDivide
+          ? ((bh - pc.gap * (pc.panelCount - 1)) / pc.panelCount).toFixed(1)
+          : (pc.panelHeight || 0).toFixed(1);
+        panelSize = `Each panel: ${bw}" W × ${ph}" H`;
+      } else if (pc.style === 'tufted' && pc.rows && pc.columns) {
+        const dw = pc.diamondW || (bw / pc.columns);
+        const dh = pc.diamondH || (bh / pc.rows);
+        panelSize = `Diamond: ${dw.toFixed(1)}" W × ${dh.toFixed(1)}" H`;
+      }
+
+      // Fabric estimate
+      let fabricEst = '';
+      if (pc.panelCount > 0 && bw > 0 && bh > 0 && pc.style !== 'tufted') {
+        const totalSqFt = (bw * bh) / 144 * 1.1;
+        fabricEst = `Est. fabric: ${totalSqFt.toFixed(1)} sq ft → ${(totalSqFt / 9).toFixed(2)} yd`;
+      }
+
+      return `
         <div style="margin-top:12px;padding:10px;background:#fdf8eb;border:1px solid #f0e6c0;border-radius:8px;">
           <div style="font-size:11px;font-weight:700;color:#b8960c;margin-bottom:6px;">Back Panel Configuration</div>
-          <div style="font-size:11px;color:#555;">
-            Style: <strong>${pc.style.replace(/_/g, ' ')}</strong>
-            ${pc.panelCount ? ` &bull; ${pc.panelCount} panels` : ''}
-            ${pc.panelWidth ? ` &bull; ${pc.panelWidth}" wide` : ''}
-            ${pc.gap ? ` &bull; ${pc.gap}" gap` : ''}
-            ${pc.rows ? ` &bull; ${pc.rows} rows × ${pc.columns} columns` : ''}
-            ${pc.tuftType && pc.style === 'tufted' ? ` &bull; ${pc.tuftType}` : ''}
-          </div>
-        </div>` : '';
+          <table style="font-size:11px;color:#555;border-collapse:collapse;width:100%;">
+            <tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Style</td><td>${styleName}</td></tr>
+            ${pc.panelCount ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;"># Panels</td><td>${pc.panelCount}</td></tr>` : ''}
+            ${pc.panelWidth ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Width</td><td>${pc.panelWidth}"</td></tr>` : ''}
+            ${pc.panelHeight ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Height</td><td>${pc.panelHeight}"</td></tr>` : ''}
+            ${pc.gap ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Gap</td><td>${pc.gap}"</td></tr>` : ''}
+            ${pc.rows ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Grid</td><td>${pc.rows} rows × ${pc.columns} columns</td></tr>` : ''}
+            ${pc.tuftType && pc.style === 'tufted' ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Tuft Type</td><td>${pc.tuftType}</td></tr>` : ''}
+            ${pc.equalDivide ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Divide</td><td>Equal</td></tr>` : ''}
+            ${panelSize ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Panel Size</td><td><strong>${panelSize}</strong></td></tr>` : ''}
+            ${fabricEst ? `<tr><td style="padding:2px 8px 2px 0;font-weight:600;color:#888;">Fabric</td><td>${fabricEst}</td></tr>` : ''}
+          </table>
+        </div>`;
+    };
+
+    const itemsHtml = itemsToPrint.map(item => {
+      const panelInfo = buildPanelHtml(item.panelConfig, item.width, item.height);
 
       const fabricInfo = item.fabric ? `
         <div style="font-size:11px;color:#555;margin-top:4px;">
@@ -2774,11 +2811,7 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
       ? rooms.map(r => `
           <h2 style="font-size:15px;font-weight:700;color:#b8960c;margin:16px 0 8px;border-bottom:1px solid #ece8e0;padding-bottom:4px;">${r.name} (${r.items.length} items)</h2>
           ${r.items.map(item => {
-            const pc = item.panelConfig;
-            const panelInfo = pc && pc.style !== 'flat' ? `
-              <div style="margin-top:8px;padding:8px;background:#fdf8eb;border:1px solid #f0e6c0;border-radius:6px;">
-                <div style="font-size:10px;font-weight:700;color:#b8960c;margin-bottom:4px;">Back Panel: ${pc.style.replace(/_/g, ' ')}${pc.panelCount ? ` — ${pc.panelCount} panels` : ''}</div>
-              </div>` : '';
+            const panelInfo = buildPanelHtml(item.panelConfig, item.width, item.height);
             return `
               <div style="padding:10px;border:1px solid #ece8e0;border-radius:8px;margin-bottom:8px;background:#faf9f7;">
                 <div style="font-size:12px;font-weight:700;color:#1a1a1a;">${formatItemType(item.type)}</div>
