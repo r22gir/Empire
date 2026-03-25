@@ -5,7 +5,11 @@ import { ArrowLeft, ArrowRight, Check, Send, Plus, Trash2 } from 'lucide-react';
 import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
 import MeasurementInput, { Measurement } from '../../../components/intake/MeasurementInput';
+import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
+
+const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? 'https://api.empirebox.store' : 'http://localhost:8000';
 
 const steps = ['Project Info', 'Photos & Scans', 'Measurements', 'Notes & Submit'];
 
@@ -15,6 +19,8 @@ interface LineItem {
   room: string;
   description: string;
   style: string;
+  fabric?: FabricInfo;
+  showFabric?: boolean;
 }
 
 const TREATMENTS = [
@@ -36,6 +42,13 @@ const STYLES = [
   { value: 'farmhouse', label: 'Farmhouse' },
   { value: 'not-sure', label: 'Not Sure' },
 ];
+
+const defaultFabric = (room: string, item: string): FabricInfo => ({
+  scope: 'item',
+  room_name: room,
+  item_name: item,
+  fabric_preference: 'not_sure',
+});
 
 export default function NewProject() {
   const router = useRouter();
@@ -70,7 +83,7 @@ export default function NewProject() {
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
-  const updateItem = (id: string, field: keyof LineItem, value: string) => {
+  const updateItem = (id: string, field: keyof LineItem, value: any) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, [field]: value } : i));
   };
 
@@ -103,6 +116,26 @@ export default function NewProject() {
     return proj.id;
   };
 
+  // Save fabric info to backend
+  const saveFabrics = async (pid: string) => {
+    const fabricItems = items.filter(i => i.fabric && i.fabric.fabric_preference !== 'not_sure');
+    for (const item of fabricItems) {
+      if (!item.fabric) continue;
+      const payload = {
+        ...item.fabric,
+        room_name: item.room || 'Unspecified',
+        item_name: item.description || item.treatment || 'Item',
+      };
+      try {
+        await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${pid}/fabrics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch { /* best effort */ }
+    }
+  };
+
   const saveDetails = async () => {
     if (!projectId) return;
     await intakeFetch(`/projects/${projectId}`, {
@@ -120,14 +153,18 @@ export default function NewProject() {
     if (step === 0) {
       if (!name.trim()) return;
       try {
-        if (!projectId) await createProject();
-        else {
-          await intakeFetch(`/projects/${projectId}`, {
+        let pid = projectId;
+        if (!pid) {
+          pid = await createProject();
+        } else {
+          await intakeFetch(`/projects/${pid}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(buildProjectData()),
           });
         }
+        // Save fabric info when leaving step 0
+        if (pid) await saveFabrics(pid);
       } catch (err) {
         console.error('Failed to save project:', err);
         return;
@@ -141,6 +178,7 @@ export default function NewProject() {
     setSubmitting(true);
     try {
       await saveDetails();
+      await saveFabrics(projectId);
       await intakeFetch(`/projects/${projectId}/submit`, { method: 'POST' });
       router.push(`/intake/project/${projectId}`);
     } catch (_err) {
@@ -279,6 +317,26 @@ export default function NewProject() {
                           />
                         </div>
                       </div>
+
+                      {/* Fabric toggle + section */}
+                      {!item.showFabric ? (
+                        <button
+                          type="button"
+                          onClick={() => updateItem(item.id, 'showFabric', true)}
+                          className="flex items-center gap-1.5 mt-2.5 text-[11px] font-semibold text-[#b8960c] cursor-pointer"
+                          style={{ background: 'none', border: 'none', padding: 0, minHeight: 44 }}
+                        >
+                          <Plus size={12} /> Add Fabric Info
+                        </button>
+                      ) : (
+                        <FabricInfoSection
+                          label={`Fabric for ${item.room || item.treatment || `Item ${idx + 1}`}`}
+                          fabric={item.fabric || defaultFabric(item.room, item.description || item.treatment)}
+                          onChange={(f) => updateItem(item.id, 'fabric', f)}
+                          onRemove={() => { updateItem(item.id, 'showFabric', false); updateItem(item.id, 'fabric', undefined); }}
+                          projectId={projectId || undefined}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -322,7 +380,7 @@ export default function NewProject() {
             <div>
               <h2 className="text-base font-bold text-[#1a1a1a] mb-2">Additional Notes</h2>
               <p className="text-[11px] text-[#888] mb-4">
-                Anything else we should know? Special requests, fabric preferences, budget range, timeline?
+                Anything else we should know? Special requests, budget range, timeline?
               </p>
               <textarea
                 value={notes}
@@ -332,16 +390,25 @@ export default function NewProject() {
                 placeholder="Tell us anything that helps us create the perfect proposal for you..."
               />
 
-              {/* Summary of items */}
+              {/* Summary of items + fabric */}
               {items.filter(i => i.treatment || i.room).length > 0 && (
                 <div className="mt-4 p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
                   <div className="text-xs font-semibold text-[#999] uppercase tracking-[0.5px] mb-2">Project Summary</div>
                   {items.filter(i => i.treatment || i.room).map((item, idx) => (
-                    <div key={item.id} className="flex items-center gap-2 text-[12px] py-1">
-                      <span className="text-[#b8960c] font-bold">{idx + 1}.</span>
-                      <span className="font-semibold text-[#333] capitalize">{item.treatment || 'TBD'}</span>
-                      {item.room && <span className="text-[#888]">— {item.room}</span>}
-                      {item.description && <span className="text-[#aaa]">({item.description})</span>}
+                    <div key={item.id} className="py-1.5">
+                      <div className="flex items-center gap-2 text-[12px]">
+                        <span className="text-[#b8960c] font-bold">{idx + 1}.</span>
+                        <span className="font-semibold text-[#333] capitalize">{item.treatment || 'TBD'}</span>
+                        {item.room && <span className="text-[#888]">— {item.room}</span>}
+                        {item.description && <span className="text-[#aaa]">({item.description})</span>}
+                      </div>
+                      {item.fabric && item.fabric.fabric_preference !== 'not_sure' && (
+                        <div className="ml-5 mt-0.5 text-[11px] text-[#b8960c]">
+                          Fabric: {item.fabric.fabric_preference === 'com' ? 'COM — ' : ''}
+                          {item.fabric.fabric_name || item.fabric.color_pattern || 'Selected'}
+                          {item.fabric.supplier_url && ' (link provided)'}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

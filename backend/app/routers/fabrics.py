@@ -505,6 +505,146 @@ async def match_intake_fabric(intake_fabric_id: int, fabric_id: int, owner_notes
         intake_conn.close()
 
 
+# ── INTAKE FABRIC INFO (empire.db) ────────────────────────────
+
+class IntakeFabricCreate(BaseModel):
+    scope: str = "item"  # 'room' or 'item'
+    room_name: Optional[str] = None
+    item_name: Optional[str] = None
+    fabric_preference: str = "not_sure"  # picked_out, com, recommend, not_sure
+    fabric_name: Optional[str] = None
+    color_pattern: Optional[str] = None
+    fabric_code: Optional[str] = None
+    supplier_url: Optional[str] = None
+    swatch_photo_path: Optional[str] = None
+    vertical_repeat: Optional[float] = None
+    horizontal_repeat: Optional[float] = None
+    fabric_width: Optional[float] = None
+    material_type: Optional[str] = None
+    yards_available: Optional[float] = None
+    client_notes: Optional[str] = None
+
+
+def _init_intake_fabrics_table():
+    """Create intake_fabrics table in empire.db if not exists."""
+    with get_db() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS intake_fabrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                intake_id TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT 'item',
+                room_name TEXT,
+                item_name TEXT,
+                fabric_preference TEXT NOT NULL DEFAULT 'not_sure',
+                fabric_name TEXT,
+                color_pattern TEXT,
+                fabric_code TEXT,
+                supplier_url TEXT,
+                swatch_photo_path TEXT,
+                vertical_repeat REAL,
+                horizontal_repeat REAL,
+                fabric_width REAL,
+                material_type TEXT,
+                yards_available REAL,
+                client_notes TEXT,
+                owner_matched_fabric_id INTEGER,
+                owner_notes TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+
+try:
+    _init_intake_fabrics_table()
+except Exception as e:
+    logger.warning(f"intake_fabrics table init: {e}")
+
+
+@router.post("/intake-project/{intake_id}/fabrics")
+async def save_intake_fabric(intake_id: str, payload: IntakeFabricCreate):
+    """Save fabric info for an intake project (room or item level)."""
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO intake_fabrics
+               (intake_id, scope, room_name, item_name, fabric_preference,
+                fabric_name, color_pattern, fabric_code, supplier_url,
+                swatch_photo_path, vertical_repeat, horizontal_repeat,
+                fabric_width, material_type, yards_available, client_notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (intake_id, payload.scope, payload.room_name, payload.item_name,
+             payload.fabric_preference, payload.fabric_name, payload.color_pattern,
+             payload.fabric_code, payload.supplier_url, payload.swatch_photo_path,
+             payload.vertical_repeat, payload.horizontal_repeat, payload.fabric_width,
+             payload.material_type, payload.yards_available, payload.client_notes),
+        )
+        row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        row = conn.execute("SELECT * FROM intake_fabrics WHERE id = ?", (row_id,)).fetchone()
+        return dict_row(row)
+
+
+@router.get("/intake-project/{intake_id}/fabrics")
+async def get_intake_fabrics(intake_id: str):
+    """Get all fabric info for an intake project."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM intake_fabrics WHERE intake_id = ? ORDER BY id", (intake_id,)
+        ).fetchall()
+        return dict_rows(rows)
+
+
+@router.put("/intake-project/{intake_id}/fabrics/{fabric_id}")
+async def update_intake_fabric(intake_id: str, fabric_id: int, payload: IntakeFabricCreate):
+    """Update a fabric entry."""
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM intake_fabrics WHERE id = ? AND intake_id = ?", (fabric_id, intake_id)
+        ).fetchone()
+        if not existing:
+            raise HTTPException(404, "Fabric entry not found")
+        conn.execute(
+            """UPDATE intake_fabrics SET
+               scope=?, room_name=?, item_name=?, fabric_preference=?,
+               fabric_name=?, color_pattern=?, fabric_code=?, supplier_url=?,
+               swatch_photo_path=?, vertical_repeat=?, horizontal_repeat=?,
+               fabric_width=?, material_type=?, yards_available=?, client_notes=?
+               WHERE id=? AND intake_id=?""",
+            (payload.scope, payload.room_name, payload.item_name,
+             payload.fabric_preference, payload.fabric_name, payload.color_pattern,
+             payload.fabric_code, payload.supplier_url, payload.swatch_photo_path,
+             payload.vertical_repeat, payload.horizontal_repeat, payload.fabric_width,
+             payload.material_type, payload.yards_available, payload.client_notes,
+             fabric_id, intake_id),
+        )
+        row = conn.execute("SELECT * FROM intake_fabrics WHERE id = ?", (fabric_id,)).fetchone()
+        return dict_row(row)
+
+
+@router.delete("/intake-project/{intake_id}/fabrics/{fabric_id}")
+async def delete_intake_fabric(intake_id: str, fabric_id: int):
+    """Remove a fabric entry."""
+    with get_db() as conn:
+        result = conn.execute(
+            "DELETE FROM intake_fabrics WHERE id = ? AND intake_id = ?", (fabric_id, intake_id)
+        )
+        if result.rowcount == 0:
+            raise HTTPException(404, "Fabric entry not found")
+        return {"deleted": fabric_id}
+
+
+@router.put("/intake-project/{intake_id}/fabrics/{fabric_id}/match")
+async def match_intake_fabric_to_library(intake_id: str, fabric_id: int, library_fabric_id: int, owner_notes: Optional[str] = None):
+    """Owner matches a client fabric submission to a library fabric."""
+    with get_db() as conn:
+        lib = conn.execute("SELECT id FROM fabrics WHERE id = ?", (library_fabric_id,)).fetchone()
+        if not lib:
+            raise HTTPException(404, f"Library fabric {library_fabric_id} not found")
+        conn.execute(
+            "UPDATE intake_fabrics SET owner_matched_fabric_id=?, owner_notes=? WHERE id=? AND intake_id=?",
+            (library_fabric_id, owner_notes, fabric_id, intake_id),
+        )
+        return {"matched": True, "fabric_id": fabric_id, "library_fabric_id": library_fabric_id}
+
+
 # ── SEED DATA ─────────────────────────────────────────────────
 
 def seed_ramiro_fabrics():

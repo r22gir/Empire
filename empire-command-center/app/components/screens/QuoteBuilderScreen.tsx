@@ -1379,8 +1379,8 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
           <>
             <StepRooms
               rooms={rooms} photos={photos} scan3DFiles={scan3DFiles} apiBase={API_BASE}
-              addRoom={addRoom} removeRoom={removeRoom} updateRoomName={updateRoomName}
-              addItem={addItem} removeItem={removeItem} updateItem={updateItem}
+              addRoom={addRoom} removeRoom={removeRoom} moveRoom={moveRoom} updateRoomName={updateRoomName}
+              addItem={addItem} moveItem={moveItem} removeItem={removeItem} updateItem={updateItem}
               onBrowseCatalog={(roomId) => { setCatalogTargetRoom(roomId); setShowCatalog(true); }}
               onSelectFabric={(roomId, itemId, mode) => setFabricSelectorOpen({ roomId, itemId, mode })}
               onAssignPhotoToItem={(photoIndex, itemId, type) => {
@@ -2709,10 +2709,10 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
   );
 }
 
-function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, updateRoomName, addItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
+function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, moveRoom, updateRoomName, addItem, moveItem, removeItem, updateItem, onBrowseCatalog, onOpenShapeBuilder, onView3D, onSelectFabric, onAssignPhotoToItem }: {
   rooms: Room[]; photos?: PhotoFile[]; scan3DFiles?: Scan3DFile[]; apiBase?: string;
-  addRoom: () => void; removeRoom: (id: string) => void; updateRoomName: (id: string, name: string) => void;
-  addItem: (roomId: string, category?: ItemCategory) => void; removeItem: (roomId: string, itemId: string) => void;
+  addRoom: () => void; removeRoom: (id: string) => void; moveRoom: (id: string, dir: 'up' | 'down') => void; updateRoomName: (id: string, name: string) => void;
+  addItem: (roomId: string, category?: ItemCategory) => void; moveItem: (roomId: string, itemId: string, dir: 'up' | 'down') => void; removeItem: (roomId: string, itemId: string) => void;
   updateItem: (roomId: string, itemId: string, field: keyof RoomItem, value: any) => void;
   onBrowseCatalog: (roomId: string) => void;
   onOpenShapeBuilder?: (roomId: string, itemId: string, itemType: string) => void;

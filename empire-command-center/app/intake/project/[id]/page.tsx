@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   ArrowLeft, MapPin, Camera, Ruler, FileText, MessageSquare,
-  Send, Download, CheckCircle, Clock,
+  Send, Download, CheckCircle, Clock, Scissors, Link2, ExternalLink,
 } from 'lucide-react';
 import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
@@ -35,6 +35,17 @@ export default function ProjectDetail() {
   const [showAddMeasurement, setShowAddMeasurement] = useState(false);
   const [newMeasurement, setNewMeasurement] = useState({ room: '', width: '', height: '', reference: '' });
   const [savingMeasurement, setSavingMeasurement] = useState(false);
+  const [fabricEntries, setFabricEntries] = useState<any[]>([]);
+
+  const loadFabrics = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`);
+      if (res.ok) {
+        const data = await res.json();
+        setFabricEntries(Array.isArray(data) ? data : []);
+      }
+    } catch { /* best effort */ }
+  };
 
   const loadProject = async () => {
     try {
@@ -52,6 +63,7 @@ export default function ProjectDetail() {
         const me = await intakeFetch('/me');
         setUser(me);
         await loadProject();
+        await loadFabrics();
       } catch (_err) {
         router.push('/intake/login');
       } finally {
@@ -354,6 +366,69 @@ export default function ProjectDetail() {
             </div>
           )}
         </div>
+
+        {/* Fabric Selections */}
+        {fabricEntries.length > 0 && (
+          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
+            <div className="flex items-center gap-2 mb-4">
+              <Scissors size={14} className="text-[#b8960c]" />
+              <h2 className="text-[13px] font-bold text-[#1a1a1a]">Fabric Selections</h2>
+              <span className="text-[9px] font-bold text-[#b8960c] bg-[#fdf8eb] px-2 py-0.5 rounded-md">
+                {fabricEntries.length}
+              </span>
+            </div>
+            <div className="space-y-3">
+              {fabricEntries.map((f: any) => (
+                <div key={f.id} className="p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-[10px] font-bold text-[#b8960c] uppercase">
+                      {f.room_name}{f.item_name ? ` — ${f.item_name}` : ''}
+                    </span>
+                    <span className="text-[9px] px-2 py-0.5 rounded-md font-semibold" style={{
+                      background: f.fabric_preference === 'com' ? '#fef3c7' : f.fabric_preference === 'picked_out' ? '#dcfce7' : '#f5f2ed',
+                      color: f.fabric_preference === 'com' ? '#92400e' : f.fabric_preference === 'picked_out' ? '#166534' : '#888',
+                    }}>
+                      {f.fabric_preference === 'picked_out' ? 'Client Selected' : f.fabric_preference === 'com' ? 'COM' : f.fabric_preference === 'recommend' ? 'Needs Recommendation' : 'Not Sure'}
+                    </span>
+                  </div>
+                  {f.fabric_name && (
+                    <div className="text-[12px] font-semibold text-[#333]">{f.fabric_name}</div>
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-[11px] text-[#888]">
+                    {f.color_pattern && <span>Color: {f.color_pattern}</span>}
+                    {f.fabric_code && <span>Code: {f.fabric_code}</span>}
+                    {f.material_type && <span>Type: {f.material_type}</span>}
+                    {f.fabric_width && <span>Width: {f.fabric_width}&quot;</span>}
+                    {f.vertical_repeat && <span>V-Repeat: {f.vertical_repeat}&quot;</span>}
+                    {f.horizontal_repeat && <span>H-Repeat: {f.horizontal_repeat}&quot;</span>}
+                    {f.yards_available && <span>Yards on hand: {f.yards_available}</span>}
+                  </div>
+                  {f.supplier_url && (
+                    <a
+                      href={f.supplier_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-semibold text-[#b8960c] hover:text-[#a3850b] transition-colors"
+                    >
+                      <ExternalLink size={10} /> Open supplier page
+                    </a>
+                  )}
+                  {f.swatch_photo_path && (
+                    <img
+                      src={f.swatch_photo_path.startsWith('http') ? f.swatch_photo_path : `${API_BASE}${f.swatch_photo_path}`}
+                      alt="Swatch"
+                      className="mt-2 rounded-[8px] border border-[#ece8e0]"
+                      style={{ width: 80, height: 80, objectFit: 'cover' }}
+                    />
+                  )}
+                  {f.client_notes && (
+                    <p className="mt-1.5 text-[11px] text-[#888] italic">{f.client_notes}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Notes */}
         {project.notes && (
