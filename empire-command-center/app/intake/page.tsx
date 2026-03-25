@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 export default function IntakeLanding() {
   return (
-    <div className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
       <nav className="bg-[#1a1a1a] border-b border-[#2a2a2a]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center justify-between h-12">
           <div className="flex items-center gap-2.5">

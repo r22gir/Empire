@@ -261,6 +261,12 @@ body:has([data-quote-page]) {
   height: auto;
 }
 
+/* Allow scrolling on intake pages */
+body:has([data-intake-page]) {
+  overflow: auto;
+  height: auto;
+}
+
 @media (max-width: 640px) {
   [data-quote-page] .info-grid { grid-template-columns: 1fr !important; }
 }

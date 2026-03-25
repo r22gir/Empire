@@ -129,7 +129,7 @@ export default function ProjectDetail() {
 
   if (loading || !project) {
     return (
-      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
+      <div data-intake-page className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
         <div className="text-[12px] text-[#999]">Loading...</div>
       </div>
     );
@@ -142,7 +142,7 @@ export default function ProjectDetail() {
   const messages = project.messages || [];
 
   return (
-    <div className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav user={user} />
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">

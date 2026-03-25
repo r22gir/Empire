@@ -64,14 +64,14 @@ export default function AccountPage() {
   };
 
   if (loading) return (
-    <div className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav />
       <div className="flex items-center justify-center h-[60vh] text-[#888]">Loading...</div>
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav user={user} />
       <div className="max-w-xl mx-auto px-4 py-8">
         <button onClick={() => router.push('/intake/dashboard')}

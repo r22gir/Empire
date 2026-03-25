@@ -56,7 +56,7 @@ export default function IntakeLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f2ed] flex flex-col">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed] flex flex-col">
       <nav className="bg-[#1a1a1a] border-b border-[#2a2a2a]">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 flex items-center h-12">
           <Link href="/intake" className="flex items-center gap-2.5">

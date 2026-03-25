@@ -193,7 +193,7 @@ export default function NewProject() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav user={user} />
 
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">

@@ -49,7 +49,7 @@ export default function IntakeDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
+      <div data-intake-page className="min-h-screen bg-[#f5f2ed] flex items-center justify-center">
         <div className="text-[12px] text-[#999]">Loading...</div>
       </div>
     );
@@ -58,7 +58,7 @@ export default function IntakeDashboard() {
   const totalPhotos = projects.reduce((sum, p) => sum + (Array.isArray(p.photos) ? p.photos.length : 0), 0);
 
   return (
-    <div className="min-h-screen bg-[#f5f2ed]">
+    <div data-intake-page className="min-h-screen bg-[#f5f2ed]">
       <IntakeNav user={user} />
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
