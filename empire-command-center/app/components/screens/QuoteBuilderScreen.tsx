@@ -3125,14 +3125,16 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                       )}
                     </div>
                   </div>
-                  {/* Panel Configurator for bench items */}
-                  {isBenchType(item.type) && (
+                  {/* Panel Configurator for items with backs */}
+                  {(isBenchType(item.type) || ['sofa', 'loveseat', 'sectional', 'sectional_l', 'sectional_u', 'headboard', 'headboard_custom', 'banquette'].some(t => item.type.startsWith(t) || item.type === t)) && (
                     <div style={{ gridColumn: '1 / -1', marginTop: -4 }}>
                       <PanelConfigurator
                         backWidth={parseFloat(item.width) || 0}
                         backHeight={parseFloat(item.height) || 0}
                         config={item.panelConfig || DEFAULT_PANEL_CONFIG}
                         onChange={(pc) => updateItem(room.id, item.id, 'panelConfig', pc)}
+                        itemType={item.type}
+                        itemLabel={`${formatItemType(item.type)} — ${room.name}`}
                       />
                     </div>
                   )}
