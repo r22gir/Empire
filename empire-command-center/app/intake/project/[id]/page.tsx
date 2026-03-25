@@ -3,10 +3,11 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
   ArrowLeft, MapPin, Camera, Ruler, FileText, MessageSquare,
-  Send, Download, CheckCircle, Clock, Scissors, Link2, ExternalLink,
+  Send, Download, CheckCircle, Clock, Scissors, Link2, ExternalLink, Plus,
 } from 'lucide-react';
 import IntakeNav from '../../../components/intake/IntakeNav';
 import PhotoUploader from '../../../components/intake/PhotoUploader';
+import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
@@ -36,6 +37,12 @@ export default function ProjectDetail() {
   const [newMeasurement, setNewMeasurement] = useState({ room: '', width: '', height: '', reference: '' });
   const [savingMeasurement, setSavingMeasurement] = useState(false);
   const [fabricEntries, setFabricEntries] = useState<any[]>([]);
+  const [showAddFabric, setShowAddFabric] = useState(false);
+  const [newFabric, setNewFabric] = useState<FabricInfo>({
+    scope: 'room',
+    fabric_preference: 'not_sure',
+  });
+  const [savingFabric, setSavingFabric] = useState(false);
 
   const loadFabrics = async () => {
     try {
@@ -125,6 +132,34 @@ export default function ProjectDetail() {
       });
       await loadProject();
     } catch (_err) { /* ignore */ }
+  };
+
+  const saveFabric = async () => {
+    if (newFabric.fabric_preference === 'not_sure') return;
+    setSavingFabric(true);
+    try {
+      const payload = {
+        ...newFabric,
+        room_name: newFabric.room_name || project?.name || 'Project',
+        item_name: newFabric.item_name || '',
+      };
+      await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      setShowAddFabric(false);
+      setNewFabric({ scope: 'room', fabric_preference: 'not_sure' });
+      await loadFabrics();
+    } catch { /* best effort */ }
+    setSavingFabric(false);
+  };
+
+  const removeFabric = async (id: number) => {
+    try {
+      await fetch(`${API_BASE}/api/v1/fabrics/intake-project/${projectId}/fabrics/${id}`, { method: 'DELETE' });
+      await loadFabrics();
+    } catch { /* best effort */ }
   };
 
   if (loading || !project) {
@@ -367,29 +402,55 @@ export default function ProjectDetail() {
           )}
         </div>
 
-        {/* Fabric Selections */}
-        {fabricEntries.length > 0 && (
-          <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
-            <div className="flex items-center gap-2 mb-4">
+        {/* Fabric Selections — always visible */}
+        <div className="bg-[#faf9f7] border border-[#ece8e0] rounded-[14px] p-5 mb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
               <Scissors size={14} className="text-[#b8960c]" />
-              <h2 className="text-[13px] font-bold text-[#1a1a1a]">Fabric Selections</h2>
-              <span className="text-[9px] font-bold text-[#b8960c] bg-[#fdf8eb] px-2 py-0.5 rounded-md">
-                {fabricEntries.length}
-              </span>
+              <h2 className="text-[13px] font-bold text-[#1a1a1a]">Fabric Info</h2>
+              {fabricEntries.length > 0 && (
+                <span className="text-[9px] font-bold text-[#b8960c] bg-[#fdf8eb] px-2 py-0.5 rounded-md">
+                  {fabricEntries.length}
+                </span>
+              )}
             </div>
-            <div className="space-y-3">
+            {canEdit && !showAddFabric && (
+              <button
+                onClick={() => setShowAddFabric(true)}
+                className="text-[10px] font-bold text-[#b8960c] hover:text-[#a3850b] transition-colors cursor-pointer"
+                style={{ background: 'none', border: 'none', padding: 0 }}
+              >
+                + Add Fabric
+              </button>
+            )}
+          </div>
+
+          {/* Existing fabric entries */}
+          {fabricEntries.length > 0 && (
+            <div className="space-y-3 mb-3">
               {fabricEntries.map((f: any) => (
                 <div key={f.id} className="p-3 rounded-[10px] bg-[#f5f2ed] border border-[#ece8e0]">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-[10px] font-bold text-[#b8960c] uppercase">
-                      {f.room_name}{f.item_name ? ` — ${f.item_name}` : ''}
-                    </span>
-                    <span className="text-[9px] px-2 py-0.5 rounded-md font-semibold" style={{
-                      background: f.fabric_preference === 'com' ? '#fef3c7' : f.fabric_preference === 'picked_out' ? '#dcfce7' : '#f5f2ed',
-                      color: f.fabric_preference === 'com' ? '#92400e' : f.fabric_preference === 'picked_out' ? '#166534' : '#888',
-                    }}>
-                      {f.fabric_preference === 'picked_out' ? 'Client Selected' : f.fabric_preference === 'com' ? 'COM' : f.fabric_preference === 'recommend' ? 'Needs Recommendation' : 'Not Sure'}
-                    </span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-[#b8960c] uppercase">
+                        {f.room_name}{f.item_name ? ` — ${f.item_name}` : ''}
+                      </span>
+                      <span className="text-[9px] px-2 py-0.5 rounded-md font-semibold" style={{
+                        background: f.fabric_preference === 'com' ? '#fef3c7' : f.fabric_preference === 'picked_out' ? '#dcfce7' : '#f5f2ed',
+                        color: f.fabric_preference === 'com' ? '#92400e' : f.fabric_preference === 'picked_out' ? '#166534' : '#888',
+                      }}>
+                        {f.fabric_preference === 'picked_out' ? 'Client Selected' : f.fabric_preference === 'com' ? 'COM' : f.fabric_preference === 'recommend' ? 'Needs Recommendation' : 'Not Sure'}
+                      </span>
+                    </div>
+                    {canEdit && (
+                      <button
+                        onClick={() => removeFabric(f.id)}
+                        className="text-[9px] text-[#ccc] hover:text-[#dc2626] transition-colors cursor-pointer"
+                        style={{ background: 'none', border: 'none', padding: 0 }}
+                      >
+                        remove
+                      </button>
+                    )}
                   </div>
                   {f.fabric_name && (
                     <div className="text-[12px] font-semibold text-[#333]">{f.fabric_name}</div>
@@ -427,8 +488,76 @@ export default function ProjectDetail() {
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Add fabric form */}
+          {showAddFabric && canEdit && (
+            <div className="mt-3">
+              <div className="grid grid-cols-2 gap-2.5 mb-3">
+                <div>
+                  <label className="text-[9px] text-[#999] font-semibold uppercase tracking-[0.5px] block mb-1">Room / Area</label>
+                  <input
+                    type="text"
+                    value={newFabric.room_name || ''}
+                    onChange={e => setNewFabric(f => ({ ...f, room_name: e.target.value }))}
+                    placeholder="e.g. Living Room"
+                    className="form-input w-full text-[12px]"
+                  />
+                </div>
+                <div>
+                  <label className="text-[9px] text-[#999] font-semibold uppercase tracking-[0.5px] block mb-1">Item</label>
+                  <input
+                    type="text"
+                    value={newFabric.item_name || ''}
+                    onChange={e => setNewFabric(f => ({ ...f, item_name: e.target.value }))}
+                    placeholder="e.g. Sofa, Drapes"
+                    className="form-input w-full text-[12px]"
+                  />
+                </div>
+              </div>
+              <FabricInfoSection
+                label="Fabric Details"
+                fabric={newFabric}
+                onChange={setNewFabric}
+                projectId={projectId}
+              />
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  onClick={saveFabric}
+                  disabled={savingFabric || newFabric.fabric_preference === 'not_sure'}
+                  className="px-4 py-2.5 min-h-[44px] text-sm font-bold bg-[#b8960c] text-white rounded-[10px] hover:bg-[#a3850b] transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {savingFabric ? 'Saving...' : 'Save Fabric'}
+                </button>
+                <button
+                  onClick={() => { setShowAddFabric(false); setNewFabric({ scope: 'room', fabric_preference: 'not_sure' }); }}
+                  className="px-4 py-2.5 min-h-[44px] text-sm text-[#888] hover:text-[#555] transition-colors cursor-pointer"
+                  style={{ background: 'none', border: 'none' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state with big add button */}
+          {fabricEntries.length === 0 && !showAddFabric && (
+            <div>
+              <p className="text-[11px] text-[#c5c0b8] mb-3">
+                No fabric info added yet.{canEdit ? ' Tell us about your fabric preferences.' : ''}
+              </p>
+              {canEdit && (
+                <button
+                  onClick={() => setShowAddFabric(true)}
+                  className="flex items-center justify-center gap-2 w-full text-[12px] font-bold text-[#b8960c] cursor-pointer rounded-[8px] hover:bg-[#fdf8eb] active:bg-[#fdf8eb] transition-colors"
+                  style={{ background: '#fdf8eb', border: '1.5px dashed #b8960c', padding: '12px 16px', minHeight: 48 }}
+                >
+                  <Plus size={14} strokeWidth={2.5} /> Add Fabric Info
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Notes */}
         {project.notes && (
