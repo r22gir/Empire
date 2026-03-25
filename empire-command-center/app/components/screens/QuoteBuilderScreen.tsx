@@ -708,13 +708,21 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     }
     if (photoSaveTimerRef.current) clearTimeout(photoSaveTimerRef.current);
     photoSaveTimerRef.current = setTimeout(() => {
-      const savedPhotos = photos.map(p => ({
-        url: p.uploadedFilename || p.serverUrl || p.preview,
-        original_name: p.originalName || p.preview.split('/').pop() || 'photo',
-        from_intake: p.fromIntake || false,
-        assigned_room_id: p.assignedRoomId || null,
-        assigned_item_id: p.assignedItemId || null,
-      }));
+      // Deduplicate by original_name before saving
+      const seen = new Set<string>();
+      const savedPhotos = photos
+        .map(p => ({
+          url: p.uploadedFilename || p.serverUrl || p.preview,
+          original_name: p.originalName || p.preview.split('/').pop() || 'photo',
+          from_intake: p.fromIntake || false,
+          assigned_room_id: p.assignedRoomId || null,
+          assigned_item_id: p.assignedItemId || null,
+        }))
+        .filter(p => {
+          if (seen.has(p.original_name)) return false;
+          seen.add(p.original_name);
+          return true;
+        });
       fetch(`${API}/quotes/${editQuoteId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
