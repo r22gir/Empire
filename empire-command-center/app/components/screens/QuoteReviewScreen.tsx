@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API } from '../../lib/api';
 import { Quote } from '../../lib/types';
-import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2 } from 'lucide-react';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2 } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 
 const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
@@ -47,6 +47,13 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
+  const [editItems, setEditItems] = useState<any[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editTerms, setEditTerms] = useState('');
+  const [editTaxRate, setEditTaxRate] = useState(0);
+  const [editDepositPct, setEditDepositPct] = useState(50);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -68,6 +75,78 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       if (res.ok) setQuote(await res.json());
     } catch { /* silent */ }
     setLoading(false);
+  };
+
+  // Initialize editable fields from quote
+  useEffect(() => {
+    if (!quote) return;
+    const q = quote as any;
+    setEditItems(JSON.parse(JSON.stringify(q.line_items || [])));
+    setEditNotes(q.notes || '');
+    setEditTerms(q.terms || '');
+    setEditTaxRate((q.tax_rate || 0) * 100);
+    setEditDepositPct(q.deposit?.deposit_percent || 50);
+    setDirty(false);
+  }, [quote]);
+
+  // Recalculate totals from editable items
+  const computedSubtotal = editItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const computedTax = Math.round(computedSubtotal * (editTaxRate / 100) * 100) / 100;
+  const computedTotal = Math.round((computedSubtotal + computedTax) * 100) / 100;
+  const computedDeposit = Math.round(computedTotal * (editDepositPct / 100) * 100) / 100;
+
+  const updateItem = (idx: number, field: string, value: any) => {
+    setEditItems(prev => {
+      const items = [...prev];
+      items[idx] = { ...items[idx], [field]: value };
+      if (field === 'quantity' || field === 'rate') {
+        items[idx].amount = Math.round((items[idx].quantity || 0) * (items[idx].rate || 0) * 100) / 100;
+      }
+      return items;
+    });
+    setDirty(true);
+  };
+
+  const addItem = () => {
+    setEditItems(prev => [...prev, { description: '', quantity: 1, unit: 'sqft', rate: 0, amount: 0, category: 'labor' }]);
+    setDirty(true);
+  };
+
+  const removeItem = (idx: number) => {
+    setEditItems(prev => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+  };
+
+  const saveQuote = async () => {
+    if (!quote) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/quotes/${quote.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          line_items: editItems,
+          subtotal: computedSubtotal,
+          tax_rate: editTaxRate / 100,
+          tax_amount: computedTax,
+          total: computedTotal,
+          deposit: { deposit_percent: editDepositPct, deposit_amount: computedDeposit },
+          notes: editNotes,
+          terms: editTerms,
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setQuote(updated.quote || updated);
+        setDirty(false);
+        showFeedback('Quote saved!');
+      } else {
+        showFeedback('Save failed');
+      }
+    } catch {
+      showFeedback('Save failed');
+    }
+    setSaving(false);
   };
 
   // Load existing photos for this quote (from intake transfer or photo store)
@@ -420,52 +499,159 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <QuoteVerificationPanel quoteId={quote.id} />
       </div>
 
-      {/* Show line item summary — 3-tier proposals disabled for now */}
+      {/* Editable line items */}
       {true ? (
         <div className="mb-5">
-          <div className="text-sm font-bold mb-3 text-[#1a1a1a]">Line Items</div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-bold text-[#1a1a1a]">Line Items</div>
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <button onClick={saveQuote} disabled={saving}
+                  className="flex items-center gap-1.5 cursor-pointer"
+                  style={{ padding: '6px 14px', borderRadius: 8, background: '#b8960c', color: '#fff', border: 'none', fontSize: 12, fontWeight: 700 }}>
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  {saving ? 'Saving...' : 'Save Changes'}
+                </button>
+              )}
+              <button onClick={addItem} className="flex items-center gap-1 cursor-pointer"
+                style={{ padding: '6px 12px', borderRadius: 8, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', fontSize: 11, fontWeight: 600 }}>
+                <Plus size={12} /> Add Line
+              </button>
+            </div>
+          </div>
           <div className="empire-card" style={{ padding: 16 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #e5e0d8' }}>
                   <th style={{ textAlign: 'left', padding: '6px 8px', color: '#777', fontSize: 11, textTransform: 'uppercase' }}>Description</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11 }}>Qty</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11 }}>Rate</th>
-                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11 }}>Amount</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11, width: 80 }}>Qty</th>
+                  <th style={{ textAlign: 'center', padding: '6px 8px', color: '#777', fontSize: 11, width: 60 }}>Unit</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11, width: 90 }}>Rate</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11, width: 100 }}>Amount</th>
+                  <th style={{ width: 36 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {((quote as any).line_items || []).map((item: any, i: number) => (
+                {editItems.map((item: any, i: number) => (
                   <tr key={i} style={{ borderBottom: '1px solid #f0ece4' }}>
-                    <td style={{ padding: '8px', color: '#333' }}>{item.description}</td>
-                    <td style={{ padding: '8px', textAlign: 'right', color: '#555' }}>{item.quantity} {item.unit}</td>
-                    <td style={{ padding: '8px', textAlign: 'right', color: '#555' }}>${(item.rate || 0).toFixed(2)}</td>
-                    <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a' }}>${(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                    <td style={{ padding: '4px 8px' }}>
+                      <input type="text" value={item.description || ''}
+                        onChange={e => updateItem(i, 'description', e.target.value)}
+                        style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7', color: '#333' }} />
+                    </td>
+                    <td style={{ padding: '4px 4px' }}>
+                      <input type="number" step="0.1" value={item.quantity ?? ''}
+                        onChange={e => updateItem(i, 'quantity', parseFloat(e.target.value) || 0)}
+                        style={{ width: '100%', textAlign: 'right', fontSize: 12, padding: '6px 6px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7' }} />
+                    </td>
+                    <td style={{ padding: '4px 4px' }}>
+                      <select value={item.unit || 'ea'}
+                        onChange={e => { updateItem(i, 'unit', e.target.value); }}
+                        style={{ width: '100%', fontSize: 11, padding: '6px 2px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7', color: '#555' }}>
+                        <option value="sqft">sqft</option>
+                        <option value="ea">ea</option>
+                        <option value="yd">yd</option>
+                        <option value="hr">hr</option>
+                        <option value="lf">lf</option>
+                      </select>
+                    </td>
+                    <td style={{ padding: '4px 4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: '#888', marginRight: 2 }}>$</span>
+                        <input type="number" step="0.01" value={item.rate ?? ''}
+                          onChange={e => updateItem(i, 'rate', parseFloat(e.target.value) || 0)}
+                          style={{ width: '100%', textAlign: 'right', fontSize: 12, padding: '6px 6px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7' }} />
+                      </div>
+                    </td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a', fontSize: 12 }}>
+                      ${(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td style={{ padding: '4px 4px', textAlign: 'center' }}>
+                      <button onClick={() => removeItem(i)} className="cursor-pointer"
+                        style={{ border: 'none', background: 'none', color: '#ccc', padding: 4 }}
+                        onMouseEnter={e => (e.currentTarget.style.color = '#dc2626')}
+                        onMouseLeave={e => (e.currentTarget.style.color = '#ccc')}>
+                        <Trash2 size={14} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
-                <tr style={{ borderTop: '2px solid #b8960c' }}>
-                  <td colSpan={3} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>Total</td>
-                  <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 18, color: '#b8960c' }}>
-                    ${((quote as any).total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                <tr>
+                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Subtotal</td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 600, fontSize: 13, color: '#1a1a1a' }}>
+                    ${computedSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
+                  <td></td>
                 </tr>
-                {(quote as any).deposit && (
-                  <tr>
-                    <td colSpan={3} style={{ padding: '6px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>
-                      Deposit ({(quote as any).deposit.deposit_percent}%)
-                    </td>
-                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>
-                      ${((quote as any).deposit.deposit_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </td>
-                  </tr>
-                )}
+                <tr>
+                  <td colSpan={3} style={{ padding: '4px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Tax</td>
+                  <td style={{ padding: '4px 4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
+                      <input type="number" step="0.1" value={editTaxRate}
+                        onChange={e => { setEditTaxRate(parseFloat(e.target.value) || 0); setDirty(true); }}
+                        style={{ width: 50, textAlign: 'right', fontSize: 11, padding: '4px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
+                      <span style={{ fontSize: 11, color: '#888' }}>%</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 12, color: '#666' }}>
+                    ${computedTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td></td>
+                </tr>
+                <tr style={{ borderTop: '2px solid #b8960c' }}>
+                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>Total</td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 18, color: '#b8960c' }}>
+                    ${computedTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td colSpan={3} style={{ padding: '6px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Deposit</td>
+                  <td style={{ padding: '4px 4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
+                      <input type="number" step="1" value={editDepositPct}
+                        onChange={e => { setEditDepositPct(parseFloat(e.target.value) || 0); setDirty(true); }}
+                        style={{ width: 45, textAlign: 'right', fontSize: 11, padding: '4px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
+                      <span style={{ fontSize: 11, color: '#888' }}>%</span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: '#16a34a', fontSize: 13 }}>
+                    ${computedDeposit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td></td>
+                </tr>
               </tfoot>
             </table>
-            {(quote as any).notes && (
-              <div style={{ marginTop: 12, padding: '10px 12px', background: '#f8f7f4', borderRadius: 8, fontSize: 12, color: '#666', lineHeight: 1.5 }}>
-                <strong>Notes:</strong> {(quote as any).notes}
+
+            {/* Editable notes */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#777', marginBottom: 4 }}>Notes</div>
+              <textarea value={editNotes}
+                onChange={e => { setEditNotes(e.target.value); setDirty(true); }}
+                rows={3}
+                style={{ width: '100%', fontSize: 12, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, background: '#faf9f7', color: '#444', lineHeight: 1.5, resize: 'vertical' }} />
+            </div>
+
+            {/* Editable terms */}
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#777', marginBottom: 4 }}>Terms & Conditions</div>
+              <textarea value={editTerms}
+                onChange={e => { setEditTerms(e.target.value); setDirty(true); }}
+                rows={2}
+                style={{ width: '100%', fontSize: 12, padding: '8px 10px', border: '1px solid #ece8e0', borderRadius: 8, background: '#faf9f7', color: '#444', lineHeight: 1.5, resize: 'vertical' }} />
+            </div>
+
+            {/* Save bar at bottom when dirty */}
+            {dirty && (
+              <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={saveQuote} disabled={saving}
+                  className="flex items-center gap-2 cursor-pointer"
+                  style={{ padding: '10px 24px', borderRadius: 10, background: '#b8960c', color: '#fff', border: 'none', fontSize: 13, fontWeight: 700, boxShadow: '0 2px 8px rgba(184,150,12,0.3)' }}>
+                  {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  {saving ? 'Saving...' : 'Save Quote'}
+                </button>
               </div>
             )}
           </div>
