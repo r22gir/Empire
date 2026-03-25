@@ -323,10 +323,10 @@ export default function NewProject() {
                         <button
                           type="button"
                           onClick={() => updateItem(item.id, 'showFabric', true)}
-                          className="flex items-center gap-1.5 mt-2.5 text-[11px] font-semibold text-[#b8960c] cursor-pointer"
-                          style={{ background: 'none', border: 'none', padding: 0, minHeight: 44 }}
+                          className="flex items-center justify-center gap-2 mt-3 w-full text-[12px] font-bold text-[#b8960c] cursor-pointer rounded-[8px] hover:bg-[#fdf8eb] active:bg-[#fdf8eb] transition-colors"
+                          style={{ background: '#fdf8eb', border: '1.5px dashed #b8960c', padding: '12px 16px', minHeight: 48 }}
                         >
-                          <Plus size={12} /> Add Fabric Info
+                          <Plus size={14} strokeWidth={2.5} /> Add Fabric Info
                         </button>
                       ) : (
                         <FabricInfoSection
