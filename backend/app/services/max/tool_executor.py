@@ -256,10 +256,15 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
     quotes = []
     if os.path.exists(QUOTES_DIR):
         for fname in os.listdir(QUOTES_DIR):
-            if not fname.endswith(".json") or fname.startswith("_"):
+            if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
                 continue
-            with open(os.path.join(QUOTES_DIR, fname)) as f:
-                q = json.load(f)
+            try:
+                with open(os.path.join(QUOTES_DIR, fname)) as f:
+                    q = json.load(f)
+                if "id" not in q:
+                    continue
+            except (json.JSONDecodeError, OSError):
+                continue
             if customer and customer not in q.get("customer_name", "").lower():
                 continue
             if status and q.get("status") != status:

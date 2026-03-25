@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -187,7 +188,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
 
-        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt)
+        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "")
 
         # Resolve access control user
         _ac_context = None
@@ -198,6 +199,23 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                     _ac_context = {"user": _ac_user}
             except Exception as _ac_err:
                 logger.debug(f"Access control resolve failed: {_ac_err}")
+
+        # Extract PIN from chat message if present (e.g. "pin 7777" or just "7777")
+        _extracted_pin = None
+        _pin_match = re.search(r'\bpin\s+(\d{4,6})\b', request.message, re.IGNORECASE)
+        if not _pin_match:
+            # Bare PIN: message is only digits (4-6 chars)
+            _bare = request.message.strip()
+            if re.fullmatch(r'\d{4,6}', _bare):
+                _pin_match_bare = _bare
+                _extracted_pin = _bare
+        if _pin_match and not _extracted_pin:
+            _extracted_pin = _pin_match.group(1)
+        if _extracted_pin and _ac_context is not None:
+            _ac_context["pin"] = _extracted_pin
+            logger.info(f"Extracted PIN from chat message for tool authorization")
+        elif _extracted_pin and _ac_context is None:
+            _ac_context = {"pin": _extracted_pin}
 
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
         tool_results_list = []
@@ -279,7 +297,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
             loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
 
-            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt)
+            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "")
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
             final_content = current_response.content
 
@@ -496,7 +514,7 @@ async def chat_stream(request: ChatRequest):
         model_used = "unknown"
         full_response = ""
         try:
-            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or ""):
+            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                 model_used = m_used
                 safe_chunk = sanitize_output(chunk)
                 full_response += safe_chunk
@@ -578,7 +596,7 @@ async def chat_stream(request: ChatRequest):
 
                 yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
-                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or ""):
+                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                     model_used = m_used
                     safe_chunk = sanitize_output(chunk)
                     followup_text += safe_chunk

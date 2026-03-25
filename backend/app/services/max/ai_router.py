@@ -35,6 +35,25 @@ class TaskComplexity(Enum):
     COMPLEX = "complex"    # analyze, calculate, quote, why, explain, compare, strategy
     CRITICAL = "critical"  # fix, edit, code, file, git, build, deploy, read ~/
 
+# ── Conversation model floor ────────────────────────────────────────
+# Once a conversation escalates to a tier, it stays at least that tier
+# for the rest of the session.  Maps conversation_id → highest complexity.
+_COMPLEXITY_ORDER = {TaskComplexity.SIMPLE: 0, TaskComplexity.MODERATE: 1,
+                     TaskComplexity.COMPLEX: 2, TaskComplexity.CRITICAL: 3}
+_conversation_floors: dict[str, TaskComplexity] = {}
+
+
+def apply_conversation_floor(conversation_id: str | None, complexity: TaskComplexity) -> TaskComplexity:
+    """Enforce model floor: never downgrade within a conversation."""
+    if not conversation_id:
+        return complexity
+    prev = _conversation_floors.get(conversation_id)
+    if prev and _COMPLEXITY_ORDER.get(prev, 0) > _COMPLEXITY_ORDER.get(complexity, 0):
+        logger.info(f"[floor] Holding {conversation_id[:8]} at {prev.value} (would have been {complexity.value})")
+        return prev
+    _conversation_floors[conversation_id] = complexity
+    return complexity
+
 
 def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) -> TaskComplexity:
     """Instant complexity classification — keyword matching + message length. No AI call.
@@ -420,7 +439,7 @@ class AIRouter:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
         return None
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "") -> AIResponse:
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AIResponse:
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -443,6 +462,7 @@ class AIRouter:
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
             complexity = classify_complexity(messages[-1].content if messages else "", source=source)
+            complexity = apply_conversation_floor(conversation_id, complexity)
             logger.info(f"[MAX] Classified as {complexity.value}, using tiered chain")
             providers_chain = self._build_complexity_chain(complexity)
 
@@ -563,7 +583,7 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "") -> AsyncGenerator[tuple[str, str], None]:
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
         # Per-desk model routing
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -586,6 +606,7 @@ class AIRouter:
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
             complexity = classify_complexity(messages[-1].content if messages else "", source=source)
+            complexity = apply_conversation_floor(conversation_id, complexity)
             logger.info(f"[MAX] Stream classified as {complexity.value}, using tiered chain")
             providers_chain = self._build_complexity_chain(complexity)
 
