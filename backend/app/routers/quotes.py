@@ -130,6 +130,7 @@ class QuoteUpdate(BaseModel):
     ai_outlines: Optional[list] = None
     ai_mockups: Optional[list] = None
     max_analysis: Optional[str] = None
+    scan_3d_files: Optional[list] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────

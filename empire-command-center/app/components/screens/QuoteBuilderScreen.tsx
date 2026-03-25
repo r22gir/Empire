@@ -732,8 +732,50 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     return () => { if (photoSaveTimerRef.current) clearTimeout(photoSaveTimerRef.current); };
   }, [photos, editQuoteId]);
 
+  // Auto-save 3D scan assignments when they change (debounced)
+  const scanSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!editQuoteId || scan3DFiles.length === 0) return;
+    if (scanSaveTimerRef.current) clearTimeout(scanSaveTimerRef.current);
+    scanSaveTimerRef.current = setTimeout(() => {
+      const savedScans = scan3DFiles.map(f => ({
+        url: f.url,
+        filename: f.filename,
+        original_name: f.originalName,
+        assigned_room_id: f.assignedRoomId || null,
+        assigned_item_id: f.assignedItemId || null,
+      }));
+      fetch(`${API}/quotes/${editQuoteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan_3d_files: savedScans }),
+      }).catch(() => {});
+    }, 1500);
+    return () => { if (scanSaveTimerRef.current) clearTimeout(scanSaveTimerRef.current); };
+  }, [scan3DFiles, editQuoteId]);
+
   // Load previously uploaded 3D scans on mount
   useEffect(() => {
+    // First try to load from quote JSON (has room assignments)
+    if (editQuoteId) {
+      fetch(`${API}/quotes/${editQuoteId}`)
+        .then(r => r.json())
+        .then(q => {
+          if (q.scan_3d_files?.length) {
+            const loaded: Scan3DFile[] = q.scan_3d_files.map((f: any) => ({
+              url: f.url,
+              filename: f.filename,
+              originalName: f.original_name || f.filename,
+              assignedRoomId: f.assigned_room_id || undefined,
+              assignedItemId: f.assigned_item_id || undefined,
+            }));
+            setScan3DFiles(loaded);
+            return; // Don't load from photo store if quote has scan data
+          }
+        })
+        .catch(() => {});
+    }
+    // Fallback: load from photo store (no room assignments)
     fetch(`${API}/photos/quote/3d_scans`)
       .then(r => r.json())
       .then(data => {
@@ -752,7 +794,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [editQuoteId]);
 
   // Fetch intake projects when entering Photos step
   useEffect(() => {
@@ -1290,7 +1332,15 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
                 setScan3DFiles(prev => prev.map((f, i) => i === scanIdx ? { ...f, assignedRoomId: roomId || undefined } : f));
               }}
               onPreview3D={(url) => setViewer3DItem({ itemId: '', roomId: '', url })}
-              onRemove3D={(idx) => setScan3DFiles(prev => prev.filter((_, i) => i !== idx))}
+              onRemove3D={async (idx) => {
+                const scan = scan3DFiles[idx];
+                if (scan?.filename) {
+                  try {
+                    await fetch(`${API}/photos/quote/3d_scans/${encodeURIComponent(scan.filename)}`, { method: 'DELETE' });
+                  } catch { /* best effort */ }
+                }
+                setScan3DFiles(prev => prev.filter((_, i) => i !== idx));
+              }}
             />
             {showAnalysis && (
               <AnalysisWizard
