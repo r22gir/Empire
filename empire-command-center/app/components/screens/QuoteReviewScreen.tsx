@@ -420,6 +420,58 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <QuoteVerificationPanel quoteId={quote.id} />
       </div>
 
+      {/* Show line item summary — 3-tier proposals disabled for now */}
+      {true ? (
+        <div className="mb-5">
+          <div className="text-sm font-bold mb-3 text-[#1a1a1a]">Line Items</div>
+          <div className="empire-card" style={{ padding: 16 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e5e0d8' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px', color: '#777', fontSize: 11, textTransform: 'uppercase' }}>Description</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11 }}>Qty</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11 }}>Rate</th>
+                  <th style={{ textAlign: 'right', padding: '6px 8px', color: '#777', fontSize: 11 }}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {((quote as any).line_items || []).map((item: any, i: number) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #f0ece4' }}>
+                    <td style={{ padding: '8px', color: '#333' }}>{item.description}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#555' }}>{item.quantity} {item.unit}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', color: '#555' }}>${(item.rate || 0).toFixed(2)}</td>
+                    <td style={{ padding: '8px', textAlign: 'right', fontWeight: 600, color: '#1a1a1a' }}>${(item.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '2px solid #b8960c' }}>
+                  <td colSpan={3} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>Total</td>
+                  <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 18, color: '#b8960c' }}>
+                    ${((quote as any).total || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                {(quote as any).deposit && (
+                  <tr>
+                    <td colSpan={3} style={{ padding: '6px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>
+                      Deposit ({(quote as any).deposit.deposit_percent}%)
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>
+                      ${((quote as any).deposit.deposit_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                )}
+              </tfoot>
+            </table>
+            {(quote as any).notes && (
+              <div style={{ marginTop: 12, padding: '10px 12px', background: '#f8f7f4', borderRadius: 8, fontSize: 12, color: '#666', lineHeight: 1.5 }}>
+                <strong>Notes:</strong> {(quote as any).notes}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+      <>
       <div className="text-sm font-bold mb-3 text-[#1a1a1a]">Select a Proposal</div>
       <div className="flex gap-3 mb-5">
         {tiers.map((t, i) => {
@@ -469,6 +521,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           );
         })}
       </div>
+      </>
+      )}
 
       {/* Feedback toast */}
       {actionFeedback && (

@@ -514,11 +514,12 @@ const STEPS = [
   { id: 5, label: 'Review', icon: FileText },
 ];
 
+/* 3-tier pricing disabled — kept for future re-enablement
 const TIERS = [
   { label: 'Essential', key: 'A', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
   { label: 'Designer', key: 'B', color: '#b8960c', bg: '#fdf8eb', border: '#f5ecd0' },
   { label: 'Premium', key: 'C', color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
-];
+]; */
 
 interface Props {
   onBack: () => void;
@@ -2401,10 +2402,9 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
     setLoadingPricing(false);
   };
 
-  // Auto-fetch pricing when entering Step 4
+  // Auto-fetch pricing disabled (3-tier system inactive)
   const goToStep = (s: number) => {
     setWizStep(s);
-    if (s === 4 && !pricingPreview) fetchPricing();
   };
 
   return (
@@ -2622,54 +2622,25 @@ function AnalysisWizard({ photo, items, rawResponse, analyzing, onUpdateItems, o
                 </div>
               )}
 
-              {/* ── STEP 4: PRICING PREVIEW ── */}
+              {/* ── STEP 4: PRICING PREVIEW — 3-tier disabled, show confirmation ── */}
               {wizStep === 4 && (
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Step 4: Review Pricing</div>
-                  <div style={{ fontSize: 11, color: '#777', marginBottom: 12 }}>3-tier pricing preview based on your approved items and measurements.</div>
-                  {loadingPricing ? (
-                    <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                      <Loader2 size={24} className="animate-spin mx-auto" style={{ color: '#b8960c' }} />
-                      <div style={{ fontSize: 12, color: '#777', marginTop: 8 }}>Calculating pricing...</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>Step 4: Review & Generate</div>
+                  <div style={{ fontSize: 11, color: '#777', marginBottom: 12 }}>Review your items and click Generate Quote to create the estimate.</div>
+                  {/* 3-tier pricing preview DISABLED — show summary of selected items */}
+                  <div style={{ padding: '14px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 8 }}>
+                      {selectedItems.length} item{selectedItems.length !== 1 ? 's' : ''} ready to quote
                     </div>
-                  ) : pricingPreview ? (
-                    <div>
-                      <div className="flex gap-2 mb-3">
-                        {TIERS.map(t => {
-                          const tier = pricingPreview[t.key];
-                          if (!tier) return null;
-                          return (
-                            <div key={t.key} className="flex-1 text-center" style={{ padding: '10px 8px', borderRadius: 10, border: `2px solid ${t.color}`, background: t.bg }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: '#777' }}>{t.key} · {t.label}</div>
-                              <div style={{ fontSize: 20, fontWeight: 700, color: t.color }}>${tier.total?.toLocaleString()}</div>
-                              <div style={{ fontSize: 9, color: '#888' }}>Deposit: ${tier.deposit?.toLocaleString()}</div>
-                            </div>
-                          );
-                        })}
+                    {selectedItems.map((item, i) => (
+                      <div key={i} style={{ fontSize: 11, color: '#555', padding: '3px 0' }}>
+                        {item.type?.replace(/_/g, ' ')} — {item.description || ''}
                       </div>
-                      {/* Show line items for Tier A as reference */}
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 4 }}>Tier A Breakdown</div>
-                      {pricingPreview.A?.items?.map((item: any, i: number) => (
-                        <div key={i} style={{ marginBottom: 6, padding: '8px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7' }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 }}>{item.name}</div>
-                          {item.line_items?.map((li: any, j: number) => (
-                            <div key={j} className="flex justify-between" style={{ fontSize: 10, color: '#555', padding: '1px 0' }}>
-                              <span>{li.description}</span>
-                              <span style={{ fontWeight: 600 }}>${li.amount?.toFixed(2)}</span>
-                            </div>
-                          ))}
-                          <div className="flex justify-between" style={{ fontSize: 11, fontWeight: 700, color: '#1a1a1a', borderTop: '1px solid #ece8e0', marginTop: 3, paddingTop: 3 }}>
-                            <span>Subtotal</span><span>${item.subtotal?.toFixed(2)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      <button onClick={fetchPricing} className="flex items-center gap-1 mt-2 cursor-pointer" style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #ece8e0', background: '#fff', fontSize: 10, fontWeight: 600, color: '#777' }}>
-                        <Loader2 size={10} /> Recalculate
-                      </button>
+                    ))}
+                    <div style={{ marginTop: 10, fontSize: 11, color: '#b8960c', fontWeight: 600 }}>
+                      Click &quot;Add to Quote&quot; to continue.
                     </div>
-                  ) : (
-                    <div style={{ textAlign: 'center', color: '#999', fontSize: 12 }}>Failed to load pricing. <button onClick={fetchPricing} className="cursor-pointer" style={{ color: '#b8960c', fontWeight: 600, border: 'none', background: 'none' }}>Retry</button></div>
-                  )}
+                  </div>
                 </div>
               )}
             </>
@@ -3613,62 +3584,13 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
 // ═══════════════════════════════════════════════════════════════
 // RESULT VIEW — Transparent pricing with editable line items
 // ═══════════════════════════════════════════════════════════════
-const CATEGORY_STYLES: Record<string, { color: string; bg: string }> = {
-  fabric: { color: '#2563eb', bg: '#eff6ff' },
-  lining: { color: '#7c3aed', bg: '#faf5ff' },
-  labor: { color: '#b8960c', bg: '#fdf8eb' },
-  upgrade: { color: '#059669', bg: '#ecfdf5' },
-  foam: { color: '#059669', bg: '#ecfdf5' },
-  installation: { color: '#6b7280', bg: '#f3f4f6' },
-  surcharge: { color: '#dc2626', bg: '#fef2f2' },
-};
+/* 3-tier TIERS and CATEGORY_STYLES disabled — kept for future re-enablement */
 
 function ResultView({ result }: { result: any }) {
-  const [selectedTier, setSelectedTier] = useState(0);
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
-  const [editableTiers, setEditableTiers] = useState<any[]>([]);
   const quoteNumber = result.quote_number || result.id || 'NEW';
-
-  // Initialize editable tiers from result
-  useEffect(() => {
-    const proposals = result.design_proposals || result.proposals || result.tiers || [];
-    if (Array.isArray(proposals)) {
-      setEditableTiers(JSON.parse(JSON.stringify(proposals)));
-    }
-  }, [result]);
-
-  const toggleExpand = (key: string) => setExpandedItems(p => ({ ...p, [key]: !p[key] }));
-
-  // Recalculate when a line item value changes
-  const updateLineItem = (tierIdx: number, itemIdx: number, liIdx: number, field: 'quantity' | 'rate', value: number) => {
-    setEditableTiers(prev => {
-      const tiers = JSON.parse(JSON.stringify(prev));
-      const li = tiers[tierIdx].items[itemIdx].line_items[liIdx];
-      li[field] = value;
-      li.amount = Math.round(li.quantity * li.rate * 100) / 100;
-      // Recalculate item subtotal
-      const item = tiers[tierIdx].items[itemIdx];
-      item.subtotal = Math.round(item.line_items.reduce((s: number, l: any) => s + l.amount, 0) * 100) / 100;
-      // Recalculate tier totals
-      const tier = tiers[tierIdx];
-      tier.subtotal = Math.round(tier.items.reduce((s: number, it: any) => s + it.subtotal, 0) * 100) / 100;
-      tier.tax = Math.round(tier.subtotal * (tier.tax_rate || 0.06) * 100) / 100;
-      tier.total = Math.round((tier.subtotal + tier.tax) * 100) / 100;
-      tier.deposit = Math.round(tier.total * 0.5 * 100) / 100;
-      return tiers;
-    });
-  };
-
-  if (editableTiers.length === 0) {
-    return (
-      <div style={{ padding: '20px 16px', borderRadius: 12, border: '1px solid #ece8e0', background: '#faf9f7' }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>Quote Created — {quoteNumber}</div>
-        {result.total && <div style={{ fontSize: 22, fontWeight: 700, color: '#b8960c' }}>${result.total.toLocaleString()}</div>}
-      </div>
-    );
-  }
-
-  const activeTier = editableTiers[selectedTier];
+  const flatTotal = result.total || result.subtotal || 0;
+  const flatLineItems = result.line_items || [];
+  const flatDeposit = result.deposit;
 
   return (
     <div>
@@ -3682,127 +3604,45 @@ function ResultView({ result }: { result: any }) {
         </div>
       </div>
 
-      {/* 3-tier selector cards */}
-      <div className="flex gap-2 mb-4">
-        {TIERS.map((t, i) => {
-          const tier = editableTiers[i];
-          if (!tier) return null;
-          const isSelected = selectedTier === i;
-          return (
-            <div key={t.key} onClick={() => setSelectedTier(i)}
-              className="flex-1 cursor-pointer text-center transition-all"
-              style={{
-                padding: '14px 8px', borderRadius: 12,
-                background: isSelected ? t.bg : '#faf9f7',
-                border: `2px solid ${isSelected ? t.color : '#ece8e0'}`,
-                boxShadow: isSelected ? '0 4px 16px rgba(0,0,0,0.06)' : 'none',
-              }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#777' }}>{t.key} · {t.label}</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: t.color, margin: '4px 0' }}>${tier.total?.toLocaleString()}</div>
-              <div style={{ fontSize: 9, color: '#888' }}>Tax: ${tier.tax?.toFixed(2)} · Deposit: ${tier.deposit?.toLocaleString()}</div>
-            </div>
-          );
-        })}
+      {/* Total display */}
+      <div style={{ padding: '16px', borderRadius: 12, border: '2px solid #b8960c', background: '#fdf8eb', marginBottom: 12, textAlign: 'center' }}>
+        <div style={{ fontSize: 28, fontWeight: 700, color: '#b8960c' }}>${flatTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+        {flatDeposit?.deposit_amount && (
+          <div style={{ fontSize: 12, color: '#16a34a', fontWeight: 600, marginTop: 4 }}>
+            Deposit ({flatDeposit.deposit_percent || 50}%): ${flatDeposit.deposit_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+          </div>
+        )}
       </div>
 
-      {/* Expanded line item breakdown */}
-      {activeTier && (
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-            {TIERS[selectedTier]?.label} Tier — Line Item Breakdown
-          </div>
+      {/* Line items */}
+      {flatLineItems.length > 0 && (
+        <div style={{ borderRadius: 10, border: '1px solid #ece8e0', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f5f3ef' }}>
+                <th style={{ textAlign: 'left', fontSize: 9, fontWeight: 700, color: '#999', padding: '8px 12px', textTransform: 'uppercase' }}>Description</th>
+                <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '8px', width: 60, textTransform: 'uppercase' }}>Qty</th>
+                <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '8px', width: 70, textTransform: 'uppercase' }}>Rate</th>
+                <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '8px 12px', width: 80, textTransform: 'uppercase' }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flatLineItems.map((li: any, i: number) => (
+                <tr key={i} style={{ borderBottom: '1px solid #f0ece4' }}>
+                  <td style={{ padding: '8px 12px', fontSize: 11, color: '#333' }}>{li.description}</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 11, color: '#555' }}>{li.quantity} {li.unit}</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 11, color: '#555' }}>${(li.rate || 0).toFixed(2)}</td>
+                  <td style={{ padding: '8px 12px', textAlign: 'right', fontSize: 11, fontWeight: 600, color: '#1a1a1a' }}>${(li.amount || 0).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-          {activeTier.items?.map((item: any, itemIdx: number) => {
-            const key = `${selectedTier}-${itemIdx}`;
-            const isOpen = expandedItems[key] !== false; // default open
-            return (
-              <div key={itemIdx} style={{ marginBottom: 8, borderRadius: 10, border: '1px solid #ece8e0', overflow: 'hidden' }}>
-                {/* Item header — click to expand/collapse */}
-                <div onClick={() => toggleExpand(key)} className="flex items-center justify-between cursor-pointer"
-                  style={{ padding: '10px 14px', background: '#f5f3ef' }}>
-                  <div className="flex items-center gap-2">
-                    <ChevronDown size={14} style={{ color: '#888', transform: isOpen ? 'none' : 'rotate(-90deg)', transition: 'transform 0.2s' }} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{item.name}</span>
-                    {item.quantity > 1 && <span style={{ fontSize: 10, color: '#888' }}>x{item.quantity}</span>}
-                  </div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: TIERS[selectedTier]?.color || '#1a1a1a' }}>
-                    ${item.subtotal?.toFixed(2)}
-                  </span>
-                </div>
-
-                {/* Line items table */}
-                {isOpen && item.line_items && (
-                  <div style={{ padding: '8px 14px' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid #ece8e0' }}>
-                          <th style={{ textAlign: 'left', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', textTransform: 'uppercase' }}>Description</th>
-                          <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', width: 70, textTransform: 'uppercase' }}>Qty</th>
-                          <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', width: 80, textTransform: 'uppercase' }}>Rate</th>
-                          <th style={{ textAlign: 'right', fontSize: 9, fontWeight: 700, color: '#999', padding: '4px 0', width: 80, textTransform: 'uppercase' }}>Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {item.line_items.map((li: any, liIdx: number) => {
-                          const catStyle = CATEGORY_STYLES[li.category] || { color: '#555', bg: '#f5f3ef' };
-                          return (
-                            <tr key={liIdx} style={{ borderBottom: '1px solid #f5f3ef' }}>
-                              <td style={{ padding: '6px 0', fontSize: 11, color: '#333' }}>
-                                <span style={{ fontSize: 8, fontWeight: 700, color: catStyle.color, background: catStyle.bg, padding: '1px 5px', borderRadius: 3, marginRight: 6, textTransform: 'uppercase' }}>
-                                  {li.category}
-                                </span>
-                                {li.description}
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '6px 0' }}>
-                                <input type="number" step="0.1" value={li.quantity}
-                                  onChange={e => updateLineItem(selectedTier, itemIdx, liIdx, 'quantity', parseFloat(e.target.value) || 0)}
-                                  style={{ width: 55, textAlign: 'right', fontSize: 11, padding: '3px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
-                                <span style={{ fontSize: 9, color: '#888', marginLeft: 2 }}>{li.unit}</span>
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '6px 0' }}>
-                                <span style={{ fontSize: 9, color: '#888', marginRight: 1 }}>$</span>
-                                <input type="number" step="0.01" value={li.rate}
-                                  onChange={e => updateLineItem(selectedTier, itemIdx, liIdx, 'rate', parseFloat(e.target.value) || 0)}
-                                  style={{ width: 60, textAlign: 'right', fontSize: 11, padding: '3px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }} />
-                              </td>
-                              <td style={{ textAlign: 'right', padding: '6px 0', fontSize: 11, fontWeight: 600, color: '#1a1a1a' }}>
-                                ${li.amount?.toFixed(2)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                    {/* Item subtotal */}
-                    <div className="flex justify-between" style={{ padding: '6px 0', borderTop: '1.5px solid #ece8e0', marginTop: 4, fontSize: 12, fontWeight: 700, color: '#1a1a1a' }}>
-                      <span>Item Subtotal</span>
-                      <span>${item.subtotal?.toFixed(2)}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Tier totals */}
-          <div style={{ marginTop: 8, padding: '12px 14px', borderRadius: 10, border: '1.5px solid #ece8e0', background: '#f5f3ef' }}>
-            <div className="flex justify-between mb-1" style={{ fontSize: 12, color: '#555' }}>
-              <span>Subtotal</span><span style={{ fontWeight: 600 }}>${activeTier.subtotal?.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between mb-1" style={{ fontSize: 12, color: '#555' }}>
-              <span>Tax ({((activeTier.tax_rate || 0.06) * 100).toFixed(1)}%)</span><span style={{ fontWeight: 600 }}>${activeTier.tax?.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between mb-1" style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', borderTop: '1.5px solid #ddd', paddingTop: 6 }}>
-              <span>Total</span><span>${activeTier.total?.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between" style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>
-              <span>50% Deposit Due</span><span>${activeTier.deposit?.toFixed(2)}</span>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 8, fontSize: 10, color: '#aaa', textAlign: 'center' }}>
-            Edit any quantity or rate above — totals recalculate live
-          </div>
+      {result.notes && (
+        <div style={{ marginTop: 8, padding: '10px 12px', background: '#f8f7f4', borderRadius: 8, fontSize: 11, color: '#666' }}>
+          <strong>Notes:</strong> {result.notes}
         </div>
       )}
     </div>

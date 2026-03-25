@@ -98,6 +98,7 @@ class QuoteCreate(BaseModel):
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
     rooms: Optional[list] = None           # Full room/window/upholstery hierarchy
+    pricing_mode: Optional[str] = None     # "flat" = skip tier engine, use line_items as-is
     ai_outlines: Optional[list] = None     # AI outline analysis results
     ai_mockups: Optional[list] = None      # AI mockup proposal results
     max_analysis: Optional[str] = None     # MAX's professional analysis text
@@ -127,6 +128,7 @@ class QuoteUpdate(BaseModel):
     business_logo_url: Optional[str] = None
     photos: Optional[list] = None
     rooms: Optional[list] = None
+    pricing_mode: Optional[str] = None     # "flat" = skip tier engine
     ai_outlines: Optional[list] = None
     ai_mockups: Optional[list] = None
     max_analysis: Optional[str] = None
@@ -342,14 +344,21 @@ async def list_quotes(
         # Strip heavy nested data — keep only what the list view needs
         light = []
         for q in quotes:
-            # Compute total from tier A (or first tier)
-            tier_total = 0
-            tiers = q.get("tiers", {})
-            if isinstance(tiers, dict):
-                first = tiers.get("A") or next(iter(tiers.values()), {})
-                tier_total = first.get("total", 0)
-            elif isinstance(tiers, list) and tiers:
-                tier_total = tiers[0].get("total", 0)
+            # Flat-priced quotes: use the stored total directly
+            if q.get("pricing_mode") == "flat" and q.get("total") is not None:
+                display_total = q["total"]
+            else:
+                # Compute total from tier A (or first tier)
+                display_total = 0
+                tiers = q.get("tiers", {})
+                if isinstance(tiers, dict):
+                    first = tiers.get("A") or next(iter(tiers.values()), {})
+                    display_total = first.get("total", 0)
+                elif isinstance(tiers, list) and tiers:
+                    display_total = tiers[0].get("total", 0)
+                # Fallback: if no tiers but total exists, use it
+                if display_total == 0 and q.get("total"):
+                    display_total = q["total"]
 
             light.append({
                 "id": q.get("id"),
@@ -359,8 +368,9 @@ async def list_quotes(
                 "customer_phone": q.get("customer_phone"),
                 "project_name": q.get("project_name"),
                 "status": q.get("status"),
-                "total": tier_total,
-                "item_count": len(q.get("items", [])),
+                "total": display_total,
+                "pricing_mode": q.get("pricing_mode"),
+                "item_count": len(q.get("items", q.get("line_items", []))),
                 "intake_code": q.get("intake_code"),
                 "created_at": q.get("created_at"),
                 "updated_at": q.get("updated_at"),
@@ -422,7 +432,34 @@ async def create_quote_from_rooms(body: dict):
 
     Converts rooms with items+dimensions into analyzed_items format,
     runs through the full QIS pricing pipeline (yardage, tiers, line items).
+
+    If the existing quote has pricing_mode="flat", skip the tier engine
+    entirely and preserve the flat line_items/totals as-is.
     """
+    # ── FLAT PRICING GUARD ──────────────────────────────────────
+    # If editing an existing flat-priced quote, skip tier calculations.
+    existing_quote_id = body.get("quote_id")
+    if existing_quote_id:
+        old_path = _quote_path(existing_quote_id)
+        if os.path.exists(old_path):
+            with open(old_path) as f:
+                old_quote = json.load(f)
+            if old_quote.get("pricing_mode") == "flat":
+                # Update customer/room info but preserve flat pricing
+                old_quote["customer_name"] = body.get("customer_name", old_quote.get("customer_name"))
+                old_quote["customer_email"] = body.get("customer_email", old_quote.get("customer_email"))
+                old_quote["customer_phone"] = body.get("customer_phone", old_quote.get("customer_phone"))
+                old_quote["customer_address"] = body.get("customer_address", old_quote.get("customer_address"))
+                if body.get("rooms"):
+                    old_quote["rooms"] = body["rooms"]
+                old_quote["photos"] = body.get("photos", old_quote.get("photos", []))
+                old_quote["options"] = body.get("options", old_quote.get("options", {}))
+                old_quote["updated_at"] = datetime.utcnow().isoformat()
+                # Recompute flat financials from line_items
+                old_quote = _compute_financials(old_quote)
+                _save_quote(old_quote)
+                return {"status": "success", "quote": old_quote}
+
     from app.services.quote_engine.quote_assembler import assemble_quote
 
     customer_name = body.get("customer_name", "Customer")

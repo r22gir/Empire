@@ -158,16 +158,25 @@ class QuoteVerifier:
         quote_data = self._normalize(quote_data)
         checks: List[CheckResult] = []
 
-        checks.append(self.check_tier_pricing(quote_data))
-        checks.append(self.check_yardage_sanity(quote_data))
-        checks.append(self.check_line_items(quote_data))
-        checks.append(self.check_measurements(quote_data))
-        checks.append(self.check_all_items_priced(quote_data))
-        checks.append(self.check_mockup_match(quote_data))
-        checks.append(self.check_market_range(quote_data))
-        checks.append(self.check_math(quote_data))
-        checks.append(self.check_completeness(quote_data))
-        checks.append(self.check_customer_info(quote_data))
+        is_flat = quote_data.get("pricing_mode") == "flat"
+
+        if is_flat:
+            # Flat-priced quotes skip tier/yardage/market checks — just verify
+            # math, completeness, and customer info
+            checks.append(self._check_flat_math(quote_data))
+            checks.append(self.check_completeness(quote_data))
+            checks.append(self.check_customer_info(quote_data))
+        else:
+            checks.append(self.check_tier_pricing(quote_data))
+            checks.append(self.check_yardage_sanity(quote_data))
+            checks.append(self.check_line_items(quote_data))
+            checks.append(self.check_measurements(quote_data))
+            checks.append(self.check_all_items_priced(quote_data))
+            checks.append(self.check_mockup_match(quote_data))
+            checks.append(self.check_market_range(quote_data))
+            checks.append(self.check_math(quote_data))
+            checks.append(self.check_completeness(quote_data))
+            checks.append(self.check_customer_info(quote_data))
 
         errors = [c for c in checks if not c.passed and c.severity == "error"]
         warnings = [c for c in checks if not c.passed and c.severity == "warning"]
@@ -231,6 +240,49 @@ class QuoteVerifier:
         )
 
         return result
+
+    # =======================================================================
+    # Flat pricing verification
+    # =======================================================================
+
+    def _check_flat_math(self, quote: Dict[str, Any]) -> CheckResult:
+        """Verify flat-priced quote math: line_items sum = subtotal, total = subtotal + tax - discount."""
+        items = quote.get("line_items", [])
+        if not items:
+            return CheckResult("flat_math", True, "info", "No line items — flat quote with room-level pricing only.")
+
+        computed_subtotal = 0.0
+        for item in items:
+            qty = item.get("quantity", 1)
+            rate = item.get("rate", 0)
+            expected_amount = round(qty * rate, 2)
+            actual_amount = item.get("amount", 0)
+            if abs(expected_amount - actual_amount) > 0.02:
+                return CheckResult(
+                    "flat_math", False, "error",
+                    f"Line item '{item.get('description', '?')}': {qty} × ${rate} = ${expected_amount}, but amount shows ${actual_amount}.",
+                )
+            computed_subtotal += expected_amount
+
+        stored_subtotal = quote.get("subtotal", 0) or 0
+        if abs(computed_subtotal - stored_subtotal) > 0.02:
+            return CheckResult(
+                "flat_math", False, "error",
+                f"Line items sum to ${computed_subtotal:.2f} but subtotal shows ${stored_subtotal:.2f}.",
+            )
+
+        tax_rate = quote.get("tax_rate", 0)
+        expected_tax = round(stored_subtotal * tax_rate, 2)
+        discount = quote.get("discount_amount", 0) or 0
+        expected_total = round(stored_subtotal + expected_tax - discount, 2)
+        stored_total = quote.get("total", 0) or 0
+        if abs(expected_total - stored_total) > 0.02:
+            return CheckResult(
+                "flat_math", False, "error",
+                f"Expected total ${expected_total:.2f} but stored ${stored_total:.2f}.",
+            )
+
+        return CheckResult("flat_math", True, "info", f"Flat pricing math verified: ${stored_total:.2f}")
 
     # =======================================================================
     # Individual checks
@@ -655,15 +707,21 @@ class QuoteVerifier:
     def check_completeness(self, quote: Dict[str, Any]) -> CheckResult:
         """WARN if quote is missing recommended sections."""
         missing = []
+        is_flat = quote.get("pricing_mode") == "flat"
 
         if not quote.get("customer_name"):
             missing.append("customer name")
         if not quote.get("created_at"):
             missing.append("creation date")
-        if not quote.get("items"):
-            missing.append("items list")
-        if not quote.get("tiers"):
-            missing.append("pricing tiers")
+        if is_flat:
+            # Flat quotes need line_items, not items/tiers
+            if not quote.get("line_items"):
+                missing.append("line items")
+        else:
+            if not quote.get("items"):
+                missing.append("items list")
+            if not quote.get("tiers"):
+                missing.append("pricing tiers")
 
         # Recommended but not required
         optional_missing = []
