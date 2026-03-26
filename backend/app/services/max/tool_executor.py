@@ -1393,12 +1393,31 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     attachments = params.get("attachments", [])
     cc = params.get("cc")
 
+    # Auto-convert SVG attachments to PDF via WeasyPrint
+    converted_attachments = []
+    for att in attachments:
+        att_path = Path(att) if isinstance(att, str) else None
+        if att_path and att_path.suffix.lower() == ".svg" and att_path.exists():
+            try:
+                pdf_out = att_path.with_suffix(".pdf")
+                svg_content = att_path.read_text()
+                html_wrap = f'<!DOCTYPE html><html><head><meta charset="utf-8"><style>@page{{size:letter;margin:0.5in}}body{{margin:0}}</style></head><body>{svg_content}</body></html>'
+                from weasyprint import HTML as WeasyHTML
+                WeasyHTML(string=html_wrap).write_pdf(str(pdf_out))
+                converted_attachments.append(str(pdf_out))
+                logger.info(f"Auto-converted SVG to PDF: {att} -> {pdf_out}")
+            except Exception as e:
+                logger.warning(f"SVG to PDF conversion failed for {att}: {e}, attaching original")
+                converted_attachments.append(att)
+        else:
+            converted_attachments.append(att)
+
     try:
         from app.services.max.email_service import EmailService
         svc = EmailService()
         if not svc.is_configured:
             return ToolResult(tool="send_email", success=False, error="Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD in .env")
-        svc.send(to=to, subject=subject, body_html=body, attachments=attachments, cc=cc)
+        svc.send(to=to, subject=subject, body_html=body, attachments=converted_attachments, cc=cc)
         return ToolResult(tool="send_email", success=True, result={"sent_to": to, "subject": subject})
     except Exception as e:
         return ToolResult(tool="send_email", success=False, error=str(e))
@@ -1469,6 +1488,57 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
         })
     except Exception as e:
         return ToolResult(tool="send_quote_email", success=False, error=f"Email send failed: {e}")
+
+
+# ── SVG TO PDF TOOL ──────────────────────────────────────────────
+
+@tool("svg_to_pdf")
+def _svg_to_pdf(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Convert SVG content or file to PDF using WeasyPrint. Returns the PDF path."""
+    svg_content = params.get("svg_content", "")
+    svg_path = params.get("svg_path", "")
+    output_path = params.get("output_path", "")
+
+    if not svg_content and not svg_path:
+        return ToolResult(tool="svg_to_pdf", success=False, error="Provide svg_content (raw SVG string) or svg_path (file path)")
+
+    try:
+        # Read SVG from file if path provided
+        if svg_path and not svg_content:
+            p = Path(svg_path)
+            if not p.exists():
+                return ToolResult(tool="svg_to_pdf", success=False, error=f"SVG file not found: {svg_path}")
+            svg_content = p.read_text()
+
+        # Default output path
+        if not output_path:
+            output_dir = os.path.expanduser("~/empire-repo/uploads")
+            os.makedirs(output_dir, exist_ok=True)
+            import uuid
+            output_path = os.path.join(output_dir, f"drawing_{uuid.uuid4().hex[:8]}.pdf")
+
+        # Wrap SVG in HTML and render via WeasyPrint
+        html_content = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  @page {{ size: letter; margin: 0; }}
+  body {{ margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: white; }}
+  svg {{ max-width: 100%; max-height: 100vh; }}
+</style></head>
+<body>{svg_content}</body></html>"""
+
+        from weasyprint import HTML as WeasyHTML
+        WeasyHTML(string=html_content).write_pdf(output_path)
+
+        size = os.path.getsize(output_path)
+        logger.info(f"SVG to PDF: {output_path} ({size} bytes)")
+        return ToolResult(tool="svg_to_pdf", success=True, result={
+            "pdf_path": output_path,
+            "size_bytes": size,
+        })
+    except Exception as e:
+        logger.error(f"SVG to PDF failed: {e}")
+        return ToolResult(tool="svg_to_pdf", success=False, error=str(e))
 
 
 # ── IMAGE SEARCH TOOL ─────────────────────────────────────────────
@@ -2279,6 +2349,10 @@ To call a tool, include a tool block in your response:
 - **send_quote_email** — Generate a quote PDF and email it to the recipient
   `{"tool": "send_quote_email", "quote_id": "abc123", "to": "client@example.com"}`
   Use this after creating/saving a quote to email the PDF directly to a client or the founder.
+- **svg_to_pdf** — Convert SVG content or file to a PDF. Use this instead of writing Python scripts. Returns the PDF file path.
+  `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
+  Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
+  IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
 
 ### Research Tools
 - **web_search** — Search the web for current information, prices, suppliers, tutorials, or any topic. Returns titles, URLs, and snippets from DuckDuckGo.
