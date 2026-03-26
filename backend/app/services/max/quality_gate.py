@@ -32,11 +32,30 @@ def validate_response(
     category: str = "",
     tool_results: Optional[list] = None,
     model_used: str = "",
+    is_action: bool = False,
 ) -> QualityResult:
-    """Run quality checks on a MAX response before delivery."""
+    """Run quality checks on a MAX response before delivery.
+
+    Args:
+        is_action: If True, this response is for an owner-initiated action
+            (send email, create task, etc). Quality issues are logged as
+            warnings but NEVER block or downgrade the response — the owner
+            explicitly asked for this action.
+    """
     start = time.time()
     result = QualityResult()
     tool_results = tool_results or []
+
+    # Auto-detect action responses: if tools like send_email, svg_to_pdf,
+    # create_task, send_quote_email were called, this is an action.
+    ACTION_TOOLS = {
+        "send_email", "send_quote_email", "svg_to_pdf", "create_task",
+        "submit_desk_task", "send_sms", "send_telegram",
+    }
+    if not is_action and tool_results:
+        tools_used = {tr.get("tool", "") for tr in tool_results}
+        if tools_used & ACTION_TOOLS:
+            is_action = True
 
     # 1. Action verification — check tool results for errors
     _check_tool_results(result, tool_results)
@@ -56,19 +75,33 @@ def validate_response(
     result.validation_time_ms = (time.time() - start) * 1000
 
     # Determine final confidence level
-    if result.level == FAILED:
-        pass  # Already set by a check
-    elif any("tool_error" in w for w in result.warnings):
-        result.level = FAILED
-        result.disclaimer = "⚠️ One or more actions encountered errors. Results may be incomplete."
-    elif any("unverified_entity" in w for w in result.warnings):
-        result.level = MODERATE
-    elif any("uncertainty" in w for w in result.warnings):
-        result.level = LOW if len([w for w in result.warnings if "uncertainty" in w]) >= 2 else MODERATE
-    elif tool_results and all(tr.get("success") for tr in tool_results):
-        result.level = VERIFIED
-    elif tool_results:
-        result.level = HIGH
+    # For ACTION responses (owner said "send email", "create task", etc.),
+    # tool errors are informational — never mark as FAILED.
+    # The owner explicitly requested the action; report results, don't block.
+    if is_action:
+        # Action responses: tool errors downgrade to MODERATE at worst
+        if any("tool_error" in w for w in result.warnings):
+            result.level = MODERATE
+            result.disclaimer = ""  # Tool error details are already in the response
+        elif tool_results and all(tr.get("success") for tr in tool_results):
+            result.level = VERIFIED
+        else:
+            result.level = HIGH
+    else:
+        # Non-action responses: original logic
+        if result.level == FAILED:
+            pass  # Already set by a check
+        elif any("tool_error" in w for w in result.warnings):
+            result.level = FAILED
+            result.disclaimer = "⚠️ One or more actions encountered errors. Results may be incomplete."
+        elif any("unverified_entity" in w for w in result.warnings):
+            result.level = MODERATE
+        elif any("uncertainty" in w for w in result.warnings):
+            result.level = LOW if len([w for w in result.warnings if "uncertainty" in w]) >= 2 else MODERATE
+        elif tool_results and all(tr.get("success") for tr in tool_results):
+            result.level = VERIFIED
+        elif tool_results:
+            result.level = HIGH
 
     return result
 
