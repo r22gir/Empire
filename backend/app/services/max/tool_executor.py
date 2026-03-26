@@ -1542,6 +1542,88 @@ def _svg_to_pdf(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="svg_to_pdf", success=False, error=str(e))
 
 
+# ── SKETCH TO DRAWING TOOL ────────────────────────────────────────
+
+@tool("sketch_to_drawing")
+def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Convert dimensions or quote data into professional architectural bench drawings (PDF).
+
+    Accepts either:
+    - quote_id: generate drawings for all areas in a quote
+    - shape + lf + name: generate a single drawing
+    """
+    try:
+        from app.services.vision.bench_renderer import (
+            render_straight, render_l_shape, render_u_shape,
+            render_quote_drawings, drawings_to_pdf,
+        )
+
+        quote_id = params.get("quote_id", "")
+        output_path = params.get("output_path", "")
+
+        if quote_id:
+            # Generate from quote data
+            quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
+            if not os.path.exists(quote_path):
+                return ToolResult(tool="sketch_to_drawing", success=False, error=f"Quote {quote_id} not found")
+
+            import json as _json
+            with open(quote_path) as f:
+                quote = _json.load(f)
+
+            quote_num = quote.get("quote_number", quote_id)
+            line_items = quote.get("line_items", [])
+            if not line_items:
+                return ToolResult(tool="sketch_to_drawing", success=False, error="Quote has no line items")
+
+            drawings = render_quote_drawings(line_items, quote_num)
+            if not output_path:
+                out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+                os.makedirs(out_dir, exist_ok=True)
+                output_path = os.path.join(out_dir, f"{quote_num}_drawings.pdf")
+
+            drawings_to_pdf(drawings, output_path)
+            size = os.path.getsize(output_path)
+            return ToolResult(tool="sketch_to_drawing", success=True, result={
+                "pdf_path": output_path,
+                "pages": len(drawings),
+                "size_bytes": size,
+                "areas": [d["name"] for d in drawings],
+            })
+        else:
+            # Single drawing
+            shape = params.get("shape", "straight").lower()
+            lf = float(params.get("lf", params.get("length_ft", 10)))
+            name = params.get("name", f"{shape.title()} Bench")
+            rate = float(params.get("rate", 195))
+
+            if "u" in shape:
+                mult = int(params.get("multiplier", 1))
+                svg = render_u_shape(name, lf, rate, mult)
+            elif "l" in shape:
+                svg = render_l_shape(name, lf, rate)
+            else:
+                svg = render_straight(name, lf, rate)
+
+            if not output_path:
+                out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+                os.makedirs(out_dir, exist_ok=True)
+                import uuid as _uuid
+                output_path = os.path.join(out_dir, f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
+
+            drawings_to_pdf([{"name": name, "svg": svg, "lf": lf}], output_path)
+            size = os.path.getsize(output_path)
+            return ToolResult(tool="sketch_to_drawing", success=True, result={
+                "pdf_path": output_path,
+                "pages": 1,
+                "size_bytes": size,
+            })
+
+    except Exception as e:
+        logger.error(f"sketch_to_drawing failed: {e}")
+        return ToolResult(tool="sketch_to_drawing", success=False, error=str(e))
+
+
 # ── IMAGE SEARCH TOOL ─────────────────────────────────────────────
 
 @tool("search_images")
@@ -2354,6 +2436,11 @@ To call a tool, include a tool block in your response:
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
+- **sketch_to_drawing** — Generate professional 3D architectural bench drawings from quote data or dimensions. Returns a PDF with isometric perspective views, dimension callouts, and upholstery details.
+  From quote: `{"tool": "sketch_to_drawing", "quote_id": "30ad17d4"}`
+  Single bench: `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 20, "name": "Main Dining Bench", "rate": 195}`
+  Shapes: "straight", "l-shape", "u-shape". For U-shaped, add "multiplier": 2 if there are multiple booths.
+  After generating, use send_email to deliver the PDF to the owner or client.
 
 ### Research Tools
 - **web_search** — Search the web for current information, prices, suppliers, tutorials, or any topic. Returns titles, URLs, and snippets from DuckDuckGo.
