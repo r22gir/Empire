@@ -10,9 +10,14 @@ _FOUNDER_CHAT_ID = os.getenv("TELEGRAM_FOUNDER_CHAT_ID")
 
 
 def is_founder_message(message_context: dict) -> bool:
+    """Determine if message is from the founder.
+    CC / web = always founder (Command Center is the owner's tool).
+    Telegram = match by chat_id.
+    Unknown channel = not founder (require PIN fallback).
+    """
     channel = message_context.get("channel", "")
-    # Web/CC sessions are founder — Command Center is the owner's tool
-    if channel in ("web", "cc", "command-center", ""):
+    # Command Center (any variant) = always founder
+    if channel in ("web", "web_cc", "cc", "command_center", "command-center", ""):
         return True
     # Telegram: match by chat_id
     if not _FOUNDER_CHAT_ID:

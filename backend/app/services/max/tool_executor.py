@@ -90,53 +90,62 @@ def tool(name: str):
     return decorator
 
 
-def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None) -> ToolResult:
-    """Dispatch and execute a tool call (with tier gating and access control)."""
+def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Optional[dict] = None, founder: bool = False) -> ToolResult:
+    """Dispatch and execute a tool call (with tier gating and access control).
+
+    Args:
+        founder: If True, skip all PIN/access checks. The caller (router) has
+                 already verified this is the founder via is_founder_message().
+    """
     tool_name = tool_call.get("tool", "")
     try:
-        # Access control check
-        if access_context and access_controller:
-            user = access_context.get("user")
-            if user:
-                level = int(access_controller.classify_tool(tool_name))
-                action, _ = access_controller.check_permission(user, tool_name, desk)
-                if action == "deny":
-                    access_controller.audit_log(user.get("id", ""), tool_name, level, "denied", channel=user.get("channel", ""))
-                    return ToolResult(tool=tool_name, success=False, error="Access denied: insufficient permissions")
-                if action == "locked":
-                    return ToolResult(tool=tool_name, success=False, error="Account locked due to failed PIN attempts. Try again in 15 minutes.")
-                if action == "confirm":
-                    session_id = access_controller.create_pending_session(
-                        user.get("id", ""), tool_name, tool_call, desk,
-                        user.get("channel", ""), user.get("chat_id", ""), level
-                    )
-                    summary = f"Tool '{tool_name}' requires confirmation"
-                    access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_confirm", channel=user.get("channel", ""))
-                    return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__confirm__{session_id}__{summary}")
-                if action == "pin":
-                    session_id = access_controller.create_pending_session(
-                        user.get("id", ""), tool_name, tool_call, desk,
-                        user.get("channel", ""), user.get("chat_id", ""), level
-                    )
-                    summary = f"Tool '{tool_name}' requires PIN authorization"
-                    access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
-                    return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
+        # ── FOUNDER BYPASS: CC / Telegram founder = full access, no PIN ──
+        if founder:
+            logger.info(f"Founder auto-auth — executing '{tool_name}' without PIN/access check")
+        else:
+            # Access control check (non-founder users)
+            if access_context and access_controller:
+                user = access_context.get("user")
+                if user:
+                    level = int(access_controller.classify_tool(tool_name))
+                    action, _ = access_controller.check_permission(user, tool_name, desk)
+                    if action == "deny":
+                        access_controller.audit_log(user.get("id", ""), tool_name, level, "denied", channel=user.get("channel", ""))
+                        return ToolResult(tool=tool_name, success=False, error="Access denied: insufficient permissions")
+                    if action == "locked":
+                        return ToolResult(tool=tool_name, success=False, error="Account locked due to failed PIN attempts. Try again in 15 minutes.")
+                    if action == "confirm":
+                        session_id = access_controller.create_pending_session(
+                            user.get("id", ""), tool_name, tool_call, desk,
+                            user.get("channel", ""), user.get("chat_id", ""), level
+                        )
+                        summary = f"Tool '{tool_name}' requires confirmation"
+                        access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_confirm", channel=user.get("channel", ""))
+                        return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__confirm__{session_id}__{summary}")
+                    if action == "pin":
+                        session_id = access_controller.create_pending_session(
+                            user.get("id", ""), tool_name, tool_call, desk,
+                            user.get("channel", ""), user.get("chat_id", ""), level
+                        )
+                        summary = f"Tool '{tool_name}' requires PIN authorization"
+                        access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
+                        return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
 
-        # Dangerous tool PIN gate
-        if tool_name in DANGEROUS_TOOLS:
-            pin = (access_context or {}).get("pin")
-            if not pin:
-                return ToolResult(
-                    tool=tool_name, success=False,
-                    error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
-                )
-            if str(pin) != FOUNDER_PIN:
-                logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
-                return ToolResult(
-                    tool=tool_name, success=False,
-                    error="❌ Invalid PIN. Access denied."
-                )
-            logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
+            # Dangerous tool PIN gate (legacy — only for non-founder)
+            if tool_name in DANGEROUS_TOOLS:
+                pin = (access_context or {}).get("pin")
+                if not pin:
+                    return ToolResult(
+                        tool=tool_name, success=False,
+                        error=f"⚠️ Tool '{tool_name}' is restricted. Please provide your founder PIN to proceed."
+                    )
+                if str(pin) != FOUNDER_PIN:
+                    logger.warning(f"Invalid PIN attempt for dangerous tool '{tool_name}'")
+                    return ToolResult(
+                        tool=tool_name, success=False,
+                        error="❌ Invalid PIN. Access denied."
+                    )
+                logger.info(f"PIN verified — executing dangerous tool '{tool_name}'")
 
         # Tier check
         from app.middleware.tier_middleware import require_tool

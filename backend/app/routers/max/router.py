@@ -271,7 +271,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                     logger.info(f"[chat] Auto-routing {tool_name} to CodeForge: {title}")
                     tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
-                result = execute_tool(tc, desk=request.desk, access_context=_ac_context)
+                result = execute_tool(tc, desk=request.desk, access_context=_ac_context, founder=founder)
                 entry = {"tool": result.tool, "success": result.success, "result": result.result, "error": result.error}
                 round_results.append(entry)
                 tool_results_list.append(entry)
@@ -571,7 +571,7 @@ async def chat_stream(request: ChatRequest):
                         logger.info(f"[stream] Auto-routing {tool_name} to CodeForge: {title}")
                         tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
-                    result = execute_tool(tc, desk=request.desk, access_context=_stream_ac_context)
+                    result = execute_tool(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder)
                     round_results.append(result)
                     tool_results_list.append(result)
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
