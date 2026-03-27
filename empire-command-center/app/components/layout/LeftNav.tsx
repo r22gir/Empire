@@ -5,7 +5,7 @@ import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
-  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X,
+  ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
 } from 'lucide-react';
 
 interface NavItem {
@@ -36,6 +36,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: 'Tools',
     items: [
       { id: 'vision', name: 'AI Vision', icon: <Camera size={16} />, status: 'active', color: '#7c3aed' },
+      { id: 'drawings' as any, name: 'Drawing Studio', icon: <PenTool size={16} />, status: 'active', color: '#b8960c' },
     ],
   },
   {

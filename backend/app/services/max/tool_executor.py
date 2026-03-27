@@ -1555,13 +1555,19 @@ def _svg_to_pdf(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("sketch_to_drawing")
 def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Convert dimensions or quote data into professional architectural bench drawings (PDF).
+    """Generate professional architectural drawings (PDF) for any item type.
+
+    Auto-classifies input to determine what to draw: bench, window treatment,
+    pillow, upholstery, table, or generic measurement diagram.
 
     Accepts either:
     - quote_id: generate drawings for all areas in a quote
-    - shape + lf + name: generate a single drawing
+    - shape + lf + name: generate a single bench drawing (bench items only)
+    - name + description + dimensions: generate a measurement diagram for any item type
+    - item_type: override auto-classification (bench, window, pillow, upholstery, table, generic)
     """
     try:
+        from app.services.vision.drawing_service import classify_input, render_measurement_diagram
         from app.services.vision.bench_renderer import (
             render_straight, render_l_shape, render_u_shape,
             render_quote_drawings, drawings_to_pdf,
@@ -1569,9 +1575,20 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
         quote_id = params.get("quote_id", "")
         output_path = params.get("output_path", "")
+        name = params.get("name", "Drawing")
+        description = params.get("description", "")
+
+        # ── Auto-classify what type of item this is ──
+        explicit_type = params.get("item_type", "")
+        if explicit_type:
+            item_type = explicit_type.lower()
+        else:
+            classify_text = f"{name} {description} {params.get('shape', '')}"
+            item_type = classify_input(classify_text)
+        logger.info(f"sketch_to_drawing: classified as '{item_type}' from input")
 
         if quote_id:
-            # Generate from quote data
+            # Generate from quote data — quotes are always bench/seating
             quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
             if not os.path.exists(quote_path):
                 return ToolResult(tool="sketch_to_drawing", success=False, error=f"Quote {quote_id} not found")
@@ -1597,14 +1614,17 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "pdf_path": output_path,
                 "pages": len(drawings),
                 "size_bytes": size,
+                "item_type": "bench",
                 "areas": [d["name"] for d in drawings],
             })
-        else:
-            # Single drawing
+
+        # ── Bench items → dedicated renderer ──
+        if item_type == "bench":
             shape = params.get("shape", "straight").lower()
             lf = float(params.get("lf", params.get("length_ft", 10)))
-            name = params.get("name", f"{shape.title()} Bench")
-            rate = float(params.get("rate", 195))
+            if not name or name == "Drawing":
+                name = f"{shape.title()} Bench"
+            rate = float(params.get("rate", 0))
 
             if "u" in shape:
                 mult = int(params.get("multiplier", 1))
@@ -1626,7 +1646,40 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "pdf_path": output_path,
                 "pages": 1,
                 "size_bytes": size,
+                "item_type": "bench",
             })
+
+        # ── All other item types → measurement diagram ──
+        dimensions = params.get("dimensions", {})
+        if not dimensions:
+            # Try to extract common dimension params
+            for key in ("width", "height", "depth", "drop", "length", "diameter"):
+                val = params.get(key)
+                if val:
+                    dimensions[key.title()] = f'{val}"'
+
+        notes = params.get("notes", description)
+        svg = render_measurement_diagram(
+            name=name,
+            item_type=item_type,
+            dimensions=dimensions,
+            notes=notes,
+        )
+
+        if not output_path:
+            out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+            os.makedirs(out_dir, exist_ok=True)
+            import uuid as _uuid
+            output_path = os.path.join(out_dir, f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
+
+        drawings_to_pdf([{"name": name, "svg": svg, "lf": 0}], output_path)
+        size = os.path.getsize(output_path)
+        return ToolResult(tool="sketch_to_drawing", success=True, result={
+            "pdf_path": output_path,
+            "pages": 1,
+            "size_bytes": size,
+            "item_type": item_type,
+        })
 
     except Exception as e:
         logger.error(f"sketch_to_drawing failed: {e}")
@@ -2550,9 +2603,11 @@ To call a tool, include a tool block in your response:
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
-- **sketch_to_drawing** — Generate professional 3D architectural bench drawings from quote data or dimensions. Returns a PDF with isometric perspective views, dimension callouts, and upholstery details.
+- **sketch_to_drawing** — Generate professional architectural drawings for ANY item type (bench, window treatment, pillow, upholstery, table, etc.). Auto-classifies the input to route to the correct renderer. Returns a PDF.
   From quote: `{"tool": "sketch_to_drawing", "quote_id": "30ad17d4"}`
-  Single bench: `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 20, "name": "Main Dining Bench", "rate": 195}`
+  Bench: `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 20, "name": "Main Dining Bench"}`
+  Window: `{"tool": "sketch_to_drawing", "name": "Office Windows", "item_type": "window", "dimensions": {"Width": "72\"", "Height": "48\"", "Drop": "84\""}}`
+  Generic: `{"tool": "sketch_to_drawing", "name": "Ottoman", "description": "round ottoman", "dimensions": {"Diameter": "36\"", "Height": "18\""}}`
   Shapes: "straight", "l-shape", "u-shape". For U-shaped, add "multiplier": 2 if there are multiple booths.
   After generating, use send_email to deliver the PDF to the owner or client.
 

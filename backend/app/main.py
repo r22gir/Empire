@@ -135,6 +135,9 @@ load_router("app.routers.notes_extraction", "/api/v1", ["notes-extraction"])
 load_router("app.routers.pattern_templates", "/api/v1/patterns", ["patterns"])
 load_router("app.routers.custom_shapes", "/api/v1", ["custom-shapes"])
 
+# Drawing Studio — architectural bench drawings (SVG + PDF)
+load_router("app.routers.drawings", "/api/v1", ["drawings"])
+
 # Fabric Library
 load_router("app.routers.fabrics", "/api/v1/fabrics", ["fabrics"])
 

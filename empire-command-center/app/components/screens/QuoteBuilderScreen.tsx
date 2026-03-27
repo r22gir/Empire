@@ -3261,6 +3261,116 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
   );
 }
 
+/* ── Shade Installation Diagram (Roman/Roller) ──────────── */
+function ShadeInstallDiagram({ config }: { config: Record<string, any> }) {
+  const ww = config.windowWidth || 48;
+  const wh = config.windowHeight || 60;
+  const isInside = config.shadeMountType === 'inside';
+  const svgW = 460;
+  const svgH = 300;
+  const margin = { top: 45, right: 40, bottom: 35, left: 50 };
+  const drawW = svgW - margin.left - margin.right;
+  const drawH = svgH - margin.top - margin.bottom;
+
+  const scale = Math.min(drawW / (ww + 20), drawH / (wh + 20), 3);
+  const cx = margin.left + drawW / 2;
+  const windowW = ww * scale;
+  const windowH = wh * scale;
+  const windowLeft = cx - windowW / 2;
+  const windowTop = margin.top + 15;
+  const casingW = isInside ? 0 : 8;
+
+  const fmtIn = (v: number) => v >= 12 ? `${Math.floor(v / 12)}'-${v % 12}"` : `${v}"`;
+
+  return (
+    <svg viewBox={`0 0 ${svgW} ${svgH}`} width="100%" style={{ maxWidth: 460 }}>
+      <defs>
+        <marker id="sArrowR" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6" fill="none" stroke="#b8960c" strokeWidth={1.2} />
+        </marker>
+        <marker id="sArrowL" markerWidth="6" markerHeight="6" refX="1" refY="3" orient="auto">
+          <path d="M6,0 L0,3 L6,6" fill="none" stroke="#b8960c" strokeWidth={1.2} />
+        </marker>
+        <marker id="sArrowD" markerWidth="6" markerHeight="6" refX="3" refY="5" orient="auto">
+          <path d="M0,0 L3,6 L6,0" fill="none" stroke="#b8960c" strokeWidth={1.2} />
+        </marker>
+        <marker id="sArrowU" markerWidth="6" markerHeight="6" refX="3" refY="1" orient="auto">
+          <path d="M0,6 L3,0 L6,6" fill="none" stroke="#b8960c" strokeWidth={1.2} />
+        </marker>
+      </defs>
+
+      {/* Title */}
+      <text x={svgW / 2} y={16} textAnchor="middle" fontSize={13} fontWeight={700} fill="#1a1a1a">
+        Shade Installation — {isInside ? 'Inside Mount' : 'Outside Mount'}
+      </text>
+
+      {/* Wall */}
+      <rect x={margin.left - 10} y={margin.top - 5} width={drawW + 20} height={drawH + 15}
+        rx={4} fill="#faf9f7" stroke="#e8e4dc" strokeWidth={1} />
+
+      {/* Window casing */}
+      <rect x={windowLeft - casingW} y={windowTop - casingW} width={windowW + casingW * 2} height={windowH + casingW * 2}
+        rx={3} fill="none" stroke="#666" strokeWidth={2} />
+      {/* Window glass */}
+      <rect x={windowLeft} y={windowTop} width={windowW} height={windowH}
+        rx={2} fill="#d4e8f7" stroke="#888" strokeWidth={1} />
+
+      {/* Shade — rolled fabric at top */}
+      <rect x={windowLeft + (isInside ? 2 : -4)} y={windowTop + (isInside ? 2 : -10)}
+        width={windowW + (isInside ? -4 : 8)} height={14}
+        rx={7} fill="#c9a96e" stroke="#a6833e" strokeWidth={1.5} />
+
+      {/* Shade fabric hanging down (partially deployed) */}
+      <rect x={windowLeft + (isInside ? 2 : -4)} y={windowTop + (isInside ? 16 : 4)}
+        width={windowW + (isInside ? -4 : 8)} height={windowH * 0.4}
+        rx={1} fill="#e8dcc8" stroke="#c9a96e" strokeWidth={1} opacity={0.7} />
+
+      {/* Fold lines (roman shade folds) */}
+      {[0.12, 0.24, 0.36].map((pct, i) => (
+        <line key={i}
+          x1={windowLeft + (isInside ? 4 : -2)}
+          y1={windowTop + (isInside ? 16 : 4) + windowH * pct}
+          x2={windowLeft + windowW + (isInside ? -4 : 2)}
+          y2={windowTop + (isInside ? 16 : 4) + windowH * pct}
+          stroke="#c9a96e" strokeWidth={0.8} strokeDasharray="4,3" />
+      ))}
+
+      {/* Bottom bar */}
+      <rect x={windowLeft + (isInside ? 2 : -4)} y={windowTop + (isInside ? 16 : 4) + windowH * 0.4 - 3}
+        width={windowW + (isInside ? -4 : 8)} height={5}
+        rx={1} fill="#8b7340" stroke="#6b5520" strokeWidth={0.8} />
+
+      {/* Mounting brackets */}
+      {[windowLeft + 10, windowLeft + windowW - 10].map((bx, i) => (
+        <rect key={i} x={bx - 4} y={windowTop + (isInside ? 0 : -12)} width={8} height={6}
+          rx={1} fill="#888" stroke="#666" strokeWidth={0.8} />
+      ))}
+
+      {/* Window label */}
+      <text x={cx} y={windowTop + windowH - 10} textAnchor="middle" fontSize={10} fill="#6b93b8" fontWeight={500}>
+        WINDOW
+      </text>
+
+      {/* Dimensions — width */}
+      <line x1={windowLeft} y1={windowTop + windowH + 15} x2={windowLeft + windowW} y2={windowTop + windowH + 15}
+        stroke="#b8960c" strokeWidth={1.2} markerStart="url(#sArrowL)" markerEnd="url(#sArrowR)" />
+      <rect x={cx - 18} y={windowTop + windowH + 9} width={36} height={14} rx={3} fill="#fff" />
+      <text x={cx} y={windowTop + windowH + 20} textAnchor="middle" fontSize={10} fontWeight={600} fill="#b8960c">{fmtIn(ww)}</text>
+
+      {/* Dimensions — height */}
+      <line x1={windowLeft + windowW + 15} y1={windowTop} x2={windowLeft + windowW + 15} y2={windowTop + windowH}
+        stroke="#b8960c" strokeWidth={1.2} markerStart="url(#sArrowU)" markerEnd="url(#sArrowD)" />
+      <rect x={windowLeft + windowW + 8} y={windowTop + windowH / 2 - 7} width={36} height={14} rx={3} fill="#fff" />
+      <text x={windowLeft + windowW + 26} y={windowTop + windowH / 2 + 4} textAnchor="middle" fontSize={10} fontWeight={600} fill="#b8960c">{fmtIn(wh)}</text>
+
+      {/* Mount type label */}
+      <text x={margin.left} y={svgH - 8} fontSize={9} fill="#aaa">
+        {isInside ? 'Inside mount — shade fits within window frame' : 'Outside mount — shade covers window frame + overlap'}
+      </text>
+    </svg>
+  );
+}
+
 function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareConfig }: {
   options: QuoteOptions; setOptions: (o: QuoteOptions) => void; rooms: Room[];
   hardwareConfig?: Record<string, any>; setHardwareConfig?: (c: Record<string, any>) => void;
@@ -3270,7 +3380,9 @@ function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareCo
   // Determine which categories are present in the quote
   const allItems = rooms.flatMap(r => r.items);
   const hasUpholstery = allItems.some(it => getItemCategory(it.type) === 'upholstery');
-  const hasDrapery = allItems.some(it => getItemCategory(it.type) === 'drapery');
+  const isShadeType = (t: string) => t.includes('roman') || t.includes('roller') || t.includes('shade');
+  const hasDrapery = allItems.some(it => getItemCategory(it.type) === 'drapery' && !isShadeType(it.type));
+  const hasShades = allItems.some(it => isShadeType(it.type));
 
   const checkBtn = (key: keyof QuoteOptions, label: string, accent = '#b8960c') => {
     const isChecked = options[key] as boolean;
@@ -3362,12 +3474,41 @@ function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareCo
         </div>
       )}
 
-      {/* Drapery Options */}
+      {/* Shade Options (Roman, Roller, etc.) */}
+      {hasShades && !hasDrapery && (
+        <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, border: '1.5px solid #d6e4f0', background: '#fafcff' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Layers size={14} style={{ color: '#2563eb' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shade Options</span>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-3">
+            {sel('Lining', 'liningType', [['unlined','Unlined'],['standard_poly_cotton','Standard Poly-Cotton'],['blackout','Blackout'],['thermal','Thermal'],['privacy','Privacy']], '#2563eb')}
+            {sel('Mount Type', 'shadeMountType' as any, [['inside','Inside Mount'],['outside','Outside Mount']], '#2563eb')}
+            {sel('Shade Style', 'shadeStyle' as any, [['flat','Flat Roman'],['hobbled','Hobbled / Teardrop'],['relaxed','Relaxed / European'],['balloon','Balloon'],['london','London / Tie-Up'],['roller','Roller'],['solar','Solar / Screen']], '#2563eb')}
+            {sel('Lift System', 'liftSystem', [['cordless','Cordless'],['cord_lock','Cord Lock'],['continuous_cord_loop','Continuous Loop'],['motorized_somfy','Motorized (Somfy)'],['motorized_lutron','Motorized (Lutron)'],['top_down_bottom_up','Top-Down/Bottom-Up'],['day_night_dual','Day/Night Dual']], '#2563eb')}
+            {sel('Bottom Bar', 'shadeBottomBar' as any, [['standard','Standard Weight Bar'],['sewn_in','Sewn-In Bar'],['decorative','Decorative Bar'],['chain_weighted','Chain Weighted']], '#2563eb')}
+            {sel('Valance', 'shadeValance' as any, [['none','None'],['attached','Attached Valance'],['separate','Separate Valance'],['cornice','Cornice Box']], '#2563eb')}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {checkBtn('contrastPiping', 'Contrast Piping', '#2563eb')}
+            {checkBtn('patternMatch', 'Pattern Match', '#2563eb')}
+            {checkBtn('installationIncluded', 'Include Installation', '#2563eb')}
+          </div>
+          {/* Shade Installation Diagram */}
+          {setHardwareConfig && (
+            <div style={{ marginTop: 16 }}>
+              <ShadeInstallDiagram config={hardwareConfig || {}} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Drapery Options (panels, curtains — NOT shades) */}
       {hasDrapery && (
         <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, border: '1.5px solid #d6e4f0', background: '#fafcff' }}>
           <div className="flex items-center gap-2 mb-3">
             <Layers size={14} style={{ color: '#2563eb' }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Drapery & Window Treatment Options</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Drapery Options</span>
           </div>
           <div className="grid grid-cols-2 gap-4 mb-3">
             {sel('Lining', 'liningType', [['unlined','Unlined'],['standard_poly_cotton','Standard Poly-Cotton'],['blackout','Blackout'],['interlining_bump','Interlining (Bump)'],['interlining_domette','Interlining (Domette)'],['interlining_flannel','Interlining (Flannel)'],['thermal','Thermal'],['sheer','Sheer'],['privacy','Privacy']], '#2563eb')}
@@ -3379,7 +3520,6 @@ function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareCo
             {sel('Returns', 'returnSize', [['standard_3_5in','Standard 3.5"'],['extended_6in','Extended 6"'],['extended_8in','Extended 8"'],['custom','Custom']], '#2563eb')}
             {sel('Stacking', 'stacking', [['left','Stack Left'],['right','Stack Right'],['split','Split (Center Open)'],['one_way_left','One-Way Left'],['one_way_right','One-Way Right']], '#2563eb')}
             {sel('Tiebacks', 'tieback', [['none','None'],['fabric','Fabric'],['rope','Rope'],['tassel','Tassel'],['medallion','Medallion'],['magnetic','Magnetic'],['holdback','Holdback']], '#2563eb')}
-            {sel('Lift System', 'liftSystem', [['cordless','Cordless'],['cord_lock','Cord Lock'],['continuous_cord_loop','Continuous Loop'],['motorized_somfy','Motorized (Somfy)'],['motorized_lutron','Motorized (Lutron)'],['top_down_bottom_up','Top-Down/Bottom-Up'],['day_night_dual','Day/Night Dual']], '#2563eb')}
           </div>
           <div className="grid grid-cols-2 gap-2">
             {checkBtn('contrastPiping', 'Contrast Piping', '#2563eb')}

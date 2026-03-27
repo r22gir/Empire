@@ -35,6 +35,7 @@ import ShipForgePage from './components/screens/ShipForgePage';
 import VetForgePage from './components/screens/VetForgePage';
 import PetForgePage from './components/screens/PetForgePage';
 import VisionAnalysisPage from './components/screens/VisionAnalysisPage';
+import DrawingStudioPage from './components/screens/DrawingStudioPage';
 import ForgeCRMPage from './components/screens/ForgeCRMPage';
 import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
 import DesksScreen from './components/screens/DesksScreen';
@@ -75,6 +76,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   system: 'max',
   tokens: 'max',
   vision: 'max',
+  drawings: 'workroom',
 };
 
 export default function CommandCenter() {
@@ -217,6 +219,8 @@ export default function CommandCenter() {
           return <PetForgePage />;
         case 'vision':
           return <VisionAnalysisPage />;
+        case 'drawings':
+          return <DrawingStudioPage />;
         default: return <DashboardScreen activeTab={activeTab} />;
       }
     }
