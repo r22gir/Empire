@@ -41,6 +41,48 @@ logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
 
 
+# ── Conversation windowing ───────────────────────────────────────────
+MAX_CONTEXT_MESSAGES = 10   # Keep last N messages verbatim
+SUMMARY_THRESHOLD = 8       # Summarize after this many older messages
+
+def _window_conversation(history: list[dict]) -> list[dict]:
+    """Apply sliding window to conversation history.
+
+    Keeps the most recent MAX_CONTEXT_MESSAGES verbatim.
+    Older messages get compressed into a single summary context note.
+    This prevents context overload after 10-15+ back-and-forth messages.
+    """
+    if len(history) <= MAX_CONTEXT_MESSAGES:
+        return history
+
+    older = history[:-MAX_CONTEXT_MESSAGES]
+    recent = history[-MAX_CONTEXT_MESSAGES:]
+
+    # Build compact summary of older messages
+    summary_parts = []
+    for msg in older:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        # Skip system-injected context that's already huge
+        if content.startswith("[Context from previous sessions]"):
+            continue
+        # Truncate each old message to key info
+        preview = content[:150].replace("\n", " ")
+        if len(content) > 150:
+            preview += "..."
+        summary_parts.append(f"  {role}: {preview}")
+
+    if not summary_parts:
+        return recent
+
+    summary = "[Earlier in this conversation (" + str(len(older)) + " messages)]\n"
+    # Limit summary to ~2000 chars to keep it compact
+    summary += "\n".join(summary_parts)[:2000]
+
+    context_msg = {"role": "system", "content": summary}
+    return [context_msg] + recent
+
+
 async def _safe_background(coro, label: str):
     """Run a coroutine in background, logging any errors without crashing."""
     try:
@@ -164,7 +206,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
     try:
-        messages = [AIMessage(role=h["role"], content=h["content"]) for h in request.history]
+        # Apply conversation windowing to prevent context overload
+        windowed_history = _window_conversation(request.history)
+        if len(windowed_history) < len(request.history):
+            logger.info(f"Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
+
+        messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
         messages.append(AIMessage(role="user", content=request.message))
         model = None
         if request.model:
@@ -460,7 +507,12 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    messages = [AIMessage(role=h["role"], content=h["content"]) for h in request.history]
+    # Apply conversation windowing
+    windowed_history = _window_conversation(request.history)
+    if len(windowed_history) < len(request.history):
+        logger.info(f"[stream] Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
+
+    messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
     messages.append(AIMessage(role="user", content=request.message))
     model = None
     if request.model:
