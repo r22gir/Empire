@@ -288,3 +288,138 @@ async def generate_project_sheet_pdf(req: ProjectSheetRequest):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="project_sheet.pdf"'},
     )
+
+
+# ============================================================
+# AI PARAMETRIC DRAWING ENGINE — two-stage pipeline
+# ============================================================
+
+class AIBenchRequest(BaseModel):
+    bench_type: str = "bench_straight"  # bench_straight, bench_l_shape, bench_u_shape
+    label: str = "BENCH"
+    dimensions: dict = {}
+    options: dict = {}
+
+
+@router.post("/drawings/ai/bench")
+async def generate_ai_bench(req: AIBenchRequest):
+    """Generate a bench drawing using AI draftsman + parametric renderer."""
+    from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
+    from app.services.drawing.parametric_renderer import render_to_svg
+    from app.services.drawing.validator import validate_drawing, inject_defaults
+
+    prompt = build_bench_prompt(req.bench_type, req.dimensions, req.label, req.options)
+    drawing_json = await call_draftsman(prompt)
+
+    is_valid, errors = validate_drawing(drawing_json)
+    if not is_valid:
+        log.warning(f"AI drawing validation failed: {errors}")
+        return {"error": f"Drawing validation failed: {errors}", "raw_json": drawing_json}
+
+    drawing_json = inject_defaults(drawing_json)
+    svg = render_to_svg(drawing_json)
+    return {"svg": svg, "json": drawing_json, "label": req.label}
+
+
+@router.post("/drawings/ai/bench/pdf")
+async def generate_ai_bench_pdf(req: AIBenchRequest):
+    """Generate bench PDF via AI pipeline."""
+    from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
+    from app.services.drawing.parametric_renderer import render_to_svg
+    from app.services.drawing.validator import validate_drawing, inject_defaults
+    from app.services.vision.bench_renderer import drawings_to_pdf
+
+    prompt = build_bench_prompt(req.bench_type, req.dimensions, req.label, req.options)
+    drawing_json = await call_draftsman(prompt)
+
+    is_valid, errors = validate_drawing(drawing_json)
+    if not is_valid:
+        raise HTTPException(422, f"Drawing validation failed: {errors}")
+
+    drawing_json = inject_defaults(drawing_json)
+    svg = render_to_svg(drawing_json)
+
+    output_path = os.path.join(tempfile.gettempdir(), f"ai_bench_{req.label.replace(' ', '_')}.pdf")
+    drawings_to_pdf([{"name": req.label, "svg": svg, "lf": 0}], output_path)
+
+    with open(output_path, "rb") as f:
+        pdf_bytes = f.read()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="ai_bench_drawing.pdf"'},
+    )
+
+
+class AIProjectSheetRequest(BaseModel):
+    benches: list = []
+    layout: dict = {}
+
+
+@router.post("/drawings/ai/project-sheet")
+async def generate_ai_project_sheet(req: AIProjectSheetRequest):
+    """Generate multi-bench project sheet via AI pipeline."""
+    from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
+    from app.services.drawing.parametric_renderer import render_project_sheet
+    from app.services.drawing.validator import validate_drawing, inject_defaults
+
+    bench_drawings = []
+    for bench in req.benches:
+        prompt = build_bench_prompt(
+            bench.get("type", "bench_straight"),
+            bench.get("dimensions", {}),
+            bench.get("label", "BENCH"),
+            bench.get("options", {}),
+        )
+        drawing_json = await call_draftsman(prompt)
+        is_valid, errors = validate_drawing(drawing_json)
+        if is_valid:
+            drawing_json = inject_defaults(drawing_json)
+            bench_drawings.append(drawing_json)
+        else:
+            log.warning(f"Skipping invalid bench: {errors}")
+
+    if not bench_drawings:
+        raise HTTPException(422, "No valid bench drawings generated")
+
+    svg = render_project_sheet(bench_drawings, req.layout)
+    return {"svg": svg, "count": len(bench_drawings)}
+
+
+@router.post("/drawings/ai/project-sheet/pdf")
+async def generate_ai_project_sheet_pdf(req: AIProjectSheetRequest):
+    """Generate project sheet PDF via AI pipeline."""
+    from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
+    from app.services.drawing.parametric_renderer import render_project_sheet
+    from app.services.drawing.validator import validate_drawing, inject_defaults
+    from app.services.vision.bench_renderer import drawings_to_pdf
+
+    bench_drawings = []
+    for bench in req.benches:
+        prompt = build_bench_prompt(
+            bench.get("type", "bench_straight"),
+            bench.get("dimensions", {}),
+            bench.get("label", "BENCH"),
+            bench.get("options", {}),
+        )
+        drawing_json = await call_draftsman(prompt)
+        is_valid, _ = validate_drawing(drawing_json)
+        if is_valid:
+            bench_drawings.append(inject_defaults(drawing_json))
+
+    if not bench_drawings:
+        raise HTTPException(422, "No valid bench drawings generated")
+
+    layout = req.layout or {"title": "BUILT-IN BENCHES"}
+    svg = render_project_sheet(bench_drawings, layout)
+
+    output_path = os.path.join(tempfile.gettempdir(), "ai_project_sheet.pdf")
+    drawings_to_pdf([{"name": layout.get("title", "BENCHES"), "svg": svg, "lf": 0}], output_path)
+
+    with open(output_path, "rb") as f:
+        pdf_bytes = f.read()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="ai_project_sheet.pdf"'},
+    )
