@@ -73,27 +73,22 @@ def _render(req: BenchRequest) -> str:
         render_straight, render_l_shape, render_u_shape,
     )
 
+    width_in = req.lf * 12
+    d = req.seat_depth
+    sh = req.seat_height
+    bh = req.back_height
+
     if req.bench_type == "l_shape":
-        return render_l_shape(
-            name=req.name,
-            lf=req.lf,
-            rate=req.rate,
-            quote_num=req.quote_num,
-        )
+        long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
+        short_in = req.leg2_length * 12 if req.leg2_length > 0 else width_in * 0.4
+        return render_l_shape(req.name, long_in, short_in, d, sh, bh, quote_num=req.quote_num)
     elif req.bench_type == "u_shape":
-        return render_u_shape(
-            name=req.name,
-            lf=req.lf,
-            rate=req.rate,
-            quote_num=req.quote_num,
-        )
+        back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
+        side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
+        side_d = req.right_depth if req.right_depth > 0 else d
+        return render_u_shape(req.name, back_in, side_in, d, side_d, sh, bh, quote_num=req.quote_num)
     else:
-        return render_straight(
-            name=req.name,
-            lf=req.lf,
-            rate=req.rate,
-            quote_num=req.quote_num,
-        )
+        return render_straight(req.name, width_in, d, sh, bh, quote_num=req.quote_num)
 
 
 SKETCH_EXTRACT_PROMPT = """You are a professional workroom estimator analyzing a hand-drawn sketch, measurement drawing, or photo of an item that needs custom fabrication.
@@ -216,12 +211,13 @@ def _render_general(req: GeneralDrawingRequest) -> str:
             render_straight, render_l_shape, render_u_shape,
         )
         lf = _estimate_lf(req.dimensions, req.lf)
+        width_in = lf * 12
         if "u" in req.bench_type:
-            return render_u_shape(req.name, lf, req.rate, quote_num=req.quote_num)
+            return render_u_shape(req.name, width_in, quote_num=req.quote_num)
         elif "l" in req.bench_type:
-            return render_l_shape(req.name, lf, req.rate, quote_num=req.quote_num)
+            return render_l_shape(req.name, width_in, quote_num=req.quote_num)
         else:
-            return render_straight(req.name, lf, req.rate, quote_num=req.quote_num)
+            return render_straight(req.name, width_in, quote_num=req.quote_num)
     else:
         return render_measurement_diagram(
             name=req.name,
@@ -259,4 +255,36 @@ async def generate_general_pdf(req: GeneralDrawingRequest):
         headers={
             "Content-Disposition": f'attachment; filename="drawing_{req.item_type}.pdf"'
         },
+    )
+
+
+class ProjectSheetRequest(BaseModel):
+    title: str = "BUILT-IN BENCHES"
+    quote_num: str = ""
+    benches: list = []
+
+
+@router.post("/drawings/project-sheet")
+async def generate_project_sheet(req: ProjectSheetRequest):
+    """Generate a multi-bench project sheet SVG."""
+    from app.services.vision.bench_renderer import render_project_sheet
+    svg = render_project_sheet(req.benches, title=req.title, quote_num=req.quote_num)
+    return {"svg": svg}
+
+
+@router.post("/drawings/project-sheet/pdf")
+async def generate_project_sheet_pdf(req: ProjectSheetRequest):
+    """Generate a multi-bench project sheet PDF."""
+    from app.services.vision.bench_renderer import render_project_sheet, drawings_to_pdf
+    svg = render_project_sheet(req.benches, title=req.title, quote_num=req.quote_num)
+    output_path = os.path.join(
+        tempfile.gettempdir(), f"project_sheet_{req.quote_num or 'benches'}.pdf"
+    )
+    drawings_to_pdf([{"name": req.title, "svg": svg, "lf": 0}], output_path)
+    with open(output_path, "rb") as f:
+        pdf_bytes = f.read()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="project_sheet.pdf"'},
     )

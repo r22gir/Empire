@@ -1626,13 +1626,14 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
                 name = f"{shape.title()} Bench"
             rate = float(params.get("rate", 0))
 
+            width_in = lf * 12
             if "u" in shape:
                 mult = int(params.get("multiplier", 1))
-                svg = render_u_shape(name, lf, rate, mult)
+                svg = render_u_shape(name, width_in, multiplier=mult, quote_num=params.get("quote_num", ""))
             elif "l" in shape:
-                svg = render_l_shape(name, lf, rate)
+                svg = render_l_shape(name, width_in, quote_num=params.get("quote_num", ""))
             else:
-                svg = render_straight(name, lf, rate)
+                svg = render_straight(name, width_in, quote_num=params.get("quote_num", ""))
 
             if not output_path:
                 out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
