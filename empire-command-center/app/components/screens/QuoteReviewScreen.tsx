@@ -231,7 +231,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       });
       if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
       const data = await res.json();
-      const items = (data.items || data.analyzed_items || []).map((it: AnalyzedItem) => ({ ...it, selected: true }));
+      const items = (data.items || data.analysis?.items || data.analyzed_items || []).map((it: AnalyzedItem) => ({ ...it, selected: true }));
       setUploadedPhotos(prev => prev.map((p, i) => i === index ? { ...p, analyzing: false, analysis: { items } } : p));
       showFeedback(`Found ${items.length} item(s)`);
     } catch {
