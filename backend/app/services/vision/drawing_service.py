@@ -38,12 +38,18 @@ def render_measurement_diagram(
     dimensions: dict,
     notes: str = "",
     svg_w: int = 740,
-    svg_h: int = 460,
+    svg_h: int = 0,
 ) -> str:
     """Generate a clean SVG measurement diagram for any item type.
 
     dimensions: dict of label→value pairs, e.g. {"Width": "72\"", "Height": "48\"", "Drop": "84\""}
     """
+    # Auto-size height based on number of dimensions
+    overflow_count = max(0, len(dimensions) - 4)
+    overflow_rows = (overflow_count + 1) // 2
+    if svg_h <= 0:
+        svg_h = 460 + overflow_rows * 22
+
     # Colors
     c_bg = "#faf8f4"
     c_border = "#d4b87a"
@@ -87,35 +93,66 @@ def render_measurement_diagram(
     # ── Dimension callouts ──
     dim_items = list(dimensions.items())
     if dim_items:
-        # Layout dimensions around the shape
-        left_x = cx - shape_w / 2 - 60
-        right_x = cx + shape_w / 2 + 20
-        top_y = cy - shape_h / 2 - 20
-        bottom_y = cy + shape_h / 2 + 30
+        shape_left = cx - shape_w / 2
+        shape_right = cx + shape_w / 2
+        shape_top = cy - shape_h / 2
+        shape_bottom = cy + shape_h / 2
 
-        positions = []
-        if len(dim_items) >= 1:
-            positions.append((cx, bottom_y + 10))  # bottom center
-        if len(dim_items) >= 2:
-            positions.append((right_x + 30, cy))  # right
-        if len(dim_items) >= 3:
-            positions.append((cx, top_y - 6))  # top center
-        if len(dim_items) >= 4:
-            positions.append((left_x - 10, cy))  # left
-        # Additional dims stack below
-        for i in range(4, len(dim_items)):
-            positions.append((cx, bottom_y + 10 + (i - 3) * 24))
+        # For ≤4 dims: place around shape edges with dimension lines
+        # For >4: first 3 around shape, rest in a neat table on the right
+        primary = dim_items[:4]
+        overflow = dim_items[4:]
 
-        for i, (label, value) in enumerate(dim_items):
-            if i >= len(positions):
-                break
-            px, py = positions[i]
-            parts.append(f'<text x="{px}" y="{py}" text-anchor="middle" font-size="14" font-weight="700" fill="{c_dim}" font-family="sans-serif">{_esc(str(value))}</text>')
-            parts.append(f'<text x="{px}" y="{py+16}" text-anchor="middle" font-size="10" fill="{c_label}" font-family="sans-serif">{_esc(label)}</text>')
+        # Position primary dims around shape with arrows
+        primary_positions = [
+            # (text_x, text_y, anchor, is_horizontal)
+            (cx, shape_bottom + 28, "middle"),         # bottom
+            (shape_right + 50, cy, "middle"),           # right
+            (cx, shape_top - 14, "middle"),             # top
+            (shape_left - 50, cy, "middle"),            # left
+        ]
+
+        for i, (label, value) in enumerate(primary):
+            px, py, anchor = primary_positions[i]
+            # Value
+            parts.append(f'<text x="{px}" y="{py}" text-anchor="{anchor}" font-size="15" font-weight="700" fill="{c_dim}" font-family="sans-serif">{_esc(str(value))}</text>')
+            # Label below
+            parts.append(f'<text x="{px}" y="{py+14}" text-anchor="{anchor}" font-size="10" fill="{c_label}" font-family="sans-serif">{_esc(label)}</text>')
+
+            # Dimension lines
+            if i == 0:  # bottom — horizontal line
+                parts.append(f'<line x1="{shape_left}" y1="{shape_bottom+8}" x2="{shape_right}" y2="{shape_bottom+8}" stroke="{c_dim}" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>')
+            elif i == 1:  # right — vertical line
+                parts.append(f'<line x1="{shape_right+12}" y1="{shape_top}" x2="{shape_right+12}" y2="{shape_bottom}" stroke="{c_dim}" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>')
+            elif i == 2:  # top — horizontal line
+                parts.append(f'<line x1="{shape_left}" y1="{shape_top-4}" x2="{shape_right}" y2="{shape_top-4}" stroke="{c_dim}" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>')
+            elif i == 3:  # left — vertical line
+                parts.append(f'<line x1="{shape_left-12}" y1="{shape_top}" x2="{shape_left-12}" y2="{shape_bottom}" stroke="{c_dim}" stroke-width="1" marker-start="url(#arrow)" marker-end="url(#arrow)"/>')
+
+        # Overflow dimensions in a clean table below or to the right
+        if overflow:
+            # Position as a neat list below the shape
+            table_y = shape_bottom + 60
+            col1_x = cx - 80
+            col2_x = cx + 80
+            for j, (label, value) in enumerate(overflow):
+                col = 0 if j % 2 == 0 else 1
+                row = j // 2
+                tx = col1_x if col == 0 else col2_x
+                ty = table_y + row * 20
+                if ty < svg_h - 30:
+                    parts.append(f'<text x="{tx-40}" y="{ty}" text-anchor="end" font-size="11" fill="{c_label}" font-family="sans-serif">{_esc(label)}:</text>')
+                    parts.append(f'<text x="{tx-34}" y="{ty}" text-anchor="start" font-size="12" font-weight="700" fill="{c_dim}" font-family="sans-serif">{_esc(str(value))}</text>')
+
+    # Arrow marker definition (insert after opening svg tag)
+    arrow_def = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#b8960c"/></marker></defs>'
+    parts.insert(1, arrow_def)
 
     # ── Notes ──
     if notes:
-        parts.append(f'<text x="{svg_w/2}" y="{svg_h-24}" text-anchor="middle" font-size="11" fill="{c_label}" font-family="sans-serif" font-style="italic">{_esc(notes[:100])}</text>')
+        # Truncate and wrap long notes
+        note_text = notes[:80]
+        parts.append(f'<text x="{svg_w/2}" y="{svg_h-24}" text-anchor="middle" font-size="11" fill="{c_label}" font-family="sans-serif" font-style="italic">{_esc(note_text)}</text>')
 
     # ── Footer ──
     parts.append(f'<text x="{svg_w-12}" y="{svg_h-10}" text-anchor="end" font-size="8" fill="#ccc" font-family="sans-serif">Empire Workroom</text>')

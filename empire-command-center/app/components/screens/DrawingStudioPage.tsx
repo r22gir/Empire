@@ -96,7 +96,27 @@ export default function DrawingStudioPage() {
       }
 
       const typeLabel = ITEM_TYPES.find(t => t.id === data.item_type)?.label || data.item_type;
-      showStatus(`Detected: ${typeLabel} — ${Object.keys(data.dimensions || {}).length} dimensions extracted`, 6000);
+      showStatus(`Detected: ${typeLabel} — ${Object.keys(data.dimensions || {}).length} dimensions extracted. Generating drawing...`, 6000);
+
+      // Auto-generate drawing after analysis
+      const genBody: Record<string, unknown> = {
+        name: data.name || 'Drawing',
+        item_type: data.item_type || 'generic',
+        dimensions: data.dimensions || {},
+        notes: data.notes || '',
+        bench_type: data.bench_details?.bench_type || 'straight',
+        lf: data.bench_details?.total_length_ft || 0,
+        quote_num: data.quote_num || '',
+      };
+      try {
+        const genRes = await fetch(`${API}/drawings/general`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(genBody),
+        });
+        const genData = await genRes.json();
+        if (genData.svg) setSvgPreview(genData.svg);
+      } catch { /* user can still click Generate manually */ }
     } catch {
       showStatus('Failed to analyze sketch');
     } finally {

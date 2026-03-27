@@ -184,29 +184,57 @@ class GeneralDrawingRequest(BaseModel):
     quote_num: str = ""
 
 
-@router.post("/drawings/general")
-async def generate_general_drawing(req: GeneralDrawingRequest):
-    """Generate an SVG drawing for any item type."""
+def _estimate_lf(dimensions: dict, lf: float) -> float:
+    """Estimate linear feet from dimension values when lf is 0."""
+    if lf > 0:
+        return lf
+    # Look for the longest inch dimension and convert to feet
+    max_inches = 0
+    for label, value in dimensions.items():
+        val_str = str(value).strip().rstrip('"\'').strip()
+        try:
+            inches = float(re.sub(r'[^0-9.]', '', val_str))
+            # Skip values that look like heights (seat height, back height)
+            label_lower = label.lower()
+            if any(kw in label_lower for kw in ['height', 'ht', 'depth', 'deep']):
+                continue
+            if inches > max_inches:
+                max_inches = inches
+        except (ValueError, TypeError):
+            continue
+    if max_inches > 0:
+        return max_inches / 12
+    return 6  # Default fallback
+
+
+def _render_general(req: GeneralDrawingRequest) -> str:
+    """Route to the correct renderer based on item type."""
     from app.services.vision.drawing_service import render_measurement_diagram
 
-    if req.item_type == "bench" and req.lf > 0:
+    if req.item_type == "bench":
         from app.services.vision.bench_renderer import (
             render_straight, render_l_shape, render_u_shape,
         )
+        lf = _estimate_lf(req.dimensions, req.lf)
         if "u" in req.bench_type:
-            svg = render_u_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
+            return render_u_shape(req.name, lf, req.rate, quote_num=req.quote_num)
         elif "l" in req.bench_type:
-            svg = render_l_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
+            return render_l_shape(req.name, lf, req.rate, quote_num=req.quote_num)
         else:
-            svg = render_straight(req.name, req.lf, req.rate, quote_num=req.quote_num)
+            return render_straight(req.name, lf, req.rate, quote_num=req.quote_num)
     else:
-        svg = render_measurement_diagram(
+        return render_measurement_diagram(
             name=req.name,
             item_type=req.item_type,
             dimensions=req.dimensions,
             notes=req.notes,
         )
 
+
+@router.post("/drawings/general")
+async def generate_general_drawing(req: GeneralDrawingRequest):
+    """Generate an SVG drawing for any item type."""
+    svg = _render_general(req)
     return {"svg": svg, "item_type": req.item_type, "name": req.name}
 
 
@@ -214,26 +242,8 @@ async def generate_general_drawing(req: GeneralDrawingRequest):
 async def generate_general_pdf(req: GeneralDrawingRequest):
     """Generate a PDF drawing for any item type."""
     from app.services.vision.bench_renderer import drawings_to_pdf
-    from app.services.vision.drawing_service import render_measurement_diagram
 
-    # Get SVG first
-    if req.item_type == "bench" and req.lf > 0:
-        from app.services.vision.bench_renderer import (
-            render_straight, render_l_shape, render_u_shape,
-        )
-        if "u" in req.bench_type:
-            svg = render_u_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
-        elif "l" in req.bench_type:
-            svg = render_l_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
-        else:
-            svg = render_straight(req.name, req.lf, req.rate, quote_num=req.quote_num)
-    else:
-        svg = render_measurement_diagram(
-            name=req.name,
-            item_type=req.item_type,
-            dimensions=req.dimensions,
-            notes=req.notes,
-        )
+    svg = _render_general(req)
 
     output_path = os.path.join(
         tempfile.gettempdir(), f"drawing_{req.item_type}_{req.name.replace(' ', '_')}.pdf"
