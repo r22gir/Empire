@@ -225,7 +225,7 @@ async def _call_sonnet(prompt: str) -> dict:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-6-20250514",
+                    "model": "claude-sonnet-4-6",
                     "max_tokens": 8000,
                     "system": DRAFTSMAN_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],

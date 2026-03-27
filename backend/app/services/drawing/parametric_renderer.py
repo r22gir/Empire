@@ -57,6 +57,8 @@ def render_to_svg(drawing: dict, width: int = 700, height: int = 500) -> str:
     faces = geom.get("faces", [])
     dimensions = drawing.get("dimensions", [])
     channels = drawing.get("channels", {})
+    if isinstance(channels, list):
+        channels = channels[0] if channels else {}
     label = drawing.get("label", "")
 
     # Calculate fit
