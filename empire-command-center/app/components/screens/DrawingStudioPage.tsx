@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
   ? 'https://api.empirebox.store/api/v1'
@@ -31,6 +31,9 @@ export default function DrawingStudioPage() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailStatus, setEmailStatus] = useState('');
+  const [sketchLoading, setSketchLoading] = useState(false);
+  const [sketchPreview, setSketchPreview] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Straight
   const [totalLength, setTotalLength] = useState(0);
@@ -138,6 +141,77 @@ export default function DrawingStudioPage() {
     }
   }, [getLf, benchType, name]);
 
+  const handleSketchUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSketchLoading(true);
+    setEmailStatus('');
+    try {
+      const reader = new FileReader();
+      const b64 = await new Promise<string>((resolve) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+      setSketchPreview(b64);
+
+      const res = await fetch(`${API}/drawings/analyze-sketch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64 }),
+      });
+      if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
+      const data = await res.json();
+
+      // Populate fields from AI extraction
+      if (data.name && data.name !== 'Bench') setName(data.name);
+      if (data.quote_num) setQuoteNum(data.quote_num);
+      if (data.bench_type) setBenchType(data.bench_type as BenchType);
+      if (data.panel_style) setPanelStyle(data.panel_style as PanelStyle);
+      if (data.seat_depth_in) setSeatDepth(data.seat_depth_in);
+      if (data.seat_height_in) setSeatHeight(data.seat_height_in);
+      if (data.back_height_in) setBackHeight(data.back_height_in);
+
+      if (data.bench_type === 'l_shape') {
+        if (data.leg1_length_ft) setLeg1Length(data.leg1_length_ft);
+        if (data.leg2_length_ft) setLeg2Length(data.leg2_length_ft);
+      } else if (data.bench_type === 'u_shape') {
+        if (data.back_length_ft) setBackLength(data.back_length_ft);
+        if (data.left_depth_ft) setLeftDepth(data.left_depth_ft);
+        if (data.right_depth_ft) setRightDepth(data.right_depth_ft);
+      } else {
+        if (data.total_length_ft) setTotalLength(data.total_length_ft);
+      }
+      setEmailStatus(data.notes ? `AI: ${data.notes}` : 'Dimensions extracted!');
+      setTimeout(() => setEmailStatus(''), 6000);
+    } catch (err) {
+      setEmailStatus('Failed to analyze sketch');
+      setTimeout(() => setEmailStatus(''), 4000);
+    } finally {
+      setSketchLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, []);
+
+  const sendToDesk = useCallback(async (desk: string) => {
+    if (getLf() <= 0) return;
+    setEmailStatus('');
+    try {
+      const res = await fetch(`${API}/max/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Create a task for ${desk} desk: Build ${benchType.replace('_', '-')} bench "${name || 'Bench'}" — ${getLf()} LF total, seat depth ${seatDepth}", seat height ${seatHeight}", back height ${backHeight}", panel style: ${panelStyle}. Generate the architectural drawing PDF and attach it to the task.`,
+          channel: 'web_cc',
+        }),
+      });
+      setEmailStatus(res.ok ? `Sent to ${desk}!` : 'Failed');
+      setTimeout(() => setEmailStatus(''), 4000);
+    } catch {
+      setEmailStatus('Error sending to desk');
+      setTimeout(() => setEmailStatus(''), 4000);
+    }
+  }, [getLf, benchType, name, seatDepth, seatHeight, backHeight, panelStyle]);
+
   const inputStyle: React.CSSProperties = {
     width: '100%',
     padding: '12px 14px',
@@ -203,6 +277,31 @@ export default function DrawingStudioPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'start' }}>
         {/* ── Left: Controls ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Import Sketch */}
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1.5px dashed #b8960c' }}>
+            <label style={labelStyle}>Import Hand Drawing</label>
+            <p style={{ fontSize: 12, color: '#999', margin: '4px 0 12px' }}>
+              Upload a photo of your sketch — AI extracts dimensions automatically
+            </p>
+            <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
+              onChange={handleSketchUpload} style={{ display: 'none' }} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => fileInputRef.current?.click()} disabled={sketchLoading} style={{
+                ...btnBase, flex: 1, padding: '12px 16px', fontSize: 13,
+                background: sketchLoading ? '#eee' : 'linear-gradient(135deg, #b8960c, #d4af37)',
+                color: sketchLoading ? '#999' : '#1a1a2e',
+              }}>
+                {sketchLoading ? 'Analyzing...' : sketchPreview ? 'Upload New' : 'Upload Sketch'}
+              </button>
+            </div>
+            {sketchPreview && (
+              <img src={sketchPreview} alt="Sketch" style={{
+                marginTop: 10, width: '100%', maxHeight: 160, objectFit: 'contain',
+                borderRadius: 8, border: '1px solid #ece8e0',
+              }} />
+            )}
+          </div>
+
           {/* Bench Type */}
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #ece8e0' }}>
             <label style={labelStyle}>Bench Type</label>
@@ -336,8 +435,25 @@ export default function DrawingStudioPage() {
                 {emailLoading ? 'Sending...' : 'Email PDF'}
               </button>
             </div>
+            {/* Send to Desk */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => sendToDesk('Workroom')} disabled={!svgPreview} style={{
+                ...btnBase, flex: 1, padding: '10px 12px', fontSize: 12,
+                background: svgPreview ? '#1a1a2e' : '#eee',
+                color: svgPreview ? '#fff' : '#bbb',
+              }}>
+                Send to Workroom
+              </button>
+              <button onClick={() => sendToDesk('WoodCraft')} disabled={!svgPreview} style={{
+                ...btnBase, flex: 1, padding: '10px 12px', fontSize: 12,
+                background: svgPreview ? '#ca8a04' : '#eee',
+                color: svgPreview ? '#fff' : '#bbb',
+              }}>
+                Send to WoodCraft
+              </button>
+            </div>
             {emailStatus && (
-              <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: emailStatus.includes('sent') ? '#16a34a' : '#ef4444' }}>
+              <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: emailStatus.includes('sent') || emailStatus.includes('Sent') || emailStatus.includes('extract') ? '#16a34a' : emailStatus.startsWith('AI:') ? '#b8960c' : '#ef4444' }}>
                 {emailStatus}
               </div>
             )}
