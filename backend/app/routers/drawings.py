@@ -96,33 +96,44 @@ def _render(req: BenchRequest) -> str:
         )
 
 
-SKETCH_EXTRACT_PROMPT = """You are analyzing a hand-drawn sketch or measurement drawing for a custom bench/banquette project.
+SKETCH_EXTRACT_PROMPT = """You are a professional workroom estimator analyzing a hand-drawn sketch, measurement drawing, or photo of an item that needs custom fabrication.
 
-Extract ALL dimensions and details you can see. Look for:
-- Total length (in feet or inches)
-- Seat depth, seat height, back height
-- Shape: straight, L-shape, U-shape
-- Number of sections or areas
-- Any labels, names, notes written on the sketch
-- Panel style if noted (flat, channels, tufted)
+FIRST: Identify what type of item this is:
+- bench, banquette, booth (seating)
+- window, drapery, curtain, shade, blind, valance, cornice (window treatment)
+- pillow, bolster, cushion
+- chair, sofa, ottoman, headboard (upholstery)
+- table, desk, console
+- other
+
+THEN: Extract ALL dimensions and details visible. Read every number, label, and annotation.
 
 Return ONLY valid JSON (no markdown):
 {
-    "name": "descriptive name from sketch or 'Bench'",
-    "bench_type": "straight" | "l_shape" | "u_shape",
-    "total_length_ft": number (convert inches to feet if needed),
-    "seat_depth_in": number or 20,
-    "seat_height_in": number or 18,
-    "back_height_in": number or 18,
-    "panel_style": "flat" | "vertical_channels" | "horizontal_channels" | "tufted",
-    "leg1_length_ft": number (L-shape leg 1, 0 if straight),
-    "leg2_length_ft": number (L-shape leg 2, 0 if straight),
-    "back_length_ft": number (U-shape back, 0 if not U),
-    "left_depth_ft": number (U-shape left wing, 0 if not U),
-    "right_depth_ft": number (U-shape right wing, 0 if not U),
-    "quote_num": "any quote/estimate number visible",
-    "notes": "any other text or notes visible on the sketch"
-}"""
+    "item_type": "bench" | "window" | "pillow" | "upholstery" | "table" | "generic",
+    "name": "descriptive name from the sketch",
+    "dimensions": {
+        "label1": "value with units (e.g. 72\\")",
+        "label2": "value with units"
+    },
+    "notes": "any text, labels, or notes visible on the sketch",
+    "quote_num": "any quote/estimate number visible or empty string",
+    "bench_details": {
+        "bench_type": "straight" | "l_shape" | "u_shape",
+        "total_length_ft": 0,
+        "seat_depth_in": 20,
+        "seat_height_in": 18,
+        "back_height_in": 18,
+        "panel_style": "flat",
+        "leg1_length_ft": 0,
+        "leg2_length_ft": 0,
+        "back_length_ft": 0,
+        "left_depth_ft": 0,
+        "right_depth_ft": 0
+    }
+}
+
+IMPORTANT: The "dimensions" dict should contain ALL measurements found, using the labels written on the sketch. The bench_details section is ONLY populated if item_type is "bench"."""
 
 
 class SketchAnalyzeRequest(BaseModel):
@@ -159,3 +170,83 @@ async def analyze_sketch(req: SketchAnalyzeRequest):
         raise HTTPException(500, "Could not parse AI response")
 
     return json.loads(m.group(0))
+
+
+class GeneralDrawingRequest(BaseModel):
+    name: str = "Drawing"
+    item_type: str = "generic"  # bench, window, pillow, upholstery, table, generic
+    dimensions: dict = {}
+    notes: str = ""
+    # Bench-specific (only used when item_type == "bench")
+    bench_type: str = "straight"
+    lf: float = 0
+    rate: float = 0
+    quote_num: str = ""
+
+
+@router.post("/drawings/general")
+async def generate_general_drawing(req: GeneralDrawingRequest):
+    """Generate an SVG drawing for any item type."""
+    from app.services.vision.drawing_service import render_measurement_diagram
+
+    if req.item_type == "bench" and req.lf > 0:
+        from app.services.vision.bench_renderer import (
+            render_straight, render_l_shape, render_u_shape,
+        )
+        if "u" in req.bench_type:
+            svg = render_u_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
+        elif "l" in req.bench_type:
+            svg = render_l_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
+        else:
+            svg = render_straight(req.name, req.lf, req.rate, quote_num=req.quote_num)
+    else:
+        svg = render_measurement_diagram(
+            name=req.name,
+            item_type=req.item_type,
+            dimensions=req.dimensions,
+            notes=req.notes,
+        )
+
+    return {"svg": svg, "item_type": req.item_type, "name": req.name}
+
+
+@router.post("/drawings/general/pdf")
+async def generate_general_pdf(req: GeneralDrawingRequest):
+    """Generate a PDF drawing for any item type."""
+    from app.services.vision.bench_renderer import drawings_to_pdf
+    from app.services.vision.drawing_service import render_measurement_diagram
+
+    # Get SVG first
+    if req.item_type == "bench" and req.lf > 0:
+        from app.services.vision.bench_renderer import (
+            render_straight, render_l_shape, render_u_shape,
+        )
+        if "u" in req.bench_type:
+            svg = render_u_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
+        elif "l" in req.bench_type:
+            svg = render_l_shape(req.name, req.lf, req.rate, quote_num=req.quote_num)
+        else:
+            svg = render_straight(req.name, req.lf, req.rate, quote_num=req.quote_num)
+    else:
+        svg = render_measurement_diagram(
+            name=req.name,
+            item_type=req.item_type,
+            dimensions=req.dimensions,
+            notes=req.notes,
+        )
+
+    output_path = os.path.join(
+        tempfile.gettempdir(), f"drawing_{req.item_type}_{req.name.replace(' ', '_')}.pdf"
+    )
+    drawings_to_pdf([{"name": req.name, "svg": svg, "lf": req.lf}], output_path)
+
+    with open(output_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="drawing_{req.item_type}.pdf"'
+        },
+    )

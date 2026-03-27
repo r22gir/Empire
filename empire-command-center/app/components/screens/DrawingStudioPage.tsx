@@ -5,147 +5,62 @@ const API = typeof window !== 'undefined' && window.location.hostname !== 'local
   ? 'https://api.empirebox.store/api/v1'
   : 'http://localhost:8000/api/v1';
 
-type BenchType = 'straight' | 'l_shape' | 'u_shape';
-type PanelStyle = 'flat' | 'vertical_channels' | 'horizontal_channels' | 'tufted';
-
-const BENCH_TYPES: { id: BenchType; label: string; icon: string }[] = [
-  { id: 'straight', label: 'Straight', icon: '▬' },
-  { id: 'l_shape', label: 'L-Shape', icon: '⌐' },
-  { id: 'u_shape', label: 'U-Shape', icon: '⊔' },
-];
-
-const PANEL_STYLES: { id: PanelStyle; label: string }[] = [
-  { id: 'flat', label: 'Flat' },
-  { id: 'vertical_channels', label: 'Vertical Channels' },
-  { id: 'horizontal_channels', label: 'Horizontal Channels' },
-  { id: 'tufted', label: 'Tufted' },
+const ITEM_TYPES: { id: string; label: string; icon: string }[] = [
+  { id: 'bench', label: 'Bench / Banquette', icon: '🪑' },
+  { id: 'window', label: 'Window Treatment', icon: '🪟' },
+  { id: 'pillow', label: 'Pillow / Cushion', icon: '🛋' },
+  { id: 'upholstery', label: 'Upholstery', icon: '💺' },
+  { id: 'table', label: 'Table / Console', icon: '🪵' },
+  { id: 'generic', label: 'Other', icon: '📐' },
 ];
 
 export default function DrawingStudioPage() {
-  const [benchType, setBenchType] = useState<BenchType>('straight');
-  const [panelStyle, setPanelStyle] = useState<PanelStyle>('flat');
+  const [itemType, setItemType] = useState('generic');
   const [name, setName] = useState('');
   const [quoteNum, setQuoteNum] = useState('');
+  const [notes, setNotes] = useState('');
+  const [dimensions, setDimensions] = useState<Record<string, string>>({});
+  const [newDimLabel, setNewDimLabel] = useState('');
+  const [newDimValue, setNewDimValue] = useState('');
   const [svgPreview, setSvgPreview] = useState('');
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [emailLoading, setEmailLoading] = useState(false);
-  const [emailStatus, setEmailStatus] = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
   const [sketchLoading, setSketchLoading] = useState(false);
   const [sketchPreview, setSketchPreview] = useState('');
+
+  // Bench-specific
+  const [benchType, setBenchType] = useState('straight');
+  const [lf, setLf] = useState(0);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Straight
-  const [totalLength, setTotalLength] = useState(0);
-  const [seatDepth, setSeatDepth] = useState(20);
-  const [seatHeight, setSeatHeight] = useState(18);
-  const [backHeight, setBackHeight] = useState(18);
+  const showStatus = (msg: string, duration = 4000) => {
+    setStatusMsg(msg);
+    if (duration > 0) setTimeout(() => setStatusMsg(''), duration);
+  };
 
-  // L-shape
-  const [leg1Length, setLeg1Length] = useState(0);
-  const [leg2Length, setLeg2Length] = useState(0);
+  const addDimension = () => {
+    if (!newDimLabel.trim() || !newDimValue.trim()) return;
+    setDimensions(prev => ({ ...prev, [newDimLabel.trim()]: newDimValue.trim() }));
+    setNewDimLabel('');
+    setNewDimValue('');
+  };
 
-  // U-shape
-  const [backLength, setBackLength] = useState(0);
-  const [leftDepth, setLeftDepth] = useState(0);
-  const [rightDepth, setRightDepth] = useState(0);
-
-  const getLf = useCallback(() => {
-    if (benchType === 'straight') return totalLength;
-    if (benchType === 'l_shape') return leg1Length + leg2Length;
-    return backLength + leftDepth + rightDepth;
-  }, [benchType, totalLength, leg1Length, leg2Length, backLength, leftDepth, rightDepth]);
-
-  const buildPayload = useCallback(() => ({
-    bench_type: benchType,
-    name: name || 'Bench',
-    lf: getLf(),
-    rate: 0,
-    seat_depth: seatDepth,
-    seat_height: seatHeight,
-    back_height: backHeight,
-    panel_style: panelStyle,
-    quote_num: quoteNum,
-    leg1_length: leg1Length,
-    leg2_length: leg2Length,
-    back_length: backLength,
-    left_depth: leftDepth,
-    right_depth: rightDepth,
-  }), [benchType, name, getLf, seatDepth, seatHeight, backHeight, panelStyle, quoteNum, leg1Length, leg2Length, backLength, leftDepth, rightDepth]);
-
-  const generatePreview = useCallback(async () => {
-    if (getLf() <= 0) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API}/drawings/bench`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload()),
-      });
-      const data = await res.json();
-      setSvgPreview(data.svg || '');
-    } catch (e) {
-      console.error('Preview failed:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [getLf, buildPayload]);
-
-  const downloadPdf = useCallback(async () => {
-    if (getLf() <= 0) return;
-    setPdfLoading(true);
-    try {
-      const res = await fetch(`${API}/drawings/bench/pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildPayload()),
-      });
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `bench_drawing_${benchType}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error('PDF download failed:', e);
-    } finally {
-      setPdfLoading(false);
-    }
-  }, [getLf, buildPayload, benchType]);
-
-  const emailPdf = useCallback(async () => {
-    if (getLf() <= 0) return;
-    setEmailLoading(true);
-    setEmailStatus('');
-    try {
-      // Generate PDF first, then send via MAX chat
-      const res = await fetch(`${API}/max/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Generate a ${benchType.replace('_', '-')} bench drawing for "${name || 'Bench'}" (${getLf()} LF) and email it to empirebox2026@gmail.com`,
-          channel: 'web_cc',
-        }),
-      });
-      if (res.ok) {
-        setEmailStatus('Email sent!');
-      } else {
-        setEmailStatus('Failed to send');
-      }
-    } catch (e) {
-      setEmailStatus('Error sending email');
-    } finally {
-      setEmailLoading(false);
-      setTimeout(() => setEmailStatus(''), 4000);
-    }
-  }, [getLf, benchType, name]);
+  const removeDimension = (key: string) => {
+    setDimensions(prev => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
+  };
 
   const handleSketchUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setSketchLoading(true);
-    setEmailStatus('');
+    setStatusMsg('');
     try {
       const reader = new FileReader();
       const b64 = await new Promise<string>((resolve) => {
@@ -162,92 +77,125 @@ export default function DrawingStudioPage() {
       if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
       const data = await res.json();
 
-      // Populate fields from AI extraction
-      if (data.name && data.name !== 'Bench') setName(data.name);
+      // Populate from AI
+      if (data.item_type) setItemType(data.item_type);
+      if (data.name) setName(data.name);
       if (data.quote_num) setQuoteNum(data.quote_num);
-      if (data.bench_type) setBenchType(data.bench_type as BenchType);
-      if (data.panel_style) setPanelStyle(data.panel_style as PanelStyle);
-      if (data.seat_depth_in) setSeatDepth(data.seat_depth_in);
-      if (data.seat_height_in) setSeatHeight(data.seat_height_in);
-      if (data.back_height_in) setBackHeight(data.back_height_in);
-
-      if (data.bench_type === 'l_shape') {
-        if (data.leg1_length_ft) setLeg1Length(data.leg1_length_ft);
-        if (data.leg2_length_ft) setLeg2Length(data.leg2_length_ft);
-      } else if (data.bench_type === 'u_shape') {
-        if (data.back_length_ft) setBackLength(data.back_length_ft);
-        if (data.left_depth_ft) setLeftDepth(data.left_depth_ft);
-        if (data.right_depth_ft) setRightDepth(data.right_depth_ft);
-      } else {
-        if (data.total_length_ft) setTotalLength(data.total_length_ft);
+      if (data.notes) setNotes(data.notes);
+      if (data.dimensions && Object.keys(data.dimensions).length > 0) {
+        setDimensions(data.dimensions);
       }
-      setEmailStatus(data.notes ? `AI: ${data.notes}` : 'Dimensions extracted!');
-      setTimeout(() => setEmailStatus(''), 6000);
-    } catch (err) {
-      setEmailStatus('Failed to analyze sketch');
-      setTimeout(() => setEmailStatus(''), 4000);
+
+      // Bench-specific
+      if (data.item_type === 'bench' && data.bench_details) {
+        const bd = data.bench_details;
+        if (bd.bench_type) setBenchType(bd.bench_type);
+        if (bd.total_length_ft) setLf(bd.total_length_ft);
+        else if (bd.leg1_length_ft && bd.leg2_length_ft) setLf(bd.leg1_length_ft + bd.leg2_length_ft);
+        else if (bd.back_length_ft) setLf(bd.back_length_ft + (bd.left_depth_ft || 0) + (bd.right_depth_ft || 0));
+      }
+
+      const typeLabel = ITEM_TYPES.find(t => t.id === data.item_type)?.label || data.item_type;
+      showStatus(`Detected: ${typeLabel} — ${Object.keys(data.dimensions || {}).length} dimensions extracted`, 6000);
+    } catch {
+      showStatus('Failed to analyze sketch');
     } finally {
       setSketchLoading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, []);
 
+  const hasDimensions = Object.keys(dimensions).length > 0 || (itemType === 'bench' && lf > 0);
+
+  const generatePreview = useCallback(async () => {
+    if (!hasDimensions) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/drawings/general`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || 'Drawing', item_type: itemType, dimensions, notes, bench_type: benchType, lf, quote_num: quoteNum }),
+      });
+      const data = await res.json();
+      setSvgPreview(data.svg || '');
+    } catch {
+      showStatus('Preview generation failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [hasDimensions, name, itemType, dimensions, notes, benchType, lf, quoteNum]);
+
+  const downloadPdf = useCallback(async () => {
+    if (!hasDimensions) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch(`${API}/drawings/general/pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name || 'Drawing', item_type: itemType, dimensions, notes, bench_type: benchType, lf, quote_num: quoteNum }),
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `drawing_${itemType}_${(name || 'item').replace(/\s+/g, '_')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      showStatus('PDF download failed');
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [hasDimensions, name, itemType, dimensions, notes, benchType, lf, quoteNum]);
+
+  const emailPdf = useCallback(async () => {
+    setEmailLoading(true);
+    try {
+      const dimStr = Object.entries(dimensions).map(([k, v]) => `${k}: ${v}`).join(', ');
+      const res = await fetch(`${API}/max/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Generate a ${itemType} drawing for "${name || 'Item'}" with dimensions: ${dimStr}. Email the PDF to empirebox2026@gmail.com`,
+          channel: 'web_cc',
+        }),
+      });
+      showStatus(res.ok ? 'Email sent!' : 'Failed to send');
+    } catch {
+      showStatus('Error sending email');
+    } finally {
+      setEmailLoading(false);
+    }
+  }, [itemType, name, dimensions]);
+
   const sendToDesk = useCallback(async (desk: string) => {
-    if (getLf() <= 0) return;
-    setEmailStatus('');
+    const dimStr = Object.entries(dimensions).map(([k, v]) => `${k}: ${v}`).join(', ');
     try {
       const res = await fetch(`${API}/max/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `Create a task for ${desk} desk: Build ${benchType.replace('_', '-')} bench "${name || 'Bench'}" — ${getLf()} LF total, seat depth ${seatDepth}", seat height ${seatHeight}", back height ${backHeight}", panel style: ${panelStyle}. Generate the architectural drawing PDF and attach it to the task.`,
+          message: `Create a task for ${desk} desk: ${itemType} "${name || 'Item'}" — dimensions: ${dimStr}. ${notes}. Generate the architectural drawing PDF and attach it to the task.`,
           channel: 'web_cc',
         }),
       });
-      setEmailStatus(res.ok ? `Sent to ${desk}!` : 'Failed');
-      setTimeout(() => setEmailStatus(''), 4000);
+      showStatus(res.ok ? `Sent to ${desk}!` : 'Failed');
     } catch {
-      setEmailStatus('Error sending to desk');
-      setTimeout(() => setEmailStatus(''), 4000);
+      showStatus('Error sending to desk');
     }
-  }, [getLf, benchType, name, seatDepth, seatHeight, backHeight, panelStyle]);
+  }, [itemType, name, dimensions, notes]);
 
   const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '12px 14px',
-    borderRadius: 10,
-    border: '1.5px solid #e5e0d8',
-    fontSize: 15,
-    background: '#fff',
-    color: '#333',
-    outline: 'none',
-    minHeight: 44,
+    width: '100%', padding: '12px 14px', borderRadius: 10,
+    border: '1.5px solid #e5e0d8', fontSize: 15, background: '#fff', color: '#333', outline: 'none', minHeight: 44,
   };
-
   const labelStyle: React.CSSProperties = {
-    fontSize: 12,
-    fontWeight: 600,
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 4,
-    display: 'block',
+    fontSize: 12, fontWeight: 600, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4, display: 'block',
   };
-
   const btnBase: React.CSSProperties = {
-    padding: '14px 24px',
-    borderRadius: 12,
-    border: 'none',
-    fontSize: 15,
-    fontWeight: 700,
-    cursor: 'pointer',
-    minHeight: 48,
-    minWidth: 48,
-    transition: 'all 0.15s',
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+    padding: '14px 24px', borderRadius: 12, border: 'none', fontSize: 15, fontWeight: 700,
+    cursor: 'pointer', minHeight: 48, minWidth: 48, transition: 'all 0.15s',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
   };
 
   return (
@@ -255,45 +203,36 @@ export default function DrawingStudioPage() {
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
         <div style={{
-          display: 'inline-block',
-          background: 'linear-gradient(135deg, #b8960c, #d4af37)',
-          color: '#1a1a2e',
-          padding: '4px 14px',
-          borderRadius: 16,
-          fontSize: 11,
-          fontWeight: 700,
-          letterSpacing: 1.2,
-          textTransform: 'uppercase',
-          marginBottom: 10,
+          display: 'inline-block', background: 'linear-gradient(135deg, #b8960c, #d4af37)',
+          color: '#1a1a2e', padding: '4px 14px', borderRadius: 16, fontSize: 11,
+          fontWeight: 700, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10,
         }}>Drawing Studio</div>
         <h1 style={{ fontSize: 28, fontWeight: 800, color: '#1a1a2e', margin: 0, lineHeight: 1.2 }}>
-          Architectural Bench Drawings
+          Professional Drawings
         </h1>
         <p style={{ color: '#888', fontSize: 14, margin: '6px 0 0' }}>
-          Generate professional isometric 3D drawings with dimension callouts
+          Upload any sketch or photo — AI identifies the item and generates a pro drawing with dimensions
         </p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'start' }}>
         {/* ── Left: Controls ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Import Sketch */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Upload */}
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1.5px dashed #b8960c' }}>
-            <label style={labelStyle}>Import Hand Drawing</label>
+            <label style={labelStyle}>Upload Sketch or Photo</label>
             <p style={{ fontSize: 12, color: '#999', margin: '4px 0 12px' }}>
-              Upload a photo of your sketch — AI extracts dimensions automatically
+              Hand drawing, measurement sketch, or photo of the item — AI extracts everything
             </p>
             <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
               onChange={handleSketchUpload} style={{ display: 'none' }} />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => fileInputRef.current?.click()} disabled={sketchLoading} style={{
-                ...btnBase, flex: 1, padding: '12px 16px', fontSize: 13,
-                background: sketchLoading ? '#eee' : 'linear-gradient(135deg, #b8960c, #d4af37)',
-                color: sketchLoading ? '#999' : '#1a1a2e',
-              }}>
-                {sketchLoading ? 'Analyzing...' : sketchPreview ? 'Upload New' : 'Upload Sketch'}
-              </button>
-            </div>
+            <button onClick={() => fileInputRef.current?.click()} disabled={sketchLoading} style={{
+              ...btnBase, width: '100%', padding: '12px 16px', fontSize: 14,
+              background: sketchLoading ? '#eee' : 'linear-gradient(135deg, #b8960c, #d4af37)',
+              color: sketchLoading ? '#999' : '#1a1a2e',
+            }}>
+              {sketchLoading ? 'Analyzing...' : sketchPreview ? 'Upload New' : 'Upload Sketch / Photo'}
+            </button>
             {sketchPreview && (
               <img src={sketchPreview} alt="Sketch" style={{
                 marginTop: 10, width: '100%', maxHeight: 160, objectFit: 'contain',
@@ -302,196 +241,156 @@ export default function DrawingStudioPage() {
             )}
           </div>
 
-          {/* Bench Type */}
-          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #ece8e0' }}>
-            <label style={labelStyle}>Bench Type</label>
-            <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-              {BENCH_TYPES.map(bt => (
-                <button key={bt.id} onClick={() => setBenchType(bt.id)} style={{
-                  ...btnBase,
-                  flex: 1,
-                  padding: '12px 8px',
-                  fontSize: 13,
-                  background: benchType === bt.id ? '#fdf8eb' : '#f8f6f2',
-                  border: benchType === bt.id ? '2px solid #b8960c' : '2px solid #e5e0d8',
-                  color: benchType === bt.id ? '#96750a' : '#666',
-                  flexDirection: 'column',
-                  gap: 2,
+          {/* Item Type */}
+          <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>
+            <label style={labelStyle}>Item Type</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 6 }}>
+              {ITEM_TYPES.map(t => (
+                <button key={t.id} onClick={() => setItemType(t.id)} style={{
+                  ...btnBase, padding: '8px 6px', fontSize: 11, flexDirection: 'column', gap: 1,
+                  background: itemType === t.id ? '#fdf8eb' : '#f8f6f2',
+                  border: itemType === t.id ? '2px solid #b8960c' : '2px solid transparent',
+                  color: itemType === t.id ? '#96750a' : '#888',
                 }}>
-                  <span style={{ fontSize: 22 }}>{bt.icon}</span>
-                  {bt.label}
+                  <span style={{ fontSize: 18 }}>{t.icon}</span>
+                  {t.label}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Name + Quote */}
+          <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 2 }}>
+                <label style={labelStyle}>Name</label>
+                <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Office Windows" style={inputStyle} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Quote #</label>
+                <input value={quoteNum} onChange={e => setQuoteNum(e.target.value)} placeholder="EST-..." style={inputStyle} />
+              </div>
+            </div>
+          </div>
+
+          {/* Bench-specific: LF */}
+          {itemType === 'bench' && (
+            <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>
+              <label style={labelStyle}>Bench Details</label>
+              <div style={{ display: 'flex', gap: 8, marginTop: 6, marginBottom: 10 }}>
+                {['straight', 'l_shape', 'u_shape'].map(bt => (
+                  <button key={bt} onClick={() => setBenchType(bt)} style={{
+                    ...btnBase, flex: 1, padding: '8px', fontSize: 12,
+                    background: benchType === bt ? '#fdf8eb' : '#f8f6f2',
+                    border: benchType === bt ? '2px solid #b8960c' : '2px solid #e5e0d8',
+                    color: benchType === bt ? '#96750a' : '#666',
+                  }}>
+                    {bt.replace('_', '-').replace(/\b\w/g, c => c.toUpperCase())}
+                  </button>
+                ))}
+              </div>
+              <label style={labelStyle}>Total Linear Feet</label>
+              <input type="number" value={lf || ''} onChange={e => setLf(Number(e.target.value))} placeholder="0" style={inputStyle} />
+            </div>
+          )}
 
           {/* Dimensions */}
-          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #ece8e0' }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>
             <label style={labelStyle}>Dimensions</label>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
-              <div>
-                <label style={labelStyle}>Name</label>
-                <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Main Dining Bench" style={inputStyle} />
+            {Object.keys(dimensions).length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, marginBottom: 10 }}>
+                {Object.entries(dimensions).map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f8f6f2', padding: '8px 10px', borderRadius: 8 }}>
+                    <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#555' }}>{k}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#b8960c' }}>{v}</span>
+                    <button onClick={() => removeDimension(k)} style={{
+                      background: 'none', border: 'none', color: '#ccc', cursor: 'pointer', fontSize: 16, padding: '0 4px',
+                    }}>×</button>
+                  </div>
+                ))}
               </div>
-              <div>
-                <label style={labelStyle}>Quote #</label>
-                <input value={quoteNum} onChange={e => setQuoteNum(e.target.value)} placeholder="e.g. EST-2026-075" style={inputStyle} />
-              </div>
-
-              {benchType === 'straight' && (
-                <div>
-                  <label style={labelStyle}>Total Length (feet)</label>
-                  <input type="number" value={totalLength || ''} onChange={e => setTotalLength(Number(e.target.value))} placeholder="0" style={inputStyle} />
-                </div>
-              )}
-
-              {benchType === 'l_shape' && (<>
-                <div>
-                  <label style={labelStyle}>Leg 1 Length (feet)</label>
-                  <input type="number" value={leg1Length || ''} onChange={e => setLeg1Length(Number(e.target.value))} placeholder="0" style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Leg 2 Length (feet)</label>
-                  <input type="number" value={leg2Length || ''} onChange={e => setLeg2Length(Number(e.target.value))} placeholder="0" style={inputStyle} />
-                </div>
-              </>)}
-
-              {benchType === 'u_shape' && (<>
-                <div>
-                  <label style={labelStyle}>Back Length (feet)</label>
-                  <input type="number" value={backLength || ''} onChange={e => setBackLength(Number(e.target.value))} placeholder="0" style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Left Depth (feet)</label>
-                  <input type="number" value={leftDepth || ''} onChange={e => setLeftDepth(Number(e.target.value))} placeholder="0" style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Right Depth (feet)</label>
-                  <input type="number" value={rightDepth || ''} onChange={e => setRightDepth(Number(e.target.value))} placeholder="0" style={inputStyle} />
-                </div>
-              </>)}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                <div>
-                  <label style={labelStyle}>Seat Depth (")</label>
-                  <input type="number" value={seatDepth || ''} onChange={e => setSeatDepth(Number(e.target.value))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Seat Height (")</label>
-                  <input type="number" value={seatHeight || ''} onChange={e => setSeatHeight(Number(e.target.value))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Back Height (")</label>
-                  <input type="number" value={backHeight || ''} onChange={e => setBackHeight(Number(e.target.value))} style={inputStyle} />
-                </div>
-              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+              <input value={newDimLabel} onChange={e => setNewDimLabel(e.target.value)} placeholder="Label (e.g. Width)"
+                style={{ ...inputStyle, flex: 1, fontSize: 13 }} onKeyDown={e => e.key === 'Enter' && addDimension()} />
+              <input value={newDimValue} onChange={e => setNewDimValue(e.target.value)} placeholder='Value (e.g. 72")'
+                style={{ ...inputStyle, flex: 1, fontSize: 13 }} onKeyDown={e => e.key === 'Enter' && addDimension()} />
+              <button onClick={addDimension} style={{
+                ...btnBase, padding: '8px 14px', fontSize: 18, background: '#f8f6f2', border: '1.5px solid #e5e0d8', color: '#b8960c',
+              }}>+</button>
             </div>
           </div>
 
-          {/* Panel Style */}
-          <div style={{ background: '#fff', borderRadius: 14, padding: 20, border: '1px solid #ece8e0' }}>
-            <label style={labelStyle}>Panel Style</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
-              {PANEL_STYLES.map(ps => (
-                <button key={ps.id} onClick={() => setPanelStyle(ps.id)} style={{
-                  ...btnBase,
-                  padding: '10px 12px',
-                  fontSize: 13,
-                  background: panelStyle === ps.id ? '#fdf8eb' : '#f8f6f2',
-                  border: panelStyle === ps.id ? '2px solid #b8960c' : '2px solid #e5e0d8',
-                  color: panelStyle === ps.id ? '#96750a' : '#666',
-                }}>
-                  {ps.label}
-                </button>
-              ))}
-            </div>
+          {/* Notes */}
+          <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>
+            <label style={labelStyle}>Notes</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Additional notes..."
+              style={{ ...inputStyle, minHeight: 60, resize: 'vertical', fontFamily: 'inherit' }} />
           </div>
 
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button onClick={generatePreview} disabled={loading || getLf() <= 0} style={{
-              ...btnBase,
-              background: getLf() > 0 ? 'linear-gradient(135deg, #b8960c, #d4af37)' : '#ddd',
-              color: getLf() > 0 ? '#1a1a2e' : '#999',
-              width: '100%',
+          {/* Actions */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button onClick={generatePreview} disabled={loading || !hasDimensions} style={{
+              ...btnBase, width: '100%',
+              background: hasDimensions ? 'linear-gradient(135deg, #b8960c, #d4af37)' : '#ddd',
+              color: hasDimensions ? '#1a1a2e' : '#999',
             }}>
-              {loading ? 'Generating...' : 'Generate Preview'}
+              {loading ? 'Generating...' : 'Generate Drawing'}
             </button>
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={downloadPdf} disabled={pdfLoading || !svgPreview} style={{
-                ...btnBase,
-                flex: 1,
-                background: svgPreview ? '#1a1a2e' : '#eee',
-                color: svgPreview ? '#d4af37' : '#bbb',
+                ...btnBase, flex: 1, background: svgPreview ? '#1a1a2e' : '#eee', color: svgPreview ? '#d4af37' : '#bbb',
               }}>
-                {pdfLoading ? 'Generating...' : 'Download PDF'}
+                {pdfLoading ? '...' : 'Download PDF'}
               </button>
               <button onClick={emailPdf} disabled={emailLoading || !svgPreview} style={{
-                ...btnBase,
-                flex: 1,
-                background: svgPreview ? '#16a34a' : '#eee',
-                color: svgPreview ? '#fff' : '#bbb',
+                ...btnBase, flex: 1, background: svgPreview ? '#16a34a' : '#eee', color: svgPreview ? '#fff' : '#bbb',
               }}>
-                {emailLoading ? 'Sending...' : 'Email PDF'}
+                {emailLoading ? '...' : 'Email PDF'}
               </button>
             </div>
-            {/* Send to Desk */}
-            <div style={{ display: 'flex', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => sendToDesk('Workroom')} disabled={!svgPreview} style={{
-                ...btnBase, flex: 1, padding: '10px 12px', fontSize: 12,
-                background: svgPreview ? '#1a1a2e' : '#eee',
-                color: svgPreview ? '#fff' : '#bbb',
-              }}>
-                Send to Workroom
-              </button>
+                ...btnBase, flex: 1, padding: '10px', fontSize: 12,
+                background: svgPreview ? '#1a1a2e' : '#eee', color: svgPreview ? '#fff' : '#bbb',
+              }}>Workroom</button>
               <button onClick={() => sendToDesk('WoodCraft')} disabled={!svgPreview} style={{
-                ...btnBase, flex: 1, padding: '10px 12px', fontSize: 12,
-                background: svgPreview ? '#ca8a04' : '#eee',
-                color: svgPreview ? '#fff' : '#bbb',
-              }}>
-                Send to WoodCraft
-              </button>
+                ...btnBase, flex: 1, padding: '10px', fontSize: 12,
+                background: svgPreview ? '#ca8a04' : '#eee', color: svgPreview ? '#fff' : '#bbb',
+              }}>WoodCraft</button>
             </div>
-            {emailStatus && (
-              <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: emailStatus.includes('sent') || emailStatus.includes('Sent') || emailStatus.includes('extract') ? '#16a34a' : emailStatus.startsWith('AI:') ? '#b8960c' : '#ef4444' }}>
-                {emailStatus}
+            {statusMsg && (
+              <div style={{
+                textAlign: 'center', fontSize: 13, fontWeight: 600, padding: '8px', borderRadius: 8,
+                background: statusMsg.includes('Detected') ? '#fdf8eb' : statusMsg.includes('sent') || statusMsg.includes('Sent') ? '#f0fdf4' : '#fef2f2',
+                color: statusMsg.includes('Detected') ? '#b8960c' : statusMsg.includes('sent') || statusMsg.includes('Sent') ? '#16a34a' : '#ef4444',
+              }}>
+                {statusMsg}
               </div>
             )}
           </div>
         </div>
 
-        {/* ── Right: SVG Preview ── */}
+        {/* ── Right: Preview ── */}
         <div style={{
-          background: '#fff',
-          borderRadius: 14,
-          border: '1px solid #ece8e0',
-          minHeight: 500,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
+          background: '#fff', borderRadius: 14, border: '1px solid #ece8e0',
+          minHeight: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
         }}>
           {svgPreview ? (
-            <div
-              dangerouslySetInnerHTML={{ __html: svgPreview }}
-              style={{ width: '100%', padding: 16 }}
-            />
+            <div dangerouslySetInnerHTML={{ __html: svgPreview }} style={{ width: '100%', padding: 16 }} />
           ) : (
             <div style={{ textAlign: 'center', color: '#ccc', padding: 40 }}>
               <div style={{ fontSize: 48, marginBottom: 12 }}>&#9998;</div>
-              <div style={{ fontSize: 15, fontWeight: 600 }}>Enter dimensions and click Generate Preview</div>
-              <div style={{ fontSize: 13, marginTop: 6 }}>Isometric 3D drawing with dimension callouts</div>
+              <div style={{ fontSize: 15, fontWeight: 600 }}>Upload a sketch or enter dimensions</div>
+              <div style={{ fontSize: 13, marginTop: 6 }}>AI generates professional drawings for any item type</div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Mobile responsive override */}
       <style>{`
         @media (max-width: 768px) {
-          div[style*="grid-template-columns: 380px"] {
-            grid-template-columns: 1fr !important;
-          }
+          div[style*="grid-template-columns: 380px"] { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
