@@ -2031,41 +2031,66 @@ def _build_rooms_html(rooms: list, has_design_proposals: bool = False) -> str:
         # Items table (new Quote Builder format — items[] instead of windows[]/upholstery[])
         items = room.get("items", [])
         if items and not regular_windows and not upholstery:
-            html += """<table style="margin-bottom:12px"><thead><tr>
-                <th>Item</th><th>Size</th><th>Fabric</th><th>Yardage</th><th>Qty</th>
-            </tr></thead><tbody>"""
-            for it in items:
-                dims = it.get("dimensions", {})
-                size_parts = [f'{dims.get("width", "")}' if dims.get("width") else '',
-                              f'{dims.get("height", "")}' if dims.get("height") else '',
-                              f'{dims.get("depth", "")}' if dims.get("depth") else '']
-                size_str = ' x '.join(p for p in size_parts if p)
-                if size_str:
-                    size_str += '"'
+            # Check if items have rate/unit (detailed pricing) or just basic info
+            has_pricing = any(it.get("rate") or it.get("unit") for it in items)
+            if has_pricing:
+                html += """<table style="margin-bottom:12px"><thead><tr>
+                    <th>Description</th><th style="text-align:center">Qty</th><th style="text-align:center">Unit</th>
+                    <th style="text-align:right">Rate</th><th style="text-align:right">Amount</th>
+                </tr></thead><tbody>"""
+                room_subtotal = 0
+                for it in items:
+                    desc = it.get("notes", "") or it.get("type", "item").replace("_", " ").title()
+                    qty = it.get("quantity", 1)
+                    unit = it.get("unit", "ea")
+                    rate = it.get("rate", 0)
+                    amount = qty * rate
+                    room_subtotal += amount
+                    html += f"""<tr>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:0.88em">{desc}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{qty}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{unit}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right">${rate:,.2f}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${amount:,.2f}</td>
+                    </tr>"""
+                html += f"""<tr><td colspan="4" style="padding:8px;text-align:right;font-weight:600;color:#333">
+                    Area Subtotal</td><td style="padding:8px;text-align:right;font-weight:700;color:#b8960c">
+                    ${room_subtotal:,.2f}</td></tr>"""
+                html += "</tbody></table>"
+            else:
+                html += """<table style="margin-bottom:12px"><thead><tr>
+                    <th>Item</th><th>Size</th><th>Fabric</th><th>Yardage</th><th>Qty</th>
+                </tr></thead><tbody>"""
+                for it in items:
+                    dims = it.get("dimensions", {})
+                    size_parts = [f'{dims.get("width", "")}' if dims.get("width") else '',
+                                  f'{dims.get("height", "")}' if dims.get("height") else '',
+                                  f'{dims.get("depth", "")}' if dims.get("depth") else '']
+                    size_str = ' x '.join(p for p in size_parts if p)
+                    if size_str:
+                        size_str += '"'
 
-                # Fabric name (client-safe: no cost/margin)
-                fabric_name = it.get("fabric_name", "")
-                backing_name = it.get("backing_fabric_name", "")
-                fabric_display = fabric_name
-                if backing_name:
-                    fabric_display += f"<br><span style='font-size:0.8em;color:#666'>Backing: {backing_name}</span>"
+                    fabric_name = it.get("fabric_name", "")
+                    backing_name = it.get("backing_fabric_name", "")
+                    fabric_display = fabric_name
+                    if backing_name:
+                        fabric_display += f"<br><span style='font-size:0.8em;color:#666'>Backing: {backing_name}</span>"
 
-                # Yardage
-                yards = it.get("fabric_yards_needed", 0)
-                backing_yards = it.get("backing_yards_needed", 0)
-                yard_display = f"{yards} yd" if yards else ""
-                if backing_yards:
-                    yard_display += f"<br><span style='font-size:0.8em;color:#666'>+ {backing_yards} yd backing</span>"
+                    yards = it.get("fabric_yards_needed", 0)
+                    backing_yards = it.get("backing_yards_needed", 0)
+                    yard_display = f"{yards} yd" if yards else ""
+                    if backing_yards:
+                        yard_display += f"<br><span style='font-size:0.8em;color:#666'>+ {backing_yards} yd backing</span>"
 
-                item_label = it.get("type", "item").replace("_", " ").title()
-                html += f"""<tr>
-                    <td style="padding:6px 8px;border-bottom:1px solid #eee">{item_label}</td>
-                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{size_str}</td>
-                    <td style="padding:6px 8px;border-bottom:1px solid #eee">{fabric_display or '—'}</td>
-                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{yard_display or '—'}</td>
-                    <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{it.get('quantity', 1)}</td>
-                </tr>"""
-            html += "</tbody></table>"
+                    item_label = it.get("type", "item").replace("_", " ").title()
+                    html += f"""<tr>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee">{item_label}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{size_str}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee">{fabric_display or '—'}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{yard_display or '—'}</td>
+                        <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center">{it.get('quantity', 1)}</td>
+                    </tr>"""
+                html += "</tbody></table>"
 
         if regular_windows or upholstery:
             html += f'<p style="text-align:right;font-weight:600;color:#333">Room Subtotal: ${room_total:,.2f}</p>'
@@ -2466,7 +2491,7 @@ def _build_line_items_html(line_items: list) -> str:
     rooms_seen = []
     rooms_items = {}
     for item in line_items:
-        r = item.get("room", "General")
+        r = item.get("room") or item.get("area") or "General"
         if r not in rooms_items:
             rooms_seen.append(r)
             rooms_items[r] = []
@@ -2737,7 +2762,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
     deposit_html = ""
     if deposit.get("deposit_amount"):
         deposit_html = f"""<tr><td colspan="3" style="padding:8px;text-align:right"><strong>Deposit ({deposit.get('deposit_percent', 50)}%)</strong></td>
-        <td style="padding:8px;text-align:right"><strong>${deposit['deposit_amount']:.2f}</strong></td></tr>"""
+        <td style="padding:8px;text-align:right"><strong>${deposit['deposit_amount']:,.2f}</strong></td></tr>"""
 
     install_date = ""
     if quote.get("install_date"):
@@ -2822,7 +2847,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 {proposals_html}
 
 <!-- ═══ ITEMIZED COST BREAKDOWN ═══ -->
-{_build_line_items_html(quote.get("line_items", [])) if (not design_proposals or proposal_selected) else ""}
+{_build_line_items_html(quote.get("line_items", [])) if (not design_proposals or proposal_selected) and not any(it.get("rate") or it.get("unit") for r in rooms for it in r.get("items", [])) else ""}
 
 <!-- ═══ TOTALS ═══ -->
 {f'''<table style="margin-top:16px"><tbody>
@@ -2833,12 +2858,12 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 </tbody></table>''' if design_proposals and not proposal_selected else f'''<table style="margin-top:16px"><tbody>
   {f"<tr><td colspan='8' style='padding:10px 8px;text-align:right;color:#666;font-style:italic'>Treatment options range from</td><td style='padding:10px 8px;text-align:right;font-weight:700;color:#b8960c;font-size:1.1em;white-space:nowrap'>${quote['price_range_low']:,.0f} &ndash; ${quote['price_range_high']:,.0f}</td></tr>" if quote.get("price_range_low") else f"""
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Subtotal</td>
-  <td style='padding:8px;text-align:right;color:#666'>${quote.get("subtotal", 0):.2f}</td></tr>
+  <td style='padding:8px;text-align:right;color:#666'>${quote.get("subtotal", 0):,.2f}</td></tr>
   {_discount_html(quote) if quote.get('discount_amount') else ""}
   <tr><td colspan='8' style='padding:8px;text-align:right;color:#666'>Tax ({quote.get('tax_rate', 0) * 100:.1f}%)</td>
-  <td style='padding:8px;text-align:right;color:#666'>${quote.get('tax_amount', 0):.2f}</td></tr>
+  <td style='padding:8px;text-align:right;color:#666'>${quote.get('tax_amount', 0):,.2f}</td></tr>
   <tr><td colspan='8' style='padding:14px 8px;text-align:right;border-top:3px solid #b8960c'><strong style='font-size:1.15em;color:#1a1a2e'>Total</strong></td>
-  <td style='padding:14px 8px;text-align:right;border-top:3px solid #b8960c'><strong style='font-size:1.2em;color:#b8960c'>${quote.get("total", 0):.2f}</strong></td></tr>"""}
+  <td style='padding:14px 8px;text-align:right;border-top:3px solid #b8960c'><strong style='font-size:1.2em;color:#b8960c'>${quote.get("total", 0):,.2f}</strong></td></tr>"""}
   {deposit_html}
 </tbody></table>'''}
 
