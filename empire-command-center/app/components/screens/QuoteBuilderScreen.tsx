@@ -3371,6 +3371,142 @@ function ShadeInstallDiagram({ config }: { config: Record<string, any> }) {
   );
 }
 
+/* ── Fabric Upload + AI Mockup ─────────────────────────────── */
+function FabricMockupSection({ rooms }: { rooms: Room[] }) {
+  const [fabricPreview, setFabricPreview] = useState<string | null>(null);
+  const [roomPhoto, setRoomPhoto] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [mockups, setMockups] = useState<{ basic?: string; withFabric?: string }>({});
+  const fabricRef = useRef<HTMLInputElement>(null);
+  const roomRef = useRef<HTMLInputElement>(null);
+
+  const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? 'https://api.empirebox.store/api/v1'
+    : 'http://localhost:8000/api/v1';
+
+  const allItems = rooms.flatMap(r => r.items);
+  const isShade = allItems.some(it => it.type.includes('roman') || it.type.includes('shade'));
+
+  const handleFileUpload = (setter: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setter(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const generateMockups = async () => {
+    if (!roomPhoto) return;
+    setGenerating(true);
+    try {
+      // 1. Basic mockup (without fabric)
+      const basicRes = await fetch(`${API}/vision/mockup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: roomPhoto }),
+      });
+      if (basicRes.ok) {
+        const basicData = await basicRes.json();
+        const basicUrl = basicData.generated_images?.[0]?.url;
+        if (basicUrl) setMockups(prev => ({ ...prev, basic: `${API.replace('/api/v1', '')}${basicUrl}` }));
+      }
+
+      // 2. Mockup with uploaded fabric
+      if (fabricPreview) {
+        const shadeNote = isShade
+          ? ' The fabric is on a FLAT ROMAN SHADE — when raised, the fabric bunches into horizontal accordion folds at the top, so the pattern appears compressed/interrupted in the folded sections. Show the shade partially raised with natural fold breaks in the pattern.'
+          : '';
+        const fabricRes = await fetch(`${API}/vision/mockup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            image: roomPhoto,
+            preferences: `Apply the uploaded fabric pattern to the window treatment. Use this EXACT fabric texture and color from the swatch photo.${shadeNote} The fabric should look natural, with proper drape and light interaction. Do NOT change the room or furniture — only apply the fabric to window treatments.`,
+          }),
+        });
+        if (fabricRes.ok) {
+          const fabricData = await fabricRes.json();
+          const fabricUrl = fabricData.generated_images?.[0]?.url;
+          if (fabricUrl) setMockups(prev => ({ ...prev, withFabric: `${API.replace('/api/v1', '')}${fabricUrl}` }));
+        }
+      }
+    } catch (err) {
+      console.error('Mockup generation failed:', err);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 20, padding: 16, borderRadius: 12, border: '1.5px solid #d4b87a', background: '#fdfcf7' }}>
+      <div className="flex items-center gap-2 mb-3">
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Fabric & Mockup</span>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+        {/* Room Photo */}
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 600, color: '#888', display: 'block', marginBottom: 4 }}>Room Photo</label>
+          <input ref={roomRef} type="file" accept="image/*" onChange={handleFileUpload(setRoomPhoto)} style={{ display: 'none' }} />
+          <button onClick={() => roomRef.current?.click()} style={{
+            width: '100%', minHeight: 48, padding: '10px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: '1.5px dashed #ccc', background: roomPhoto ? '#f0fdf4' : '#faf9f7', color: roomPhoto ? '#16a34a' : '#999',
+          }}>
+            {roomPhoto ? 'Room uploaded' : 'Upload room photo'}
+          </button>
+          {roomPhoto && <img src={roomPhoto} alt="Room" style={{ marginTop: 6, width: '100%', height: 80, objectFit: 'cover', borderRadius: 8 }} />}
+        </div>
+
+        {/* Fabric Swatch */}
+        <div>
+          <label style={{ fontSize: 11, fontWeight: 600, color: '#888', display: 'block', marginBottom: 4 }}>Fabric Swatch</label>
+          <input ref={fabricRef} type="file" accept="image/*" onChange={handleFileUpload(setFabricPreview)} style={{ display: 'none' }} />
+          <button onClick={() => fabricRef.current?.click()} style={{
+            width: '100%', minHeight: 48, padding: '10px 12px', borderRadius: 10, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: '1.5px dashed #ccc', background: fabricPreview ? '#fdf8eb' : '#faf9f7', color: fabricPreview ? '#b8960c' : '#999',
+          }}>
+            {fabricPreview ? 'Swatch uploaded' : 'Upload fabric swatch'}
+          </button>
+          {fabricPreview && <img src={fabricPreview} alt="Fabric" style={{ marginTop: 6, width: '100%', height: 80, objectFit: 'cover', borderRadius: 8 }} />}
+        </div>
+      </div>
+
+      {isShade && (
+        <div style={{ fontSize: 11, color: '#b8960c', background: '#fdf8eb', padding: '8px 10px', borderRadius: 8, marginBottom: 10, lineHeight: 1.4 }}>
+          Roman shade detected — mockup will show fold breaks in the fabric pattern when raised
+        </div>
+      )}
+
+      <button onClick={generateMockups} disabled={generating || !roomPhoto} style={{
+        width: '100%', padding: '12px 16px', borderRadius: 10, border: 'none', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+        minHeight: 48, transition: 'all 0.15s',
+        background: roomPhoto ? 'linear-gradient(135deg, #b8960c, #d4af37)' : '#eee',
+        color: roomPhoto ? '#1a1a2e' : '#bbb',
+      }}>
+        {generating ? 'Generating mockups...' : fabricPreview ? 'Generate Mockups (Basic + Fabric)' : 'Generate Basic Mockup'}
+      </button>
+
+      {/* Mockup Results */}
+      {(mockups.basic || mockups.withFabric) && (
+        <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: mockups.withFabric ? '1fr 1fr' : '1fr', gap: 10 }}>
+          {mockups.basic && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', marginBottom: 4 }}>BASIC MOCKUP</div>
+              <img src={mockups.basic} alt="Basic mockup" style={{ width: '100%', borderRadius: 8, border: '1px solid #ece8e0' }} />
+            </div>
+          )}
+          {mockups.withFabric && (
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#b8960c', marginBottom: 4 }}>WITH YOUR FABRIC</div>
+              <img src={mockups.withFabric} alt="Fabric mockup" style={{ width: '100%', borderRadius: 8, border: '1px solid #ece8e0' }} />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareConfig }: {
   options: QuoteOptions; setOptions: (o: QuoteOptions) => void; rooms: Room[];
   hardwareConfig?: Record<string, any>; setHardwareConfig?: (c: Record<string, any>) => void;
@@ -3426,29 +3562,8 @@ function StepOptions({ options, setOptions, rooms, hardwareConfig, setHardwareCo
         Quote Options
       </div>
 
-      {/* Fabric Grade — shared */}
-      <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 12, fontWeight: 600, color: '#555', display: 'block', marginBottom: 8 }}>Fabric Grade</label>
-        <div className="flex gap-2">
-          {(['A', 'B', 'C'] as const).map(g => {
-            const isActive = options.fabricGrade === g;
-            const labels: Record<string, string> = { A: 'Standard', B: 'Designer', C: 'Premium' };
-            const colors: Record<string, string> = { A: '#16a34a', B: '#b8960c', C: '#7c3aed' };
-            return (
-              <button key={g} onClick={() => setOptions({ ...options, fabricGrade: g })}
-                className="flex-1 cursor-pointer transition-all"
-                style={{
-                  padding: '10px 8px', borderRadius: 10, textAlign: 'center', fontSize: 12, fontWeight: 600,
-                  border: `2px solid ${isActive ? colors[g] : '#ece8e0'}`,
-                  background: isActive ? `${colors[g]}10` : '#faf9f7',
-                  color: isActive ? colors[g] : '#777',
-                }}>
-                Grade {g}<br /><span style={{ fontSize: 10, fontWeight: 400 }}>{labels[g]}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {/* Fabric Upload & AI Mockup */}
+      <FabricMockupSection rooms={rooms} />
 
       {/* Upholstery Options */}
       {hasUpholstery && (
@@ -3638,8 +3753,8 @@ function StepReview({ customer, photos, rooms, options, totalItems }: {
             <span style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>{photos.length}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span style={{ fontSize: 12, color: '#555' }}>Fabric Grade</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Grade {options.fabricGrade}</span>
+            <span style={{ fontSize: 12, color: '#555' }}>Fabric</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#b8960c' }}>Customer provided</span>
           </div>
         </div>
       </div>
