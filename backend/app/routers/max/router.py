@@ -90,8 +90,8 @@ async def _safe_background(coro, label: str):
     except Exception as e:
         logger.warning(f"Background {label} failed: {e}")
 
-def _log_quality_metric(quality_result, model_used: str, channel: str):
-    """Log quality gate result to database for metrics."""
+def _log_quality_metric(quality_result, model_used: str, channel: str, response_time_ms: float = 0.0):
+    """Log quality gate result + response time to database for metrics."""
     try:
         import sqlite3
         db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
@@ -107,12 +107,13 @@ def _log_quality_metric(quality_result, model_used: str, channel: str):
                 validation_time_ms REAL,
                 message_preview TEXT,
                 model_used TEXT,
-                channel TEXT
+                channel TEXT,
+                response_time_ms REAL DEFAULT 0
             )
         """)
         conn.execute(
-            "INSERT INTO quality_metrics (category, quality_level, checks_performed, warnings, validation_time_ms, model_used, channel) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            ("chat", quality_result.level, ",".join(quality_result.checks_performed), ",".join(quality_result.warnings), quality_result.validation_time_ms, model_used, channel)
+            "INSERT INTO quality_metrics (category, quality_level, checks_performed, warnings, validation_time_ms, model_used, channel, response_time_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("chat", quality_result.level, ",".join(quality_result.checks_performed), ",".join(quality_result.warnings), quality_result.validation_time_ms, model_used, channel, response_time_ms)
         )
         conn.commit()
         conn.close()
@@ -180,6 +181,9 @@ class PresentRequest(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks):
+    import time as _time_mod
+    _chat_start = _time_mod.time()
+
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
     if founder:
@@ -452,8 +456,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
                 final_content += quality_suffix
             quality_badge = get_quality_badge(quality_result)
 
-            # Log quality metrics
-            _log_quality_metric(quality_result, response.model_used, request.channel or "web")
+            # Log quality metrics with response time
+            _response_time_ms = (_time_mod.time() - _chat_start) * 1000
+            _log_quality_metric(quality_result, response.model_used, request.channel or "web", _response_time_ms)
+            logger.info(f"Response time: {_response_time_ms:.0f}ms | Quality: {quality_result.level} | Model: {response.model_used}")
         except Exception as qg_err:
             logger.debug(f"Quality gate error (non-fatal): {qg_err}")
             quality_badge = None
