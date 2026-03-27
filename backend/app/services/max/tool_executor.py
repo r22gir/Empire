@@ -1618,22 +1618,71 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "areas": [d["name"] for d in drawings],
             })
 
-        # ── Bench items → dedicated renderer ──
+        # ── Bench items → AI parametric pipeline ──
         if item_type == "bench":
             shape = params.get("shape", "straight").lower()
             lf = float(params.get("lf", params.get("length_ft", 10)))
             if not name or name == "Drawing":
                 name = f"{shape.title()} Bench"
-            rate = float(params.get("rate", 0))
 
+            # Build dimensions dict for AI draftsman
             width_in = lf * 12
+            ai_dims = {"width": width_in, "depth": 21, "seat_height": 18, "back_height": 18}
+            for k in ("depth", "seat_depth", "seat_height", "back_height"):
+                if params.get(k):
+                    ai_dims[k.replace("seat_depth", "depth")] = float(params[k])
+            if params.get("dimensions"):
+                for k, v in params["dimensions"].items():
+                    try:
+                        ai_dims[k] = float(str(v).replace('"', '').replace("'", '').strip())
+                    except (ValueError, TypeError):
+                        pass
+
+            bench_type = "bench_straight"
             if "u" in shape:
-                mult = int(params.get("multiplier", 1))
-                svg = render_u_shape(name, width_in, multiplier=mult, quote_num=params.get("quote_num", ""))
+                bench_type = "bench_u_shape"
             elif "l" in shape:
-                svg = render_l_shape(name, width_in, quote_num=params.get("quote_num", ""))
-            else:
-                svg = render_straight(name, width_in, quote_num=params.get("quote_num", ""))
+                bench_type = "bench_l_shape"
+
+            # Try AI parametric pipeline first
+            svg = None
+            try:
+                import asyncio
+                from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
+                from app.services.drawing.parametric_renderer import render_to_svg
+                from app.services.drawing.validator import validate_drawing, inject_defaults
+
+                prompt = build_bench_prompt(bench_type, ai_dims, name, {})
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        drawing_json = pool.submit(asyncio.run, call_draftsman(prompt)).result()
+                else:
+                    drawing_json = asyncio.run(call_draftsman(prompt))
+
+                is_valid, errors = validate_drawing(drawing_json)
+                if is_valid:
+                    drawing_json = inject_defaults(drawing_json)
+                    svg = render_to_svg(drawing_json)
+                    logger.info("sketch_to_drawing: used AI parametric pipeline")
+                else:
+                    logger.warning(f"AI drawing validation failed: {errors}, falling back")
+            except Exception as e:
+                logger.warning(f"AI parametric pipeline failed: {e}, falling back to bench_renderer")
+
+            # Fallback to old renderer if AI failed
+            if not svg:
+                from app.services.vision.bench_renderer import (
+                    render_straight, render_l_shape, render_u_shape,
+                )
+                if "u" in shape:
+                    mult = int(params.get("multiplier", 1))
+                    svg = render_u_shape(name, width_in, multiplier=mult, quote_num=params.get("quote_num", ""))
+                elif "l" in shape:
+                    svg = render_l_shape(name, width_in, quote_num=params.get("quote_num", ""))
+                else:
+                    svg = render_straight(name, width_in, quote_num=params.get("quote_num", ""))
 
             if not output_path:
                 out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")

@@ -1,11 +1,11 @@
-"""Validate AI draftsman output before rendering. Reject bad geometry."""
+"""Validate AI draftsman output before rendering. Strip bad refs, reject bad geometry."""
 import logging
 
 log = logging.getLogger("drawing_validator")
 
 
 def validate_drawing(drawing: dict) -> tuple[bool, list[str]]:
-    """Returns (is_valid, errors). Mutates drawing to inject defaults."""
+    """Returns (is_valid, errors). Strips invalid edges/dims rather than rejecting."""
     errors = []
 
     if not drawing:
@@ -17,28 +17,36 @@ def validate_drawing(drawing: dict) -> tuple[bool, list[str]]:
     dimensions = drawing.get("dimensions", [])
 
     if not points:
-        errors.append("No geometry points defined")
+        return False, ["No geometry points defined"]
 
-    # Check edge references
-    for i, edge in enumerate(edges):
-        for key in ("from", "to"):
-            ref = edge.get(key)
-            if ref and ref not in points:
-                errors.append(f"Edge {i} references undefined point '{ref}'")
+    # Strip edges that reference undefined points (AI sometimes adds channel edges)
+    valid_edges = []
+    for edge in edges:
+        p_from = edge.get("from")
+        p_to = edge.get("to")
+        if p_from in points and p_to in points:
+            valid_edges.append(edge)
+        else:
+            log.debug(f"Stripping edge with undefined ref: {p_from} -> {p_to}")
+    geom["edges"] = valid_edges
 
-    # Check dimension references
-    for i, dim in enumerate(dimensions):
-        for key in ("from", "to"):
-            ref = dim.get(key)
-            if ref and ref not in points:
-                errors.append(f"Dimension {i} references undefined point '{ref}'")
+    # Strip dimensions that reference undefined points
+    valid_dims = []
+    for dim in dimensions:
+        p_from = dim.get("from")
+        p_to = dim.get("to")
+        if p_from in points and p_to in points:
+            valid_dims.append(dim)
+        else:
+            log.debug(f"Stripping dimension with undefined ref: {p_from} -> {p_to}")
+    drawing["dimensions"] = valid_dims
 
-    # Minimum geometry
+    # Minimum geometry — hard fail only on truly broken output
     if len(points) < 8:
         errors.append(f"Too few points ({len(points)}) — need at least 8 for a box")
 
-    if len(dimensions) < 3:
-        errors.append(f"Too few dimensions ({len(dimensions)}) — need at least width, depth, height")
+    if len(valid_dims) < 2:
+        errors.append(f"Too few dimensions ({len(valid_dims)}) — need at least width + height")
 
     if errors:
         log.warning(f"Validation errors: {errors}")
