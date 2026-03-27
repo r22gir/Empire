@@ -2054,6 +2054,9 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not title:
         return ToolResult(tool="run_desk_task", success=False, error="Task title is required")
 
+    # Check if caller wants async (non-blocking) mode
+    async_mode = params.get("async", False)
+
     try:
         import asyncio
         import concurrent.futures
@@ -2075,7 +2078,24 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "desk": getattr(task, "desk_id", None) or "auto",
             }
 
-        # Run async desk call from sync context — use thread to avoid event loop deadlock
+        if async_mode:
+            # Async mode: submit to background, return immediately
+            task_id = uuid.uuid4().hex[:8]
+            _log_async_task(task_id, title, "delegated")
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_run_atlas_background(task_id, title, params))
+            except RuntimeError:
+                # No running loop — fall through to sync
+                pass
+            return ToolResult(tool="run_desk_task", success=True, result={
+                "task_id": task_id,
+                "title": title,
+                "status": "delegated",
+                "message": f"Task #{task_id} delegated to Atlas. Working in background. I'll notify you when it's done.",
+            })
+
+        # Sync mode: block until complete (original behavior)
         try:
             loop = asyncio.get_running_loop()
             with concurrent.futures.ThreadPoolExecutor() as pool:
@@ -2090,6 +2110,88 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
                             result=data, error=data.get("result", "Task did not complete"))
     except Exception as e:
         return ToolResult(tool="run_desk_task", success=False, error=f"Desk task failed: {e}")
+
+
+async def _run_atlas_background(task_id: str, title: str, params: dict):
+    """Background: Atlas executes task, updates status, notifies founder."""
+    try:
+        from app.services.max.desks.desk_manager import desk_manager
+        desk_manager.initialize()
+        task = await desk_manager.submit_task(
+            title=title,
+            description=params.get("description", title),
+            priority=params.get("priority", "normal"),
+            source="atlas_async",
+        )
+        state = task.state.value if hasattr(task.state, "value") else str(task.state)
+        _log_async_task(task_id, title, state, result=task.result)
+
+        # Notify founder on completion/failure
+        _notify = f"Atlas task #{task_id} {state}: {title}"
+        if task.result:
+            _notify += f"\n{str(task.result)[:200]}"
+        try:
+            from app.services.max.telegram_bot import telegram_bot
+            if telegram_bot and telegram_bot.is_configured:
+                import asyncio
+                await telegram_bot.send_message(_notify)
+        except Exception:
+            pass
+        logger.info(f"Atlas background task #{task_id} {state}: {title}")
+    except Exception as e:
+        _log_async_task(task_id, title, "failed", error=str(e))
+        logger.error(f"Atlas background task #{task_id} failed: {e}")
+        try:
+            from app.services.max.telegram_bot import telegram_bot
+            if telegram_bot and telegram_bot.is_configured:
+                await telegram_bot.send_message(f"Atlas task #{task_id} FAILED: {str(e)[:150]}")
+        except Exception:
+            pass
+
+
+def _log_async_task(task_id: str, title: str, status: str, result=None, error=None):
+    """Log async task status to DB."""
+    try:
+        import sqlite3
+        db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+        conn = sqlite3.connect(db_path)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS atlas_tasks (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                status TEXT,
+                result TEXT,
+                error TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute(
+            "INSERT OR REPLACE INTO atlas_tasks (id, title, status, result, error, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            (task_id, title, status, str(result)[:2000] if result else None, error)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"Atlas task log failed: {e}")
+
+
+@tool("delegate_to_atlas")
+def _delegate_to_atlas(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Delegate a code task to Atlas (Opus). Returns IMMEDIATELY.
+    Atlas runs in background. MAX is free for the next question.
+    """
+    title = params.get("title", params.get("task", "")).strip()
+    if not title:
+        return ToolResult(tool="delegate_to_atlas", success=False, error="Task title/description is required")
+
+    # Use run_desk_task in async mode
+    return _run_desk_task({
+        "title": title,
+        "description": params.get("description", title),
+        "priority": params.get("priority", "normal"),
+        "async": True,
+    }, desk=desk)
 
 
 # ── PRESENTATION PDF + TELEGRAM TOOL ──────────────────────────────
@@ -2429,6 +2531,9 @@ To call a tool, include a tool block in your response:
 - **run_desk_task** — Delegate a task to the AI desk system. Task is auto-routed to the best desk (ForgeDesk, MarketDesk, etc.) for autonomous handling.
   `{"tool": "run_desk_task", "title": "Generate mockup for living room windows", "description": "Use AI vision to create design mockup from uploaded photo", "priority": "normal", "customer_name": "..."}`
   ForgeDesk capabilities: quotes, follow-ups, scheduling, measurements, fabric lookup, AI vision (measure, mockup, outline, upholstery)
+- **delegate_to_atlas** — Delegate a CODE task to Atlas (Opus). Returns IMMEDIATELY — Atlas works in background while you stay free for the next question. Atlas notifies the founder via Telegram when done or if it fails.
+  `{"tool": "delegate_to_atlas", "title": "Add cushion depth shading to bench renderer", "description": "Detailed task description..."}`
+  Use this for code changes, file edits, and development tasks. Do NOT use run_desk_task for code — use this instead. You get a task ID back immediately.
 
 ### Communication Tools
 - **send_telegram** — Send a text message to the founder via Telegram
