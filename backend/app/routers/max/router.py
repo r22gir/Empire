@@ -1535,18 +1535,23 @@ async def get_quality_metrics():
 class CodeTaskRequest(BaseModel):
     prompt: str
     pin: str = ""
+    channel: str = "web_cc"
 
 
 @router.post("/code-task")
 async def submit_code_task(request: CodeTaskRequest):
     """Submit an async code task to CodeForge/Atlas.
-    Requires founder PIN. Returns immediately with task ID.
+    Founder channels (web_cc, telegram founder) skip PIN.
+    Non-founder channels require PIN.
     Poll status via GET /code-task/{id}/status.
     """
     import os
-    founder_pin = os.getenv("FOUNDER_PIN", "7777")
-    if not request.pin or str(request.pin) != founder_pin:
-        raise HTTPException(status_code=403, detail="Invalid PIN. Code Mode requires founder authorization.")
+    msg_ctx = {"channel": request.channel or "web_cc"}
+    founder = is_founder_message(msg_ctx)
+    if not founder:
+        founder_pin = os.getenv("FOUNDER_PIN", "7777")
+        if not request.pin or str(request.pin) != founder_pin:
+            raise HTTPException(status_code=403, detail="Invalid PIN. Code Mode requires founder authorization.")
 
     from app.services.max.code_task_runner import code_task_runner
 

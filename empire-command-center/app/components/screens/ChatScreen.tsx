@@ -61,10 +61,6 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [recording, setRecording] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [codeMode, setCodeMode] = useState(false);
-  const [codeModePin, setCodeModePin] = useState('');
-  const [showPinModal, setShowPinModal] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState('');
   const [codeTask, setCodeTask] = useState<any>(null);
   const [voiceMode, setVoiceMode] = useState(false);
   const [ttsPlaying, setTtsPlaying] = useState(false);
@@ -309,48 +305,19 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   }, [codeTask?.id, codeTask?.state]);
 
   const submitCodeTask = async (prompt: string) => {
-    if (!codeModePin) {
-      setShowPinModal(true);
-      return;
-    }
     try {
       const r = await fetch(`${API}/max/code-task`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, pin: codeModePin }),
+        body: JSON.stringify({ prompt, channel: 'web_cc' }),
       });
       if (r.ok) {
         const data = await r.json();
         setCodeTask({ id: data.task_id, state: data.state, prompt, log: [], files_changed: [] });
       } else if (r.status === 403) {
-        setCodeModePin('');
         setCodeMode(false);
-        setShowPinModal(true);
-        setPinError('PIN expired or invalid. Please re-enter.');
       }
     } catch { /* offline */ }
-  };
-
-  const handlePinSubmit = async () => {
-    setPinError('');
-    try {
-      const r = await fetch(`${API}/max/verify-pin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: pinInput }),
-      });
-      if (r.ok) {
-        setCodeModePin(pinInput);
-        setCodeMode(true);
-        setShowPinModal(false);
-        setPinInput('');
-      } else {
-        setPinError('Invalid PIN');
-        setPinInput('');
-      }
-    } catch {
-      setPinError('Connection error');
-    }
   };
 
   const handleSend = () => {
@@ -921,16 +888,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           <span style={{ color: 'var(--border)', fontSize: 10 }}>·</span>
           <button
             onClick={() => {
-              if (codeMode) {
-                setCodeMode(false);
-                setCodeModePin('');
-              } else if (codeModePin) {
-                setCodeMode(true);
-              } else {
-                setPinInput('');
-                setPinError('');
-                setShowPinModal(true);
-              }
+              setCodeMode(!codeMode);
             }}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
@@ -995,64 +953,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       </div>
 
-      {/* PIN Modal for Code Mode */}
-      {showPinModal && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.6)', zIndex: 9999,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 20,
-        }} onClick={() => setShowPinModal(false)}>
-          <div style={{
-            background: '#1a1a1a', borderRadius: 16, padding: 28, width: '100%', maxWidth: 340,
-            border: '1.5px solid #b8960c', boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-          }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <Terminal size={20} style={{ color: '#b8960c' }} />
-              <span style={{ color: '#fff', fontWeight: 700, fontSize: 16 }}>Code Mode — PIN Required</span>
-            </div>
-            <p style={{ color: '#aaa', fontSize: 13, marginBottom: 16, lineHeight: 1.4 }}>
-              Code Mode grants Atlas (Opus) access to read and edit project files. Enter your founder PIN to activate.
-            </p>
-            {pinError && (
-              <div style={{ color: '#ef4444', fontSize: 13, marginBottom: 12, fontWeight: 600 }}>{pinError}</div>
-            )}
-            <input
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={pinInput}
-              onChange={e => setPinInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handlePinSubmit(); }}
-              placeholder="Enter PIN"
-              autoFocus
-              style={{
-                width: '100%', padding: '14px 16px', fontSize: 18, fontWeight: 600,
-                background: '#111', border: '1.5px solid #333', borderRadius: 12,
-                color: '#fff', textAlign: 'center', letterSpacing: 8,
-                outline: 'none', boxSizing: 'border-box',
-              }}
-            />
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              <button
-                onClick={() => setShowPinModal(false)}
-                style={{
-                  flex: 1, padding: '12px 0', borderRadius: 10, border: '1px solid #333',
-                  background: 'transparent', color: '#aaa', fontSize: 14, cursor: 'pointer',
-                }}
-              >Cancel</button>
-              <button
-                onClick={handlePinSubmit}
-                style={{
-                  flex: 1, padding: '12px 0', borderRadius: 10, border: 'none',
-                  background: '#b8960c', color: '#000', fontSize: 14, fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >Activate</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* PIN Modal removed — CC is always founder, Code Mode activates directly */}
 
       {/* Animations */}
       <style>{`

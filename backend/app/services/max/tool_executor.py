@@ -102,6 +102,7 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         # ── FOUNDER BYPASS: CC / Telegram founder = full access, no PIN ──
         if founder:
             logger.info(f"Founder auto-auth — executing '{tool_name}' without PIN/access check")
+            tool_call["_founder"] = True  # pass founder flag to tool handlers
         else:
             # Access control check (non-founder users)
             if access_context and access_controller:
@@ -2502,14 +2503,16 @@ BLOCKED_PATTERNS = [
 
 @tool("shell_execute")
 def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Execute a safe shell command. Blocked commands are rejected."""
+    """Execute a shell command. Founder channels bypass allowlist.
+    Blocked patterns (rm -rf, sensors-detect, etc.) always enforced for safety.
+    """
     import subprocess
 
     command = params.get("command", "").strip()
     if not command:
         return ToolResult(tool="shell_execute", success=False, error="No command provided")
 
-    # Safety checks — block dangerous patterns
+    # Safety checks — block dangerous patterns (always enforced, even for founder)
     for blocked in BLOCKED_PATTERNS:
         if blocked in command:
             return ToolResult(
@@ -2517,13 +2520,15 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
                 error=f"Blocked command pattern: {blocked}",
             )
 
-    # Check if command starts with an allowed prefix
-    allowed = any(command.startswith(cmd) for cmd in ALLOWED_COMMANDS)
-    if not allowed:
-        return ToolResult(
-            tool="shell_execute", success=False,
-            error=f"Command not in allowlist. Allowed: {', '.join(ALLOWED_COMMANDS[:10])}...",
-        )
+    # Founder bypasses allowlist; non-founder must match allowed prefixes
+    founder = params.get("_founder", False)
+    if not founder:
+        allowed = any(command.startswith(cmd) for cmd in ALLOWED_COMMANDS)
+        if not allowed:
+            return ToolResult(
+                tool="shell_execute", success=False,
+                error=f"Command not in allowlist. Allowed: {', '.join(ALLOWED_COMMANDS[:10])}...",
+            )
 
     # Execute with timeout
     try:
