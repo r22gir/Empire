@@ -97,7 +97,7 @@ export default function PhotoUploader({
           </button>
         </div>
         <input ref={fileRef} type="file" accept="image/*" multiple onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
-        <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
+        <input ref={cameraRef} type="file" accept="image/*" onChange={e => e.target.files && handleFiles(e.target.files)} className="hidden" />
       </div>
 
       {photos.length > 0 && (

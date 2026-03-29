@@ -336,7 +336,7 @@ export default function SmartListerPanel({
         </div>
       )}
       <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileUpload} style={{ display: 'none' }} />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" onChange={handleFileUpload} style={{ display: 'none' }} />
+      <input ref={cameraInputRef} type="file" accept="image/*" onChange={handleFileUpload} style={{ display: 'none' }} />
     </div>
   );
 

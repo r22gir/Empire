@@ -362,7 +362,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       {/* Hidden file inputs */}
       <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/heic,image/webp" multiple
         style={{ display: 'none' }} onChange={e => e.target.files && handlePhotoUpload(e.target.files)} />
-      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment"
+      <input ref={cameraInputRef} type="file" accept="image/*"
         style={{ display: 'none' }} onChange={e => e.target.files && handlePhotoUpload(e.target.files)} />
 
       {/* Photo area */}

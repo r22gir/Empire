@@ -260,7 +260,7 @@ export default function NotesImporter({ onQuoteCreated, onClose }: NotesImporter
 
         {/* Buttons */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-          <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" multiple
+          <input ref={cameraInputRef} type="file" accept="image/*" multiple
             style={{ display: 'none' }} onChange={e => e.target.files && addFiles(e.target.files)} />
           <input ref={fileInputRef} type="file" accept="image/*" multiple
             style={{ display: 'none' }} onChange={e => e.target.files && addFiles(e.target.files)} />

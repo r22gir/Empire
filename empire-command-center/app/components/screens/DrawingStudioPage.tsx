@@ -338,7 +338,7 @@ export default function DrawingStudioPage() {
             <p style={{ fontSize: 12, color: '#999', margin: '4px 0 12px' }}>
               Hand drawing, measurement sketch, or photo of the item — AI extracts everything
             </p>
-            <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
+            <input ref={fileInputRef} type="file" accept="image/*"
               onChange={handleSketchUpload} style={{ display: 'none' }} />
             <button onClick={() => fileInputRef.current?.click()} disabled={sketchLoading} style={{
               ...btnBase, width: '100%', padding: '12px 16px', fontSize: 14,
