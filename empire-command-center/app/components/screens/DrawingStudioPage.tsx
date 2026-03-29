@@ -8,9 +8,13 @@ const API = typeof window !== 'undefined' && window.location.hostname !== 'local
 const ITEM_TYPES: { id: string; label: string; icon: string }[] = [
   { id: 'bench', label: 'Bench / Banquette', icon: '🪑' },
   { id: 'window', label: 'Window Treatment', icon: '🪟' },
-  { id: 'pillow', label: 'Pillow / Cushion', icon: '🛋' },
-  { id: 'upholstery', label: 'Upholstery', icon: '💺' },
-  { id: 'table', label: 'Table / Console', icon: '🪵' },
+  { id: 'cushion', label: 'Cushion / Pillow', icon: '🛋' },
+  { id: 'chair', label: 'Chair', icon: '💺' },
+  { id: 'sofa', label: 'Sofa / Sectional', icon: '🛋' },
+  { id: 'headboard', label: 'Headboard', icon: '🛏' },
+  { id: 'ottoman', label: 'Ottoman', icon: '🟫' },
+  { id: 'millwork', label: 'Cabinet / Millwork', icon: '🪵' },
+  { id: 'table', label: 'Table / Desk', icon: '🪵' },
   { id: 'generic', label: 'Other', icon: '📐' },
 ];
 
@@ -77,8 +81,9 @@ export default function DrawingStudioPage() {
       if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
       const data = await res.json();
 
-      // Populate from AI
-      if (data.item_type) setItemType(data.item_type);
+      // Populate from AI — map legacy types
+      const typeMap: Record<string, string> = { pillow: 'cushion', upholstery: 'chair' };
+      if (data.item_type) setItemType(typeMap[data.item_type] || data.item_type);
       if (data.name) setName(data.name);
       if (data.quote_num) setQuoteNum(data.quote_num);
       if (data.notes) setNotes(data.notes);
@@ -358,7 +363,7 @@ export default function DrawingStudioPage() {
           {/* Item Type */}
           <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>
             <label style={labelStyle}>Item Type</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginTop: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 5, marginTop: 6 }}>
               {ITEM_TYPES.map(t => (
                 <button key={t.id} onClick={() => setItemType(t.id)} style={{
                   ...btnBase, padding: '8px 6px', fontSize: 11, flexDirection: 'column', gap: 1,

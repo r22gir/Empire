@@ -169,7 +169,7 @@ async def analyze_sketch(req: SketchAnalyzeRequest):
 
 class GeneralDrawingRequest(BaseModel):
     name: str = "Drawing"
-    item_type: str = "generic"  # bench, window, pillow, upholstery, table, generic
+    item_type: str = "generic"
     dimensions: dict = {}
     notes: str = ""
     # Bench-specific (only used when item_type == "bench")
@@ -179,17 +179,20 @@ class GeneralDrawingRequest(BaseModel):
     quote_num: str = ""
 
 
+class UniversalDrawingRequest(BaseModel):
+    user_text: str = ""
+    params: dict = {}
+
+
 def _estimate_lf(dimensions: dict, lf: float) -> float:
     """Estimate linear feet from dimension values when lf is 0."""
     if lf > 0:
         return lf
-    # Look for the longest inch dimension and convert to feet
     max_inches = 0
     for label, value in dimensions.items():
         val_str = str(value).strip().rstrip('"\'').strip()
         try:
             inches = float(re.sub(r'[^0-9.]', '', val_str))
-            # Skip values that look like heights (seat height, back height)
             label_lower = label.lower()
             if any(kw in label_lower for kw in ['height', 'ht', 'depth', 'deep']):
                 continue
@@ -199,39 +202,121 @@ def _estimate_lf(dimensions: dict, lf: float) -> float:
             continue
     if max_inches > 0:
         return max_inches / 12
-    return 6  # Default fallback
+    return 6
 
 
-def _render_general(req: GeneralDrawingRequest) -> str:
-    """Route to the correct renderer based on item type."""
-    from app.services.vision.drawing_service import render_measurement_diagram
+def _render_general(req: GeneralDrawingRequest) -> tuple[str, str]:
+    """Route to the correct renderer. Returns (svg, resolved_type)."""
+    from app.services.vision.drawing_service import classify_item, render_measurement_diagram
 
-    if req.item_type == "bench":
+    # Smart classification — use item_type as hint but verify
+    classification = classify_item(
+        user_text=req.item_type,
+        item_name=req.name,
+    )
+    resolved_type = classification["type"]
+
+    if resolved_type == "bench" or req.item_type == "bench":
         from app.services.vision.bench_renderer import (
             render_straight, render_l_shape, render_u_shape,
         )
         lf = _estimate_lf(req.dimensions, req.lf)
         width_in = lf * 12
         if "u" in req.bench_type:
-            return render_u_shape(req.name, width_in, quote_num=req.quote_num)
+            return render_u_shape(req.name, width_in, quote_num=req.quote_num), "bench"
         elif "l" in req.bench_type:
-            return render_l_shape(req.name, width_in, quote_num=req.quote_num)
+            return render_l_shape(req.name, width_in, quote_num=req.quote_num), "bench"
         else:
-            return render_straight(req.name, width_in, quote_num=req.quote_num)
+            return render_straight(req.name, width_in, quote_num=req.quote_num), "bench"
     else:
-        return render_measurement_diagram(
+        svg = render_measurement_diagram(
             name=req.name,
-            item_type=req.item_type,
+            item_type=resolved_type,
             dimensions=req.dimensions,
             notes=req.notes,
         )
+        return svg, resolved_type
+
+
+@router.post("/drawings/generate")
+async def generate_universal_drawing(req: UniversalDrawingRequest):
+    """Universal drawing endpoint — smart classification routes to correct renderer.
+
+    Accepts user_text (what the user asked for) and params (dimensions, name, etc).
+    Returns SVG + classification info.
+    """
+    from app.services.vision.drawing_service import classify_item, generate_drawing
+
+    params = req.params or {}
+    user_text = req.user_text or ""
+    name = params.get("name", "")
+
+    # Classify
+    classification = classify_item(
+        user_text=user_text,
+        item_name=name,
+        description=params.get("description", ""),
+        filename=params.get("filename", ""),
+    )
+
+    resolved_type = classification["type"]
+
+    if resolved_type == "bench":
+        # Route to bench_renderer (4-quadrant professional)
+        from app.services.vision.bench_renderer import (
+            render_straight, render_l_shape, render_u_shape,
+        )
+        # Detect bench subtype from text
+        all_text = f"{user_text} {name}".lower()
+        if any(kw in all_text for kw in ["u-shape", "u shape", "u_shape", "booth"]):
+            bench_sub = "u_shape"
+        elif any(kw in all_text for kw in ["l-shape", "l shape", "l_shape"]):
+            bench_sub = "l_shape"
+        else:
+            bench_sub = "straight"
+
+        width = params.get("width", 120)
+        depth = params.get("depth", 20)
+        seat_h = params.get("seat_height", 18)
+        back_h = params.get("back_height", 18)
+
+        if bench_sub == "u_shape":
+            svg = render_u_shape(name or "Bench", width, depth_in=depth,
+                                 seat_h_in=seat_h, back_h_in=back_h)
+        elif bench_sub == "l_shape":
+            short = params.get("short", params.get("depth", width * 0.5))
+            svg = render_l_shape(name or "Bench", width, short,
+                                 depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
+        else:
+            svg = render_straight(name or "Bench", width, depth_in=depth,
+                                  seat_h_in=seat_h, back_h_in=back_h)
+
+        return {"svg": svg, "item_type": "bench", "bench_type": bench_sub,
+                "classification": classification, "name": name}
+
+    # Non-bench: use drawing_service renderers
+    result = generate_drawing(
+        name=name,
+        description=params.get("description", ""),
+        dimensions=params.get("dimensions", {}),
+        item_type=resolved_type,
+        notes=params.get("notes", ""),
+        user_text=user_text,
+        params=params,
+    )
+    return {
+        "svg": result["svg"],
+        "item_type": result["item_type"],
+        "classification": classification,
+        "name": result["name"],
+    }
 
 
 @router.post("/drawings/general")
 async def generate_general_drawing(req: GeneralDrawingRequest):
     """Generate an SVG drawing for any item type."""
-    svg = _render_general(req)
-    return {"svg": svg, "item_type": req.item_type, "name": req.name}
+    svg, resolved_type = _render_general(req)
+    return {"svg": svg, "item_type": resolved_type, "name": req.name}
 
 
 @router.post("/drawings/general/pdf")
@@ -239,10 +324,10 @@ async def generate_general_pdf(req: GeneralDrawingRequest):
     """Generate a PDF drawing for any item type."""
     from app.services.vision.bench_renderer import drawings_to_pdf
 
-    svg = _render_general(req)
+    svg, resolved_type = _render_general(req)
 
     output_path = os.path.join(
-        tempfile.gettempdir(), f"drawing_{req.item_type}_{req.name.replace(' ', '_')}.pdf"
+        tempfile.gettempdir(), f"drawing_{resolved_type}_{req.name.replace(' ', '_')}.pdf"
     )
     drawings_to_pdf([{"name": req.name, "svg": svg, "lf": req.lf}], output_path)
 
@@ -253,7 +338,7 @@ async def generate_general_pdf(req: GeneralDrawingRequest):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="drawing_{req.item_type}.pdf"'
+            "Content-Disposition": f'attachment; filename="drawing_{resolved_type}.pdf"'
         },
     )
 

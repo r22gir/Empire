@@ -1579,14 +1579,21 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         name = params.get("name", "Drawing")
         description = params.get("description", "")
 
-        # ── Auto-classify what type of item this is ──
+        # ── Smart classifier (10 item types) ──
+        from app.services.vision.drawing_service import classify_item
         explicit_type = params.get("item_type", "")
         if explicit_type:
-            item_type = explicit_type.lower()
+            classification = classify_item(user_text=explicit_type, item_name=name)
+            item_type = classification["type"]
+            # If explicit type didn't match any category, use it directly
+            if item_type == "generic" and explicit_type not in ("generic", ""):
+                item_type = explicit_type.lower()
         else:
             classify_text = f"{name} {description} {params.get('shape', '')}"
-            item_type = classify_input(classify_text)
-        logger.info(f"sketch_to_drawing: classified as '{item_type}' from input")
+            classification = classify_item(user_text=classify_text, item_name=name,
+                                           description=description)
+            item_type = classification["type"]
+        logger.info(f"sketch_to_drawing: classified as '{item_type}' (confidence={classification.get('confidence','?')}) from input")
 
         if quote_id:
             # Generate from quote data — quotes are always bench/seating
@@ -1700,16 +1707,21 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
                 "item_type": "bench",
             })
 
-        # ── All other item types → measurement diagram ──
+        # ── All other item types → type-specific renderer ──
         dimensions = params.get("dimensions", {})
         if not dimensions:
-            # Try to extract common dimension params
             for key in ("width", "height", "depth", "drop", "length", "diameter"):
                 val = params.get(key)
                 if val:
                     dimensions[key.title()] = f'{val}"'
 
         notes = params.get("notes", description)
+        render_params = {"name": name, "dimensions": dimensions, "notes": notes}
+        # Pass through raw dimension values for renderers that use them
+        for k in ("width", "height", "depth", "drop", "seat_height", "treatment_type", "mount_type"):
+            if params.get(k):
+                render_params[k] = params[k]
+
         svg = render_measurement_diagram(
             name=name,
             item_type=item_type,
