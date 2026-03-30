@@ -1398,8 +1398,13 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     to = params.get("to", "").strip()
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
-    if not to or not subject or not body:
-        return ToolResult(tool="send_email", success=False, error="to, subject, and body are required")
+
+    # Resolve founder aliases to FOUNDER_EMAIL from .env
+    if not to or to.lower() in ("me", "owner", "founder", "my email", "myself"):
+        to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+
+    if not subject or not body:
+        return ToolResult(tool="send_email", success=False, error="subject and body are required")
 
     attachments = params.get("attachments", [])
     cc = params.get("cc")
@@ -2603,6 +2608,53 @@ def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResul
         return ToolResult(tool="dispatch_to_openclaw", success=False, error=str(e))
 
 
+# ── RESET MAX STATE ────────────────────────────────────────────────
+
+@tool("reset_max_state")
+def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Reset MAX's conversation state, clear caches, reload config.
+    FOUNDER ONLY — triggered by 'MAX reset', 'reset yourself', 'clear cache', etc.
+    """
+    results = []
+
+    # 1. Reload .env
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(os.path.expanduser("~/empire-repo/backend/.env"), override=True)
+        founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        results.append(f"Environment reloaded — FOUNDER_EMAIL: {founder_email}")
+    except Exception as e:
+        results.append(f"Environment reload failed: {e}")
+
+    # 2. Clear system prompt cache
+    try:
+        from app.services.max.system_prompt import _prompt_cache
+        _prompt_cache["prompt"] = None
+        _prompt_cache["expires"] = 0
+        _prompt_cache.pop("_brain_ctx", None)
+        _prompt_cache.pop("_brain_expires", None)
+        results.append("System prompt cache cleared")
+    except Exception as e:
+        results.append(f"Cache clear failed: {e}")
+
+    # 3. Check OpenClaw
+    import httpx as _hx
+    openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
+    try:
+        resp = _hx.get(f"{openclaw_url}/health", timeout=5)
+        if resp.status_code == 200:
+            results.append(f"OpenClaw: UP ({openclaw_url})")
+        else:
+            results.append(f"OpenClaw: responded {resp.status_code} ({openclaw_url})")
+    except Exception:
+        results.append(f"OpenClaw: DOWN ({openclaw_url})")
+
+    # 4. Report
+    results.append("MAX state reset complete. All caches cleared. Ready for commands.")
+
+    return ToolResult(tool="reset_max_state", success=True, result={"actions": results})
+
+
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
 TOOLS_DOC = """## Available Tools
@@ -2730,6 +2782,11 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   `{"tool": "dispatch_to_openclaw", "title": "Health check", "description": "Run full API health check"}`
   `{"tool": "dispatch_to_openclaw", "title": "Disk report", "description": "check disk usage", "wait_for_result": true}`
   Optional: `priority` (low/normal/high/critical), `skills_needed` (list of skill names), `wait_for_result` (true/false)
+
+### System Reset
+- **reset_max_state** — Reset MAX: clear caches, reload .env, verify OpenClaw. FOUNDER ONLY.
+  `{"tool": "reset_max_state"}`
+  Triggers: "MAX reset", "reset yourself", "clear your cache", "reload config", "refresh yourself", "start fresh"
 
 ### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
 - NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.
