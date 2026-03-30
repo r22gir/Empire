@@ -157,7 +157,37 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         handler = TOOL_REGISTRY.get(tool_name)
         if handler:
             return handler(tool_call, desk)
-        return ToolResult(tool=tool_name, success=False, error=f"Unknown tool: {tool_name}")
+
+        # ── Suggest correct tool name for common mistakes ──
+        corrections = {
+            "run_command": "shell_execute",
+            "execute_command": "shell_execute",
+            "run_shell": "shell_execute",
+            "exec": "shell_execute",
+            "command": "shell_execute",
+            "draw": "sketch_to_drawing",
+            "generate_drawing": "sketch_to_drawing",
+            "create_drawing": "sketch_to_drawing",
+            "send_mail": "send_email",
+            "email": "send_email",
+            "find_quotes": "search_quotes",
+            "list_quotes": "search_quotes",
+            "find_contacts": "search_contacts",
+            "list_contacts": "search_contacts",
+            "read_file": "file_read",
+            "write_file": "file_write",
+            "edit_file": "file_edit",
+            "git": "git_ops",
+            "telegram": "send_telegram",
+            "reset": "reset_max_state",
+        }
+        suggestion = corrections.get(tool_name, "")
+        if suggestion:
+            return ToolResult(tool=tool_name, success=False,
+                              error=f"Unknown tool '{tool_name}'. Did you mean '{suggestion}'? Use '{suggestion}' instead.")
+        available = ", ".join(sorted(TOOL_REGISTRY.keys()))
+        return ToolResult(tool=tool_name, success=False,
+                          error=f"Unknown tool: {tool_name}. Available tools: {available}")
     except Exception as e:
         logger.error(f"Tool execution error ({tool_name}): {e}")
         return ToolResult(tool=tool_name, success=False, error=str(e))
@@ -2693,13 +2723,17 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
-TOOLS_DOC = """## Available Tools
+TOOLS_DOC = """## Available Tools (42 total)
 You have access to real tools that query live data. Use them instead of making up information.
 To call a tool, include a tool block in your response:
 
 ```tool
 {"tool": "tool_name", "param1": "value1"}
 ```
+
+IMPORTANT — EXACT TOOL NAMES ONLY. There is NO tool called "run_command", "execute_command", or "run_shell".
+To run shell commands, use "shell_execute". To generate drawings, use "sketch_to_drawing".
+If a tool call fails with "Unknown tool", check the name against this list.
 
 ### Data Tools
 - **search_quotes** — Search quotes by customer or status. Searches BOTH Workroom and CraftForge quotes.
@@ -2759,11 +2793,15 @@ To call a tool, include a tool block in your response:
   `{"tool": "svg_to_pdf", "svg_content": "<svg>...</svg>", "output_path": "/home/rg/empire-repo/uploads/drawing.pdf"}`
   Or from file: `{"tool": "svg_to_pdf", "svg_path": "/path/to/drawing.svg"}`
   IMPORTANT: Always use this tool to convert SVG drawings to PDF. Do NOT write conversion scripts.
-- **sketch_to_drawing** — Generate professional architectural drawings for ANY item type (bench, window treatment, pillow, upholstery, table, etc.). Auto-classifies the input to route to the correct renderer. Returns a PDF.
+- **sketch_to_drawing** — Generate professional architectural drawings for ANY item type. Auto-classifies input and routes to the correct renderer. Returns a PDF file path.
+  **Bench drawings** produce a 4-QUADRANT layout: Plan View + Isometric View + Front Elevation + Empire Workroom Title Block.
+  Bench (straight): `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 10, "name": "Main Dining Bench", "seat_depth": 18, "seat_height": 18, "back_height": 34}`
+  Bench (L-shape): `{"tool": "sketch_to_drawing", "shape": "l_shape", "lf": 12, "name": "Corner Booth"}`
+  Bench (U-shape): `{"tool": "sketch_to_drawing", "shape": "u_shape", "lf": 15, "name": "U Booth", "multiplier": 2}`
   From quote: `{"tool": "sketch_to_drawing", "quote_id": "30ad17d4"}`
-  Bench: `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 20, "name": "Main Dining Bench"}`
   Window: `{"tool": "sketch_to_drawing", "name": "Office Windows", "item_type": "window", "dimensions": {"Width": "72\"", "Height": "48\"", "Drop": "84\""}}`
   Generic: `{"tool": "sketch_to_drawing", "name": "Ottoman", "description": "round ottoman", "dimensions": {"Diameter": "36\"", "Height": "18\""}}`
+  The PDF can be emailed using send_email with the pdf_path as an attachment.
   Shapes: "straight", "l-shape", "u-shape". For U-shaped, add "multiplier": 2 if there are multiple booths.
   After generating, use send_email to deliver the PDF to the owner or client.
 
