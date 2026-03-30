@@ -259,53 +259,89 @@ def _get_desk_status(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("search_quotes")
 def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Search quotes by customer name or status."""
+    """Search quotes by customer name or status. Searches BOTH Workroom and CraftForge quotes."""
     customer = params.get("customer_name", "").lower()
     status = params.get("status")
+    source_filter = params.get("source", "").lower()  # "workroom", "craftforge", or "" for both
     limit = min(params.get("limit", 10), 20)
 
     quotes = []
-    if os.path.exists(QUOTES_DIR):
-        for fname in os.listdir(QUOTES_DIR):
-            if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
-                continue
-            try:
-                with open(os.path.join(QUOTES_DIR, fname)) as f:
-                    q = json.load(f)
-                if "id" not in q:
+
+    # ── Search Workroom quotes ──
+    if source_filter in ("", "workroom", "all"):
+        if os.path.exists(QUOTES_DIR):
+            for fname in os.listdir(QUOTES_DIR):
+                if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
                     continue
-            except (json.JSONDecodeError, OSError):
-                continue
-            if customer and customer not in q.get("customer_name", "").lower():
-                continue
-            if status and q.get("status") != status:
-                continue
-            # Resolve total: flat field → tiers.A → tiers.B → tiers.C
-            total = q.get("total") or 0
-            if not total:
-                tiers = q.get("tiers") or {}
-                for t in ("A", "B", "C"):
-                    tier = tiers.get(t)
-                    if tier and tier.get("subtotal"):
-                        total = tier["subtotal"]
-                        break
-            # Resolve items count: flat line_items → tiers items → rooms
-            items_count = len(q.get("line_items") or [])
-            if not items_count:
-                tiers = q.get("tiers") or {}
-                tier_a = tiers.get("A") or {}
-                items_count = len(tier_a.get("items") or [])
-            if not items_count:
-                items_count = sum(len(r.get("items") or r.get("windows") or []) for r in (q.get("rooms") or []))
-            quotes.append({
-                "id": q["id"],
-                "quote_number": q.get("quote_number"),
-                "customer_name": q.get("customer_name"),
-                "total": total,
-                "status": q.get("status"),
-                "created_at": q.get("created_at", "")[:10],
-                "items_count": items_count,
-            })
+                try:
+                    with open(os.path.join(QUOTES_DIR, fname)) as f:
+                        q = json.load(f)
+                    if "id" not in q:
+                        continue
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if customer and customer not in q.get("customer_name", "").lower():
+                    continue
+                if status and q.get("status") != status:
+                    continue
+                # Resolve total: flat field → tiers.A → tiers.B → tiers.C
+                total = q.get("total") or 0
+                if not total:
+                    tiers = q.get("tiers") or {}
+                    for t in ("A", "B", "C"):
+                        tier = tiers.get(t)
+                        if tier and tier.get("subtotal"):
+                            total = tier["subtotal"]
+                            break
+                # Resolve items count: flat line_items → tiers items → rooms
+                items_count = len(q.get("line_items") or [])
+                if not items_count:
+                    tiers = q.get("tiers") or {}
+                    tier_a = tiers.get("A") or {}
+                    items_count = len(tier_a.get("items") or [])
+                if not items_count:
+                    items_count = sum(len(r.get("items") or r.get("windows") or []) for r in (q.get("rooms") or []))
+                quotes.append({
+                    "id": q["id"],
+                    "quote_number": q.get("quote_number"),
+                    "customer_name": q.get("customer_name"),
+                    "total": total,
+                    "status": q.get("status"),
+                    "created_at": q.get("created_at", "")[:10],
+                    "items_count": items_count,
+                    "source": "workroom",
+                })
+
+    # ── Search CraftForge quotes ──
+    cf_dir = os.path.expanduser("~/empire-repo/backend/data/craftforge/designs")
+    if source_filter in ("", "craftforge", "all"):
+        if os.path.exists(cf_dir):
+            for fname in os.listdir(cf_dir):
+                if not fname.endswith(".json") or fname.startswith("_"):
+                    continue
+                try:
+                    with open(os.path.join(cf_dir, fname)) as f:
+                        q = json.load(f)
+                    if "id" not in q:
+                        continue
+                except (json.JSONDecodeError, OSError):
+                    continue
+                if customer and customer not in q.get("customer_name", "").lower():
+                    continue
+                if status and q.get("status") != status:
+                    continue
+                total = q.get("total") or q.get("subtotal") or 0
+                items_count = len(q.get("line_items") or q.get("materials") or [])
+                quotes.append({
+                    "id": q["id"],
+                    "quote_number": q.get("design_number") or q.get("quote_number"),
+                    "customer_name": q.get("customer_name"),
+                    "total": total,
+                    "status": q.get("status"),
+                    "created_at": q.get("created_at", "")[:10],
+                    "items_count": items_count,
+                    "source": "craftforge",
+                })
 
     quotes.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return ToolResult(tool="search_quotes", success=True, result={
@@ -2666,8 +2702,9 @@ To call a tool, include a tool block in your response:
 ```
 
 ### Data Tools
-- **search_quotes** — Search quotes by customer or status
+- **search_quotes** — Search quotes by customer or status. Searches BOTH Workroom and CraftForge quotes.
   `{"tool": "search_quotes", "customer_name": "...", "status": "proposal|draft|sent|accepted"}`
+  Optional: `source` filter: "workroom", "craftforge", or omit for both. Results include `source` field.
 - **get_quote** — Get full quote details by ID
   `{"tool": "get_quote", "quote_id": "..."}`
 - **search_contacts** — Search customers, contractors, vendors
