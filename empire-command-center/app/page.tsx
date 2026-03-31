@@ -46,6 +46,7 @@ import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppScreen from './components/screens/RelistAppScreen';
 import DevPanel from './components/screens/DevPanel';
+import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
@@ -211,6 +212,7 @@ export default function CommandCenter() {
         case 'dev':
           return <DevPanel />;
         case 'openclaw':
+          return <OpenClawTasksPage />;
         case 'hardware':
           return <EcosystemProductPage productId={activeProduct} productName="" productColor="#b8960c" productIcon={null} />;
         case 'vetforge':

@@ -18,6 +18,29 @@ const ITEM_TYPES: { id: string; label: string; icon: string }[] = [
   { id: 'generic', label: 'Other', icon: '📐' },
 ];
 
+const TYPE_ICONS: Record<string, string> = {
+  bench: '🪑', window: '🪟', cushion: '🛋', chair: '💺', sofa: '🛋',
+  headboard: '🛏', ottoman: '🟫', millwork: '🪵', table: '🪵', generic: '📐',
+};
+
+interface AnalyzedItem {
+  id: number;
+  item_type: string;
+  name: string;
+  confidence: number;
+  dimensions: Record<string, string>;
+  notes: string;
+  condition: string;
+  work_needed: string;
+}
+
+interface AnalyzedDrawing {
+  item_id: number;
+  name: string;
+  svg: string;
+  item_type: string;
+}
+
 export default function DrawingStudioPage() {
   const [itemType, setItemType] = useState('generic');
   const [name, setName] = useState('');
@@ -33,6 +56,12 @@ export default function DrawingStudioPage() {
   const [statusMsg, setStatusMsg] = useState('');
   const [sketchLoading, setSketchLoading] = useState(false);
   const [sketchPreview, setSketchPreview] = useState('');
+
+  // Multi-item analysis results
+  const [analyzedItems, setAnalyzedItems] = useState<AnalyzedItem[]>([]);
+  const [analyzedDrawings, setAnalyzedDrawings] = useState<AnalyzedDrawing[]>([]);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [multiMode, setMultiMode] = useState(false);
 
   // Bench-specific
   const [benchType, setBenchType] = useState('straight');
@@ -65,6 +94,10 @@ export default function DrawingStudioPage() {
     if (!file) return;
     setSketchLoading(true);
     setStatusMsg('');
+    setAnalyzedItems([]);
+    setAnalyzedDrawings([]);
+    setSelectedItemId(null);
+    setMultiMode(false);
     try {
       const reader = new FileReader();
       const b64 = await new Promise<string>((resolve) => {
@@ -73,82 +106,126 @@ export default function DrawingStudioPage() {
       });
       setSketchPreview(b64);
 
-      const res = await fetch(`${API}/drawings/analyze-sketch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64 }),
-      });
-      if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
-      const data = await res.json();
-
-      // Populate from AI — map legacy types
-      const typeMap: Record<string, string> = { pillow: 'cushion', upholstery: 'chair' };
-      if (data.item_type) setItemType(typeMap[data.item_type] || data.item_type);
-      if (data.name) setName(data.name);
-      if (data.quote_num) setQuoteNum(data.quote_num);
-      if (data.notes) setNotes(data.notes);
-      if (data.dimensions && Object.keys(data.dimensions).length > 0) {
-        setDimensions(data.dimensions);
-      }
-
-      // Bench-specific
-      if (data.item_type === 'bench' && data.bench_details) {
-        const bd = data.bench_details;
-        if (bd.bench_type) setBenchType(bd.bench_type);
-        if (bd.total_length_ft) setLf(bd.total_length_ft);
-        else if (bd.leg1_length_ft && bd.leg2_length_ft) setLf(bd.leg1_length_ft + bd.leg2_length_ft);
-        else if (bd.back_length_ft) setLf(bd.back_length_ft + (bd.left_depth_ft || 0) + (bd.right_depth_ft || 0));
-      }
-
-      const typeLabel = ITEM_TYPES.find(t => t.id === data.item_type)?.label || data.item_type;
-      showStatus(`Detected: ${typeLabel} — ${Object.keys(data.dimensions || {}).length} dimensions extracted. Generating drawing...`, 6000);
-
-      // Auto-generate drawing after analysis
+      // Try multi-item furniture analyzer first
+      let multiSuccess = false;
       try {
-        let genData;
-        if (data.item_type === 'bench') {
-          // Use professional 4-quadrant bench renderer
-          const bd = data.bench_details || {};
-          const parseDim = (key: string, def: number) => {
-            const raw = (data.dimensions || {})[key];
-            if (raw) { const n = parseFloat(String(raw).replace(/[^0-9.]/g, '')); if (!isNaN(n)) return n; }
-            return (bd as Record<string, number>)[key] || def;
-          };
-          const genRes = await fetch(`${API}/drawings/bench`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              bench_type: bd.bench_type || 'straight',
-              name: data.name || 'Bench',
-              lf: bd.total_length_ft || 10,
-              seat_depth: parseDim('seat_depth_in', 20),
-              seat_height: parseDim('seat_height_in', 18),
-              back_height: parseDim('back_height_in', 18),
-              panel_style: bd.panel_style || 'vertical_channels',
-              quote_num: data.quote_num || '',
-              leg1_length: bd.leg1_length_ft || 0,
-              leg2_length: bd.leg2_length_ft || 0,
-              back_length: bd.back_length_ft || 0,
-              left_depth: bd.left_depth_ft || 0,
-              right_depth: bd.right_depth_ft || 0,
-            }),
-          });
-          genData = await genRes.json();
-        } else {
-          const genRes = await fetch(`${API}/drawings/general`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: data.name || 'Drawing', item_type: data.item_type || 'generic',
-              dimensions: data.dimensions || {}, notes: data.notes || '',
-              bench_type: data.bench_details?.bench_type || 'straight',
-              lf: data.bench_details?.total_length_ft || 0, quote_num: data.quote_num || '',
-            }),
-          });
-          genData = await genRes.json();
+        const mRes = await fetch(`${API}/drawings/analyze-furniture`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: b64, generate_drawings: true }),
+        });
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          const items: AnalyzedItem[] = mData.items || [];
+          const drawings: AnalyzedDrawing[] = (mData.drawings || []).filter((d: AnalyzedDrawing) => d.svg);
+
+          if (items.length > 0) {
+            multiSuccess = true;
+            setAnalyzedItems(items);
+            setAnalyzedDrawings(drawings);
+
+            if (items.length > 1) {
+              // Multi-item mode: show item cards, first drawing in preview
+              setMultiMode(true);
+              setSelectedItemId(items[0].id);
+              const firstDrawing = drawings.find(d => d.item_id === items[0].id) || drawings.find(d => d.item_id === 0) || drawings[0];
+              if (firstDrawing?.svg) setSvgPreview(firstDrawing.svg);
+              showStatus(`Detected ${items.length} items — tap any item card to view its drawing`, 8000);
+            } else {
+              // Single item from multi-analyzer — populate form like before
+              const item = items[0];
+              const typeMap: Record<string, string> = { pillow: 'cushion', upholstery: 'chair' };
+              setItemType(typeMap[item.item_type] || item.item_type);
+              if (item.name) setName(item.name);
+              if (item.notes) setNotes(item.notes);
+              if (item.dimensions && Object.keys(item.dimensions).length > 0) {
+                setDimensions(item.dimensions);
+              }
+              if (drawings[0]?.svg) setSvgPreview(drawings[0].svg);
+
+              const typeLabel = ITEM_TYPES.find(t => t.id === item.item_type)?.label || item.item_type;
+              const dimCount = Object.keys(item.dimensions || {}).length;
+              showStatus(`Detected: ${typeLabel} — ${dimCount} dimensions extracted`, 6000);
+            }
+          }
         }
-        if (genData.svg) setSvgPreview(genData.svg);
-      } catch { /* user can still click Generate manually */ }
+      } catch { /* fall through to legacy analyzer */ }
+
+      // Fallback: legacy single-item analyzer
+      if (!multiSuccess) {
+        const res = await fetch(`${API}/drawings/analyze-sketch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: b64 }),
+        });
+        if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
+        const data = await res.json();
+
+        const typeMap: Record<string, string> = { pillow: 'cushion', upholstery: 'chair' };
+        if (data.item_type) setItemType(typeMap[data.item_type] || data.item_type);
+        if (data.name) setName(data.name);
+        if (data.quote_num) setQuoteNum(data.quote_num);
+        if (data.notes) setNotes(data.notes);
+        if (data.dimensions && Object.keys(data.dimensions).length > 0) {
+          setDimensions(data.dimensions);
+        }
+
+        if (data.item_type === 'bench' && data.bench_details) {
+          const bd = data.bench_details;
+          if (bd.bench_type) setBenchType(bd.bench_type);
+          if (bd.total_length_ft) setLf(bd.total_length_ft);
+          else if (bd.leg1_length_ft && bd.leg2_length_ft) setLf(bd.leg1_length_ft + bd.leg2_length_ft);
+          else if (bd.back_length_ft) setLf(bd.back_length_ft + (bd.left_depth_ft || 0) + (bd.right_depth_ft || 0));
+        }
+
+        const typeLabel = ITEM_TYPES.find(t => t.id === data.item_type)?.label || data.item_type;
+        showStatus(`Detected: ${typeLabel} — ${Object.keys(data.dimensions || {}).length} dimensions extracted. Generating drawing...`, 6000);
+
+        try {
+          let genData;
+          if (data.item_type === 'bench') {
+            const bd = data.bench_details || {};
+            const parseDim = (key: string, def: number) => {
+              const raw = (data.dimensions || {})[key];
+              if (raw) { const n = parseFloat(String(raw).replace(/[^0-9.]/g, '')); if (!isNaN(n)) return n; }
+              return (bd as Record<string, number>)[key] || def;
+            };
+            const genRes = await fetch(`${API}/drawings/bench`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                bench_type: bd.bench_type || 'straight',
+                name: data.name || 'Bench',
+                lf: bd.total_length_ft || 10,
+                seat_depth: parseDim('seat_depth_in', 20),
+                seat_height: parseDim('seat_height_in', 18),
+                back_height: parseDim('back_height_in', 18),
+                panel_style: bd.panel_style || 'vertical_channels',
+                quote_num: data.quote_num || '',
+                leg1_length: bd.leg1_length_ft || 0,
+                leg2_length: bd.leg2_length_ft || 0,
+                back_length: bd.back_length_ft || 0,
+                left_depth: bd.left_depth_ft || 0,
+                right_depth: bd.right_depth_ft || 0,
+              }),
+            });
+            genData = await genRes.json();
+          } else {
+            const genRes = await fetch(`${API}/drawings/general`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: data.name || 'Drawing', item_type: data.item_type || 'generic',
+                dimensions: data.dimensions || {}, notes: data.notes || '',
+                bench_type: data.bench_details?.bench_type || 'straight',
+                lf: data.bench_details?.total_length_ft || 0, quote_num: data.quote_num || '',
+              }),
+            });
+            genData = await genRes.json();
+          }
+          if (genData.svg) setSvgPreview(genData.svg);
+        } catch { /* user can still click Generate manually */ }
+      }
     } catch {
       showStatus('Failed to analyze sketch');
     } finally {
@@ -156,6 +233,22 @@ export default function DrawingStudioPage() {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, []);
+
+  // Select an analyzed item — show its drawing and populate form
+  const selectAnalyzedItem = useCallback((itemId: number) => {
+    setSelectedItemId(itemId);
+    const item = analyzedItems.find(i => i.id === itemId);
+    const drawing = analyzedDrawings.find(d => d.item_id === itemId);
+    if (drawing?.svg) setSvgPreview(drawing.svg);
+    if (item) {
+      setItemType(item.item_type);
+      setName(item.name);
+      setNotes(item.notes || '');
+      if (item.dimensions && Object.keys(item.dimensions).length > 0) {
+        setDimensions(item.dimensions);
+      }
+    }
+  }, [analyzedItems, analyzedDrawings]);
 
   const hasDimensions = Object.keys(dimensions).length > 0 || (itemType === 'bench' && lf > 0);
 
@@ -346,6 +439,37 @@ export default function DrawingStudioPage() {
               }} />
             )}
           </div>
+
+          {/* Multi-item cards (shown when photo has multiple items) */}
+          {multiMode && analyzedItems.length > 1 && (
+            <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1.5px solid #b8960c' }}>
+              <label style={labelStyle}>Detected Items ({analyzedItems.length})</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                {analyzedItems.map(item => (
+                  <button key={item.id} onClick={() => selectAnalyzedItem(item.id)} style={{
+                    ...btnBase, width: '100%', padding: '10px 14px', fontSize: 13,
+                    flexDirection: 'row', justifyContent: 'flex-start', gap: 10,
+                    background: selectedItemId === item.id ? '#fdf8eb' : '#f8f6f2',
+                    border: selectedItemId === item.id ? '2px solid #b8960c' : '2px solid transparent',
+                    color: '#333', fontWeight: selectedItemId === item.id ? 700 : 500,
+                    borderRadius: 10,
+                  }}>
+                    <span style={{ fontSize: 20 }}>{TYPE_ICONS[item.item_type] || '📐'}</span>
+                    <span style={{ flex: 1, textAlign: 'left' }}>
+                      <span style={{ display: 'block', fontSize: 13, fontWeight: 600 }}>{item.name || item.item_type}</span>
+                      <span style={{ display: 'block', fontSize: 11, color: '#888' }}>
+                        {item.item_type.replace(/_/g, ' ')} — {Object.keys(item.dimensions || {}).length} dims
+                        {item.condition ? ` — ${item.condition}` : ''}
+                      </span>
+                    </span>
+                    <span style={{ fontSize: 10, color: '#b8960c', fontWeight: 700 }}>
+                      {Math.round(item.confidence * 100)}%
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Item Type */}
           <div style={{ background: '#fff', borderRadius: 14, padding: 16, border: '1px solid #ece8e0' }}>

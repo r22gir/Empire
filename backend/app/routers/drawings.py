@@ -169,6 +169,77 @@ async def analyze_sketch(req: SketchAnalyzeRequest):
     return json.loads(m.group(0))
 
 
+class FurnitureAnalyzeRequest(BaseModel):
+    image: str  # base64 image data
+    provider: str = "grok"  # "grok" or "claude"
+    generate_drawings: bool = True
+    generate_fabrication: bool = False
+
+
+@router.post("/drawings/analyze-furniture")
+async def analyze_furniture(req: FurnitureAnalyzeRequest):
+    """Multi-object furniture analysis — detects ALL items in a photo/sketch.
+
+    Returns items with classifications, dimensions, per-item drawings, and
+    optional fabrication data. Upgrades analyze-sketch from single to multi-item.
+    """
+    from app.services.vision.furniture_analyzer import (
+        analyze_image, get_fabrication_data, enrich_with_fabric,
+    )
+
+    try:
+        result = await analyze_image(req.image, provider=req.provider)
+    except Exception as e:
+        log.error(f"Furniture analysis failed: {e}")
+        raise HTTPException(500, f"Analysis failed: {e}")
+
+    if result.error:
+        raise HTTPException(500, result.error)
+
+    response = result.to_dict()
+
+    # Optional fabrication data
+    if req.generate_fabrication:
+        fab_data = [get_fabrication_data(item) for item in result.items]
+        response["fabrication"] = fab_data
+
+    # Fabric enrichment (always attempt)
+    try:
+        response["fabric_matches"] = enrich_with_fabric(result.items)
+    except Exception:
+        response["fabric_matches"] = []
+
+    return response
+
+
+@router.post("/drawings/analyze-furniture/pdf")
+async def analyze_furniture_pdf(req: FurnitureAnalyzeRequest):
+    """Multi-object furniture analysis with PDF output."""
+    from app.services.vision.furniture_analyzer import analyze_image, analysis_to_pdf
+
+    try:
+        result = await analyze_image(req.image, provider=req.provider)
+    except Exception as e:
+        raise HTTPException(500, f"Analysis failed: {e}")
+
+    if result.error:
+        raise HTTPException(500, result.error)
+
+    if not result.drawings:
+        raise HTTPException(422, "No drawings generated")
+
+    output_path = analysis_to_pdf(result)
+
+    with open(output_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="furniture_analysis.pdf"'},
+    )
+
+
 class GeneralDrawingRequest(BaseModel):
     name: str = "Drawing"
     item_type: str = "generic"
