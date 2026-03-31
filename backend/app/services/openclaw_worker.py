@@ -234,12 +234,55 @@ async def _process_task(task: dict):
         log.error(f"Task #{task_id} unexpected error: {e}")
 
 
+_tasks_completed_since_summary = 0
+_last_summary_time = None
+
+
+async def _send_batch_summary():
+    """Send a batch summary of recent completions. Called every 30 min if tasks were done."""
+    global _tasks_completed_since_summary, _last_summary_time
+
+    if _tasks_completed_since_summary < 1:
+        return
+
+    conn = _get_db()
+    try:
+        since = _last_summary_time or (datetime.now() - timedelta(minutes=30)).isoformat()
+        done = conn.execute(
+            "SELECT id, title, desk, status FROM openclaw_tasks WHERE completed_at > ? AND status = 'done' ORDER BY completed_at DESC LIMIT 10",
+            (since,),
+        ).fetchall()
+        failed = conn.execute(
+            "SELECT id, title, desk, error FROM openclaw_tasks WHERE completed_at > ? AND status = 'failed' ORDER BY completed_at DESC LIMIT 5",
+            (since,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if not done and not failed:
+        _tasks_completed_since_summary = 0
+        return
+
+    msg = f"📊 OpenClaw Progress — {len(done)} done, {len(failed)} failed\n\n"
+    for r in done:
+        msg += f"✅ #{r[0]} {r[1]} ({r[2]})\n"
+    for r in failed:
+        msg += f"❌ #{r[0]} {r[1]}: {(r[3] or '')[:80]}\n"
+
+    await _notify_telegram(msg)
+    _tasks_completed_since_summary = 0
+    _last_summary_time = datetime.now().isoformat()
+
+
 async def openclaw_worker_loop():
     """Main worker loop — polls queue every 30 seconds, processes one task at a time."""
+    global _tasks_completed_since_summary
     log.info("OpenClaw worker loop started — polling every %ds", POLL_INTERVAL)
 
     # Brief startup delay
     await asyncio.sleep(10)
+
+    summary_interval = 0  # counter for batch summary timing
 
     while True:
         try:
@@ -250,10 +293,17 @@ async def openclaw_worker_loop():
             task = _get_next_task()
             if task:
                 await _process_task(task)
+                _tasks_completed_since_summary += 1
                 # Brief pause between tasks
                 await asyncio.sleep(5)
             else:
                 await asyncio.sleep(POLL_INTERVAL)
+
+            # Batch summary every ~30 minutes (60 poll cycles * 30s)
+            summary_interval += 1
+            if summary_interval >= 60:
+                await _send_batch_summary()
+                summary_interval = 0
 
         except Exception as e:
             log.error(f"Worker loop error: {e}")
