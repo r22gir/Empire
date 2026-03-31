@@ -224,18 +224,17 @@ async def _execute_in_background(task: TaskRequest, task_id: str, task_record: d
         logger.error(f"Background task error: {task.title} [{task_id}]: {e}")
 
 
-@router.get("/tasks")
-async def list_tasks():
-    """List all dispatched tasks and their status."""
+@router.get("/legacy-tasks")
+async def list_legacy_tasks():
+    """List in-memory dispatched tasks (legacy — use /api/v1/openclaw/tasks for DB-backed queue)."""
     return {"tasks": task_queue, "count": len(task_queue)}
 
 
-@router.get("/tasks/{task_id}")
-async def get_task(task_id: str):
-    """Get status/result of a specific task."""
+@router.get("/legacy-tasks/{task_id}")
+async def get_legacy_task(task_id: str):
+    """Get in-memory task status (legacy — use /api/v1/openclaw/tasks/{id} for DB-backed)."""
     for task in task_queue:
         if task["task_id"] == task_id:
-            # Check for full result
             for result in task_results:
                 if result["task_id"] == task_id:
                     return {**task, "result": result}

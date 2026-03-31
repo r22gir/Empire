@@ -168,6 +168,9 @@ except Exception as e:
 # OpenClaw Bridge — MAX→OpenClaw autonomous task dispatch
 load_router("app.routers.openclaw_bridge", "", ["openclaw"])
 
+# OpenClaw Task Queue — persistent task queue with worker
+load_router("app.routers.openclaw_tasks", "", ["openclaw-tasks"])
+
 # Docker / System / Ollama management
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])
@@ -323,6 +326,14 @@ async def start_background_services():
         print(f"✓ MAX Monitor: checking every {max_monitor.get_status()['interval_seconds']}s")
     except Exception as e:
         print(f"✗ MAX Monitor: {e}")
+
+    # OpenClaw Worker Loop — polls task queue, dispatches tasks
+    try:
+        from app.services.openclaw_worker import openclaw_worker_loop
+        asyncio.create_task(openclaw_worker_loop())
+        print("✓ OpenClaw Worker: polling task queue every 30s")
+    except Exception as e:
+        print(f"✗ OpenClaw Worker: {e}")
 
     # ── Autonomous Startup Probes ──
     # Run immediate health check + brain context warm-up on boot
