@@ -107,37 +107,33 @@ export default function DrawingStudioPage() {
       try {
         let genData;
         if (data.item_type === 'bench') {
-          // Use AI pipeline for benches
-          const aiDims: Record<string, number> = {};
-          for (const [k, v] of Object.entries(data.dimensions || {})) {
-            const num = parseFloat(String(v).replace(/[^0-9.]/g, ''));
-            if (!isNaN(num)) aiDims[k.toLowerCase().replace(/\s+/g, '_')] = num;
-          }
-          const genRes = await fetch(`${API}/drawings/ai/bench`, {
+          // Use professional 4-quadrant bench renderer
+          const bd = data.bench_details || {};
+          const parseDim = (key: string, def: number) => {
+            const raw = (data.dimensions || {})[key];
+            if (raw) { const n = parseFloat(String(raw).replace(/[^0-9.]/g, '')); if (!isNaN(n)) return n; }
+            return (bd as Record<string, number>)[key] || def;
+          };
+          const genRes = await fetch(`${API}/drawings/bench`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              bench_type: `bench_${data.bench_details?.bench_type || 'straight'}`,
-              label: data.name || 'BENCH',
-              dimensions: aiDims,
-              options: {},
+              bench_type: bd.bench_type || 'straight',
+              name: data.name || 'Bench',
+              lf: bd.total_length_ft || 10,
+              seat_depth: parseDim('seat_depth_in', 20),
+              seat_height: parseDim('seat_height_in', 18),
+              back_height: parseDim('back_height_in', 18),
+              panel_style: bd.panel_style || 'vertical_channels',
+              quote_num: data.quote_num || '',
+              leg1_length: bd.leg1_length_ft || 0,
+              leg2_length: bd.leg2_length_ft || 0,
+              back_length: bd.back_length_ft || 0,
+              left_depth: bd.left_depth_ft || 0,
+              right_depth: bd.right_depth_ft || 0,
             }),
           });
           genData = await genRes.json();
-          if (genData.error) {
-            // Fallback
-            const fbRes = await fetch(`${API}/drawings/general`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                name: data.name || 'Drawing', item_type: data.item_type || 'generic',
-                dimensions: data.dimensions || {}, notes: data.notes || '',
-                bench_type: data.bench_details?.bench_type || 'straight',
-                lf: data.bench_details?.total_length_ft || 0, quote_num: data.quote_num || '',
-              }),
-            });
-            genData = await fbRes.json();
-          }
         } else {
           const genRes = await fetch(`${API}/drawings/general`, {
             method: 'POST',
@@ -163,40 +159,40 @@ export default function DrawingStudioPage() {
 
   const hasDimensions = Object.keys(dimensions).length > 0 || (itemType === 'bench' && lf > 0);
 
+  // Parse a dimension value from the dimensions dict
+  const parseDimVal = (key: string, def: number): number => {
+    for (const [k, v] of Object.entries(dimensions)) {
+      if (k.toLowerCase().replace(/\s+/g, '_').includes(key)) {
+        const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
+        if (!isNaN(n)) return n;
+      }
+    }
+    return def;
+  };
+
   const generatePreview = useCallback(async () => {
     if (!hasDimensions) return;
     setLoading(true);
     try {
       let data;
       if (itemType === 'bench') {
-        // Use AI parametric pipeline for benches (10-30 seconds)
-        setStatusMsg('AI is drafting your drawing...');
-        const aiDims: Record<string, number> = {};
-        for (const [k, v] of Object.entries(dimensions)) {
-          const num = parseFloat(String(v).replace(/[^0-9.]/g, ''));
-          if (!isNaN(num)) aiDims[k.toLowerCase().replace(/\s+/g, '_')] = num;
-        }
-        const res = await fetch(`${API}/drawings/ai/bench`, {
+        // Professional 4-quadrant bench renderer (instant, no AI wait)
+        setStatusMsg('Generating professional drawing...');
+        const res = await fetch(`${API}/drawings/bench`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            bench_type: `bench_${benchType}`,
-            label: name || 'BENCH',
-            dimensions: aiDims,
-            options: {},
+            bench_type: benchType,
+            name: name || 'Bench',
+            lf: lf || 10,
+            seat_depth: parseDimVal('seat_depth', parseDimVal('depth', 20)),
+            seat_height: parseDimVal('seat_height', 18),
+            back_height: parseDimVal('back_height', 18),
+            panel_style: 'vertical_channels',
+            quote_num: quoteNum,
           }),
         });
         data = await res.json();
-        if (data.error) {
-          // AI pipeline failed — fall back to deterministic renderer
-          showStatus('AI drafting failed, using standard renderer...', 3000);
-          const fbRes = await fetch(`${API}/drawings/general`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name || 'Drawing', item_type: itemType, dimensions, notes, bench_type: benchType, lf, quote_num: quoteNum }),
-          });
-          data = await fbRes.json();
-        }
       } else {
         // Non-bench items use deterministic renderer
         const res = await fetch(`${API}/drawings/general`, {
@@ -221,30 +217,21 @@ export default function DrawingStudioPage() {
     try {
       let res;
       if (itemType === 'bench') {
-        setStatusMsg('AI is generating PDF...');
-        const aiDims: Record<string, number> = {};
-        for (const [k, v] of Object.entries(dimensions)) {
-          const num = parseFloat(String(v).replace(/[^0-9.]/g, ''));
-          if (!isNaN(num)) aiDims[k.toLowerCase().replace(/\s+/g, '_')] = num;
-        }
-        res = await fetch(`${API}/drawings/ai/bench/pdf`, {
+        setStatusMsg('Generating PDF...');
+        res = await fetch(`${API}/drawings/bench/pdf`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            bench_type: `bench_${benchType}`,
-            label: name || 'BENCH',
-            dimensions: aiDims,
-            options: {},
+            bench_type: benchType,
+            name: name || 'Bench',
+            lf: lf || 10,
+            seat_depth: parseDimVal('seat_depth', parseDimVal('depth', 20)),
+            seat_height: parseDimVal('seat_height', 18),
+            back_height: parseDimVal('back_height', 18),
+            panel_style: 'vertical_channels',
+            quote_num: quoteNum,
           }),
         });
-        if (!res.ok) {
-          // Fallback to deterministic
-          res = await fetch(`${API}/drawings/general/pdf`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name || 'Drawing', item_type: itemType, dimensions, notes, bench_type: benchType, lf, quote_num: quoteNum }),
-          });
-        }
       } else {
         res = await fetch(`${API}/drawings/general/pdf`, {
           method: 'POST',
@@ -454,7 +441,7 @@ export default function DrawingStudioPage() {
               background: hasDimensions ? 'linear-gradient(135deg, #b8960c, #d4af37)' : '#ddd',
               color: hasDimensions ? '#1a1a2e' : '#999',
             }}>
-              {loading ? (itemType === 'bench' ? 'AI Drafting (~15s)...' : 'Generating...') : 'Generate Drawing'}
+              {loading ? 'Generating...' : 'Generate Drawing'}
             </button>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={downloadPdf} disabled={pdfLoading || !svgPreview} style={{

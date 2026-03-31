@@ -78,17 +78,19 @@ def _render(req: BenchRequest) -> str:
     sh = req.seat_height
     bh = req.back_height
 
+    ps = req.panel_style if req.panel_style != "flat" else "vertical_channels"
+
     if req.bench_type == "l_shape":
         long_in = req.leg1_length * 12 if req.leg1_length > 0 else width_in * 0.6
         short_in = req.leg2_length * 12 if req.leg2_length > 0 else width_in * 0.4
-        return render_l_shape(req.name, long_in, short_in, d, sh, bh, quote_num=req.quote_num)
+        return render_l_shape(req.name, long_in, short_in, d, sh, bh, quote_num=req.quote_num, panel_style=ps)
     elif req.bench_type == "u_shape":
         back_in = req.back_length * 12 if req.back_length > 0 else width_in * 0.45
         side_in = req.left_depth * 12 if req.left_depth > 0 else width_in * 0.275
         side_d = req.right_depth if req.right_depth > 0 else d
-        return render_u_shape(req.name, back_in, side_in, d, side_d, sh, bh, quote_num=req.quote_num)
+        return render_u_shape(req.name, back_in, side_in, d, side_d, sh, bh, quote_num=req.quote_num, panel_style=ps)
     else:
-        return render_straight(req.name, width_in, d, sh, bh, quote_num=req.quote_num)
+        return render_straight(req.name, width_in, d, sh, bh, quote_num=req.quote_num, panel_style=ps)
 
 
 SKETCH_EXTRACT_PROMPT = """You are a professional workroom estimator analyzing a hand-drawn sketch, measurement drawing, or photo of an item that needs custom fabrication.
@@ -388,41 +390,53 @@ class AIBenchRequest(BaseModel):
 
 @router.post("/drawings/ai/bench")
 async def generate_ai_bench(req: AIBenchRequest):
-    """Generate a bench drawing using AI draftsman + parametric renderer."""
-    from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
-    from app.services.drawing.parametric_renderer import render_to_svg
-    from app.services.drawing.validator import validate_drawing, inject_defaults
+    """Generate a bench drawing — redirects to professional bench_renderer.py.
 
-    prompt = build_bench_prompt(req.bench_type, req.dimensions, req.label, req.options)
-    drawing_json = await call_draftsman(prompt)
+    Legacy endpoint: frontend used to call this for AI parametric pipeline.
+    Now routes to the 4-quadrant professional renderer (1200x850, no rotated text).
+    """
+    from app.services.vision.bench_renderer import render_straight, render_l_shape, render_u_shape
 
-    is_valid, errors = validate_drawing(drawing_json)
-    if not is_valid:
-        log.warning(f"AI drawing validation failed: {errors}")
-        return {"error": f"Drawing validation failed: {errors}", "raw_json": drawing_json}
+    # Parse bench_type: "bench_straight" → "straight"
+    bt = req.bench_type.replace("bench_", "")
+    dims = req.dimensions or {}
+    width_in = float(dims.get("width", dims.get("total_length", 120)))
+    if width_in < 50:
+        width_in = width_in * 12  # convert feet to inches
+    depth = float(dims.get("seat_depth", dims.get("depth", 20)))
+    seat_h = float(dims.get("seat_height", 18))
+    back_h = float(dims.get("back_height", 18))
 
-    drawing_json = inject_defaults(drawing_json)
-    svg = render_to_svg(drawing_json)
-    return {"svg": svg, "json": drawing_json, "label": req.label}
+    if "u" in bt:
+        svg = render_u_shape(req.label, width_in, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
+    elif "l" in bt:
+        svg = render_l_shape(req.label, width_in, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
+    else:
+        svg = render_straight(req.label, width_in, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
+
+    return {"svg": svg, "label": req.label}
 
 
 @router.post("/drawings/ai/bench/pdf")
 async def generate_ai_bench_pdf(req: AIBenchRequest):
-    """Generate bench PDF via AI pipeline."""
-    from app.services.drawing.ai_draftsman import build_bench_prompt, call_draftsman
-    from app.services.drawing.parametric_renderer import render_to_svg
-    from app.services.drawing.validator import validate_drawing, inject_defaults
-    from app.services.vision.bench_renderer import drawings_to_pdf
+    """Generate bench PDF — redirects to professional bench_renderer.py."""
+    from app.services.vision.bench_renderer import render_straight, render_l_shape, render_u_shape, drawings_to_pdf
 
-    prompt = build_bench_prompt(req.bench_type, req.dimensions, req.label, req.options)
-    drawing_json = await call_draftsman(prompt)
+    bt = req.bench_type.replace("bench_", "")
+    dims = req.dimensions or {}
+    width_in = float(dims.get("width", dims.get("total_length", 120)))
+    if width_in < 50:
+        width_in = width_in * 12
+    depth = float(dims.get("seat_depth", dims.get("depth", 20)))
+    seat_h = float(dims.get("seat_height", 18))
+    back_h = float(dims.get("back_height", 18))
 
-    is_valid, errors = validate_drawing(drawing_json)
-    if not is_valid:
-        raise HTTPException(422, f"Drawing validation failed: {errors}")
-
-    drawing_json = inject_defaults(drawing_json)
-    svg = render_to_svg(drawing_json)
+    if "u" in bt:
+        svg = render_u_shape(req.label, width_in, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
+    elif "l" in bt:
+        svg = render_l_shape(req.label, width_in, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
+    else:
+        svg = render_straight(req.label, width_in, depth_in=depth, seat_h_in=seat_h, back_h_in=back_h)
 
     output_path = os.path.join(tempfile.gettempdir(), f"ai_bench_{req.label.replace(' ', '_')}.pdf")
     drawings_to_pdf([{"name": req.label, "svg": svg, "lf": 0}], output_path)
@@ -432,7 +446,7 @@ async def generate_ai_bench_pdf(req: AIBenchRequest):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="ai_bench_drawing.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="bench_drawing.pdf"'},
     )
 
 
