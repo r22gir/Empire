@@ -168,6 +168,12 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "draw": "sketch_to_drawing",
             "generate_drawing": "sketch_to_drawing",
             "create_drawing": "sketch_to_drawing",
+            "analyze_furniture": "sketch_to_drawing",
+            "furniture_analyzer": "sketch_to_drawing",
+            "analyze_photo": "sketch_to_drawing",
+            "queue_task": "queue_openclaw_task",
+            "openclaw_task": "queue_openclaw_task",
+            "create_openclaw_task": "queue_openclaw_task",
             "send_mail": "send_email",
             "email": "send_email",
             "find_quotes": "search_quotes",
@@ -2323,8 +2329,27 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         if data.get("state") == "completed":
             return ToolResult(tool="run_desk_task", success=True, result=data)
         else:
+            # Desk task didn't complete — also queue for OpenClaw as backup
+            try:
+                import httpx as _q_httpx
+                _q_httpx.post(
+                    "http://localhost:8000/api/v1/openclaw/tasks",
+                    json={
+                        "title": title,
+                        "description": params.get("description", title),
+                        "desk": data.get("desk", "general"),
+                        "priority": {"urgent": 1, "high": 3, "normal": 5, "low": 7}.get(
+                            params.get("priority", "normal"), 5
+                        ),
+                        "source": "desk_fallback",
+                    },
+                    timeout=5,
+                )
+                data["openclaw_queued"] = True
+            except Exception:
+                data["openclaw_queued"] = False
             return ToolResult(tool="run_desk_task", success=False,
-                            result=data, error=data.get("result", "Task did not complete"))
+                            result=data, error=data.get("result", "Task did not complete — queued for OpenClaw"))
     except Exception as e:
         return ToolResult(tool="run_desk_task", success=False, error=f"Desk task failed: {e}")
 
@@ -2704,6 +2729,57 @@ def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResul
         return ToolResult(tool="dispatch_to_openclaw", success=False, error=str(e))
 
 
+# ── QUEUE OPENCLAW TASK ─────────────────────────────────────────────
+
+@tool("queue_openclaw_task")
+def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Queue a task for autonomous OpenClaw execution (non-blocking).
+
+    Unlike dispatch_to_openclaw which waits for a result, this queues the task
+    in the persistent DB and returns immediately. The background worker picks
+    it up automatically.
+    """
+    import httpx as _httpx
+
+    title = params.get("title", "").strip()
+    description = params.get("description", "").strip()
+    if not title:
+        return ToolResult(tool="queue_openclaw_task", success=False, error="Task title is required")
+    if not description:
+        description = title
+
+    task_desk = params.get("desk", desk or "general")
+    priority = params.get("priority", 5)
+    if isinstance(priority, str):
+        priority = {"critical": 1, "high": 3, "normal": 5, "low": 7}.get(priority, 5)
+
+    try:
+        resp = _httpx.post(
+            "http://localhost:8000/api/v1/openclaw/tasks",
+            json={
+                "title": title,
+                "description": description,
+                "desk": task_desk,
+                "priority": priority,
+                "source": "max",
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return ToolResult(tool="queue_openclaw_task", success=True, result={
+                "task_id": data.get("id"),
+                "title": title,
+                "desk": task_desk,
+                "status": "queued",
+                "message": f"Task #{data.get('id')} queued for OpenClaw. Worker will pick it up within 30 seconds.",
+            })
+        return ToolResult(tool="queue_openclaw_task", success=False,
+                         error=f"Queue API returned {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        return ToolResult(tool="queue_openclaw_task", success=False, error=str(e))
+
+
 # ── RESET MAX STATE ────────────────────────────────────────────────
 
 @tool("reset_max_state")
@@ -2887,10 +2963,13 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
   BLOCKED: rm -rf, rm -r, pkill -f, kill -9, killall, dd, mkfs, fdisk, sudo rm, chmod 777, sensors-detect, eval, exec, pipe to sh/bash.
 
 ### Autonomous Execution
-- **dispatch_to_openclaw** — Send a task to OpenClaw for autonomous execution. Returns results.
+- **dispatch_to_openclaw** — Send a task to OpenClaw for autonomous execution. Returns results (blocking).
   `{"tool": "dispatch_to_openclaw", "title": "Health check", "description": "Run full API health check"}`
   `{"tool": "dispatch_to_openclaw", "title": "Disk report", "description": "check disk usage", "wait_for_result": true}`
   Optional: `priority` (low/normal/high/critical), `skills_needed` (list of skill names), `wait_for_result` (true/false)
+- **queue_openclaw_task** — Queue a task for OpenClaw (non-blocking). Worker picks it up within 30s. Use this when you want to fire-and-forget.
+  `{"tool": "queue_openclaw_task", "title": "Check disk usage", "description": "Run disk usage report", "desk": "ITDesk", "priority": 5}`
+  Optional: `desk` (CodeForge/ITDesk/ForgeDesk/etc.), `priority` (1=critical, 5=normal, 10=low)
 
 ### System Reset
 - **reset_max_state** — Reset MAX: clear caches, reload .env, verify OpenClaw. FOUNDER ONLY.
