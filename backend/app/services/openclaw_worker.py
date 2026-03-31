@@ -8,6 +8,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import subprocess
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -166,6 +168,19 @@ async def _process_task(task: dict):
     _update_task(task_id, status="running", started_at=datetime.now().isoformat())
 
     try:
+        # Check for drawing tasks — handle directly without OpenClaw
+        if _is_drawing_task(task):
+            try:
+                drawing_result = await _handle_drawing_task(task)
+                _update_task(
+                    task_id, status="done", result=drawing_result[:5000],
+                    completed_at=datetime.now().isoformat(),
+                )
+                log.info(f"Task #{task_id} drawing completed: {task['title']}")
+                return
+            except Exception as e:
+                log.warning(f"Drawing task failed, falling through to OpenClaw: {e}")
+
         prompt = _build_task_prompt(task)
         result = await _dispatch_to_openclaw(prompt)
 
@@ -232,6 +247,170 @@ async def _process_task(task: dict):
         _update_task(task_id, status="failed", error=str(e)[:2000],
                      completed_at=datetime.now().isoformat())
         log.error(f"Task #{task_id} unexpected error: {e}")
+
+
+# ── AUTONOMOUS DEV CAPABILITIES ──────────────────────────────────────
+
+REPO_DIR = os.path.expanduser("~/empire-repo")
+
+# Files that must NEVER be modified by automated processes
+PROTECTED_PATTERNS = [".env", ".git/", "node_modules/", "backend/data/empire.db",
+                      "backend/data/", "main.py", "start-empire.sh", "__pycache__/"]
+
+
+def _is_protected(filepath: str) -> bool:
+    """Check if a file is protected from automated modification."""
+    for pattern in PROTECTED_PATTERNS:
+        if pattern in filepath:
+            return True
+    return False
+
+
+def _validate_python(filepath: str) -> tuple[bool, str]:
+    """Validate Python file syntax."""
+    try:
+        result = subprocess.run(
+            ["python3", "-c", f"import ast; ast.parse(open('{filepath}').read())"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0, result.stderr[:300] if result.returncode != 0 else ""
+    except Exception as e:
+        return False, str(e)
+
+
+async def verify_services() -> dict:
+    """Quick health check on all services."""
+    checks = {}
+    async with httpx.AsyncClient(timeout=10) as client:
+        for name, url in [("backend", "http://localhost:8000/health"),
+                          ("frontend", "http://localhost:3005"),
+                          ("openclaw", "http://localhost:7878/health")]:
+            try:
+                resp = await client.get(url)
+                checks[name] = resp.status_code == 200
+            except Exception:
+                checks[name] = False
+
+    return checks
+
+
+async def safe_git_commit(task: dict, files: list[str], message: str) -> dict:
+    """Commit changes with safety checks. Returns commit info or error."""
+    # 1. Check what changed
+    result = subprocess.run(
+        ["git", "diff", "--stat"], capture_output=True, text=True, cwd=REPO_DIR,
+    )
+    changed = [l.strip().split("|")[0].strip() for l in result.stdout.strip().split("\n") if "|" in l]
+
+    # 2. Refuse if too many files
+    if len(changed) > 20:
+        return {"error": f"Too many files changed ({len(changed)}). Needs manual review."}
+
+    # 3. Check for protected files
+    for f in changed:
+        if _is_protected(f):
+            return {"error": f"Protected file modified: {f}. Needs manual approval."}
+
+    # 4. Validate Python files
+    for f in files:
+        if f.endswith(".py"):
+            full_path = os.path.join(REPO_DIR, f)
+            if os.path.exists(full_path):
+                valid, err = _validate_python(full_path)
+                if not valid:
+                    return {"error": f"Syntax error in {f}: {err}"}
+
+    # 5. Stage and commit
+    subprocess.run(["git", "add"] + files, cwd=REPO_DIR, capture_output=True)
+    desk = task.get("desk", "general")
+    commit_result = subprocess.run(
+        ["git", "commit", "-m", f"openclaw/{desk}: {message}"],
+        cwd=REPO_DIR, capture_output=True, text=True,
+    )
+    if commit_result.returncode != 0:
+        return {"error": f"Git commit failed: {commit_result.stderr[:300]}"}
+
+    # 6. Get hash
+    hash_result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=REPO_DIR,
+    )
+    commit_hash = hash_result.stdout.strip()
+
+    # 7. Push
+    push_result = subprocess.run(
+        ["git", "push", "origin", "main"], cwd=REPO_DIR, capture_output=True, text=True,
+    )
+    if push_result.returncode != 0:
+        log.warning(f"Git push failed: {push_result.stderr[:200]}")
+
+    # 8. Verify services still healthy
+    checks = await verify_services()
+    if not all(checks.values()):
+        failed = [k for k, v in checks.items() if not v]
+        # Auto-revert
+        subprocess.run(["git", "revert", "HEAD", "--no-edit"], cwd=REPO_DIR, capture_output=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=REPO_DIR, capture_output=True)
+        return {"error": f"Services failed after commit ({failed}). Auto-reverted {commit_hash}."}
+
+    return {"commit": commit_hash, "files": files, "pushed": push_result.returncode == 0}
+
+
+# Drawing task detection
+DRAWING_KEYWORDS = ["bench drawing", "generate drawing", "shop drawing", "render bench",
+                    "parametric drawing", "cushion drawing", "window drawing"]
+
+
+def _is_drawing_task(task: dict) -> bool:
+    """Check if a task is a drawing generation request."""
+    text = f"{task['title']} {task['description']}".lower()
+    return any(kw in text for kw in DRAWING_KEYWORDS)
+
+
+async def _handle_drawing_task(task: dict) -> str:
+    """Handle drawing tasks by calling the renderer directly."""
+    desc = task["description"].lower()
+
+    # Parse dimensions from description
+    width_match = re.search(r"(\d+)\s*(?:inch|in|\")", desc)
+    width = int(width_match.group(1)) if width_match else 120
+
+    # Determine bench type
+    if "u-shape" in desc or "u shape" in desc or "booth" in desc:
+        bench_type = "u_shape"
+    elif "l-shape" in desc or "l shape" in desc:
+        bench_type = "l_shape"
+    else:
+        bench_type = "straight"
+
+    # Name from title
+    name = task["title"].replace("drawing", "").replace("Drawing", "").strip() or "Bench"
+
+    # Call the renderer via API
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "http://localhost:8000/api/v1/drawings/bench",
+            json={
+                "bench_type": bench_type,
+                "name": name,
+                "lf": width / 12,
+                "seat_depth": 20,
+                "seat_height": 18,
+                "back_height": 34,
+                "panel_style": "vertical_channels",
+            },
+        )
+
+    if resp.status_code == 200:
+        data = resp.json()
+        # Save SVG to file
+        out_dir = os.path.expanduser("~/empire-repo/uploads/openclaw_drawings")
+        os.makedirs(out_dir, exist_ok=True)
+        svg_path = os.path.join(out_dir, f"task_{task['id']}_{bench_type}.svg")
+        with open(svg_path, "w") as f:
+            f.write(data.get("svg", ""))
+        return f"Drawing generated: {svg_path} ({bench_type}, {width}\")"
+    else:
+        return f"Drawing API error: {resp.status_code}"
 
 
 _tasks_completed_since_summary = 0
