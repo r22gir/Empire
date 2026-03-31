@@ -1763,19 +1763,28 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
                 render_straight, render_l_shape, render_u_shape,
             )
             quote_num = params.get("quote_num", "")
+            cushion_width = float(params.get("cushion_width", 24))
+            panel_style = params.get("panel_style", "vertical_channels")
+            channel_count = int(params.get("channel_count", 6))
+            client = params.get("client", "")
+            project = params.get("project", "")
+
+            style_kw = dict(cushion_width=cushion_width, panel_style=panel_style,
+                            channel_count=channel_count, client=client, project=project)
+
             if "u" in shape:
                 mult = int(params.get("multiplier", 1))
                 svg = render_u_shape(name, width_in, depth_in=seat_depth,
                                      seat_h_in=seat_height, back_h_in=back_height,
-                                     multiplier=mult, quote_num=quote_num)
+                                     multiplier=mult, quote_num=quote_num, **style_kw)
             elif "l" in shape:
                 svg = render_l_shape(name, width_in, depth_in=seat_depth,
                                      seat_h_in=seat_height, back_h_in=back_height,
-                                     quote_num=quote_num)
+                                     quote_num=quote_num, **style_kw)
             else:
                 svg = render_straight(name, width_in, depth_in=seat_depth,
                                       seat_h_in=seat_height, back_h_in=back_height,
-                                      quote_num=quote_num)
+                                      quote_num=quote_num, **style_kw)
             logger.info(f"sketch_to_drawing: bench '{shape}' rendered via bench_renderer.py (4-quadrant, 1200x850)")
 
             if not output_path:
@@ -2820,6 +2829,8 @@ If a tool call fails with "Unknown tool", check the name against this list.
   Bench (straight): `{"tool": "sketch_to_drawing", "shape": "straight", "lf": 10, "name": "Main Dining Bench", "seat_depth": 18, "seat_height": 18, "back_height": 34}`
   Bench (L-shape): `{"tool": "sketch_to_drawing", "shape": "l_shape", "lf": 12, "name": "Corner Booth"}`
   Bench (U-shape): `{"tool": "sketch_to_drawing", "shape": "u_shape", "lf": 15, "name": "U Booth", "multiplier": 2}`
+  **Style params** (optional, owner decides): `"cushion_width": 24` (default 24"), `"panel_style": "vertical_channels"` (or horizontal_channels/tufted/button_tufted/flat), `"channel_count": 6`
+  **Client/Project**: `"client": "John Smith", "project": "Restaurant Renovation"`
   From quote: `{"tool": "sketch_to_drawing", "quote_id": "30ad17d4"}`
   Window: `{"tool": "sketch_to_drawing", "name": "Office Windows", "item_type": "window", "dimensions": {"Width": "72\"", "Height": "48\"", "Drop": "84\""}}`
   Generic: `{"tool": "sketch_to_drawing", "name": "Ottoman", "description": "round ottoman", "dimensions": {"Diameter": "36\"", "Height": "18\""}}`
