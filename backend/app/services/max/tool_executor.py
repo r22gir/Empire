@@ -154,17 +154,15 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
         if tier_error:
             return ToolResult(tool=tool_name, success=False, error=tier_error)
 
-        handler = TOOL_REGISTRY.get(tool_name)
-        if handler:
-            return handler(tool_call, desk)
-
-        # ── Suggest correct tool name for common mistakes ──
-        corrections = {
+        # ── Auto-correct common tool name mistakes ──
+        TOOL_CORRECTIONS = {
             "run_command": "shell_execute",
             "execute_command": "shell_execute",
             "run_shell": "shell_execute",
             "exec": "shell_execute",
             "command": "shell_execute",
+            "bash": "shell_execute",
+            "terminal": "shell_execute",
             "draw": "sketch_to_drawing",
             "generate_drawing": "sketch_to_drawing",
             "create_drawing": "sketch_to_drawing",
@@ -174,23 +172,39 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "queue_task": "queue_openclaw_task",
             "openclaw_task": "queue_openclaw_task",
             "create_openclaw_task": "queue_openclaw_task",
+            "openclaw": "dispatch_to_openclaw",
             "send_mail": "send_email",
             "email": "send_email",
             "find_quotes": "search_quotes",
             "list_quotes": "search_quotes",
+            "search_quote": "search_quotes",
+            "get_quotes": "search_quotes",
             "find_contacts": "search_contacts",
             "list_contacts": "search_contacts",
+            "find_customer": "search_contacts",
+            "search_customer": "search_contacts",
             "read_file": "file_read",
             "write_file": "file_write",
             "edit_file": "file_edit",
+            "append_file": "file_append",
+            "create_quote": "create_quick_quote",
+            "make_quote": "create_quick_quote",
+            "send_message": "send_telegram",
             "git": "git_ops",
             "telegram": "send_telegram",
+            "desk_task": "run_desk_task",
             "reset": "reset_max_state",
         }
-        suggestion = corrections.get(tool_name, "")
-        if suggestion:
-            return ToolResult(tool=tool_name, success=False,
-                              error=f"Unknown tool '{tool_name}'. Did you mean '{suggestion}'? Use '{suggestion}' instead.")
+        if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
+            corrected = TOOL_CORRECTIONS[tool_name]
+            logger.info(f"Auto-corrected tool '{tool_name}' → '{corrected}'")
+            tool_name = corrected
+            tool_call["tool"] = corrected
+
+        handler = TOOL_REGISTRY.get(tool_name)
+        if handler:
+            return handler(tool_call, desk)
+
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         return ToolResult(tool=tool_name, success=False,
                           error=f"Unknown tool: {tool_name}. Available tools: {available}")
@@ -2616,25 +2630,44 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── SHELL EXECUTE (safe, allowlisted) ─────────────────────────────
 
+# Level 1 — auto-execute (read-only + safe operations)
 ALLOWED_COMMANDS = [
+    # Filesystem read
     "ls", "cat", "head", "tail", "wc", "df", "du", "free",
-    "ps", "uptime", "date", "whoami", "pwd", "find", "grep",
+    "find", "grep", "rg", "tree", "file", "stat",
+    # System info
+    "ps", "uptime", "date", "whoami", "pwd", "hostname", "id",
+    "env", "printenv", "uname", "lsb_release", "top -bn1", "pgrep",
+    # Shell basics
     "echo", "sort", "uniq", "tee", "touch", "mkdir", "cp", "mv",
-    "hostname", "id", "env", "printenv",
-    "python3", "sqlite3",
-    "git status", "git log", "git diff", "git branch", "git add", "git commit", "git push", "git pull", "git stash",
-    "curl", "wget", "pip", "pip3", "npm", "npx",
-    "sudo systemctl", "systemctl status", "systemctl restart", "systemctl is-active", "systemctl start", "systemctl stop",
+    "which", "type", "command -v",
+    # Programming
+    "python3", "node -e", "sqlite3", "pytest", "python3 scripts/",
+    # Git
+    "git status", "git log", "git diff", "git branch", "git show",
+    "git add", "git commit", "git push", "git pull", "git stash",
+    "git checkout", "git merge", "git fetch", "git remote", "git tag",
+    # Network
+    "curl", "wget", "dig", "ping", "ss", "netstat",
+    # Package managers
+    "pip", "pip3", "npm", "npx", "npm run",
+    # Service management
+    "sudo systemctl", "systemctl status", "systemctl restart",
+    "systemctl is-active", "systemctl start", "systemctl stop",
     "journalctl",
-    "ollama list", "ollama ps",
-    "docker ps", "docker images",
+    # Tools
+    "ollama list", "ollama ps", "ollama run",
+    "docker ps", "docker images", "docker logs",
     "chmod 600",
 ]
 
+# Hard-blocked — NEVER allow, even for founder
 BLOCKED_PATTERNS = [
-    "rm -rf", "rm -r", "pkill -f", "kill -9", "killall",
-    "dd if=", "mkfs", "fdisk", "sudo rm", "chmod 777",
-    "> /dev/", "| sh", "| bash", "eval", "exec",
+    "rm -rf /", "rm -r /", "rm -rf ~", "rm -r ~",
+    "pkill -9", "kill -9", "killall",
+    "dd if=", "mkfs", "fdisk", "shutdown", "reboot", "init 0",
+    "sudo rm -rf", "chmod 777", "chown root",
+    "> /dev/sda", ":(){ :|:& };:",
     "sensors-detect",  # CRITICAL: crashes EmpireDell
 ]
 

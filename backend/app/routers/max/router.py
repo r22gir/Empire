@@ -2,7 +2,7 @@
 MAX API Router - Endpoints for AI Assistant Manager.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -180,7 +180,7 @@ class PresentRequest(BaseModel):
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks):
+async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
     import time as _time_mod
     _chat_start = _time_mod.time()
 
@@ -471,6 +471,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks)
             tool_results=tool_results_list if tool_results_list else None,
             quality=quality_badge,
         )
+        # Prevent phone/browser caching stale responses
+        http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        http_response.headers["Pragma"] = "no-cache"
         return resp
     except Exception as e:
         logger.error(f"Chat error: {e}")
