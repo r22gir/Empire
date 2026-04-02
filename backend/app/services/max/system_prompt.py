@@ -14,7 +14,7 @@ logger = logging.getLogger("max.system_prompt")
 
 # ── Prompt cache (5-minute TTL) ──────────────────────────────────────
 _prompt_cache: dict = {"prompt": None, "expires": 0}
-_CACHE_TTL = 120  # 2 minutes (was 5 — shorter for faster iteration)
+_CACHE_TTL = 60  # 1 minute — fast refresh for brain context accuracy
 
 
 def _load_memory() -> str:
@@ -366,7 +366,7 @@ def get_max_brain_context() -> str:
     try:
         repo = os.path.expanduser("~/empire-repo")
         result = subprocess.run(
-            ["git", "log", "--oneline", "-5"],
+            ["git", "log", "--oneline", "-10"],
             cwd=repo, capture_output=True, text=True, timeout=5,
         )
         if result.returncode == 0 and result.stdout.strip():
@@ -424,7 +424,7 @@ def get_max_brain_context() -> str:
         last_summary = Path.home() / ".claude-context" / "last_chat_summary.md"
         if last_summary.exists():
             age_s = time.time() - last_summary.stat().st_mtime
-            if age_s < 14400:  # within 4 hours
+            if age_s < 172800:  # within 48 hours
                 content = last_summary.read_text(encoding="utf-8")[:600]
                 sections.append(f"### Current Session Context (updated {int(age_s // 60)}m ago)\n{content}")
     except Exception as e:

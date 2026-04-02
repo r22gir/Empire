@@ -70,6 +70,11 @@ def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) 
     msg = message.lower().strip()
     words = msg.split()
 
+    # Greetings set — used by both voice and standard classification
+    simple_greetings = {'hi', 'hello', 'hey', 'thanks', 'thank you', 'bye',
+                        'good morning', 'good night', 'good evening',
+                        "what's up", 'whats up', 'sup', 'yo'}
+
     # CRITICAL — code/file operations
     critical_keywords = ['fix', 'edit', 'code', 'file', 'git', 'build', 'deploy', 'commit', 'push', 'pull', 'merge', 'rebase', 'scaffold', 'refactor']
     if any(kw in words for kw in critical_keywords) or msg.startswith('read ~/') or msg.startswith('cat ') or '```' in msg:
@@ -101,10 +106,9 @@ def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) 
 
     # Voice transcriptions are less structured — need smarter model
     if source == "voice":
-        # Check if it would otherwise be SIMPLE
-        simple_keywords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'ok', 'yes', 'no', 'bye', 'good morning', 'good night', 'status', 'ping', 'test']
-        if len(words) <= 3 and any(kw in msg for kw in simple_keywords):
-            return TaskComplexity.SIMPLE  # genuinely simple voice = keep cheap
+        # Only exact greetings stay SIMPLE for voice
+        if msg.rstrip('!., ') in simple_greetings:
+            return TaskComplexity.SIMPLE
         return TaskComplexity.MODERATE  # everything else from voice → MODERATE min
 
     # Multi-turn without resolution → escalate
@@ -113,9 +117,10 @@ def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) 
 
     # ── Standard classification ──
 
-    # SIMPLE — ONLY single-word greetings and acknowledgments (Gemini Flash territory)
-    simple_greetings = ['hi', 'hello', 'hey', 'thanks', 'thank you', 'ok', 'yes', 'no', 'bye', 'good morning', 'good night', 'ping', 'test']
-    if len(words) <= 2 and any(msg == kw or msg.rstrip('!.') == kw for kw in simple_greetings):
+    # SIMPLE — ONLY exact greetings (Gemini Flash territory)
+    # Must be an EXACT match after stripping punctuation — no questions, no requests
+    stripped = msg.rstrip('!., ')
+    if stripped in simple_greetings:
         return TaskComplexity.SIMPLE
 
     # COMPLEX — analytical tasks
@@ -150,10 +155,10 @@ DESK_MODEL_ROUTING = {
     "quality": AIModel.CLAUDE_SONNET,     # Phoenix — accuracy critical
     "innovation": AIModel.CLAUDE_SONNET,  # Spark — creative reasoning
     "forge": AIModel.GROQ,               # Kai — routine ops, speed
-    "sales": AIModel.GEMINI,             # Aria — lookups are simple
+    "sales": AIModel.GROQ,              # Aria — needs reasoning, not just lookups
     "costtracker": AIModel.OPENAI_NANO,  # Cipher — basic expense math
     "it": AIModel.GROQ,                  # Orion — health checks routine
-    "marketing": AIModel.GEMINI,         # Content + images
+    "marketing": AIModel.GROQ,          # Nova — content needs reasoning
     "support": AIModel.OPENAI_MINI,      # Fast responses
     # All others fall through to complexity-based routing
 }
