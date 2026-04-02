@@ -60,16 +60,26 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
 
   const fetchTelegramChats = useCallback(async () => {
     try {
-      const res = await fetch(API + '/max/telegram/history?limit=20');
+      const res = await fetch(API + '/max/telegram/history');
       if (res.ok) {
         const data = await res.json();
-        const msgs = data.messages || data.history || [];
-        if (msgs.length > 0) {
+        // Two response formats: {chats:[...]} (list) or {messages:[...]} (single chat)
+        if (data.chats && data.chats.length > 0) {
+          setTelegramChats(data.chats.map((c: any) => ({
+            id: c.chat_id || 'telegram',
+            title: `Telegram (${c.chat_id})`,
+            preview: c.last_message || '',
+            timestamp: c.updated_at || '',
+            messageCount: c.message_count || 0,
+            channel: 'telegram',
+          })));
+        } else if (data.messages && data.messages.length > 0) {
+          const msgs = data.messages;
           setTelegramChats([{
-            id: 'telegram-main',
+            id: data.chat_id || 'telegram-main',
             title: 'Telegram Chat',
-            preview: msgs[0]?.content?.slice(0, 100) || '',
-            timestamp: msgs[0]?.timestamp || '',
+            preview: msgs[msgs.length - 1]?.content?.slice(0, 100) || '',
+            timestamp: msgs[msgs.length - 1]?.timestamp || '',
             messageCount: msgs.length,
             channel: 'telegram',
           }]);
@@ -79,34 +89,28 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
   }, []);
 
   const fetchEmails = useCallback(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
     try {
-      const res = await fetch(API + '/max/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: '{"tool":"check_email","limit":10,"unread_only":false}',
-          channel: 'system',
-        }),
+      const res = await fetch(API + '/max/gmail/inbox?limit=10&unread_only=false', {
+        signal: controller.signal,
       });
-      // Fallback: direct tool call endpoint if available
-    } catch { /* silent */ }
-
-    // Use direct Gmail endpoint
-    try {
-      const res = await fetch(API + '/max/gmail/inbox?limit=10');
       if (res.ok) {
         const data = await res.json();
         setEmails(data.emails || []);
         setUnreadCount(data.unread_total || 0);
       }
-    } catch { /* silent */ }
+    } catch { /* timeout or network error — silent */ }
+    finally { clearTimeout(timer); }
   }, []);
 
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    Promise.all([fetchWebChats(), fetchTelegramChats(), fetchEmails()])
-      .finally(() => setLoading(false));
+    // Load each tab independently — don't let one hang block others
+    fetchWebChats().finally(() => setLoading(false));
+    fetchTelegramChats();
+    fetchEmails();
   }, [open, fetchWebChats, fetchTelegramChats, fetchEmails]);
 
   const handleSearch = useCallback(async () => {

@@ -239,7 +239,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
 
-        response = await ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "")
+        response = await asyncio.wait_for(
+            ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or ""),
+            timeout=45.0,
+        )
 
         # Resolve access control user
         _ac_context = None
@@ -475,6 +478,13 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         http_response.headers["Pragma"] = "no-cache"
         return resp
+    except asyncio.TimeoutError:
+        logger.error("Chat request timed out after 45s")
+        return ChatResponse(
+            response="Request timed out after 45 seconds. The AI provider may be slow or unreachable. Please try again.",
+            model_used="timeout",
+            fallback_used=True,
+        )
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -5,11 +5,11 @@ Filters for emails TO max@empirebox.store by default.
 READ ONLY — no delete, no move, no modify.
 """
 import os
-import base64
 import logging
+import socket
 from pathlib import Path
-from datetime import datetime
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 logger = logging.getLogger("max.gmail_reader")
 
@@ -17,12 +17,18 @@ TOKEN_FILE = Path(__file__).resolve().parents[3] / "token.json"
 CREDS_FILE = Path(__file__).resolve().parents[3] / "credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
+# Global timeout for all Gmail HTTP calls (seconds)
+_GMAIL_TIMEOUT = 10
+_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gmail")
+
 
 def _get_service():
     """Build Gmail API service from saved OAuth2 token."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
+    from google_auth_httplib2 import AuthorizedHttp
+    import httplib2
 
     if not TOKEN_FILE.exists():
         raise RuntimeError(
@@ -35,42 +41,35 @@ def _get_service():
         creds.refresh(Request())
         TOKEN_FILE.write_text(creds.to_json())
 
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+    # Build with a timeout-aware http transport
+    http = httplib2.Http(timeout=_GMAIL_TIMEOUT)
+    authed_http = AuthorizedHttp(creds, http=http)
+    return build("gmail", "v1", http=authed_http, cache_discovery=False)
 
 
-def check_inbox(
+def _check_inbox_sync(
     limit: int = 10,
     unread_only: bool = True,
     filter_to: Optional[str] = None,
 ) -> dict:
-    """Fetch recent emails. Returns dict with count and email list.
-
-    Parameters
-    ----------
-    limit : int
-        Max emails to return (default 10, max 20).
-    unread_only : bool
-        If True, only return unread emails.
-    filter_to : str or None
-        Filter for emails sent TO this address. Defaults to MAX_EMAIL env var.
-    """
+    """Internal sync implementation — always run in a thread."""
     limit = min(limit, 20)
     max_email = filter_to or os.getenv("MAX_EMAIL", "max@empirebox.store")
 
+    # Set socket-level timeout as safety net
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(_GMAIL_TIMEOUT)
     try:
         service = _get_service()
-    except Exception as e:
-        return {"success": False, "error": str(e), "emails": [], "count": 0}
 
-    # Build Gmail search query
-    query_parts = []
-    if max_email:
-        query_parts.append(f"to:{max_email}")
-    if unread_only:
-        query_parts.append("is:unread")
-    query = " ".join(query_parts) if query_parts else None
+        # Build Gmail search query
+        query_parts = []
+        if max_email:
+            query_parts.append(f"to:{max_email}")
+        if unread_only:
+            query_parts.append("is:unread")
+        query = " ".join(query_parts) if query_parts else None
 
-    try:
         results = service.users().messages().list(
             userId="me", q=query, maxResults=limit
         ).execute()
@@ -112,4 +111,23 @@ def check_inbox(
         }
     except Exception as e:
         logger.error(f"Gmail check failed: {e}")
+        return {"success": False, "error": str(e), "emails": [], "count": 0}
+    finally:
+        socket.setdefaulttimeout(old_timeout)
+
+
+def check_inbox(
+    limit: int = 10,
+    unread_only: bool = True,
+    filter_to: Optional[str] = None,
+) -> dict:
+    """Fetch recent emails with a hard 15s timeout. Thread-safe, never blocks event loop."""
+    try:
+        future = _executor.submit(_check_inbox_sync, limit, unread_only, filter_to)
+        return future.result(timeout=15)
+    except FuturesTimeout:
+        logger.error("Gmail check timed out after 15s")
+        return {"success": False, "error": "Gmail request timed out (15s)", "emails": [], "count": 0}
+    except Exception as e:
+        logger.error(f"Gmail check error: {e}")
         return {"success": False, "error": str(e), "emails": [], "count": 0}
