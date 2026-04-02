@@ -1,8 +1,8 @@
 # CLAUDE CODE — READ THIS FIRST
 
-## Active Session: Empire Full System Fix (2026-04-01)
+## Active Session: EMPIRE COMPLETE SYSTEM BUILD
 Check progress: cat ~/empire-repo/.claude-progress.md
-Resume from next unchecked block. Do NOT redo completed work.
+Resume from the next unchecked block. Do NOT redo completed work.
 
 ## Project
 - Backend: ~/empire-repo/backend/app/ (port 8000)
@@ -12,8 +12,10 @@ Resume from next unchecked block. Do NOT redo completed work.
 - Owner on PHONE via studio.empirebox.store + Telegram
 
 ## Rules
-- Commit + push after EVERY block (one at a time, not batched)
+- EXECUTE, don't describe
+- Commit + push after EVERY block
 - Telegram update after every block
-- Test before commit — never break running services
+- VERIFY before marking complete
+- If it breaks, revert immediately
 - One service restart at a time
-- If something breaks, revert immediately
+- Mark partial/failed/blocked honestly — NEVER fake completion
