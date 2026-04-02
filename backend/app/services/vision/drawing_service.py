@@ -259,13 +259,24 @@ def _parse_dim(dimensions: dict, key: str, default: float = 0) -> float:
 # ── WINDOW RENDERER (1 view) ─────────────────────────────────────
 
 def render_window(params: dict) -> str:
-    """Single clean front-view window diagram. Portrait 850x1100."""
+    """Professional window treatment shop drawing. Portrait 850x1100.
+
+    Supports: drapery panels, roman shades, cornices, valances, roller shades.
+    Shows window frame, treatment in position, dimension callouts,
+    pleat style, fullness, lining, mount type, rod/track, stack-back.
+    """
     name = params.get("name", "Window Treatment")
-    width = _parse_dim(params.get("dimensions", {}), "width", params.get("width", 72))
-    height = _parse_dim(params.get("dimensions", {}), "height", params.get("height", 48))
-    drop = _parse_dim(params.get("dimensions", {}), "drop", params.get("drop", 0))
+    dims = params.get("dimensions", {})
+    width = _parse_dim(dims, "width", params.get("width", 72))
+    height = _parse_dim(dims, "height", params.get("height", 48))
+    drop = _parse_dim(dims, "drop", params.get("drop", 0))
     treatment = params.get("treatment_type", "")
     mount = params.get("mount_type", "inside")
+    pleat_style = params.get("pleat_style", "")
+    fullness = params.get("fullness", 0)
+    panels = params.get("panels", 0)
+    stack_dir = params.get("stack_direction", "split")
+    lining = params.get("lining", "")
     notes = params.get("notes", "")
 
     svg_w, svg_h = 850, 1100
@@ -279,7 +290,7 @@ def render_window(params: dict) -> str:
 
     # Scale to fit
     draw_area_w = svg_w - 200
-    draw_area_h = svg_h - 380
+    draw_area_h = svg_h - 420
     eff_h = drop if drop > 0 else height
     scale = min(draw_area_w / max(width, 1), draw_area_h / max(eff_h, 1))
     scale = min(scale, 6)
@@ -292,7 +303,7 @@ def render_window(params: dict) -> str:
     x0 = cx - w_s / 2
     y0 = cy - h_s / 2
 
-    # Window frame (double lines)
+    # Window frame (double lines — architectural style)
     frame_pad = 8
     parts.append(_rect(x0 - frame_pad, y0 - frame_pad, w_s + frame_pad * 2, h_s + frame_pad * 2, SW_HEAVY))
     parts.append(_rect(x0, y0, w_s, h_s, SW_MED))
@@ -315,25 +326,38 @@ def render_window(params: dict) -> str:
         parts.append(_line(x0 + 4, y0 + h_s - 2, x0 + w_s - 4, y0 + h_s - 2, SW_MED))
         parts.append(_text(cx, y0 + h_s / 2, "ROMAN SHADE", 10, fill=GRAY))
     elif any(kw in treatment_lower for kw in ["drape", "drapery", "curtain", "ripple", "pleat"]):
-        # Drapery — vertical folds
-        rod_y = y0 - frame_pad - 10
-        parts.append(_line(x0 - 30, rod_y, x0 + w_s + 30, rod_y, 3))
-        # Curtain folds
-        fold_count = max(int(width / 4), 6)
+        # Drapery — rod/track above window
+        rod_y = y0 - frame_pad - 14
+        rod_ext = 30 if mount == "outside" else 0
+        parts.append(_line(x0 - rod_ext, rod_y, x0 + w_s + rod_ext, rod_y, 3))
+        # Rod finials
+        parts.append(f'<circle cx="{x0 - rod_ext - 4}" cy="{rod_y}" r="4" fill="none" stroke="black" stroke-width="1.5"/>')
+        parts.append(f'<circle cx="{x0 + w_s + rod_ext + 4}" cy="{rod_y}" r="4" fill="none" stroke="black" stroke-width="1.5"/>')
+
+        # Curtain folds (density based on fullness)
+        actual_fullness = fullness if fullness > 0 else 2.5
+        fold_count = max(int(width * actual_fullness / 6), 6)
         fold_w = w_s / fold_count
         for i in range(fold_count):
             fx = x0 + i * fold_w + fold_w / 2
             parts.append(_line(fx, rod_y + 4, fx, y0 + h_s + 10, SW_LIGHT, LIGHT_GRAY))
-        # Side panels
+
+        # Side panels based on stack direction
         panel_w = w_s * 0.15
-        parts.append(_rect(x0 - 2, rod_y + 4, panel_w, h_s + frame_pad + 14, SW_MED, fill="#f5f0eb"))
-        parts.append(_rect(x0 + w_s - panel_w + 2, rod_y + 4, panel_w, h_s + frame_pad + 14, SW_MED, fill="#f5f0eb"))
+        if stack_dir == "left":
+            parts.append(_rect(x0 - 2, rod_y + 4, panel_w * 2, h_s + frame_pad + 18, SW_MED, fill="#f5f0eb"))
+        elif stack_dir == "right":
+            parts.append(_rect(x0 + w_s - panel_w * 2 + 2, rod_y + 4, panel_w * 2, h_s + frame_pad + 18, SW_MED, fill="#f5f0eb"))
+        else:  # split
+            parts.append(_rect(x0 - 2, rod_y + 4, panel_w, h_s + frame_pad + 18, SW_MED, fill="#f5f0eb"))
+            parts.append(_rect(x0 + w_s - panel_w + 2, rod_y + 4, panel_w, h_s + frame_pad + 18, SW_MED, fill="#f5f0eb"))
+
         parts.append(_text(cx, y0 + h_s / 2, "DRAPERY", 10, fill=GRAY))
     elif any(kw in treatment_lower for kw in ["valance", "cornice"]):
         # Valance/cornice — top treatment
         val_h = min(h_s * 0.25, 40)
         parts.append(_rect(x0 - 10, y0 - frame_pad - val_h, w_s + 20, val_h, SW_HEAVY, fill="#f5f0eb"))
-        parts.append(_text(cx, y0 - frame_pad - val_h / 2 + 4, "VALANCE", 9, fill=GRAY))
+        parts.append(_text(cx, y0 - frame_pad - val_h / 2 + 4, "VALANCE / CORNICE", 9, fill=GRAY))
     else:
         # Generic window treatment
         parts.append(_text(cx, y0 + h_s / 2, "WINDOW TREATMENT", 10, fill=GRAY))
@@ -345,12 +369,33 @@ def render_window(params: dict) -> str:
     # Dimensions
     _dim_h(parts, x0, x0 + w_s, sill_y + 6, f'{width:.0f}"', 22)
     _dim_v(parts, x0 + w_s + frame_pad, y0, y0 + h_s, f'{eff_h:.0f}"', 30)
+    if drop > 0 and drop != height:
+        _dim_v(parts, x0 + w_s + frame_pad + 50, y0, y0 + h_s, f'{drop:.0f}" DROP', 30)
     if mount == "outside":
-        _dim_v(parts, x0 - frame_pad, y0 - frame_pad, y0 + h_s + frame_pad, f'{eff_h + frame_pad * 2 / scale:.0f}" O.M.', -30)
+        _dim_v(parts, x0 - frame_pad - 20, y0 - frame_pad, y0 + h_s + frame_pad,
+               f'{eff_h + frame_pad * 2 / scale:.0f}" O.M.', -30)
+
+    # Spec callouts (right side, below dimensions)
+    spec_y = sill_y + 50
+    spec_lines = []
+    if mount:
+        spec_lines.append(f"MOUNT: {mount.upper()}")
+    if pleat_style:
+        spec_lines.append(f"PLEAT: {pleat_style.upper().replace('_', ' ')}")
+    if fullness:
+        spec_lines.append(f"FULLNESS: {fullness}x")
+    if panels:
+        spec_lines.append(f"PANELS: {panels}")
+    if stack_dir and any(kw in treatment_lower for kw in ["drape", "drapery", "curtain"]):
+        spec_lines.append(f"STACK: {stack_dir.upper()}")
+    if lining:
+        spec_lines.append(f"LINING: {lining.upper()}")
+    for i, line in enumerate(spec_lines):
+        parts.append(_text(cx, spec_y + i * 16, line, 9, fill=GRAY))
 
     # Notes
     if notes:
-        parts.append(_text(cx, svg_h - 200, _esc(notes[:100]), 10, fill=GRAY))
+        parts.append(_text(cx, svg_h - 210, _esc(notes[:100]), 10, fill=GRAY))
 
     # Title block
     _title_block_small(parts, svg_w / 2 - 160, svg_h - 170, 320, 130, name, "Window Treatment")
