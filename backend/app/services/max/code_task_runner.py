@@ -18,7 +18,7 @@ from typing import Optional
 logger = logging.getLogger("max.code_task")
 
 # Tools Atlas is allowed to use in Code Mode
-ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner"}
+ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "shell_execute", "package_manager", "service_manager", "project_scaffold"}
 MAX_ITERATIONS = 8  # Safety cap on tool-call loops (reduced from 15 for performance)
 
 
