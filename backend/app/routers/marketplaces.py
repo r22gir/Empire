@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models import User
 from app.middleware import get_current_user
 
-router = APIRouter(prefix="/marketplaces", tags=["Marketplaces"])
+router = APIRouter(tags=["Marketplaces"])
 
 
 @router.get("")

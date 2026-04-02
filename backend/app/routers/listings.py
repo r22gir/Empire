@@ -29,7 +29,7 @@ from app.services.listing_service import (
     publish_listing
 )
 
-router = APIRouter(prefix="/listings", tags=["Listings"])
+router = APIRouter(tags=["Listings"])
 
 
 @router.get("", response_model=List[ListingResponse])
