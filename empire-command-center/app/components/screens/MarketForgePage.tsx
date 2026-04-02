@@ -58,7 +58,7 @@ const _API_BASE = typeof window !== 'undefined' && window.location.hostname !== 
 const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
   ? 'https://api.empirebox.store/api/v1'
   : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
-const LISTINGS_URL = `${_API_BASE}/listings/listings`;
+const LISTINGS_URL = `${_API_BASE}/listings`;
 const ORDERS_URL = `${_API_BASE}/preorders/`;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
