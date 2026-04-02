@@ -175,6 +175,11 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "openclaw": "dispatch_to_openclaw",
             "send_mail": "send_email",
             "email": "send_email",
+            "check_mail": "check_email",
+            "check_inbox": "check_email",
+            "gmail": "check_email",
+            "read_email": "check_email",
+            "inbox": "check_email",
             "find_quotes": "search_quotes",
             "list_quotes": "search_quotes",
             "search_quote": "search_quotes",
@@ -1498,6 +1503,23 @@ async def _generate_pdf_for_quote(quote_id: str):
 
 
 # ── EMAIL TOOLS ───────────────────────────────────────────────────
+
+@tool("check_email")
+def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Check Gmail inbox via OAuth2. Read-only — no delete, no move."""
+    limit = min(int(params.get("limit", 10)), 20)
+    unread_only = params.get("unread_only", True)
+    filter_to = params.get("filter_to", None)
+
+    try:
+        from app.services.max.gmail_reader import check_inbox
+        result = check_inbox(limit=limit, unread_only=unread_only, filter_to=filter_to)
+        if not result.get("success"):
+            return ToolResult(tool="check_email", success=False, error=result.get("error", "Gmail check failed"))
+        return ToolResult(tool="check_email", success=True, result=result)
+    except Exception as e:
+        return ToolResult(tool="check_email", success=False, error=str(e))
+
 
 @tool("send_email")
 def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:

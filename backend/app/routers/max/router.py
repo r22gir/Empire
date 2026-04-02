@@ -1936,3 +1936,19 @@ async def get_changelog():
         result["error"] = str(e)
 
     return result
+
+
+# ── Gmail Inbox (read-only) ────────────────────────────────────────
+
+@router.get("/gmail/inbox")
+async def gmail_inbox(limit: int = 10, unread_only: bool = True):
+    """Read-only Gmail inbox check via OAuth2."""
+    import asyncio
+    try:
+        from app.services.max.gmail_reader import check_inbox
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: check_inbox(limit=min(limit, 20), unread_only=unread_only)
+        )
+    except Exception as e:
+        return {"success": False, "error": str(e), "emails": [], "count": 0}

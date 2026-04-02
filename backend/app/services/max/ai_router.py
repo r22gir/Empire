@@ -100,6 +100,8 @@ def classify_complexity(message: str, *, source: str = "", turn_count: int = 0) 
         'schedule', 'set reminder', 'remind me',
         'run report', 'generate report', 'show report',
         'post to', 'send to telegram', 'send message',
+        'check my email', 'check email', 'check inbox', 'read my email',
+        'any new email', 'unread email', 'new emails', 'check mail',
     ]
     if any(p in msg for p in tool_trigger_patterns):
         return TaskComplexity.MODERATE

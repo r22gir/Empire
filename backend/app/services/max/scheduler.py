@@ -5,6 +5,7 @@ Each action calls existing tools/functions — no new AI logic needed.
 """
 import logging
 import asyncio
+import os
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -129,11 +130,29 @@ class MaxScheduler:
             if disk.percent > 90:
                 brief += f"\n⚠️ Disk usage high ({disk.percent}%)"
 
-            # Log to notifications — available on demand via "brief" command or dashboard
+            # Log to notifications
             from app.routers.notifications import notify_founder
             notify_founder("MAX", "system_alert", "Morning Brief", brief, "low")
-            self._last_brief = brief  # Cache for on-demand retrieval
-            logger.info("Daily brief generated (on-demand, not auto-sent)")
+            self._last_brief = brief
+
+            # Send morning brief email FROM max@empirebox.store TO founder
+            try:
+                from app.services.max.email_service import EmailService
+                svc = EmailService()
+                if svc.is_configured:
+                    founder_email = os.environ.get("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+                    # Convert Telegram HTML to email-friendly HTML
+                    email_body = brief.replace("\n", "<br>")
+                    svc.send(
+                        to=founder_email,
+                        subject=f"☀️ Empire Morning Brief — {now.strftime('%A, %B %d')}",
+                        body_html=email_body,
+                    )
+                    logger.info(f"Morning brief emailed to {founder_email}")
+            except Exception as e:
+                logger.warning(f"Morning brief email failed: {e}")
+
+            logger.info("Daily brief generated and dispatched")
         except Exception as e:
             logger.error(f"Daily brief failed: {e}")
 

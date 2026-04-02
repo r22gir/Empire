@@ -1,6 +1,7 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock } from 'lucide-react';
+import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
@@ -53,12 +54,15 @@ interface Props {
   onStop: () => void;
   onScreenChange?: (screen: string) => void;
   setOnMessageComplete?: (cb: ((msg: Message) => void) | null) => void;
+  onLoadChat?: (chatId: string) => void;
+  onNewChat?: () => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange, setOnMessageComplete }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [codeMode, setCodeMode] = useState(false);
   const [codeTask, setCodeTask] = useState<any>(null);
@@ -94,6 +98,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     calculate_yardage: '🧮 Calculating yardage...',
     generate_pdf: '📄 Generating PDF...',
     send_email: '📧 Sending email...',
+    check_email: '📧 Checking inbox...',
     file_read: '📂 Reading files...',
     file_write: '📝 Writing files...',
     file_edit: '📝 Editing files...',
@@ -385,12 +390,15 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
 
       {/* MAX Header — compact bold line */}
       <div style={{
-        padding: '6px 0',
-        textAlign: 'center',
+        padding: '6px 12px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         flexShrink: 0,
         borderBottom: '1px solid var(--border)',
         background: 'var(--card-bg)',
       }}>
+        <div style={{ width: 44 }} />
         <span style={{
           fontSize: 14,
           fontWeight: 900,
@@ -400,6 +408,22 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         }}>
           MAX
         </span>
+        <button
+          onClick={() => setHistoryOpen(prev => !prev)}
+          title="Chat History"
+          style={{
+            background: historyOpen ? '#d4a017' : 'none',
+            border: historyOpen ? 'none' : '1px solid var(--border)',
+            borderRadius: 6,
+            color: historyOpen ? '#000' : 'var(--text-muted)',
+            cursor: 'pointer',
+            padding: 6,
+            minHeight: 44, minWidth: 44,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <Clock size={16} />
+        </button>
         {voiceMode && (
           <span style={{
             fontSize: 11,
@@ -966,6 +990,14 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           to { transform: rotate(360deg); }
         }
       `}</style>
+
+      {/* Chat History Panel */}
+      <ChatHistoryPanel
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onLoadChat={(chatId) => { if (onLoadChat) onLoadChat(chatId); }}
+        onNewChat={() => { if (onNewChat) onNewChat(); }}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
 import { useChatHistory } from './hooks/useChatHistory';
+import { API } from './lib/api';
 
 import TopBar from './components/layout/TopBar';
 import LeftNav from './components/layout/LeftNav';
@@ -166,6 +167,51 @@ export default function CommandCenter() {
     chat.sendMessage(msg, imageFilename);
   }, [chat]);
 
+  // Auto-save chat after every assistant message
+  useEffect(() => {
+    const msgs = chat.messages.filter(m => m.id !== 'welcome');
+    if (msgs.length >= 2 && msgs[msgs.length - 1]?.role === 'assistant') {
+      const chatId = (chat as any).chatId;
+      const payload = msgs.map(m => ({ role: m.role, content: m.content, timestamp: m.timestamp }));
+      if (chatId) {
+        fetch(API + `/chats/${chatId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: payload }),
+        }).catch(() => {});
+      } else {
+        fetch(API + '/chats/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: payload }),
+        }).catch(() => {});
+      }
+    }
+  }, [chat.messages]);
+
+  const handleLoadChat = useCallback(async (chatId: string) => {
+    try {
+      const res = await fetch(API + `/chats/${chatId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const msgs = (data.messages || []).map((m: any, i: number) => ({
+          id: m.id || `loaded-${i}`,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp || '',
+          model: m.model,
+        }));
+        chat.loadMessages(msgs, chatId);
+        setActiveScreen('chat');
+      }
+    } catch { /* silent */ }
+  }, [chat, setActiveScreen]);
+
+  const handleNewChat = useCallback(() => {
+    chat.loadMessages([], null);
+    setActiveScreen('chat');
+  }, [chat, setActiveScreen]);
+
   const handleQuickSwitchSelect = useCallback((screen: string) => {
     if (screen === 'workroom-page') { setActiveProduct('workroom'); setActiveScreen('dashboard'); }
     else if (screen === 'craft-page') { setActiveProduct('craft'); setActiveScreen('dashboard'); }
@@ -249,6 +295,8 @@ export default function CommandCenter() {
           onStop={chat.stopStreaming}
           onScreenChange={handleScreenChange}
           setOnMessageComplete={chat.setOnMessageComplete}
+          onLoadChat={handleLoadChat}
+          onNewChat={handleNewChat}
         />
       );
     }
