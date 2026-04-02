@@ -37,6 +37,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# No-cache middleware — EVERY response gets anti-cache headers
+# This prevents phones/browsers/CDNs from serving stale data
+@app.middleware("http")
+async def no_cache_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.headers["Surrogate-Control"] = "no-store"
+    response.headers["CDN-Cache-Control"] = "no-store"
+    return response
+
 # Helper to safely load routers
 def load_router(module_path, prefix, tags):
     try:
