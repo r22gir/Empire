@@ -246,9 +246,30 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         )
 
     logger.info(f"Task created: {task_id} - {title} (desk={task_desk})")
+
+    # Also queue to OpenClaw for autonomous execution
+    openclaw_queued = False
+    try:
+        import httpx as _oc_httpx
+        _oc_resp = _oc_httpx.post(
+            "http://localhost:8000/api/v1/openclaw/tasks",
+            json={
+                "title": title,
+                "description": description or title,
+                "desk": task_desk,
+                "priority": {"urgent": 1, "high": 3, "normal": 5, "low": 7}.get(priority, 5),
+                "source": "create_task",
+                "parent_task_id": task_id,
+            },
+            timeout=5,
+        )
+        openclaw_queued = _oc_resp.status_code == 200
+    except Exception:
+        pass
+
     return ToolResult(tool="create_task", success=True, result={
         "task_id": task_id, "title": title, "priority": priority,
-        "desk": task_desk, "status": "todo",
+        "desk": task_desk, "status": "todo", "openclaw_queued": openclaw_queued,
     })
 
 

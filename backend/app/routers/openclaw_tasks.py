@@ -26,7 +26,7 @@ class TaskCreate(BaseModel):
     source: str = "manual"
     assigned_to: str = "openclaw"
     max_retries: int = 2
-    parent_task_id: Optional[int] = None
+    parent_task_id: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
