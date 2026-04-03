@@ -107,6 +107,7 @@ load_router("app.routers.inbox", "/api/v1", ["inbox"])
 # CraftForge — CNC & 3D print business
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
 load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
+load_router("app.routers.social_setup", "/api/v1", ["social-setup"])
 
 # Avatar / Presentation Mode
 load_router("app.routers.avatar", "/api/v1", ["avatar"])
