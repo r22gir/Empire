@@ -1,292 +1,340 @@
-# Trending Products & Arbitrage Opportunities
-## What's Hot RIGHT NOW -- April 2026
+# Trending Products & Viral Opportunity Guide
+## RelistApp Arbitrage -- April 2026
 
-*Created: April 2, 2026 | Based on live market research*
-
----
-
-## Top Arbitrage Opportunities by Category
-
-### 1. Beauty & Skincare (HOTTEST CATEGORY)
-
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Korean Skincare Sets | $8-15 | $25-45 | TikTok Shop, Amazon | 45-60% | TikTok viral, Google Trends rising |
-| LED Face Masks (Red/Blue Light) | $12-25 | $40-80 | eBay, TikTok Shop | 50-65% | "Glass skin" trend, derma-influencer push |
-| Snail Mucin Serums | $4-8 | $15-25 | TikTok Shop, Mercari | 55-70% | $2.93B market by 2034, TikTok obsession |
-| Peeling Exfoliating Serums | $3-6 | $20-30 | TikTok Shop, Shopify | 81-85% | "Clean girl" aesthetic driving demand |
-| Hair Repair Masks | $5-10 | $18-35 | Amazon, eBay | 50-65% | 73K searches/month, steady uptrend |
-| Vitamin C Serums | $3-7 | $15-30 | Mercari, Amazon | 60-75% | Evergreen skincare staple, Q2 spike |
-| Mouth Tape (sleep) | $2-4 | $10-18 | Amazon, TikTok Shop | 70-80% | Fastest-growing sleep trend 2026 |
-
-**Why Beauty Wins**: Beauty products are lightweight (cheap to ship), consumable (repeat buyers), highly visual (great for TikTok/social selling), and have massive margin potential. Source from Korean/Chinese wholesale suppliers for maximum spread.
+*Updated: April 2, 2026 | Compiled from 20 internal research docs*
 
 ---
 
-### 2. Home Gadgets & Kitchen
+## Why Trending Products Have the Widest Price Spreads
 
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Rain Cloud Aroma Diffuser | $8-15 | $30-50 | TikTok Shop, eBay | 55-65% | Social media viral, mesmerizing video appeal |
-| Magnetic Window Cleaner | $6-12 | $25-40 | eBay, FB Marketplace | 55-65% | Problem-solver, easy demo video |
-| LED Galaxy Projector | $5-15 | $25-45 | TikTok Shop | 60-70% | Q1 2026 breakout hit (10K orders from one viral clip) |
-| Hard Water Shower Filter | $8-15 | $30-50 | Amazon, eBay | 50-60% | Rising awareness of water quality + skin/hair health |
-| Smart Home Gadgets (WiFi plugs, sensors) | $5-10 | $18-30 | eBay, Amazon | 45-55% | Smart home adoption accelerating |
-| Portable Blenders | $6-12 | $25-40 | TikTok Shop, Mercari | 55-65% | Gym/fitness culture crossover |
-| Self-Cleaning Water Bottles | $8-15 | $30-50 | Amazon, Shopify | 50-60% | Wellness trend + UV sterilization tech |
+Trending products create the biggest arbitrage windows for one simple reason: **the market hasn't caught up yet.** When a product goes viral on TikTok, gets featured on a morning show, or surges on Amazon Movers & Shakers, three things happen simultaneously:
 
-**Why Home Gadgets Win**: Products that "solve a problem in seconds" perform best on short-form video platforms. The visual demo creates its own marketing.
+1. **Demand spikes instantly** -- buyers search for the product across every platform
+2. **Supply lags by days or weeks** -- most sellers haven't sourced it yet
+3. **Price discovery is broken** -- buyers don't know what "fair price" is, so they pay what's listed
 
----
+This gap between demand and supply is where arbitrage profit lives. The first sellers to list a trending product set the price. Latecomers compete on price and erode margins. The window is typically **2-4 weeks** before saturation kills profitability.
 
-### 3. Health & Wellness
+### The Trend Lifecycle
 
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Sauna Blankets | $25-50 | $80-150 | Shopify, Amazon | 50-60% | Infrared wellness trend, Google Trends rising |
-| Melatonin Gummies | $3-6 | $12-20 | Amazon | 55-70% | Remarkable rise in sleep aid searches |
-| Magnesium Supplements | $4-8 | $15-25 | Amazon, eBay | 50-65% | "Magnesium for sleep" trending on TikTok |
-| Massage Guns (mini) | $10-20 | $35-60 | eBay, Amazon | 50-65% | Fitness recovery mainstream |
-| Posture Correctors | $3-8 | $15-30 | Amazon, TikTok Shop | 60-75% | Remote work posture awareness |
-| Blue Light Glasses | $2-5 | $12-25 | Mercari, eBay | 65-80% | Screen time concern + fashion accessory |
-| Sleep Bonnets | $3-6 | $12-22 | Amazon, TikTok Shop | 60-70% | Emerging hair protection trend |
+| Phase | Timeframe | Margin | Competition | Action |
+|-------|-----------|--------|-------------|--------|
+| **Discovery** | Day 1-3 | 60-80% | Almost none | List immediately at premium. You set the price. |
+| **Early Adoption** | Day 4-14 | 40-60% | Low (5-20 sellers) | Scale listings across platforms. Maximize volume. |
+| **Growth** | Week 2-4 | 25-40% | Medium (20-100 sellers) | Optimize pricing, ride the wave. |
+| **Saturation** | Month 2+ | 10-20% | High (100+ sellers) | Exit or pivot to bundles/variants. |
+| **Decline** | Month 3+ | 0-10% | Oversaturated | Kill listings. Move on. |
 
-**Why Wellness Wins**: Consumers spend freely on health promises. Lightweight products with high perceived value. Recurring purchase potential for supplements.
+**Rule: If you're not listing within 72 hours of spotting a trend, you've already lost half the margin.**
 
 ---
 
-### 4. Fashion & Accessories
+## How to Monitor Trends (Daily Routine)
 
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Athleisure (leggings, joggers) | $8-15 | $25-50 | Poshmark, Mercari | 45-60% | Searches at all-time high, everyday fashion |
-| Travel Pants | $10-18 | $35-60 | Amazon, Shopify | 50-60% | "Travel pants" searches at strongest ever |
-| Oversized Sunglasses | $2-5 | $12-25 | Depop, Poshmark | 65-80% | Spring/summer seasonal spike |
-| Crossbody Phone Bags | $3-7 | $15-30 | TikTok Shop, Mercari | 60-75% | Hands-free trend, festival season |
-| Y2K Fashion Items | $5-12 | $20-40 | Depop, Poshmark | 55-65% | Gen-Z nostalgia continues strong |
-| Claw Clips (large) | $1-3 | $8-15 | TikTok Shop, Mercari | 75-85% | Sustained fashion accessory trend |
+### 1. Amazon Movers & Shakers (10 min/day)
+**URL**: amazon.com/gp/movers-and-shakers
 
----
+Amazon Movers & Shakers shows the biggest gainers in sales rank over the last 24 hours. This is the single most reliable trend indicator because it's based on actual purchases, not just searches or views.
 
-### 5. Tech Accessories
+**How to use it:**
+- Check top 10 in each of these categories daily: Electronics, Home & Kitchen, Beauty, Toys, Pet Supplies, Sports & Outdoors
+- Look for items with 200%+ BSR jump -- these are surging
+- Cross-reference the item's price on Amazon vs eBay/Mercari sold listings
+- If the arbitrage spread is 25%+, list immediately
 
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Portable Power Banks (20000mAh+) | $8-15 | $25-45 | eBay, Amazon | 50-60% | Market growing to $27.17B by 2034 |
-| Fast Charging Cables (braided) | $1-3 | $8-15 | eBay, Amazon | 75-85% | Consumable, repeat purchase |
-| Wireless Earbuds (budget) | $5-12 | $20-40 | eBay, TikTok Shop | 55-70% | Seasonal peak approaching |
-| Phone Camera Lens Kits | $4-8 | $18-30 | Amazon, eBay | 55-65% | Content creation boom |
-| MagSafe Accessories | $3-8 | $15-30 | eBay, Amazon | 60-75% | iPhone ecosystem expanding |
-| Laptop Stands (ergonomic) | $8-15 | $25-45 | Amazon, eBay | 50-60% | Remote work furniture demand |
+### 2. TikTok Trending (15 min/day)
+**What to search:**
+- "TikTok made me buy it" (evergreen hashtag, 50B+ views)
+- TikTok Shop trending tab
+- Creator marketplace for products getting affiliate pushes
+- Search "viral [category]" (e.g., "viral kitchen gadget", "viral beauty tool")
 
----
+**Why TikTok matters:**
+- TikTok drives product virality faster than any other platform in 2026
+- Products go from unknown to sold-out in 48 hours
+- The audience (18-34) has high impulse-buy behavior
+- TikTok Shop's own algorithm surfaces trending products
 
-### 6. Pet Care (Underrated Opportunity)
+### 3. Google Trends (5 min/day)
+**URL**: trends.google.com
 
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Interactive Pet Toys | $3-8 | $15-30 | Amazon, eBay | 60-75% | Pet spending at record highs |
-| Pet Grooming Gloves | $2-4 | $10-20 | Amazon, TikTok Shop | 70-80% | Viral video potential (satisfying fur removal) |
-| Slow Feeder Bowls | $3-6 | $12-22 | Amazon, eBay | 55-70% | Pet health awareness trend |
-| Pet Car Seat Covers | $8-15 | $25-45 | Amazon, eBay | 50-60% | Spring travel season |
-| GPS Pet Trackers | $10-20 | $35-60 | Amazon, Shopify | 50-60% | Tech + pets crossover |
+- Check "Trending Searches" for product-related queries
+- Compare search interest for products you're considering
+- Use "Related queries" to find emerging product variations
+- Filter by "Past 7 days" for actionable trends (not long-term curiosity)
 
----
+### 4. Social Listening (10 min/day)
+- Reddit: r/BuyItForLife, r/shutupandtakemymoney, r/Flipping, r/AmazonFinds
+- Instagram: #amazonfinds, #tiktokmademebuyit, #musthave
+- YouTube: "best [category] 2026" videos with 100K+ views in the last week
+- X/Twitter: product launch announcements, influencer endorsements
 
-### 7. Seasonal (April-Summer 2026)
+### 5. Competitor Watch (5 min/day)
+- Check top eBay sellers in your categories for new listings
+- Monitor Mercari "just listed" in trending categories
+- Track which products competitors are running Promoted Listings on (they're investing in winners)
 
-| Product | Source Cost | Sell Price | Platform | Margin | Trend Signal |
-|---------|-----------|-----------|----------|--------|-------------|
-| Rotating Infant Car Seats | $40-80 | $120-200 | Amazon, Walmart | 45-55% | Steep rise in search interest |
-| Outdoor String Lights (solar) | $5-12 | $20-35 | Amazon, eBay | 50-60% | Spring/summer patio season |
-| Portable Fans (neck/handheld) | $3-8 | $15-30 | TikTok Shop, Amazon | 60-75% | Pre-summer demand ramp |
-| Insulated Water Bottles | $5-10 | $20-35 | eBay, Mercari | 55-65% | Summer hydration + outdoor activities |
-| Beach/Pool Accessories | $3-8 | $15-25 | Amazon, FB Marketplace | 50-65% | Seasonal spike starting now |
-| Gardening Tools/Kits | $5-12 | $20-35 | Amazon, eBay | 50-60% | Spring gardening season peak |
+**Total daily monitoring time: 45 minutes. Non-negotiable if you want to catch trends early.**
 
 ---
 
-## Viral TikTok Products -- Highest Velocity Opportunities
+## April 2026 Seasonal Context
 
-These products went viral in Q1-Q2 2026 and still have active arbitrage windows:
+April is one of the strongest months for arbitrage because of converging demand drivers:
 
-### 1. LED Galaxy Projector
-- **Source**: $5-15 from CJ Dropshipping / Alibaba
-- **Sell**: $25-45 on TikTok Shop, eBay
-- **Why it's hot**: "Bedroom glow-up" videos. One viral clip = 10,000+ orders in 2 weeks.
-- **Arbitrage window**: OPEN -- source pricing still low, demand still rising.
+### Tax Refund Spending (Peaks Mid-April)
+- Average US tax refund: ~$3,100 (IRS 2025/2026 data)
+- 70%+ of refund recipients spend at least part of it on discretionary purchases
+- Electronics and home improvement see the biggest spike
+- Buyers are less price-sensitive when spending "found money"
+- **Window**: April 1-30, with peak spending April 10-25
 
-### 2. Snail Mucin Products
-- **Source**: $4-8 wholesale
-- **Sell**: $15-25 on TikTok Shop, Amazon
-- **Why it's hot**: K-beauty TikTok obsession. Market expanding to $2.93B by 2034.
-- **Arbitrage window**: OPEN but narrowing -- big brands entering.
+### Spring Cleaning Season
+- Home organization, storage, and cleaning products surge
+- Furniture and home decor see increased buying as people refresh spaces
+- Garage/yard sale season begins (source inventory locally)
 
-### 3. Mini Projectors (portable)
-- **Source**: $15-30 from wholesale
-- **Sell**: $50-90 on eBay, Amazon
-- **Why it's hot**: Low source cost, high perceived value. Movie night / outdoor cinema content.
-- **Arbitrage window**: OPEN -- consistent demand, not yet oversaturated on eBay.
+### Outdoor Season Begins
+- Camping, hiking, and outdoor gear demand increases
+- Garden tools and outdoor furniture season kicks off
+- Car accessories for road trip season
+- Sports equipment for spring leagues
 
-### 4. Peeling Gel Exfoliants
-- **Source**: $3-6 wholesale
-- **Sell**: $20-30 on TikTok Shop, Shopify
-- **Why it's hot**: "Satisfying peel" videos get millions of views. 81-85% gross margins.
-- **Arbitrage window**: WIDE OPEN -- low source cost, high demand.
-
-### 5. Cleaning Gadgets (Drill Brush Sets, Steam Cleaners)
-- **Source**: $5-12 from wholesale
-- **Sell**: $20-35 on Amazon, TikTok Shop
-- **Why it's hot**: "Oddly satisfying" cleaning transformation videos. Problem-solving appeal.
-- **Arbitrage window**: OPEN -- consistent demand year-round.
+### Easter/Spring Events (April 20, 2026)
+- Easter decorations and gifts (niche but profitable pre-holiday)
+- Spring wedding season begins -- wedding accessories, gifts, decor
 
 ---
 
-## Amazon Movers & Shakers -- How to Use for Arbitrage
+## 10 Product Categories Trending Now (April 2026)
 
-Amazon's Movers & Shakers list updates hourly and shows the biggest gainers in sales rank over the past 24 hours. This is a real-time arbitrage signal.
+### 1. Phone Cases & Accessories (iPhone 16 / Samsung S25 Cycle)
+**Why trending:** New phone releases (iPhone 16 series, Samsung Galaxy S25) drive massive accessory demand. Every new phone = millions of people needing new cases, screen protectors, and chargers.
 
-### Strategy
-1. Check Movers & Shakers daily: `amazon.com/gp/movers-and-shakers`
-2. Focus on categories: Home & Kitchen, Beauty, Health & Household, Electronics
-3. When a product spikes on Amazon M&S:
-   - Check if you can source it cheaper from wholesale
-   - List it on eBay/Mercari/TikTok Shop at a markup
-   - Amazon demand spike often precedes demand on other platforms by 1-3 days
-4. Use tools: Keepa, CamelCamelCamel for price history / deal detection
+**Arbitrage window:** Source on AliExpress ($1.50-4) and sell on eBay ($10-18). MagSafe accessories are particularly hot -- the magnetic ecosystem is expanding rapidly.
 
-### Key Categories to Monitor
-- **Home & Kitchen**: Gadgets, kitchen tools, storage solutions
-- **Beauty & Personal Care**: New viral products, K-beauty items
-- **Health & Household**: Supplements, wellness gadgets
-- **Electronics**: Accessories, cables, portable devices
-- **Toys & Games**: Seasonal spikes, viral toys
+**Products to list:**
+- iPhone 16 Pro MagSafe clear cases
+- Samsung S25 Ultra tempered glass 3-packs
+- USB-C 65W GaN chargers (universal demand)
+- MagSafe car mounts and wallet attachments
+- AirPods Pro 2 cases with carabiner clips
+
+**Estimated margin:** 45-65% after fees
+**Volume potential:** 20-50 units/day across platforms
 
 ---
 
-## Google Trends Rising Products -- Long-Term Plays
+### 2. LED/Ambient Lighting Products
+**Why trending:** LED sunset lamps, strip lights, and ambient lighting continue to go viral on TikTok. They photograph well, they're impulse buys, and they transform rooms for under $25.
 
-These products show sustained upward trends (not flash-in-the-pan virality):
+**Arbitrage window:** Source on Temu/AliExpress ($4-8) and sell on TikTok Shop/eBay ($18-30). The visual appeal makes these perfect for TikTok Shop video demos.
 
-### Rising for 12+ Months (Strong Buy Signal)
-1. **Sauna blankets** -- infrared wellness, home spa trend
-2. **Mouth tape** -- sleep optimization becoming mainstream
-3. **Hard water shower filters** -- water quality awareness growing
-4. **Travel pants** -- post-pandemic travel boom continues
-5. **Rotating car seats** -- convenience-driven parenting upgrade
-6. **Magnesium supplements** -- sleep + wellness crossover
-7. **Wireless earbuds** -- annual Q4 peak but steady year-round
+**Products to list:**
+- Sunset lamp projectors (multiple colors)
+- LED strip lights with app control
+- Galaxy/star projector night lights
+- Under-desk LED glow strips
+- LED neon signs (custom-look, pre-made phrases)
 
-### Emerging (6-Month Trend, Getting Started)
-1. **Sleep bonnets** -- hair protection awareness
-2. **Blue light therapy devices** -- following red light therapy adoption curve
-3. **Hair repair masks** -- 73K searches/month and climbing
-4. **Pet GPS trackers** -- tech + pet care convergence
-
-### Seasonal Peaks Approaching (Act Now)
-1. **Outdoor lighting** -- peaks May-July
-2. **Portable fans** -- peaks June-August
-3. **Beach accessories** -- peaks May-July
-4. **Gardening tools** -- peaks March-May (list NOW)
-5. **Insulated bottles** -- peaks May-August
+**Estimated margin:** 50-65% after fees
+**Volume potential:** 15-40 units/day
 
 ---
 
-## Recommended First 50 Products for RelistApp Launch
+### 3. Kitchen Gadgets & Organization
+**Why trending:** Spring cleaning + tax refund spending + TikTok kitchen videos. Small kitchen gadgets under $25 have consistent viral potential and low return rates.
 
-Based on all research, here are the 50 best products to list on Day 1-2, sorted by confidence:
+**Arbitrage window:** Source on Amazon Warehouse/Temu ($3-8) and sell on eBay/Mercari ($12-25).
 
-### Tier 1: Highest Confidence (list these first)
-1. Fast charging cables (braided, multi-pack)
-2. Snail mucin serum
-3. LED galaxy projector
-4. Phone screen protectors (multi-pack)
-5. Claw clips (variety pack)
-6. Pet grooming gloves
-7. Portable power bank (20000mAh)
-8. Vitamin C serum
-9. Magnetic phone mount
-10. Slow feeder pet bowl
+**Products to list:**
+- Vegetable chopper/dicer (perennial TikTok favorite)
+- Magnetic spice rack organizers
+- Under-sink sliding storage bins
+- Silicone stretch lids (multi-size packs)
+- Electric milk frother/whisk
 
-### Tier 2: High Confidence
-11. Mouth tape (sleep strips)
-12. Korean skincare set (5-piece)
-13. Wireless earbuds (budget tier)
-14. Laptop stand (ergonomic)
-15. Hair repair mask
-16. MagSafe wallet/stand
-17. Peeling gel exfoliant
-18. Crossbody phone bag
-19. Posture corrector
-20. Rain cloud diffuser
-
-### Tier 3: Strong Potential
-21. Mini portable blender
-22. Blue light glasses
-23. Sleep bonnet
-24. Hard water shower filter
-25. Drill brush cleaning set
-26. Magnetic window cleaner
-27. Interactive cat toy
-28. Solar outdoor string lights
-29. Neck fan (portable)
-30. Insulated water bottle
-
-### Tier 4: Seasonal / Trending
-31. Beach towel clips
-32. Gardening tool set
-33. Sunscreen stick (SPF 50)
-34. Oversized sunglasses
-35. Travel pants (lightweight)
-36. Yoga mat (thick, non-slip)
-37. Ice roller (face)
-38. Scalp massager
-39. Car phone mount (dashboard)
-40. USB desk fan
-
-### Tier 5: Higher Ticket / Testing
-41. Mini projector (portable)
-42. Massage gun (mini)
-43. Sauna blanket
-44. LED face mask
-45. Pet GPS tracker
-46. Smart plug (WiFi, 4-pack)
-47. Rotating car seat
-48. Self-cleaning water bottle
-49. Standing desk converter
-50. Ergonomic mouse (vertical)
+**Estimated margin:** 35-55% after fees
+**Volume potential:** 15-30 units/day
 
 ---
 
-## Key Takeaways
+### 4. Beauty & Skincare Tools
+**Why trending:** Beauty/skincare is TikTok's #1 commerce category. Tools (not consumables) avoid expiration/ingredient issues that come with skincare products.
 
-1. **Beauty/Skincare is the #1 category** for arbitrage right now. High margins, lightweight shipping, viral potential on TikTok, consumable (repeat purchases).
+**Arbitrage window:** Source on AliExpress ($2-6) and sell on TikTok Shop/Mercari ($12-25). Viral beauty tools can sell thousands of units in a single week.
 
-2. **TikTok Shop is the growth platform** for 2026. Products that demo well in short video have an outsized advantage. But FBT fulfillment requirement (March 2026) adds logistics complexity.
+**Products to list:**
+- Ice roller facial massagers
+- LED red light therapy masks/wands
+- Scalp massager shampoo brushes
+- Jade/rose quartz gua sha sets
+- Electric eyelash curlers
 
-3. **Seasonal timing matters**: List spring/summer products NOW (April). Gardening is peaking. Beach/pool is ramping. Don't wait until June.
-
-4. **Digital products are the ultimate margin play**: Zero shipping, zero inventory, infinite copies. CNC/SVG files on Etsy are a natural fit for Empire Workroom.
-
-5. **Use Amazon Movers & Shakers as a daily signal**: Products spiking on Amazon often haven't hit peak demand on eBay/Mercari yet. 1-3 day arbitrage window.
-
-6. **Source from wholesale, not retail**: eBay explicitly bans retail arbitrage (buying from Amazon/Walmart to resell). Use legitimate wholesale suppliers: CJ Dropshipping, Alibaba (verified suppliers), SaleHoo, Spocket.
-
-7. **Lightweight wins**: Products under 1 lb have the best margin profile. Shipping costs destroy margins on heavy items unless selling locally (FB Marketplace, OfferUp).
+**Estimated margin:** 55-70% after fees
+**Volume potential:** 20-50 units/day (spikes with viral content)
 
 ---
 
-## Sources
+### 5. Pet Supplies & Accessories
+**Why trending:** Pet spending in the US exceeds $140B/year and grows 6-8% annually. Pet owners are emotionally driven buyers -- they spend freely on their animals. Low return rates because pets don't return products.
 
-- [Trending Products 2026 - Printful](https://www.printful.com/blog/trending-products-to-sell)
-- [Trending Dropshipping Products April 2026 - USAdrop](https://usadrop.com/trending-dropshipping-products-april/)
-- [Viral TikTok Products 2026 - CJ Dropshipping](https://cjdropshipping.com/blogs/winning-products/TikTok-Viral-products-2026)
-- [Google Trends Products 2026 - Glimpse](https://meetglimpse.com/google-trends/products/)
-- [Google Trends Products - Shopify](https://www.shopify.com/blog/how-to-use-google-trends-to-start-and-run-a-retail-business)
-- [Amazon Movers & Shakers](https://www.amazon.com/gp/movers-and-shakers)
-- [Best TikTok Products 2026 - DarkRoom Agency](https://www.darkroomagency.com/observatory/the-best-tiktok-products-to-sell-in-2026-what-actually-works-on-tiktok-shop)
-- [Top 50 Trending Dropshipping Products 2026 - Dropified](https://www.dropified.com/blog/top-50-trending-dropshipping-products-to-sell-in-2026-with-profit-margins/)
-- [Trending Products - Hostinger](https://www.hostinger.com/tutorials/trending-products)
-- [TikTok Viral Products 2026 - Savezy](https://mysavezy.com/tiktok-viral-products-2026/)
-- [AI Arbitrage 2026 - CLOSO](https://closo.co/blogs/optimization-growth-strategies/ai-arbitrage-the-truth-about-automated-profits-in-2026)
-- [eBay Dropshipping Policy 2026 - SuperDS](https://super-ds.com/blog/ebay-dropshipping-policy-2025-you-must-know)
+**Arbitrage window:** Source on Amazon/Temu ($3-7) and sell on eBay/Amazon ($12-22).
+
+**Products to list:**
+- Elevated pet bowls (stainless steel)
+- Dog enrichment puzzle toys
+- Cat window perch beds
+- Pet grooming gloves
+- Automatic pet water fountains
+
+**Estimated margin:** 40-55% after fees
+**Volume potential:** 10-25 units/day
+
+---
+
+### 6. Home Office & Desk Accessories
+**Why trending:** Remote/hybrid work is permanent. Workers continuously upgrade their desk setups. Desk accessories are impulse buys with low return rates.
+
+**Arbitrage window:** Source on AliExpress/Temu ($3-8) and sell on eBay/Amazon ($14-28).
+
+**Products to list:**
+- Monitor riser stands with storage
+- Cable management clips/channels
+- Desk pad/mat (oversized, leather-look)
+- Laptop stand (adjustable aluminum)
+- Desk organizer with wireless charger
+
+**Estimated margin:** 40-55% after fees
+**Volume potential:** 10-20 units/day
+
+---
+
+### 7. Car Accessories (Spring Road Trip Season)
+**Why trending:** Spring = road trip planning. April tax refunds fund car upgrades. Phone mounts and chargers are universal accessories with massive search volume.
+
+**Arbitrage window:** Source on AliExpress ($2-5) and sell on eBay ($12-20).
+
+**Products to list:**
+- MagSafe car phone mount (dashboard/vent)
+- USB-C car charger (dual port, 65W)
+- Tire inflator (portable, rechargeable)
+- Car trunk organizer
+- Dash cam (budget segment, $20-30 retail)
+
+**Estimated margin:** 45-60% after fees
+**Volume potential:** 10-25 units/day
+
+---
+
+### 8. Fitness & Outdoor Gear (Spring Active Season)
+**Why trending:** Spring weather + "summer body" motivation. Fitness accessories are consumable (bands break, grips wear out) driving repeat purchases.
+
+**Arbitrage window:** Source on Temu/AliExpress ($2-6) and sell on Mercari/TikTok Shop ($12-22).
+
+**Products to list:**
+- Resistance band sets (5-pack with bag)
+- Hiking water bottle with filter
+- Yoga mat with alignment lines
+- Jump rope (weighted, with counter)
+- Massage gun (mini/portable)
+
+**Estimated margin:** 45-60% after fees
+**Volume potential:** 10-30 units/day
+
+---
+
+### 9. Smart Home / Tech Accessories
+**Why trending:** Smart home adoption continues to accelerate. Tax refund season drives tech upgrade spending. Low-cost smart home accessories have high perceived value.
+
+**Arbitrage window:** Source on AliExpress/Amazon Warehouse ($5-12) and sell on eBay ($18-35).
+
+**Products to list:**
+- Smart plugs (Wi-Fi, Alexa/Google compatible)
+- Bluetooth tracker tags (AirTag alternatives)
+- Smart LED bulbs (color-changing, app control)
+- Ring/doorbell camera mounts and accessories
+- USB-C hub/docking station
+
+**Estimated margin:** 35-50% after fees
+**Volume potential:** 10-25 units/day
+
+---
+
+### 10. Seasonal & Holiday (Easter + Spring Decor)
+**Why trending:** Easter falls on April 20, 2026. Spring decor and party supplies have a narrow but profitable window. Mothers Day (May 11) pre-buying begins in late April.
+
+**Arbitrage window:** Source seasonal items at deep discount and sell at full seasonal markup. Post-holiday, pivot to clearance sourcing for next year.
+
+**Products to list:**
+- Easter decorations and table centerpieces
+- Spring wreaths and door hangers
+- Mothers Day gift sets (pre-position by April 25)
+- Garden stake decorations
+- Seasonal throw pillow covers
+
+**Estimated margin:** 40-60% before holiday, clearance sourcing for next year at 70%+
+**Volume potential:** 5-15 units/day (narrow window, high margin)
+
+---
+
+## Speed Matters: The First-Mover Advantage
+
+The data from our research is clear: **the first 2-4 weeks of a trend produce 60-80% of total arbitrage profit for that product.** After that, competition drives margins to commodity levels.
+
+### Trend Response Timeline
+
+| Response Time | Margin Capture | Example |
+|--------------|---------------|---------|
+| Within 24 hours | 80-100% of peak margin | You spotted a viral TikTok product before other sellers. List at premium, no competition. |
+| Within 3 days | 60-80% of peak margin | A few sellers are listing but demand still exceeds supply. Good margins. |
+| Within 1 week | 40-60% of peak margin | Competition building. Margins shrinking. Still profitable. |
+| Within 2 weeks | 20-40% of peak margin | Market approaching equilibrium. Race to the bottom starting. |
+| After 1 month | 0-20% of peak margin | Saturated. Exit or differentiate (bundles, branding). |
+
+### How RelistApp Captures Trends Faster
+
+The Product Scout feature (see `feature_requirements.md`) is designed specifically for trend capture:
+- **BSR Scanner**: Monitors Amazon Best Sellers Rank changes every 30 minutes
+- **Trend Alert System**: Push notification when a product jumps 200%+ in BSR
+- **Auto-List**: Draft listings from trending product data in under 60 seconds
+- **Cross-Platform Price Check**: Instantly compare source vs sell price across all 15 platforms
+- **Competition Counter**: Show how many sellers already have the item on each platform
+
+### Daily Trend Capture Workflow
+
+1. **7:00 AM** -- Check Amazon Movers & Shakers (10 min)
+2. **7:10 AM** -- Scan TikTok trending products (15 min)
+3. **7:25 AM** -- Review Google Trends product queries (5 min)
+4. **7:30 AM** -- Check RelistApp Product Scout alerts (5 min)
+5. **7:35 AM** -- Cross-reference top 5 finds against platform prices (10 min)
+6. **7:45 AM** -- List winners immediately on primary platforms (30 min)
+7. **8:15 AM** -- Cross-list to secondary platforms (15 min)
+
+**Total time: 1 hour 15 minutes. This is the highest-ROI hour of your day.**
+
+---
+
+## Trend Sources Ranked by Reliability
+
+| Source | Reliability | Speed | Why |
+|--------|------------|-------|-----|
+| Amazon Movers & Shakers | Very High | Same day | Based on actual purchases, not just searches |
+| TikTok Trending/FYP | High | Real-time | Drives demand directly; products go viral in hours |
+| eBay Trending (Terapeak) | High | 1-2 days behind | Shows what's actually selling, with price data |
+| Google Trends | Medium | Same day | Shows search interest but not purchase intent |
+| Reddit/Social Media | Medium | Variable | Early signal but noisy; requires filtering |
+| Competitor Monitoring | Medium | 1-3 days behind | Reactive but reliable -- if they're listing it, it sells |
+| News/Media Mentions | Low-Medium | Variable | Occasional spikes from TV/press coverage |
+
+---
+
+## Cross-Reference: Existing Research
+
+For deeper analysis on specific product categories:
+- `top_20_arbitrage_products.md` -- Detailed spread analysis on 20 proven products
+- `product_research_amazon.md` -- Amazon BSR data and high-velocity products
+- `product_research_ebay.md` -- eBay sold data and volume analysis
+- `seasonal_event_calendar.md` -- Month-by-month seasonal strategy for all of 2026
+- `DECISION_FRAMEWORK.md` -- The 5 specific products to start with today
+- `competitor_monitoring.md` -- How to track what top sellers are listing
