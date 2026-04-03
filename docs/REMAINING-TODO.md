@@ -1,10 +1,10 @@
 # Empire — Remaining TODO (Post v5.0)
 
-**Current Completion: 88%** | Updated: 2026-03-16
+**Current Completion: 91%** | Updated: 2026-04-02
 
 ---
 
-## API Keys Needed (Blocking)
+## API Keys Needed (Blocking — Owner Action)
 
 | Service | Purpose | Signup Guide |
 |---------|---------|-------------|
@@ -18,19 +18,31 @@
 
 ## Frontend Issues
 
-- [ ] **CraftForge frontend routing** — 404s on built modules (6 modules built but not routable)
+- [x] **CraftForge frontend routing** — FIXED (2026-04-02): module routing now context-aware, 6 sub-modules reachable via right panel
+- [x] **Discount display bug** — FIXED (2026-04-02): discount_type (% vs $) now displayed correctly in quotes and PDFs
 - [ ] **SupportForge multi-tenant auth** — JWT integration needed (currently hardcoded fallback)
-- [ ] **PetForge** — Coming Soon placeholder, needs full build
-- [ ] **VetForge** — Coming Soon placeholder, needs full build
+- [ ] **PetForge** — Coming Soon placeholder, needs full build (v6.0)
+- [ ] **VetForge** — Coming Soon placeholder, needs full build (v6.0)
 
 ---
 
 ## Backend Items
 
+- [x] **/system/health endpoint** — FIXED (2026-04-02): was documented but never created, now returns service status
+- [x] **Ollama service** — FIXED (2026-04-02): started, nomic-embed-text model pulled
+- [x] **Gmail OAuth2** — DONE (2026-04-02): check_email tool working
 - [ ] **SMTP configuration** — endpoint ready at /api/v1/email/send, needs SendGrid API key in .env
 - [ ] **Carrier integration** — ShipForge endpoints exist in test mode, need ShipStation key
 - [ ] **eBay OAuth** — OAuth flow structure built, needs eBay developer keys
 - [ ] **Brave API key** — Missing from backend/.env, needed for MAX web search tool
+
+---
+
+## Data Issues (Owner Action)
+
+- [ ] **OSTERIA MARZANO** — address still "123 Main St, Hyattsville MD" (placeholder). Founder must provide correct address.
+- [ ] **OSTERIA MAZZARO** — duplicate entry (typo). Should be merged or deleted.
+- [ ] **Lauren Bassett** — drawing never delivered. Re-request via CC web chat.
 
 ---
 
@@ -40,8 +52,10 @@
 - [ ] Cloudflare Tunnel production config verification
 - [ ] Load testing on EmpireDell (20 cores available)
 - [ ] Database migration from SQLite → PostgreSQL for production scale
-- [ ] Automated backup schedule for empire.db + empirebox.db
+- [x] **Automated backup schedule** — DONE: cron runs daily at 3 AM
+- [ ] Stripe live keys (currently test mode)
+- [ ] Session recovery after backend crashes
 
 ---
 
-*Generated during v5.0 Final session*
+*Updated during continuous self-heal session — 2026-04-02*

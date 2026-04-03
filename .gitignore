@@ -39,6 +39,16 @@ npm-debug.log*
 # Environment files with secrets
 .env.local
 
+# OAuth credentials (Gmail, Google API)
+credentials.json
+token.json
+backend/credentials.json
+backend/token.json
+
+# Backup files
+*.bak
+*.bak2
+
 # Runtime data — databases, chats, quotes, inbox (never commit)
 *.db
 data/
