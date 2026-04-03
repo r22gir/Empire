@@ -1,43 +1,43 @@
 # Expanded Platform Analysis for RelistApp
 ## 15-Platform Drop-Ship Arbitrage Guide
 
-*Created: April 2, 2026 | Based on live 2026 market research*
+*Updated: April 2, 2026 | Based on live 2026 market research across 20 internal docs*
 
 ---
 
 ## Master Comparison Table
 
-| # | Platform | Total Fees | Best Categories | Daily Volume Potential | Difficulty | RelistApp Priority |
-|---|----------|-----------|-----------------|----------------------|------------|-------------------|
-| 1 | **eBay** | 12-15% FVF + $0.30-0.40/order | Electronics, Home, Collectibles, Auto Parts | 50-200 sales/day | Medium | P0 - Launch Day |
-| 2 | **Mercari** | 10% flat | Fashion, Home, Electronics, Toys | 20-80 sales/day | Easy | P0 - Launch Day |
-| 3 | **Facebook Marketplace** | 10% shipped / 0% local | Furniture, Home, Electronics, Local deals | 15-60 sales/day | Easy | P0 - Launch Day |
-| 4 | **Poshmark** | 20% (>$15) / $2.95 (<$15) | Fashion, Shoes, Accessories, Home decor | 10-40 sales/day | Medium | P0 - Launch Day |
-| 5 | **Amazon** | 8-15% referral + FBA fees | Everything (but high competition) | 100-500 sales/day | Hard | P1 - Week 2 |
-| 6 | **Etsy** | ~12-15% total (6.5% + 3% + listing) | Handmade, Vintage, Digital, CNC files | 10-50 sales/day | Medium | P1 - Week 2 |
-| 7 | **TikTok Shop** | ~9% (6% + 2.9% processing) | Viral gadgets, Beauty, Fashion | 20-100 sales/day | Medium-Hard | P1 - Week 2 |
-| 8 | **Depop** | 3.3% + $0.45/order (US) | Gen-Z Fashion, Streetwear, Vintage | 10-30 sales/day | Easy | P1 - Week 3 |
-| 9 | **Walmart Marketplace** | 6-15% referral only | Home, Electronics, Grocery, Toys | 30-150 sales/day | Hard (approval) | P2 - Month 2 |
-| 10 | **Whatnot** | 8% + 2.9% + $0.30 | Collectibles, Cards, Sneakers, Vintage | 5-30 sales/day (live) | Medium | P2 - Month 2 |
-| 11 | **Shopify** | $29-299/mo + 2.9% + $0.30 | Everything (own store) | Unlimited (traffic-dependent) | Hard | P2 - Month 2 |
-| 12 | **StockX** | 10-12% total (7-9% + 3%) | Sneakers, Streetwear, Electronics, Collectibles | 5-20 sales/day | Medium | P3 - Month 3 |
-| 13 | **OfferUp** | 12.9% shipped / 0% local | Furniture, Electronics, Local goods | 5-20 sales/day | Easy | P3 - Month 3 |
-| 14 | **Bonanza** | 11% + $0.25/transaction | Niche goods, Jewelry, Crafts | 2-10 sales/day | Easy | P3 - Month 3 |
-| 15 | **Grailed** | 9% + 2.9% + $0.30 | Men's Designer, Streetwear, Luxury | 3-15 sales/day | Medium | P3 - Month 3 |
+| # | Platform | Fee % | Monthly Cost | Avg Sale Price | Best Categories | Daily Volume Potential | Difficulty | RelistApp Priority |
+|---|----------|-------|-------------|---------------|-----------------|----------------------|------------|-------------------|
+| 1 | **eBay** | 13.6% (no store) / 12.7% (store) + $0.30-0.40/order | $0-21.95 (store) | $18-25 | Electronics, Home, Collectibles, Auto Parts | 50-200 sales/day | Medium | P0 - Launch Day |
+| 2 | **Mercari** | 10% flat | $0 | $15-20 | Fashion, Home, Electronics, Toys | 20-80 sales/day | Easy | P0 - Launch Day |
+| 3 | **Facebook Marketplace** | 0% local / 10% shipped | $0 | $12-30 | Furniture, Home, Electronics, Local deals | 15-60 sales/day | Easy | P0 - Launch Day |
+| 4 | **Amazon** | 8-15% referral + FBA | $39.99 (Pro) | $20-35 | Everything (high competition) | 100-500 sales/day | Hard | P1 - Week 2 |
+| 5 | **TikTok Shop** | 5-8% (6% + 2.9% processing) | $0 | $12-25 | Viral gadgets, Beauty, Fashion | 20-100 sales/day | Medium-Hard | P1 - Week 2 |
+| 6 | **Etsy** | ~12-15% (6.5% + 3% + $0.20/listing) | $0 | $18-30 | Handmade, Vintage, Digital, CNC files | 10-50 sales/day | Medium | P1 - Week 2 |
+| 7 | **Walmart Marketplace** | 6-15% referral | $0 | $20-35 | Home, Electronics, Grocery, Toys | 30-150 sales/day | Hard (approval) | P2 - Month 2 |
+| 8 | **Poshmark** | 20% (>$15) / $2.95 (<$15) | $0 | $20-40 | Fashion, Shoes, Accessories, Home decor | 10-40 sales/day | Medium | P0 - Launch Day |
+| 9 | **Depop** | 3.3% + $0.45/order | $0 | $15-25 | Gen-Z Fashion, Streetwear, Vintage | 10-30 sales/day | Easy | P1 - Week 3 |
+| 10 | **Whatnot** | 8% + 2.9% + $0.30 | $0 | $15-50 | Collectibles, Cards, Sneakers, Vintage | 5-30 sales/day (live) | Medium | P2 - Month 2 |
+| 11 | **Shopify** | ~3.5% (Shopify Payments) | $29-299 | Variable | Everything (own store) | Unlimited (traffic-dep.) | Hard | P2 - Month 2 |
+| 12 | **OfferUp** | 0% local / 12.9% shipped | $0 | $15-40 | Furniture, Electronics, Local goods | 5-20 sales/day | Easy | P3 - Month 3 |
+| 13 | **Bonanza** | ~11% + $0.25/txn | $0 | $20-35 | Niche goods, Jewelry, Crafts | 2-10 sales/day | Easy | P3 - Month 3 |
+| 14 | **StockX** | 10-12% (7-9% + 3%) | $0 | $80-200 | Sneakers, Streetwear, Electronics | 5-20 sales/day | Medium | P3 - Month 3 |
+| 15 | **Reverb** | 5% + 2.7% processing | $0 | $50-300 | Musical instruments, Gear, Pedals | 3-15 sales/day | Medium | P3 - Month 3 |
 
 ---
 
-## Detailed Platform Analysis
+## Tier 1: High Volume Platforms (Launch Day)
 
 ### 1. eBay
 **Priority: P0 -- Launch Day**
 
 #### Fees (2026)
-- **Final Value Fee**: 12-15.3% depending on category + $0.30 (under $10) or $0.40 (over $10) per order
+- **Final Value Fee**: 13.6% without store / 12.7% with Basic Store + $0.30 (under $10) or $0.40 (over $10) per order
 - **Insertion fee**: First 250-300 free/month (depends on store tier), then $0.35 each
 - **Promoted Listings**: Optional 2-8% ad rate (pay only on sale)
 - **International fee**: +1.65% on international sales
-- **Store subscription**: Basic $7.95/mo (1,000 free listings), Premium $21.95/mo (10,000 free listings)
+- **Store subscription**: $0 (no store), $7.95/mo (Starter), $21.95/mo (Basic), $59.95/mo (Premium)
 - **No separate payment processing fee** (included in FVF since Managed Payments)
 
 #### Best Categories
@@ -113,35 +113,7 @@ Easy for local. Medium for shipped. No dedicated seller dashboard -- interface i
 
 ---
 
-### 4. Poshmark
-**Priority: P0 -- Launch Day**
-
-#### Fees (2026)
-- **Under $15**: Flat $2.95 fee
-- **$15 and above**: 20% commission
-- **Shipping**: Paid by buyer via flat-rate USPS label (~$7.67 for up to 5 lbs)
-- **Payment processing**: Included in commission
-- **No listing fees**
-
-#### Best Categories
-Women's fashion, Men's fashion, Shoes, Handbags, Jewelry, Home decor, Beauty
-
-#### Daily Volume Potential
-Low-Medium. Poshmark's social-commerce model requires active engagement (sharing, following, Posh Parties). With consistent sharing, 10-40 sales/day. Best for fashion-focused inventory.
-
-#### Difficulty
-Medium. Requires daily closet sharing (30 min minimum). Social engagement drives visibility. 20% fee is the highest among major platforms -- price accordingly. Returns limited to 3 days.
-
-#### Key Strategy
-- Share entire closet 2-3 times daily
-- Participate in Posh Parties for category-specific exposure
-- Follow potential buyers in your niche
-- Bundle items for higher AOV (5 lbs same shipping cost)
-- Price 20-25% higher than other platforms to offset the 20% fee
-
----
-
-### 5. Amazon
+### 4. Amazon
 **Priority: P1 -- Week 2**
 
 #### Fees (2026)
@@ -169,6 +141,36 @@ Hard. Requires brand approval for many categories. Listing against existing ASIN
 
 ---
 
+### 5. TikTok Shop
+**Priority: P1 -- Week 2**
+
+#### Fees (2026)
+- **Referral fee**: 6% standard (3% promotional rate for first 30 days)
+- **Payment processing**: ~2.9% + fixed fee
+- **Fulfillment**: FBT (Fulfilled by TikTok) required for all US sellers as of March 31, 2026
+- **Affiliate commissions**: 10-20% if using creators for promotion
+- **Effective total**: ~9% without affiliates, 19-29% with affiliates
+
+#### Best Categories
+Viral gadgets, Beauty & Skincare, Fashion, Home gadgets, Wellness products, Impulse buys under $30
+
+#### Daily Volume Potential
+High potential but volatile. Single viral video can drive 10,000+ orders. Average steady-state with good content: 20-100 sales/day. Discovery-based platform means inconsistent daily volumes.
+
+#### Difficulty
+Medium-Hard. Requires video content creation or affiliate partnerships. FBT fulfillment adds logistics complexity. New policy (March 2026): independent shipping no longer allowed -- must use FBT, Upgraded TikTok Shipping, or CBT.
+
+#### Key Strategy
+- Source viral-friendly products (must be demonstrable in 15-second video)
+- Partner with micro-influencers (10-20% affiliate commission)
+- Use FBT for fulfillment compliance
+- Target impulse-buy price points ($10-30)
+- Ride trending sounds/hashtags for organic reach
+
+---
+
+## Tier 2: Niche/Growing Platforms (Week 2-4)
+
 ### 6. Etsy
 **Priority: P1 -- Week 2**
 
@@ -186,79 +188,22 @@ Handmade goods, Vintage (20+ years old), Craft supplies, Digital downloads (SVG,
 Medium. Etsy has 90M+ active buyers specifically looking for unique/handmade/vintage items. 10-50 sales/day with a well-stocked shop. Digital products can sell on autopilot.
 
 #### Difficulty
-Medium. Etsy requires items to be handmade, vintage, or craft supplies -- standard retail arbitrage is against ToS. However, DIGITAL PRODUCTS are a massive opportunity (see Digital Products section below). Offsite Ads fee is mandatory and significant for successful sellers.
+Medium. Etsy requires items to be handmade, vintage, or craft supplies -- standard retail arbitrage is against ToS. However, DIGITAL PRODUCTS are a massive opportunity. Offsite Ads fee is mandatory and significant for successful sellers.
 
 #### Key Strategy
 - Focus on digital products for infinite-margin, zero-shipping revenue
-- SVG/CNC files are the sweet spot for Empire Workroom integration
+- SVG/CNC files are the sweet spot for CraftForge integration
 - Use Etsy SEO: long-tail keywords in titles and tags
 - Free shipping threshold ($35+) boosts search ranking
 - Avoid Offsite Ads by keeping under $10K/year or accept the 12% cost
 
 ---
 
-### 7. TikTok Shop
-**Priority: P1 -- Week 2**
-
-#### Fees (2026)
-- **Referral fee**: 6% standard (3% promotional rate for first 30 days)
-- **Payment processing**: ~2.9% + fixed fee
-- **Fulfillment**: FBT (Fulfilled by TikTok) required for all US sellers as of March 31, 2026
-- **Affiliate commissions**: 10-20% if using creators for promotion
-- **Effective total**: ~9% without affiliates, 19-29% with affiliates
-
-#### Best Categories
-Viral gadgets, Beauty & Skincare, Fashion, Home gadgets, Wellness products, Impulse buys under $30
-
-#### Daily Volume Potential
-High potential but volatile. Single viral video can drive 10,000+ orders. Average steady-state with good content: 20-100 sales/day. Discovery-based platform means inconsistent daily volumes.
-
-#### Difficulty
-Medium-Hard. Requires video content creation or affiliate partnerships. FBT fulfillment adds logistics complexity. New policy (March 2026): independent shipping no longer allowed -- must use FBT, Upgraded TikTok Shipping, or CBT. Preferred Seller Program offers up to 2% discount for high performers.
-
-#### Key Strategy
-- Source viral-friendly products (must be demonstrable in 15-second video)
-- Partner with micro-influencers (10-20% affiliate commission)
-- Use FBT for fulfillment compliance
-- Target impulse-buy price points ($10-30)
-- Ride trending sounds/hashtags for organic reach
-
----
-
-### 8. Depop
-**Priority: P1 -- Week 3**
-
-#### Fees (2026)
-- **Selling fee**: NONE for US and UK sellers (eliminated July 2024)
-- **Payment processing**: 3.3% + $0.45 per transaction (US)
-- **Boosted listings**: Additional 8% on item price if sold via boost
-- **Effective total**: ~3.3% + $0.45 (one of the cheapest platforms)
-
-#### Best Categories
-Gen-Z fashion, Streetwear, Vintage clothing, Y2K fashion, Handmade accessories, Thrifted finds
-
-#### Daily Volume Potential
-Low-Medium. Depop's audience skews young (Gen-Z/Millennial). With 200+ listings, expect 10-30 sales/day. Platform rewards unique, curated aesthetic.
-
-#### Difficulty
-Easy. Very low fees make profitability easier. Simple mobile-first listing process. However, success requires understanding Gen-Z fashion trends and creating an appealing shop aesthetic.
-
-#### Key Strategy
-- Curate a cohesive shop aesthetic (not a random assortment)
-- Use hashtags and explore page strategies
-- Price competitively -- low fees mean you can undercut Poshmark sellers
-- Focus on trending fashion (Y2K, streetwear, vintage)
-- Cross-list fashion items from Poshmark to Depop at lower prices (lower fees allow it)
-
----
-
-### 9. Walmart Marketplace
+### 7. Walmart Marketplace
 **Priority: P2 -- Month 2**
 
 #### Fees (2026)
-- **Setup fee**: None
-- **Monthly fee**: None
-- **Listing fee**: None
+- **Setup/monthly/listing fees**: None
 - **Referral fee**: 6-15% depending on category
 - **WFS (Walmart Fulfillment Services)**: From $3.45/unit (optional)
 - **New Seller Savings**: Up to $75,000 in value for sellers going live after Feb 1, 2026
@@ -276,9 +221,63 @@ Hard (approval process). Walmart has strict seller requirements: established eco
 #### Key Strategy
 - Apply early -- approval takes time
 - Highlight eBay/Amazon sales history in application
-- Start with WFS for algorithm advantage (similar to FBA for Amazon)
+- Start with WFS for algorithm advantage (similar to FBA)
 - Use the New Seller Savings ($75K value) aggressively
 - Price match or beat Amazon on key items
+
+---
+
+### 8. Poshmark
+**Priority: P0 -- Launch Day**
+
+#### Fees (2026)
+- **Under $15**: Flat $2.95 fee
+- **$15 and above**: 20% commission
+- **Shipping**: Paid by buyer via flat-rate USPS label (~$7.67 for up to 5 lbs)
+- **Payment processing**: Included in commission
+- **No listing fees**
+
+#### Best Categories
+Women's fashion, Men's fashion, Shoes, Handbags, Jewelry, Home decor, Beauty
+
+#### Daily Volume Potential
+Low-Medium. Poshmark's social-commerce model requires active engagement (sharing, following, Posh Parties). With consistent sharing, 10-40 sales/day. Best for fashion-focused inventory.
+
+#### Difficulty
+Medium. Requires daily closet sharing (30 min minimum). Social engagement drives visibility. 20% fee is the highest among major platforms -- price accordingly. Returns limited to 3 days.
+
+#### Key Strategy
+- Share entire closet 2-3 times daily
+- Participate in Posh Parties for category-specific exposure
+- Bundle items for higher AOV (5 lbs same shipping cost)
+- Price 20-25% higher than other platforms to offset the 20% fee
+
+---
+
+### 9. Depop
+**Priority: P1 -- Week 3**
+
+#### Fees (2026)
+- **Selling fee**: NONE for US and UK sellers (eliminated July 2024)
+- **Payment processing**: 3.3% + $0.45 per transaction (US)
+- **Boosted listings**: Additional 8% on item price if sold via boost
+- **Effective total**: ~3.3% + $0.45 (one of the cheapest platforms)
+
+#### Best Categories
+Gen-Z fashion, Streetwear, Vintage clothing, Y2K fashion, Handmade accessories, Thrifted finds
+
+#### Daily Volume Potential
+Low-Medium. Depop's audience skews young (Gen-Z/Millennial). With 200+ listings, expect 10-30 sales/day. Platform rewards unique, curated aesthetic.
+
+#### Difficulty
+Easy. Very low fees make profitability easier. Simple mobile-first listing process. Success requires understanding Gen-Z fashion trends and creating an appealing shop aesthetic.
+
+#### Key Strategy
+- Curate a cohesive shop aesthetic (not a random assortment)
+- Use hashtags and explore page strategies
+- Price competitively -- low fees mean you can undercut Poshmark sellers
+- Focus on trending fashion (Y2K, streetwear, vintage)
+- Cross-list fashion items from Poshmark to Depop at lower prices
 
 ---
 
@@ -298,16 +297,17 @@ Trading cards (Pokemon, sports), Collectibles, Sneakers, Vintage, Funko Pops, Co
 Low-Medium. Whatnot is live-auction focused -- volume depends on show frequency and audience. Top sellers do 5-30+ sales per live show. Running 2-3 shows/week = steady income.
 
 #### Difficulty
-Medium. Requires on-camera presence for live selling. Need to build a following. Works best for collectibles/enthusiast categories. Seller Rewards program offers fee credits for top performers.
+Medium. Requires on-camera presence for live selling. Need to build a following. Works best for collectibles/enthusiast categories.
 
 #### Key Strategy
 - Start with 1 show/week in a niche you know
 - Source inventory from estate sales, thrift stores, wholesale lots
 - Engage with chat during live shows
-- Use Promoted Shows ($25-50) to build initial audience
 - Cross-promote shows on social media
 
 ---
+
+## Tier 3: Specialty Platforms (Month 2+)
 
 ### 11. Shopify (Own Store)
 **Priority: P2 -- Month 2**
@@ -316,9 +316,8 @@ Medium. Requires on-camera presence for live selling. Need to build a following.
 - **Basic plan**: $29/month
 - **Shopify plan**: $79/month
 - **Advanced plan**: $299/month
-- **Payment processing**: 2.9% + $0.30 (Shopify Payments), higher with third-party processors
-- **Transaction fee**: 0% with Shopify Payments, 0.5-2% with third-party
-- **Apps**: $20-200+/month for essential apps (reviews, email, upsells)
+- **Payment processing**: 2.9% + $0.30 (Shopify Payments)
+- **Apps**: $20-200+/month for essential apps
 - **Effective total**: ~3-5% (lowest fees but requires driving your own traffic)
 
 #### Best Categories
@@ -328,25 +327,73 @@ Everything -- but you need a brand angle. Best for niche stores, branded product
 Unlimited in theory. Entirely dependent on traffic generation (ads, SEO, social). Typical new store: 1-10 sales/day. Established store: 50-500+ sales/day.
 
 #### Difficulty
-Hard. Zero built-in traffic. Must drive all traffic via paid ads (Facebook, Google, TikTok), SEO, email marketing, or social media. Real monthly cost is $200-500+ when factoring apps, themes, and ads. Cash flow risk with ad spend preceding revenue.
+Hard. Zero built-in traffic. Must drive all traffic via paid ads, SEO, email marketing, or social media. Real monthly cost is $200-500+ when factoring apps, themes, and ads.
 
 #### Key Strategy
 - Use for branded/niche stores, not general arbitrage
 - Perfect for digital product sales (CNC files, templates, SVGs)
 - Integrate with Empire backend for order management
-- Use Shopify + a marketplace (eBay/Amazon) together -- Shopify for brand, marketplace for volume
 - Focus on email list building for repeat customers
 
 ---
 
-### 12. StockX
+### 12. OfferUp
+**Priority: P3 -- Month 3**
+
+#### Fees (2026)
+- **Shipped items**: 12.9% of sale price (minimum $1.99)
+- **Local pickup**: 0% (no fees)
+- **Shipping**: Buyer pays based on weight/distance
+- **Effective total**: 0% local, 12.9% shipped
+
+#### Best Categories
+Furniture, Electronics, Vehicles, Tools, Sporting Goods, Home appliances
+
+#### Daily Volume Potential
+Low. Primarily a local marketplace. 5-20 sales/day with focus on local metro area. Better for high-ticket items.
+
+#### Difficulty
+Easy for local sales. Limited shipping infrastructure. Best as a supplementary channel for local inventory.
+
+#### Key Strategy
+- Use for LOCAL pickup only (0% fees)
+- List large/heavy items that are expensive to ship
+- Cross-list all eBay items with "local pickup" option on OfferUp
+
+---
+
+### 13. Bonanza
+**Priority: P3 -- Month 3**
+
+#### Fees (2026)
+- **Transaction fee**: $0.25 per transaction
+- **Commission (FVF)**: 11% minimum on Final Offer Value
+- **Listing fee**: $0.03/listing/month over 50 listings (max $20/month)
+- **Account setup fee**: $14.99 one-time
+- **Effective total**: ~11-12% base
+
+#### Best Categories
+Jewelry, Clothing, Home & Garden, Collectibles, Crafts, Niche products
+
+#### Daily Volume Potential
+Very Low. 2-10 sales/day for a well-stocked store. Best as a supplementary channel.
+
+#### Difficulty
+Easy. Can import listings from eBay. Fee increase from 3.5% to 11% (May 2025) reduced attractiveness.
+
+#### Key Strategy
+- Import eBay listings automatically (Bonanza supports eBay sync)
+- Use as a set-and-forget supplementary channel
+
+---
+
+### 14. StockX
 **Priority: P3 -- Month 3**
 
 #### Fees (2026)
 - **Transaction fee**: 7-9% based on seller level (Level 1-5)
 - **Payment processing**: 3%
 - **Shipping fee**: $4-5 per sale (US standard)
-- **Flex Program**: +2% fee for Flex fulfillment
 - **Performance bonuses**: Up to 2% off for Quick Ship + Successful Ship
 - **Effective total**: 10-12% for new sellers, down to 8% for top performers
 
@@ -354,100 +401,67 @@ Hard. Zero built-in traffic. Must drive all traffic via paid ads (Facebook, Goog
 Sneakers (primary), Streetwear, Electronics (consoles, GPUs), Collectibles (trading cards), Handbags
 
 #### Daily Volume Potential
-Low-Medium. StockX is bid/ask model -- sales happen when your ask matches market. Niche but high-value. 5-20 sales/day with consistent inventory.
+Low-Medium. StockX is bid/ask model -- sales happen when your ask matches market. 5-20 sales/day with consistent inventory.
 
 #### Difficulty
-Medium. Authentication required for all items (StockX verifies before shipping to buyer). Need to ship to StockX within 2 business days. Best for sneaker resellers and hype product flippers.
+Medium. Authentication required for all items (StockX verifies). Need to ship to StockX within 2 business days. Best for sneaker resellers and hype product flippers.
 
 #### Key Strategy
 - Focus on sneaker releases and limited editions
 - Use StockX for price discovery even when selling elsewhere
 - Level up to reduce fees (Level 5 = 5% transaction fee)
-- Time listings around release dates for maximum demand
-- Source from retail drops, outlet stores, and wholesale
 
 ---
 
-### 13. OfferUp
+### 15. Reverb
 **Priority: P3 -- Month 3**
 
 #### Fees (2026)
-- **Shipped items**: 12.9% of sale price (minimum $1.99)
-- **Local pickup**: 0% (no fees)
-- **Shipping**: Buyer pays based on weight/distance
-- **Promoted listings**: Optional paid promotion
-- **Effective total**: 0% local, 12.9% shipped
+- **Selling fee**: 5% of total sale (including shipping)
+- **Payment processing**: 2.7% + $0.25 per transaction
+- **Listing fee**: Free
+- **Effective total**: ~7.7% (very competitive for its niche)
 
 #### Best Categories
-Furniture, Electronics, Vehicles, Tools, Sporting Goods, Home appliances
+Guitars, Pedals, Amplifiers, Synthesizers, DJ Equipment, Recording Gear, Vintage Instruments
 
 #### Daily Volume Potential
-Low. Primarily a local marketplace. Shipped items are secondary. 5-20 sales/day with focus on local metro area. Better for high-ticket items.
+Low. Highly specialized marketplace. 3-15 sales/day with good inventory. Very high average order value ($50-300+) compensates for lower volume.
 
 #### Difficulty
-Easy for local sales. Limited shipping infrastructure compared to eBay/Mercari. No seller dashboard or analytics. Best as a supplementary channel for local inventory.
+Medium. Requires knowledge of musical instruments and gear. Condition grading matters. Buyers are knowledgeable and will call out misrepresentations. Shipping large/fragile items adds complexity.
 
 #### Key Strategy
-- Use for LOCAL pickup only (0% fees)
-- List large/heavy items that are expensive to ship
-- Focus on electronics and furniture
-- Respond to messages instantly (OfferUp shows response time)
-- Cross-list all eBay items with "local pickup" option on OfferUp
+- Source from estate sales, pawn shops, and Craigslist
+- Focus on pedals and small gear (high value, easy to ship)
+- Accurate condition descriptions are non-negotiable
+- Use Reverb's price guide for market rates
+- Cross-list to eBay for broader reach
 
 ---
 
-### 14. Bonanza
-**Priority: P3 -- Month 3**
+## Fee Comparison: Selling a $30 Item
 
-#### Fees (2026)
-- **Transaction fee**: $0.25 per transaction (waived for members)
-- **Commission (FVF)**: 11% minimum on Final Offer Value
-- **Listing fee**: $0.03/listing/month over 50 listings (max $20/month)
-- **Account setup fee**: $14.99 one-time (new sellers)
-- **Advertising options**: 11-30% of FOV for various ad tiers
-- **Effective total**: ~11-12% base
+| Platform | Total Fees | You Keep | Net % |
+|----------|-----------|----------|-------|
+| **Depop** | $1.44 | $28.56 | 95.2% |
+| **Shopify** | $1.17 + $29/mo amortized | ~$27.50 | ~91.7% |
+| **Walmart** | $2.40-4.50 | $25.50-27.60 | 85-92% |
+| **TikTok Shop** (no affiliate) | $2.67 | $27.33 | 91.1% |
+| **Reverb** | $2.31 | $27.69 | 92.3% |
+| **Mercari** | $3.00 | $27.00 | 90.0% |
+| **FB Marketplace** (shipped) | $3.00 | $27.00 | 90.0% |
+| **eBay** (13% avg) | $4.30 | $25.70 | 85.7% |
+| **Etsy** | $4.08 | $25.92 | 86.4% |
+| **Whatnot** | $3.57 | $26.43 | 88.1% |
+| **Bonanza** | $3.55 | $26.45 | 88.2% |
+| **OfferUp** (shipped) | $3.87 | $26.13 | 87.1% |
+| **StockX** | $3.00-3.60 + $5 ship | $21.40-22.00 | 71.3-73.3% |
+| **Poshmark** | $6.00 | $24.00 | 80.0% |
+| **Amazon** (FBA) | $3.60-4.50 + ~$3.50 FBA | $22.00-22.90 | 73.3-76.3% |
 
-#### Best Categories
-Jewelry, Clothing, Home & Garden, Collectibles, Crafts, Niche products
-
-#### Daily Volume Potential
-Very Low. Bonanza has significantly less traffic than eBay or Amazon. 2-10 sales/day for a well-stocked store. Best as a supplementary channel.
-
-#### Difficulty
-Easy. Simple setup, easy listing process. Can import listings from eBay. Low traffic is the main limitation. Fee increase from 3.5% to 11% (May 2025) reduced attractiveness.
-
-#### Key Strategy
-- Import eBay listings automatically (Bonanza supports eBay sync)
-- Use as a set-and-forget supplementary channel
-- Don't invest significant time -- it's free traffic on existing inventory
-- Good for niche/unique items that get buried on eBay
-
----
-
-### 15. Grailed
-**Priority: P3 -- Month 3**
-
-#### Fees (2026)
-- **Commission**: 9% of sale price
-- **Payment processing**: 2.9% + $0.30 (PayPal/Grailed Payments)
-- **Shipping**: Seller pays (USPS, UPS, FedEx)
-- **Effective total**: ~12%
-
-#### Best Categories
-Men's designer fashion, Streetwear (Supreme, Bape, Palace), Luxury brands, Vintage menswear, High-end sneakers
-
-#### Daily Volume Potential
-Low. Niche audience of men's fashion enthusiasts. 3-15 sales/day with quality inventory. High AOV ($50-500+) makes up for lower volume.
-
-#### Difficulty
-Medium. Requires knowledge of men's designer brands and market values. Authentication matters. Listings need quality photos. Community is knowledgeable -- don't misprice or misrepresent.
-
-#### Key Strategy
-- Source designer items from thrift stores, estate sales, wholesale
-- Focus on hyped brands: Rick Owens, Raf Simons, Comme des Garcons, vintage Nike
-- Price based on Grailed sold listings
-- Cross-list to eBay and Depop simultaneously
-- Quality photos on plain background are essential
+**Cheapest platforms for sellers**: Depop > Reverb > Shopify > Walmart > TikTok Shop > Mercari
+**Most expensive platforms**: Poshmark > Amazon FBA > StockX
 
 ---
 
@@ -468,9 +482,9 @@ Digital products represent the highest-margin opportunity in the RelistApp ecosy
 | **Gumroad** | 10% | eBooks, courses, software, art packs | $200-2,000/month |
 | **Creative Market** | 40% (they take a lot) | Design assets, fonts, templates | $300-3,000/month |
 
-### SVG/CNC Files -- Empire Workroom Integration
+### SVG/CNC Files -- CraftForge Integration
 
-This is a natural fit for Empire Workroom and WoodCraft. The CNC and design expertise already exists in-house.
+This is a natural fit for Empire Workroom and WoodCraft. The CNC and design expertise already exists in-house through CraftForge.
 
 **What Sells (2026 research):**
 - CNC project files (furniture plans, signs, ornaments, boxes)
@@ -487,6 +501,8 @@ This is a natural fit for Empire Workroom and WoodCraft. The CNC and design expe
 
 **Critical 2026 Policy Change:**
 Etsy now requires CNC/laser/Cricut items to use the seller's OWN ORIGINAL DESIGNS -- not purchased templates from other creators. This is actually an advantage: Empire Workroom already creates original designs, creating a moat against low-effort resellers.
+
+**Estimated passive income: $2,000-5,000/month** once 100+ digital products are listed and optimized. This is achievable within 60-90 days of focused effort.
 
 ### Printables and Templates
 
@@ -520,72 +536,84 @@ The fastest-growing digital product category:
 - Scale to 200+ digital products
 - Create product bundles (10-pack CNC file collections)
 - Build email list from digital product buyers
-- Target: $1,000/month passive digital income by Month 3
+- Target: $2,000/month passive digital income by Month 3
 
 ---
 
-## Platform Selection Strategy by Product Type
+## Multi-Platform Launch Strategy
+
+### Week 1: Launch Platforms (Lowest Barrier to Entry)
+| Platform | Why First | Action Items |
+|----------|----------|-------------|
+| eBay | Largest buyer pool, instant credibility | Create store, list 100 items, request selling limit increase |
+| Mercari | Easiest signup, 10% flat fee, no limits | List 100 items, enable Smart Pricing |
+| Facebook Marketplace | Zero fees on local, massive reach | List 50 items local, 50 shipped |
+
+**Week 1 Target:** 250 active listings, 10-30 sales/day, $150-500 revenue/day
+
+### Week 2-4: Scale Platforms (Higher Volume, More Setup)
+| Platform | Why Now | Action Items |
+|----------|--------|-------------|
+| TikTok Shop | Algorithm-driven discovery, viral potential | Create shop, source 20 viral-ready products, create demo videos |
+| Poshmark | Fashion-specific audience, easy cross-list | Cross-list all fashion from eBay/Mercari |
+| Etsy | Digital products for passive income | List 20 SVG/CNC files, 10 printables |
+| Depop | Lowest fees, Gen-Z audience | Cross-list streetwear/vintage from Poshmark |
+
+**Week 2-4 Target:** 500-1,000 active listings, 50-150 sales/day, $500-2,000 revenue/day
+
+### Month 2+: Niche Platforms (Specialized, Higher Margins)
+| Platform | Why Later | Action Items |
+|----------|----------|-------------|
+| Walmart Marketplace | Hard approval, but low fees + huge audience | Apply now, launch when approved |
+| Whatnot | Live selling for collectibles | Start 1 show/week |
+| Shopify | Own brand store for digital + physical | Launch niche store for top-selling category |
+| StockX | Sneakers/hype only | List limited-edition items |
+| Reverb | Musical instruments niche | Source gear from pawn shops/estate sales |
+| OfferUp | Local supplementary channel | Cross-list local pickup items |
+| Bonanza | Set-and-forget eBay sync | Import eBay listings automatically |
+
+**Month 2+ Target:** 2,000-5,000 active listings, 200-500 sales/day, $2,000-5,000 revenue/day
+
+---
+
+## Platform Selection by Product Type
 
 | Product Type | Primary Platform | Secondary Platforms | Why |
 |-------------|-----------------|--------------------|----|
 | Electronics accessories | eBay | Mercari, Amazon | eBay has largest electronics buyer base |
 | Fashion (women's) | Poshmark | Mercari, Depop, eBay | Poshmark's audience is fashion-focused |
-| Fashion (men's designer) | Grailed | eBay, Depop | Grailed buyers pay premium for quality |
-| Streetwear/Sneakers | StockX | Grailed, eBay, Whatnot | StockX authentication adds buyer confidence |
+| Fashion (men's designer) | Grailed/Depop | eBay | Niche buyers pay premium |
+| Streetwear/Sneakers | StockX | eBay, Whatnot | StockX authentication adds buyer confidence |
 | Home & Garden | eBay | Walmart, FB Marketplace | Volume + diverse buyer base |
 | Furniture (large) | FB Marketplace | OfferUp | Local pickup = zero shipping cost/fees |
 | Collectibles | Whatnot | eBay | Live auction creates excitement/premium |
 | Viral gadgets | TikTok Shop | Shopify | Discovery-based, impulse buying |
 | Digital products | Etsy | Shopify | Etsy has built-in buyer traffic for digital |
 | Beauty/Skincare | TikTok Shop | Amazon, Mercari | TikTok drives beauty trends |
+| Musical instruments | Reverb | eBay | Reverb buyers are gear-focused and pay fair prices |
 | Pet supplies | Amazon | eBay, Walmart | Amazon dominates consumables |
 | Vintage items | Etsy | eBay, Depop | Etsy buyers seek vintage specifically |
 | Baby/Kids | FB Marketplace | Mercari | Parents shop FB Marketplace actively |
 | Tools/Hardware | eBay | OfferUp (local) | eBay has professional buyer segment |
-| Generic wholesale | Walmart | Amazon, eBay | Low fees, less competition than Amazon |
-
----
-
-## Fee Comparison: Selling a $30 Item
-
-| Platform | Total Fees | You Keep | Net % |
-|----------|-----------|----------|-------|
-| **Depop** | $1.44 | $28.56 | 95.2% |
-| **Shopify** | $1.17 + $29/mo amortized | ~$27.50 | ~91.7% |
-| **Walmart** | $2.40-4.50 | $25.50-27.60 | 85-92% |
-| **TikTok Shop** (no affiliate) | $2.67 | $27.33 | 91.1% |
-| **Mercari** | $3.00 | $27.00 | 90.0% |
-| **eBay** (13% avg) | $4.30 | $25.70 | 85.7% |
-| **Etsy** | $4.08 | $25.92 | 86.4% |
-| **Whatnot** | $3.57 | $26.43 | 88.1% |
-| **Bonanza** | $3.55 | $26.45 | 88.2% |
-| **FB Marketplace** (shipped) | $3.00 | $27.00 | 90.0% |
-| **Grailed** | $3.57 | $26.43 | 88.1% |
-| **OfferUp** (shipped) | $3.87 | $26.13 | 87.1% |
-| **StockX** | $3.00-3.60 + $5 ship | $21.40-22.00 | 71.3-73.3% |
-| **Poshmark** | $6.00 | $24.00 | 80.0% |
-| **Amazon** (FBA) | $3.60-4.50 + ~$3.50 FBA | $22.00-22.90 | 73.3-76.3% |
-
-**Cheapest platforms for sellers**: Depop > Shopify > Walmart > TikTok Shop > Mercari
-**Most expensive platforms**: Poshmark > Amazon FBA > StockX
 
 ---
 
 ## Sources
 
-- [Etsy Fees 2026](https://www.gelato.com/blog/the-real-cost-of-selling-on-etsy)
-- [TikTok Shop Fees 2026](https://synder.com/blog/tiktok-shop-fees/)
-- [Walmart Seller Fees 2026](https://goaura.com/blog/walmart-seller-fees-breakdown)
-- [Whatnot Fees 2026](https://www.underpriced.app/blog/whatnot-fees-explained-seller-fee-breakdown-2026)
-- [Depop Fees 2026](https://nifty.ai/post/how-much-does-depop-take-from-a-sale)
-- [OfferUp Fees](https://www.topbubbleindex.com/blog/offerup-fee/)
-- [Shopify Dropshipping Costs 2026](https://www.shopify.com/blog/how-much-does-it-cost-to-start-dropshipping)
-- [StockX Seller Fee Updates](https://stockx.com/news/en-us/updates-to-the-stockx-seller-program/)
-- [Bonanza Pricing](https://support.bonanza.com/hc/en-us/articles/360000605292-Bonanza-Pricing)
 - [eBay Seller Fees 2026](https://itemstoflip.com/blog/ebay-seller-fees)
 - [Mercari Fees 2026](https://nifty.ai/post/mercari-fees)
 - [Facebook Marketplace Fees 2026](https://litcommerce.com/blog/facebook-marketplace-fees/)
 - [Poshmark Fees 2026](https://nifty.ai/post/how-much-poshmark-take)
+- [Etsy Fees 2026](https://www.gelato.com/blog/the-real-cost-of-selling-on-etsy)
+- [TikTok Shop Fees 2026](https://synder.com/blog/tiktok-shop-fees/)
+- [Walmart Seller Fees 2026](https://goaura.com/blog/walmart-seller-fees-breakdown)
+- [Depop Fees 2026](https://nifty.ai/post/how-much-does-depop-take-from-a-sale)
+- [Whatnot Fees 2026](https://www.underpriced.app/blog/whatnot-fees-explained-seller-fee-breakdown-2026)
+- [Shopify Dropshipping Costs 2026](https://www.shopify.com/blog/how-much-does-it-cost-to-start-dropshipping)
+- [StockX Seller Fee Updates](https://stockx.com/news/en-us/updates-to-the-stockx-seller-program/)
+- [Bonanza Pricing](https://support.bonanza.com/hc/en-us/articles/360000605292-Bonanza-Pricing)
+- [OfferUp Fees](https://www.topbubbleindex.com/blog/offerup-fee/)
+- [Reverb Seller Fees](https://reverb.com/page/selling-fees)
 - [Selling Digital Products on Etsy 2026](https://www.outfy.com/blog/top-selling-digital-products-on-etsy/)
 - [Digital Products Passive Income 2026](https://resellready.co/blogs/news/most-profitable-digital-products-to-sell-in-2026)
 - [CNC Products on Etsy](https://nextwavecnc.com/4-tips-for-selling-your-cnc-made-products-on-etsy/)
