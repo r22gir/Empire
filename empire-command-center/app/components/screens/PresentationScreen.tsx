@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Mic, MicOff, Send, Monitor, Square, MessageSquare, Sparkles, Wifi, WifiOff } from 'lucide-react';
 
+import InlineDrawing from '../InlineDrawing';
+
 const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
   ? 'https://api.empirebox.store/api/v1'
   : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
@@ -16,6 +18,7 @@ interface ChatMessage {
   desk?: string;
   model?: string;
   hasAudio?: boolean;
+  toolResults?: { tool: string; success: boolean; result?: any; error?: string }[];
 }
 
 // ── TalkingHead Avatar Component (iframe-loaded) ────────────────────────
@@ -624,6 +627,12 @@ export default function PresentationScreen() {
                   color: '#1a1a1a',
                 }}>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                  {msg.toolResults?.map((tr, j) => {
+                    if (tr.tool === 'sketch_to_drawing' && tr.success && tr.result?.svg) {
+                      return <InlineDrawing key={j} result={tr.result} />;
+                    }
+                    return null;
+                  })}
                   <div style={{
                     display: 'flex', alignItems: 'center', gap: 6,
                     marginTop: 4, fontSize: 9, color: '#999',
