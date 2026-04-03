@@ -19,7 +19,7 @@ export function useChatHistory() {
           preview: c.preview || c.last_message || '',
           timestamp: c.updated_at || c.created_at || '',
           business: c.business || c.desk || undefined,
-        }));
+        })).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         setConversations(convs);
       }
     } catch { /* silent */ }

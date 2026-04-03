@@ -53,7 +53,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
           messageCount: c.message_count || 0,
           pinned: c.pinned || false,
           channel: 'web',
-        })));
+        })).sort((a: ChatEntry, b: ChatEntry) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       }
     } catch { /* silent */ }
   }, []);
@@ -126,7 +126,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
           timestamp: c.updated_at || '',
           messageCount: c.message_count || 0,
           channel: 'web',
-        })));
+        })).sort((a: ChatEntry, b: ChatEntry) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       }
     } catch { /* silent */ }
   }, [search, fetchWebChats]);
