@@ -11,6 +11,7 @@ import LeftNav from './components/layout/LeftNav';
 import RightPanel from './components/layout/RightPanel';
 import BottomBar from './components/layout/BottomBar';
 import QuickSwitch from './components/layout/QuickSwitch';
+import ActiveJobBanner from './components/ActiveJobBanner';
 
 import ChatScreen from './components/screens/ChatScreen';
 import QuoteReviewScreen from './components/screens/QuoteReviewScreen';
@@ -50,6 +51,8 @@ import RelistAppPage from './components/screens/RelistAppPage';
 import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
+import JobsScreen from './components/screens/JobsScreen';
+import InvoiceScreen from './components/screens/InvoiceScreen';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 const AmpLanding = lazy(() => import('./amp/page'));
@@ -201,6 +204,8 @@ export default function CommandCenter() {
       documents: 'docs',
       'business-profile': 'business-profile',
       settings: 'business-profile',
+      jobs: 'jobs',
+      invoices: 'invoices',
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
@@ -348,6 +353,8 @@ export default function CommandCenter() {
       );
     }
     if (activeScreen === 'quote') return <QuoteReviewScreen />;
+    if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
+    if (activeScreen === 'invoices') return <InvoiceScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;
     if (activeScreen === 'product-docs') return (
       <div style={{ padding: '24px 28px', maxWidth: 900, margin: '0 auto' }}>
@@ -381,6 +388,8 @@ export default function CommandCenter() {
         }}
         services={sys.services}
       />
+
+      <ActiveJobBanner />
 
       <div className="flex-1 flex overflow-hidden">
         <LeftNav
