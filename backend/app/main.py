@@ -87,6 +87,7 @@ load_router("app.routers.auth", "/auth", ["auth"])
 load_router("app.routers.users", "/users", ["users"])
 load_router("app.routers.listings", "/listings", ["listings"])
 load_router("app.routers.relist", "/api/v1", ["relist"])
+load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
 load_router("app.routers.messages", "/messages", ["messages"])
 load_router("app.routers.marketplaces", "/marketplaces", ["marketplaces"])
 load_router("app.routers.webhooks", "/webhooks", ["webhooks"])
@@ -479,6 +480,9 @@ load_router("app.routers.notifications", "/api/v1", ["notifications"])
 load_router("app.routers.desks", "/api/v1", ["desks"])
 load_router("app.routers.tasks", "/api/v1", ["tasks"])
 load_router("app.routers.contacts", "/api/v1", ["contacts"])
+
+# LeadForge — Lead generation & sales machine
+load_router("app.routers.leadforge", "/api/v1", ["leadforge"])
 
 # Onboarding & Tier
 load_router("app.routers.onboarding", "/api/v1", ["onboarding"])
