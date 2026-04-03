@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 
+// Capture build timestamp once at config load time (not per-call)
+// This prevents the race condition where Date.now() returns different values
+// between compilation and static page generation steps
+const BUILD_TIMESTAMP = Date.now();
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -17,7 +22,7 @@ const nextConfig: NextConfig = {
     ];
   },
   // Force unique chunk URLs on every build so phones never use stale JS
-  generateBuildId: async () => `build-${Date.now()}`,
+  generateBuildId: async () => `build-${BUILD_TIMESTAMP}`,
 };
 
 export default nextConfig;
