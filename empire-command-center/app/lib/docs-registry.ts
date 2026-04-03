@@ -412,38 +412,40 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   ],
 
   // ═══════════════════════════════════════════════
-  // RELISTAPP — 23 Research Documents
+  // RELISTAPP — 23 Research Documents (numbered in reading order)
   // ═══════════════════════════════════════════════
   relist: [
-    // PLANS
-    { title: "Master Plan — 1000 Sales/Day Strategy", path: "docs/relist/MASTER_PLAN.md", type: "plan", description: "Complete arbitrage business plan with financial projections through Year 1" },
-    { title: "7-Day Launch Plan", path: "docs/relist/7_day_launch_plan.md", type: "plan", description: "Day-by-day launch with listing targets and sales milestones" },
-    // FRAMEWORK
-    { title: "Decision Framework — 10 Concrete Answers", path: "docs/relist/DECISION_FRAMEWORK.md", type: "framework", description: "Start products, platforms, capital rules, 72-hour quick start, abort criteria" },
-    // RESEARCH
-    { title: "Platform Fee Analysis (15 Platforms)", path: "docs/relist/platform_fee_analysis.md", type: "research", description: "Exact fees for eBay, Mercari, Amazon, TikTok Shop, Etsy, Walmart, and more" },
-    { title: "Amazon Product Research", path: "docs/relist/product_research_amazon.md", type: "research", description: "Top 50 products by category with BSR data and arbitrage rationale" },
-    { title: "eBay Product Research", path: "docs/relist/product_research_ebay.md", type: "research", description: "High-velocity eBay items with sourcing tables" },
-    { title: "Top 20 Arbitrage Products", path: "docs/relist/top_20_arbitrage_products.md", type: "research", description: "Specific products with price spreads across Amazon, Walmart, AliExpress, eBay" },
-    { title: "Trending Products (April 2026)", path: "docs/relist/trending_products_opportunity.md", type: "research", description: "Viral products, trend lifecycle, first-mover advantage windows" },
-    { title: "Expanded Platform Analysis (15 Platforms)", path: "docs/relist/expanded_platform_analysis.md", type: "research", description: "Master comparison table: fees, categories, volume, difficulty per platform" },
-    { title: "Seasonal Event Calendar (12 Months)", path: "docs/relist/seasonal_event_calendar.md", type: "research", description: "Month-by-month 2026 calendar with top categories and volume multipliers" },
-    // ANALYSIS
-    { title: "Revenue Scenarios (4 Models)", path: "docs/relist/revenue_scenarios.md", type: "analysis", description: "Ultra-low to moderate margin models with full fee math" },
-    { title: "Risk Analysis & Mitigation", path: "docs/relist/risk_analysis.md", type: "analysis", description: "Account, financial, operational, legal risks with mitigation strategies" },
-    { title: "Competitive Analysis (7 Tools)", path: "docs/relist/competitive_analysis.md", type: "analysis", description: "Tactical Arbitrage, AutoDS, BuyBotPro, SellerAmp, Keepa, Zik compared" },
-    { title: "Competitor Monitoring Strategy", path: "docs/relist/competitor_monitoring.md", type: "analysis", description: "Track top sellers, new listings, pricing changes across platforms" },
-    // STRATEGY
-    { title: "Automation Requirements", path: "docs/relist/automation_requirements.md", type: "strategy", description: "6 core features for 1000/day: Scout, Calculator, Lister, Router, Monitor, Analytics" },
-    { title: "Feature Requirements", path: "docs/relist/feature_requirements.md", type: "strategy", description: "Detailed specs for Product Scout, Profit Calculator, Cross-Lister, Order Router" },
-    { title: "Financial Controls & Cash Flow", path: "docs/relist/financial_controls.md", type: "strategy", description: "Payment hold timelines, working capital model, break-even analysis" },
-    { title: "Supplier Strategy (3-Tier)", path: "docs/relist/supplier_strategy.md", type: "strategy", description: "Marketplace → wholesale → private label progression" },
-    { title: "Empire Integration Plan", path: "docs/relist/empire_integration.md", type: "strategy", description: "How RelistApp connects to Command Center, MAX, Finance, SocialForge" },
-    // PLAYBOOKS
-    { title: "Daily Operations Playbook", path: "docs/relist/daily_operations_playbook.md", type: "playbook", description: "Hour-by-hour routine: scout, list, process, optimize, repeat" },
-    { title: "Account Health Playbook", path: "docs/relist/account_health_playbook.md", type: "playbook", description: "Avoid suspension, scaling without triggers, tracking requirements" },
-    { title: "Returns Management", path: "docs/relist/returns_management.md", type: "playbook", description: "Return workflows, auto-flag thresholds, return-adjusted profit" },
-    { title: "Tax & Legal Compliance", path: "docs/relist/tax_legal_compliance.md", type: "playbook", description: "Sales tax, 1099-K, quarterly estimates, LLC recommendation" },
+    // ── START HERE ──
+    { title: "① Master Plan — 1000 Sales/Day Strategy", path: "docs/relist/MASTER_PLAN.md", type: "plan", description: "READ FIRST — Complete arbitrage business plan with financial projections through Year 1" },
+    { title: "② Decision Framework — 10 Concrete Answers", path: "docs/relist/DECISION_FRAMEWORK.md", type: "framework", description: "READ SECOND — Start products, platforms, capital rules, 72-hour quick start, abort criteria" },
+    // ── UNDERSTAND THE MATH ──
+    { title: "③ Revenue Scenarios (4 Models)", path: "docs/relist/revenue_scenarios.md", type: "analysis", description: "Which margin model actually works — full fee math for each scenario" },
+    { title: "④ Platform Fee Analysis (15 Platforms)", path: "docs/relist/platform_fee_analysis.md", type: "research", description: "Exact fees for eBay, Mercari, Amazon, TikTok Shop, Etsy, Walmart, and more" },
+    { title: "⑤ Financial Controls & Cash Flow", path: "docs/relist/financial_controls.md", type: "strategy", description: "Payment hold timelines, working capital model, break-even — cash flow is life or death" },
+    // ── PICK YOUR PRODUCTS ──
+    { title: "⑥ Top 20 Arbitrage Products", path: "docs/relist/top_20_arbitrage_products.md", type: "research", description: "Specific products with price spreads across Amazon, Walmart, AliExpress, eBay" },
+    { title: "⑦ Amazon Product Research", path: "docs/relist/product_research_amazon.md", type: "research", description: "Top 50 products by category with BSR data and arbitrage rationale" },
+    { title: "⑧ eBay Product Research", path: "docs/relist/product_research_ebay.md", type: "research", description: "High-velocity eBay items with sourcing tables" },
+    { title: "⑨ Trending Products (April 2026)", path: "docs/relist/trending_products_opportunity.md", type: "research", description: "Viral products, trend lifecycle, first-mover advantage windows" },
+    // ── KNOW THE PLATFORMS ──
+    { title: "⑩ Expanded Platform Analysis (15 Platforms)", path: "docs/relist/expanded_platform_analysis.md", type: "research", description: "Master comparison table: fees, categories, volume, difficulty per platform" },
+    { title: "⑪ Account Health Playbook", path: "docs/relist/account_health_playbook.md", type: "playbook", description: "Avoid suspension, scaling without triggers, tracking requirements — READ BEFORE LISTING" },
+    // ── LAUNCH ──
+    { title: "⑫ 7-Day Launch Plan", path: "docs/relist/7_day_launch_plan.md", type: "plan", description: "Day-by-day launch with listing targets and sales milestones" },
+    { title: "⑬ Daily Operations Playbook", path: "docs/relist/daily_operations_playbook.md", type: "playbook", description: "Hour-by-hour routine for Day 8+ — scout, list, process, optimize, repeat" },
+    // ── KNOW THE RISKS ──
+    { title: "⑭ Risk Analysis & Mitigation", path: "docs/relist/risk_analysis.md", type: "analysis", description: "Account, financial, operational, legal risks with mitigation strategies" },
+    { title: "⑮ Returns Management", path: "docs/relist/returns_management.md", type: "playbook", description: "Return workflows, auto-flag thresholds, return-adjusted profit" },
+    { title: "⑯ Tax & Legal Compliance", path: "docs/relist/tax_legal_compliance.md", type: "playbook", description: "Sales tax, 1099-K, quarterly estimates, LLC — read before $10K/month" },
+    // ── SCALE UP ──
+    { title: "⑰ Supplier Strategy (3-Tier)", path: "docs/relist/supplier_strategy.md", type: "strategy", description: "Marketplace → wholesale → private label progression as you grow" },
+    { title: "⑱ Seasonal Event Calendar (12 Months)", path: "docs/relist/seasonal_event_calendar.md", type: "research", description: "Month-by-month 2026 calendar — plan ahead for Prime Day, BFCM, holidays" },
+    { title: "⑲ Competitor Monitoring Strategy", path: "docs/relist/competitor_monitoring.md", type: "analysis", description: "Track top sellers, new listings, pricing changes across platforms" },
+    { title: "⑳ Competitive Analysis (7 Tools)", path: "docs/relist/competitive_analysis.md", type: "analysis", description: "Tactical Arbitrage, AutoDS, BuyBotPro — know what's out there" },
+    // ── BUILD RELISTAPP ──
+    { title: "㉑ Automation Requirements", path: "docs/relist/automation_requirements.md", type: "strategy", description: "6 core features for 1000/day: Scout, Calculator, Lister, Router, Monitor, Analytics" },
+    { title: "㉒ Feature Requirements", path: "docs/relist/feature_requirements.md", type: "strategy", description: "Detailed specs for Product Scout, Profit Calculator, Cross-Lister, Order Router" },
+    { title: "㉓ Empire Integration Plan", path: "docs/relist/empire_integration.md", type: "strategy", description: "How RelistApp connects to Command Center, MAX, Finance, SocialForge, SaaS pricing" },
   ],
 
   // ═══════════════════════════════════════════════
