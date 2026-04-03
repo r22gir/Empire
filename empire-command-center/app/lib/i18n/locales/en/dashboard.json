@@ -1,0 +1,47 @@
+{
+  "title": "Dashboard",
+  "subtitle": "Empire Command Center",
+  "nav": {
+    "overview": "Overview",
+    "modules": "Modules",
+    "activity": "Activity",
+    "notifications": "Notifications",
+    "settings": "Settings"
+  },
+  "widgets": {
+    "revenue_today": "Revenue Today",
+    "revenue_month": "Revenue This Month",
+    "active_orders": "Active Orders",
+    "pending_tasks": "Pending Tasks",
+    "active_users": "Active Users",
+    "system_health": "System Health",
+    "ai_calls_today": "AI Calls Today",
+    "uptime": "Uptime"
+  },
+  "actions": {
+    "refresh": "Refresh",
+    "customize": "Customize",
+    "export_report": "Export Report",
+    "view_all": "View All",
+    "add_widget": "Add Widget",
+    "remove_widget": "Remove Widget",
+    "full_screen": "Full Screen"
+  },
+  "status": {
+    "online": "Online",
+    "offline": "Offline",
+    "maintenance": "Maintenance",
+    "degraded": "Degraded",
+    "healthy": "Healthy",
+    "warning": "Warning",
+    "critical": "Critical"
+  },
+  "labels": {
+    "last_updated": "Last Updated",
+    "quick_actions": "Quick Actions",
+    "recent_activity": "Recent Activity",
+    "top_modules": "Top Modules",
+    "performance": "Performance",
+    "loading": "Loading..."
+  }
+}

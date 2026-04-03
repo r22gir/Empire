@@ -1,0 +1,58 @@
+{
+  "title": "LeadForge",
+  "subtitle": "Generacion y Gestion de Prospectos",
+  "nav": {
+    "dashboard": "Tablero",
+    "prospects": "Prospectos",
+    "pipeline": "Pipeline",
+    "campaigns": "Campanas",
+    "outreach": "Contacto Directo",
+    "analytics": "Analiticas",
+    "settings": "Configuracion"
+  },
+  "lead_status": {
+    "new": "Nuevo",
+    "cold": "Frio",
+    "warm": "Tibio",
+    "hot": "Caliente",
+    "contacted": "Contactado",
+    "qualified": "Calificado",
+    "converted": "Convertido",
+    "lost": "Perdido",
+    "nurturing": "En Seguimiento"
+  },
+  "actions": {
+    "add_lead": "Agregar Prospecto",
+    "import_leads": "Importar Prospectos",
+    "send_outreach": "Enviar Contacto",
+    "schedule_follow_up": "Programar Seguimiento",
+    "log_call": "Registrar Llamada",
+    "send_email": "Enviar Correo",
+    "assign_to": "Asignar a",
+    "move_to_stage": "Mover a Etapa",
+    "mark_converted": "Marcar como Convertido",
+    "export_leads": "Exportar Prospectos"
+  },
+  "campaign": {
+    "campaign_name": "Nombre de Campana",
+    "channel": "Canal",
+    "start_date": "Fecha de Inicio",
+    "end_date": "Fecha de Fin",
+    "budget": "Presupuesto",
+    "leads_generated": "Prospectos Generados",
+    "cost_per_lead": "Costo por Prospecto",
+    "conversion_rate": "Tasa de Conversion"
+  },
+  "labels": {
+    "lead_source": "Fuente del Prospecto",
+    "contact_name": "Nombre de Contacto",
+    "company": "Empresa",
+    "email": "Correo Electronico",
+    "phone": "Telefono",
+    "last_contact": "Ultimo Contacto",
+    "next_follow_up": "Proximo Seguimiento",
+    "lead_score": "Puntaje del Prospecto",
+    "total_leads": "Total de Prospectos",
+    "pipeline_value": "Valor del Pipeline"
+  }
+}

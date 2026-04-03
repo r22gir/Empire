@@ -1,0 +1,57 @@
+{
+  "title": "CRM",
+  "subtitle": "Gestion de Relaciones con Clientes",
+  "nav": {
+    "dashboard": "Tablero",
+    "contacts": "Contactos",
+    "companies": "Empresas",
+    "deals": "Negocios",
+    "tasks": "Tareas",
+    "calendar": "Calendario",
+    "reports": "Reportes",
+    "settings": "Configuracion"
+  },
+  "contact": {
+    "first_name": "Nombre",
+    "last_name": "Apellido",
+    "email": "Correo Electronico",
+    "phone": "Telefono",
+    "company": "Empresa",
+    "job_title": "Cargo",
+    "address": "Direccion",
+    "tags": "Etiquetas",
+    "notes": "Notas",
+    "add_contact": "Agregar Contacto",
+    "edit_contact": "Editar Contacto",
+    "delete_contact": "Eliminar Contacto"
+  },
+  "deal": {
+    "deal_name": "Nombre del Negocio",
+    "deal_value": "Valor del Negocio",
+    "stage": "Etapa",
+    "probability": "Probabilidad",
+    "expected_close": "Fecha Estimada de Cierre",
+    "assigned_to": "Asignado a",
+    "won": "Ganado",
+    "lost": "Perdido",
+    "open": "Abierto"
+  },
+  "activity": {
+    "log_call": "Registrar Llamada",
+    "log_email": "Registrar Correo",
+    "log_meeting": "Registrar Reunion",
+    "add_note": "Agregar Nota",
+    "schedule_task": "Programar Tarea",
+    "follow_up": "Seguimiento",
+    "last_activity": "Ultima Actividad"
+  },
+  "labels": {
+    "total_contacts": "Total de Contactos",
+    "active_deals": "Negocios Activos",
+    "pipeline_value": "Valor del Pipeline",
+    "win_rate": "Tasa de Cierre",
+    "avg_deal_size": "Tamano Promedio de Negocio",
+    "search_contacts": "Buscar contactos...",
+    "no_results": "Sin resultados"
+  }
+}

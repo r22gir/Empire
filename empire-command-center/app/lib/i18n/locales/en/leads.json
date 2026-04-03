@@ -1,0 +1,58 @@
+{
+  "title": "LeadForge",
+  "subtitle": "Lead Generation & Management",
+  "nav": {
+    "dashboard": "Dashboard",
+    "prospects": "Prospects",
+    "pipeline": "Pipeline",
+    "campaigns": "Campaigns",
+    "outreach": "Outreach",
+    "analytics": "Analytics",
+    "settings": "Settings"
+  },
+  "lead_status": {
+    "new": "New",
+    "cold": "Cold",
+    "warm": "Warm",
+    "hot": "Hot",
+    "contacted": "Contacted",
+    "qualified": "Qualified",
+    "converted": "Converted",
+    "lost": "Lost",
+    "nurturing": "Nurturing"
+  },
+  "actions": {
+    "add_lead": "Add Lead",
+    "import_leads": "Import Leads",
+    "send_outreach": "Send Outreach",
+    "schedule_follow_up": "Schedule Follow-Up",
+    "log_call": "Log Call",
+    "send_email": "Send Email",
+    "assign_to": "Assign To",
+    "move_to_stage": "Move to Stage",
+    "mark_converted": "Mark as Converted",
+    "export_leads": "Export Leads"
+  },
+  "campaign": {
+    "campaign_name": "Campaign Name",
+    "channel": "Channel",
+    "start_date": "Start Date",
+    "end_date": "End Date",
+    "budget": "Budget",
+    "leads_generated": "Leads Generated",
+    "cost_per_lead": "Cost per Lead",
+    "conversion_rate": "Conversion Rate"
+  },
+  "labels": {
+    "lead_source": "Lead Source",
+    "contact_name": "Contact Name",
+    "company": "Company",
+    "email": "Email",
+    "phone": "Phone",
+    "last_contact": "Last Contact",
+    "next_follow_up": "Next Follow-Up",
+    "lead_score": "Lead Score",
+    "total_leads": "Total Leads",
+    "pipeline_value": "Pipeline Value"
+  }
+}

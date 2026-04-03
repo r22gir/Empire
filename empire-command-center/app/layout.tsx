@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { I18nWrapper } from "./components/I18nWrapper";
 
 export const metadata: Metadata = {
   title: "Empire Command Center",
@@ -25,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           if('caches' in window){caches.keys().then(function(n){n.forEach(function(k){caches.delete(k)})});}
         `}} />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><I18nWrapper>{children}</I18nWrapper></body>
     </html>
   );
 }

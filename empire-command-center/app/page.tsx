@@ -48,6 +48,8 @@ import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppScreen from './components/screens/RelistAppScreen';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
+import ConstructionForgePage from './components/screens/ConstructionForgePage';
+import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
@@ -79,6 +81,8 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   tokens: 'max',
   vision: 'max',
   drawings: 'workroom',
+  construction: 'max',
+  storefront: 'max',
 };
 
 export default function CommandCenter() {
@@ -302,6 +306,10 @@ export default function CommandCenter() {
           return <VetForgePage />;
         case 'petforge':
           return <PetForgePage />;
+        case 'construction':
+          return <ConstructionForgePage initialSection={activeSection || undefined} />;
+        case 'storefront':
+          return <StoreFrontForgePage initialSection={activeSection || undefined} />;
         case 'vision':
           return <VisionAnalysisPage />;
         case 'drawings':

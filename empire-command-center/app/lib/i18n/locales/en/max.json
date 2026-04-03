@@ -1,0 +1,57 @@
+{
+  "title": "MAX AI",
+  "subtitle": "AI Assistant",
+  "nav": {
+    "chat": "Chat",
+    "desks": "Desks",
+    "tools": "Tools",
+    "memories": "Memories",
+    "scheduler": "Scheduler",
+    "costs": "Costs",
+    "settings": "Settings"
+  },
+  "chat": {
+    "send_message": "Send Message",
+    "type_message": "Type a message...",
+    "thinking": "Thinking...",
+    "generating": "Generating response...",
+    "clear_chat": "Clear Chat",
+    "copy_response": "Copy Response",
+    "regenerate": "Regenerate",
+    "stop": "Stop",
+    "voice_input": "Voice Input",
+    "attach_file": "Attach File"
+  },
+  "desks": {
+    "active_desk": "Active Desk",
+    "switch_desk": "Switch Desk",
+    "desk_count": "Desk Count",
+    "model_routing": "Model Routing",
+    "current_model": "Current Model"
+  },
+  "tools": {
+    "available_tools": "Available Tools",
+    "tool_name": "Tool Name",
+    "tool_status": "Tool Status",
+    "last_used": "Last Used",
+    "run_tool": "Run Tool",
+    "tool_output": "Tool Output"
+  },
+  "costs": {
+    "token_usage": "Token Usage",
+    "input_tokens": "Input Tokens",
+    "output_tokens": "Output Tokens",
+    "total_cost": "Total Cost",
+    "daily_spend": "Daily Spend",
+    "monthly_spend": "Monthly Spend",
+    "cost_by_model": "Cost by Model",
+    "cost_by_desk": "Cost by Desk"
+  },
+  "labels": {
+    "ai_provider": "AI Provider",
+    "response_time": "Response Time",
+    "total_memories": "Total Memories",
+    "scheduled_tasks": "Scheduled Tasks",
+    "autonomous_mode": "Autonomous Mode"
+  }
+}

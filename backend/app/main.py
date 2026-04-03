@@ -142,6 +142,12 @@ load_router("app.routers.llcfactory", "/api/v1", ["llcfactory"])
 # ApostApp — Document apostille & authentication service (DC/MD/VA)
 load_router("app.routers.apostapp", "/api/v1", ["apostapp"])
 
+# ConstructionForge — Colombian real estate land development
+load_router("app.routers.construction", "/api/v1", ["construction"])
+
+# StoreFrontForge — Retail store management / POS
+load_router("app.routers.storefront", "/api/v1", ["storefront"])
+
 # Notes-to-Quote extraction + diagrams
 load_router("app.routers.notes_extraction", "/api/v1", ["notes-extraction"])
 

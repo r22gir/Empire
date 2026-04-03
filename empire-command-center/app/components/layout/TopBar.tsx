@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bell, ChevronDown, ExternalLink, Check } from 'lucide-react';
 import { API } from '../../lib/api';
+import LanguageSwitcher from '../LanguageSwitcher';
 
 const MODELS = [
   { id: 'grok-3-fast', label: 'xAI Grok', desc: 'Primary · Fast', color: '#b8960c' },
@@ -178,6 +179,9 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, servic
             </div>
           )}
         </div>
+
+        {/* Language Switcher */}
+        <LanguageSwitcher />
 
         {/* Notifications */}
         <div ref={notifRef} className="relative">

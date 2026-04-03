@@ -1,0 +1,62 @@
+{
+  "title": "ConstructionForge",
+  "subtitle": "Desarrollo Inmobiliario",
+  "nav": {
+    "dashboard": "Tablero",
+    "projects": "Proyectos",
+    "lot_map": "Mapa de Lotes",
+    "buyers": "Compradores",
+    "sales": "Ventas",
+    "payments": "Pagos",
+    "construction_progress": "Avance de Obra",
+    "contractors": "Contratistas",
+    "materials": "Materiales",
+    "infrastructure": "Infraestructura",
+    "reports": "Reportes"
+  },
+  "lot_status": {
+    "available": "Disponible",
+    "reserved": "Separado",
+    "sold": "Vendido",
+    "under_construction": "En Construccion",
+    "delivered": "Entregado",
+    "held": "Retenido"
+  },
+  "construction_phases": {
+    "foundation": "Cimentacion",
+    "structure": "Estructura",
+    "masonry": "Mamposteria",
+    "installations": "Instalaciones",
+    "finishes": "Acabados",
+    "handover": "Entrega"
+  },
+  "payment_methods": {
+    "bank_transfer": "Transferencia Bancaria",
+    "pse": "PSE",
+    "cash": "Efectivo",
+    "check": "Cheque",
+    "nequi": "Nequi",
+    "daviplata": "Daviplata"
+  },
+  "sales_pipeline": {
+    "prospect": "Prospecto",
+    "scheduled_visit": "Visita Programada",
+    "reservation": "Separacion",
+    "purchase_agreement": "Promesa de Compraventa",
+    "deed": "Escritura",
+    "delivered": "Entregado"
+  },
+  "labels": {
+    "lot_number": "Numero de Lote",
+    "lot_area": "Area del Lote",
+    "price_per_sqm": "Precio por m²",
+    "total_price": "Precio Total",
+    "down_payment": "Cuota Inicial",
+    "balance_due": "Saldo Pendiente",
+    "completion_pct": "% de Avance",
+    "estimated_delivery": "Fecha Estimada de Entrega",
+    "contractor_name": "Nombre del Contratista",
+    "material_cost": "Costo de Materiales",
+    "labor_cost": "Costo de Mano de Obra"
+  }
+}

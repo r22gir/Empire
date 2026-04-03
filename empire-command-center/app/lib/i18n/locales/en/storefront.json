@@ -1,0 +1,52 @@
+{
+  "title": "StoreFront Forge",
+  "subtitle": "Retail Point of Sale",
+  "nav": {
+    "pos": "POS",
+    "inventory": "Inventory",
+    "products": "Products",
+    "customers": "Customers",
+    "transactions": "Transactions",
+    "reports": "Reports",
+    "settings": "Settings"
+  },
+  "pos": {
+    "new_sale": "New Sale",
+    "scan_barcode": "Scan Barcode",
+    "search_product": "Search Product",
+    "add_to_cart": "Add to Cart",
+    "remove_item": "Remove Item",
+    "subtotal": "Subtotal",
+    "tax": "Tax",
+    "discount": "Discount",
+    "total": "Total",
+    "cash": "Cash",
+    "card": "Card",
+    "change_due": "Change Due",
+    "print_receipt": "Print Receipt",
+    "email_receipt": "Email Receipt",
+    "void_sale": "Void Sale",
+    "refund": "Refund",
+    "apply_coupon": "Apply Coupon"
+  },
+  "inventory": {
+    "sku": "SKU",
+    "barcode": "Barcode",
+    "quantity_on_hand": "Qty on Hand",
+    "reorder_point": "Reorder Point",
+    "cost_price": "Cost Price",
+    "retail_price": "Retail Price",
+    "margin": "Margin",
+    "low_stock_alert": "Low Stock Alert",
+    "stock_count": "Stock Count",
+    "receive_shipment": "Receive Shipment"
+  },
+  "labels": {
+    "daily_sales": "Daily Sales",
+    "register_open": "Register Open",
+    "register_close": "Register Close",
+    "cash_drawer": "Cash Drawer",
+    "items_sold": "Items Sold",
+    "average_sale": "Average Sale"
+  }
+}

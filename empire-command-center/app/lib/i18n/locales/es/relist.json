@@ -1,0 +1,54 @@
+{
+  "title": "RelistApp",
+  "subtitle": "Arbitraje de Envio Directo",
+  "nav": {
+    "dashboard": "Tablero",
+    "listings": "Publicaciones",
+    "sources": "Fuentes",
+    "orders": "Pedidos",
+    "analytics": "Analiticas",
+    "settings": "Configuracion"
+  },
+  "listing": {
+    "source_price": "Precio de Origen",
+    "sell_price": "Precio de Venta",
+    "markup": "Margen de Ganancia",
+    "markup_pct": "% de Margen",
+    "platform_fee": "Comision de Plataforma",
+    "shipping_cost": "Costo de Envio",
+    "estimated_profit": "Ganancia Estimada",
+    "actual_profit": "Ganancia Real",
+    "cross_list": "Publicar en Multiples Plataformas",
+    "delist": "Despublicar",
+    "relist": "Republicar",
+    "source_url": "URL de Origen",
+    "target_platform": "Plataforma Destino"
+  },
+  "status": {
+    "active": "Activo",
+    "sold": "Vendido",
+    "delisted": "Despublicado",
+    "out_of_stock": "Agotado",
+    "price_changed": "Precio Actualizado",
+    "pending_shipment": "Envio Pendiente",
+    "shipped": "Enviado",
+    "delivered": "Entregado"
+  },
+  "actions": {
+    "scan_source": "Escanear Fuente",
+    "import_listing": "Importar Publicacion",
+    "bulk_relist": "Republicar en Lote",
+    "sync_prices": "Sincronizar Precios",
+    "check_availability": "Verificar Disponibilidad",
+    "auto_reprice": "Auto Repricing",
+    "export_csv": "Exportar CSV"
+  },
+  "labels": {
+    "total_listings": "Total de Publicaciones",
+    "total_profit": "Ganancia Total",
+    "avg_margin": "Margen Promedio",
+    "sell_through_rate": "Tasa de Venta",
+    "days_listed": "Dias Publicado",
+    "supplier": "Proveedor"
+  }
+}

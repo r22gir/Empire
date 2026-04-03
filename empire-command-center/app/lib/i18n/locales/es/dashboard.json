@@ -1,0 +1,47 @@
+{
+  "title": "Tablero",
+  "subtitle": "Centro de Comando Empire",
+  "nav": {
+    "overview": "Vista General",
+    "modules": "Modulos",
+    "activity": "Actividad",
+    "notifications": "Notificaciones",
+    "settings": "Configuracion"
+  },
+  "widgets": {
+    "revenue_today": "Ingresos de Hoy",
+    "revenue_month": "Ingresos del Mes",
+    "active_orders": "Pedidos Activos",
+    "pending_tasks": "Tareas Pendientes",
+    "active_users": "Usuarios Activos",
+    "system_health": "Salud del Sistema",
+    "ai_calls_today": "Llamadas IA Hoy",
+    "uptime": "Tiempo Activo"
+  },
+  "actions": {
+    "refresh": "Actualizar",
+    "customize": "Personalizar",
+    "export_report": "Exportar Reporte",
+    "view_all": "Ver Todo",
+    "add_widget": "Agregar Widget",
+    "remove_widget": "Eliminar Widget",
+    "full_screen": "Pantalla Completa"
+  },
+  "status": {
+    "online": "En Linea",
+    "offline": "Fuera de Linea",
+    "maintenance": "Mantenimiento",
+    "degraded": "Degradado",
+    "healthy": "Saludable",
+    "warning": "Advertencia",
+    "critical": "Critico"
+  },
+  "labels": {
+    "last_updated": "Ultima Actualizacion",
+    "quick_actions": "Acciones Rapidas",
+    "recent_activity": "Actividad Reciente",
+    "top_modules": "Modulos Principales",
+    "performance": "Rendimiento",
+    "loading": "Cargando..."
+  }
+}

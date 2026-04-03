@@ -1,5 +1,5 @@
 // Ecosystem product = left nav item
-export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'platform' | 'openclaw' | 'recovery' | 'luxe' | 'hardware' | 'system' | 'tokens' | 'market' | 'contractor' | 'support' | 'lead' | 'ship' | 'crm' | 'relist' | 'llc' | 'apost' | 'assist' | 'pay' | 'amp' | 'vetforge' | 'petforge' | 'vision' | 'max-avatar' | 'dev' | 'drawings';
+export type EcosystemProduct = 'owner' | 'workroom' | 'craft' | 'social' | 'platform' | 'openclaw' | 'recovery' | 'luxe' | 'hardware' | 'system' | 'tokens' | 'market' | 'contractor' | 'support' | 'lead' | 'ship' | 'crm' | 'relist' | 'llc' | 'apost' | 'assist' | 'pay' | 'amp' | 'vetforge' | 'petforge' | 'vision' | 'max-avatar' | 'dev' | 'drawings' | 'construction' | 'storefront';
 
 // Legacy BusinessTab mapping (for hooks/data that still reference it)
 export type BusinessTab = 'max' | 'workroom' | 'craft' | 'social' | 'platform' | 'tickets' | 'shipping';

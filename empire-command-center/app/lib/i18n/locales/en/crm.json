@@ -1,0 +1,57 @@
+{
+  "title": "CRM",
+  "subtitle": "Customer Relationship Management",
+  "nav": {
+    "dashboard": "Dashboard",
+    "contacts": "Contacts",
+    "companies": "Companies",
+    "deals": "Deals",
+    "tasks": "Tasks",
+    "calendar": "Calendar",
+    "reports": "Reports",
+    "settings": "Settings"
+  },
+  "contact": {
+    "first_name": "First Name",
+    "last_name": "Last Name",
+    "email": "Email",
+    "phone": "Phone",
+    "company": "Company",
+    "job_title": "Job Title",
+    "address": "Address",
+    "tags": "Tags",
+    "notes": "Notes",
+    "add_contact": "Add Contact",
+    "edit_contact": "Edit Contact",
+    "delete_contact": "Delete Contact"
+  },
+  "deal": {
+    "deal_name": "Deal Name",
+    "deal_value": "Deal Value",
+    "stage": "Stage",
+    "probability": "Probability",
+    "expected_close": "Expected Close Date",
+    "assigned_to": "Assigned To",
+    "won": "Won",
+    "lost": "Lost",
+    "open": "Open"
+  },
+  "activity": {
+    "log_call": "Log Call",
+    "log_email": "Log Email",
+    "log_meeting": "Log Meeting",
+    "add_note": "Add Note",
+    "schedule_task": "Schedule Task",
+    "follow_up": "Follow Up",
+    "last_activity": "Last Activity"
+  },
+  "labels": {
+    "total_contacts": "Total Contacts",
+    "active_deals": "Active Deals",
+    "pipeline_value": "Pipeline Value",
+    "win_rate": "Win Rate",
+    "avg_deal_size": "Avg Deal Size",
+    "search_contacts": "Search contacts...",
+    "no_results": "No results found"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "title": "Empire Workroom",
+  "subtitle": "Drapery & Upholstery",
+  "nav": {
+    "dashboard": "Dashboard",
+    "work_orders": "Work Orders",
+    "clients": "Clients",
+    "fabrics": "Fabrics",
+    "quotes": "Quotes",
+    "schedule": "Schedule",
+    "intake": "Intake",
+    "reports": "Reports",
+    "settings": "Settings"
+  },
+  "work_order": {
+    "order_number": "Order Number",
+    "client_name": "Client Name",
+    "product_type": "Product Type",
+    "fabric": "Fabric",
+    "lining": "Lining",
+    "width": "Width",
+    "height": "Height",
+    "quantity": "Quantity",
+    "status": "Status",
+    "due_date": "Due Date",
+    "priority": "Priority",
+    "create_order": "Create Order",
+    "edit_order": "Edit Order"
+  },
+  "product_types": {
+    "drapes": "Drapes",
+    "curtains": "Curtains",
+    "roman_shades": "Roman Shades",
+    "valances": "Valances",
+    "upholstery": "Upholstery",
+    "cushions": "Cushions",
+    "bedding": "Bedding",
+    "pillows": "Pillows"
+  },
+  "status": {
+    "pending": "Pending",
+    "cutting": "Cutting",
+    "sewing": "Sewing",
+    "pressing": "Pressing",
+    "quality_check": "Quality Check",
+    "ready": "Ready for Pickup",
+    "delivered": "Delivered",
+    "on_hold": "On Hold"
+  },
+  "labels": {
+    "fabric_yards": "Fabric (yards)",
+    "labor_hours": "Labor Hours",
+    "total_quote": "Total Quote",
+    "deposit": "Deposit",
+    "balance": "Balance",
+    "install_date": "Install Date",
+    "active_orders": "Active Orders",
+    "this_week": "This Week"
+  }
+}

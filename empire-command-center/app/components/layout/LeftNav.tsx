@@ -6,6 +6,7 @@ import {
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
+  Building2, ShoppingCart,
 } from 'lucide-react';
 
 interface NavItem {
@@ -25,10 +26,12 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
-    label: 'Businesses',
+    label: 'Your Business',
     items: [
       { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a' },
       { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04' },
+      { id: 'storefront', name: 'StoreFront Forge', icon: <ShoppingCart size={16} />, status: 'active', color: '#16a34a' },
+      { id: 'construction', name: 'ConstructionForge', icon: <Building2 size={16} />, status: 'active', color: '#b8960c' },
       { id: 'luxe', name: 'LuxeForge', icon: <Gem size={16} />, status: 'active', color: '#7c3aed' },
     ],
   },

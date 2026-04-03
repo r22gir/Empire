@@ -1,0 +1,57 @@
+{
+  "title": "MAX AI",
+  "subtitle": "Asistente de IA",
+  "nav": {
+    "chat": "Chat",
+    "desks": "Escritorios",
+    "tools": "Herramientas",
+    "memories": "Memorias",
+    "scheduler": "Programador",
+    "costs": "Costos",
+    "settings": "Configuracion"
+  },
+  "chat": {
+    "send_message": "Enviar Mensaje",
+    "type_message": "Escribe un mensaje...",
+    "thinking": "Pensando...",
+    "generating": "Generando respuesta...",
+    "clear_chat": "Limpiar Chat",
+    "copy_response": "Copiar Respuesta",
+    "regenerate": "Regenerar",
+    "stop": "Detener",
+    "voice_input": "Entrada de Voz",
+    "attach_file": "Adjuntar Archivo"
+  },
+  "desks": {
+    "active_desk": "Escritorio Activo",
+    "switch_desk": "Cambiar Escritorio",
+    "desk_count": "Cantidad de Escritorios",
+    "model_routing": "Enrutamiento de Modelo",
+    "current_model": "Modelo Actual"
+  },
+  "tools": {
+    "available_tools": "Herramientas Disponibles",
+    "tool_name": "Nombre de Herramienta",
+    "tool_status": "Estado de Herramienta",
+    "last_used": "Ultimo Uso",
+    "run_tool": "Ejecutar Herramienta",
+    "tool_output": "Resultado de Herramienta"
+  },
+  "costs": {
+    "token_usage": "Uso de Tokens",
+    "input_tokens": "Tokens de Entrada",
+    "output_tokens": "Tokens de Salida",
+    "total_cost": "Costo Total",
+    "daily_spend": "Gasto Diario",
+    "monthly_spend": "Gasto Mensual",
+    "cost_by_model": "Costo por Modelo",
+    "cost_by_desk": "Costo por Escritorio"
+  },
+  "labels": {
+    "ai_provider": "Proveedor de IA",
+    "response_time": "Tiempo de Respuesta",
+    "total_memories": "Total de Memorias",
+    "scheduled_tasks": "Tareas Programadas",
+    "autonomous_mode": "Modo Autonomo"
+  }
+}

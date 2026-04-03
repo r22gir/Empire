@@ -1,0 +1,60 @@
+{
+  "title": "Empire Workroom",
+  "subtitle": "Cortinas y Tapiceria",
+  "nav": {
+    "dashboard": "Tablero",
+    "work_orders": "Ordenes de Trabajo",
+    "clients": "Clientes",
+    "fabrics": "Telas",
+    "quotes": "Cotizaciones",
+    "schedule": "Calendario",
+    "intake": "Recepcion",
+    "reports": "Reportes",
+    "settings": "Configuracion"
+  },
+  "work_order": {
+    "order_number": "Numero de Orden",
+    "client_name": "Nombre del Cliente",
+    "product_type": "Tipo de Producto",
+    "fabric": "Tela",
+    "lining": "Forro",
+    "width": "Ancho",
+    "height": "Alto",
+    "quantity": "Cantidad",
+    "status": "Estado",
+    "due_date": "Fecha de Entrega",
+    "priority": "Prioridad",
+    "create_order": "Crear Orden",
+    "edit_order": "Editar Orden"
+  },
+  "product_types": {
+    "drapes": "Cortinas",
+    "curtains": "Visillos",
+    "roman_shades": "Persianas Romanas",
+    "valances": "Cenefas",
+    "upholstery": "Tapiceria",
+    "cushions": "Cojines",
+    "bedding": "Ropa de Cama",
+    "pillows": "Almohadas"
+  },
+  "status": {
+    "pending": "Pendiente",
+    "cutting": "Corte",
+    "sewing": "Costura",
+    "pressing": "Planchado",
+    "quality_check": "Control de Calidad",
+    "ready": "Listo para Recoger",
+    "delivered": "Entregado",
+    "on_hold": "En Espera"
+  },
+  "labels": {
+    "fabric_yards": "Tela (yardas)",
+    "labor_hours": "Horas de Trabajo",
+    "total_quote": "Cotizacion Total",
+    "deposit": "Anticipo",
+    "balance": "Saldo",
+    "install_date": "Fecha de Instalacion",
+    "active_orders": "Ordenes Activas",
+    "this_week": "Esta Semana"
+  }
+}

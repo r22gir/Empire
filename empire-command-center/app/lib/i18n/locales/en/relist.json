@@ -1,0 +1,54 @@
+{
+  "title": "RelistApp",
+  "subtitle": "Drop-Ship Arbitrage",
+  "nav": {
+    "dashboard": "Dashboard",
+    "listings": "Listings",
+    "sources": "Sources",
+    "orders": "Orders",
+    "analytics": "Analytics",
+    "settings": "Settings"
+  },
+  "listing": {
+    "source_price": "Source Price",
+    "sell_price": "Sell Price",
+    "markup": "Markup",
+    "markup_pct": "Markup %",
+    "platform_fee": "Platform Fee",
+    "shipping_cost": "Shipping Cost",
+    "estimated_profit": "Estimated Profit",
+    "actual_profit": "Actual Profit",
+    "cross_list": "Cross-List",
+    "delist": "Delist",
+    "relist": "Relist",
+    "source_url": "Source URL",
+    "target_platform": "Target Platform"
+  },
+  "status": {
+    "active": "Active",
+    "sold": "Sold",
+    "delisted": "Delisted",
+    "out_of_stock": "Out of Stock",
+    "price_changed": "Price Changed",
+    "pending_shipment": "Pending Shipment",
+    "shipped": "Shipped",
+    "delivered": "Delivered"
+  },
+  "actions": {
+    "scan_source": "Scan Source",
+    "import_listing": "Import Listing",
+    "bulk_relist": "Bulk Relist",
+    "sync_prices": "Sync Prices",
+    "check_availability": "Check Availability",
+    "auto_reprice": "Auto Reprice",
+    "export_csv": "Export CSV"
+  },
+  "labels": {
+    "total_listings": "Total Listings",
+    "total_profit": "Total Profit",
+    "avg_margin": "Avg Margin",
+    "sell_through_rate": "Sell-Through Rate",
+    "days_listed": "Days Listed",
+    "supplier": "Supplier"
+  }
+}

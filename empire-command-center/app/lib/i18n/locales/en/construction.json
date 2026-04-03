@@ -1,0 +1,62 @@
+{
+  "title": "ConstructionForge",
+  "subtitle": "Real Estate Development",
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "lot_map": "Lot Map",
+    "buyers": "Buyers",
+    "sales": "Sales",
+    "payments": "Payments",
+    "construction_progress": "Construction Progress",
+    "contractors": "Contractors",
+    "materials": "Materials",
+    "infrastructure": "Infrastructure",
+    "reports": "Reports"
+  },
+  "lot_status": {
+    "available": "Available",
+    "reserved": "Reserved",
+    "sold": "Sold",
+    "under_construction": "Under Construction",
+    "delivered": "Delivered",
+    "held": "Held"
+  },
+  "construction_phases": {
+    "foundation": "Foundation",
+    "structure": "Structure",
+    "masonry": "Masonry",
+    "installations": "Installations",
+    "finishes": "Finishes",
+    "handover": "Handover"
+  },
+  "payment_methods": {
+    "bank_transfer": "Bank Transfer",
+    "pse": "PSE",
+    "cash": "Cash",
+    "check": "Check",
+    "nequi": "Nequi",
+    "daviplata": "Daviplata"
+  },
+  "sales_pipeline": {
+    "prospect": "Prospect",
+    "scheduled_visit": "Scheduled Visit",
+    "reservation": "Reservation",
+    "purchase_agreement": "Purchase Agreement",
+    "deed": "Deed",
+    "delivered": "Delivered"
+  },
+  "labels": {
+    "lot_number": "Lot Number",
+    "lot_area": "Lot Area",
+    "price_per_sqm": "Price per m²",
+    "total_price": "Total Price",
+    "down_payment": "Down Payment",
+    "balance_due": "Balance Due",
+    "completion_pct": "Completion %",
+    "estimated_delivery": "Estimated Delivery",
+    "contractor_name": "Contractor Name",
+    "material_cost": "Material Cost",
+    "labor_cost": "Labor Cost"
+  }
+}

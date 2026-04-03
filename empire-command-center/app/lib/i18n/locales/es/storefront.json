@@ -1,0 +1,52 @@
+{
+  "title": "StoreFront Forge",
+  "subtitle": "Punto de Venta Minorista",
+  "nav": {
+    "pos": "POS",
+    "inventory": "Inventario",
+    "products": "Productos",
+    "customers": "Clientes",
+    "transactions": "Transacciones",
+    "reports": "Reportes",
+    "settings": "Configuracion"
+  },
+  "pos": {
+    "new_sale": "Nueva Venta",
+    "scan_barcode": "Escanear Codigo de Barras",
+    "search_product": "Buscar Producto",
+    "add_to_cart": "Agregar al Carrito",
+    "remove_item": "Eliminar Articulo",
+    "subtotal": "Subtotal",
+    "tax": "Impuesto",
+    "discount": "Descuento",
+    "total": "Total",
+    "cash": "Efectivo",
+    "card": "Tarjeta",
+    "change_due": "Cambio a Devolver",
+    "print_receipt": "Imprimir Recibo",
+    "email_receipt": "Enviar Recibo por Correo",
+    "void_sale": "Anular Venta",
+    "refund": "Devolucion",
+    "apply_coupon": "Aplicar Cupon"
+  },
+  "inventory": {
+    "sku": "SKU",
+    "barcode": "Codigo de Barras",
+    "quantity_on_hand": "Cantidad en Existencia",
+    "reorder_point": "Punto de Reorden",
+    "cost_price": "Precio de Costo",
+    "retail_price": "Precio de Venta",
+    "margin": "Margen",
+    "low_stock_alert": "Alerta de Stock Bajo",
+    "stock_count": "Conteo de Inventario",
+    "receive_shipment": "Recibir Envio"
+  },
+  "labels": {
+    "daily_sales": "Ventas del Dia",
+    "register_open": "Apertura de Caja",
+    "register_close": "Cierre de Caja",
+    "cash_drawer": "Cajon de Efectivo",
+    "items_sold": "Articulos Vendidos",
+    "average_sale": "Venta Promedio"
+  }
+}
