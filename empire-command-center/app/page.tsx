@@ -46,6 +46,8 @@ import TelegramScreen from './components/screens/TelegramScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppScreen from './components/screens/RelistAppScreen';
+import RelistAppPage from './components/screens/RelistAppPage';
+import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
@@ -282,7 +284,7 @@ export default function CommandCenter() {
         case 'assist': return <EmpireAssistPage />;
         case 'support': return <SupportForgePage />;
         case 'contractor': return <ContractorForgePage />;
-        case 'lead': return <LeadForgePage />;
+        case 'lead': return <LeadForgePageNew initialSection={activeSection || undefined} />;
         case 'market': return <MarketForgePage />;
         case 'pay': return <EmpirePayPage />;
         case 'ship': return <ShipForgePage />;
@@ -295,7 +297,7 @@ export default function CommandCenter() {
         case 'recovery':
           return <RecoveryForgeScreen />;
         case 'relist':
-          return <RelistAppScreen />;
+          return <RelistAppPage initialSection={activeSection || undefined} />;
         case 'dev':
           return <DevPanel />;
         case 'openclaw':
