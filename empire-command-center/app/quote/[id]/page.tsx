@@ -33,6 +33,7 @@ interface Quote {
   tax_rate: number;
   tax_amount: number;
   discount_amount: number;
+  discount_type: string | null;
   total: number;
   deposit: number | null;
   terms: string;
@@ -237,8 +238,8 @@ export default function QuoteAcceptPage() {
           </div>
           {quote.discount_amount > 0 && (
             <div style={{ ...styles.totalsRow, color: '#16a34a' }}>
-              <span>Discount</span>
-              <span>-{formatCurrency(quote.discount_amount)}</span>
+              <span>Discount{quote.discount_type === 'percent' ? ` (${quote.discount_amount}%)` : ''}</span>
+              <span>-{formatCurrency(quote.discount_type === 'percent' ? quote.subtotal * (quote.discount_amount / 100) : quote.discount_amount)}</span>
             </div>
           )}
           {quote.tax_amount > 0 && (
