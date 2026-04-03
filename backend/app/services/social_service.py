@@ -9,8 +9,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 GRAPH_API = "https://graph.facebook.com/v21.0"
-INSTAGRAM_API_TOKEN = os.getenv("INSTAGRAM_API_TOKEN", "")
-FACEBOOK_PAGE_TOKEN = os.getenv("FACEBOOK_PAGE_TOKEN", "")
+INSTAGRAM_API_TOKEN = os.getenv("INSTAGRAM_API_TOKEN", "") or os.getenv("META_ACCESS_TOKEN", "")
+FACEBOOK_PAGE_TOKEN = os.getenv("FACEBOOK_PAGE_TOKEN", "") or os.getenv("META_ACCESS_TOKEN", "")
 
 
 async def _get_instagram_account_id() -> str | None:
