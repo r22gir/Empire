@@ -130,7 +130,8 @@ load_router("app.routers.crypto_checkout", "/api/v1", ["crypto-checkout"])
 load_router("app.routers.emails", "/api/v1", ["emails"])
 load_router("app.routers.customer_mgmt", "/api/v1", ["crm"])
 load_router("app.routers.inventory", "/api/v1", ["inventory"])
-load_router("app.routers.jobs", "/api/v1", ["jobs"])
+# load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
+load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
 
 # LuxeForge FREE — Public intake portal
 load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
@@ -212,14 +213,8 @@ async def root():
 # ── Alias routes (fix 404s for common frontend paths) ──────────────
 from fastapi.responses import RedirectResponse
 
-@app.get("/api/v1/invoices")
-async def invoices_alias(request: Request):
-    """Redirect /api/v1/invoices → /api/v1/finance/invoices."""
-    query = str(request.query_params)
-    target = "/api/v1/finance/invoices"
-    if query:
-        target += f"?{query}"
-    return RedirectResponse(url=target, status_code=307)
+# invoices_alias removed — /api/v1/invoices now served by jobs_unified router
+# Legacy finance invoices still available at /api/v1/finance/invoices
 
 @app.get("/health")
 async def health():
