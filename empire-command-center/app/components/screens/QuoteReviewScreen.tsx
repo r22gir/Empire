@@ -52,6 +52,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [editTerms, setEditTerms] = useState('');
   const [editTaxRate, setEditTaxRate] = useState(0);
   const [editDepositPct, setEditDepositPct] = useState(50);
+  const [editDiscountAmt, setEditDiscountAmt] = useState(0);
+  const [editDiscountType, setEditDiscountType] = useState<'dollar' | 'percent'>('dollar');
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -86,13 +88,18 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     setEditTerms(q.terms || '');
     setEditTaxRate((q.tax_rate || 0) * 100);
     setEditDepositPct(q.deposit?.deposit_percent || 50);
+    setEditDiscountAmt(q.discount_amount || 0);
+    setEditDiscountType(q.discount_type || 'dollar');
     setDirty(false);
   }, [quote]);
 
   // Recalculate totals from editable items
   const computedSubtotal = editItems.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const computedDiscount = editDiscountType === 'percent'
+    ? Math.round(computedSubtotal * (editDiscountAmt / 100) * 100) / 100
+    : editDiscountAmt;
   const computedTax = Math.round(computedSubtotal * (editTaxRate / 100) * 100) / 100;
-  const computedTotal = Math.round((computedSubtotal + computedTax) * 100) / 100;
+  const computedTotal = Math.round((computedSubtotal + computedTax - computedDiscount) * 100) / 100;
   const computedDeposit = Math.round(computedTotal * (editDepositPct / 100) * 100) / 100;
 
   const updateItem = (idx: number, field: string, value: any) => {
@@ -129,6 +136,8 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           subtotal: computedSubtotal,
           tax_rate: editTaxRate / 100,
           tax_amount: computedTax,
+          discount_amount: editDiscountAmt,
+          discount_type: editDiscountType,
           total: computedTotal,
           deposit: { deposit_percent: editDepositPct, deposit_amount: computedDeposit },
           notes: editNotes,
@@ -582,6 +591,26 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                   <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', color: '#666', fontSize: 12 }}>Subtotal</td>
                   <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 600, fontSize: 13, color: '#1a1a1a' }}>
                     ${computedSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </td>
+                  <td></td>
+                </tr>
+                <tr>
+                  <td colSpan={3} style={{ padding: '4px 8px', textAlign: 'right', color: '#16a34a', fontSize: 12 }}>Discount</td>
+                  <td style={{ padding: '4px 4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
+                      <input type="number" step="0.01" min="0" value={editDiscountAmt || ''}
+                        onChange={e => { setEditDiscountAmt(parseFloat(e.target.value) || 0); setDirty(true); }}
+                        style={{ width: 50, textAlign: 'right', fontSize: 11, padding: '4px 4px', border: '1px solid #ece8e0', borderRadius: 4, background: '#faf9f7' }}
+                        placeholder="0" />
+                      <button onClick={() => { setEditDiscountType(editDiscountType === 'dollar' ? 'percent' : 'dollar'); setDirty(true); }}
+                        style={{ fontSize: 11, color: '#16a34a', background: 'none', border: '1px solid #ece8e0', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', fontWeight: 600 }}
+                        title={`Toggle discount type (currently ${editDiscountType})`}>
+                        {editDiscountType === 'dollar' ? '$' : '%'}
+                      </button>
+                    </div>
+                  </td>
+                  <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 12, color: '#16a34a' }}>
+                    {computedDiscount > 0 ? `-$${computedDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
                   </td>
                   <td></td>
                 </tr>
