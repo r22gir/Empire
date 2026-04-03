@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+import AccountSetupWizard from './AccountSetupWizard';
 
 const SF_API = `${API}/socialforge`;
 
@@ -54,7 +55,7 @@ const EMPTY_ANALYTICS = {
 
 // ============ TAB CONFIG ============
 
-type Tab = 'dashboard' | 'calendar' | 'compose' | 'analytics' | 'accounts' | 'payments' | 'docs';
+type Tab = 'dashboard' | 'calendar' | 'compose' | 'analytics' | 'accounts' | 'setup' | 'payments' | 'docs';
 
 const NAV_TABS: { id: Tab; label: string; icon: any }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
@@ -62,6 +63,7 @@ const NAV_TABS: { id: Tab; label: string; icon: any }[] = [
   { id: 'compose', label: 'Compose', icon: PenTool },
   { id: 'analytics', label: 'Analytics', icon: TrendingUp },
   { id: 'accounts', label: 'Accounts', icon: Users },
+  { id: 'setup', label: 'Setup Wizard', icon: Settings },
   { id: 'payments', label: 'Payments', icon: CreditCard },
   { id: 'docs', label: 'Docs', icon: BookOpen },
 ];
@@ -1348,6 +1350,9 @@ export default function SocialForgePage() {
             </div>
           </div>
         )}
+
+        {/* ==================== SETUP WIZARD TAB ==================== */}
+        {tab === 'setup' && <AccountSetupWizard />}
 
         {tab === 'payments' && (
           <PaymentModule product="social" />
