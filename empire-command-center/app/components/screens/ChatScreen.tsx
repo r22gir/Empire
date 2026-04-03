@@ -5,6 +5,7 @@ import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
+import InlineDrawing from '../InlineDrawing';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -597,6 +598,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
                     onSend={onSend}
                   />
                 );
+              }
+              if (tr.tool === 'sketch_to_drawing' && tr.success && tr.result?.svg) {
+                return <InlineDrawing key={j} result={tr.result} />;
               }
               return null;
             })}

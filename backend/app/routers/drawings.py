@@ -1,5 +1,6 @@
 """Drawing Studio API — generate architectural bench drawings (SVG + PDF)."""
 from fastapi import APIRouter, Response, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 import os
@@ -13,6 +14,25 @@ router = APIRouter()
 log = logging.getLogger("drawings")
 
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
+
+
+@router.get("/drawings/files/{filename}")
+async def serve_drawing_file(filename: str):
+    """Serve generated drawing files (SVG, PDF)."""
+    base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+    file_path = os.path.join(base_dir, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Drawing file not found")
+    # Determine media type
+    if filename.endswith('.svg'):
+        media_type = "image/svg+xml"
+    elif filename.endswith('.pdf'):
+        media_type = "application/pdf"
+    elif filename.endswith('.png'):
+        media_type = "image/png"
+    else:
+        media_type = "application/octet-stream"
+    return FileResponse(file_path, media_type=media_type)
 
 
 class BenchRequest(BaseModel):

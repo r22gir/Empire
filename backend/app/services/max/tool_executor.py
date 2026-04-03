@@ -1858,11 +1858,26 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
             drawings_to_pdf([{"name": name, "svg": svg, "lf": lf}], output_path)
             size = os.path.getsize(output_path)
+
+            # Save SVG file next to PDF for inline display
+            svg_path = output_path.replace('.pdf', '.svg')
+            with open(svg_path, 'w') as f:
+                f.write(svg)
+
+            from app.services.vision.renderer_registry import get_business_unit
+            filename = os.path.basename(output_path)
+            svg_filename = filename.replace('.pdf', '.svg')
             result = {
                 "pdf_path": output_path,
                 "pages": 1,
                 "size_bytes": size,
                 "item_type": "bench",
+                "svg": svg,
+                "svg_url": f'/api/v1/drawings/files/{svg_filename}',
+                "pdf_url": f'/api/v1/drawings/files/{filename}',
+                "canvas_mode": "drawing",
+                "item_name": name,
+                "business_unit": get_business_unit("bench"),
             }
             if email_to:
                 result["email"] = _auto_email_pdf(output_path, email_to, name)
@@ -1898,11 +1913,26 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
         drawings_to_pdf([{"name": name, "svg": svg, "lf": 0}], output_path)
         size = os.path.getsize(output_path)
+
+        # Save SVG file next to PDF for inline display
+        svg_path = output_path.replace('.pdf', '.svg')
+        with open(svg_path, 'w') as f:
+            f.write(svg)
+
+        from app.services.vision.renderer_registry import get_business_unit
+        filename = os.path.basename(output_path)
+        svg_filename = filename.replace('.pdf', '.svg')
         result = {
             "pdf_path": output_path,
             "pages": 1,
             "size_bytes": size,
             "item_type": item_type,
+            "svg": svg,
+            "svg_url": f'/api/v1/drawings/files/{svg_filename}',
+            "pdf_url": f'/api/v1/drawings/files/{filename}',
+            "canvas_mode": "drawing",
+            "item_name": name,
+            "business_unit": get_business_unit(item_type),
         }
         if email_to:
             result["email"] = _auto_email_pdf(output_path, email_to, name)
