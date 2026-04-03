@@ -129,8 +129,8 @@ async def list_chats(user_id: str = "founder"):
         except (json.JSONDecodeError, KeyError):
             continue
 
-    # Pinned first, then by updated_at descending
-    chats.sort(key=lambda x: (not x.get("pinned", False), x.get("updated_at", "")), reverse=False)
+    # Pinned first, then by updated_at descending (newest on top)
+    chats.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
     chats.sort(key=lambda x: x.get("pinned", False), reverse=True)
 
     return {"chats": chats, "count": len(chats)}
