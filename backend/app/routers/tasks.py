@@ -327,3 +327,42 @@ def add_comment(task_id: str, comment: CommentCreate):
             "UPDATE tasks SET updated_at = datetime('now') WHERE id = ?", (task_id,)
         )
         return {"status": "ok", "task_id": task_id}
+
+
+# ── Execute Task via Desk System ──
+
+@router.post("/{task_id}/execute")
+async def execute_task(task_id: str):
+    """Execute a task through the AI desk system. Routes to appropriate desk and returns result."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Task not found")
+        task = dict_row(row)
+        if task["status"] == "done":
+            return {"status": "already_done", "task_id": task_id, "result_summary": task.get("result_summary")}
+
+    from app.services.max.desks.desk_manager import desk_manager
+    import asyncio
+
+    try:
+        result = await asyncio.wait_for(
+            desk_manager.submit_task(
+                title=task["title"],
+                description=task.get("description", task["title"]),
+                priority=task.get("priority", "normal"),
+                source="ui_execute",
+                db_task_id=task_id,
+            ),
+            timeout=60.0
+        )
+        return {
+            "status": "executed",
+            "task_id": task_id,
+            "state": result.state.value if hasattr(result.state, 'value') else str(result.state),
+            "result_summary": result.result[:500] if result.result else None,
+        }
+    except asyncio.TimeoutError:
+        return {"status": "timeout", "task_id": task_id, "error": "Task execution timed out after 60s"}
+    except Exception as e:
+        raise HTTPException(500, f"Execution failed: {str(e)}")

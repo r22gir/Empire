@@ -91,12 +91,16 @@ class AIDeskManager:
         customer_name: str | None = None,
         source: str = "max",
         conversation_id: str | None = None,
+        db_task_id: str | None = None,
     ) -> DeskTask:
-        """Create and route a task to the appropriate desk."""
+        """Create and route a task to the appropriate desk.
+
+        If db_task_id is provided, updates the existing tasks table row with results.
+        """
         self.initialize()
 
         task = DeskTask(
-            id=str(uuid.uuid4())[:8],
+            id=db_task_id or str(uuid.uuid4())[:8],
             title=title,
             description=description,
             priority=TaskPriority(priority) if priority in TaskPriority.__members__.values() else TaskPriority.NORMAL,
@@ -112,7 +116,10 @@ class AIDeskManager:
             desk = self.router.get_desk(desk_id)
             logger.info(f"Task '{title}' → {desk.desk_name}: {reason}")
             try:
-                return await asyncio.wait_for(desk.handle_task(task), timeout=60.0)
+                result = await asyncio.wait_for(desk.handle_task(task), timeout=60.0)
+                # Sync result back to SQLite tasks table
+                self._sync_task_to_db(result, desk_id)
+                return result
             except asyncio.TimeoutError:
                 task.state = TaskState.FAILED
                 task.result = "Task timed out — try a simpler request or use Claude Code for complex tasks"
@@ -120,6 +127,7 @@ class AIDeskManager:
                 if task in desk.active_tasks:
                     desk.active_tasks.remove(task)
                 logger.error(f"Task '{title}' TIMED OUT after 60s on {desk.desk_name}")
+                self._sync_task_to_db(task, desk_id)
                 return task
         else:
             # No desk matched — send to founder inbox
@@ -128,6 +136,43 @@ class AIDeskManager:
             self.founder_inbox.append(task)
             logger.info(f"Task '{title}' → founder inbox: {reason}")
             return task
+
+    def _sync_task_to_db(self, task: DeskTask, desk_id: str = ""):
+        """Sync DeskTask result back to the SQLite tasks table."""
+        try:
+            import sqlite3, os
+            db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+            conn = sqlite3.connect(db_path)
+            state_map = {
+                TaskState.COMPLETED: "done",
+                TaskState.FAILED: "failed",
+                TaskState.IN_PROGRESS: "in_progress",
+                TaskState.PENDING: "todo",
+                TaskState.ESCALATED: "waiting",
+            }
+            status = state_map.get(task.state, "todo")
+            result_text = task.result or ""
+            # Update existing row if task.id matches, otherwise insert
+            existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task.id,)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, result_summary = ?, completed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (status, result_text[:2000], task.completed_at, task.id)
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO tasks (id, title, description, status, priority, desk, result_summary,
+                       completed_at, created_by, source, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'max', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+                    (task.id, task.title, task.description, status,
+                     task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
+                     desk_id, result_text[:2000], task.completed_at, task.source)
+                )
+            conn.commit()
+            conn.close()
+            logger.info(f"Synced task {task.id} to DB: status={status}")
+        except Exception as e:
+            logger.error(f"Failed to sync task {task.id} to DB: {e}")
 
     async def get_all_statuses(self) -> list[dict]:
         """Get status from all registered desks."""
