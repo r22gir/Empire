@@ -219,16 +219,19 @@ def _dim_v(parts, x, y1, y2, label, offset_x=20):
 
 
 def _title_block_small(parts, x, y, w, h, name="", item_type=""):
-    """Compact title block for non-bench drawings."""
+    """Compact title block for non-bench drawings. Auto-detects WoodCraft vs Workroom."""
+    from .renderer_registry import get_title_block
+    brand = get_title_block(item_type) if item_type else {"company": BRANDING["name"], "tagline": BRANDING["tagline"], "address": BRANDING["address"]}
+
     parts.append(_rect(x, y, w, h, SW_MED))
-    parts.append(_text(x + w / 2, y + 18, BRANDING["name"], 14, weight="bold"))
-    parts.append(_text(x + w / 2, y + 32, BRANDING["tagline"], 8, fill=GRAY))
+    parts.append(_text(x + w / 2, y + 18, brand.get("company", BRANDING["name"]), 14, weight="bold"))
+    parts.append(_text(x + w / 2, y + 32, brand.get("tagline", BRANDING["tagline"]), 8, fill=GRAY))
     if name:
         parts.append(_line(x + 10, y + 40, x + w - 10, y + 40, 0.5))
         parts.append(_text(x + w / 2, y + 54, _esc(name.upper()), 11, weight="bold"))
     if item_type:
         parts.append(_text(x + w / 2, y + 68, item_type.upper().replace("_", " "), 8, fill=GRAY))
-    parts.append(_text(x + w / 2, y + h - 8, BRANDING["address"], 7, fill=GRAY))
+    parts.append(_text(x + w / 2, y + h - 8, brand.get("address", BRANDING["address"]), 7, fill=GRAY))
 
 
 def _view_label(parts, x, y, w, label):
