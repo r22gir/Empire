@@ -5,7 +5,7 @@
 export interface DocEntry {
   title: string;
   path: string;
-  type: 'spec' | 'readme' | 'guide' | 'api' | 'plan' | 'report' | 'config' | 'audit' | 'session' | 'architecture' | 'legal' | 'business' | 'pdf' | 'image' | 'presentation' | 'mockup' | 'diagram' | 'compliance' | 'code';
+  type: 'spec' | 'readme' | 'guide' | 'api' | 'plan' | 'report' | 'config' | 'audit' | 'session' | 'architecture' | 'legal' | 'business' | 'pdf' | 'image' | 'presentation' | 'mockup' | 'diagram' | 'compliance' | 'code' | 'research' | 'strategy' | 'playbook' | 'analysis' | 'framework';
   description: string;
 }
 
@@ -254,12 +254,13 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // SOCIALFORGE
   // ═══════════════════════════════════════════════
   social: [
-    { title: "EmpireBot Messenger Integration v7", path: "docs_EMPIREBOT_MESSENGER_INTEGRATION_Version7.md", type: "architecture", description: "EmpireBot messenger integration — Version 7" },
     { title: "SocialForge Module README", path: "modules/social/README.md", type: "readme", description: "Social media management & AI content generation" },
-    { title: "Zero to Hero Spec", path: "docs/ZERO_TO_HERO_SPEC.md", type: "spec", description: "Business automation (social media section)" },
-    { title: "EmpireBox Master Backup", path: "EMPIREBOX_MASTER_BACKUP_2026-02-19_Version7.md", type: "report", description: "Version 7 backup with SocialForge status" },
-    { title: "Ecosystem Directory", path: "docs/ECOSYSTEM.md", type: "architecture", description: "23+ products overview" },
-    { title: "Product Directory", path: "docs/EMPIRE_PRODUCT_DIRECTORY.md", type: "architecture", description: "30+ products listing" },
+    { title: "Instagram Setup Plan", path: "docs/social/instagram_setup_plan.md", type: "plan", description: "Handles, bios, 5 post ideas per business, content pillars" },
+    { title: "Facebook Content Plan", path: "docs/social/facebook_content_plan.md", type: "plan", description: "Page updates, 5 posts per business, CTA recommendations" },
+    { title: "WoodCraft Social Plan", path: "docs/social/woodcraft_social_plan.md", type: "strategy", description: "Content pillars, hashtag strategy, posting cadence for WoodCraft" },
+    { title: "Infrastructure Status Report", path: ".session-artifacts/socialforge/infra_status_report.md", type: "report", description: "Platform status, token health, publisher modules" },
+    { title: "Live Posting Handoff", path: ".session-artifacts/socialforge/live_posting_handoff.md", type: "guide", description: "Current state, owner next steps, test post results" },
+    { title: "Setup Wizard Handoff", path: ".session-artifacts/socialforge/setup_wizard_handoff.md", type: "guide", description: "Wizard API, scripts, checklist locations" },
     { title: "AI Desk Delegation Plan", path: "docs/AI_DESK_DELEGATION_PLAN.md", type: "plan", description: "Desk architecture for social desk" },
   ],
 
@@ -411,13 +412,38 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   ],
 
   // ═══════════════════════════════════════════════
-  // RELISTAPP
+  // RELISTAPP — 23 Research Documents
   // ═══════════════════════════════════════════════
   relist: [
-    { title: "RelistApp Module README", path: "modules/relist/README.md", type: "readme", description: "Cross-platform product relisting" },
-    { title: "Revenue Model", path: "docs/REVENUE_MODEL.md", type: "business", description: "Revenue projections" },
-    { title: "Ecosystem Directory", path: "docs/ECOSYSTEM.md", type: "architecture", description: "23+ products overview" },
-    { title: "Product Directory", path: "docs/EMPIRE_PRODUCT_DIRECTORY.md", type: "architecture", description: "30+ products listing" },
+    // PLANS
+    { title: "Master Plan — 1000 Sales/Day Strategy", path: "docs/relist/MASTER_PLAN.md", type: "plan", description: "Complete arbitrage business plan with financial projections through Year 1" },
+    { title: "7-Day Launch Plan", path: "docs/relist/7_day_launch_plan.md", type: "plan", description: "Day-by-day launch with listing targets and sales milestones" },
+    // FRAMEWORK
+    { title: "Decision Framework — 10 Concrete Answers", path: "docs/relist/DECISION_FRAMEWORK.md", type: "framework", description: "Start products, platforms, capital rules, 72-hour quick start, abort criteria" },
+    // RESEARCH
+    { title: "Platform Fee Analysis (15 Platforms)", path: "docs/relist/platform_fee_analysis.md", type: "research", description: "Exact fees for eBay, Mercari, Amazon, TikTok Shop, Etsy, Walmart, and more" },
+    { title: "Amazon Product Research", path: "docs/relist/product_research_amazon.md", type: "research", description: "Top 50 products by category with BSR data and arbitrage rationale" },
+    { title: "eBay Product Research", path: "docs/relist/product_research_ebay.md", type: "research", description: "High-velocity eBay items with sourcing tables" },
+    { title: "Top 20 Arbitrage Products", path: "docs/relist/top_20_arbitrage_products.md", type: "research", description: "Specific products with price spreads across Amazon, Walmart, AliExpress, eBay" },
+    { title: "Trending Products (April 2026)", path: "docs/relist/trending_products_opportunity.md", type: "research", description: "Viral products, trend lifecycle, first-mover advantage windows" },
+    { title: "Expanded Platform Analysis (15 Platforms)", path: "docs/relist/expanded_platform_analysis.md", type: "research", description: "Master comparison table: fees, categories, volume, difficulty per platform" },
+    { title: "Seasonal Event Calendar (12 Months)", path: "docs/relist/seasonal_event_calendar.md", type: "research", description: "Month-by-month 2026 calendar with top categories and volume multipliers" },
+    // ANALYSIS
+    { title: "Revenue Scenarios (4 Models)", path: "docs/relist/revenue_scenarios.md", type: "analysis", description: "Ultra-low to moderate margin models with full fee math" },
+    { title: "Risk Analysis & Mitigation", path: "docs/relist/risk_analysis.md", type: "analysis", description: "Account, financial, operational, legal risks with mitigation strategies" },
+    { title: "Competitive Analysis (7 Tools)", path: "docs/relist/competitive_analysis.md", type: "analysis", description: "Tactical Arbitrage, AutoDS, BuyBotPro, SellerAmp, Keepa, Zik compared" },
+    { title: "Competitor Monitoring Strategy", path: "docs/relist/competitor_monitoring.md", type: "analysis", description: "Track top sellers, new listings, pricing changes across platforms" },
+    // STRATEGY
+    { title: "Automation Requirements", path: "docs/relist/automation_requirements.md", type: "strategy", description: "6 core features for 1000/day: Scout, Calculator, Lister, Router, Monitor, Analytics" },
+    { title: "Feature Requirements", path: "docs/relist/feature_requirements.md", type: "strategy", description: "Detailed specs for Product Scout, Profit Calculator, Cross-Lister, Order Router" },
+    { title: "Financial Controls & Cash Flow", path: "docs/relist/financial_controls.md", type: "strategy", description: "Payment hold timelines, working capital model, break-even analysis" },
+    { title: "Supplier Strategy (3-Tier)", path: "docs/relist/supplier_strategy.md", type: "strategy", description: "Marketplace → wholesale → private label progression" },
+    { title: "Empire Integration Plan", path: "docs/relist/empire_integration.md", type: "strategy", description: "How RelistApp connects to Command Center, MAX, Finance, SocialForge" },
+    // PLAYBOOKS
+    { title: "Daily Operations Playbook", path: "docs/relist/daily_operations_playbook.md", type: "playbook", description: "Hour-by-hour routine: scout, list, process, optimize, repeat" },
+    { title: "Account Health Playbook", path: "docs/relist/account_health_playbook.md", type: "playbook", description: "Avoid suspension, scaling without triggers, tracking requirements" },
+    { title: "Returns Management", path: "docs/relist/returns_management.md", type: "playbook", description: "Return workflows, auto-flag thresholds, return-adjusted profit" },
+    { title: "Tax & Legal Compliance", path: "docs/relist/tax_legal_compliance.md", type: "playbook", description: "Sales tax, 1099-K, quarterly estimates, LLC recommendation" },
   ],
 
   // ═══════════════════════════════════════════════
@@ -696,4 +722,11 @@ export const DOC_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   presentation: { bg: '#fff7ed', text: '#ea580c' },
   mockup: { bg: '#fdf4ff', text: '#a855f7' },
   diagram: { bg: '#ecfdf5', text: '#059669' },
+  research: { bg: '#dbeafe', text: '#2563eb' },
+  strategy: { bg: '#fdf8eb', text: '#b8960c' },
+  playbook: { bg: '#dcfce7', text: '#16a34a' },
+  analysis: { bg: '#ede9fe', text: '#7c3aed' },
+  framework: { bg: '#fef3c7', text: '#d97706' },
+  compliance: { bg: '#fef2f2', text: '#b91c1c' },
+  code: { bg: '#f3f4f6', text: '#374151' },
 };
