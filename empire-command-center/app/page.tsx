@@ -126,29 +126,14 @@ export default function CommandCenter() {
   }, []);
 
   const handleModuleClick = useCallback((module: string) => {
-    // Modules that map to Workroom sections
-    // Tasks gets its own dedicated screen
+    // Tasks gets its own dedicated screen regardless of product
     if (module === 'tasks') {
       setActiveSection(null);
       setActiveScreen('tasks');
       return;
     }
 
-    const workroomSections: Record<string, string> = {
-      quotes: 'quotes',
-      invoices: 'invoices',
-      crm: 'customers',
-      inventory: 'inventory',
-    };
-
-    if (workroomSections[module]) {
-      setActiveProduct('workroom');
-      setActiveScreen('dashboard');
-      setActiveSection(workroomSections[module]);
-      return;
-    }
-
-    // CraftForge sub-module routing
+    // CraftForge-specific module IDs (prefixed with 'craft-')
     const craftSections: Record<string, string> = {
       'craft-quotes': 'quotebuilder',
       'craft-inventory': 'inventory',
@@ -165,6 +150,41 @@ export default function CommandCenter() {
       return;
     }
 
+    // Shared module IDs that route based on active product context
+    const sharedSections: Record<string, string> = {
+      quotes: 'quotes',
+      invoices: 'invoices',
+      crm: 'customers',
+      inventory: 'inventory',
+    };
+
+    if (sharedSections[module]) {
+      // If currently on CraftForge, route to CraftForge sections
+      if (activeProduct === 'craft') {
+        const craftMapping: Record<string, string> = {
+          quotes: 'quotebuilder',
+          inventory: 'inventory',
+          crm: 'customers',
+          invoices: 'finance',
+        };
+        setActiveScreen('dashboard');
+        setActiveSection(craftMapping[module] || sharedSections[module]);
+      } else {
+        // Default to Workroom
+        setActiveProduct('workroom');
+        setActiveScreen('dashboard');
+        setActiveSection(sharedSections[module]);
+      }
+      return;
+    }
+
+    // Empire-wide CRM shortcut
+    if (module === 'empire-crm') {
+      setActiveProduct('crm');
+      setActiveScreen('dashboard');
+      return;
+    }
+
     // Modules that map to standalone screens
     const moduleScreenMap: Record<string, ScreenMode> = {
       shipping: 'shipping',
@@ -178,7 +198,7 @@ export default function CommandCenter() {
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
-  }, []);
+  }, [activeProduct]);
 
   const handleSendMessage = useCallback((msg: string, imageFilename?: string | null) => {
     chat.sendMessage(msg, imageFilename);
