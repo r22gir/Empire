@@ -89,6 +89,7 @@ class QuoteCreate(BaseModel):
     tax_rate: float = 0.0
     tax_amount: float = 0.0
     discount_amount: float = 0.0
+    discount_type: Optional[str] = "dollar"  # "dollar" or "percent"
     total: float = 0.0
     deposit: Optional[DepositSchedule] = None
     terms: Optional[str] = None
@@ -117,6 +118,7 @@ class QuoteUpdate(BaseModel):
     tax_rate: Optional[float] = None
     tax_amount: Optional[float] = None
     discount_amount: Optional[float] = None
+    discount_type: Optional[str] = None  # "dollar" or "percent"
     total: Optional[float] = None
     deposit: Optional[DepositSchedule] = None
     terms: Optional[str] = None
@@ -209,7 +211,12 @@ def _compute_financials(data: dict) -> dict:
 
     tax_rate = data.get("tax_rate", 0.0)
     tax_amount = round(subtotal * tax_rate, 2)
-    discount = data.get("discount_amount", 0.0)
+    discount_raw = data.get("discount_amount", 0.0)
+    discount_type = data.get("discount_type", "dollar")
+    if discount_type == "percent" and discount_raw > 0:
+        discount = round(subtotal * (discount_raw / 100), 2)
+    else:
+        discount = discount_raw
     total = round(subtotal + tax_amount - discount, 2)
 
     data["line_items"] = items

@@ -47,6 +47,26 @@ def _get_disk_summary():
     }
 
 
+@router.get("/system/health")
+async def system_health():
+    """Quick health check — is the system alive and services reachable?"""
+    ports = {"8000": "API", "3005": "CC", "7878": "OpenClaw", "11434": "Ollama"}
+    services = {}
+    for port_str, name in ports.items():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        services[name] = sock.connect_ex(("127.0.0.1", int(port_str))) == 0
+        sock.close()
+    mem = psutil.virtual_memory()
+    return {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "services": services,
+        "ram_percent": mem.percent,
+        "uptime_seconds": round(time.time() - _PROCESS_START_TIME, 1),
+    }
+
+
 @router.get("/system/stats")
 async def system_stats():
     """Return current system resource usage."""

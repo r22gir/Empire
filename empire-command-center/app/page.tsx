@@ -148,6 +148,23 @@ export default function CommandCenter() {
       return;
     }
 
+    // CraftForge sub-module routing
+    const craftSections: Record<string, string> = {
+      'craft-quotes': 'quotebuilder',
+      'craft-inventory': 'inventory',
+      'craft-crm': 'customers',
+      'craft-finance': 'finance',
+      'craft-jobs': 'jobs',
+      'craft-payments': 'payments',
+    };
+
+    if (craftSections[module]) {
+      setActiveProduct('craft');
+      setActiveScreen('dashboard');
+      setActiveSection(craftSections[module]);
+      return;
+    }
+
     // Modules that map to standalone screens
     const moduleScreenMap: Record<string, ScreenMode> = {
       shipping: 'shipping',
@@ -228,7 +245,7 @@ export default function CommandCenter() {
     if (activeScreen === 'dashboard') {
       switch (activeProduct) {
         case 'workroom': return <WorkroomPage initialSection={activeSection || undefined} />;
-        case 'craft': return <CraftForgePage />;
+        case 'craft': return <CraftForgePage initialSection={activeSection || undefined} />;
         case 'social': return <SocialForgePage />;
         case 'platform': return <PlatformPage />;
         case 'owner': return <DashboardScreen activeTab={activeTab} />;
