@@ -109,6 +109,9 @@ load_router("app.routers.lifecycle", "/api/v1", ["lifecycle"])
 load_router("app.routers.financial", "/api/v1", ["finance-v2"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
+# Client Portal — public token-based customer access
+load_router("app.routers.client_portal", "/api/v1", ["client-portal"])
+
 # CraftForge — CNC & 3D print business
 load_router("app.routers.craftforge", "/api/v1/craftforge", ["craftforge"])
 load_router("app.routers.socialforge", "/api/v1/socialforge", ["socialforge"])
