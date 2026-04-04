@@ -43,6 +43,7 @@ async def payments_list(
 # ── Chart of Accounts ──────────────────────────────────────────
 
 @router.get("/chart-of-accounts")
+@router.get("/accounts")
 async def chart_of_accounts():
     return {"accounts": get_chart_of_accounts()}
 

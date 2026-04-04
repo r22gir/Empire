@@ -2946,8 +2946,26 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
 
 @router.get("/{quote_id}/pdf")
 async def download_pdf(quote_id: str):
-    """Download a previously generated PDF. Auto-generates if not yet created."""
-    quote = _load_quote(quote_id)
+    """Download a previously generated PDF. Auto-generates if not yet created.
+    Falls back to quotes_v2 (SQL) if JSON quote not found."""
+    try:
+        quote = _load_quote(quote_id)
+    except HTTPException:
+        # Not a JSON quote — try SQL quotes_v2
+        try:
+            from app.services.quote_pdf_service import generate_quote_pdf
+            pdf_bytes = generate_quote_pdf(quote_id)
+            from app.services.quote_service import get_quote
+            q = get_quote(quote_id)
+            filename = f"{q.get('quote_number', quote_id)}.pdf"
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        except FileNotFoundError:
+            raise HTTPException(404, f"Quote {quote_id} not found")
+
     pdf_path = os.path.join(
         os.path.expanduser("~/empire-repo/backend/data/quotes/pdf"),
         f"{quote['quote_number']}.pdf",

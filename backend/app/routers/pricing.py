@@ -30,9 +30,18 @@ async def calculate_price(body: dict):
               cushion_count, pattern_repeat, fabric_width, quantity
     """
     try:
+        # Accept dimensions as nested dict or top-level width/height/depth
+        dims = body.get("dimensions")
+        if not dims:
+            dims = {}
+            for k in ("width", "height", "depth"):
+                if k in body:
+                    dims[k] = body[k]
+            dims = dims or None
+
         result = calculate_full_price(
             item_type=body.get("item_type", "drapery"),
-            dimensions=body.get("dimensions"),
+            dimensions=dims,
             fabric_price_per_yard=float(body.get("fabric_price_per_yard", 0)),
             lining_type=body.get("lining_type", "none"),
             labor_rate=body.get("labor_rate"),
