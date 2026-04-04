@@ -8,7 +8,7 @@ import logging
 from app.services.work_order_service import (
     create_work_order_from_quote, create_work_order,
     get_work_order, list_work_orders,
-    advance_item_stage, get_production_board,
+    advance_item_stage, get_production_board, get_overdue_items,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,13 @@ async def list_wos(
 async def production_board(business_unit: Optional[str] = None):
     """Kanban view — items grouped by production stage."""
     return get_production_board(business_unit)
+
+
+@router.get("/overdue")
+async def overdue_items():
+    """Get all overdue production items."""
+    items = get_overdue_items()
+    return {"overdue_items": items, "count": len(items)}
 
 
 @router.get("/{wo_id}")

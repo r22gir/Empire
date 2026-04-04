@@ -273,35 +273,137 @@ def advance_item_stage(wo_id: int, item_id: int, changed_by: str = "system",
             conn.execute("UPDATE work_orders SET status = 'in_progress', updated_at = ? WHERE id = ?",
                         (now, wo_id))
 
+    # Notify on stage change (non-blocking)
+    try:
+        notify_on_stage_change(wo_id, item_id, new_status, notes)
+    except Exception as e:
+        logger.warning(f"Notification failed for WO {wo_id}: {e}")
+
     return get_work_order(wo_id)
 
 
 def get_production_board(business_unit: str = None) -> dict:
-    """Kanban board view — items grouped by production stage."""
+    """Kanban board view — items grouped by production stage with urgency colors."""
     with get_db() as conn:
+        query = """
+            SELECT woi.*, wo.work_order_number, wo.customer_name, wo.business_unit,
+                   wo.due_date, wo.priority, wo.quote_id
+            FROM work_order_items woi
+            JOIN work_orders wo ON wo.id = woi.work_order_id
+            WHERE wo.status NOT IN ('delivered', 'cancelled')
+        """
+        params = []
         if business_unit:
-            items = conn.execute("""
-                SELECT woi.*, wo.work_order_number, wo.customer_name, wo.business_unit
-                FROM work_order_items woi
-                JOIN work_orders wo ON wo.id = woi.work_order_id
-                WHERE wo.business_unit = ? AND wo.status NOT IN ('delivered', 'cancelled')
-                ORDER BY woi.updated_at
-            """, (business_unit,)).fetchall()
-        else:
-            items = conn.execute("""
-                SELECT woi.*, wo.work_order_number, wo.customer_name, wo.business_unit
-                FROM work_order_items woi
-                JOIN work_orders wo ON wo.id = woi.work_order_id
-                WHERE wo.status NOT IN ('delivered', 'cancelled')
-                ORDER BY woi.updated_at
-            """).fetchall()
+            query += " AND wo.business_unit = ?"
+            params.append(business_unit)
+        query += " ORDER BY wo.due_date ASC NULLS LAST, woi.updated_at"
 
+        items = conn.execute(query, params).fetchall()
+
+        now = datetime.now()
         board = {}
+        overdue = 0
+        due_soon = 0
+
         for item in items:
             d = dict(item)
             stage = d['production_status']
             if stage not in board:
                 board[stage] = []
+
+            # Urgency color coding based on due date
+            due = d.get('due_date')
+            if due:
+                try:
+                    due_dt = datetime.fromisoformat(due) if isinstance(due, str) else due
+                    days_until = (due_dt - now).days
+                    if days_until < 0:
+                        d['urgency'] = 'overdue'
+                        d['urgency_color'] = 'red'
+                        d['days_overdue'] = abs(days_until)
+                        overdue += 1
+                    elif days_until <= 2:
+                        d['urgency'] = 'due_soon'
+                        d['urgency_color'] = 'yellow'
+                        d['days_until_due'] = days_until
+                        due_soon += 1
+                    else:
+                        d['urgency'] = 'on_track'
+                        d['urgency_color'] = 'green'
+                        d['days_until_due'] = days_until
+                except (ValueError, TypeError):
+                    d['urgency'] = 'no_date'
+                    d['urgency_color'] = 'gray'
+            else:
+                d['urgency'] = 'no_date'
+                d['urgency_color'] = 'gray'
+
             board[stage].append(d)
 
-        return {"board": board, "total_items": len(items)}
+        # Ordered stages list
+        all_stages = WORKROOM_STAGES
+        ordered_stages = [s for s in all_stages if s in board]
+        extra = [s for s in board if s not in all_stages]
+        ordered_stages.extend(extra)
+
+        return {
+            "board": board,
+            "total_items": len(items),
+            "overdue": overdue,
+            "due_soon": due_soon,
+            "stages": ordered_stages,
+            "stage_counts": {s: len(board.get(s, [])) for s in ordered_stages},
+        }
+
+
+def get_overdue_items() -> list:
+    """Get all overdue production items for morning report."""
+    with get_db() as conn:
+        now = datetime.now().isoformat()
+        rows = conn.execute("""
+            SELECT woi.id, woi.description, woi.production_status,
+                   wo.work_order_number, wo.customer_name, wo.due_date
+            FROM work_order_items woi
+            JOIN work_orders wo ON wo.id = woi.work_order_id
+            WHERE wo.due_date < ? AND wo.status NOT IN ('complete', 'delivered', 'cancelled')
+              AND woi.production_status NOT IN ('complete', 'delivered')
+            ORDER BY wo.due_date ASC
+        """, (now,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def notify_on_stage_change(wo_id: int, item_id: int, new_status: str, notes: str = ""):
+    """Send notifications when a production stage changes.
+    Notifies client via portal email if portal token exists."""
+    with get_db() as conn:
+        wo = conn.execute(
+            "SELECT customer_id, customer_name, quote_id FROM work_orders WHERE id = ?",
+            (wo_id,)
+        ).fetchone()
+        if not wo:
+            return
+
+        # Check for client portal
+        portal = conn.execute(
+            "SELECT token FROM client_portal_tokens WHERE customer_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1",
+            (wo[0],)
+        ).fetchone()
+
+        status_labels = {
+            "fabric_ordered": "Fabric has been ordered",
+            "fabric_received": "Fabric arrived and quality checked",
+            "cutting": "Cutting has started",
+            "sewing": "Sewing is in progress",
+            "finishing": "Finishing touches being applied",
+            "qc": "Quality check in progress",
+            "complete": "Your items are complete!",
+            "delivered": "Your items have been delivered",
+        }
+        label = status_labels.get(new_status, f"Status: {new_status}")
+
+        # Log the notification
+        logger.info(f"Production update for {wo[1]}: {label} (portal: {'yes' if portal else 'no'})")
+
+        # If work order is complete, also log that
+        if new_status == "complete":
+            logger.info(f"🎉 Work order {wo_id} for {wo[1]} is COMPLETE — ready for delivery")
