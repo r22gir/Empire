@@ -1962,3 +1962,23 @@ async def gmail_inbox(limit: int = 10, unread_only: bool = True):
         )
     except Exception as e:
         return {"success": False, "error": str(e), "emails": [], "count": 0}
+
+
+# ── MAX Health + Self-Heal Status ────────────────────────────────────
+
+@router.get("/self-heal-status")
+async def max_self_heal_status():
+    """MAX self-heal dashboard — capabilities, incidents, mode."""
+    result = {"status": "ok"}
+    try:
+        from app.services.max.capability_loader import load_registry
+        result["capabilities"] = load_registry()
+    except Exception as e:
+        result["capabilities"] = {"error": str(e)}
+    try:
+        from app.services.max.self_heal import get_heal_status
+        result["self_heal"] = get_heal_status()
+    except Exception as e:
+        result["self_heal"] = {"error": str(e)}
+    result["auto_heal_enabled"] = True
+    return result

@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 850" width="1200" height="850">
+  <defs>
+  <marker id="dim-arrow" viewBox="0 0 10 6" refX="10" refY="3"
+          markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,0 L10,3 L0,6 Z" fill="#000"/>
+  </marker>
+</defs>
+  <rect width="1200" height="850" fill="white"/>
+  <rect x="4.0" y="4.0" width="1192.0" height="842.0" fill="none" stroke="#000000" stroke-width="2.0"/>
+  <rect x="8.0" y="8.0" width="1184.0" height="834.0" fill="none" stroke="#000000" stroke-width="0.5"/>
+  <rect x="18.0" y="18.0" width="570.0" height="395.0" fill="none" stroke="#666666" stroke-width="0.5"/>
+  <text x="303.0" y="32.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#000000" font-weight="bold">PLAN VIEW</text>
+  <g transform="translate(18,38)">
+  <rect x="101.7" y="154.6" width="366.6" height="35.6" fill="none" stroke="#000000" stroke-width="2.5"/>
+  <rect x="101.7" y="190.2" width="366.6" height="10.2" fill="#F0F0F0" stroke="#000000" stroke-width="2.5"/>
+  <line x1="162.8" y1="192.2" x2="162.8" y2="198.4" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="223.9" y1="192.2" x2="223.9" y2="198.4" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="285.0" y1="192.2" x2="285.0" y2="198.4" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="346.1" y1="192.2" x2="346.1" y2="198.4" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="407.2" y1="192.2" x2="407.2" y2="198.4" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="162.8" y1="156.6" x2="162.8" y2="188.2" stroke="#666666" stroke-width="1.0"/>
+  <line x1="223.9" y1="156.6" x2="223.9" y2="188.2" stroke="#666666" stroke-width="1.0"/>
+  <line x1="285.0" y1="156.6" x2="285.0" y2="188.2" stroke="#666666" stroke-width="1.0"/>
+  <line x1="346.1" y1="156.6" x2="346.1" y2="188.2" stroke="#666666" stroke-width="1.0"/>
+  <line x1="407.2" y1="156.6" x2="407.2" y2="188.2" stroke="#666666" stroke-width="1.0"/>
+  <circle cx="132.2" cy="172.4" r="7.7" fill="white" stroke="#000000" stroke-width="0.75"/>
+  <text x="132.2" y="176.3" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">C1</text>
+  <circle cx="193.4" cy="172.4" r="7.7" fill="white" stroke="#000000" stroke-width="0.75"/>
+  <text x="193.4" y="176.3" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">C2</text>
+  <circle cx="254.4" cy="172.4" r="7.7" fill="white" stroke="#000000" stroke-width="0.75"/>
+  <text x="254.4" y="176.3" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">C3</text>
+  <circle cx="315.6" cy="172.4" r="7.7" fill="white" stroke="#000000" stroke-width="0.75"/>
+  <text x="315.6" y="176.3" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">C4</text>
+  <circle cx="376.6" cy="172.4" r="7.7" fill="white" stroke="#000000" stroke-width="0.75"/>
+  <text x="376.6" y="176.3" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">C5</text>
+  <circle cx="437.8" cy="172.4" r="7.7" fill="white" stroke="#000000" stroke-width="0.75"/>
+  <text x="437.8" y="176.3" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">C6</text>
+  <text x="285.0" y="214.4" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="600">CHANNELED BACK</text>
+  <line x1="101.7" y1="223.4" x2="101.7" y2="243.4" stroke="#333333" stroke-width="0.5"/>
+  <line x1="468.3" y1="223.4" x2="468.3" y2="243.4" stroke="#333333" stroke-width="0.5"/>
+  <line x1="101.7" y1="238.4" x2="468.3" y2="238.4" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="285.0" y="250.4" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">144&quot;</text>
+  <line x1="98.7" y1="154.6" x2="74.7" y2="154.6" stroke="#333333" stroke-width="0.5"/>
+  <line x1="98.7" y1="200.4" x2="74.7" y2="200.4" stroke="#333333" stroke-width="0.5"/>
+  <line x1="79.7" y1="154.6" x2="79.7" y2="200.4" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="69.7" y="181.5" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">18&quot;</text>
+  </g>
+  <rect x="612.0" y="18.0" width="570.0" height="395.0" fill="none" stroke="#666666" stroke-width="0.5"/>
+  <text x="897.0" y="32.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#000000" font-weight="bold">ISOMETRIC VIEW</text>
+  <g transform="translate(622,38)">
+  <polygon points="149.9,340.0 435.9,174.9 435.9,133.6 149.9,298.7" fill="none" stroke="#000000" stroke-width="2.5" stroke-linejoin="round"/>
+  <polygon points="149.9,298.7 435.9,133.6 408.1,117.6 122.1,282.7" fill="none" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"/>
+  <polygon points="435.9,174.9 408.1,158.8 408.1,117.6 435.9,133.6" fill="none" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"/>
+  <polygon points="122.1,282.7 408.1,117.6 408.1,39.6 122.1,204.7" fill="none" stroke="#000000" stroke-width="2.5" stroke-linejoin="round"/>
+  <polygon points="122.1,204.7 408.1,39.6 400.1,35.0 114.1,200.1" fill="none" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"/>
+  <polygon points="408.1,117.6 400.1,113.0 400.1,35.0 408.1,39.6" fill="none" stroke="#000000" stroke-width="1.5" stroke-linejoin="round"/>
+  <line x1="122.1" y1="282.7" x2="408.1" y2="117.6" stroke="#000000" stroke-width="1.0"/>
+  <line x1="169.7" y1="252.9" x2="169.7" y2="179.5" stroke="#000000" stroke-width="0.3"/>
+  <line x1="217.4" y1="225.3" x2="217.4" y2="152.0" stroke="#000000" stroke-width="0.3"/>
+  <line x1="265.1" y1="197.8" x2="265.1" y2="124.4" stroke="#000000" stroke-width="0.3"/>
+  <line x1="312.7" y1="170.3" x2="312.7" y2="96.9" stroke="#000000" stroke-width="0.3"/>
+  <line x1="360.4" y1="142.8" x2="360.4" y2="69.4" stroke="#000000" stroke-width="0.3"/>
+  <line x1="155.8" y1="360.2" x2="155.8" y2="384.2" stroke="#333333" stroke-width="0.5"/>
+  <line x1="441.8" y1="195.1" x2="441.8" y2="219.1" stroke="#333333" stroke-width="0.5"/>
+  <line x1="155.8" y1="379.2" x2="441.8" y2="214.1" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="298.8" y="308.6" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">144&quot;</text>
+  <line x1="415.0" y1="106.1" x2="435.0" y2="106.1" stroke="#333333" stroke-width="0.5"/>
+  <line x1="415.0" y1="28.1" x2="435.0" y2="28.1" stroke="#333333" stroke-width="0.5"/>
+  <line x1="430.0" y1="106.1" x2="430.0" y2="28.1" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="440.0" y="71.1" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">34&quot; BH</text>
+  <line x1="484.5" y1="155.4" x2="504.5" y2="155.4" stroke="#333333" stroke-width="0.5"/>
+  <line x1="484.5" y1="114.1" x2="504.5" y2="114.1" stroke="#333333" stroke-width="0.5"/>
+  <line x1="499.5" y1="155.4" x2="499.5" y2="114.1" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="509.5" y="138.8" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">18&quot; SH</text>
+  <line x1="443.8" y1="180.2" x2="443.8" y2="204.2" stroke="#333333" stroke-width="0.5"/>
+  <line x1="408.1" y1="159.5" x2="408.1" y2="183.5" stroke="#333333" stroke-width="0.5"/>
+  <line x1="443.8" y1="199.2" x2="408.1" y2="178.5" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="425.9" y="200.9" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">18&quot;</text>
+  </g>
+  <rect x="18.0" y="437.0" width="570.0" height="395.0" fill="none" stroke="#666666" stroke-width="0.5"/>
+  <text x="303.0" y="451.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#000000" font-weight="bold">FRONT ELEVATION</text>
+  <g transform="translate(18,457)">
+  <line x1="86.7" y1="243.7" x2="483.3" y2="243.7" stroke="#666666" stroke-width="1.0" stroke-dasharray="6,3"/>
+  <text x="83.7" y="247.7" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">FL</text>
+  <rect x="101.7" y="197.9" width="366.6" height="45.8" fill="none" stroke="#000000" stroke-width="2.5"/>
+  <rect x="101.7" y="111.3" width="366.6" height="86.6" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <line x1="162.8" y1="113.3" x2="162.8" y2="195.9" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="223.9" y1="113.3" x2="223.9" y2="195.9" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="285.0" y1="113.3" x2="285.0" y2="195.9" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="346.1" y1="113.3" x2="346.1" y2="195.9" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="407.2" y1="113.3" x2="407.2" y2="195.9" stroke="#CCCCCC" stroke-width="0.3"/>
+  <line x1="101.7" y1="197.9" x2="468.3" y2="197.9" stroke="#000000" stroke-width="1.5"/>
+  <line x1="101.7" y1="246.7" x2="101.7" y2="266.7" stroke="#333333" stroke-width="0.5"/>
+  <line x1="468.3" y1="246.7" x2="468.3" y2="266.7" stroke="#333333" stroke-width="0.5"/>
+  <line x1="101.7" y1="261.7" x2="468.3" y2="261.7" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="285.0" y="273.7" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">144&quot;</text>
+  <line x1="471.3" y1="243.7" x2="495.3" y2="243.7" stroke="#333333" stroke-width="0.5"/>
+  <line x1="471.3" y1="197.9" x2="495.3" y2="197.9" stroke="#333333" stroke-width="0.5"/>
+  <line x1="490.3" y1="243.7" x2="490.3" y2="197.9" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="500.3" y="224.8" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">18&quot; SH</text>
+  <line x1="511.3" y1="197.9" x2="535.3" y2="197.9" stroke="#333333" stroke-width="0.5"/>
+  <line x1="511.3" y1="111.3" x2="535.3" y2="111.3" stroke="#333333" stroke-width="0.5"/>
+  <line x1="530.3" y1="197.9" x2="530.3" y2="111.3" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="540.3" y="158.6" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">34&quot; BH</text>
+  <line x1="94.7" y1="243.7" x2="68.7" y2="243.7" stroke="#333333" stroke-width="0.5"/>
+  <line x1="94.7" y1="111.3" x2="68.7" y2="111.3" stroke="#333333" stroke-width="0.5"/>
+  <line x1="73.7" y1="243.7" x2="73.7" y2="111.3" stroke="#333333" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="63.7" y="181.5" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#333333" font-weight="600">52&quot;</text>
+  </g>
+  <rect x="612.0" y="437.0" width="570.0" height="395.0" fill="none" stroke="#000000" stroke-width="2.0"/>
+  <rect x="615.0" y="440.0" width="564.0" height="389.0" fill="none" stroke="#000000" stroke-width="0.5"/>
+  <text x="897.0" y="465.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#000000" font-weight="bold">EMPIRE WORKROOM</text>
+  <text x="897.0" y="481.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">CUSTOM UPHOLSTERY &amp; FABRICATION</text>
+  <text x="897.0" y="493.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">5124 Frolich Ln, Hyattsville, MD 20781</text>
+  <text x="897.0" y="503.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">(703) 213-6484 | workroom@empirebox.store</text>
+  <line x1="627.0" y1="511.0" x2="1167.0" y2="511.0" stroke="#000000" stroke-width="0.5"/>
+  <text x="627.0" y="527.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">ITEM:</text>
+  <text x="712.0" y="527.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">DINING BENCH</text>
+  <text x="627.0" y="545.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">TYPE:</text>
+  <text x="712.0" y="545.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">STRAIGHT</text>
+  <text x="627.0" y="563.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">DIMENSIONS:</text>
+  <text x="712.0" y="563.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">144&quot; W × 18&quot; D × 18&quot; SH × 34&quot; BH</text>
+  <text x="627.0" y="581.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">CUSHIONS:</text>
+  <text x="712.0" y="581.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">6 @ 24.0&quot; each</text>
+  <text x="627.0" y="599.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">BACK STYLE:</text>
+  <text x="712.0" y="599.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">CHANNELED BACK</text>
+  <text x="627.0" y="617.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">DATE:</text>
+  <text x="712.0" y="617.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">04/03/2026</text>
+  <text x="627.0" y="635.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="bold">DRAWN BY:</text>
+  <text x="712.0" y="635.0" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#000000" font-weight="normal">MAX AI / Empire Workroom</text>
+  <text x="897.0" y="784.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#000000" font-weight="bold">SCALE REFERENCE</text>
+  <rect x="637.0" y="790.0" width="130.0" height="7.0" fill="#000" stroke="#000000" stroke-width="0.5"/>
+  <rect x="767.0" y="790.0" width="130.0" height="7.0" fill="#FFF" stroke="#000000" stroke-width="0.5"/>
+  <rect x="897.0" y="790.0" width="130.0" height="7.0" fill="#000" stroke="#000000" stroke-width="0.5"/>
+  <rect x="1027.0" y="790.0" width="130.0" height="7.0" fill="#FFF" stroke="#000000" stroke-width="0.5"/>
+  <text x="637.0" y="807.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6" fill="#000000" font-weight="normal">0&quot;</text>
+  <text x="767.0" y="807.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6" fill="#000000" font-weight="normal">12&quot;</text>
+  <text x="897.0" y="807.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6" fill="#000000" font-weight="normal">24&quot;</text>
+  <text x="1027.0" y="807.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6" fill="#000000" font-weight="normal">36&quot;</text>
+  <text x="1157.0" y="807.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="6" fill="#000000" font-weight="normal">48&quot;</text>
+</svg>

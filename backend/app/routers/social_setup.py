@@ -178,15 +178,14 @@ def _init_tables():
 
             CREATE TABLE IF NOT EXISTS social_post_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                business_key TEXT NOT NULL,
+                post_id TEXT NOT NULL,
+                business_unit TEXT NOT NULL,
                 platform TEXT NOT NULL,
-                post_type TEXT DEFAULT 'test',
-                post_id TEXT,
-                content TEXT,
-                media_url TEXT,
-                status TEXT DEFAULT 'pending',
+                status TEXT NOT NULL,
+                external_post_id TEXT,
+                external_url TEXT,
                 error TEXT,
-                api_response TEXT,
+                published_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -801,13 +800,15 @@ async def test_publish(business_key: str, platform: str, data: TestPublishReques
                 result["error"] = f"Publishing not implemented for '{platform}'"
 
         # Store result in DB
+        import uuid as _uuid
+        internal_post_id = f"test-{_uuid.uuid4().hex[:8]}"
         conn.execute(
             """INSERT INTO social_post_results
-               (business_key, platform, post_type, post_id, content, media_url, status, error, api_response, created_at)
-               VALUES (?, ?, 'test', ?, ?, ?, ?, ?, ?, ?)""",
-            (business_key, platform, result.get("post_id"), content,
-             data.media_url, result["status"], result.get("error"),
-             result.get("api_response"), now),
+               (post_id, business_unit, platform, status, external_post_id, error, published_at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (internal_post_id, business_key, platform, result["status"],
+             result.get("post_id"), result.get("error"),
+             now if result["status"] == "success" else None, now),
         )
         conn.commit()
 
@@ -913,12 +914,14 @@ async def publish_drafts(req: PublishDraftsRequest = None):
                 result["error"] = str(e)
 
             # Store publish result
+            import uuid as _uuid
             conn.execute(
                 """INSERT INTO social_post_results
-                   (business_key, platform, post_type, post_id, content, media_url, status, error, created_at)
-                   VALUES (?, ?, 'draft_publish', ?, ?, ?, ?, ?, ?)""",
-                (business_key, platform, result.get("post_id"), content,
-                 media_url, result["status"], result.get("error"), now),
+                   (post_id, business_unit, platform, status, external_post_id, error, published_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (post.get("id", _uuid.uuid4().hex[:8]), business_key, platform,
+                 result["status"], result.get("post_id"), result.get("error"),
+                 now if result["status"] == "success" else None, now),
             )
 
             if result["status"] == "success":

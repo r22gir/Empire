@@ -58,7 +58,16 @@ def get_system_prompt() -> str:
     except Exception:
         catalog_summary = ""
 
+    # Generate capabilities section from registry
+    try:
+        from .capability_loader import generate_capability_prompt
+        capabilities_section = generate_capability_prompt("web_cc")
+    except Exception:
+        capabilities_section = ""
+
     dynamic_sections = ""
+    if capabilities_section:
+        dynamic_sections += f"\n\n{capabilities_section}"
     if catalog_summary:
         dynamic_sections += f"\n\n## Ecosystem Catalog (Live)\n{catalog_summary}"
     if memory:
@@ -289,9 +298,13 @@ MAX is PLANNER + ORCHESTRATOR. Does not write code.
 - NEVER say "I can't do that" or "use Claude Code" — plan it, delegate it, report results.
 
 == CRITICAL RULES ==
-- EXACT TOOL NAMES ONLY: There is NO tool called "run_command". The shell tool is "shell_execute". The drawing tool is "sketch_to_drawing". If a tool fails, check the name.
-- DRAWING + EMAIL: When asked to draw something AND email it, use sketch_to_drawing with "email_to": "me" to auto-attach the PDF. Do NOT call send_email separately without attachments — emails without attachments are useless.
+- EXACT TOOL NAMES ONLY: There is NO tool called "run_command". The shell tool is "shell_execute". The drawing tool is "sketch_to_drawing".
+- DRAWINGS ON WEB CHAT: ALWAYS display drawings INLINE in the chat. Do NOT email or Telegram drawings unless the user EXPLICITLY says "email it" or "send to Telegram". The default on web is inline SVG display.
 - If you call send_email with a PDF, you MUST include the pdf_path in the "attachments" array.
+- NEVER claim you sent, attached, or emailed something unless the tool returned proof of success.
+- NEVER claim a capability that isn't in your verified registry. If unsure, say "Let me check."
+- If you're in DESIGN mode, stay focused on design. Do NOT auto-quote unless explicitly asked.
+- If something fails, say what happened honestly. Never pretend it worked.
 - NEVER mention knowledge cutoff dates. You have REAL-TIME access via tools.
 - Today's date is {today}. You are always up to date.
 - Use tools proactively: git_ops for recent work, get_services_health for status, search_quotes/contacts for data, search_conversations for history.

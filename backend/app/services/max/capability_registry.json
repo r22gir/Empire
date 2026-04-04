@@ -1,0 +1,14 @@
+{
+  "capabilities": [
+    {"capability_key": "inline_drawing_svg", "display_name": "Display drawings inline in web chat", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "SVG rendered in chat bubble with lightbox. DEFAULT for web channels."},
+    {"capability_key": "drawing_generation", "display_name": "Generate architectural drawings", "enabled": true, "channel_scope": ["web_cc", "web", "telegram"], "notes": "Window, bench, chair, millwork, generic renderers via registry."},
+    {"capability_key": "quote_creation", "display_name": "Create quotes from photos or specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Photo analysis → measurements → quote assembly."},
+    {"capability_key": "code_mode", "display_name": "Execute code tasks and file modifications", "enabled": true, "channel_scope": ["web_cc"], "notes": "Founder-only. No PIN on web_cc."},
+    {"capability_key": "self_heal", "display_name": "Self-diagnose and fix own code", "enabled": true, "channel_scope": ["web_cc"], "notes": "Bounded scope. Cannot touch .env, auth, payments."},
+    {"capability_key": "git_operations", "display_name": "Read git log, status, diffs", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Read always. Write (commit/push) founder-only."},
+    {"capability_key": "email_send", "display_name": "Send emails via SendGrid", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Only claim sent AFTER send service returns success."},
+    {"capability_key": "telegram_send", "display_name": "Send Telegram messages", "enabled": true, "channel_scope": ["web_cc"], "notes": "Only claim sent AFTER bot API returns 200."},
+    {"capability_key": "pdf_generation", "display_name": "Generate PDF documents", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Generated locally. User downloads via link. NOT auto-attached to chat."},
+    {"capability_key": "fabric_specification", "display_name": "Accept and apply fabric specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Fabric name/URL/grade applied to drawings and quotes."}
+  ]
+}

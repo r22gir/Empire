@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 1100" width="850" height="1100">
+  <defs>
+  <marker id="dim-arrow" viewBox="0 0 10 6" refX="10" refY="3"
+          markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,0 L10,3 L0,6 Z" fill="#000"/>
+  </marker>
+</defs>
+  <rect width="850" height="1100" fill="white"/>
+  <rect x="6.0" y="6.0" width="838.0" height="1088.0" fill="none" stroke="#000000" stroke-width="2.0"/>
+  <rect x="10.0" y="10.0" width="830.0" height="1080.0" fill="none" stroke="#000000" stroke-width="0.5"/>
+  <text x="425.0" y="44.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#000000" font-weight="bold">FRONT VIEW</text>
+  <rect x="201.0" y="40.0" width="448.0" height="520.0" fill="none" stroke="#000000" stroke-width="2.5"/>
+  <rect x="209.0" y="48.0" width="432.0" height="504.0" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <rect x="211.0" y="50.0" width="213.0" height="500.0" fill="#f0f5fa" stroke="#000000" stroke-width="0.4"/>
+  <rect x="426.0" y="50.0" width="213.0" height="500.0" fill="#f0f5fa" stroke="#000000" stroke-width="0.4"/>
+  <text x="425.0" y="300.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#666666" font-weight="normal">WINDOW TREATMENT</text>
+  <rect x="193.0" y="560.0" width="464.0" height="6.0" fill="#e8e4dc" stroke="#000000" stroke-width="1.5"/>
+  <line x1="209.0" y1="569.0" x2="209.0" y2="593.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="641.0" y1="569.0" x2="641.0" y2="593.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="209.0" y1="588.0" x2="641.0" y2="588.0" stroke="#000000" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="425.0" y="600.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#000000" font-weight="600">72"</text>
+  <line x1="652.0" y1="48.0" x2="684.0" y2="48.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="652.0" y1="552.0" x2="684.0" y2="552.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="679.0" y1="48.0" x2="679.0" y2="552.0" stroke="#000000" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="687.0" y="303.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#000000" font-weight="600" transform="rotate(-90,687.0,303.0)">84"</text>
+  <text x="425.0" y="610.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#666666" font-weight="normal">MOUNT: INSIDE</text>
+  <text x="425.0" y="890.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#666666" font-weight="normal">Window with Roman shades based on provided image</text>
+  <rect x="265.0" y="930.0" width="320.0" height="130.0" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <text x="425.0" y="948.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#000000" font-weight="bold">EMPIRE WORKROOM</text>
+  <text x="425.0" y="962.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">Custom Upholstery &amp; Window Treatments</text>
+  <line x1="275.0" y1="970.0" x2="575.0" y2="970.0" stroke="#000000" stroke-width="0.5"/>
+  <text x="425.0" y="984.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">WINDOW FROM IMAGE</text>
+  <text x="425.0" y="998.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">WINDOW TREATMENT</text>
+  <text x="425.0" y="1052.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">5124 Frolich Ln, Hyattsville, MD 20781</text>
+</svg>
