@@ -583,6 +583,18 @@ async def execute_next_steps() -> dict:
                     prospect_data = _dict(prospect) if prospect else {}
                     rendered_subject = render_template(e.get("subject") or "", prospect_data)
                     rendered_body = render_template(e.get("body_template") or "", prospect_data)
+                    # Insert draft row for founder review
+                    conn.execute("""INSERT INTO campaign_drafts
+                        (campaign_id, enrollment_id, prospect_id, step_id, step_type,
+                         to_email, to_name, subject, body, phone_number, script, linkedin_message, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')""",
+                        (cid, e["id"], e["prospect_id"], e["step_id"], step_type,
+                         prospect_data.get("email"),
+                         prospect_data.get("name") or prospect_data.get("business_name"),
+                         rendered_subject, rendered_body,
+                         prospect_data.get("phone"),
+                         rendered_body if step_type == 'phone_script' else None,
+                         rendered_body if step_type == 'linkedin' else None))
                     conn.execute("""INSERT INTO campaign_activity
                         (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
                         VALUES (?, ?, ?, ?, 'drafted_no_channel', ?)""",
@@ -607,6 +619,19 @@ async def execute_next_steps() -> dict:
 
                 rendered_subject = render_template(e.get("subject") or "", prospect_data)
                 rendered_body = render_template(e.get("body_template") or "", prospect_data)
+
+                # Insert draft row for all step types
+                conn.execute("""INSERT INTO campaign_drafts
+                    (campaign_id, enrollment_id, prospect_id, step_id, step_type,
+                     to_email, to_name, subject, body, phone_number, script, linkedin_message, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')""",
+                    (cid, e["id"], e["prospect_id"], e["step_id"], step_type,
+                     prospect_data.get("email"),
+                     prospect_data.get("name") or prospect_data.get("business_name"),
+                     rendered_subject, rendered_body,
+                     prospect_data.get("phone"),
+                     rendered_body if step_type == 'phone_script' else None,
+                     rendered_body if step_type == 'linkedin' else None))
 
                 if e["is_manual"]:
                     # Create a manual task instead of auto-sending
@@ -1120,3 +1145,302 @@ except Exception as e:
 def get_templates() -> List[dict]:
     """Return all campaigns in draft status as available templates."""
     return list_campaigns(status="draft")
+
+
+# ── Draft Management ──────────────────────────────────────────────────
+
+def get_drafts(campaign_id: Optional[int] = None, status: Optional[str] = None, limit: int = 50) -> List[dict]:
+    """List drafts with prospect info."""
+    clauses, params = [], []
+    if campaign_id is not None:
+        clauses.append("d.campaign_id = ?")
+        params.append(campaign_id)
+    if status:
+        clauses.append("d.status = ?")
+        params.append(status)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    with _db() as conn:
+        rows = conn.execute(
+            f"""SELECT d.*, p.name as prospect_name, p.business_name, p.email as prospect_email,
+                       p.phone as prospect_phone, p.location
+                FROM campaign_drafts d
+                LEFT JOIN prospects p ON p.id = d.prospect_id
+                {where}
+                ORDER BY d.created_at DESC LIMIT ?""",
+            params + [limit],
+        ).fetchall()
+    return _dicts(rows)
+
+
+def get_draft(draft_id: int) -> Optional[dict]:
+    """Get single draft with full detail."""
+    with _db() as conn:
+        row = conn.execute(
+            """SELECT d.*, p.name as prospect_name, p.business_name, p.email as prospect_email,
+                      p.phone as prospect_phone, p.location, p.website,
+                      c.name as campaign_name, c.target_type, c.business_unit
+               FROM campaign_drafts d
+               LEFT JOIN prospects p ON p.id = d.prospect_id
+               LEFT JOIN campaigns c ON c.id = d.campaign_id
+               WHERE d.id = ?""",
+            (draft_id,),
+        ).fetchone()
+    return _dict(row) if row else None
+
+
+def update_draft(draft_id: int, updates: dict) -> Optional[dict]:
+    """Edit draft subject/body/attachments. Sets status='edited'."""
+    allowed = {"subject", "body", "to_email", "to_name", "phone_number",
+               "script", "linkedin_message", "attachments"}
+    data = {k: v for k, v in updates.items() if k in allowed and v is not None}
+    if not data:
+        return get_draft(draft_id)
+    # Serialize attachments if it's a list
+    if "attachments" in data and isinstance(data["attachments"], list):
+        data["attachments"] = json.dumps(data["attachments"])
+    sets = ", ".join(f"{k} = ?" for k in data)
+    vals = list(data.values())
+    vals.append(draft_id)
+    with _db() as conn:
+        if not conn.execute("SELECT 1 FROM campaign_drafts WHERE id = ?", (draft_id,)).fetchone():
+            return None
+        conn.execute(
+            f"UPDATE campaign_drafts SET {sets}, status = 'edited', edited_at = datetime('now') WHERE id = ?",
+            vals,
+        )
+    return get_draft(draft_id)
+
+
+async def send_draft(draft_id: int) -> dict:
+    """Send one draft via email service. Updates status to 'sent' or 'failed'."""
+    from app.services.max.email_service import EmailService
+
+    draft = get_draft(draft_id)
+    if not draft:
+        return {"error": "Draft not found"}
+
+    if not draft.get("to_email"):
+        return {"error": "No recipient email on this draft"}
+
+    email_svc = EmailService()
+    if not email_svc.is_configured:
+        return {"error": "Email service not configured (no SendGrid/SMTP credentials)"}
+
+    try:
+        success = email_svc.send(
+            to=draft["to_email"],
+            subject=draft.get("subject") or "(no subject)",
+            body_html=draft.get("body") or "",
+        )
+    except Exception as exc:
+        success = False
+        send_result = str(exc)
+    else:
+        send_result = "sent" if success else "send_failed"
+
+    new_status = "sent" if success else "failed"
+    with _db() as conn:
+        conn.execute(
+            """UPDATE campaign_drafts
+               SET status = ?, sent_at = datetime('now'), send_result = ?
+               WHERE id = ?""",
+            (new_status, send_result, draft_id),
+        )
+        if success:
+            # Log activity
+            conn.execute(
+                """INSERT INTO campaign_activity
+                   (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
+                   VALUES (?, ?, ?, ?, 'email_sent', ?)""",
+                (
+                    draft.get("campaign_id"), draft.get("enrollment_id"),
+                    draft.get("prospect_id"), draft.get("step_id"),
+                    json.dumps({"draft_id": draft_id, "to": draft["to_email"],
+                                "subject": draft.get("subject")}),
+                ),
+            )
+            # Update campaign sent_count
+            if draft.get("campaign_id"):
+                conn.execute(
+                    "UPDATE campaigns SET sent_count = sent_count + 1, updated_at = datetime('now') WHERE id = ?",
+                    (draft["campaign_id"],),
+                )
+
+    return {"draft_id": draft_id, "status": new_status, "send_result": send_result}
+
+
+async def send_all_reviewed(campaign_id: int) -> dict:
+    """Batch send all drafts with status='reviewed' or 'edited' that have to_email."""
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id FROM campaign_drafts
+               WHERE campaign_id = ? AND status IN ('reviewed', 'edited')
+                 AND to_email IS NOT NULL AND to_email != ''""",
+            (campaign_id,),
+        ).fetchall()
+
+    results = {"sent": 0, "failed": 0, "details": []}
+    for row in rows:
+        r = await send_draft(row["id"])
+        if r.get("status") == "sent":
+            results["sent"] += 1
+        else:
+            results["failed"] += 1
+        results["details"].append(r)
+
+    return results
+
+
+# ── Attachments ────────────────────────────────────────────────────────
+
+def get_attachments(target_audience: Optional[str] = None) -> List[dict]:
+    """List available attachments, optionally filtered by audience."""
+    with _db() as conn:
+        if target_audience:
+            rows = conn.execute(
+                "SELECT * FROM campaign_attachments WHERE target_audience = ? ORDER BY filename",
+                (target_audience,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM campaign_attachments ORDER BY filename"
+            ).fetchall()
+    return _dicts(rows)
+
+
+def get_recommended_attachments(target_type: str) -> List[str]:
+    """Return recommended attachment filenames based on campaign target type."""
+    mapping = {
+        "interior_designer": "Workroom Lookbook",
+        "designer": "Workroom Lookbook",
+        "general_contractor": "WoodCraft Capabilities",
+        "contractor": "WoodCraft Capabilities",
+        "hospitality": "Commercial Fit-Out",
+        "restaurant": "Commercial Fit-Out",
+        "hotel": "Commercial Fit-Out",
+    }
+    keyword = mapping.get(target_type)
+    if not keyword:
+        return []
+    with _db() as conn:
+        rows = conn.execute(
+            "SELECT filename FROM campaign_attachments WHERE filename LIKE ?",
+            (f"%{keyword}%",),
+        ).fetchall()
+    return [r["filename"] for r in rows]
+
+
+# ── Enrollment Controls ──────────────────────────────────────────────
+
+def snooze_enrollment(enrollment_id: int, days: int) -> Optional[dict]:
+    """Delay next_step_at by N days."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM campaign_enrollments WHERE id = ?", (enrollment_id,)
+        ).fetchone()
+        if not row:
+            return None
+        e = _dict(row)
+        current_next = e.get("next_step_at")
+        if current_next:
+            try:
+                base = datetime.fromisoformat(current_next)
+            except (ValueError, TypeError):
+                base = datetime.utcnow()
+        else:
+            base = datetime.utcnow()
+        new_next = (base + timedelta(days=days)).isoformat()
+        conn.execute(
+            "UPDATE campaign_enrollments SET next_step_at = ? WHERE id = ?",
+            (new_next, enrollment_id),
+        )
+        # Log activity
+        conn.execute(
+            """INSERT INTO campaign_activity
+               (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
+               VALUES (?, ?, ?, NULL, 'snoozed', ?)""",
+            (e["campaign_id"], enrollment_id, e["prospect_id"],
+             json.dumps({"days": days, "new_next_step_at": new_next})),
+        )
+        updated = conn.execute(
+            "SELECT * FROM campaign_enrollments WHERE id = ?", (enrollment_id,)
+        ).fetchone()
+    return _dict(updated)
+
+
+def skip_enrollment_step(enrollment_id: int) -> Optional[dict]:
+    """Skip current step, advance to next."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM campaign_enrollments WHERE id = ?", (enrollment_id,)
+        ).fetchone()
+        if not row:
+            return None
+        e = _dict(row)
+        cid = e["campaign_id"]
+        current_step = e.get("current_step", 0)
+
+        # Find the next step after current
+        next_step = conn.execute(
+            """SELECT * FROM campaign_steps
+               WHERE campaign_id = ? AND step_number > ?
+               ORDER BY step_number LIMIT 1""",
+            (cid, current_step + 1),
+        ).fetchone()
+
+        now_iso = datetime.utcnow().isoformat()
+        if next_step:
+            ns = _dict(next_step)
+            next_at = (datetime.utcnow() + timedelta(days=ns["delay_days"])).isoformat()
+            conn.execute(
+                """UPDATE campaign_enrollments
+                   SET current_step = ?, next_step_at = ?, last_action_type = 'step_skipped',
+                       last_action_at = ?
+                   WHERE id = ?""",
+                (current_step + 1, next_at, now_iso, enrollment_id),
+            )
+        else:
+            conn.execute(
+                """UPDATE campaign_enrollments
+                   SET current_step = ?, status = 'completed', next_step_at = NULL,
+                       last_action_type = 'step_skipped', last_action_at = ?
+                   WHERE id = ?""",
+                (current_step + 1, now_iso, enrollment_id),
+            )
+
+        # Log activity
+        conn.execute(
+            """INSERT INTO campaign_activity
+               (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
+               VALUES (?, ?, ?, NULL, 'step_skipped', ?)""",
+            (cid, enrollment_id, e["prospect_id"],
+             json.dumps({"skipped_step": current_step + 1})),
+        )
+
+        updated = conn.execute(
+            "SELECT * FROM campaign_enrollments WHERE id = ?", (enrollment_id,)
+        ).fetchone()
+    return _dict(updated)
+
+
+def add_enrollment_note(enrollment_id: int, text: str) -> Optional[dict]:
+    """Add a note to an enrollment's activity log."""
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT * FROM campaign_enrollments WHERE id = ?", (enrollment_id,)
+        ).fetchone()
+        if not row:
+            return None
+        e = _dict(row)
+        conn.execute(
+            """INSERT INTO campaign_activity
+               (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
+               VALUES (?, ?, ?, NULL, 'note', ?)""",
+            (e["campaign_id"], enrollment_id, e["prospect_id"],
+             json.dumps({"text": text})),
+        )
+        note_row = conn.execute(
+            "SELECT * FROM campaign_activity WHERE enrollment_id = ? ORDER BY id DESC LIMIT 1",
+            (enrollment_id,),
+        ).fetchone()
+    return _dict(note_row)

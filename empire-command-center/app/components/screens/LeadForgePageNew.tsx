@@ -424,6 +424,157 @@ function ProspectFinderSection() {
   );
 }
 
+function DraftReviewPanel({ campaignId }: { campaignId: number }) {
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [selectedDraft, setSelectedDraft] = useState<any>(null);
+  const [sending, setSending] = useState<number | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editSubject, setEditSubject] = useState('');
+  const [editBody, setEditBody] = useState('');
+
+  useEffect(() => {
+    fetch(`${LF_API}/leadforge/campaigns/drafts?campaign_id=${campaignId}`)
+      .then(r => r.json()).then(d => setDrafts(d.drafts || d || [])).catch(() => {});
+  }, [campaignId]);
+
+  const sendDraft = async (draftId: number) => {
+    setSending(draftId);
+    try {
+      const res = await fetch(`${LF_API}/leadforge/campaigns/drafts/${draftId}/send`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setDrafts(prev => prev.map(d => d.id === draftId ? { ...d, status: 'sent' } : d));
+        setSelectedDraft(null);
+      } else {
+        alert(`Send failed: ${data.error || 'Unknown error'}`);
+      }
+    } catch { alert('Send failed'); }
+    setSending(null);
+  };
+
+  const saveDraftEdit = async () => {
+    if (!selectedDraft) return;
+    await fetch(`${LF_API}/leadforge/campaigns/drafts/${selectedDraft.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: editSubject, body: editBody }),
+    });
+    setDrafts(prev => prev.map(d => d.id === selectedDraft.id ? { ...d, subject: editSubject, body: editBody, status: 'edited' } : d));
+    setEditMode(false);
+    setSelectedDraft({ ...selectedDraft, subject: editSubject, body: editBody, status: 'edited' });
+  };
+
+  const sendAllReviewed = async () => {
+    const res = await fetch(`${LF_API}/leadforge/campaigns/${campaignId}/send-reviewed`, { method: 'POST' });
+    const data = await res.json();
+    alert(`Sent: ${data.sent || 0}, Failed: ${data.failed || 0}, Skipped: ${data.skipped || 0}`);
+    // Refresh
+    fetch(`${LF_API}/leadforge/campaigns/drafts?campaign_id=${campaignId}`)
+      .then(r => r.json()).then(d => setDrafts(d.drafts || d || [])).catch(() => {});
+  };
+
+  if (drafts.length === 0) return null;
+
+  const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+    draft: { bg: '#f3f4f6', color: '#6b7280' },
+    edited: { bg: '#fef3c7', color: '#d97706' },
+    reviewed: { bg: '#dbeafe', color: '#2563eb' },
+    sent: { bg: '#dcfce7', color: '#16a34a' },
+    failed: { bg: '#fef2f2', color: '#dc2626' },
+    skipped: { bg: '#f5f3ef', color: '#999' },
+  };
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>DRAFTS ({drafts.length})</div>
+        <button onClick={sendAllReviewed} style={{ fontSize: 9, padding: '3px 8px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>
+          Send All Reviewed
+        </button>
+      </div>
+
+      {drafts.map(draft => {
+        const sc = STATUS_COLORS[draft.status] || STATUS_COLORS.draft;
+        return (
+          <div key={draft.id} onClick={() => { setSelectedDraft(draft); setEditSubject(draft.subject || ''); setEditBody(draft.body || draft.script || draft.linkedin_message || ''); setEditMode(false); }}
+            style={{ padding: '6px 8px', borderBottom: '1px solid #f0ede6', fontSize: 10, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 500 }}>{draft.to_name || `Prospect #${draft.prospect_id}`}</div>
+              <div style={{ color: '#888', fontSize: 9 }}>{draft.step_type} — {draft.subject?.slice(0, 40) || 'No subject'}</div>
+            </div>
+            <span style={{ fontSize: 8, padding: '1px 6px', borderRadius: 4, fontWeight: 600, background: sc.bg, color: sc.color }}>{draft.status}</span>
+          </div>
+        );
+      })}
+
+      {/* Draft detail modal */}
+      {selectedDraft && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9990, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setSelectedDraft(null)}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, maxWidth: 600, width: '90%', maxHeight: '80vh', overflowY: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Draft Review</h3>
+              <button onClick={() => setSelectedDraft(null)} style={{ background: '#f5f3ef', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              <strong>To:</strong> {selectedDraft.to_name || 'Unknown'} {selectedDraft.to_email ? `<${selectedDraft.to_email}>` : '(no email)'}
+            </div>
+
+            {editMode ? (
+              <>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>Subject</label>
+                  <input value={editSubject} onChange={e => setEditSubject(e.target.value)}
+                    style={{ width: '100%', padding: '6px 8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12, marginTop: 2 }} />
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>Body</label>
+                  <textarea value={editBody} onChange={e => setEditBody(e.target.value)}
+                    rows={12} style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12, lineHeight: 1.5, marginTop: 2 }} />
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={saveDraftEdit} style={{ padding: '6px 14px', background: '#b8960c', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Save Changes</button>
+                  <button onClick={() => setEditMode(false)} style={{ padding: '6px 14px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+                </div>
+              </>
+            ) : (
+              <>
+                {selectedDraft.subject && (
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, padding: '6px 8px', background: '#faf9f7', borderRadius: 6 }}>
+                    Subject: {selectedDraft.subject}
+                  </div>
+                )}
+                <div style={{ fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', padding: '10px 12px', background: '#faf9f7', borderRadius: 8, border: '1px solid #e5e2dc', marginBottom: 12, maxHeight: 300, overflowY: 'auto' }}>
+                  {selectedDraft.body || selectedDraft.script || selectedDraft.linkedin_message || 'No content'}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {selectedDraft.to_email && selectedDraft.status !== 'sent' && (
+                    <button onClick={() => sendDraft(selectedDraft.id)} disabled={sending === selectedDraft.id}
+                      style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      {sending === selectedDraft.id ? 'Sending...' : '📧 Send via Gmail'}
+                    </button>
+                  )}
+                  {!selectedDraft.to_email && (
+                    <span style={{ fontSize: 10, color: '#dc2626', padding: '6px 0' }}>No email address — find and add manually</span>
+                  )}
+                  <button onClick={() => setEditMode(true)}
+                    style={{ padding: '6px 14px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>
+                    ✏️ Edit Draft
+                  </button>
+                  {selectedDraft.status === 'sent' && (
+                    <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600, padding: '6px 0' }}>✅ Sent {selectedDraft.sent_at?.split('T')[0]}</span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CampaignsSection() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
@@ -576,11 +727,14 @@ function CampaignsSection() {
 
               {/* Enrollments preview */}
               <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginTop: 12, marginBottom: 6 }}>
-                ENROLLED ({selectedCampaign.enrollment_count || 0})
+                ENROLLED ({selectedCampaign.enrollment_count || selectedCampaign.enrollment_stats?.total_enrolled || 0})
               </div>
-              {(selectedCampaign.enrollment_count || 0) === 0 && (
+              {(selectedCampaign.enrollment_count || selectedCampaign.enrollment_stats?.total_enrolled || 0) === 0 && (
                 <div style={{ fontSize: 11, color: '#999', padding: 8 }}>No prospects enrolled yet</div>
               )}
+
+              {/* Drafts section */}
+              <DraftReviewPanel campaignId={selectedCampaign.id} />
             </div>
           )}
         </div>

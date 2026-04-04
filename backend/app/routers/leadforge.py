@@ -1266,6 +1266,25 @@ class OutcomeUpdate(BaseModel):
     outcome: str
 
 
+class DraftUpdate(BaseModel):
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    to_email: Optional[str] = None
+    to_name: Optional[str] = None
+    phone_number: Optional[str] = None
+    script: Optional[str] = None
+    linkedin_message: Optional[str] = None
+    attachments: Optional[list] = None
+
+
+class SnoozeRequest(BaseModel):
+    days: int = Field(ge=1, le=365)
+
+
+class NoteRequest(BaseModel):
+    text: str
+
+
 @router.post("/leadforge/campaigns")
 def create_campaign(body: CampaignCreate):
     """Create a new campaign."""
@@ -1285,6 +1304,76 @@ def list_templates():
     return {"templates": cs.get_templates()}
 
 
+@router.get("/leadforge/campaigns/drafts")
+def list_drafts(
+    campaign_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """List campaign drafts with prospect info."""
+    return {"drafts": cs.get_drafts(campaign_id=campaign_id, status=status, limit=limit)}
+
+
+@router.get("/leadforge/campaigns/drafts/{draft_id}")
+def get_draft(draft_id: int):
+    """Get single draft with full detail."""
+    result = cs.get_draft(draft_id)
+    if not result:
+        raise HTTPException(404, "Draft not found")
+    return {"draft": result}
+
+
+@router.patch("/leadforge/campaigns/drafts/{draft_id}")
+def update_draft(draft_id: int, body: DraftUpdate):
+    """Edit a draft (subject, body, attachments, etc). Sets status to 'edited'."""
+    result = cs.update_draft(draft_id, body.model_dump(exclude_none=True))
+    if not result:
+        raise HTTPException(404, "Draft not found")
+    return {"draft": result}
+
+
+@router.post("/leadforge/campaigns/drafts/{draft_id}/send")
+async def send_draft(draft_id: int):
+    """Send a single draft via email service."""
+    result = await cs.send_draft(draft_id)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.get("/leadforge/campaigns/attachments")
+def list_attachments(target_audience: Optional[str] = Query(None)):
+    """List available campaign attachments."""
+    return {"attachments": cs.get_attachments(target_audience=target_audience)}
+
+
+@router.post("/leadforge/campaigns/enrollments/{enrollment_id}/snooze")
+def snooze_enrollment(enrollment_id: int, body: SnoozeRequest):
+    """Snooze an enrollment by N days."""
+    result = cs.snooze_enrollment(enrollment_id, body.days)
+    if not result:
+        raise HTTPException(404, "Enrollment not found")
+    return {"enrollment": result}
+
+
+@router.post("/leadforge/campaigns/enrollments/{enrollment_id}/skip")
+def skip_enrollment_step(enrollment_id: int):
+    """Skip current step and advance to next."""
+    result = cs.skip_enrollment_step(enrollment_id)
+    if not result:
+        raise HTTPException(404, "Enrollment not found")
+    return {"enrollment": result}
+
+
+@router.post("/leadforge/campaigns/enrollments/{enrollment_id}/note")
+def add_enrollment_note(enrollment_id: int, body: NoteRequest):
+    """Add a note to an enrollment."""
+    result = cs.add_enrollment_note(enrollment_id, body.text)
+    if not result:
+        raise HTTPException(404, "Enrollment not found")
+    return {"note": result}
+
+
 @router.get("/leadforge/campaigns")
 def list_campaigns_endpoint(
     status: Optional[str] = Query(None),
@@ -1301,6 +1390,13 @@ def get_campaign(campaign_id: int):
     if not result:
         raise HTTPException(404, "Campaign not found")
     return {"campaign": result}
+
+
+@router.post("/leadforge/campaigns/{campaign_id}/send-reviewed")
+async def send_reviewed(campaign_id: int):
+    """Batch send all reviewed/edited drafts for a campaign."""
+    result = await cs.send_all_reviewed(campaign_id)
+    return result
 
 
 @router.patch("/leadforge/campaigns/{campaign_id}")
