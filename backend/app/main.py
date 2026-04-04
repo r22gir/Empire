@@ -106,6 +106,7 @@ load_router("app.routers.quotes_v2", "/api/v1", ["quotes-v2"])
 load_router("app.routers.pricing", "/api/v1", ["pricing"])
 load_router("app.routers.work_orders", "/api/v1", ["work-orders"])
 load_router("app.routers.lifecycle", "/api/v1", ["lifecycle"])
+load_router("app.routers.financial", "/api/v1", ["finance-v2"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
 # CraftForge — CNC & 3D print business
