@@ -426,23 +426,163 @@ function ProspectFinderSection() {
 
 function CampaignsSection() {
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  useEffect(() => { fetch(`${LF_API}/campaigns`).then(r => r.json()).then(d => setCampaigns(d.campaigns || d || [])).catch(() => {}); }, []);
+  const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
+  const [enrolling, setEnrolling] = useState(false);
+  const [executing, setExecuting] = useState(false);
+
+  const fetchCampaigns = () => {
+    fetch(`${LF_API}/leadforge/campaigns`).then(r => r.json()).then(d => {
+      setCampaigns(d.campaigns || d || []);
+    }).catch(() => {});
+  };
+  useEffect(() => { fetchCampaigns(); }, []);
+
+  const loadDetail = async (id: number) => {
+    const res = await fetch(`${LF_API}/leadforge/campaigns/${id}`);
+    const data = await res.json();
+    setSelectedCampaign(data);
+  };
+
+  const activateCampaign = async (id: number) => {
+    await fetch(`${LF_API}/leadforge/campaigns/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    fetchCampaigns();
+    if (selectedCampaign?.id === id) loadDetail(id);
+  };
+
+  const enrollTop = async (campaignId: number, count: number) => {
+    setEnrolling(true);
+    // Get top prospects by score
+    const pRes = await fetch(`${LF_API}/leadforge/prospects?limit=${count}`);
+    const pData = await pRes.json();
+    const ids = (pData.prospects || pData || []).map((p: any) => p.id);
+    const res = await fetch(`${LF_API}/leadforge/campaigns/${campaignId}/enroll`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prospect_ids: ids }),
+    });
+    const result = await res.json();
+    alert(`Enrolled: ${result.enrolled || 0}, Already: ${result.already_enrolled || 0}, In other: ${result.already_in_other_campaign || 0}`);
+    setEnrolling(false);
+    loadDetail(campaignId);
+    fetchCampaigns();
+  };
+
+  const executeCampaigns = async () => {
+    setExecuting(true);
+    const res = await fetch(`${LF_API}/leadforge/campaigns/execute`, { method: 'POST' });
+    const data = await res.json();
+    alert(`Executed: ${data.executed || 0}, Skipped: ${data.skipped || 0}, Errors: ${data.errors || 0}`);
+    setExecuting(false);
+    fetchCampaigns();
+    if (selectedCampaign) loadDetail(selectedCampaign.id);
+  };
+
+  const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+    draft: { bg: '#f3f4f6', color: '#6b7280' },
+    active: { bg: '#dcfce7', color: '#16a34a' },
+    paused: { bg: '#fef3c7', color: '#d97706' },
+    completed: { bg: '#dbeafe', color: '#2563eb' },
+  };
+
+  const STEP_ICONS: Record<string, string> = {
+    email: '📧', follow_up_email: '📧', phone_script: '📞', linkedin: '💼', sms: '💬',
+  };
+
   return (
     <div>
-      <SH title="Outreach Campaigns" subtitle="Automated multi-channel outreach"
-        action={<button style={{ fontSize: 12, padding: '6px 14px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}><Plus size={12} /> New Campaign</button>} />
-      {campaigns.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No campaigns yet. Create your first outreach campaign.</div> : (
-        <div style={{ display: 'grid', gap: 10 }}>
-          {campaigns.map((c: any) => (
-            <div key={c.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</div>
-                <div style={{ fontSize: 11, color: '#888' }}>{c.channel} — {c.target_audience}</div>
-                <div style={{ fontSize: 10, color: '#aaa', marginTop: 4 }}>Sent: {c.sent} | Opened: {c.opened} | Responded: {c.responded} | Converted: {c.converted}</div>
+      <SH title="Outreach Campaigns" subtitle={`${campaigns.length} campaigns`}
+        action={
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={executeCampaigns} disabled={executing}
+              style={{ fontSize: 11, padding: '6px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+              {executing ? 'Running...' : 'Execute Due Steps'}
+            </button>
+          </div>
+        } />
+
+      {campaigns.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Loading campaigns...</div>
+      ) : (
+        <div style={{ display: 'flex', gap: 16 }}>
+          {/* Campaign list */}
+          <div style={{ flex: 1, display: 'grid', gap: 10 }}>
+            {campaigns.map((c: any) => {
+              const sc = STATUS_COLORS[c.status] || STATUS_COLORS.draft;
+              return (
+                <div key={c.id} onClick={() => loadDetail(c.id)}
+                  style={{ background: '#fff', border: selectedCampaign?.id === c.id ? '2px solid #dc2626' : '1px solid #e5e2dc', borderRadius: 10, padding: 14, cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
+                    <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 9, fontWeight: 600, background: sc.bg, color: sc.color }}>{(c.status || 'draft').toUpperCase()}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#888' }}>
+                    {c.prospects_count || 0} enrolled · {c.sent_count || 0} sent · {c.responded_count || 0} responded · Reply: {c.reply_rate || 0}%
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                    {c.status === 'draft' && (
+                      <button onClick={e => { e.stopPropagation(); activateCampaign(c.id); }}
+                        style={{ fontSize: 9, padding: '2px 8px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>Activate</button>
+                    )}
+                    <button onClick={e => { e.stopPropagation(); enrollTop(c.id, 10); }} disabled={enrolling}
+                      style={{ fontSize: 9, padding: '2px 8px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+                      {enrolling ? '...' : 'Enroll Top 10'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Campaign detail panel */}
+          {selectedCampaign && (
+            <div style={{ width: 400, background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, flexShrink: 0, overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{selectedCampaign.name}</h4>
+                <button onClick={() => setSelectedCampaign(null)} style={{ background: '#f5f3ef', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
               </div>
-              <span style={{ padding: '4px 10px', borderRadius: 12, fontSize: 10, fontWeight: 600, background: c.status === 'active' ? '#f0fdf4' : '#f5f3ef', color: c.status === 'active' ? '#16a34a' : '#888' }}>{c.status}</span>
+
+              {/* Stats */}
+              {selectedCampaign.analytics && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, marginBottom: 12 }}>
+                  {[
+                    { label: 'Enrolled', value: selectedCampaign.analytics.total_enrolled || 0 },
+                    { label: 'Active', value: selectedCampaign.analytics.active || 0 },
+                    { label: 'Responded', value: selectedCampaign.analytics.responded || 0 },
+                    { label: 'Completed', value: selectedCampaign.analytics.completed || 0 },
+                    { label: 'Due Today', value: selectedCampaign.analytics.due_today || 0 },
+                    { label: 'Reply %', value: `${selectedCampaign.analytics.reply_rate || 0}%` },
+                  ].map((s, i) => (
+                    <div key={i} style={{ background: '#faf9f7', borderRadius: 6, padding: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 16, fontWeight: 700 }}>{s.value}</div>
+                      <div style={{ fontSize: 8, color: '#888' }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Steps */}
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 6 }}>SEQUENCE ({(selectedCampaign.steps || []).length} steps)</div>
+              {(selectedCampaign.steps || []).map((step: any) => (
+                <div key={step.id} style={{ padding: '6px 8px', borderBottom: '1px solid #f0ede6', fontSize: 11, display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span>{STEP_ICONS[step.step_type] || '📋'}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500 }}>{step.subject || step.step_type.replace('_', ' ')}</div>
+                    <div style={{ fontSize: 9, color: '#999' }}>Day {step.delay_days} · {step.step_type}{step.is_manual ? ' · ⚡ Manual' : ''}</div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Enrollments preview */}
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginTop: 12, marginBottom: 6 }}>
+                ENROLLED ({selectedCampaign.enrollment_count || 0})
+              </div>
+              {(selectedCampaign.enrollment_count || 0) === 0 && (
+                <div style={{ fontSize: 11, color: '#999', padding: 8 }}>No prospects enrolled yet</div>
+              )}
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
@@ -450,11 +590,87 @@ function CampaignsSection() {
 }
 
 function FollowupsSection() {
-  return <div><SH title="Follow-up Queue" subtitle="Scheduled automated follow-ups" /><div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No follow-ups scheduled. Create a campaign to start.</div></div>;
+  const [followups, setFollowups] = useState<any>({});
+  useEffect(() => {
+    fetch(`${LF_API}/leadforge/campaigns/followups`).then(r => r.json()).then(setFollowups).catch(() => {});
+  }, []);
+  const due = followups.due_today || [];
+  const overdue = followups.overdue || [];
+  const upcoming = followups.upcoming_7_days || [];
+  return (
+    <div>
+      <SH title="Follow-up Queue" subtitle={`${due.length} due today, ${overdue.length} overdue, ${upcoming.length} upcoming`} />
+      {overdue.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 6 }}>⚠️ Overdue ({overdue.length})</div>
+          {overdue.map((f: any) => (
+            <div key={f.id} style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: 10, marginBottom: 6, fontSize: 11 }}>
+              <div style={{ fontWeight: 600 }}>{f.name || 'Unknown'} — Step {(f.current_step || 0) + 1}: {f.step_type}</div>
+              <div style={{ color: '#888', fontSize: 10 }}>Was due: {f.next_step_at?.split('T')[0]}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {due.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#b8960c', marginBottom: 6 }}>📋 Due Today ({due.length})</div>
+          {due.map((f: any) => (
+            <div key={f.id} style={{ background: '#fdf8eb', border: '1px solid #f0e6c0', borderRadius: 8, padding: 10, marginBottom: 6, fontSize: 11 }}>
+              <div style={{ fontWeight: 600 }}>{f.name || 'Unknown'} — {f.step_type?.replace('_', ' ')}</div>
+              {f.subject && <div style={{ color: '#666', fontSize: 10 }}>Subject: {f.subject}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+      {upcoming.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', marginBottom: 6 }}>📅 Upcoming 7 Days ({upcoming.length})</div>
+          {upcoming.map((f: any) => (
+            <div key={f.id} style={{ background: '#f5f3ef', borderRadius: 8, padding: 8, marginBottom: 4, fontSize: 10 }}>
+              {f.name} — {f.step_type?.replace('_', ' ')} — {f.next_step_at?.split('T')[0]}
+            </div>
+          ))}
+        </div>
+      )}
+      {due.length === 0 && overdue.length === 0 && upcoming.length === 0 && (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No follow-ups scheduled. Activate a campaign and enroll prospects to start.</div>
+      )}
+    </div>
+  );
 }
 
 function ActivitySection() {
-  return <div><SH title="Activity Feed" subtitle="All touchpoints across all leads" /><div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Activity will appear here as you interact with leads.</div></div>;
+  const [activity, setActivity] = useState<any[]>([]);
+  useEffect(() => {
+    fetch(`${LF_API}/leadforge/campaigns/1/activity`).then(r => r.json()).then(d => setActivity(d.activity || d || [])).catch(() => {});
+  }, []);
+  const ICONS: Record<string, string> = {
+    enrolled: '✅', email_sent: '📧', email_drafted: '📧', call_script_ready: '📞',
+    linkedin_drafted: '💼', status_changed: '🔄', error: '⚠️', skipped: '⏭️',
+  };
+  return (
+    <div>
+      <SH title="Activity Feed" subtitle={`${activity.length} recent activities`} />
+      {activity.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Activity will appear here after campaigns execute.</div>
+      ) : (
+        <div>
+          {activity.map((a: any) => (
+            <div key={a.id} style={{ padding: '8px 0', borderBottom: '1px solid #f0ede6', fontSize: 11, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 14 }}>{ICONS[a.action_type] || '📋'}</span>
+              <div style={{ flex: 1 }}>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{a.prospect_name || 'Unknown'}</span>
+                  <span style={{ color: '#888' }}> — {(a.action_type || '').replace(/_/g, ' ')}</span>
+                </div>
+                <div style={{ fontSize: 9, color: '#aaa' }}>{a.created_at?.replace('T', ' ').split('.')[0]}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ReportsSection() {

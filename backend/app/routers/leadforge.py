@@ -1211,3 +1211,191 @@ def list_providers():
         "dmv_locations": len(expand_location("DMV")),
         "nationwide_metros": len(expand_location("nationwide")),
     }
+
+
+# ── Campaign Endpoints ──────────────────────────────────────────────────
+
+from app.services.leadforge import campaign_service as cs
+
+
+class CampaignCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    business_unit: str = "workroom"
+    target_type: Optional[str] = None
+    status: str = "draft"
+    send_window_start: str = "08:00"
+    send_window_end: str = "18:00"
+    skip_weekends: bool = True
+
+
+class CampaignUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    business_unit: Optional[str] = None
+    target_type: Optional[str] = None
+    status: Optional[str] = None
+    send_window_start: Optional[str] = None
+    send_window_end: Optional[str] = None
+    skip_weekends: Optional[bool] = None
+
+
+class StepCreate(BaseModel):
+    step_number: Optional[int] = None
+    step_type: str = "email"
+    subject: Optional[str] = None
+    body_template: Optional[str] = None
+    delay_days: int = 0
+    is_manual: bool = False
+
+
+class StepUpdate(BaseModel):
+    step_number: Optional[int] = None
+    step_type: Optional[str] = None
+    subject: Optional[str] = None
+    body_template: Optional[str] = None
+    delay_days: Optional[int] = None
+    is_manual: Optional[bool] = None
+
+
+class EnrollRequest(BaseModel):
+    prospect_ids: List[int]
+
+
+class OutcomeUpdate(BaseModel):
+    outcome: str
+
+
+@router.post("/leadforge/campaigns")
+def create_campaign(body: CampaignCreate):
+    """Create a new campaign."""
+    result = cs.create_campaign(body.model_dump())
+    return {"campaign": result}
+
+
+@router.get("/leadforge/campaigns/followups")
+def get_followups():
+    """Get follow-ups: due today, overdue, upcoming 7 days."""
+    return cs.get_followups()
+
+
+@router.get("/leadforge/campaigns/templates")
+def list_templates():
+    """List seeded campaign templates (draft campaigns)."""
+    return {"templates": cs.get_templates()}
+
+
+@router.get("/leadforge/campaigns")
+def list_campaigns_endpoint(
+    status: Optional[str] = Query(None),
+    business_unit: Optional[str] = Query(None),
+):
+    """List all campaigns."""
+    return {"campaigns": cs.list_campaigns(status=status, business_unit=business_unit)}
+
+
+@router.get("/leadforge/campaigns/{campaign_id}")
+def get_campaign(campaign_id: int):
+    """Get campaign detail with steps and stats."""
+    result = cs.get_campaign(campaign_id)
+    if not result:
+        raise HTTPException(404, "Campaign not found")
+    return {"campaign": result}
+
+
+@router.patch("/leadforge/campaigns/{campaign_id}")
+def update_campaign(campaign_id: int, body: CampaignUpdate):
+    """Update a campaign."""
+    result = cs.update_campaign(campaign_id, body.model_dump(exclude_none=True))
+    if not result:
+        raise HTTPException(404, "Campaign not found")
+    return {"campaign": result}
+
+
+@router.delete("/leadforge/campaigns/{campaign_id}")
+def delete_campaign(campaign_id: int):
+    """Delete a campaign and all related data."""
+    if not cs.delete_campaign(campaign_id):
+        raise HTTPException(404, "Campaign not found")
+    return {"deleted": True, "campaign_id": campaign_id}
+
+
+@router.post("/leadforge/campaigns/{campaign_id}/steps")
+def add_step(campaign_id: int, body: StepCreate):
+    """Add a step to a campaign."""
+    result = cs.add_step(campaign_id, body.model_dump())
+    if not result:
+        raise HTTPException(404, "Campaign not found")
+    return {"step": result}
+
+
+@router.patch("/leadforge/campaigns/{campaign_id}/steps/{step_id}")
+def update_step(campaign_id: int, step_id: int, body: StepUpdate):
+    """Update a campaign step."""
+    result = cs.update_step(campaign_id, step_id, body.model_dump(exclude_none=True))
+    if not result:
+        raise HTTPException(404, "Step not found")
+    return {"step": result}
+
+
+@router.delete("/leadforge/campaigns/{campaign_id}/steps/{step_id}")
+def delete_step(campaign_id: int, step_id: int):
+    """Delete a campaign step."""
+    if not cs.delete_step(campaign_id, step_id):
+        raise HTTPException(404, "Step not found")
+    return {"deleted": True, "step_id": step_id}
+
+
+@router.post("/leadforge/campaigns/{campaign_id}/enroll")
+def enroll_prospects(campaign_id: int, body: EnrollRequest):
+    """Enroll prospects into a campaign."""
+    result = cs.enroll_prospects(campaign_id, body.prospect_ids)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    return result
+
+
+@router.post("/leadforge/campaigns/{campaign_id}/enroll-preview")
+def enroll_preview(campaign_id: int, body: EnrollRequest):
+    """Preview enrollment impact before committing."""
+    result = cs.enrollment_preview(campaign_id, body.prospect_ids)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    return result
+
+
+@router.get("/leadforge/campaigns/{campaign_id}/enrollments")
+def get_enrollments(campaign_id: int):
+    """List enrollments for a campaign."""
+    return {"enrollments": cs.get_enrollments(campaign_id)}
+
+
+@router.patch("/leadforge/campaigns/enrollments/{enrollment_id}/outcome")
+def set_outcome(enrollment_id: int, body: OutcomeUpdate):
+    """Set outcome on an enrollment with pipeline backflow."""
+    result = cs.set_enrollment_outcome(enrollment_id, body.outcome)
+    if not result:
+        raise HTTPException(404, "Enrollment not found")
+    return {"enrollment": result}
+
+
+@router.post("/leadforge/campaigns/execute")
+async def execute_campaigns():
+    """Trigger campaign execution engine — processes all due steps."""
+    result = await cs.execute_next_steps()
+    return result
+
+
+@router.get("/leadforge/campaigns/{campaign_id}/activity")
+def get_activity(campaign_id: int, limit: int = Query(50, ge=1, le=500)):
+    """Get activity feed for a campaign."""
+    return {"activity": cs.get_activity(campaign_id, limit=limit)}
+
+
+@router.post("/leadforge/campaigns/{campaign_id}/preview/{step_id}")
+def preview_step(campaign_id: int, step_id: int, prospect_id: int = Query(...)):
+    """Preview a rendered step with real prospect data."""
+    result = cs.preview_step(campaign_id, step_id, prospect_id)
+    if not result:
+        raise HTTPException(404, "Step not found")
+    return result
