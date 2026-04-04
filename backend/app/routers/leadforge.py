@@ -1121,3 +1121,102 @@ def report_activity(days: int = Query(30, ge=1, le=365)):
         "total_activities": total,
         "by_type": _dicts(rows),
     }
+
+
+# ════════════════════════════════════════════════════
+# PROSPECT FINDER — Real multi-service search
+# ════════════════════════════════════════════════════
+
+from pydantic import BaseModel as _BM
+
+class ProspectSearchRequest(_BM):
+    business_unit: str = "workroom"
+    location: str = "DMV"
+    target_type: str = "interior designers"
+
+@router.post("/leadforge/prospects/search")
+async def search_prospects(req: ProspectSearchRequest):
+    """Run real multi-service prospect search (Brave + Google + Yelp)."""
+    from app.services.leadforge.prospect_engine import run_prospect_search
+    result = await run_prospect_search(req.business_unit, req.location, req.target_type)
+    return result
+
+@router.get("/leadforge/prospects")
+def list_prospects(
+    source: Optional[str] = None,
+    location: Optional[str] = None,
+    score_min: int = Query(0, ge=0, le=100),
+    confidence_min: int = Query(0, ge=0, le=100),
+    outreach_ready: Optional[bool] = None,
+    outreach_priority: Optional[str] = None,
+    has_phone: Optional[bool] = None,
+    has_website: Optional[bool] = None,
+    sort_by: str = "score",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = 0,
+):
+    """List prospects with filters."""
+    from app.services.leadforge.prospect_engine import get_prospects
+    return get_prospects(
+        source=source, location=location, score_min=score_min,
+        confidence_min=confidence_min, outreach_ready=outreach_ready,
+        outreach_priority=outreach_priority, has_phone=1 if has_phone else None,
+        has_website=1 if has_website else None, sort_by=sort_by,
+        limit=limit, offset=offset,
+    )
+
+@router.get("/leadforge/prospects/stats")
+def prospect_stats():
+    """Prospect statistics."""
+    from app.services.leadforge.prospect_engine import get_prospect_stats
+    return get_prospect_stats()
+
+@router.get("/leadforge/prospects/{prospect_id}")
+def get_prospect_detail(prospect_id: int):
+    """Get full prospect detail with scoring breakdown."""
+    from app.services.leadforge.prospect_engine import get_prospect
+    p = get_prospect(prospect_id)
+    if not p:
+        raise HTTPException(404, "Prospect not found")
+    return p
+
+@router.post("/leadforge/prospects/{prospect_id}/pipeline")
+def add_prospect_to_pipeline(prospect_id: int, assigned_unit: Optional[str] = None):
+    """Add prospect to pipeline (duplicate-safe)."""
+    from app.services.leadforge.prospect_engine import add_to_pipeline
+    return add_to_pipeline(prospect_id, assigned_unit)
+
+@router.get("/leadforge/prospect-pipeline")
+def list_pipeline(status: Optional[str] = None, limit: int = 50):
+    """List prospect pipeline entries."""
+    from app.services.leadforge.prospect_engine import get_pipeline
+    return get_pipeline(status=status, limit=limit)
+
+@router.get("/leadforge/search-runs")
+def list_search_runs(limit: int = 20):
+    """View past search runs with provider results."""
+    from app.services.leadforge.prospect_engine import get_search_runs
+    return get_search_runs(limit=limit)
+
+@router.get("/leadforge/providers")
+def list_providers():
+    """Check which search providers are available."""
+    from app.services.leadforge.prospect_engine import expand_location
+    import os
+    providers = []
+    if os.getenv("BRAVE_API_KEY"):
+        providers.append({"name": "brave", "status": "configured", "type": "web_search"})
+    if os.getenv("GOOGLE_PLACES_API_KEY"):
+        providers.append({"name": "google_places", "status": "configured", "type": "places"})
+    else:
+        providers.append({"name": "google_places", "status": "not_configured", "type": "places"})
+    if os.getenv("YELP_FUSION_API_KEY"):
+        providers.append({"name": "yelp", "status": "configured", "type": "business"})
+    else:
+        providers.append({"name": "yelp", "status": "not_configured", "type": "business"})
+    return {
+        "providers": providers,
+        "configured_count": sum(1 for p in providers if p["status"] == "configured"),
+        "dmv_locations": len(expand_location("DMV")),
+        "nationwide_metros": len(expand_location("nationwide")),
+    }
