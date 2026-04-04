@@ -220,11 +220,21 @@ function ProspectFinderSection() {
   const [selected, setSelected] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load existing prospects on mount
+  // Load existing prospects + pipeline status on mount
   useEffect(() => {
-    fetch(`${LF_API}/leadforge/prospects?limit=300`).then(r => r.json()).then(d => {
-      const items = d.prospects || d || [];
+    Promise.all([
+      fetch(`${LF_API}/leadforge/prospects?limit=300`).then(r => r.json()),
+      fetch(`${LF_API}/leadforge/prospect-pipeline?limit=500`).then(r => r.json()).catch(() => []),
+    ]).then(([prospectData, pipelineData]) => {
+      const items = prospectData.prospects || prospectData || [];
       setProspects(items);
+      // Build pipeline status from existing pipeline entries
+      const pipeItems = pipelineData.pipeline || pipelineData || [];
+      const status: Record<number, string> = {};
+      for (const pp of pipeItems) {
+        if (pp.prospect_id) status[pp.prospect_id] = 'already_in_pipeline';
+      }
+      setPipelineStatus(status);
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
