@@ -211,30 +211,52 @@ function PipelineSection() {
 
 function ProspectFinderSection() {
   const [bizUnit, setBizUnit] = useState('workroom');
-  const [location, setLocation] = useState('Washington DC');
+  const [location, setLocation] = useState('DMV');
   const [target, setTarget] = useState('interior designers');
   const [searching, setSearching] = useState(false);
   const [prospects, setProspects] = useState<any[]>([]);
+  const [searchMeta, setSearchMeta] = useState<any>(null);
+  const [pipelineStatus, setPipelineStatus] = useState<Record<number, string>>({});
+
+  // Load existing prospects on mount
+  useEffect(() => {
+    fetch(`${LF_API}/leadforge/prospects?limit=50&sort_by=score`).then(r => r.json()).then(d => {
+      const items = d.prospects || d || [];
+      if (items.length > 0) setProspects(items);
+    }).catch(() => {});
+  }, []);
 
   const findProspects = async () => {
     setSearching(true);
     try {
-      const res = await fetch(`${LF_API}/ai/find-prospects`, {
+      const res = await fetch(`${LF_API}/leadforge/prospects/search`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ business_unit: bizUnit, location, target }),
+        body: JSON.stringify({ business_unit: bizUnit, location, target_type: target }),
       });
       const data = await res.json();
-      setProspects(data.prospects || []);
-    } catch { setProspects([]); }
+      setSearchMeta(data);
+      // Reload prospects from DB after search
+      const listRes = await fetch(`${LF_API}/leadforge/prospects?limit=100&sort_by=score`);
+      const listData = await listRes.json();
+      setProspects(listData.prospects || listData || []);
+    } catch { /* keep existing */ }
     setSearching(false);
+  };
+
+  const addToPipeline = async (prospectId: number) => {
+    try {
+      const res = await fetch(`${LF_API}/leadforge/prospects/${prospectId}/pipeline`, { method: 'POST' });
+      const data = await res.json();
+      setPipelineStatus(prev => ({ ...prev, [prospectId]: data.status }));
+    } catch { /* silent */ }
   };
 
   return (
     <div>
-      <SH title="Prospect Finder" subtitle="AI discovers potential clients in your target area" />
+      <SH title="Prospect Finder" subtitle={`${prospects.length} prospects in database`} />
       <div style={{ background: 'linear-gradient(135deg, #fef2f2, #fff)', border: '1px solid #fca5a5', borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 10 }}>
-          <Crosshair size={14} style={{ verticalAlign: 'text-bottom' }} /> THE WEAPON — AI Prospect Discovery
+          <Crosshair size={14} style={{ verticalAlign: 'text-bottom' }} /> THE WEAPON — Real Prospect Discovery (Brave + Google + Yelp)
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 150 }}>
@@ -247,11 +269,13 @@ function ProspectFinderSection() {
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
             <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Location</label>
-            <input value={location} onChange={e => setLocation(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
+            <input value={location} onChange={e => setLocation(e.target.value)} placeholder="DMV, Washington DC, nationwide..."
+              style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
           </div>
           <div style={{ flex: 1, minWidth: 150 }}>
             <label style={{ fontSize: 10, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Target Type</label>
-            <input value={target} onChange={e => setTarget(e.target.value)} style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
+            <input value={target} onChange={e => setTarget(e.target.value)} placeholder="interior designers, contractors..."
+              style={{ width: '100%', padding: '8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 12 }} />
           </div>
         </div>
         <button onClick={findProspects} disabled={searching} style={{
@@ -261,27 +285,55 @@ function ProspectFinderSection() {
           {searching ? <Loader2 size={14} className="animate-spin" /> : <Crosshair size={14} />}
           {searching ? 'Searching...' : 'Find Prospects'}
         </button>
+        {searchMeta && (
+          <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>
+            Last search: {searchMeta.raw_result_count || 0} raw → {searchMeta.unique_result_count || 0} unique → {searchMeta.inserted_count || 0} new |
+            Providers: {(searchMeta.providers_succeeded || searchMeta.providers_attempted || []).join(', ') || 'none'}
+          </div>
+        )}
       </div>
       {prospects.length > 0 && (
         <div>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{prospects.length} Prospects Found</h3>
+          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{prospects.length} Prospects</h3>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
             <thead><tr style={{ borderBottom: '2px solid #e5e2dc', textAlign: 'left' }}>
-              <th style={{ padding: 8 }}>Name</th><th style={{ padding: 8 }}>Business</th><th style={{ padding: 8 }}>Location</th>
-              <th style={{ padding: 8 }}>Platform</th><th style={{ padding: 8 }}>Score</th><th style={{ padding: 8 }}>Action</th>
+              <th style={{ padding: 8 }}>Name</th>
+              <th style={{ padding: 8 }}>Location</th>
+              <th style={{ padding: 8 }}>Source</th>
+              <th style={{ padding: 8 }}>Score</th>
+              <th style={{ padding: 8 }}>Conf</th>
+              <th style={{ padding: 8 }}>Fit</th>
+              <th style={{ padding: 8 }}>Action</th>
             </tr></thead>
-            <tbody>{prospects.map((p: any, i: number) => (
-              <tr key={i} style={{ borderBottom: '1px solid #f0ede6' }}>
-                <td style={{ padding: 8, fontWeight: 500 }}>{p.name}</td>
-                <td style={{ padding: 8, color: '#666' }}>{p.business_name || '—'}</td>
-                <td style={{ padding: 8, color: '#666' }}>{p.location}</td>
-                <td style={{ padding: 8 }}><span style={{ fontSize: 10, fontWeight: 600 }}>{p.platform}</span></td>
-                <td style={{ padding: 8 }}><span style={{ fontWeight: 700, color: (p.relevance_score || 0) > 70 ? '#16a34a' : '#b8960c' }}>{p.relevance_score || 0}</span></td>
-                <td style={{ padding: 8 }}>
-                  <button style={{ fontSize: 10, padding: '3px 8px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>+ Pipeline</button>
-                </td>
-              </tr>
-            ))}</tbody>
+            <tbody>{prospects.map((p: any) => {
+              const inPipeline = pipelineStatus[p.id] === 'added' || pipelineStatus[p.id] === 'already_in_pipeline';
+              const fitTags = ['designer_fit', 'upholstery_fit', 'millwork_fit', 'cabinetry_fit', 'hospitality_fit', 'restaurant_fit', 'gc_fit']
+                .filter(t => p[t]).map(t => t.replace('_fit', ''));
+              return (
+                <tr key={p.id} style={{ borderBottom: '1px solid #f0ede6' }}>
+                  <td style={{ padding: 8 }}>
+                    <div style={{ fontWeight: 500 }}>{p.name?.slice(0, 35)}</div>
+                    {p.website && <a href={p.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#2563eb' }}>website</a>}
+                  </td>
+                  <td style={{ padding: 8, color: '#666', fontSize: 11 }}>{p.location || p.city || '—'}</td>
+                  <td style={{ padding: 8 }}><span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#f0fdf4', color: '#16a34a' }}>{p.source || p.platform}</span></td>
+                  <td style={{ padding: 8 }}><span style={{ fontWeight: 700, color: (p.score || 0) >= 50 ? '#16a34a' : (p.score || 0) >= 30 ? '#b8960c' : '#999' }}>{p.score || 0}</span></td>
+                  <td style={{ padding: 8 }}><span style={{ fontSize: 10, color: (p.confidence_score || 0) >= 75 ? '#16a34a' : '#999' }}>{p.confidence_score || 0}%</span></td>
+                  <td style={{ padding: 8 }}>
+                    <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                      {fitTags.map(t => <span key={t} style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#fdf8eb', color: '#b8960c', fontWeight: 600 }}>{t}</span>)}
+                    </div>
+                  </td>
+                  <td style={{ padding: 8 }}>
+                    {inPipeline ? (
+                      <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600 }}>In Pipeline ✓</span>
+                    ) : (
+                      <button onClick={() => addToPipeline(p.id)} style={{ fontSize: 10, padding: '3px 8px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>+ Pipeline</button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}</tbody>
           </table>
         </div>
       )}
