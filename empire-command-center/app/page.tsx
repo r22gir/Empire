@@ -395,26 +395,23 @@ export default function CommandCenter() {
         <LeftNav
           activeProduct={activeProduct}
           onProductChange={handleProductChange}
+          dashboardProps={{
+            desks: sys.desks,
+            briefing: sys.briefing,
+            systemStats: sys.systemStats,
+            activeScreen,
+            activeProduct,
+            activeSection,
+            onScreenChange: handleScreenChange,
+            onModuleClick: handleModuleClick,
+          }}
         />
 
         <div className="flex-1 flex flex-col overflow-y-auto bg-[var(--chat-bg)]">
           {renderCenterContent()}
         </div>
 
-        {!clientView && (
-          <div className="hidden md:block h-full overflow-hidden">
-            <RightPanel
-              desks={sys.desks}
-              briefing={sys.briefing}
-              systemStats={sys.systemStats}
-              activeScreen={activeScreen}
-              activeProduct={activeProduct}
-              activeSection={activeSection}
-              onScreenChange={handleScreenChange}
-              onModuleClick={handleModuleClick}
-            />
-          </div>
-        )}
+        {/* Right panel moved into left nav as Dashboard tab */}
       </div>
 
       <div className="hidden md:block">

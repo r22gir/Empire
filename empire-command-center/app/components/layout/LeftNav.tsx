@@ -1,12 +1,13 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { EcosystemProduct } from '../../lib/types';
+import RightPanel from './RightPanel';
 import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
-  Building2, ShoppingCart,
+  Building2, ShoppingCart, LayoutDashboard,
 } from 'lucide-react';
 
 interface NavItem {
@@ -78,12 +79,14 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
 interface Props {
   activeProduct: EcosystemProduct;
   onProductChange: (product: EcosystemProduct) => void;
+  dashboardProps?: any;
 }
 
-export default function LeftNav({ activeProduct, onProductChange }: Props) {
+export default function LeftNav({ activeProduct, onProductChange, dashboardProps }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
 
   // Detect mobile and auto-collapse
   useEffect(() => {
@@ -250,6 +253,51 @@ export default function LeftNav({ activeProduct, onProductChange }: Props) {
               </div>
             </div>
           ))}
+
+          {/* Dashboard toggle — below Infrastructure */}
+          <div className="h-px bg-[var(--border)] my-2" style={{ margin: isCollapsed ? '6px 4px' : '8px 6px' }} />
+          {isCollapsed ? (
+            <button
+              onClick={() => setShowDashboard(!showDashboard)}
+              className="flex items-center justify-center cursor-pointer transition-all"
+              title="Dashboard"
+              style={{
+                width: 40, height: 40, borderRadius: 12, alignSelf: 'center',
+                border: showDashboard ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                background: showDashboard ? '#fdf8eb' : 'transparent',
+                color: showDashboard ? '#b8960c' : '#7c3aed',
+                opacity: showDashboard ? 1 : 0.7,
+              }}
+            >
+              <LayoutDashboard size={16} />
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowDashboard(!showDashboard)}
+              className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
+              style={{
+                padding: '10px 12px', borderRadius: 12, fontSize: 13, minHeight: 44,
+                border: showDashboard ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                background: showDashboard ? '#fdf8eb' : 'transparent',
+                fontWeight: showDashboard ? 600 : 400,
+              }}
+              onMouseEnter={e => { if (!showDashboard) { e.currentTarget.style.background = '#f5f3ef'; } }}
+              onMouseLeave={e => { if (!showDashboard) { e.currentTarget.style.background = 'transparent'; } }}
+            >
+              <span className="shrink-0" style={{ color: showDashboard ? '#b8960c' : '#7c3aed' }}>
+                <LayoutDashboard size={16} />
+              </span>
+              <span className="flex-1 truncate" style={{ color: showDashboard ? '#96750a' : '#666' }}>Dashboard</span>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: '#22c55e' }} />
+            </button>
+          )}
+
+          {/* Inline dashboard panel */}
+          {showDashboard && !isCollapsed && dashboardProps && (
+            <div style={{ padding: '8px 4px', marginTop: 4, borderTop: '1px solid var(--border)' }}>
+              <RightPanel {...dashboardProps} />
+            </div>
+          )}
         </nav>
       )}
     </>

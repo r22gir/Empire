@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock } from 'lucide-react';
+import { Paperclip, Mic, MicOff, ArrowUp, Volume2, VolumeX, Mail, CheckSquare, Search, FileText, Calendar, ClipboardList, Loader2, Terminal, Headphones, Clock, MoreHorizontal, X } from 'lucide-react';
 import ChatHistoryPanel from '../ChatHistoryPanel';
 import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
@@ -72,6 +72,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [voiceStatus, setVoiceStatus] = useState<string>(''); // Recording/uploading/transcribing status
   const [aiStatus, setAiStatus] = useState<string>(''); // Thinking/tool status for all messages
   const [recordingTimer, setRecordingTimer] = useState(0);
+  const [showMoreActions, setShowMoreActions] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const msgsEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -811,11 +812,12 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </div>
         )}
 
-        {/* Input row: [Attach] [Input] [Mic] [Send] */}
+        {/* Input row: [Attach] [More] [Input] [Mic] [Send] */}
         <div style={{
           display: 'flex',
           alignItems: 'flex-end',
           gap: 8,
+          position: 'relative',
         }}>
           {/* Attach button */}
           <button
@@ -828,6 +830,22 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             }}
           >
             <Paperclip size={17} />
+          </button>
+
+          {/* More button — opens quick actions popup */}
+          <button
+            onClick={() => setShowMoreActions(!showMoreActions)}
+            style={{
+              width: 44, height: 44, borderRadius: 12,
+              background: showMoreActions ? '#fdf8eb' : 'var(--card-bg)',
+              border: showMoreActions ? '1.5px solid #b8960c' : '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: showMoreActions ? '#b8960c' : 'var(--dim)',
+              flexShrink: 0, transition: 'all 0.2s',
+            }}
+            title="More actions"
+          >
+            {showMoreActions ? <X size={17} /> : <MoreHorizontal size={17} />}
           </button>
 
           {/* Text input */}
@@ -930,55 +948,45 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </button>
         </div>
 
-        {/* Quick actions — hidden on mobile */}
-        <div className="hidden md:flex" style={{
-          gap: 8,
-          marginTop: 14,
-          paddingBottom: 4,
-          overflowX: 'auto',
-        }}>
-          {QUICK_ACTIONS.map(qa => {
-            const Icon = qa.icon;
-            const isHighlight = (qa as any).highlight;
-            return (
-              <button
-                key={qa.action}
-                onClick={() => handleQuickAction(qa.action)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  padding: '8px 16px',
-                  background: isHighlight ? '#fdf8eb' : '#fff',
-                  border: isHighlight ? '1.5px solid #b8960c' : '1px solid var(--border)',
-                  borderRadius: 12,
-                  fontSize: 13,
-                  fontWeight: isHighlight ? 700 : 500,
-                  color: isHighlight ? '#b8960c' : 'var(--dim)',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  transition: 'all 0.2s',
-                  fontFamily: "'Inter', sans-serif",
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.borderColor = 'var(--gold)';
-                  e.currentTarget.style.color = 'var(--gold)';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(184,150,12,0.12)';
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.borderColor = isHighlight ? '#b8960c' : 'var(--border)';
-                  e.currentTarget.style.color = isHighlight ? '#b8960c' : 'var(--dim)';
-                  e.currentTarget.style.transform = 'none';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                <Icon size={15} />
-                {qa.label}
-              </button>
-            );
-          })}
-        </div>
+        {/* More actions popup — positioned above the More button */}
+        {showMoreActions && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setShowMoreActions(false)} />
+            <div style={{
+              position: 'absolute', bottom: '100%', left: 0, marginBottom: 8,
+              background: '#fff', border: '1px solid var(--border)', borderRadius: 14,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12)', padding: 8, zIndex: 50,
+              display: 'flex', flexWrap: 'wrap', gap: 6, minWidth: 280,
+            }}>
+              {QUICK_ACTIONS.map(qa => {
+                const Icon = qa.icon;
+                const isHighlight = (qa as any).highlight;
+                return (
+                  <button
+                    key={qa.action}
+                    onClick={() => { handleQuickAction(qa.action); setShowMoreActions(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      padding: '10px 16px',
+                      background: isHighlight ? '#fdf8eb' : '#faf9f7',
+                      border: isHighlight ? '1.5px solid #b8960c' : '1px solid #ece8e0',
+                      borderRadius: 10, fontSize: 13,
+                      fontWeight: isHighlight ? 700 : 500,
+                      color: isHighlight ? '#b8960c' : '#555',
+                      cursor: 'pointer', whiteSpace: 'nowrap',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#fdf8eb'; e.currentTarget.style.borderColor = '#b8960c'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = isHighlight ? '#fdf8eb' : '#faf9f7'; e.currentTarget.style.borderColor = isHighlight ? '#b8960c' : '#ece8e0'; }}
+                  >
+                    <Icon size={15} />
+                    {qa.label}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* PIN Modal removed — CC is always founder, Code Mode activates directly */}
