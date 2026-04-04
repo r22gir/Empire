@@ -9,6 +9,11 @@
     {"capability_key": "email_send", "display_name": "Send emails via SendGrid", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Only claim sent AFTER send service returns success."},
     {"capability_key": "telegram_send", "display_name": "Send Telegram messages", "enabled": true, "channel_scope": ["web_cc"], "notes": "Only claim sent AFTER bot API returns 200."},
     {"capability_key": "pdf_generation", "display_name": "Generate PDF documents", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Generated locally. User downloads via link. NOT auto-attached to chat."},
-    {"capability_key": "fabric_specification", "display_name": "Accept and apply fabric specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Fabric name/URL/grade applied to drawings and quotes."}
+    {"capability_key": "fabric_specification", "display_name": "Accept and apply fabric specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Fabric name/URL/grade applied to drawings and quotes."},
+    {"capability_key": "client_portal", "display_name": "Generate and manage client portal links", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Secure token links. Client sees quote, photos, production, invoice, pay button."},
+    {"capability_key": "stripe_payments", "display_name": "Process Stripe payments and send reminders", "enabled": true, "channel_scope": ["web_cc"], "notes": "PaymentIntent, payment links, webhook handling, auto-reminders."},
+    {"capability_key": "financial_dashboard", "display_name": "Answer financial queries and show dashboards", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Revenue, P&L, AR aging, category drill-down, job profitability."},
+    {"capability_key": "production_board", "display_name": "Show and manage production board", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Kanban with urgency colors, advance stages, overdue alerts."},
+    {"capability_key": "daily_ops", "display_name": "Show daily action items and quick stats", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Prioritized action list, pipeline stats, production overview."}
   ]
 }

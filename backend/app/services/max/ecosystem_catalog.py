@@ -1,8 +1,8 @@
 """
 Empire Ecosystem Catalog — Auto-generated from full codebase scan.
 MAX uses this to answer questions about any Empire product, service, or feature.
-Last updated: 2026-03-20 (v5.2 — accuracy audit)
-Source: Full codebase audit (422+ commits, 44 screens, 38 tools, 17 desks, 7 databases)
+Last updated: 2026-04-04 (v7.0 — portal, payments, lifecycle, finance, production)
+Source: Full codebase audit (422+ commits, 48 screens, 38 tools, 17 desks, 7 databases)
 """
 
 from datetime import datetime
@@ -496,7 +496,7 @@ EMPIRE_CATALOG = {
     "databases": {
         "empire.db": {
             "path": "backend/data/empire.db",
-            "tables": 16,
+            "tables": 17,
             "key_tables": {
                 "tasks": {"rows": 139, "purpose": "All desk tasks with status tracking"},
                 "task_activity": {"rows": 165, "purpose": "Task history/changelog"},
@@ -513,6 +513,7 @@ EMPIRE_CATALOG = {
                 "access_users": {"rows": 5, "purpose": "User accounts with roles"},
                 "access_sessions": {"rows": 0, "purpose": "Tool authorization sessions"},
                 "access_audit": {"rows": 0, "purpose": "Tool execution audit log"},
+                "client_portal_tokens": {"rows": 0, "purpose": "Token-based client access, secure project links"},
             },
         },
         "intake.db": {
@@ -618,6 +619,36 @@ EMPIRE_CATALOG = {
             {"method": "POST", "path": "/api/v1/socialforge/post/facebook", "description": "Post to Facebook"},
             {"method": "GET", "path": "/api/v1/socialforge/accounts", "description": "Check connected social accounts"},
         ],
+        "portal": [
+            {"method": "POST", "path": "/api/v1/portal/generate", "description": "Generate portal token for client"},
+            {"method": "POST", "path": "/api/v1/portal/send", "description": "Send portal link to client"},
+            {"method": "GET", "path": "/api/v1/portal/links", "description": "List active portal links"},
+            {"method": "POST", "path": "/api/v1/portal/revoke", "description": "Revoke a portal token"},
+            {"method": "GET", "path": "/api/v1/portal/data", "description": "Get portal data for client view"},
+            {"method": "POST", "path": "/api/v1/portal/approve", "description": "Client approves quote via portal"},
+            {"method": "GET", "path": "/api/v1/portal/pdf", "description": "Download project PDF from portal"},
+        ],
+        "payments_v7": [
+            {"method": "POST", "path": "/api/v1/payments/create-intent", "description": "Create Stripe payment intent"},
+            {"method": "GET", "path": "/api/v1/payments/overdue", "description": "List overdue payments"},
+            {"method": "POST", "path": "/api/v1/payments/send-reminders", "description": "Send reminders for all overdue"},
+            {"method": "POST", "path": "/api/v1/payments/send-reminder/{id}", "description": "Send reminder for specific invoice"},
+        ],
+        "lifecycle": [
+            {"method": "POST", "path": "/api/v1/lifecycle/cascade", "description": "Quote→Invoice→Job→WO cascade"},
+            {"method": "GET", "path": "/api/v1/lifecycle/daily-actions", "description": "Daily lifecycle action items"},
+            {"method": "GET", "path": "/api/v1/lifecycle/quick-stats", "description": "Quick lifecycle stats"},
+        ],
+        "finance_v7": [
+            {"method": "GET", "path": "/api/v1/finance/revenue-by-category", "description": "Revenue breakdown by category"},
+            {"method": "GET", "path": "/api/v1/finance/revenue-by-client", "description": "Revenue breakdown by client"},
+            {"method": "GET", "path": "/api/v1/finance/ar-aging", "description": "Accounts receivable aging report"},
+            {"method": "GET", "path": "/api/v1/finance/job-profitability/{id}", "description": "Job profitability analysis"},
+            {"method": "GET", "path": "/api/v1/finance/monthly-comparison", "description": "Month-over-month comparison"},
+        ],
+        "work_orders_v7": [
+            {"method": "GET", "path": "/api/v1/work-orders/overdue", "description": "List overdue work orders"},
+        ],
         "other_groups": [
             "quotes", "chats", "files", "docker", "ollama", "notifications",
             "tickets", "customers (supportforge)", "kb", "tasks", "contacts",
@@ -665,6 +696,12 @@ EMPIRE_CATALOG = {
             "File naming: Name_YYYY-MM-DD_HHMM.ext",
             "Founder Override Protocol: founder commands execute immediately, no confirmation needed",
         ],
+        "v7_screens": [
+            {"path": "/portal/[token]", "name": "Portal Page", "description": "Client-facing project view with quote approval and payment"},
+            {"path": "/workroom/production", "name": "Production Board", "description": "Kanban board for work order tracking"},
+            {"path": "/workroom/finance", "name": "Financial Dashboard", "description": "KPI cards, trends, drill-down analytics"},
+            {"path": "/workroom/ops", "name": "Daily Ops", "description": "Founder morning dashboard with action items"},
+        ],
         "tech_stack": {
             "backend": "Python 3.12, FastAPI, SQLite (async), httpx",
             "frontend": "Next.js 14/15, React 18, TypeScript, Tailwind CSS",
@@ -696,6 +733,7 @@ EMPIRE_CATALOG = {
             {"date": "2026-03-17", "event": "Live testing fixes — file safety, 3D avatar, timeouts, port refs, systemd services"},
             {"date": "2026-03-18", "event": "v5.0 Total Knowledge Build — ecosystem catalog, comprehensive report"},
             {"date": "2026-03-18", "event": "v5.0.1 — embedding fix, MAX behavior rules, Ollama toggle, landing pages, SocialForge wired, expanded tools"},
+            {"date": "2026-04-04", "event": "v7.0 — Client Portal (token-based access), Production Board (Kanban), Financial Dashboard (KPI/trends), Daily Ops, Stripe payments + auto-reminders, one-click lifecycle cascade, overdue work orders, AR aging, job profitability"},
         ],
     },
 
@@ -731,10 +769,10 @@ EMPIRE_CATALOG = {
         "total_desks": 17,
         "total_tools": 38,
         "total_products": 22,
-        "total_screens": 44,
-        "total_api_endpoints": 350,
+        "total_screens": 48,
+        "total_api_endpoints": 370,
         "total_databases": 7,
-        "total_db_tables": 38,
+        "total_db_tables": 39,
         "total_intake_users": 3,
         "total_intake_projects": 5,
         "total_access_users": 5,
@@ -772,7 +810,7 @@ def get_catalog_summary() -> str:
 
     lines = [
         f"Empire Ecosystem: {stats['total_products']} products ({active} active, {dev} dev, {placeholder} placeholder)",
-        f"Desks: {stats['total_desks']} | Tools: {stats['total_tools']} | Screens: {stats['total_screens']} | Endpoints: ~{stats['total_api_endpoints']}",
+        f"Desks: {stats['total_desks']} | Tools: {stats['total_tools']} | Screens: {stats['total_screens']} | Endpoints: ~{stats['total_api_endpoints']} | DB Tables: {stats['total_db_tables']}",
         f"Data: {stats['total_customers']} customers, {stats['total_inventory_items']} inventory, {stats['total_tasks']} tasks, {stats['total_vendors']} vendors",
         "",
         "Active Products:",
