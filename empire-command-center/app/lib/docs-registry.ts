@@ -415,6 +415,8 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // RELISTAPP — 23 Research Documents (numbered in reading order)
   // ═══════════════════════════════════════════════
   relist: [
+    // ── COMPLETE PACKAGE (PDF) ──
+    { title: "📥 Complete Research Package (All 23 Docs — PDF)", path: "docs/relist/pdf/00_COMPLETE_RESEARCH_PACKAGE.pdf", type: "pdf", description: "All 23 documents in one downloadable PDF with cover page and table of contents (1.2MB)" },
     // ── START HERE ──
     { title: "① Master Plan — 1000 Sales/Day Strategy", path: "docs/relist/MASTER_PLAN.md", type: "plan", description: "READ FIRST — Complete arbitrage business plan with financial projections through Year 1" },
     { title: "② Decision Framework — 10 Concrete Answers", path: "docs/relist/DECISION_FRAMEWORK.md", type: "framework", description: "READ SECOND — Start products, platforms, capital rules, 72-hour quick start, abort criteria" },

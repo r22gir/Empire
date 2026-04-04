@@ -312,22 +312,45 @@ export default function ProductDocs({ product }: Props) {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ padding: '14px 18px', maxHeight: 500, overflowY: 'auto' }}>
-                      {isLoading ? (
-                        <div style={{ fontSize: 13, color: '#999', padding: 20, textAlign: 'center' }}>Loading document...</div>
-                      ) : (
-                        <pre style={{
-                          fontSize: 12,
-                          lineHeight: 1.7,
-                          color: '#444',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                          fontFamily: 'ui-monospace, SFMono-Regular, monospace',
-                          margin: 0,
-                        }}>
-                          {docContent[doc.path] || ''}
-                        </pre>
-                      )}
+                    <div>
+                      <div style={{ padding: '14px 18px', maxHeight: 500, overflowY: 'auto' }}>
+                        {isLoading ? (
+                          <div style={{ fontSize: 13, color: '#999', padding: 20, textAlign: 'center' }}>Loading document...</div>
+                        ) : (
+                          <pre style={{
+                            fontSize: 12,
+                            lineHeight: 1.7,
+                            color: '#444',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                            margin: 0,
+                          }}>
+                            {docContent[doc.path] || ''}
+                          </pre>
+                        )}
+                      </div>
+                      {/* PDF download button for docs with PDF companions */}
+                      {doc.path.startsWith('docs/relist/') && doc.path.endsWith('.md') && (() => {
+                        const basename = doc.path.split('/').pop()?.replace('.md', '') || '';
+                        const num = doc.title.match(/[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳㉑㉒㉓]/)?.[0];
+                        const numMap: Record<string, string> = {'①':'01','②':'02','③':'03','④':'04','⑤':'05','⑥':'06','⑦':'07','⑧':'08','⑨':'09','⑩':'10','⑪':'11','⑫':'12','⑬':'13','⑭':'14','⑮':'15','⑯':'16','⑰':'17','⑱':'18','⑲':'19','⑳':'20','㉑':'21','㉒':'22','㉓':'23'};
+                        const prefix = num ? numMap[num] : '';
+                        const pdfPath = prefix ? `docs/relist/pdf/${prefix}_${basename}.pdf` : '';
+                        if (!pdfPath) return null;
+                        return (
+                          <div style={{ padding: '8px 18px', borderTop: '1px solid #ece8e0', display: 'flex', gap: 8 }}>
+                            <a href={`/api/docs/serve?path=${encodeURIComponent(pdfPath)}`} target="_blank" rel="noopener noreferrer"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#dc2626', border: '1px solid #fecaca', background: '#fef2f2', textDecoration: 'none' }}>
+                              <Download size={12} /> View PDF
+                            </a>
+                            <a href={`/api/docs/serve?path=${encodeURIComponent(pdfPath)}`} download
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, color: '#555', border: '1px solid #ece8e0', background: '#faf9f7', textDecoration: 'none' }}>
+                              <Download size={12} /> Download PDF
+                            </a>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
