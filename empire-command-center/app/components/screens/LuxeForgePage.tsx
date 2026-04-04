@@ -4,7 +4,7 @@ import { API } from '../../lib/api';
 import {
   Gem, RefreshCw, Users, FolderOpen, Camera, Ruler, Clock,
   CheckCircle2, FileText, MessageSquare, ChevronDown, ChevronUp,
-  ExternalLink, Image, Maximize2, Send, AlertCircle, Eye, Scissors, Loader2,
+  ExternalLink, Image, Maximize2, Send, AlertCircle, Eye, Scissors, Loader2, TreePine,
   Pencil, Trash2, X, Save, BookOpen, Download, Archive, RotateCcw,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
@@ -147,17 +147,22 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
     setExpandedProject(prev => prev === id ? null : id);
   };
 
-  const sendToWorkroom = async (projectId: string) => {
+  const sendToWorkroom = async (projectId: string, businessUnit: string = 'workroom') => {
     setSendingToWorkroom(projectId);
     try {
-      const res = await fetch(`${API}/intake/admin/projects/${projectId}/to-quote`, { method: 'POST' });
+      const res = await fetch(`${API}/intake/admin/projects/${projectId}/to-quote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_unit: businessUnit }),
+      });
       if (res.ok) {
         const data = await res.json();
-        await fetchData(); // refresh to show updated status
+        await fetchData();
         const quoteNum = data.quote_number || data.quote_id || '';
-        if (confirm(`✅ Quote ${quoteNum} created!\n\nCustomer info and photos transferred.\n\nGo to Workroom Quotes now?`)) {
+        const unitLabel = businessUnit === 'woodcraft' ? 'WoodCraft' : 'Workroom';
+        if (confirm(`✅ Quote ${quoteNum} created for ${unitLabel}!\n\nCustomer info and photos transferred.\n\nGo to ${unitLabel} Quotes now?`)) {
           if (onNavigate) {
-            onNavigate('workroom', 'dashboard', 'quotes');
+            onNavigate(businessUnit === 'woodcraft' ? 'craft' : 'workroom', 'dashboard', 'quotes');
           }
         }
       } else {
@@ -701,7 +706,7 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
                                       {expandedProject === proj.id ? 'Hide Details' : 'View Full Details'}
                                     </button>
                                     <button
-                                      onClick={() => sendToWorkroom(proj.id)}
+                                      onClick={() => sendToWorkroom(proj.id, 'workroom')}
                                       disabled={sendingToWorkroom === proj.id}
                                       style={{
                                         fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 8,
@@ -711,6 +716,18 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
                                     >
                                       <Scissors size={11} style={{ display: 'inline', marginRight: 4 }} />
                                       {sendingToWorkroom === proj.id ? 'Sending...' : 'Send to Workroom'}
+                                    </button>
+                                    <button
+                                      onClick={() => sendToWorkroom(proj.id, 'woodcraft')}
+                                      disabled={sendingToWorkroom === proj.id}
+                                      style={{
+                                        fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 8,
+                                        border: 'none', background: '#ca8a04', color: '#fff', cursor: 'pointer',
+                                        opacity: sendingToWorkroom === proj.id ? 0.5 : 1,
+                                      }}
+                                    >
+                                      <TreePine size={11} style={{ display: 'inline', marginRight: 4 }} />
+                                      Send to WoodCraft
                                     </button>
                                   </div>
 
@@ -1169,22 +1186,36 @@ export default function LuxeForgePage({ onNavigate }: LuxeForgePageProps) {
                     >
                       <Eye size={13} /> View Full Project
                     </a>
-                    {project.status === 'submitted' && (
-                      <button
-                        onClick={() => sendToWorkroom(project.id)}
-                        disabled={sendingToWorkroom === project.id}
-                        style={{
-                          padding: '8px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
-                          background: '#b8960c', color: '#fff', border: 'none', cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', gap: 6,
-                          opacity: sendingToWorkroom === project.id ? 0.6 : 1,
-                        }}
-                      >
-                        {sendingToWorkroom === project.id
-                          ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Creating Quote...</>
-                          : <><Scissors size={13} /> Send to Workroom</>
-                        }
-                      </button>
+                    {(project.status === 'submitted' || project.status === 'draft') && (
+                      <>
+                        <button
+                          onClick={() => sendToWorkroom(project.id, 'workroom')}
+                          disabled={sendingToWorkroom === project.id}
+                          style={{
+                            padding: '8px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                            background: '#16a34a', color: '#fff', border: 'none', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            opacity: sendingToWorkroom === project.id ? 0.6 : 1,
+                          }}
+                        >
+                          {sendingToWorkroom === project.id
+                            ? <><Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Creating Quote...</>
+                            : <><Scissors size={13} /> Send to Workroom</>
+                          }
+                        </button>
+                        <button
+                          onClick={() => sendToWorkroom(project.id, 'woodcraft')}
+                          disabled={sendingToWorkroom === project.id}
+                          style={{
+                            padding: '8px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8,
+                            background: '#ca8a04', color: '#fff', border: 'none', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            opacity: sendingToWorkroom === project.id ? 0.6 : 1,
+                          }}
+                        >
+                          <TreePine size={13} /> Send to WoodCraft
+                        </button>
+                      </>
                     )}
                     {project.status === 'quote-ready' && (
                       <button
