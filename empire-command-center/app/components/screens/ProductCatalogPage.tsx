@@ -57,14 +57,47 @@ export default function ProductCatalogPage() {
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Loading product catalog...</div>;
   if (!catalog) return <div style={{ textAlign: 'center', padding: 40, color: '#dc2626' }}>Could not load catalog</div>;
 
+  // Sub-category groupings for window treatments
+  const WINDOW_GROUPS: Record<string, { label: string; styles: string[] }> = {
+    drapery: { label: '🪟 Drapery (12 pleat styles)', styles: ['pinch_pleat','french_pleat','euro_pleat','goblet','ripplefold','grommet','rod_pocket','tab_top','inverted_box','cartridge','pencil','smocked'] },
+    roman: { label: '🏠 Roman Shades (7 styles)', styles: ['flat_roman','hobbled_roman','balloon_roman','austrian','relaxed_roman','london_roman','tulip_roman'] },
+    cornice: { label: '🎭 Cornices & Valances (12 styles)', styles: ['straight_cornice','arched_cornice','scalloped_cornice','shaped_cornice','upholstered_cornice','swag_jabot','balloon_valance','box_pleat_valance','kingston_valance','rod_pocket_valance','board_mounted_valance','scarf_swag'] },
+  };
+
+  const MODE_INFO: Record<string, { label: string; desc: string; color: string; bg: string }> = {
+    presentation: { label: 'Presentation', desc: 'Client-friendly view — clean visuals, fabric emphasis, minimal technical detail', color: '#2563eb', bg: '#dbeafe' },
+    shop: { label: 'Shop Drawing', desc: 'For your fabrication team — exact dimensions, construction notes, material schedule', color: '#d97706', bg: '#fef3c7' },
+    construction: { label: 'Construction', desc: 'Builder view — exploded frame, numbered parts, cut list, assembly diagram', color: '#dc2626', bg: '#fef2f2' },
+  };
+
+  const [drawMode, setDrawMode] = useState('presentation');
+
+  // Navigate to Drawing Studio with pre-selected style
+  const handleDrawThis = (style: any) => {
+    // Switch parent view back to studio with the item type pre-selected
+    // For now, send a MAX chat message to generate the drawing
+    const msg = `Draw a ${style.style_name} (${selectedCategory?.name}) in ${drawMode} mode`;
+    window.open(`/?screen=chat&autoMessage=${encodeURIComponent(msg)}`, '_self');
+  };
+
   // Style detail view
   if (selectedCategory) {
+    const isWindow = selectedCategory.key === 'window';
+    const groups = isWindow ? WINDOW_GROUPS : null;
+    const [subFilter, setSubFilter] = useState<string>('all');
+
+    const getFilteredStyles = () => {
+      if (!isWindow || subFilter === 'all') return selectedCategory.styles;
+      const groupStyles = groups?.[subFilter]?.styles || [];
+      return selectedCategory.styles.filter(s => groupStyles.includes(s.style_key));
+    };
+
     return (
       <div style={{ padding: '20px 24px' }}>
         <button onClick={() => setSelectedCategory(null)} style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', color: '#666', fontSize: 12, marginBottom: 12 }}>
           <ArrowLeft size={14} /> Back to Catalog
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <span style={{ fontSize: 24 }}>{CAT_ICONS[selectedCategory.key] || '📋'}</span>
           <div>
             <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>{selectedCategory.name}</h2>
@@ -72,18 +105,66 @@ export default function ProductCatalogPage() {
           </div>
           <span style={{ padding: '2px 8px', borderRadius: 8, fontSize: 10, fontWeight: 600, ...BIZ_COLORS[selectedCategory.business_unit] }}>{BIZ_COLORS[selectedCategory.business_unit]?.label}</span>
         </div>
+
+        {/* Mode selector with explanations */}
+        <div style={{ background: '#faf9f7', borderRadius: 10, padding: 12, marginBottom: 14, border: '1px solid #e5e2dc' }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 6, textTransform: 'uppercase' }}>Drawing Mode</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {selectedCategory.modes.map(m => {
+              const info = MODE_INFO[m] || { label: m, desc: '', color: '#888', bg: '#f5f3ef' };
+              return (
+                <button key={m} onClick={() => setDrawMode(m)} title={info.desc} style={{
+                  padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  background: drawMode === m ? info.bg : '#fff',
+                  color: drawMode === m ? info.color : '#999',
+                  border: drawMode === m ? `2px solid ${info.color}` : '1px solid #e5e2dc',
+                }}>
+                  {info.label}
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: 10, color: '#888', margin: '6px 0 0', fontStyle: 'italic' }}>
+            {MODE_INFO[drawMode]?.desc || ''}
+          </p>
+        </div>
+
+        {/* Sub-category filter for window treatments */}
+        {isWindow && groups && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+            <button onClick={() => setSubFilter('all')} style={{
+              fontSize: 11, padding: '5px 12px', borderRadius: 8, cursor: 'pointer',
+              border: subFilter === 'all' ? '2px solid #b8960c' : '1px solid #e5e2dc',
+              background: subFilter === 'all' ? '#fdf8eb' : '#fff',
+              color: subFilter === 'all' ? '#b8960c' : '#666', fontWeight: subFilter === 'all' ? 600 : 400,
+            }}>All (31)</button>
+            {Object.entries(groups).map(([key, group]) => (
+              <button key={key} onClick={() => setSubFilter(key)} style={{
+                fontSize: 11, padding: '5px 12px', borderRadius: 8, cursor: 'pointer',
+                border: subFilter === key ? '2px solid #b8960c' : '1px solid #e5e2dc',
+                background: subFilter === key ? '#fdf8eb' : '#fff',
+                color: subFilter === key ? '#b8960c' : '#666', fontWeight: subFilter === key ? 600 : 400,
+              }}>{group.label}</button>
+            ))}
+          </div>
+        )}
+
+        {/* Style cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-          {selectedCategory.styles.map(style => {
+          {getFilteredStyles().map(style => {
             const r = READINESS[style.readiness] || READINESS.fallback;
             return (
               <div key={style.style_key} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 14 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{style.style_name}</div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
                   <span style={{ fontSize: 8, padding: '1px 6px', borderRadius: 4, fontWeight: 600, background: r.bg, color: r.color }}>{r.label}</span>
-                  {style.modes.map(m => <span key={m} style={{ fontSize: 8, padding: '1px 5px', borderRadius: 4, background: '#f5f3ef', color: '#888' }}>{m}</span>)}
+                  {style.modes.map(m => {
+                    const mi = MODE_INFO[m];
+                    return <span key={m} title={mi?.desc} style={{ fontSize: 8, padding: '1px 5px', borderRadius: 4, background: mi?.bg || '#f5f3ef', color: mi?.color || '#888', cursor: 'help' }}>{mi?.label || m}</span>;
+                  })}
                 </div>
-                <button style={{ fontSize: 10, padding: '4px 10px', background: '#b8960c', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, width: '100%' }}>
-                  Draw This
+                <button onClick={() => handleDrawThis(style)} style={{ fontSize: 10, padding: '6px 10px', background: '#b8960c', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, width: '100%' }}>
+                  Draw This ({MODE_INFO[drawMode]?.label || drawMode})
                 </button>
               </div>
             );
