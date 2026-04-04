@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 1100" width="850" height="1100">
+  <defs>
+  <marker id="dim-arrow" viewBox="0 0 10 6" refX="10" refY="3"
+          markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,0 L10,3 L0,6 Z" fill="#000"/>
+  </marker>
+</defs>
+  <rect width="850" height="1100" fill="white"/>
+  <rect x="6.0" y="6.0" width="838.0" height="1088.0" fill="none" stroke="#000000" stroke-width="2.0"/>
+  <text x="425.0" y="44.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#000000" font-weight="bold">PLAN VIEW (TOP DOWN)</text>
+  <rect x="113.0" y="224.0" width="624.0" height="192.0" fill="none" stroke="#000000" stroke-width="2.5" rx="15.4"/>
+  <rect x="119.0" y="230.0" width="612.0" height="180.0" fill="none" stroke="#CCCCCC" stroke-width="0.4" stroke-dasharray="4,3" rx="13.4"/>
+  <text x="425.0" y="320.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" fill="#000000" font-weight="600">78" x 24"</text>
+  <text x="425.0" y="336.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#666666" font-weight="normal">60" thick</text>
+  <line x1="113.0" y1="419.0" x2="113.0" y2="443.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="737.0" y1="419.0" x2="737.0" y2="443.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="113.0" y1="438.0" x2="737.0" y2="438.0" stroke="#000000" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="425.0" y="450.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#000000" font-weight="600">78"</text>
+  <line x1="740.0" y1="224.0" x2="764.0" y2="224.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="740.0" y1="416.0" x2="764.0" y2="416.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="759.0" y1="224.0" x2="759.0" y2="416.0" stroke="#000000" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="767.0" y="323.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#000000" font-weight="600" transform="rotate(-90,767.0,323.0)">24"</text>
+  <text x="425.0" y="900.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#666666" font-weight="normal">King size headboard with vertical channel back and 3-inch foam, upholstered in blue velvet</text>
+  <rect x="265.0" y="930.0" width="320.0" height="130.0" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <text x="425.0" y="948.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#000000" font-weight="bold">EMPIRE WORKROOM</text>
+  <text x="425.0" y="962.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">Custom Upholstery &amp; Window Treatments</text>
+  <line x1="275.0" y1="970.0" x2="575.0" y2="970.0" stroke="#000000" stroke-width="0.5"/>
+  <text x="425.0" y="984.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">KING SIZE HEADBOARD</text>
+  <text x="425.0" y="998.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">CUSHION</text>
+  <text x="425.0" y="1052.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">5124 Frolich Ln, Hyattsville, MD 20781</text>
+</svg>

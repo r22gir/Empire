@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 1100" width="850" height="1100">
+  <defs>
+  <marker id="dim-arrow" viewBox="0 0 10 6" refX="10" refY="3"
+          markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+    <path d="M0,0 L10,3 L0,6 Z" fill="#000"/>
+  </marker>
+</defs>
+  <rect width="850" height="1100" fill="white"/>
+  <rect x="6.0" y="6.0" width="838.0" height="1088.0" fill="none" stroke="#000000" stroke-width="2.0"/>
+  <text x="425.0" y="44.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#000000" font-weight="bold">FRONT ELEVATION</text>
+  <rect x="191.0" y="220.0" width="468.0" height="360.0" fill="none" stroke="#000000" stroke-width="2.5" rx="20.0"/>
+  <circle cx="243.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="295.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="347.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="399.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="451.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="503.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="555.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="607.0" cy="271.4" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="243.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="295.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="347.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="399.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="451.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="503.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="555.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="607.0" cy="322.9" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="243.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="295.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="347.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="399.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="451.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="503.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="555.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="607.0" cy="374.3" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="243.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="295.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="347.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="399.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="451.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="503.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="555.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="607.0" cy="425.7" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="243.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="295.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="347.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="399.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="451.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="503.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="555.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="607.0" cy="477.1" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="243.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="295.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="347.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="399.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="451.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="503.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="555.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <circle cx="607.0" cy="528.6" r="2" fill="#CCCCCC" stroke="#000000" stroke-width="0.5"/>
+  <line x1="181.0" y1="580.0" x2="669.0" y2="580.0" stroke="#666666" stroke-width="1.5"/>
+  <text x="425.0" y="594.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">MATTRESS LINE</text>
+  <line x1="191.0" y1="583.0" x2="191.0" y2="613.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="659.0" y1="583.0" x2="659.0" y2="613.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="191.0" y1="608.0" x2="659.0" y2="608.0" stroke="#000000" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="425.0" y="620.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#000000" font-weight="600">78"</text>
+  <line x1="662.0" y1="220.0" x2="692.0" y2="220.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="662.0" y1="580.0" x2="692.0" y2="580.0" stroke="#000000" stroke-width="0.5"/>
+  <line x1="687.0" y1="220.0" x2="687.0" y2="580.0" stroke="#000000" stroke-width="0.75" marker-start="url(#dim-arrow)" marker-end="url(#dim-arrow)"/>
+  <text x="695.0" y="403.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#000000" font-weight="600" transform="rotate(-90,695.0,403.0)">60"</text>
+  <text x="425.0" y="900.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#666666" font-weight="normal">Front view of a king size headboard with a prominent wooden frame to hold the structure, upholstery </text>
+  <rect x="265.0" y="930.0" width="320.0" height="130.0" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <text x="425.0" y="948.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14" fill="#000000" font-weight="bold">EMPIRE WORKROOM</text>
+  <text x="425.0" y="962.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">Custom Upholstery &amp; Window Treatments</text>
+  <line x1="275.0" y1="970.0" x2="575.0" y2="970.0" stroke="#000000" stroke-width="0.5"/>
+  <text x="425.0" y="984.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="11" fill="#000000" font-weight="bold">KING SIZE HEADBOARD WITH WOODEN FRAME</text>
+  <text x="425.0" y="998.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="8" fill="#666666" font-weight="normal">HEADBOARD</text>
+  <text x="425.0" y="1052.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="7" fill="#666666" font-weight="normal">5124 Frolich Ln, Hyattsville, MD 20781</text>
+</svg>

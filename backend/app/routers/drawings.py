@@ -613,3 +613,88 @@ async def generate_ai_project_sheet_pdf(req: AIProjectSheetRequest):
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="ai_project_sheet.pdf"'},
     )
+
+
+# ── PRODUCT CATALOG API ──────────────────────────────────────────
+
+@router.get("/drawings/catalog")
+async def get_product_catalog(business_unit: str = None, mode: str = None):
+    """Browse the full product catalog — 18 categories, 204+ styles."""
+    from app.services.vision.product_catalog import PRODUCT_CATALOG, get_total_styles
+    from app.services.vision.renderer_registry import RENDERER_MAP, get_renderer, get_business_unit as get_biz
+
+    categories = []
+    for cat_key, cat_info in PRODUCT_CATALOG.items():
+        if business_unit and cat_info.get("business_unit") != business_unit:
+            continue
+        if mode and mode not in cat_info.get("modes", []):
+            continue
+
+        styles = []
+        for style_key in cat_info.get("styles", []):
+            renderer = get_renderer(style_key)
+            renderer_name = renderer.__name__ if hasattr(renderer, '__name__') else str(renderer)
+            # Determine readiness
+            if "generic" in renderer_name:
+                readiness = "fallback"
+            elif "furniture_2view" in renderer_name or "millwork" in renderer_name:
+                readiness = "shared_renderer"
+            else:
+                readiness = "dedicated"
+
+            styles.append({
+                "style_key": style_key,
+                "style_name": style_key.replace("_", " ").title(),
+                "renderer": renderer_name,
+                "readiness": readiness,
+                "business_unit": cat_info.get("business_unit", "workroom"),
+                "modes": cat_info.get("modes", ["presentation"]),
+            })
+
+        categories.append({
+            "key": cat_key,
+            "name": cat_key.replace("_", " ").title(),
+            "business_unit": cat_info.get("business_unit", "workroom"),
+            "style_count": len(styles),
+            "modes": cat_info.get("modes", ["presentation"]),
+            "styles": styles,
+        })
+
+    workroom_count = sum(1 for c in categories if c["business_unit"] == "workroom")
+    woodcraft_count = sum(1 for c in categories if c["business_unit"] == "woodcraft")
+
+    return {
+        "total_categories": len(categories),
+        "total_styles": sum(c["style_count"] for c in categories),
+        "business_unit_counts": {"workroom": workroom_count, "woodcraft": woodcraft_count},
+        "categories": categories,
+    }
+
+
+@router.get("/drawings/catalog/search")
+async def search_catalog(q: str = ""):
+    """Search product catalog by style name, category, or keyword."""
+    from app.services.vision.product_catalog import PRODUCT_CATALOG
+    from app.services.vision.renderer_registry import get_renderer
+
+    if not q or len(q) < 2:
+        return {"results": [], "query": q}
+
+    query = q.lower().strip()
+    results = []
+
+    for cat_key, cat_info in PRODUCT_CATALOG.items():
+        for style_key in cat_info.get("styles", []):
+            searchable = f"{cat_key} {style_key} {cat_info.get('business_unit', '')}".lower()
+            if query in searchable:
+                renderer = get_renderer(style_key)
+                results.append({
+                    "category": cat_key,
+                    "style_key": style_key,
+                    "style_name": style_key.replace("_", " ").title(),
+                    "business_unit": cat_info.get("business_unit", "workroom"),
+                    "modes": cat_info.get("modes", []),
+                    "renderer": renderer.__name__ if hasattr(renderer, '__name__') else "generic",
+                })
+
+    return {"results": results[:50], "query": q, "total": len(results)}

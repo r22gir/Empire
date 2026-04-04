@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-04-04",
+  "skills": {
+    "tier_1_dev": {
+      "file_read": {"status": "live", "module": "openclaw", "founder_gated": false},
+      "file_write": {"status": "live", "module": "openclaw", "founder_gated": true, "rollback": true},
+      "file_edit": {"status": "live", "module": "openclaw", "founder_gated": true, "rollback": true},
+      "git_ops": {"status": "live", "module": "openclaw", "founder_gated": true, "rollback": true},
+      "shell_execute": {"status": "live", "module": "openclaw", "founder_gated": true},
+      "test_runner": {"status": "live", "module": "openclaw", "founder_gated": false},
+      "service_manager": {"status": "live", "module": "openclaw", "founder_gated": true},
+      "scaffold": {"status": "live", "module": "openclaw", "founder_gated": true}
+    },
+    "tier_2_business": {
+      "create_task": {"status": "live", "module": "max"},
+      "search_quotes": {"status": "live", "module": "max"},
+      "create_quick_quote": {"status": "live", "module": "max"},
+      "search_contacts": {"status": "live", "module": "max"},
+      "send_telegram": {"status": "live", "module": "max", "founder_gated": true},
+      "send_email": {"status": "live", "module": "max", "founder_gated": true},
+      "db_query": {"status": "live", "module": "max", "founder_gated": true},
+      "web_search": {"status": "live", "module": "max"}
+    },
+    "tier_3_vision": {
+      "sketch_to_drawing": {"status": "live", "module": "max"},
+      "photo_to_quote": {"status": "live", "module": "max"},
+      "svg_to_pdf": {"status": "live", "module": "max"}
+    },
+    "pipelines": {
+      "edit_test_commit": {"steps": ["file_edit", "test_runner", "git_commit", "git_push", "send_telegram"], "rollback": true},
+      "health_check_fix": {"steps": ["check_services", "read_logs", "self_heal", "send_telegram"], "rollback": true},
+      "deploy": {"steps": ["test_runner", "npm_build", "restart_services", "check_services", "send_telegram"]}
+    }
+  }
+}

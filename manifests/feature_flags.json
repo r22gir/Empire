@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "features": {
+    "self_heal": {"enabled": true, "status": "live", "verified": true},
+    "capability_registry": {"enabled": true, "status": "live", "verified": true},
+    "transport_matrix": {"enabled": true, "status": "live", "verified": true},
+    "conversation_mode": {"enabled": true, "status": "live", "verified": true},
+    "founder_auth_centralized": {"enabled": true, "status": "live", "verified": true},
+    "leadforge_prospects": {"enabled": true, "status": "live", "verified": true},
+    "leadforge_campaigns": {"enabled": true, "status": "live", "verified": true},
+    "drawing_catalog": {"enabled": true, "status": "live", "verified": true},
+    "drawing_renderers": {"enabled": true, "status": "enabled_limited", "notes": "204 styles routable, most via shared renderers"},
+    "openclaw_skills": {"enabled": true, "status": "live"},
+    "socialforge": {"enabled": true, "status": "live", "verified": true},
+    "inline_drawing": {"enabled": true, "status": "live", "verified": true},
+    "task_auto_execution": {"enabled": true, "status": "live", "verified": true},
+    "product_catalog_page": {"enabled": true, "status": "live"},
+    "constructionforge": {"enabled": true, "status": "live"},
+    "storefrontforge": {"enabled": true, "status": "live"},
+    "relistapp": {"enabled": true, "status": "requires_setup", "notes": "Research done, needs platform signups"},
+    "i18n": {"enabled": true, "status": "live", "verified": true}
+  }
+}
