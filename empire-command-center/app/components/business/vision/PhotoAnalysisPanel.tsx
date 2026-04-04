@@ -15,6 +15,7 @@ import AnalysisApprovalFlow from './AnalysisApprovalFlow';
 const ThreeViewer = dynamic(() => import('./ThreeViewer'), { ssr: false });
 const CushionBuilder = dynamic(() => import('../upholstery/CushionBuilder'), { ssr: false });
 const FurnitureCatalog = dynamic(() => import('../upholstery/FurnitureCatalog'), { ssr: false });
+const WindowTreatmentCatalog = dynamic(() => import('../upholstery/WindowTreatmentCatalog'), { ssr: false });
 
 /* ═══════════════════════════════════════════════════════════
    Types
@@ -637,6 +638,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   // Upholstery tools
   const [showCushionBuilder, setShowCushionBuilder] = useState(false);
   const [showFurnitureCatalog, setShowFurnitureCatalog] = useState(false);
+  const [showWindowTreatments, setShowWindowTreatments] = useState(false);
   // Design Mockup style preferences
   const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
   const [measureInputMethod, setMeasureInputMethod] = useState<MeasureInputMethod>('photo');
@@ -1321,20 +1323,28 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
         </>
       )}
 
-      {/* Upholstery Tools */}
-      <SectionHeader>UPHOLSTERY TOOLS</SectionHeader>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+      {/* Workroom Tools */}
+      <SectionHeader>WORKROOM TOOLS</SectionHeader>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
         <button
-          onClick={() => { setShowFurnitureCatalog(true); setShowCushionBuilder(false); }}
+          onClick={() => { setShowFurnitureCatalog(true); setShowCushionBuilder(false); setShowWindowTreatments(false); }}
           className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
-          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: '#7c3aed', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', minHeight: 44 }}
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: showFurnitureCatalog ? '#7c3aed' : '#f5f3ef', color: showFurnitureCatalog ? '#fff' : '#7c3aed', fontSize: 12, fontWeight: 700, border: showFurnitureCatalog ? 'none' : '1px solid #e9d5ff', minHeight: 44, minWidth: 140 }}
         >
           <Armchair size={14} /> Furniture Catalog
         </button>
         <button
-          onClick={() => { setShowCushionBuilder(true); setShowFurnitureCatalog(false); }}
+          onClick={() => { setShowWindowTreatments(true); setShowFurnitureCatalog(false); setShowCushionBuilder(false); }}
           className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
-          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: 'linear-gradient(135deg, #b8960c, #d4af37)', color: '#fff', fontSize: 12, fontWeight: 700, border: 'none', minHeight: 44 }}
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: showWindowTreatments ? '#b8960c' : '#f5f3ef', color: showWindowTreatments ? '#fff' : '#b8960c', fontSize: 12, fontWeight: 700, border: showWindowTreatments ? 'none' : '1px solid #ece8e0', minHeight: 44, minWidth: 140 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /></svg>
+          Window Treatments
+        </button>
+        <button
+          onClick={() => { setShowCushionBuilder(true); setShowFurnitureCatalog(false); setShowWindowTreatments(false); }}
+          className="flex items-center gap-1.5 cursor-pointer transition-all hover:brightness-110"
+          style={{ flex: 1, padding: '10px 14px', borderRadius: 10, background: showCushionBuilder ? 'linear-gradient(135deg, #b8960c, #d4af37)' : '#f5f3ef', color: showCushionBuilder ? '#fff' : '#b8960c', fontSize: 12, fontWeight: 700, border: showCushionBuilder ? 'none' : '1px solid #ece8e0', minHeight: 44, minWidth: 140 }}
         >
           <Edit3 size={14} /> Cushion Builder
         </button>
@@ -1353,6 +1363,25 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                   measurements: measData.measurements,
                   cushion_count: measData.cushionCount,
                   source: 'furniture_catalog',
+                  notes: measData.notes,
+                });
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {showWindowTreatments && (
+        <div style={{ marginBottom: 14 }}>
+          <WindowTreatmentCatalog
+            onSelect={() => {}}
+            onMeasurementsComplete={(measData) => {
+              if (onSaveQuote) {
+                onSaveQuote({
+                  type: measData.treatmentType,
+                  description: `${measData.treatmentType} window treatment`,
+                  measurements: measData.measurements,
+                  source: 'window_treatment_catalog',
                   notes: measData.notes,
                 });
               }

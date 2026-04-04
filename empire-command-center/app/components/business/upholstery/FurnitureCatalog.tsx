@@ -11,19 +11,21 @@ import {
   CheckCircle2,
   Sparkles,
   Ruler,
+  Search,
+  Filter,
 } from 'lucide-react';
 
+import {
+  FURNITURE_TYPES as ALL_FURNITURE,
+  CATEGORY_LABELS,
+  type FurnitureType,
+} from './furniture-catalog-data';
+
 // ---------------------------------------------------------------------------
-// Types
+// Types (re-export for backward compat)
 // ---------------------------------------------------------------------------
 
-export interface FurnitureType {
-  key: string;
-  name: string;
-  category: 'sofa' | 'chair' | 'ottoman' | 'bench' | 'other';
-  measurementPoints: string[];
-  fabricSections: string[];
-}
+export type { FurnitureType } from './furniture-catalog-data';
 
 export interface FurnitureMeasurements {
   furnitureType: string;
@@ -40,10 +42,15 @@ export interface FurnitureCatalogProps {
 }
 
 // ---------------------------------------------------------------------------
-// Furniture data
+// Furniture data — imported from furniture-catalog-data.ts (162 items)
+// The FURNITURE_TYPES constant is imported as ALL_FURNITURE above.
+// Legacy inline array kept below only for the 10 items that have custom SVGs.
 // ---------------------------------------------------------------------------
 
-const FURNITURE_TYPES: FurnitureType[] = [
+const FURNITURE_TYPES = ALL_FURNITURE;
+
+// Legacy data preserved only as a reference (not used):
+const _LEGACY_FURNITURE_TYPES_REF = [
   {
     key: 'lawson-sofa',
     name: 'Lawson Sofa',
@@ -226,6 +233,7 @@ const FURNITURE_TYPES: FurnitureType[] = [
 
 // ---------------------------------------------------------------------------
 // Category colours (light tints for fabric section fills)
+// (CATEGORY_LABELS now imported from furniture-catalog-data.ts)
 // ---------------------------------------------------------------------------
 
 const SECTION_TINTS = [
@@ -237,13 +245,7 @@ const SECTION_TINTS = [
   'rgba(184,150,12,0.06)',
 ];
 
-const CATEGORY_LABELS: Record<string, string> = {
-  sofa: 'Sofa',
-  chair: 'Chair',
-  ottoman: 'Ottoman',
-  bench: 'Bench',
-  other: 'Specialty',
-};
+// CATEGORY_LABELS imported from furniture-catalog-data.ts
 
 // ---------------------------------------------------------------------------
 // SVG diagram functions — simple line drawings (front view, 200x150 viewBox)
@@ -488,6 +490,132 @@ function SvgBarrelChair({ full = false }: { full?: boolean }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Generic SVG renderers — for items without custom drawings
+// ---------------------------------------------------------------------------
+
+function SvgGenericSofa({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="20" y="25" width="160" height="55" rx="6" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="20" y="25" width="18" height="100" rx="4" fill={full ? SECTION_TINTS[2] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="162" y="25" width="18" height="100" rx="4" fill={full ? SECTION_TINTS[2] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="38" y="80" width="124" height="28" rx="3" fill={full ? SECTION_TINTS[1] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="25" y="125" width="6" height="12" rx="1" fill="#999" />
+      <rect x="169" y="125" width="6" height="12" rx="1" fill="#999" />
+    </svg>
+  );
+}
+
+function SvgGenericChair({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="45" y="15" width="110" height="60" rx="6" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="35" y="50" width="15" height="55" rx="3" fill={full ? SECTION_TINTS[2] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="150" y="50" width="15" height="55" rx="3" fill={full ? SECTION_TINTS[2] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="50" y="80" width="100" height="25" rx="4" fill={full ? SECTION_TINTS[1] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="50" y="105" width="5" height="18" rx="1" fill="#999" />
+      <rect x="145" y="105" width="5" height="18" rx="1" fill="#999" />
+    </svg>
+  );
+}
+
+function SvgGenericOttoman({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="30" y="30" width="140" height="25" rx="6" fill={full ? SECTION_TINTS[1] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="30" y="55" width="140" height="50" rx="3" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="35" y="105" width="8" height="12" rx="2" fill="#999" />
+      <rect x="157" y="105" width="8" height="12" rx="2" fill="#999" />
+    </svg>
+  );
+}
+
+function SvgGenericBench({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="15" y="40" width="170" height="22" rx="4" fill={full ? SECTION_TINTS[1] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="15" y="62" width="170" height="20" rx="2" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="20" y="82" width="5" height="30" rx="1" fill="#999" />
+      <rect x="90" y="82" width="5" height="30" rx="1" fill="#999" />
+      <rect x="175" y="82" width="5" height="30" rx="1" fill="#999" />
+    </svg>
+  );
+}
+
+function SvgGenericBed({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="25" y="10" width="150" height="70" rx="6" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="20" y="80" width="160" height="30" rx="3" fill={full ? SECTION_TINTS[1] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="20" y="110" width="160" height="8" rx="2" fill={full ? SECTION_TINTS[2] : 'none'} stroke="#999" strokeWidth="1" />
+      <rect x="25" y="118" width="6" height="12" rx="1" fill="#999" />
+      <rect x="169" y="118" width="6" height="12" rx="1" fill="#999" />
+    </svg>
+  );
+}
+
+function SvgGenericStool({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="55" y="10" width="90" height="40" rx="4" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="50" y="50" width="100" height="20" rx="4" fill={full ? SECTION_TINTS[1] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <line x1="60" y1="70" x2="55" y2="130" stroke="#999" strokeWidth="2" />
+      <line x1="140" y1="70" x2="145" y2="130" stroke="#999" strokeWidth="2" />
+      <line x1="70" y1="100" x2="130" y2="100" stroke="#999" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function SvgGenericTable({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="20" y="40" width="160" height="12" rx="2" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <rect x="30" y="52" width="6" height="60" rx="1" fill="#999" />
+      <rect x="164" y="52" width="6" height="60" rx="1" fill="#999" />
+      <line x1="36" y1="85" x2="164" y2="85" stroke="#999" strokeWidth="1" strokeDasharray="4,3" />
+    </svg>
+  );
+}
+
+function SvgGenericCabinet({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="30" y="10" width="140" height="120" rx="3" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" />
+      <line x1="100" y1="15" x2="100" y2="125" stroke="#999" strokeWidth="1" />
+      <line x1="35" y1="70" x2="165" y2="70" stroke="#999" strokeWidth="1" />
+      <circle cx="90" cy="42" r="3" fill="#999" />
+      <circle cx="110" cy="42" r="3" fill="#999" />
+      <circle cx="90" cy="98" r="3" fill="#999" />
+      <circle cx="110" cy="98" r="3" fill="#999" />
+      <rect x="35" y="130" width="6" height="10" rx="1" fill="#999" />
+      <rect x="159" y="130" width="6" height="10" rx="1" fill="#999" />
+    </svg>
+  );
+}
+
+function SvgGenericItem({ full = false }: { full?: boolean }) {
+  return (
+    <svg viewBox="0 0 200 150" className="w-full h-full">
+      <rect x="40" y="25" width="120" height="90" rx="8" fill={full ? SECTION_TINTS[0] : 'none'} stroke="#999" strokeWidth="1.5" strokeDasharray="4,4" />
+      <text x="100" y="75" textAnchor="middle" fontSize="11" fill="#999">Custom</text>
+    </svg>
+  );
+}
+
+const GENERIC_SVG_MAP: Record<string, React.FC<{ full?: boolean }>> = {
+  sofa: SvgGenericSofa,
+  armchair: SvgGenericChair,
+  chair: SvgGenericChair,
+  ottoman: SvgGenericOttoman,
+  bench: SvgGenericBench,
+  bed: SvgGenericBed,
+  stool: SvgGenericStool,
+  table: SvgGenericTable,
+  cabinet: SvgGenericCabinet,
+  generic: SvgGenericItem,
+};
+
 const SVG_MAP: Record<string, React.FC<{ full?: boolean }>> = {
   'lawson-sofa': SvgLawsonSofa,
   'english-roll-arm': SvgEnglishRollArm,
@@ -505,6 +633,13 @@ const SVG_MAP: Record<string, React.FC<{ full?: boolean }>> = {
 // Main component
 // ---------------------------------------------------------------------------
 
+/** Resolve SVG component — custom if available, else generic by hint */
+function getSvgComponent(ft: FurnitureType): React.FC<{ full?: boolean }> | undefined {
+  if (SVG_MAP[ft.key]) return SVG_MAP[ft.key];
+  const hint = (ft as any).svgHint || ft.category;
+  return GENERIC_SVG_MAP[hint] || GENERIC_SVG_MAP.generic;
+}
+
 export default function FurnitureCatalog({
   onSelect,
   onMeasurementsComplete,
@@ -515,6 +650,33 @@ export default function FurnitureCatalog({
   const [measurements, setMeasurements] = useState<Record<string, string>>({});
   const [cushionCount, setCushionCount] = useState<number>(2);
   const [notes, setNotes] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+
+  // Filtered furniture list
+  const filteredTypes = useMemo(() => {
+    let items = FURNITURE_TYPES;
+    if (activeCategory !== 'all') {
+      items = items.filter((ft) => ft.category === activeCategory);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      items = items.filter(
+        (ft) =>
+          ft.name.toLowerCase().includes(q) ||
+          ft.category.toLowerCase().includes(q) ||
+          ((ft as any).subcategory || '').toLowerCase().includes(q) ||
+          ((ft as any).description || '').toLowerCase().includes(q),
+      );
+    }
+    return items;
+  }, [activeCategory, searchQuery]);
+
+  // Get unique categories for filter tabs
+  const categories = useMemo(() => {
+    const cats = new Set(FURNITURE_TYPES.map((ft) => ft.category));
+    return ['all', ...Array.from(cats)];
+  }, []);
 
   // Derive whether all required fields are filled
   const allFilled = useMemo(() => {
@@ -563,7 +725,7 @@ export default function FurnitureCatalog({
   // Detail / measurement view
   // -----------------------------------------------------------------------
   if (selected) {
-    const SvgComponent = SVG_MAP[selected.key];
+    const SvgComponent = getSvgComponent(selected);
     return (
       <div
         style={{
@@ -807,18 +969,61 @@ export default function FurnitureCatalog({
         fontFamily: 'inherit',
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 16,
-        }}
-      >
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <Sofa size={20} color="#b8960c" />
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#333' }}>
           Furniture Catalog
         </h2>
+        <span style={{ fontSize: 12, color: '#999', marginLeft: 'auto' }}>
+          {filteredTypes.length} of {FURNITURE_TYPES.length} items
+        </span>
+      </div>
+
+      {/* Search bar */}
+      <div style={{ position: 'relative', marginBottom: 12 }}>
+        <Search size={16} style={{ position: 'absolute', left: 12, top: 14, color: '#999' }} />
+        <input
+          type="text"
+          placeholder="Search furniture types..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            width: '100%',
+            minHeight: 44,
+            borderRadius: 8,
+            border: '1px solid #ece8e0',
+            padding: '0 12px 0 36px',
+            fontSize: 14,
+            outline: 'none',
+            fontFamily: 'inherit',
+            background: '#fff',
+          }}
+        />
+      </div>
+
+      {/* Category filter tabs */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setActiveCategory(cat)}
+            style={{
+              padding: '4px 12px',
+              borderRadius: 16,
+              border: activeCategory === cat ? '1px solid #b8960c' : '1px solid #ece8e0',
+              background: activeCategory === cat ? '#b8960c' : '#fff',
+              color: activeCategory === cat ? '#fff' : '#666',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              textTransform: 'capitalize',
+              transition: 'all 0.15s',
+            }}
+          >
+            {cat === 'all' ? `All (${FURNITURE_TYPES.length})` : `${CATEGORY_LABELS[cat] || cat}`}
+          </button>
+        ))}
       </div>
 
       {suggestedType && (
@@ -835,11 +1040,13 @@ export default function FurnitureCatalog({
             ? 'repeat(auto-fill, minmax(140px, 1fr))'
             : 'repeat(auto-fill, minmax(180px, 1fr))',
           gap: compact ? 10 : 14,
+          maxHeight: 600,
+          overflowY: 'auto',
         }}
       >
-        {FURNITURE_TYPES.map((ft) => {
+        {filteredTypes.map((ft) => {
           const isSuggested = suggestedType === ft.key;
-          const SvgComponent = SVG_MAP[ft.key];
+          const SvgComponent = getSvgComponent(ft);
           return (
             <button
               key={ft.key}
