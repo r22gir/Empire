@@ -901,7 +901,14 @@ async def get_quote_intake_photos(quote_id: str):
 
 @router.get("/{quote_id}")
 async def get_quote(quote_id: str):
-    """Get a single quote by ID."""
+    """Get a single quote by ID. Tries SQL first, falls back to JSON."""
+    try:
+        from app.services.quote_service import get_quote as get_quote_sql
+        result = get_quote_sql(quote_id)
+        if result:
+            return result
+    except Exception:
+        pass
     return _load_quote(quote_id)
 
 

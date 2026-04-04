@@ -102,6 +102,7 @@ load_router("app.routers.economic", "/api/v1/economic", ["economic"])
 load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
 load_router("app.routers.memory", "/api/v1", ["memory"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
+load_router("app.routers.quotes_v2", "/api/v1", ["quotes-v2"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])
 
 # CraftForge — CNC & 3D print business
@@ -309,6 +310,17 @@ async def start_background_services():
         return
 
     print("★ Primary worker — starting singleton background services")
+
+    # Unified Business System — ensure tables exist
+    try:
+        from app.db.unified_business_migration import get_conn, create_all_tables, seed_chart_of_accounts
+        _mconn = get_conn()
+        create_all_tables(_mconn)
+        seed_chart_of_accounts(_mconn)
+        _mconn.close()
+        print("✓ Unified Business tables: ready")
+    except Exception as _e:
+        print(f"✗ Unified Business migration: {_e}")
 
     # Telegram Bot
     try:
