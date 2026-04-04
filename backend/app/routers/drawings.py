@@ -623,6 +623,29 @@ async def get_product_catalog(business_unit: str = None, mode: str = None):
     from app.services.vision.product_catalog import PRODUCT_CATALOG, get_total_styles
     from app.services.vision.renderer_registry import RENDERER_MAP, get_renderer, get_business_unit as get_biz
 
+    # Renderer mode truth — which modes produce genuinely different output
+    RENDERER_MODE_TRUTH = {
+        "_render_bench_straight": {"presentation": "active", "shop": "active", "construction": "active"},
+        "_render_bench_l": {"presentation": "active", "shop": "active", "construction": "active"},
+        "_render_bench_u": {"presentation": "active", "shop": "active", "construction": "active"},
+        "render_straight": {"presentation": "active", "shop": "active", "construction": "active"},
+        "render_l_shape": {"presentation": "active", "shop": "active", "construction": "active"},
+        "render_u_shape": {"presentation": "active", "shop": "active", "construction": "active"},
+        "render_window": {"presentation": "active", "shop": "active"},
+        "_render_chair": {"presentation": "active", "shop": "planned"},
+        "_render_sofa": {"presentation": "active", "shop": "planned"},
+        "_render_ottoman": {"presentation": "active", "shop": "planned"},
+        "_render_table": {"presentation": "active", "shop": "planned"},
+        "render_millwork": {"presentation": "active", "shop": "planned", "construction": "planned"},
+        "render_cushion": {"presentation": "active", "shop": "planned"},
+        "render_headboard": {"presentation": "active"},
+        "render_generic": {"presentation": "active"},
+        "_render_slipcover": {"presentation": "active"},
+        "_render_bedding": {"presentation": "active"},
+        "_render_wall_panel": {"presentation": "active"},
+        "_render_commercial": {"presentation": "active", "shop": "planned", "construction": "planned"},
+    }
+
     categories = []
     for cat_key, cat_info in PRODUCT_CATALOG.items():
         if business_unit and cat_info.get("business_unit") != business_unit:
@@ -637,10 +660,20 @@ async def get_product_catalog(business_unit: str = None, mode: str = None):
             # Determine readiness
             if "generic" in renderer_name:
                 readiness = "fallback"
+            elif "bench" in renderer_name:
+                readiness = "dedicated"
+            elif "window" in renderer_name:
+                readiness = "dedicated"
             elif "furniture_2view" in renderer_name or "millwork" in renderer_name:
                 readiness = "shared_renderer"
             else:
-                readiness = "dedicated"
+                readiness = "shared_renderer"
+
+            # Mode truth per renderer
+            mode_truth = RENDERER_MODE_TRUTH.get(renderer_name, {"presentation": "active"})
+            mode_status = {}
+            for m in cat_info.get("modes", ["presentation"]):
+                mode_status[m] = mode_truth.get(m, "planned")
 
             styles.append({
                 "style_key": style_key,
@@ -649,6 +682,7 @@ async def get_product_catalog(business_unit: str = None, mode: str = None):
                 "readiness": readiness,
                 "business_unit": cat_info.get("business_unit", "workroom"),
                 "modes": cat_info.get("modes", ["presentation"]),
+                "mode_status": mode_status,
             })
 
         categories.append({

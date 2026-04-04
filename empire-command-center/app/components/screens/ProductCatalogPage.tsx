@@ -127,6 +127,11 @@ export default function ProductCatalogPage() {
           <p style={{ fontSize: 10, color: '#888', margin: '6px 0 0', fontStyle: 'italic' }}>
             {MODE_INFO[drawMode]?.desc || ''}
           </p>
+          <div style={{ fontSize: 9, color: '#aaa', marginTop: 8, lineHeight: 1.5 }}>
+            ✅ Presentation mode produces professional drawings for all 204 styles.<br />
+            ⚙️ Shop mode adds technical dimensions — live for windows & banquettes, expanding to all categories.<br />
+            🔧 Construction mode (exploded diagrams, parts lists) is live for banquettes and in development for other WoodCraft items.
+          </div>
         </div>
 
         {/* Sub-category filter for window treatments */}
@@ -160,9 +165,28 @@ export default function ProductCatalogPage() {
                   <span style={{ fontSize: 8, padding: '1px 6px', borderRadius: 4, fontWeight: 600, background: r.bg, color: r.color }}>{r.label}</span>
                   {style.modes.map(m => {
                     const mi = MODE_INFO[m];
-                    return <span key={m} title={mi?.desc} style={{ fontSize: 8, padding: '1px 5px', borderRadius: 4, background: mi?.bg || '#f5f3ef', color: mi?.color || '#888', cursor: 'help' }}>{mi?.label || m}</span>;
+                    const modeStatus = (style as any).mode_status?.[m] || 'planned';
+                    const isActive = modeStatus === 'active';
+                    const tooltip = isActive ? mi?.desc : `In development — currently produces same output as Presentation mode`;
+                    return (
+                      <span key={m} title={tooltip} style={{
+                        fontSize: 8, padding: '1px 5px', borderRadius: 4, cursor: 'help',
+                        background: isActive ? (mi?.bg || '#f5f3ef') : 'transparent',
+                        color: isActive ? (mi?.color || '#888') : '#bbb',
+                        border: isActive ? 'none' : '1px dashed #ddd',
+                        fontStyle: isActive ? 'normal' : 'italic',
+                      }}>
+                        {isActive ? '' : '🔧 '}{mi?.label || m}{!isActive ? ' (planned)' : ''}
+                      </span>
+                    );
                   })}
                 </div>
+                {/* Planned mode warning */}
+                {(style as any).mode_status?.[drawMode] === 'planned' && (
+                  <div style={{ fontSize: 9, color: '#999', fontStyle: 'italic', marginBottom: 6, padding: '4px 6px', background: '#faf9f7', borderRadius: 4 }}>
+                    Note: {MODE_INFO[drawMode]?.label} mode for this style uses the shared renderer. Output will look similar to Presentation.
+                  </div>
+                )}
                 <button onClick={() => handleDrawThis(style)} style={{ fontSize: 10, padding: '6px 10px', background: '#b8960c', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, width: '100%' }}>
                   Draw This ({MODE_INFO[drawMode]?.label || drawMode})
                 </button>
