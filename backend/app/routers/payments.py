@@ -568,3 +568,179 @@ async def payment_history(
     except stripe.error.StripeError as e:
         logger.error(f"Payment history error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── PaymentIntent (for client portal direct pay) ────────────────────
+
+@router.post("/create-intent")
+async def create_payment_intent(body: dict):
+    """Create a Stripe PaymentIntent for direct payment from client portal."""
+    _require_stripe()
+
+    invoice_id = body.get("invoice_id")
+    amount = body.get("amount")
+    customer_email = body.get("customer_email", "")
+    description = body.get("description", "Empire Workroom Payment")
+    payment_type = body.get("payment_type", "payment")
+
+    if not invoice_id or not amount:
+        raise HTTPException(400, "invoice_id and amount required")
+
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=int(float(amount) * 100),
+            currency="usd",
+            description=description,
+            receipt_email=customer_email or None,
+            metadata={
+                "invoice_id": str(invoice_id),
+                "payment_type": payment_type,
+                "source": "empire_portal",
+            },
+        )
+        return {
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id,
+            "amount": amount,
+        }
+    except stripe.error.StripeError as e:
+        raise HTTPException(400, str(e))
+
+
+# ── Overdue Invoices ────────────────────────────────────────────────
+
+@router.get("/overdue")
+async def overdue_invoices():
+    """List overdue invoices (unpaid past due_date)."""
+    from app.db.database import get_db
+    with get_db() as conn:
+        now = datetime.now().isoformat()[:10]
+        rows = conn.execute("""
+            SELECT i.*, c.name as customer_name, c.email as customer_email, c.phone as customer_phone
+            FROM invoices i
+            LEFT JOIN customers c ON c.id = i.customer_id
+            WHERE i.status IN ('sent', 'partial', 'overdue', 'pending')
+              AND i.balance_due > 0
+              AND i.due_date IS NOT NULL AND i.due_date < ?
+            ORDER BY i.due_date ASC
+        """, (now,)).fetchall()
+
+        invoices = []
+        for r in rows:
+            d = dict(r)
+            due = d.get("due_date", "")
+            if due:
+                try:
+                    days_overdue = (datetime.now() - datetime.fromisoformat(due)).days
+                    d["days_overdue"] = days_overdue
+                except (ValueError, TypeError):
+                    d["days_overdue"] = 0
+            invoices.append(d)
+
+        total_outstanding = sum(i.get("balance_due", 0) for i in invoices)
+        return {
+            "overdue_invoices": invoices,
+            "count": len(invoices),
+            "total_outstanding": round(total_outstanding, 2),
+        }
+
+
+# ── Auto-Reminders ──────────────────────────────────────────────────
+
+@router.post("/send-reminders")
+async def send_payment_reminders():
+    """Send automatic reminders for overdue and upcoming invoices.
+    Called by morning cron or manually."""
+    from app.db.database import get_db
+    reminders_sent = 0
+    now = datetime.now()
+
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT i.id, i.invoice_number, i.total, i.balance_due, i.due_date,
+                   i.customer_id, c.name as customer_name, c.email as customer_email
+            FROM invoices i
+            LEFT JOIN customers c ON c.id = i.customer_id
+            WHERE i.status IN ('sent', 'partial', 'overdue', 'pending')
+              AND i.balance_due > 0
+              AND i.due_date IS NOT NULL
+              AND c.email IS NOT NULL AND c.email != ''
+        """).fetchall()
+
+        reminders = []
+        for r in rows:
+            d = dict(r)
+            due = d.get("due_date", "")
+            if not due:
+                continue
+            try:
+                due_dt = datetime.fromisoformat(due)
+                days_until = (due_dt - now).days
+            except (ValueError, TypeError):
+                continue
+
+            reminder_type = None
+            if days_until < -7:
+                reminder_type = "overdue_final"
+            elif days_until < 0:
+                reminder_type = "overdue"
+            elif days_until <= 3:
+                reminder_type = "due_soon"
+
+            if reminder_type:
+                reminders.append({**d, "reminder_type": reminder_type, "days_until": days_until})
+
+                # Check for portal link
+                portal = conn.execute(
+                    "SELECT token FROM client_portal_tokens WHERE customer_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1",
+                    (d["customer_id"],)
+                ).fetchone()
+                pay_url = f"https://studio.empirebox.store/portal/{portal[0]}" if portal else None
+
+                logger.info(
+                    f"Payment reminder ({reminder_type}): {d['customer_name']} — "
+                    f"Invoice #{d['invoice_number']} — ${d['balance_due']:.2f} — "
+                    f"{'portal: ' + pay_url if pay_url else 'no portal'}"
+                )
+                reminders_sent += 1
+
+    return {
+        "reminders_sent": reminders_sent,
+        "reminders": reminders,
+    }
+
+
+@router.post("/send-reminder/{invoice_id}")
+async def send_single_reminder(invoice_id: str):
+    """Send a payment reminder for a specific invoice."""
+    from app.db.database import get_db
+    with get_db() as conn:
+        inv = conn.execute("""
+            SELECT i.*, c.name as customer_name, c.email as customer_email
+            FROM invoices i
+            LEFT JOIN customers c ON c.id = i.customer_id
+            WHERE i.id = ?
+        """, (invoice_id,)).fetchone()
+
+        if not inv:
+            raise HTTPException(404, f"Invoice {invoice_id} not found")
+
+        d = dict(inv)
+        if d.get("balance_due", 0) <= 0:
+            return {"status": "no_balance", "message": "Invoice has no outstanding balance"}
+
+        portal = conn.execute(
+            "SELECT token FROM client_portal_tokens WHERE customer_id = ? AND is_active = 1 ORDER BY created_at DESC LIMIT 1",
+            (d.get("customer_id"),)
+        ).fetchone()
+        pay_url = f"https://studio.empirebox.store/portal/{portal[0]}" if portal else None
+
+        logger.info(f"Manual reminder: {d.get('customer_name')} — Invoice #{d.get('invoice_number')} — ${d.get('balance_due', 0):.2f}")
+
+        return {
+            "status": "sent",
+            "invoice_id": invoice_id,
+            "customer": d.get("customer_name"),
+            "balance": d.get("balance_due"),
+            "portal_url": pay_url,
+        }
