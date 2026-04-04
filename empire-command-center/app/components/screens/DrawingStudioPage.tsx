@@ -1,5 +1,6 @@
 'use client';
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, lazy, Suspense } from 'react';
+const ProductCatalogPage = lazy(() => import('./ProductCatalogPage'));
 
 const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
   ? 'https://api.empirebox.store/api/v1'
@@ -42,6 +43,7 @@ interface AnalyzedDrawing {
 }
 
 export default function DrawingStudioPage() {
+  const [view, setView] = useState<'studio' | 'catalog'>('studio');
   const [itemType, setItemType] = useState('generic');
   const [name, setName] = useState('');
   const [quoteNum, setQuoteNum] = useState('');
@@ -412,9 +414,32 @@ export default function DrawingStudioPage() {
         <p style={{ color: '#888', fontSize: 14, margin: '6px 0 0' }}>
           Upload any sketch or photo — AI identifies the item and generates a pro drawing with dimensions
         </p>
+        {/* Tab toggle: Studio | Product Catalog */}
+        <div style={{ marginTop: 14, display: 'flex', gap: 6 }}>
+          <button onClick={() => setView('studio')} style={{
+            padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            background: view === 'studio' ? '#b8960c' : '#faf9f7',
+            color: view === 'studio' ? '#fff' : '#888',
+            border: view === 'studio' ? '1.5px solid #b8960c' : '1px solid #e5e2dc',
+          }}>Drawing Studio</button>
+          <button onClick={() => setView('catalog')} style={{
+            padding: '7px 16px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            background: view === 'catalog' ? '#b8960c' : '#faf9f7',
+            color: view === 'catalog' ? '#fff' : '#888',
+            border: view === 'catalog' ? '1.5px solid #b8960c' : '1px solid #e5e2dc',
+          }}>📋 Product Catalog (204 styles)</button>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'start' }}>
+      {/* Catalog view */}
+      {view === 'catalog' && (
+        <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: '#999' }}>Loading catalog...</div>}>
+          <ProductCatalogPage />
+        </Suspense>
+      )}
+
+      {/* Studio view */}
+      {view === 'studio' && <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: 24, alignItems: 'start' }}>
         {/* ── Left: Controls ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Upload */}
@@ -616,7 +641,7 @@ export default function DrawingStudioPage() {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       <style>{`
         @media (max-width: 768px) {
