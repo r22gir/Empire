@@ -217,13 +217,15 @@ function ProspectFinderSection() {
   const [prospects, setProspects] = useState<any[]>([]);
   const [searchMeta, setSearchMeta] = useState<any>(null);
   const [pipelineStatus, setPipelineStatus] = useState<Record<number, string>>({});
+  const [selected, setSelected] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   // Load existing prospects on mount
   useEffect(() => {
-    fetch(`${LF_API}/leadforge/prospects?limit=50&sort_by=score`).then(r => r.json()).then(d => {
+    fetch(`${LF_API}/leadforge/prospects?limit=300`).then(r => r.json()).then(d => {
       const items = d.prospects || d || [];
-      if (items.length > 0) setProspects(items);
-    }).catch(() => {});
+      setProspects(items);
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const findProspects = async () => {
@@ -236,7 +238,7 @@ function ProspectFinderSection() {
       const data = await res.json();
       setSearchMeta(data);
       // Reload prospects from DB after search
-      const listRes = await fetch(`${LF_API}/leadforge/prospects?limit=100&sort_by=score`);
+      const listRes = await fetch(`${LF_API}/leadforge/prospects?limit=300`);
       const listData = await listRes.json();
       setProspects(listData.prospects || listData || []);
     } catch { /* keep existing */ }
@@ -292,49 +294,120 @@ function ProspectFinderSection() {
           </div>
         )}
       </div>
+      {/* Empty / Loading states */}
+      {loading && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>Loading prospects...</div>}
+      {!loading && prospects.length === 0 && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>No prospects yet — run a search above</div>}
+
+      {/* Prospect table */}
       {prospects.length > 0 && (
-        <div>
-          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{prospects.length} Prospects</h3>
-          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ borderBottom: '2px solid #e5e2dc', textAlign: 'left' }}>
-              <th style={{ padding: 8 }}>Name</th>
-              <th style={{ padding: 8 }}>Location</th>
-              <th style={{ padding: 8 }}>Source</th>
-              <th style={{ padding: 8 }}>Score</th>
-              <th style={{ padding: 8 }}>Conf</th>
-              <th style={{ padding: 8 }}>Fit</th>
-              <th style={{ padding: 8 }}>Action</th>
-            </tr></thead>
-            <tbody>{prospects.map((p: any) => {
-              const inPipeline = pipelineStatus[p.id] === 'added' || pipelineStatus[p.id] === 'already_in_pipeline';
-              const fitTags = ['designer_fit', 'upholstery_fit', 'millwork_fit', 'cabinetry_fit', 'hospitality_fit', 'restaurant_fit', 'gc_fit']
-                .filter(t => p[t]).map(t => t.replace('_fit', ''));
-              return (
-                <tr key={p.id} style={{ borderBottom: '1px solid #f0ede6' }}>
-                  <td style={{ padding: 8 }}>
-                    <div style={{ fontWeight: 500 }}>{p.name?.slice(0, 35)}</div>
-                    {p.website && <a href={p.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: '#2563eb' }}>website</a>}
-                  </td>
-                  <td style={{ padding: 8, color: '#666', fontSize: 11 }}>{p.location || p.city || '—'}</td>
-                  <td style={{ padding: 8 }}><span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#f0fdf4', color: '#16a34a' }}>{p.source || p.platform}</span></td>
-                  <td style={{ padding: 8 }}><span style={{ fontWeight: 700, color: (p.score || 0) >= 50 ? '#16a34a' : (p.score || 0) >= 30 ? '#b8960c' : '#999' }}>{p.score || 0}</span></td>
-                  <td style={{ padding: 8 }}><span style={{ fontSize: 10, color: (p.confidence_score || 0) >= 75 ? '#16a34a' : '#999' }}>{p.confidence_score || 0}%</span></td>
-                  <td style={{ padding: 8 }}>
-                    <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                      {fitTags.map(t => <span key={t} style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: '#fdf8eb', color: '#b8960c', fontWeight: 600 }}>{t}</span>)}
-                    </div>
-                  </td>
-                  <td style={{ padding: 8 }}>
-                    {inPipeline ? (
-                      <span style={{ fontSize: 10, color: '#16a34a', fontWeight: 600 }}>In Pipeline ✓</span>
-                    ) : (
-                      <button onClick={() => addToPipeline(p.id)} style={{ fontSize: 10, padding: '3px 8px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>+ Pipeline</button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}</tbody>
-          </table>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{prospects.length} Prospects</h3>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ borderBottom: '2px solid #e5e2dc', textAlign: 'left' }}>
+                  <th style={{ padding: 6 }}>Name</th>
+                  <th style={{ padding: 6 }}>Location</th>
+                  <th style={{ padding: 6 }}>Source</th>
+                  <th style={{ padding: 6 }}>Score</th>
+                  <th style={{ padding: 6 }}>Conf</th>
+                  <th style={{ padding: 6 }}>Fit</th>
+                  <th style={{ padding: 6 }}>Action</th>
+                </tr></thead>
+                <tbody>{prospects.map((p: any) => {
+                  const inPipeline = pipelineStatus[p.id] === 'added' || pipelineStatus[p.id] === 'already_in_pipeline';
+                  const fitTags = ['designer_fit', 'upholstery_fit', 'millwork_fit', 'cabinetry_fit', 'hospitality_fit', 'restaurant_fit', 'gc_fit']
+                    .filter(t => p[t]).map(t => t.replace('_fit', ''));
+                  const srcColor = p.source === 'google_places' ? { bg: '#dbeafe', color: '#2563eb' } :
+                                   p.source === 'brave' ? { bg: '#fed7aa', color: '#c2410c' } :
+                                   p.source === 'yelp' ? { bg: '#fecaca', color: '#dc2626' } : { bg: '#f0fdf4', color: '#16a34a' };
+                  return (
+                    <tr key={p.id} onClick={() => setSelected(p)}
+                      style={{ borderBottom: '1px solid #f0ede6', cursor: 'pointer', background: selected?.id === p.id ? '#fdf8eb' : '' }}
+                      onMouseEnter={e => { if (selected?.id !== p.id) e.currentTarget.style.background = '#faf9f7'; }}
+                      onMouseLeave={e => { if (selected?.id !== p.id) e.currentTarget.style.background = ''; }}>
+                      <td style={{ padding: 6 }}>
+                        <div style={{ fontWeight: 500, fontSize: 12 }}>{(p.name || p.business_name || '—').slice(0, 30)}</div>
+                        {p.phone && <div style={{ fontSize: 9, color: '#666' }}>{p.phone}</div>}
+                      </td>
+                      <td style={{ padding: 6, color: '#666', fontSize: 10 }}>{p.location || p.city || '—'}</td>
+                      <td style={{ padding: 6 }}><span style={{ fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: srcColor.bg, color: srcColor.color }}>{p.platform || p.source}</span></td>
+                      <td style={{ padding: 6 }}><span style={{ fontWeight: 700, color: (p.score || 0) >= 60 ? '#16a34a' : (p.score || 0) >= 30 ? '#b8960c' : '#999' }}>{p.score || 0}</span></td>
+                      <td style={{ padding: 6, fontSize: 10, color: '#888' }}>{p.confidence_score || 0}%</td>
+                      <td style={{ padding: 6 }}>
+                        <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                          {fitTags.slice(0, 2).map(t => <span key={t} style={{ fontSize: 7, padding: '1px 3px', borderRadius: 3, background: '#fdf8eb', color: '#b8960c', fontWeight: 600 }}>{t}</span>)}
+                        </div>
+                      </td>
+                      <td style={{ padding: 6 }} onClick={e => e.stopPropagation()}>
+                        {inPipeline ? (
+                          <span style={{ fontSize: 9, color: '#16a34a', fontWeight: 600 }}>✓ Pipeline</span>
+                        ) : (
+                          <button onClick={() => addToPipeline(p.id)} style={{ fontSize: 9, padding: '2px 6px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>+ Pipeline</button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Detail panel */}
+          {selected && (
+            <div style={{ width: 320, background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, flexShrink: 0, overflowY: 'auto', maxHeight: 'calc(100vh - 200px)', position: 'sticky', top: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>{selected.name || selected.business_name}</h4>
+                <button onClick={() => setSelected(null)} style={{ background: '#f5f3ef', border: 'none', borderRadius: 6, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>✕</button>
+              </div>
+
+              {/* Contact */}
+              <div style={{ fontSize: 11, marginBottom: 12 }}>
+                {selected.phone && <div style={{ marginBottom: 2 }}><Phone size={10} style={{ verticalAlign: 'text-bottom' }} /> <a href={`tel:${selected.phone}`} style={{ color: '#2563eb' }}>{selected.phone}</a></div>}
+                {selected.website && <div style={{ marginBottom: 2 }}><Globe size={10} style={{ verticalAlign: 'text-bottom' }} /> <a href={selected.website} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb' }}>{selected.website?.replace(/https?:\/\/(www\.)?/, '').slice(0, 30)}</a></div>}
+                {selected.address && <div style={{ color: '#666' }}><MapPin size={10} style={{ verticalAlign: 'text-bottom' }} /> {selected.address}</div>}
+              </div>
+
+              {/* Score breakdown */}
+              <div style={{ background: '#faf9f7', borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Score: {selected.score}/100</div>
+                <div>Rating: {selected.rating_points || 0}/40 {selected.rating ? `(${selected.rating}★)` : ''}</div>
+                <div>Reviews: {selected.review_points || 0}/30 {selected.review_count ? `(${selected.review_count})` : ''}</div>
+                <div>Relevance: {selected.relevance_points || 0}/20</div>
+                <div>Proximity: {selected.proximity_points || 0}/10</div>
+                <div>Keywords: {selected.keyword_bonus || 0}/10</div>
+                <div>Source: {selected.source_bonus || 0}/5</div>
+                <div style={{ marginTop: 4, fontWeight: 600 }}>Confidence: {selected.confidence_score || 0}%</div>
+              </div>
+
+              {/* Fit tags */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#888', marginBottom: 4 }}>FIT TAGS</div>
+                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                  {['designer', 'upholstery', 'millwork', 'cabinetry', 'hospitality', 'restaurant', 'gc'].filter(t => selected[t + '_fit']).map(t =>
+                    <span key={t} style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: '#fdf8eb', color: '#b8960c', fontWeight: 600 }}>{t}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Recommended */}
+              {selected.recommended_angle && (
+                <div style={{ fontSize: 10, color: '#555', marginBottom: 12, fontStyle: 'italic' }}>
+                  Angle: {selected.recommended_angle}
+                </div>
+              )}
+              {selected.card_summary && (
+                <div style={{ fontSize: 10, color: '#888', marginBottom: 12 }}>{selected.card_summary}</div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <button onClick={() => addToPipeline(selected.id)} style={{ fontSize: 10, padding: '5px 10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>+ Pipeline</button>
+                {selected.phone && <a href={`tel:${selected.phone}`} style={{ fontSize: 10, padding: '5px 10px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, textDecoration: 'none', fontWeight: 600 }}>Call</a>}
+                {selected.website && <a href={selected.website} target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, padding: '5px 10px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, textDecoration: 'none', fontWeight: 600 }}>Website</a>}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

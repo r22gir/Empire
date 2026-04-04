@@ -1143,27 +1143,18 @@ async def search_prospects(req: ProspectSearchRequest):
 
 @router.get("/leadforge/prospects")
 def list_prospects(
-    source: Optional[str] = None,
-    location: Optional[str] = None,
     score_min: int = Query(0, ge=0, le=100),
-    confidence_min: int = Query(0, ge=0, le=100),
     outreach_ready: Optional[bool] = None,
-    outreach_priority: Optional[str] = None,
-    has_phone: Optional[bool] = None,
-    has_website: Optional[bool] = None,
-    sort_by: str = "score",
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=500),
     offset: int = 0,
 ):
     """List prospects with filters."""
     from app.services.leadforge.prospect_engine import get_prospects
-    return get_prospects(
-        source=source, location=location, score_min=score_min,
-        confidence_min=confidence_min, outreach_ready=outreach_ready,
-        outreach_priority=outreach_priority, has_phone=1 if has_phone else None,
-        has_website=1 if has_website else None, sort_by=sort_by,
+    return {"prospects": get_prospects(
+        min_score=score_min,
+        outreach_ready=outreach_ready,
         limit=limit, offset=offset,
-    )
+    )}
 
 @router.get("/leadforge/prospects/stats")
 def prospect_stats():
