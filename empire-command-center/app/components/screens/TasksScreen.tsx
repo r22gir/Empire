@@ -5,7 +5,7 @@ import {
   Plus, Search, CheckCircle2, Circle, Clock,
   ChevronDown, ChevronUp, X, Loader2, Trash2, MessageSquare,
   ListTodo, ArrowRight, Flag, Calendar, User, Briefcase, Send,
-  ChevronLeft, RefreshCw,
+  ChevronLeft, RefreshCw, Play,
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────
@@ -207,6 +207,19 @@ export default function TasksScreen({ business }: { business?: string }) {
     } catch { /* offline */ }
   };
 
+  const executeTask = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const res = await fetch(`${API}/tasks/${taskId}/execute`, { method: 'POST' });
+      if (res.ok) {
+        fetchTasks();
+        fetchDashboard();
+        if (selectedTask?.id === taskId) openTaskDetail(taskId);
+      }
+    } catch { /* offline */ }
+    setActionLoading(null);
+  };
+
   const handleTaskCreated = () => {
     setShowCreateDialog(false);
     fetchTasks();
@@ -220,6 +233,7 @@ export default function TasksScreen({ business }: { business?: string }) {
         task={selectedTask}
         onBack={() => setSelectedTask(null)}
         onStatusChange={(s) => updateTaskStatus(selectedTask.id, s)}
+        onExecute={() => executeTask(selectedTask.id)}
         onDelete={() => deleteTask(selectedTask.id)}
         onComment={(detail) => addComment(selectedTask.id, detail)}
         actionLoading={actionLoading === selectedTask.id}
@@ -369,6 +383,7 @@ export default function TasksScreen({ business }: { business?: string }) {
               task={task}
               onClick={() => openTaskDetail(task.id)}
               onStatusChange={(s) => updateTaskStatus(task.id, s)}
+              onExecute={() => executeTask(task.id)}
               onDelete={() => {
                 if (confirmDelete === task.id) deleteTask(task.id);
                 else setConfirmDelete(task.id);
@@ -507,9 +522,9 @@ function SelectFilter({ label, value, onChange, options }: {
 
 // ── Task Row ─────────────────────────────────────────────────────
 
-function TaskRow({ task, onClick, onStatusChange, onDelete, confirmingDelete, onCancelDelete, actionLoading }: {
+function TaskRow({ task, onClick, onStatusChange, onExecute, onDelete, confirmingDelete, onCancelDelete, actionLoading }: {
   task: Task; onClick: () => void; onStatusChange: (s: string) => void;
-  onDelete: () => void; confirmingDelete: boolean; onCancelDelete: () => void; actionLoading: boolean;
+  onExecute: () => void; onDelete: () => void; confirmingDelete: boolean; onCancelDelete: () => void; actionLoading: boolean;
 }) {
   const sc = statusConfig(task.status);
   const pc = priorityConfig(task.priority);
@@ -584,6 +599,20 @@ function TaskRow({ task, onClick, onStatusChange, onDelete, confirmingDelete, on
       <div className="flex items-center gap-1" style={{ flexShrink: 0 }}>
         {task.status !== 'done' && task.status !== 'in_progress' && (
           <button
+            onClick={(e) => { e.stopPropagation(); onExecute(); }}
+            title="Execute task via AI desk"
+            disabled={actionLoading}
+            style={{
+              width: 32, height: 32, borderRadius: 8,
+              border: '1px solid #16a34a', background: '#f0fdf4',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            {actionLoading ? <Loader2 size={14} className="animate-spin" style={{ color: '#16a34a' }} /> : <Play size={14} style={{ color: '#16a34a' }} />}
+          </button>
+        )}
+        {task.status !== 'done' && task.status !== 'in_progress' && (
+          <button
             onClick={(e) => { e.stopPropagation(); onStatusChange('in_progress'); }}
             title="Start task"
             disabled={actionLoading}
@@ -639,9 +668,9 @@ function TaskRow({ task, onClick, onStatusChange, onDelete, confirmingDelete, on
 
 // ── Task Detail View ─────────────────────────────────────────────
 
-function TaskDetailView({ task, onBack, onStatusChange, onDelete, onComment, actionLoading }: {
+function TaskDetailView({ task, onBack, onStatusChange, onExecute, onDelete, onComment, actionLoading }: {
   task: Task; onBack: () => void; onStatusChange: (s: string) => void;
-  onDelete: () => void; onComment: (detail: string) => void; actionLoading: boolean;
+  onExecute: () => void; onDelete: () => void; onComment: (detail: string) => void; actionLoading: boolean;
 }) {
   const [commentText, setCommentText] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
@@ -758,8 +787,23 @@ function TaskDetailView({ task, onBack, onStatusChange, onDelete, onComment, act
           </MetaField>
         </div>
 
-        {/* Status change buttons */}
+        {/* Execute + Status change buttons */}
         <div className="flex flex-wrap gap-2 mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+          {task.status !== 'done' && (
+            <button
+              onClick={onExecute}
+              disabled={actionLoading}
+              style={{
+                height: 44, padding: '0 20px', borderRadius: 10,
+                border: '1px solid #16a34a', background: '#f0fdf4',
+                color: '#16a34a', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                marginRight: 8,
+              }}
+            >
+              {actionLoading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Execute
+            </button>
+          )}
           <span className="section-label" style={{ alignSelf: 'center', marginRight: 8 }}>Change Status:</span>
           {STATUS_OPTIONS.map(s => (
             <button

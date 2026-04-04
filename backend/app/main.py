@@ -353,9 +353,108 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ OpenClaw Worker: {e}")
 
+    # Task Auto-Execution Worker — polls todo tasks every 30s, routes to desks
+    try:
+        asyncio.create_task(_task_auto_worker())
+        print("✓ Task Auto-Worker: polling todo tasks every 30s")
+    except Exception as e:
+        print(f"✗ Task Auto-Worker: {e}")
+
     # ── Autonomous Startup Probes ──
     # Run immediate health check + brain context warm-up on boot
     asyncio.create_task(_startup_probes())
+
+
+async def _task_auto_worker():
+    """Background worker that polls the tasks table every 30s for todo tasks and executes them.
+
+    Only picks up tasks that are status='todo' and were created by 'max' or have
+    source='tool' — avoids auto-executing manually created tasks the founder may
+    want to review first.  Limits to 3 tasks per cycle to avoid overloading desks.
+    """
+    import asyncio
+    await asyncio.sleep(15)  # Let startup finish before first poll
+
+    from app.db.database import get_db, dict_rows
+    from app.services.max.desks.desk_manager import desk_manager
+
+    desk_manager.initialize()
+    logger_prefix = "🔄 TaskWorker"
+    print(f"{logger_prefix}: started — polling every 30s")
+
+    while True:
+        try:
+            with get_db() as conn:
+                rows = conn.execute(
+                    """SELECT id, title, description, priority, desk, created_by
+                       FROM tasks
+                       WHERE status = 'todo'
+                         AND (created_by = 'max' OR metadata LIKE '%"auto_execute"%')
+                       ORDER BY
+                           CASE priority
+                               WHEN 'urgent' THEN 0 WHEN 'high' THEN 1
+                               WHEN 'normal' THEN 2 WHEN 'low' THEN 3
+                           END,
+                           created_at ASC
+                       LIMIT 3""",
+                ).fetchall()
+                todo_tasks = dict_rows(rows) if rows else []
+
+            for task_row in todo_tasks:
+                tid = task_row["id"]
+                title = task_row["title"]
+                try:
+                    # Mark in_progress immediately
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE tasks SET status = 'in_progress', updated_at = datetime('now') WHERE id = ? AND status = 'todo'",
+                            (tid,),
+                        )
+                        conn.execute(
+                            "INSERT INTO task_activity (task_id, actor, action, detail, created_at) VALUES (?, 'task_worker', 'status_changed', 'Auto-worker picked up task', datetime('now'))",
+                            (tid,),
+                        )
+
+                    result = await asyncio.wait_for(
+                        desk_manager.submit_task(
+                            title=title,
+                            description=task_row.get("description") or title,
+                            priority=task_row.get("priority", "normal"),
+                            source="task_worker",
+                            db_task_id=tid,
+                        ),
+                        timeout=60.0,
+                    )
+
+                    state = result.state.value if hasattr(result.state, "value") else str(result.state)
+                    print(f"{logger_prefix}: {title} → {state}")
+
+                    # Send Telegram notification on completion/failure
+                    try:
+                        from app.services.max.telegram_bot import telegram_bot
+                        if telegram_bot.is_configured:
+                            emoji = "✅" if state == "completed" else "❌" if state == "failed" else "⏳"
+                            summary = (result.result or "")[:200]
+                            await telegram_bot.send_message(
+                                f"{emoji} <b>Task Auto-Executed</b>\n<b>{title}</b>\nStatus: {state}\n{summary}",
+                            )
+                    except Exception:
+                        pass  # Telegram is best-effort
+
+                except asyncio.TimeoutError:
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?",
+                            (tid,),
+                        )
+                    print(f"{logger_prefix}: {title} — timed out, reset to todo")
+                except Exception as e:
+                    print(f"{logger_prefix}: {title} — error: {e}")
+
+        except Exception as e:
+            print(f"{logger_prefix}: poll error: {e}")
+
+        await asyncio.sleep(30)
 
 
 async def _startup_probes():

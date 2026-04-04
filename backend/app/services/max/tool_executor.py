@@ -8,6 +8,7 @@ import json
 import os
 import uuid
 import logging
+import asyncio
 import psutil
 import httpx
 from dataclasses import dataclass, asdict
@@ -272,10 +273,70 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception:
         pass
 
+    # Immediate execution: fire desk_manager.submit_task in background
+    auto_executing = False
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_auto_execute_new_task(task_id, title, description or title, priority, task_desk))
+        auto_executing = True
+    except RuntimeError:
+        pass  # No event loop — background worker will pick it up in ≤30s
+
     return ToolResult(tool="create_task", success=True, result={
         "task_id": task_id, "title": title, "priority": priority,
         "desk": task_desk, "status": "todo", "openclaw_queued": openclaw_queued,
+        "auto_executing": auto_executing,
     })
+
+
+async def _auto_execute_new_task(task_id: str, title: str, description: str, priority: str, desk: str):
+    """Background coroutine: immediately execute a newly created task via desk system."""
+    try:
+        from app.services.max.desks.desk_manager import desk_manager
+        desk_manager.initialize()
+
+        # Mark in_progress
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE tasks SET status = 'in_progress', updated_at = datetime('now') WHERE id = ? AND status = 'todo'",
+                (task_id,),
+            )
+
+        result = await asyncio.wait_for(
+            desk_manager.submit_task(
+                title=title,
+                description=description,
+                priority=priority,
+                source="auto_execute",
+                db_task_id=task_id,
+            ),
+            timeout=60.0,
+        )
+
+        state = result.state.value if hasattr(result.state, "value") else str(result.state)
+        logger.info(f"Auto-executed task {task_id}: {title} → {state}")
+
+        # Telegram notification
+        try:
+            from app.services.max.telegram_bot import telegram_bot
+            if telegram_bot.is_configured:
+                emoji = "✅" if state == "completed" else "❌" if state == "failed" else "⏳"
+                summary = (result.result or "")[:200]
+                await telegram_bot.send_message(
+                    f"{emoji} <b>Task Auto-Executed</b>\n<b>{title}</b>\nStatus: {state}\n{summary}",
+                )
+        except Exception:
+            pass
+
+    except asyncio.TimeoutError:
+        logger.warning(f"Auto-execute timed out for task {task_id}: {title}")
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE tasks SET status = 'todo', updated_at = datetime('now') WHERE id = ?",
+                (task_id,),
+            )
+    except Exception as e:
+        logger.error(f"Auto-execute failed for task {task_id}: {e}")
 
 
 @tool("get_tasks")
