@@ -948,15 +948,15 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </button>
         </div>
 
-        {/* More actions popup — positioned above the More button */}
+        {/* More actions popup — fixed position to escape overflow:hidden */}
         {showMoreActions && (
           <>
-            <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setShowMoreActions(false)} />
+            <div style={{ position: 'fixed', inset: 0, zIndex: 9990 }} onClick={() => setShowMoreActions(false)} />
             <div style={{
-              position: 'absolute', bottom: '100%', left: 0, marginBottom: 8,
+              position: 'fixed', bottom: 120, left: 20, right: 20, maxWidth: 400,
               background: '#fff', border: '1px solid var(--border)', borderRadius: 14,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.12)', padding: 8, zIndex: 50,
-              display: 'flex', flexWrap: 'wrap', gap: 6, minWidth: 280,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.15)', padding: 10, zIndex: 9999,
+              display: 'flex', flexWrap: 'wrap', gap: 6,
             }}>
               {QUICK_ACTIONS.map(qa => {
                 const Icon = qa.icon;
