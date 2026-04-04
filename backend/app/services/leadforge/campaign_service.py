@@ -485,6 +485,25 @@ def get_enrollments(campaign_id: int) -> List[dict]:
 
 # ── Execution Engine ────────────────────────────────────────────────────
 
+def _advance_enrollment(conn, enrollment: dict):
+    """Advance an enrollment to its next step or mark completed."""
+    from datetime import timedelta
+    now_iso = datetime.utcnow().isoformat()
+    cid = enrollment["campaign_id"]
+    step_num = enrollment.get("step_number", enrollment.get("current_step", 0))
+    next_step = conn.execute(
+        "SELECT * FROM campaign_steps WHERE campaign_id = ? AND step_number > ? ORDER BY step_number LIMIT 1",
+        (cid, step_num)).fetchone()
+    if next_step:
+        ns = _dict(next_step)
+        next_at = (datetime.utcnow() + timedelta(days=ns["delay_days"])).isoformat()
+        conn.execute("UPDATE campaign_enrollments SET current_step = ?, next_step_at = ?, last_action_at = ? WHERE id = ?",
+                     (step_num, next_at, now_iso, enrollment["id"]))
+    else:
+        conn.execute("UPDATE campaign_enrollments SET current_step = ?, status = 'completed', next_step_at = NULL, last_action_at = ? WHERE id = ?",
+                     (step_num, now_iso, enrollment["id"]))
+
+
 async def execute_next_steps() -> dict:
     """Find and execute all due enrollment steps. Async for non-blocking use."""
     now = datetime.utcnow()
@@ -557,9 +576,25 @@ async def execute_next_steps() -> dict:
                 channel_ok = False
 
             if not channel_ok:
+                # Still create the draft (founder can add contact info later)
+                # but log as skipped and advance to next step
+                try:
+                    prospect = conn.execute("SELECT * FROM prospects WHERE id = ?", (e["prospect_id"],)).fetchone()
+                    prospect_data = _dict(prospect) if prospect else {}
+                    rendered_subject = render_template(e.get("subject") or "", prospect_data)
+                    rendered_body = render_template(e.get("body_template") or "", prospect_data)
+                    conn.execute("""INSERT INTO campaign_activity
+                        (campaign_id, enrollment_id, prospect_id, step_id, action_type, details)
+                        VALUES (?, ?, ?, ?, 'drafted_no_channel', ?)""",
+                        (cid, e["id"], e["prospect_id"], e["step_id"],
+                         json.dumps({"step_type": step_type, "subject": rendered_subject,
+                                     "body": rendered_body[:500], "reason": f"missing {step_type} contact"})))
+                    _advance_enrollment(conn, e)
+                except Exception:
+                    pass
                 results["skipped"] += 1
                 results["details"].append({
-                    "enrollment_id": e["id"], "reason": f"missing_channel_{step_type}"
+                    "enrollment_id": e["id"], "reason": f"missing_channel_{step_type}_drafted_and_advanced"
                 })
                 continue
 
