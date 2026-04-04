@@ -1336,3 +1336,229 @@ def revenue_breakdown(
             "by_method": by_method,
             "total": round(total_row["total"], 2),
         }
+
+
+# ── Revenue by Category (Drill-Down) ─────────────────────────────────
+
+@router.get("/revenue-by-category")
+def revenue_by_category(
+    request: Request,
+    category: Optional[str] = None,
+):
+    """Revenue grouped by item type (drapery, upholstery, etc.).
+    If category specified, returns job-level detail for that category."""
+    with get_db() as conn:
+        if category:
+            # Drill into a specific category — show individual jobs
+            rows = dict_rows(conn.execute("""
+                SELECT q.id as quote_id, q.quote_number, q.customer_name,
+                       q.total, q.status, q.created_at,
+                       i.item_type, i.description, i.subtotal as item_subtotal
+                FROM quote_line_items i
+                JOIN quotes_v2 q ON q.id = i.quote_id
+                WHERE LOWER(i.item_type) LIKE ? OR LOWER(i.description) LIKE ?
+                ORDER BY q.created_at DESC
+            """, (f"%{category.lower()}%", f"%{category.lower()}%")).fetchall())
+            return {"category": category, "items": rows, "count": len(rows)}
+
+        # Summary by category
+        rows = dict_rows(conn.execute("""
+            SELECT
+                COALESCE(NULLIF(i.item_type, ''), 'other') as category,
+                COUNT(DISTINCT q.id) as quote_count,
+                SUM(i.subtotal) as total_value,
+                COUNT(i.id) as item_count
+            FROM quote_line_items i
+            JOIN quotes_v2 q ON q.id = i.quote_id
+            WHERE q.status NOT IN ('cancelled', 'rejected')
+            GROUP BY COALESCE(NULLIF(i.item_type, ''), 'other')
+            ORDER BY total_value DESC
+        """).fetchall())
+        grand_total = sum(r.get("total_value", 0) or 0 for r in rows)
+        return {"categories": rows, "grand_total": round(grand_total, 2)}
+
+
+# ── Revenue by Client (Drill-Down) ───────────────────────────────────
+
+@router.get("/revenue-by-client")
+def revenue_by_client(
+    request: Request,
+    customer_id: Optional[str] = None,
+):
+    """Client revenue. If customer_id specified, shows full history."""
+    with get_db() as conn:
+        if customer_id:
+            # Specific client detail
+            customer = dict_row(conn.execute(
+                "SELECT * FROM customers WHERE id = ?", (customer_id,)
+            ).fetchone()) if conn.execute("SELECT 1 FROM customers WHERE id = ?", (customer_id,)).fetchone() else None
+
+            quotes = dict_rows(conn.execute("""
+                SELECT id, quote_number, customer_name, total, status, created_at
+                FROM quotes_v2 WHERE customer_id = ?
+                ORDER BY created_at DESC
+            """, (customer_id,)).fetchall())
+
+            invoices = dict_rows(conn.execute("""
+                SELECT id, invoice_number, total, amount_paid, balance_due, status, created_at
+                FROM invoices WHERE customer_id = ?
+                ORDER BY created_at DESC
+            """, (customer_id,)).fetchall())
+
+            payments = dict_rows(conn.execute("""
+                SELECT amount, method, payment_date, notes
+                FROM payments WHERE customer_id = ?
+                ORDER BY payment_date DESC
+            """, (customer_id,)).fetchall())
+
+            lifetime = sum(p.get("amount", 0) or 0 for p in payments)
+            return {
+                "customer": customer,
+                "quotes": quotes,
+                "invoices": invoices,
+                "payments": payments,
+                "lifetime_value": round(lifetime, 2),
+            }
+
+        # Top clients summary
+        rows = dict_rows(conn.execute("""
+            SELECT c.id, c.name, c.total_revenue,
+                   COUNT(DISTINCT q.id) as quote_count,
+                   (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE customer_id = c.id) as actual_revenue
+            FROM customers c
+            LEFT JOIN quotes_v2 q ON q.customer_id = c.id
+            GROUP BY c.id
+            ORDER BY actual_revenue DESC
+            LIMIT 20
+        """).fetchall())
+        return {"top_clients": rows}
+
+
+# ── AR Aging Detail ─���────────────────────────────────────────────────
+
+@router.get("/ar-aging")
+def ar_aging_detail(request: Request):
+    """Detailed accounts receivable aging report with individual invoices."""
+    with get_db() as conn:
+        today = datetime.now().strftime("%Y-%m-%d")
+        rows = dict_rows(conn.execute("""
+            SELECT i.id, i.invoice_number, i.total, i.balance_due, i.due_date, i.status,
+                   COALESCE(i.client_name, c.name) as customer_name,
+                   c.email as customer_email,
+                   CAST(julianday(?) - julianday(i.due_date) AS INTEGER) as days_overdue
+            FROM invoices i
+            LEFT JOIN customers c ON c.id = i.customer_id
+            WHERE i.status NOT IN ('paid', 'cancelled', 'draft')
+              AND i.balance_due > 0
+              AND i.due_date IS NOT NULL
+            ORDER BY i.due_date ASC
+        """, (today,)).fetchall())
+
+        buckets = {"0_30": [], "31_60": [], "61_90": [], "90_plus": []}
+        for r in rows:
+            d = r.get("days_overdue", 0)
+            if d <= 30:
+                buckets["0_30"].append(r)
+            elif d <= 60:
+                buckets["31_60"].append(r)
+            elif d <= 90:
+                buckets["61_90"].append(r)
+            else:
+                buckets["90_plus"].append(r)
+
+        totals = {k: round(sum(i.get("balance_due", 0) for i in v), 2) for k, v in buckets.items()}
+        return {
+            "buckets": buckets,
+            "totals": totals,
+            "grand_total": round(sum(totals.values()), 2),
+            "invoice_count": len(rows),
+        }
+
+
+# ── Job Profitability ────────────────────────────────────────────────
+
+@router.get("/job-profitability/{job_id}")
+def job_profitability(request: Request, job_id: str):
+    """Revenue vs costs for a single job."""
+    with get_db() as conn:
+        job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if not job:
+            raise HTTPException(404, f"Job {job_id} not found")
+        job = dict_row(job)
+
+        # Revenue from payments
+        revenue = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE job_id = ?)",
+            (job_id,)
+        ).fetchone()[0]
+
+        # Expenses linked to this job
+        expenses = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE job_id = ?",
+            (job_id,)
+        ).fetchone()[0]
+
+        # Quote value
+        quoted = job.get("quoted_amount", 0) or 0
+
+        profit = round(revenue - expenses, 2)
+        margin = round((profit / revenue * 100), 1) if revenue > 0 else 0
+
+        return {
+            "job_id": job_id,
+            "job_number": job.get("job_number"),
+            "customer": job.get("client_name"),
+            "quoted_amount": quoted,
+            "revenue": round(revenue, 2),
+            "expenses": round(expenses, 2),
+            "profit": profit,
+            "margin_pct": margin,
+            "status": job.get("status"),
+        }
+
+
+# ── Monthly Comparison ───────────────────────────────────────────────
+
+@router.get("/monthly-comparison")
+def monthly_comparison(request: Request, months: int = Query(6, ge=2, le=24)):
+    """Month-over-month revenue/expenses with % change."""
+    with get_db() as conn:
+        rows = dict_rows(conn.execute("""
+            SELECT
+                strftime('%Y-%m', payment_date) as month,
+                SUM(amount) as revenue
+            FROM payments
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT ?
+        """, (months,)).fetchall())
+        rows.reverse()
+
+        exp_rows = dict_rows(conn.execute("""
+            SELECT
+                strftime('%Y-%m', expense_date) as month,
+                SUM(amount) as expenses
+            FROM expenses
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT ?
+        """, (months,)).fetchall())
+        exp_map = {r["month"]: r["expenses"] for r in exp_rows}
+
+        result = []
+        for i, r in enumerate(rows):
+            rev = r.get("revenue", 0) or 0
+            exp = exp_map.get(r["month"], 0) or 0
+            profit = round(rev - exp, 2)
+            prev_rev = rows[i - 1].get("revenue", 0) if i > 0 else 0
+            pct_change = round((rev - prev_rev) / prev_rev * 100, 1) if prev_rev > 0 else 0
+
+            result.append({
+                "month": r["month"],
+                "revenue": round(rev, 2),
+                "expenses": round(exp, 2),
+                "profit": profit,
+                "revenue_change_pct": pct_change,
+            })
+
+        return {"months": result, "count": len(result)}
