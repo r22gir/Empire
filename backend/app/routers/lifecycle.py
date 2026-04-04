@@ -11,6 +11,9 @@ from app.services.lifecycle_service import (
     create_work_order_from_approved_quote,
     create_invoice_from_quote,
     get_lifecycle_status,
+    execute_cascade,
+    get_daily_actions,
+    get_quick_stats,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,3 +68,26 @@ async def lifecycle_status(quote_id: str):
     if not result:
         raise HTTPException(404, f"Quote {quote_id} not found")
     return result
+
+
+@router.post("/cascade")
+async def trigger_cascade(body: dict):
+    """Execute a status cascade (e.g. quote_approved, deposit_paid).
+    Body: {trigger: str, quote_id: str, customer_id?: str, job_id?: str}"""
+    trigger = body.get("trigger")
+    if not trigger:
+        raise HTTPException(400, "trigger required")
+    result = execute_cascade(trigger, body)
+    return result
+
+
+@router.get("/daily-actions")
+async def daily_actions():
+    """Get today's action items for the founder dashboard."""
+    return get_daily_actions()
+
+
+@router.get("/quick-stats")
+async def quick_stats():
+    """Quick stats for dashboard header."""
+    return get_quick_stats()

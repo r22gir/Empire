@@ -288,3 +288,238 @@ def get_lifecycle_status(quote_id: str) -> dict:
             result['payments'] = [dict(p) for p in payments]
 
         return result
+
+
+# ── Status Cascade Definitions ────────────────────────────────
+
+STATUS_CASCADES = {
+    "quote_approved": [
+        "create_job_from_quote",
+        "send_portal_link_if_email",
+    ],
+    "deposit_paid": [
+        "update_quote_to_ordered",
+        "create_work_order_from_approved_quote",
+    ],
+    "work_order_complete": [
+        "create_invoice_from_quote",
+    ],
+    "invoice_paid": [
+        "update_job_to_complete",
+        "update_customer_lifetime_value",
+    ],
+}
+
+
+def execute_cascade(trigger: str, context: dict) -> dict:
+    """Execute all cascade actions for a given trigger."""
+    actions = STATUS_CASCADES.get(trigger, [])
+    results = []
+
+    for action_name in actions:
+        try:
+            fn = globals().get(action_name) or _cascade_actions.get(action_name)
+            if fn:
+                result = fn(context.get("quote_id", ""), context.get("changed_by", "cascade"))
+                results.append({"action": action_name, "status": "ok", "result": str(result)})
+            else:
+                results.append({"action": action_name, "status": "skipped", "error": "function not found"})
+        except Exception as e:
+            logger.warning(f"Cascade {action_name} failed: {e}")
+            results.append({"action": action_name, "status": "error", "error": str(e)})
+
+    return {"trigger": trigger, "actions_run": len(results), "results": results}
+
+
+def _cascade_update_job_to_complete(quote_id: str, changed_by: str = "cascade") -> str:
+    with get_db() as conn:
+        q = conn.execute("SELECT job_id FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
+        if q and q[0]:
+            conn.execute("UPDATE jobs SET status = 'complete', updated_at = ? WHERE id = ?",
+                         (datetime.now().isoformat(), q[0]))
+            return f"job {q[0]} → complete"
+    return "no job linked"
+
+
+def _cascade_update_customer_lifetime_value(quote_id: str, changed_by: str = "cascade") -> str:
+    with get_db() as conn:
+        q = conn.execute("SELECT customer_id FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
+        if q and q[0]:
+            conn.execute("""
+                UPDATE customers SET
+                    total_revenue = (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE customer_id = ?),
+                    updated_at = ?
+                WHERE id = ?
+            """, (q[0], datetime.now().isoformat(), q[0]))
+            return f"customer {q[0]} LTV updated"
+    return "no customer linked"
+
+
+def _cascade_send_portal_link_if_email(quote_id: str, changed_by: str = "cascade") -> str:
+    with get_db() as conn:
+        q = conn.execute("SELECT customer_id FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
+        if not q or not q[0]:
+            return "no customer linked"
+        c = conn.execute("SELECT email FROM customers WHERE id = ?", (q[0],)).fetchone()
+        if not c or not c[0]:
+            return "customer has no email"
+        from app.services.client_portal_service import generate_portal_link
+        link = generate_portal_link(q[0], quote_id=quote_id)
+        return f"portal: {link['url']}"
+
+
+def _cascade_update_quote_to_ordered(quote_id: str, changed_by: str = "cascade") -> str:
+    with get_db() as conn:
+        conn.execute("UPDATE quotes_v2 SET status = 'ordered', updated_at = ? WHERE id = ?",
+                     (datetime.now().isoformat(), quote_id))
+    return "quote → ordered"
+
+
+_cascade_actions = {
+    "update_job_to_complete": _cascade_update_job_to_complete,
+    "update_customer_lifetime_value": _cascade_update_customer_lifetime_value,
+    "send_portal_link_if_email": _cascade_send_portal_link_if_email,
+    "update_quote_to_ordered": _cascade_update_quote_to_ordered,
+}
+
+
+# ── Daily Actions ─────────────────────────────────────────────
+
+def get_daily_actions() -> dict:
+    """Get today's action items for the founder's dashboard."""
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    actions = []
+
+    with get_db() as conn:
+        # 1. Drafts with items ready to send
+        drafts = conn.execute("""
+            SELECT q.id, q.quote_number, q.customer_name, q.total,
+                   COUNT(i.id) as item_count
+            FROM quotes_v2 q
+            JOIN quote_line_items i ON i.quote_id = q.id
+            WHERE q.status = 'draft'
+            GROUP BY q.id HAVING item_count > 0
+            ORDER BY q.updated_at DESC LIMIT 10
+        """).fetchall()
+        for d in drafts:
+            d = dict(d)
+            actions.append({
+                "type": "send_quote", "icon": "📧", "priority": "medium",
+                "label": f"Send quote to {d['customer_name']}",
+                "detail": f"{d['quote_number']} — ${d.get('total', 0):,.2f}",
+                "entity_type": "quote", "entity_id": d["id"],
+            })
+
+        # 2. Approved quotes needing deposit
+        approved = conn.execute("""
+            SELECT q.id, q.quote_number, q.customer_name, q.total
+            FROM quotes_v2 q
+            WHERE q.status = 'approved'
+              AND (q.deposit_paid IS NULL OR q.deposit_paid = 0)
+        """).fetchall()
+        for a in approved:
+            a = dict(a)
+            actions.append({
+                "type": "collect_deposit", "icon": "💰", "priority": "high",
+                "label": f"Collect deposit from {a['customer_name']}",
+                "detail": f"${round(a.get('total', 0) * 0.5, 2):,.2f} on {a['quote_number']}",
+                "entity_type": "quote", "entity_id": a["id"],
+            })
+
+        # 3. Approved quotes without work orders
+        no_wo = conn.execute("""
+            SELECT q.id, q.quote_number, q.customer_name
+            FROM quotes_v2 q
+            WHERE q.status IN ('approved', 'ordered')
+              AND NOT EXISTS (SELECT 1 FROM work_orders wo WHERE wo.quote_id = q.id)
+        """).fetchall()
+        for n in no_wo:
+            n = dict(n)
+            actions.append({
+                "type": "create_work_order", "icon": "🔧", "priority": "high",
+                "label": f"Create work order for {n['customer_name']}",
+                "detail": n["quote_number"],
+                "entity_type": "quote", "entity_id": n["id"],
+            })
+
+        # 4. Overdue invoices
+        overdue = conn.execute("""
+            SELECT i.id, i.invoice_number, i.balance_due, i.due_date,
+                   COALESCE(i.client_name, c.name) as customer_name
+            FROM invoices i
+            LEFT JOIN customers c ON c.id = i.customer_id
+            WHERE i.balance_due > 0 AND i.due_date IS NOT NULL AND i.due_date < ?
+              AND i.status NOT IN ('paid', 'cancelled')
+        """, (today,)).fetchall()
+        for o in overdue:
+            o = dict(o)
+            actions.append({
+                "type": "send_reminder", "icon": "⚠️", "priority": "urgent",
+                "label": f"Overdue: {o.get('customer_name', 'Unknown')}",
+                "detail": f"Invoice #{o.get('invoice_number')} — ${o.get('balance_due', 0):,.2f}",
+                "entity_type": "invoice", "entity_id": o["id"],
+            })
+
+        # 5. Complete work orders ready for invoicing
+        complete_wos = conn.execute("""
+            SELECT wo.id, wo.work_order_number, wo.customer_name, wo.quote_id
+            FROM work_orders wo
+            WHERE wo.status = 'complete'
+              AND NOT EXISTS (SELECT 1 FROM invoices inv WHERE inv.quote_id = wo.quote_id)
+        """).fetchall()
+        for c in complete_wos:
+            c = dict(c)
+            actions.append({
+                "type": "create_invoice", "icon": "✅", "priority": "high",
+                "label": f"Invoice {c['customer_name']} — work complete",
+                "detail": c["work_order_number"],
+                "entity_type": "work_order", "entity_id": c["id"],
+            })
+
+    # Sort by priority
+    prio = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
+    actions.sort(key=lambda a: prio.get(a["priority"], 9))
+
+    return {
+        "date": today, "actions": actions, "count": len(actions),
+        "summary": {p: sum(1 for a in actions if a["priority"] == p) for p in ("urgent", "high", "medium")},
+    }
+
+
+# ── Quick Stats ───────────────────────────────────────────────
+
+def get_quick_stats() -> dict:
+    """Quick stats for the founder dashboard header."""
+    with get_db() as conn:
+        now = datetime.now()
+        month_start = now.strftime("%Y-%m-01")
+
+        rev = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE payment_date >= ?", (month_start,)
+        ).fetchone()[0]
+        rev2 = conn.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments_v2 WHERE payment_date >= ? AND status = 'completed'",
+            (month_start,)
+        ).fetchone()[0]
+
+        active_jobs = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE status IN ('approved', 'in_production', 'ordered')"
+        ).fetchone()[0]
+        pending_quotes = conn.execute(
+            "SELECT COUNT(*) FROM quotes_v2 WHERE status IN ('draft', 'sent')"
+        ).fetchone()[0]
+        pipeline = conn.execute(
+            "SELECT COALESCE(SUM(total), 0) FROM quotes_v2 WHERE status NOT IN ('cancelled', 'rejected', 'expired')"
+        ).fetchone()[0]
+        in_production = conn.execute(
+            "SELECT COUNT(*) FROM work_orders WHERE status = 'in_progress'"
+        ).fetchone()[0]
+
+        return {
+            "revenue_mtd": round(rev + rev2, 2),
+            "active_jobs": active_jobs,
+            "pending_quotes": pending_quotes,
+            "pipeline_value": round(pipeline, 2),
+            "in_production": in_production,
+        }
