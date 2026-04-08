@@ -300,6 +300,33 @@ CREATE INDEX IF NOT EXISTS idx_access_users_telegram ON access_users(telegram_ch
 CREATE INDEX IF NOT EXISTS idx_access_sessions_chat ON access_sessions(chat_id, status);
 CREATE INDEX IF NOT EXISTS idx_access_audit_user ON access_audit(user_id);
 CREATE INDEX IF NOT EXISTS idx_access_audit_created ON access_audit(created_at);
+
+-- OpenClaw task queue (used by openclaw_worker and openclaw_tasks router)
+CREATE TABLE IF NOT EXISTS openclaw_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    desk TEXT DEFAULT 'general',
+    priority INTEGER DEFAULT 5,
+    source TEXT DEFAULT 'manual',
+    assigned_to TEXT DEFAULT 'openclaw',
+    status TEXT DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'done', 'failed', 'paused', 'cancelled')),
+    result TEXT,
+    error TEXT,
+    files_modified TEXT,
+    commit_hash TEXT,
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 2,
+    parent_task_id TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_openclaw_tasks_status ON openclaw_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_openclaw_tasks_desk ON openclaw_tasks(desk);
+CREATE INDEX IF NOT EXISTS idx_openclaw_tasks_priority ON openclaw_tasks(priority);
 """
 
 DESKS_JSON_PATH = Path(__file__).resolve().parent.parent / "config" / "desks.json"
