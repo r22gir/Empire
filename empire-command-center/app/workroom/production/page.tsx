@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-
-const API = 'http://localhost:8000';
+import { API } from '../../lib/api';
 
 const STAGES = [
   'pending',
@@ -71,7 +70,7 @@ export default function ProductionBoardPage() {
 
   const fetchBoard = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/api/v1/work-orders/production-board`);
+      const res = await fetch(`${API}/work-orders/production-board`);
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const json = await res.json();
       setData(json);
@@ -93,7 +92,7 @@ export default function ProductionBoardPage() {
     setAdvancing(itemId);
     try {
       const res = await fetch(
-        `${API}/api/v1/work-orders/${workOrderId}/items/${itemId}/advance`,
+        `${API}/work-orders/${workOrderId}/items/${itemId}/advance`,
         { method: 'POST' }
       );
       if (!res.ok) throw new Error(`Advance failed: ${res.status}`);

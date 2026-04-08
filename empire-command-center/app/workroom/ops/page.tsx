@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-
-const API = "http://localhost:8000";
+import { API } from "../../lib/api";
 
 interface DailyAction {
   type: string;
@@ -76,9 +75,9 @@ export default function OpsPage() {
   const fetchAll = useCallback(async () => {
     try {
       const [actionsRes, statsRes, boardRes] = await Promise.all([
-        fetch(`${API}/api/v1/lifecycle/daily-actions`),
-        fetch(`${API}/api/v1/lifecycle/quick-stats`),
-        fetch(`${API}/api/v1/work-orders/production-board`),
+        fetch(`${API}/lifecycle/daily-actions`),
+        fetch(`${API}/lifecycle/quick-stats`),
+        fetch(`${API}/work-orders/production-board`),
       ]);
 
       const [actions, stats, board] = await Promise.all([

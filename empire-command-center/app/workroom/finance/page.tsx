@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-
-const API = "http://localhost:8000";
+import { API } from "../../lib/api";
 
 /* ── types ─────────────────────────────────────────────── */
 
@@ -121,11 +120,11 @@ export default function FinanceDashboard() {
     async function load() {
       try {
         const [dashRes, catRes, monthRes, clientRes, statsRes] = await Promise.all([
-          fetch(`${API}/api/v1/finance/dashboard`),
-          fetch(`${API}/api/v1/finance/revenue-by-category`),
-          fetch(`${API}/api/v1/finance/monthly-comparison?months=6`),
-          fetch(`${API}/api/v1/finance/revenue-by-client`),
-          fetch(`${API}/api/v1/lifecycle/quick-stats`),
+          fetch(`${API}/finance/dashboard`),
+          fetch(`${API}/finance/revenue-by-category`),
+          fetch(`${API}/finance/monthly-comparison?months=6`),
+          fetch(`${API}/finance/revenue-by-client`),
+          fetch(`${API}/lifecycle/quick-stats`),
         ]);
 
         if (!dashRes.ok) throw new Error("Failed to load dashboard data");
