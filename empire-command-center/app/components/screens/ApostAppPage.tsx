@@ -317,13 +317,36 @@ export default function ApostAppPage() {
     fetch(`${API}/apostapp/orders`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to fetch orders')))
       .then(data => {
-        const orderList = Array.isArray(data) ? data : (data.orders || []);
+        const orderList = (Array.isArray(data) ? data : (data.orders || [])).map((o: any) => ({
+          ...o,
+          orderNumber: o.order_number || o.orderNumber || o.id,
+          createdAt: o.created_at || o.createdAt,
+          sameDay: o.same_day ?? o.sameDay ?? false,
+          shippingMethod: o.shipping_method || o.shippingMethod,
+          shippingAddress: o.shipping_address || o.shippingAddress,
+          customer: {
+            name: o.customer_name || o.customer?.name || '',
+            email: o.customer_email || o.customer?.email || '',
+            phone: o.customer_phone || o.customer?.phone || '',
+          },
+          documents: (o.documents || []).map((d: any) => ({
+            id: d.id || '',
+            type: d.doc_type || d.type || 'other',
+            description: d.doc_description || d.description || '',
+            stateOfOrigin: d.state_of_origin || d.stateOfOrigin || 'DC',
+            destinationCountry: d.destination_country || d.destinationCountry || '',
+            needsNotarization: d.needs_notarization ?? d.needsNotarization ?? false,
+            needsCertification: d.needs_certification ?? d.needsCertification ?? false,
+            status: d.status || 'received',
+            trackingNumber: d.tracking_number || d.trackingNumber,
+          })),
+        }));
         setOrders(orderList);
         const customerMap = new Map<string, ApostCustomer>();
         orderList.forEach((o: any) => {
-          const cName = o.customer_name || o.customer?.name || '';
-          const cEmail = o.customer_email || o.customer?.email || '';
-          const cPhone = o.customer_phone || o.customer?.phone || '';
+          const cName = o.customer.name;
+          const cEmail = o.customer.email;
+          const cPhone = o.customer.phone;
           const key = cEmail || cName;
           if (customerMap.has(key)) {
             const existing = customerMap.get(key)!;
@@ -350,9 +373,10 @@ export default function ApostAppPage() {
   // ============ COMPUTED ============
 
   const activeOrders = orders.filter(o => !['completed', 'shipped'].includes(o.status)).length;
-  const revenueMTD = orders.filter(o => o.createdAt >= '2026-03-01').reduce((s, o) => s + o.total, 0);
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+  const revenueMTD = orders.filter(o => (o.createdAt || '') >= monthStart).reduce((s, o) => s + (o.total || 0), 0);
   const atState = orders.filter(o => o.status === 'at_state').length;
-  const completedThisMonth = orders.filter(o => o.status === 'completed' && o.createdAt >= '2026-03-01').length;
+  const completedThisMonth = orders.filter(o => o.status === 'completed' && (o.createdAt || '') >= monthStart).length;
 
   const filteredOrders = orderFilter === 'all' ? orders : orders.filter(o => o.status === orderFilter);
 
