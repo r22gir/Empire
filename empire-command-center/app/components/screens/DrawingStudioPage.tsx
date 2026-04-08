@@ -1,10 +1,7 @@
 'use client';
 import { useState, useCallback, useRef, lazy, Suspense } from 'react';
+import { API } from '../../lib/api';
 const ProductCatalogPage = lazy(() => import('./ProductCatalogPage'));
-
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : 'http://localhost:8000/api/v1';
 
 const ITEM_TYPES: { id: string; label: string; icon: string }[] = [
   { id: 'bench', label: 'Bench / Banquette', icon: '🪑' },

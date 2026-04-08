@@ -71,6 +71,7 @@ export default function ProductCatalogPage() {
   };
 
   const [drawMode, setDrawMode] = useState('presentation');
+  const [subFilter, setSubFilter] = useState<string>('all');
 
   // Navigate to Drawing Studio with pre-selected style
   const handleDrawThis = (style: any) => {
@@ -84,7 +85,6 @@ export default function ProductCatalogPage() {
   if (selectedCategory) {
     const isWindow = selectedCategory.key === 'window';
     const groups = isWindow ? WINDOW_GROUPS : null;
-    const [subFilter, setSubFilter] = useState<string>('all');
 
     const getFilteredStyles = () => {
       if (!isWindow || subFilter === 'all') return selectedCategory.styles;

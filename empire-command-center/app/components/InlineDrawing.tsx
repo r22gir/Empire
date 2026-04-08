@@ -1,10 +1,9 @@
 'use client';
 import { useState } from 'react';
 import { Download, Maximize2, X, RefreshCw, FileText } from 'lucide-react';
+import { API } from '../lib/api';
 
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store'
-  : 'http://localhost:8000';
+const API_BASE = API.replace(/\/api\/v1\/?$/, '');
 
 interface InlineDrawingProps {
   result: {
