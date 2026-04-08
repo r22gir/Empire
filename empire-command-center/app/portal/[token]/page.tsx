@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { API } from '../../lib/api';
 
 /* ── Types ─────────────────────────────────────────────────────────── */
 
@@ -66,7 +67,7 @@ interface PortalData {
 
 /* ── Constants ─────────────────────────────────────────────────────── */
 
-const API = "http://localhost:8000/api/v1/portal";
+const PORTAL_API = `${API}/portal`;
 
 const STAGES = [
   "Pending",
@@ -116,7 +117,7 @@ export default function PortalPage() {
   useEffect(() => {
     if (!token) return;
     setLoading(true);
-    fetch(`${API}/${token}`)
+    fetch(`${PORTAL_API}/${token}`)
       .then((r) => {
         if (r.status === 404) throw new Error("expired");
         if (!r.ok) throw new Error("failed");
@@ -136,7 +137,7 @@ export default function PortalPage() {
     if (!confirm("Are you sure you want to approve this quote?")) return;
     setApproving(true);
     try {
-      const r = await fetch(`${API}/${token}/approve`, { method: "POST" });
+      const r = await fetch(`${PORTAL_API}/${token}/approve`, { method: "POST" });
       if (!r.ok) throw new Error();
       const updated = await r.json();
       setData((prev) => (prev ? { ...prev, ...updated } : prev));

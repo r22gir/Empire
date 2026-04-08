@@ -3380,10 +3380,6 @@ function FabricMockupSection({ rooms }: { rooms: Room[] }) {
   const fabricRef = useRef<HTMLInputElement>(null);
   const roomRef = useRef<HTMLInputElement>(null);
 
-  const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-    ? 'https://api.empirebox.store/api/v1'
-    : 'http://localhost:8000/api/v1';
-
   const allItems = rooms.flatMap(r => r.items);
   const isShade = allItems.some(it => it.type.includes('roman') || it.type.includes('shade'));
 

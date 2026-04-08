@@ -60,10 +60,7 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ElementTy
   { id: 'zelle', label: 'Zelle / Wire', icon: Send, sub: 'Business transfers' },
 ];
 
-// Crypto wallet addresses + tokens fetched from backend (no hardcoded addresses)
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+import { API } from '../../../lib/api';
 
 // Map backend keys to display names
 const CRYPTO_DISPLAY: Record<string, string> = {
@@ -112,7 +109,7 @@ export default function PaymentModule({
   useEffect(() => {
     if (method !== 'crypto') return;
     setCryptoLoading(true);
-    fetch(`${API_BASE}/crypto-checkout/addresses`)
+    fetch(`${API}/crypto-checkout/addresses`)
       .then(res => res.ok ? res.json() : Promise.reject('Failed'))
       .then(data => {
         const addrs = data.addresses || {};

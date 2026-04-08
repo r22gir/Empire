@@ -4,9 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { CheckCircle, Clock, FileText, Phone, Mail, MapPin, AlertCircle } from 'lucide-react';
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : 'http://localhost:8000/api/v1';
+import { API } from '../../lib/api';
 
 interface LineItem {
   description: string;

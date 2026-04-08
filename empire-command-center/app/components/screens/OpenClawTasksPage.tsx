@@ -1,9 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : 'http://localhost:8000/api/v1';
+import { API } from '../../lib/api';
 
 interface Task {
   id: number;

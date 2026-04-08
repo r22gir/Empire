@@ -3,7 +3,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import MeasurementDiagram from './MeasurementDiagram';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+import { API } from '../../../lib/api';
 
 interface ExtractedCustomer {
   name: string | null;

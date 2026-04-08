@@ -53,9 +53,7 @@ const COIN_NOTES: Record<string, string> = {
   usdt_trc20: 'TRC-20 recommended \u2014 lower fees',
 };
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+import { API } from '../../../lib/api';
 
 const ACCENT = '#16a34a';
 const BORDER = '#e8e4dc';
