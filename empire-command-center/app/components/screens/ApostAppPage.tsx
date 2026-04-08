@@ -266,6 +266,7 @@ export default function ApostAppPage() {
   const [trackingQuery, setTrackingQuery] = useState('');
   const [trackingResult, setTrackingResult] = useState<ApostOrder | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<ApostCustomer | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Intake form state
   const [intakeForm, setIntakeForm] = useState<Omit<IntakeClient, 'id' | 'createdAt'>>({
@@ -316,30 +317,31 @@ export default function ApostAppPage() {
     fetch(`${API}/apostapp/orders`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('Failed to fetch orders')))
       .then(data => {
-        if (Array.isArray(data)) {
-          setOrders(data);
-          // Derive customers from orders
-          const customerMap = new Map<string, ApostCustomer>();
-          data.forEach((o: ApostOrder) => {
-            const key = o.customer.email || o.customer.name;
-            if (customerMap.has(key)) {
-              const existing = customerMap.get(key)!;
-              existing.totalOrders += 1;
-              existing.totalSpent += o.total;
-            } else {
-              customerMap.set(key, {
-                id: `c-${customerMap.size + 1}`,
-                name: o.customer.name,
-                email: o.customer.email,
-                phone: o.customer.phone,
-                totalOrders: 1,
-                totalSpent: o.total,
-                orders: [],
-              });
-            }
-          });
-          setCustomers(Array.from(customerMap.values()));
-        }
+        const orderList = Array.isArray(data) ? data : (data.orders || []);
+        setOrders(orderList);
+        const customerMap = new Map<string, ApostCustomer>();
+        orderList.forEach((o: any) => {
+          const cName = o.customer_name || o.customer?.name || '';
+          const cEmail = o.customer_email || o.customer?.email || '';
+          const cPhone = o.customer_phone || o.customer?.phone || '';
+          const key = cEmail || cName;
+          if (customerMap.has(key)) {
+            const existing = customerMap.get(key)!;
+            existing.totalOrders += 1;
+            existing.totalSpent += o.total || 0;
+          } else {
+            customerMap.set(key, {
+              id: o.customer_id || `c-${customerMap.size + 1}`,
+              name: cName,
+              email: cEmail,
+              phone: cPhone,
+              totalOrders: 1,
+              totalSpent: o.total || 0,
+              orders: [],
+            });
+          }
+        });
+        setCustomers(Array.from(customerMap.values()));
       })
       .catch((err) => { setOrdersError(err.message || 'Failed to load orders'); })
       .finally(() => setLoading(false));
@@ -407,20 +409,43 @@ export default function ApostAppPage() {
 
   const submitOrder = async () => {
     try {
+      setSubmitting(true);
+      const shippingParts = [newOrder.shippingAddress, newOrder.shippingCity, newOrder.shippingState, newOrder.shippingZip].filter(Boolean);
+      const payload = {
+        customer_name: newOrder.customerName,
+        customer_email: newOrder.customerEmail || null,
+        customer_phone: newOrder.customerPhone || null,
+        documents: newOrder.documents.map(d => ({
+          doc_type: d.type,
+          doc_description: d.description,
+          state_of_origin: d.stateOfOrigin,
+          destination_country: d.destinationCountry,
+          needs_notarization: d.needsNotarization,
+          needs_certification: d.needsCertification,
+        })),
+        rush: newOrder.rush,
+        same_day: newOrder.sameDay,
+        shipping_method: newOrder.shippingMethod,
+        shipping_address: shippingParts.join(', ') || null,
+      };
       const res = await fetch(`${API}/apostapp/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newOrder),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const created = await res.json();
         setOrders(prev => [created, ...prev]);
         setActiveSection('orders');
         setNewOrder({ customerName: '', customerEmail: '', customerPhone: '', documents: [], rush: false, sameDay: false, shippingMethod: 'standard', shippingAddress: '', shippingCity: '', shippingState: '', shippingZip: '' });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(`Failed to submit order: ${err.detail || res.statusText}`);
       }
     } catch {
-      // API not available
       alert('Failed to submit order. Please check your connection and try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -791,9 +816,9 @@ export default function ApostAppPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{ fontSize: 28, fontWeight: 700, color: '#b8960c' }}>${newOrderTotal}</div>
-            <button onClick={submitOrder} disabled={!newOrder.customerName || newOrder.documents.length === 0}
-              style={{ padding: '12px 28px', background: newOrder.customerName && newOrder.documents.length > 0 ? '#b8960c' : '#d1d5db', color: '#fff', borderRadius: 8, border: 'none', cursor: newOrder.customerName && newOrder.documents.length > 0 ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 14 }}>
-              Submit Order
+            <button onClick={submitOrder} disabled={submitting || !newOrder.customerName || newOrder.documents.length === 0}
+              style={{ padding: '12px 28px', background: !submitting && newOrder.customerName && newOrder.documents.length > 0 ? '#b8960c' : '#d1d5db', color: '#fff', borderRadius: 8, border: 'none', cursor: !submitting && newOrder.customerName && newOrder.documents.length > 0 ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 14 }}>
+              {submitting ? 'Submitting...' : 'Submit Order'}
             </button>
           </div>
         </div>

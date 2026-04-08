@@ -92,6 +92,7 @@ class ApostilleOrderCreate(BaseModel):
     customer_id: Optional[str] = None
     documents: List[ApostilleDocument] = Field(default_factory=list)
     rush: bool = False
+    same_day: bool = False
     shipping_method: str = "standard"
     shipping_address: Optional[str] = None
     notes: str = ""
@@ -282,6 +283,14 @@ async def pricing_calculator(
 
 
 # 5. Create order
+_ORDER_COUNTER = 0
+
+def _next_order_number() -> str:
+    global _ORDER_COUNTER
+    _ORDER_COUNTER += 1
+    return f"APO-{datetime.utcnow().strftime('%Y%m')}-{_ORDER_COUNTER:04d}"
+
+
 @router.post("/orders")
 async def create_order(order: ApostilleOrderCreate):
     """Create a new apostille order."""
@@ -292,7 +301,10 @@ async def create_order(order: ApostilleOrderCreate):
     docs = []
     for d in order.documents:
         doc_dict = d.model_dump()
-        doc_dict["fee"] = _calculate_document_fee(d, rush=order.rush)
+        fee = _calculate_document_fee(d, rush=order.rush)
+        if order.same_day and d.state_of_origin.upper() == "DC":
+            fee *= APOSTILLE_SERVICES["same_day"]["multiplier"]
+        doc_dict["fee"] = round(fee, 2)
         docs.append(doc_dict)
 
     # Resolve or create customer
@@ -324,6 +336,7 @@ async def create_order(order: ApostilleOrderCreate):
 
     order_data = {
         "id": order_id,
+        "order_number": _next_order_number(),
         "customer_id": customer_id,
         "customer_name": order.customer_name,
         "customer_email": order.customer_email,
@@ -331,6 +344,7 @@ async def create_order(order: ApostilleOrderCreate):
         "documents": docs,
         "status": "received",
         "rush": order.rush,
+        "same_day": order.same_day,
         "shipping_method": order.shipping_method,
         "shipping_address": order.shipping_address,
         "total": total,
