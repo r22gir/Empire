@@ -29,9 +29,8 @@ const ACCENT_BORDER = '#93c5fd';
 
 // ============ UI CONFIG ============
 
-const SHIPPING_API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/shipping'
-  : 'http://localhost:8000/shipping';
+import { API_BASE } from '../../lib/api';
+const SHIPPING_API = `${API_BASE}/shipping`;
 
 const CARRIERS = ['USPS', 'UPS', 'FedEx', 'DHL'] as const;
 type Carrier = typeof CARRIERS[number];

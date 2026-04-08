@@ -3,9 +3,7 @@ import { useState, useRef } from 'react';
 import { Camera, Upload, Image as ImageIcon } from 'lucide-react';
 import { intakeUpload } from '../../lib/intake-auth';
 
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store'
-  : 'http://localhost:8000';
+import { API_BASE } from '../../lib/api';
 
 export default function PhotoUploader({
   projectId,

@@ -1,12 +1,9 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { API } from '../../lib/api';
+import { API, API_BASE } from '../../lib/api';
 import { Quote } from '../../lib/types';
 import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2 } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
-
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store' : 'http://localhost:8000';
 
 interface UploadedPhoto {
   filename: string;

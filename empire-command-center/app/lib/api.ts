@@ -2,6 +2,8 @@ export const API = typeof window !== 'undefined' && window.location.hostname !==
   ? 'https://api.empirebox.store/api/v1'
   : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
 
+export const API_BASE = API.replace(/\/api\/v1\/?$/, '');
+
 /** Append cache-bust param to any URL to defeat browser/CDN caching */
 function bustCache(url: string): string {
   const sep = url.includes('?') ? '&' : '?';

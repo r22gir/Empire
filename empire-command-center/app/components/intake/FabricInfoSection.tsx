@@ -32,8 +32,7 @@ const MATERIAL_TYPES = [
   'Upholstery', 'Marine Vinyl', 'Velvet', 'Linen', 'Outdoor', 'Leather', 'Other',
 ];
 
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store' : 'http://localhost:8000';
+import { API_BASE } from '../../lib/api';
 
 interface Props {
   fabric: FabricInfo;

@@ -2,9 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store'
-  : 'http://localhost:8000';
+import { API_BASE } from '../../lib/api';
 
 interface PresentationData {
   id: string;

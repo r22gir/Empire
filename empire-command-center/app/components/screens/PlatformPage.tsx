@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { API } from '../../lib/api';
+import { API, API_BASE } from '../../lib/api';
 import {
   Server, Activity, Brain, Code, Shield, Cpu, HardDrive, Wifi, Database,
   Globe, ChevronDown, ChevronRight, Key, Lock, AlertTriangle, CheckCircle2,
@@ -353,10 +353,7 @@ export default function PlatformPage() {
             return (
               <div key={i} className="flex items-center justify-between" style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer' }}
                 onClick={() => {
-                const base = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-                  ? 'https://api.empirebox.store'
-                  : 'http://localhost:8000';
-                window.open(`${base}/api/v1${r.prefix}`, '_blank');
+                window.open(`${API_BASE}/api/v1${r.prefix}`, '_blank');
               }}>
                 <div className="flex items-center gap-2 min-w-0">
                   <span style={{ fontSize: 9, fontWeight: 700, fontFamily: 'monospace', padding: '2px 6px', borderRadius: 4, color: '#2563eb', background: '#dbeafe' }}>/api/v1</span>

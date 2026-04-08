@@ -10,9 +10,7 @@ import PhotoUploader from '../../../components/intake/PhotoUploader';
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store'
-  : 'http://localhost:8000';
+import { API, API_BASE } from '../../../lib/api';
 
 const statusConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   draft: { label: 'Draft', color: '#888', bg: '#f5f3ef', icon: Clock },

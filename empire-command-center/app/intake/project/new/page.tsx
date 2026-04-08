@@ -8,8 +8,7 @@ import MeasurementInput, { Measurement } from '../../../components/intake/Measur
 import FabricInfoSection, { FabricInfo } from '../../../components/intake/FabricInfoSection';
 import { intakeFetch, getToken } from '../../../lib/intake-auth';
 
-const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store' : 'http://localhost:8000';
+import { API, API_BASE } from '../../../lib/api';
 
 const steps = ['Project Info', 'Photos & Scans', 'Measurements', 'Notes & Submit'];
 

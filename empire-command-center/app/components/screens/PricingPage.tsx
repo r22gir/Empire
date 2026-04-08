@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { Check, Sparkles, ArrowRight, ChevronDown, ChevronUp } from 'lucide-react';
+import { API } from '../../lib/api';
 
 const TIERS = [
   {
@@ -87,10 +88,7 @@ export default function PricingPage() {
     setLoading(tier);
     setError(null);
     try {
-      const API_BASE = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-        ? 'https://api.empirebox.store'
-        : 'http://localhost:8000';
-      const res = await fetch(`${API_BASE}/api/v1/payments/checkout`, {
+      const res = await fetch(`${API}/payments/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
