@@ -25,10 +25,21 @@ interface ApostOrder {
   rush: boolean;
   sameDay: boolean;
   total: number;
+  paid: boolean;
   shippingMethod: string;
   shippingAddress: string;
   createdAt: string;
   trackingNumber?: string;
+  attachments: Attachment[];
+}
+
+interface Attachment {
+  id: string;
+  filename: string;
+  stored_as: string;
+  content_type: string;
+  size: number;
+  uploaded_at: string;
 }
 
 interface ApostDocument {
@@ -322,6 +333,7 @@ export default function ApostAppPage() {
           orderNumber: o.order_number || o.orderNumber || o.id,
           createdAt: o.created_at || o.createdAt,
           sameDay: o.same_day ?? o.sameDay ?? false,
+          paid: o.paid ?? false,
           shippingMethod: o.shipping_method || o.shippingMethod,
           shippingAddress: o.shipping_address || o.shippingAddress,
           customer: {
@@ -339,6 +351,14 @@ export default function ApostAppPage() {
             needsCertification: d.needs_certification ?? d.needsCertification ?? false,
             status: d.status || 'received',
             trackingNumber: d.tracking_number || d.trackingNumber,
+          })),
+          attachments: (o.attachments || []).map((a: any) => ({
+            id: a.id || '',
+            filename: a.filename || a.stored_as || '',
+            stored_as: a.stored_as || '',
+            content_type: a.content_type || '',
+            size: a.size || 0,
+            uploaded_at: a.uploaded_at || '',
           })),
         }));
         setOrders(orderList);
@@ -481,6 +501,50 @@ export default function ApostAppPage() {
     setTrackingResult(found || null);
   };
 
+  const markOrderPaid = async (orderId: string) => {
+    try {
+      const res = await fetch(`${API}/apostapp/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paid: true }),
+      });
+      if (res.ok) {
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, paid: true } : o));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const updateOrderStatus = async (orderId: string, status: string) => {
+    try {
+      const res = await fetch(`${API}/apostapp/orders/${orderId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: status as any } : o));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const uploadDocument = async (orderId: string, file: File) => {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${API}/apostapp/orders/${orderId}/documents`, {
+        method: 'POST',
+        body: form,
+      });
+      if (res.ok) {
+        const { attachment } = await res.json();
+        setOrders(prev => prev.map(o => {
+          if (o.id !== orderId) return o;
+          return { ...o, attachments: [...(o.attachments || []), attachment] };
+        }));
+      }
+    } catch { /* ignore */ }
+  };
+
   const importFromLLC = async (llcId: string) => {
     try {
       const res = await fetch(`${API}/apostapp/orders/from-llc/${llcId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
@@ -619,6 +683,7 @@ export default function ApostAppPage() {
               <th style={{ textAlign: 'left', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Customer</th>
               <th style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Docs</th>
               <th style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Status</th>
+              <th style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Paid</th>
               <th style={{ textAlign: 'center', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Rush</th>
               <th style={{ textAlign: 'right', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Total</th>
               <th style={{ textAlign: 'right', padding: '10px 14px', fontWeight: 600, color: '#6b7280', fontSize: 11, textTransform: 'uppercase' }}>Date</th>
@@ -634,6 +699,11 @@ export default function ApostAppPage() {
                   <td style={{ padding: '12px 14px' }}>{o.customer.name}</td>
                   <td style={{ padding: '12px 14px', textAlign: 'center' }}>{o.documents.length}</td>
                   <td style={{ padding: '12px 14px', textAlign: 'center' }}><StatusBadge status={o.status} /></td>
+                  <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                    {o.paid
+                      ? <span style={{ background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700 }}>PAID</span>
+                      : <span style={{ background: '#fef2f2', color: '#dc2626', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700 }}>UNPAID</span>}
+                  </td>
                   <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                     {o.rush && <span style={{ background: '#fef3c7', color: '#d97706', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700 }}>RUSH</span>}
                     {o.sameDay && <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, marginLeft: 4 }}>SAME-DAY</span>}
@@ -664,6 +734,49 @@ export default function ApostAppPage() {
                             </div>
                           ))}
                         </div>
+
+                        {/* Admin Controls */}
+                        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e5e7eb', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 11, fontWeight: 600, color: '#6b7280' }}>Status:</label>
+                            <select value={o.status} onChange={e => updateOrderStatus(o.id, e.target.value)}
+                              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #d1d5db', fontSize: 12 }}>
+                              <option value="received">Received</option>
+                              <option value="processing">Processing</option>
+                              <option value="at_state">At State</option>
+                              <option value="completed">Completed</option>
+                              <option value="shipped">Shipped</option>
+                            </select>
+                          </div>
+                          {!o.paid && (
+                            <button onClick={() => markOrderPaid(o.id)}
+                              style={{ padding: '4px 12px', background: '#16a34a', color: '#fff', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                              Mark Paid
+                            </button>
+                          )}
+                          {o.paid && <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}>✓ Paid</span>}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+                            <input type="file" id={`upload-${o.id}`} accept=".pdf,.jpg,.jpeg,.png,.gif,.webp"
+                              onChange={e => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) uploadDocument(o.id, f); e.target.value = ''; }}
+                              style={{ fontSize: 11 }} />
+                          </div>
+                        </div>
+
+                        {/* Attachments */}
+                        {o.attachments && o.attachments.length > 0 && (
+                          <div style={{ marginTop: 12 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Uploaded Files</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {o.attachments.map((a: Attachment) => (
+                                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', background: '#fff', borderRadius: 6, border: '1px solid #e5e7eb' }}>
+                                  <FileText size={12} style={{ color: '#6b7280' }} />
+                                  <span style={{ flex: 1 }}>{a.filename}</span>
+                                  <span style={{ color: '#6b7280', fontSize: 10 }}>{(a.size / 1024).toFixed(1)}KB</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>

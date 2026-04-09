@@ -6,7 +6,7 @@ for DC / MD / VA. JSON file storage.
 Integrates with LLC Factory for seamless business document apostille.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, date
@@ -426,6 +426,51 @@ async def update_document_status(order_id: str, doc_index: int, update: Document
     _save_json(ORDERS_DIR, f"{order_id}.json", order)
     logger.info(f"ApostApp doc {doc_index} in order {order_id} updated: {changes}")
     return order
+
+
+# 9b. Upload document file to an order
+@router.post("/orders/{order_id}/documents")
+async def upload_order_document(order_id: str, file: UploadFile = File(...)):
+    """Upload a document file (PDF, image) to an apostille order."""
+    order = _load_json(ORDERS_DIR, f"{order_id}.json")
+
+    # Validate file type
+    allowed = {"application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"}
+    content_type = file.content_type or "application/octet-stream"
+    if content_type not in allowed:
+        raise HTTPException(400, f"File type not allowed: {content_type}. Use PDF, JPEG, PNG, GIF, or WEBP.")
+
+    # Create per-order files directory
+    order_files_dir = os.path.join(ORDERS_DIR, order_id, "files")
+    os.makedirs(order_files_dir, exist_ok=True)
+
+    # Save file
+    file_id = str(uuid.uuid4())[:8]
+    ext = os.path.splitext(file.filename or "document")[1] or ".pdf"
+    safe_filename = f"{file_id}{ext}"
+    file_path = os.path.join(order_files_dir, safe_filename)
+
+    content = await file.read()
+    size = len(content)
+
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Add attachment metadata to order
+    attachment = {
+        "id": file_id,
+        "filename": file.filename or safe_filename,
+        "stored_as": safe_filename,
+        "content_type": content_type,
+        "size": size,
+        "uploaded_at": datetime.utcnow().isoformat(),
+    }
+    order.setdefault("attachments", []).append(attachment)
+    order["updated_at"] = datetime.utcnow().isoformat()
+    _save_json(ORDERS_DIR, f"{order_id}.json", order)
+
+    logger.info(f"ApostApp file uploaded: {file.filename} ({size}b) for order {order_id}")
+    return {"attachment": attachment, "order_id": order_id}
 
 
 # 10. Create customer
