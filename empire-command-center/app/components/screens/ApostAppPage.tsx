@@ -290,6 +290,7 @@ export default function ApostAppPage() {
   const [formsSearch, setFormsSearch] = useState('');
   const [aiFillForm, setAiFillForm] = useState<string>('');
   const [aiFillClient, setAiFillClient] = useState<string>('');
+  const [aiFillOrder, setAiFillOrder] = useState<string>('');
   const [aiFillFields, setAiFillFields] = useState<Record<string, string>>({});
   const [aiFillGenerated, setAiFillGenerated] = useState(false);
   const [ronSessionForm, setRonSessionForm] = useState({ clientName: '', docType: '', preferredDate: '', preferredTime: '', state: 'DC' });
@@ -1636,7 +1637,7 @@ export default function ApostAppPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => form.url ? window.open(form.url, '_blank') : alert('Form download coming soon')}
+                <button onClick={() => downloadFromLibrary(form)}
                   style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 14px', background: '#faf9f7', color: '#374151', borderRadius: 8, border: '1px solid #ece8e0', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
                   <ExternalLink size={14} /> Download
                 </button>
@@ -1655,30 +1656,93 @@ export default function ApostAppPage() {
   const renderAIFill = () => {
     const selectedForm = FORMS_LIBRARY.find(f => f.name === aiFillForm);
     const selectedClient = savedClients.find(c => c.id === aiFillClient);
+    const selectedOrder = orders.find(o => o.id === aiFillOrder);
 
     const autoFillFields = () => {
-      if (!selectedForm || !selectedClient) return;
+      if (!selectedForm) return;
       const fieldMap: Record<string, string> = {};
+
       const clientData: Record<string, string> = {
-        applicant_name: selectedClient.fullName, name: selectedClient.fullName, applicant: selectedClient.fullName,
-        requester: selectedClient.fullName, person_name: selectedClient.fullName, signer_name: selectedClient.fullName,
-        responsible_party: selectedClient.fullName, business_name: '',
-        address: `${selectedClient.street}, ${selectedClient.city}, ${selectedClient.state} ${selectedClient.zip}`,
-        dob: selectedClient.dateOfBirth, ssn: `***-**-${selectedClient.ssnLast4}`,
-        document_type: selectedClient.documents[0]?.docType || '', date_of_document: new Date().toISOString().split('T')[0],
-        destination_country: selectedClient.documents[0]?.destinationCountry || '',
-        document_description: selectedClient.documents.map(d => d.docType).join(', '),
-        document_info: selectedClient.documents.map(d => d.docType).join(', '),
+        applicant_name: selectedClient?.fullName || '', name: selectedClient?.fullName || '', applicant: selectedClient?.fullName || '',
+        requester: selectedClient?.fullName || '', person_name: selectedClient?.fullName || '', signer_name: selectedClient?.fullName || '',
+        responsible_party: selectedClient?.fullName || '', business_name: '',
+        address: `${selectedClient?.street || ''}, ${selectedClient?.city || ''}, ${selectedClient?.state || ''} ${selectedClient?.zip || ''}`.replace(/^, /, ''),
+        dob: selectedClient?.dateOfBirth || '', ssn: selectedClient?.ssnLast4 ? `***-**-${selectedClient.ssnLast4}` : '',
+        document_type: selectedClient?.documents?.[0]?.docType || selectedOrder?.documents?.[0]?.doc_type || '',
+        date_of_document: new Date().toISOString().split('T')[0],
+        destination_country: selectedClient?.documents?.[0]?.destinationCountry || selectedOrder?.documents?.[0]?.destination_country || '',
+        document_description: (selectedClient?.documents || []).map((d: any) => d.docType).join(', ') || (selectedOrder?.documents || []).map((d: any) => d.doc_type).join(', ') || '',
+        document_info: (selectedClient?.documents || []).map((d: any) => d.docType).join(', ') || (selectedOrder?.documents || []).map((d: any) => d.doc_type).join(', ') || '',
         notary_info: '', notary_county: '', notary_details: '', notary_name: '', commission_expiry: '',
-        state: selectedClient.state, date: new Date().toISOString().split('T')[0],
-        type: selectedClient.documents[0]?.docType || '', relationship: '', purpose: selectedClient.documents[0]?.purpose || '',
-        fingerprints: 'Required — schedule at local office',
+        state: selectedClient?.state || selectedOrder?.documents?.[0]?.state_of_origin || '',
+        date: new Date().toISOString().split('T')[0],
+        type: selectedClient?.documents?.[0]?.docType || selectedOrder?.documents?.[0]?.doc_type || '', relationship: '', purpose: '',
+        fingerprints: 'Required — schedule at local FBI office or approved merchant',
+        notaries: '',
       };
+
       selectedForm.fields.forEach(f => {
         fieldMap[f] = clientData[f] || '';
       });
       setAiFillFields(fieldMap);
       setAiFillGenerated(false);
+    };
+
+    const downloadForm = async () => {
+      if (!selectedForm) return;
+      const clientName = selectedClient?.fullName || selectedOrder?.customer?.name || '';
+      const orderNumber = selectedOrder?.orderNumber || selectedOrder?.order_number || '';
+      try {
+        const res = await fetch(`${API}/apostapp/forms/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            form_name: selectedForm.name,
+            agency: selectedForm.agency,
+            purpose: selectedForm.purpose,
+            fee: selectedForm.fee,
+            fields: aiFillFields,
+            client_name: clientName,
+            order_number: orderNumber,
+            notes: '',
+          }),
+        });
+        if (res.ok) {
+          const html = await res.text();
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (win) win.focus();
+        }
+      } catch { alert('Failed to generate form. Make sure the backend is running.'); }
+    };
+
+    const downloadFromLibrary = async (form: typeof FORMS_LIBRARY[0]) => {
+      try {
+        const emptyFields: Record<string, string> = {};
+        form.fields.forEach(f => { emptyFields[f] = ''; });
+        const res = await fetch(`${API}/apostapp/forms/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            form_name: form.name,
+            agency: form.agency,
+            purpose: form.purpose,
+            fee: form.fee,
+            fields: emptyFields,
+            client_name: '',
+            order_number: '',
+            notes: 'Blank form — fill in fields before submitting',
+          }),
+        });
+        if (res.ok) {
+          const html = await res.text();
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          const win = window.open(url, '_blank');
+          if (win) win.focus();
+        }
+      } catch { alert('Failed to generate form. Make sure the backend is running.'); }
     };
 
     return (
@@ -1703,14 +1767,33 @@ export default function ApostAppPage() {
                 {savedClients.map(c => <option key={c.id} value={c.id}>{c.fullName} ({c.email})</option>)}
               </select>
             </div>
-            <button onClick={autoFillFields} disabled={!aiFillForm || !aiFillClient}
-              style={{ padding: '8px 20px', background: aiFillForm && aiFillClient ? '#b8960c' : '#d1d5db', color: '#fff', borderRadius: 8, border: 'none', cursor: aiFillForm && aiFillClient ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: 13, height: 38 }}>
+            <button onClick={autoFillFields} disabled={!aiFillForm}
+              style={{ padding: '8px 20px', background: aiFillForm ? '#b8960c' : '#d1d5db', color: '#fff', borderRadius: 8, border: 'none', cursor: aiFillForm ? 'pointer' : 'not-allowed', fontWeight: 600, fontSize: 13, height: 38 }}>
               Auto-Fill
             </button>
           </div>
-          {savedClients.length === 0 && (
+
+          {/* Order selector row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+            <div>
+              <label style={labelStyle}>Select Order (optional — for real order data)</label>
+              <select value={aiFillOrder} onChange={e => { setAiFillOrder(e.target.value); setAiFillFields({}); setAiFillGenerated(false); }} style={inputStyle}>
+                <option value="">Choose an order...</option>
+                {orders.map(o => <option key={o.id} value={o.id}>{o.orderNumber || o.id} — {o.customer?.name || o.customer_name || 'No name'}</option>)}
+              </select>
+            </div>
+            {selectedOrder && (
+              <div style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0', fontSize: 12, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div style={{ fontWeight: 600 }}>{selectedOrder.customer?.name || selectedOrder.customer_name || '—'}</div>
+                <div style={{ color: '#6b7280' }}>{selectedOrder.documents?.length || 0} doc(s) · {selectedOrder.status} · {selectedOrder.shippingMethod || selectedOrder.shipping_method || 'standard'}</div>
+                <div style={{ color: '#6b7280' }}>{selectedOrder.documents?.[0]?.destinationCountry || selectedOrder.documents?.[0]?.destination_country || ''}</div>
+              </div>
+            )}
+          </div>
+
+          {(savedClients.length === 0 && orders.length === 0) && (
             <div style={{ marginTop: 12, padding: 12, background: '#fef3c7', borderRadius: 8, fontSize: 12, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <AlertTriangle size={14} /> No saved clients yet. Use the Client Intake form to save client profiles first.
+              <AlertTriangle size={14} /> No clients or orders yet. Use Client Intake or create an order first.
             </div>
           )}
         </div>
@@ -1725,12 +1808,12 @@ export default function ApostAppPage() {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => setAiFillGenerated(true)}
-                  style={{ padding: '8px 16px', background: '#b8960c', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
-                  Generate Filled Form
-                </button>
-                <button onClick={() => alert('PDF download coming soon — form generation integration in progress')}
                   style={{ padding: '8px 16px', background: '#faf9f7', color: '#374151', borderRadius: 8, border: '1px solid #ece8e0', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
-                  Download PDF
+                  Show Text
+                </button>
+                <button onClick={downloadForm}
+                  style={{ padding: '8px 16px', background: '#16a34a', color: '#fff', borderRadius: 8, border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>
+                  Print / Save PDF
                 </button>
               </div>
             </div>
@@ -1739,11 +1822,11 @@ export default function ApostAppPage() {
                 const value = aiFillFields[field] || '';
                 const isAutoFilled = !!value;
                 return (
-                  <div key={field} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 8, background: isAutoFilled ? '#faf9f7' : '#fef3c7', border: `1px solid ${isAutoFilled ? '#ece8e0' : '#fbbf24'}` }}>
+                  <div key={field} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 8, background: isAutoFilled ? '#f0fdf4' : '#fef3c7', border: `1px solid ${isAutoFilled ? '#bbf7d0' : '#fbbf24'}` }}>
                     <div style={{ width: 180, fontSize: 12, fontWeight: 600, color: '#374151' }}>
                       {field.replace(/_/g, ' ')}
-                      {!isAutoFilled && <span style={{ color: '#d97706', marginLeft: 4, fontSize: 10 }}>MANUAL</span>}
-                      {isAutoFilled && <span style={{ color: '#16a34a', marginLeft: 4, fontSize: 10 }}>AUTO</span>}
+                      {!isAutoFilled && <span style={{ color: '#d97706', marginLeft: 4, fontSize: 10, fontWeight: 700 }}>MISSING</span>}
+                      {isAutoFilled && <span style={{ color: '#16a34a', marginLeft: 4, fontSize: 10, fontWeight: 700 }}>FILLED</span>}
                     </div>
                     <input value={value} onChange={e => setAiFillFields(prev => ({ ...prev, [field]: e.target.value }))}
                       placeholder={`Enter ${field.replace(/_/g, ' ')}...`}
@@ -1758,7 +1841,7 @@ export default function ApostAppPage() {
         {/* Generated Text Version */}
         {aiFillGenerated && selectedForm && (
           <div className="empire-card" style={{ padding: 20, background: '#faf9f7' }}>
-            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Generated Form Text</div>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Form Data Summary</div>
             <pre style={{ fontFamily: 'monospace', fontSize: 12, lineHeight: 1.8, padding: 16, background: '#fff', borderRadius: 8, border: '1px solid #ece8e0', whiteSpace: 'pre-wrap' }}>
 {`FORM: ${selectedForm.name}
 AGENCY: ${selectedForm.agency}
@@ -1767,7 +1850,7 @@ FEE: ${selectedForm.fee}
 DATE GENERATED: ${new Date().toISOString().split('T')[0]}
 ${'='.repeat(50)}
 
-${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillFields[f] || '[NOT PROVIDED]'}`).join('\n')}`}
+${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillFields[f] || '[NOT PROVIDED — fill in manually]'}`).join('\n')}`}
             </pre>
           </div>
         )}

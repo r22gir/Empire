@@ -7,6 +7,7 @@ Integrates with LLC Factory for seamless business document apostille.
 """
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, date
@@ -695,3 +696,120 @@ async def create_from_llc_order(llc_order_id: str, link: LLCOrderLink = LLCOrder
 
     logger.info(f"ApostApp order {result['id']} created from LLC order {llc_order_id} — {len(auto_docs)} docs")
     return result
+
+
+# 15. Generate filled printable form (HTML → browser print-to-PDF)
+class FormGenerateRequest(BaseModel):
+    form_name: str
+    agency: str
+    purpose: str = ""
+    fee: str = ""
+    fields: dict[str, str]
+    client_name: str = ""
+    order_number: str = ""
+    notes: str = ""
+
+
+@router.post("/forms/generate")
+async def generate_form(data: FormGenerateRequest):
+    """Generate a printable HTML form with autofilled fields. Open in browser and use Print→Save as PDF."""
+    now = datetime.utcnow().strftime("%B %d, %Y")
+
+    rows_html = ""
+    for field_key, field_value in data.fields.items():
+        display_name = field_key.replace("_", " ").replace("-", " ").title()
+        is_filled = bool(field_value and field_value.strip())
+        bg = "#f0fdf4" if is_filled else "#fef9c3"
+        border = "#22c55e" if is_filled else "#f59e0b"
+        badge = '<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:middle;">FILLED</span>' if is_filled else '<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;margin-left:6px;vertical-align:middle;background:#f59e0b;color:#fff;">MISSING</span>'
+        value_display = field_value.strip() if is_filled else '<span style="color:#9ca3af;font-style:italic;">Not provided — please complete manually</span>'
+        rows_html += f"""
+        <tr>
+          <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;font-weight:600;color:#374151;font-size:13px;width:35%;background:#f9fafb;">
+            {display_name}{badge}
+          </td>
+          <td style="padding:10px 14px;border-bottom:1px solid #e5e7eb;font-size:13px;background:{bg};">
+            {value_display}
+          </td>
+        </tr>"""
+
+    missing_count = sum(1 for v in data.fields.values() if not (v and v.strip()))
+    filled_count = len(data.fields) - missing_count
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>{data.form_name} — {data.agency}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 13px; color: #1a1a1a; background: #fff; }}
+  .page {{ max-width: 800px; margin: 0 auto; padding: 40px 48px; }}
+  .header {{ border-bottom: 3px solid #1a1a1a; padding-bottom: 16px; margin-bottom: 24px; }}
+  .header h1 {{ font-size: 22px; font-weight: 900; letter-spacing: -0.5px; }}
+  .header .agency {{ font-size: 14px; color: #b8960c; font-weight: 700; margin-top: 4px; }}
+  .meta {{ display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap; }}
+  .meta-item {{ font-size: 12px; color: #6b7280; }}
+  .meta-item strong {{ color: #374151; }}
+  .summary {{ display: flex; gap: 16px; margin: 20px 0; }}
+  .summary-badge {{ padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; }}
+  .filled-badge {{ background: #dcfce7; color: #16a34a; }}
+  .missing-badge {{ background: #fef3c7; color: #d97706; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 32px; }}
+  .footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; }}
+  .watermark {{ position: fixed; bottom: 20px; right: 40px; font-size: 10px; color: #d1d5db; }}
+  @media print {{
+    body {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+    .page {{ padding: 0; max-width: 100%; }}
+    .no-print {{ display: none !important; }}
+    .watermark {{ display: none; }}
+  }}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <h1>{data.form_name}</h1>
+    <div class="agency">{data.agency}</div>
+    <div class="meta">
+      <div class="meta-item"><strong>Purpose:</strong> {data.purpose or 'N/A'}</div>
+      <div class="meta-item"><strong>Fee:</strong> {data.fee or 'N/A'}</div>
+      <div class="meta-item"><strong>Date Generated:</strong> {now}</div>
+      <div class="meta-item"><strong>Client:</strong> {data.client_name or 'N/A'}</div>
+      <div class="meta-item"><strong>Order #:</strong> {data.order_number or 'N/A'}</div>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-badge filled-badge">{filled_count} field{'' if filled_count == 1 else 's'} filled</div>
+    <div class="summary-badge missing-badge">{missing_count} field{'' if missing_count == 1 else 's'} need manual entry</div>
+  </div>
+
+  <table>
+    <tbody>
+{rows_html}
+    </tbody>
+  </table>
+
+  {"<div style='margin-bottom:20px;font-size:12px;color:#374151;'><strong>Notes:</strong><br/>" + data.notes.replace("\n", "<br/>") + "</div>" if data.notes else ""}
+
+  <div class="footer">
+    This form was auto-generated by EmpireBox ApostApp on {now}. Fields marked FILLED were auto-populated from client/order data.
+    Fields marked MISSING require manual completion. Review all entries before submission.
+    <br/>EmpireBox · ApostApp · empirebox.store
+  </div>
+</div>
+<div class="watermark">Generated by EmpireBox ApostApp · {now}</div>
+
+<button class="no-print" onclick="window.print()" style="
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  padding: 10px 28px; background: #b8960c; color: #fff; border: none; border-radius: 8px;
+  font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 100;
+">
+  Print / Save as PDF
+</button>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html.encode(), media_type="text/html")
