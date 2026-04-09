@@ -56,3 +56,5 @@ backend/data/
 
 # Version archives
 versions/*.tar.gz
+
+.opencode/private/

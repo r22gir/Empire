@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "plan",
+  "share": "manual",
+  "permission": {
+    "bash": "ask",
+    "edit": "ask",
+    "webfetch": "allow",
+    "websearch": "allow"
+  },
+  "agent": {
+    "build": {
+      "permission": {
+        "bash": "ask",
+        "edit": "ask",
+        "webfetch": "allow",
+        "websearch": "allow"
+      }
+    }
+  },
+  "instructions": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".claude-progress.md"
+  ]
+}
