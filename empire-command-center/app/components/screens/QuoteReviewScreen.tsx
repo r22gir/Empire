@@ -139,6 +139,11 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
           deposit: { deposit_percent: editDepositPct, deposit_amount: computedDeposit },
           notes: editNotes,
           terms: editTerms,
+          customer_name: (quote as any).customer_name,
+          customer_email: (quote as any).customer_email,
+          customer_phone: (quote as any).customer_phone,
+          customer_address: (quote as any).customer_address,
+          business_unit: (quote as any).business_unit,
         }),
       });
       if (res.ok) {

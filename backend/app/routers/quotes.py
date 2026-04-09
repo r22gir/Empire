@@ -98,6 +98,7 @@ class QuoteCreate(BaseModel):
     notes: Optional[str] = None
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
+    business_unit: Optional[str] = "workroom"
     rooms: Optional[list] = None           # Full room/window/upholstery hierarchy
     pricing_mode: Optional[str] = None     # "flat" = skip tier engine, use line_items as-is
     ai_outlines: Optional[list] = None     # AI outline analysis results
@@ -128,6 +129,7 @@ class QuoteUpdate(BaseModel):
     status: Optional[str] = None
     business_name: Optional[str] = None
     business_logo_url: Optional[str] = None
+    business_unit: Optional[str] = None
     photos: Optional[list] = None
     rooms: Optional[list] = None
     pricing_mode: Optional[str] = None     # "flat" = skip tier engine

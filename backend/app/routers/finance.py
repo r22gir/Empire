@@ -813,8 +813,14 @@ def create_invoice_from_quote(request: Request, quote_id: str):
         conn.execute(
             """INSERT INTO invoices
                (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
-                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+                client_name, client_email, client_phone, client_address,
+                business_unit, deposit_required, deposit_received,
+                discount_amount, discount_type)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, ?,
+                       ?, ?, ?, ?,
+                       ?, ?, ?,
+                       ?, ?, ?)""",
             (
                 inv_number,
                 customer_id,
@@ -825,8 +831,18 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 total,
                 total,
                 json.dumps(line_items),
-                f"Generated from quote {quote.get('quote_number', quote_id)}",
+                quote.get("notes") or f"Generated from quote {quote.get('quote_number', quote_id)}",
+                quote.get("terms") or "Net 30",
                 due,
+                customer_name,
+                customer_email,
+                quote.get("customer_phone", ""),
+                quote.get("customer_address", ""),
+                quote.get("business_unit") or "workroom",
+                (quote.get("deposit") or {}).get("deposit_percent") or 0,
+                (quote.get("deposit") or {}).get("deposit_amount") or 0,
+                quote.get("discount_amount", 0),
+                quote.get("discount_type", "dollar"),
             )
         )
 

@@ -719,6 +719,9 @@ async def convert_to_quote(request: Request, project_id: str):
     rooms_raw = json.loads(project.get("rooms") or "[]")
     photos_raw = json.loads(project.get("photos") or "[]")
 
+    body = await request.json()
+    business_unit = body.get("business_unit", "workroom")
+
     # Build rooms list for the quote from measurements + treatment info
     rooms = []
     for m in measurements_raw:
@@ -776,6 +779,7 @@ async def convert_to_quote(request: Request, project_id: str):
             for w in room.get("windows", [])
         ],
         "valid_days": 30,
+        "business_unit": business_unit,
     }
 
     # Create the quote via the quotes router
