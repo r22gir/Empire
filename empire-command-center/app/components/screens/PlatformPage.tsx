@@ -5,9 +5,11 @@ import {
   Server, Activity, Brain, Code, Shield, Cpu, HardDrive, Wifi, Database,
   Globe, ChevronDown, ChevronRight, Key, Lock, AlertTriangle, CheckCircle2,
   RefreshCw, Eye, EyeOff, Loader2, ExternalLink, Layers, Zap, BookOpen, CreditCard,
+  Smartphone,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import PaymentModule from '../business/payments/PaymentModule';
+import DesktopPairing from '../platform/DesktopPairing';
 
 // All data fetched live from backend
 interface LiveData {
@@ -453,6 +455,11 @@ export default function PlatformPage() {
           </div>
         </CollapsibleSection>
       )}
+
+      {/* ── DESKTOP TOOLS ── */}
+      <CollapsibleSection title="Desktop Pairing" icon={<Smartphone size={15} />} iconColor="#06b6d4" expanded={expanded.pairing} onToggle={() => toggle('pairing')}>
+        <DesktopPairing />
+      </CollapsibleSection>
 
       {/* ── PAYMENTS ── */}
       <CollapsibleSection title="Payments" icon={<CreditCard size={15} />} iconColor="#16a34a" expanded={expanded.payments} onToggle={() => toggle('payments')}>
