@@ -15,6 +15,7 @@ const RA_API = `${API}/relist`;
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
   { id: 'scout', label: 'Product Scout', icon: Search },
+  { id: 'deals', label: 'AI Deal Finder', icon: Target },
   { id: 'listings', label: 'My Listings', icon: Package },
   { id: 'crosslist', label: 'Cross-List', icon: Link },
   { id: 'orders', label: 'Orders', icon: ShoppingCart },
@@ -42,8 +43,9 @@ export default function RelistAppPage({ initialSection }: RelistAppPageProps) {
 
   const renderContent = () => {
     switch (section) {
-      case 'dashboard': return <DashboardSection />;
+      case 'dashboard': return <DashboardSection onNav={(s) => setSection(s as Section)} />;
       case 'scout': return <ScoutSection />;
+      case 'deals': return <DealsSection />;
       case 'listings': return <ListingsSection />;
       case 'crosslist': return <CrossListSection />;
       case 'orders': return <OrdersSection />;
@@ -52,7 +54,7 @@ export default function RelistAppPage({ initialSection }: RelistAppPageProps) {
       case 'analytics': return <AnalyticsSection />;
       case 'plans': return <PlansSection />;
       case 'docs': return <ProductDocs product="relist" />;
-      default: return <DashboardSection />;
+      default: return <DashboardSection onNav={(s) => setSection(s as Section)} />;
     }
   };
 
@@ -103,30 +105,32 @@ function Kpi({ label, value, color, sub }: { label: string; value: string | numb
   );
 }
 
-function DashboardSection() {
+function DashboardSection({ onNav }: { onNav?: (s: string) => void }) {
   const [stats, setStats] = useState<any>({});
   useEffect(() => {
     fetch(`${RA_API}/analytics/dashboard`).then(r => r.json()).then(setStats).catch(() => {});
   }, []);
+  const nav = (id: string) => { if (onNav) onNav(id); };
   return (
     <div>
       <SH title="RelistApp Dashboard" subtitle="Drop-ship arbitrage overview" />
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <Kpi label="Total Profit (Month)" value={`$${(stats.monthly_profit || 0).toFixed(2)}`} color="#16a34a" />
-        <Kpi label="Active Listings" value={stats.active_listings ?? '—'} color="#06b6d4" />
-        <Kpi label="Pending Orders" value={stats.pending_orders ?? '—'} color="#b8960c" />
-        <Kpi label="Average ROI" value={`${(stats.avg_roi || 0).toFixed(0)}%`} color="#8b5cf6" />
+        <Kpi label="Total Profit" value={`$${(stats.financials?.total_profit || 0).toFixed(2)}`} color="#16a34a" />
+        <Kpi label="Active Listings" value={stats.listings?.active ?? '—'} color="#06b6d4" />
+        <Kpi label="Pending Orders" value={stats.orders?.pending ?? '—'} color="#b8960c" />
+        <Kpi label="Source Products" value={stats.source_products ?? '—'} color="#8b5f6" />
       </div>
       <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16 }}>
         <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Quick Actions</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {[
-            { label: 'Import Product URL', icon: Link, color: '#06b6d4' },
-            { label: 'AI Deal Finder', icon: Target, color: '#b8960c' },
-            { label: 'Check All Prices', icon: RefreshCw, color: '#16a34a' },
-            { label: 'View Orders', icon: ShoppingCart, color: '#8b5cf6' },
+            { label: 'Import Product URL', icon: Link, color: '#06b6d4', section: 'scout' },
+            { label: 'AI Deal Finder', icon: Target, color: '#b8960c', section: 'deals' },
+            { label: 'Check All Prices', icon: RefreshCw, color: '#16a34a', section: 'pricemon' },
+            { label: 'View Orders', icon: ShoppingCart, color: '#8b5f6', section: 'orders' },
           ].map((a, i) => (
-            <button key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', border: '1px solid #e5e2dc', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}>
+            <button key={i} onClick={() => nav(a.section)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', border: '1px solid #e5e2dc', borderRadius: 8, background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 500 }}>
               <a.icon size={14} style={{ color: a.color }} /> {a.label}
             </button>
           ))}
@@ -139,35 +143,232 @@ function DashboardSection() {
 function ScoutSection() {
   const [url, setUrl] = useState('');
   const [sources, setSources] = useState<any[]>([]);
-  useEffect(() => { fetch(`${RA_API}/sources`).then(r => r.json()).then(d => setSources(d.sources || d || [])).catch(() => {}); }, []);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState('');
+  const [lastResult, setLastResult] = useState<any>(null);
+  useEffect(() => { fetch(`${RA_API}/sources`).then(r => r.json()).then(d => setSources(d.items || [])).catch(() => {}); }, []);
+
+  const doImport = async () => {
+    if (!url.trim()) return;
+    setImporting(true);
+    setError('');
+    try {
+      const res = await fetch(`${RA_API}/sources/import-full`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Import failed');
+      setLastResult(data);
+      setSources(prev => [data, ...prev.filter(s => s.id !== data.id)]);
+      setUrl('');
+    } catch (e: any) {
+      setError(e.message || 'Import failed');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   return (
     <div>
-      <SH title="Product Scout" subtitle="Find products to resell at a profit" />
+      <SH title="Product Scout" subtitle="Import products to analyze and resell at a profit" />
       <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Import Product from URL</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <input value={url} onChange={e => setUrl(e.target.value)} placeholder="Paste Amazon, Walmart, or wholesale URL..."
+          <input value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => e.key === 'Enter' && doImport()}
+            placeholder="Paste Amazon, Walmart, AliExpress, or any product URL..."
             style={{ flex: 1, padding: '8px 12px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
-          <button style={{ padding: '8px 16px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
-            Import
+          <button onClick={doImport} disabled={importing}
+            style={{ padding: '8px 16px', background: importing ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: importing ? 'wait' : 'pointer' }}>
+            {importing ? 'Importing...' : 'Import'}
           </button>
         </div>
+        {error && <div style={{ marginTop: 8, fontSize: 11, color: '#dc2626' }}>{error}</div>}
+        {lastResult && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: '#f0fdf4', border: '1px solid #86efac' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#16a34a', marginBottom: 4 }}>
+              ✓ Imported: {lastResult.title?.slice(0, 60)}...
+            </div>
+            <div style={{ display: 'flex', gap: 16, fontSize: 11, color: '#666' }}>
+              <span>Source: <b>${lastResult.price?.toFixed(2) || '?'}</b></span>
+              <span>Market: <b>${(lastResult.deal?.market_price || 0).toFixed(2)}</b></span>
+              <span>Est. Profit: <b style={{ color: '#16a34a' }}>${(lastResult.market_estimate?.estimated_profit || 0).toFixed(2)}</b></span>
+              <span>Score: <b>{lastResult.deal?.score || 0}/100</b> <span style={{ color: lastResult.deal?.label === 'strong' ? '#16a34a' : lastResult.deal?.label === 'medium' ? '#ca8a04' : '#dc2626' }}>({lastResult.deal?.label})</span></span>
+            </div>
+            {lastResult.deal?.reason && <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>{lastResult.deal.reason}</div>}
+          </div>
+        )}
       </div>
+      <div style={{ fontSize: 11, color: '#888', marginBottom: 12 }}>{sources.length} products imported</div>
       {sources.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No source products yet. Import a URL or use AI Deal Finder.</div>
+        <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
+          No source products yet. Paste a URL above to import your first product.
+        </div>
       ) : (
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-          {sources.map((s: any) => (
-            <div key={s.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{s.title}</div>
-              <div style={{ fontSize: 11, color: '#888' }}>{s.source_platform} — ${(s.source_price || 0).toFixed(2)}</div>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                <button style={{ fontSize: 10, padding: '4px 10px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>Relist</button>
-                <button style={{ fontSize: 10, padding: '4px 10px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Check Price</button>
+          {sources.map((s: any) => {
+            let deal = { score: 0, label: 'weak', reason: '' };
+            try { if (s.notes) { const n = typeof s.notes === 'string' ? JSON.parse(s.notes) : s.notes; deal = n.deal_score || deal; } } catch {}
+            return (
+              <div key={s.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{s.title?.slice(0, 60)}</div>
+                <div style={{ fontSize: 11, color: '#888' }}>{s.source_platform} — ${(s.source_price || 0).toFixed(2)}</div>
+                {s.market_estimate && (
+                  <div style={{ fontSize: 11, marginTop: 4 }}>
+                    <span style={{ color: '#16a34a' }}>Profit ${(s.market_estimate.estimated_profit || 0).toFixed(2)}</span>
+                    <span style={{ marginLeft: 8, color: '#888' }}>ROI {(s.market_estimate.roi_percent || 0).toFixed(0)}%</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button style={{ fontSize: 10, padding: '4px 10px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
+                    onClick={async () => {
+                      await fetch(`${RA_API}/listings/from-source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_id: s.id, platform: 'ebay', your_price: s.market_estimate?.market_price || s.source_price * 2 || 29.99, platform_fee_percent: 13 }) });
+                    }}>
+                    Create Draft
+                  </button>
+                  <button style={{ fontSize: 10, padding: '4px 10px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+                    onClick={async () => { await fetch(`${RA_API}/sources/${s.id}/analyze`, { method: 'POST' }); }}>
+                    Refresh
+                  </button>
+                </div>
               </div>
-            </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DealsSection() {
+  const [deals, setDeals] = useState<any[]>([]);
+  const [totals, setTotals] = useState<any>({});
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('score');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [creating, setCreating] = useState(false);
+
+  const loadDeals = () => {
+    setLoading(true);
+    fetch(`${RA_API}/deals?sort_by=${sortBy}&limit=100`)
+      .then(r => r.json())
+      .then(d => { setDeals(d.deals || []); setTotals({ strong: d.strong, medium: d.medium, weak: d.weak, total: d.total }); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+
+  useEffect(() => { loadDeals(); }, [sortBy]);
+
+  const filtered = filter === 'all' ? deals : deals.filter((d: any) => d.deal_label === filter);
+
+  const toggleSelect = (id: number) => {
+    setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  };
+
+  const bulkCreateDrafts = async (platform = 'ebay') => {
+    if (selected.size === 0) return;
+    setCreating(true);
+    for (const id of selected) {
+      const d = deals.find((x: any) => x.id === id);
+      if (!d) continue;
+      const yourPrice = d.market_estimate?.market_price || d.source_price * 2;
+      await fetch(`${RA_API}/listings/from-source`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_id: id, platform, your_price: yourPrice, platform_fee_percent: 13 }),
+      });
+    }
+    setSelected(new Set());
+    setCreating(false);
+  };
+
+  const labelColor = (label: string) => label === 'strong' ? '#16a34a' : label === 'medium' ? '#ca8a04' : '#dc2626';
+
+  return (
+    <div>
+      <SH title="AI Deal Finder" subtitle="Scored arbitrage opportunities ranked by profit potential" />
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        <Kpi label="Strong Deals" value={totals.strong ?? '—'} color="#16a34a" />
+        <Kpi label="Medium Deals" value={totals.medium ?? '—'} color="#ca8a04" />
+        <Kpi label="Weak Deals" value={totals.weak ?? '—'} color="#dc2626" />
+        <Kpi label="Total" value={totals.total ?? '—'} />
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['all', 'strong', 'medium', 'weak'].map(f => (
+            <button key={f} onClick={() => setFilter(f)} style={{
+              fontSize: 10, padding: '4px 12px', borderRadius: 12, cursor: 'pointer',
+              border: filter === f ? '2px solid #06b6d4' : '1px solid #e5e2dc',
+              background: filter === f ? '#ecfeff' : '#fff', color: filter === f ? '#06b6d4' : '#666', fontWeight: filter === f ? 600 : 400,
+            }}>
+              {f.charAt(0).toUpperCase() + f.slice(1)} ({f === 'all' ? deals.length : deals.filter((d: any) => d.deal_label === f).length})
+            </button>
           ))}
+        </div>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ fontSize: 11, padding: '4px 8px', border: '1px solid #e5e2dc', borderRadius: 6 }}>
+          <option value="score">Sort: Score</option>
+          <option value="profit">Sort: Profit</option>
+          <option value="roi">Sort: ROI</option>
+          <option value="price">Sort: Price</option>
+        </select>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {selected.size > 0 && (
+            <>
+              <span style={{ fontSize: 11, color: '#666', alignSelf: 'center' }}>{selected.size} selected</span>
+              <button onClick={() => bulkCreateDrafts('ebay')} disabled={creating} style={{ fontSize: 10, padding: '6px 12px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: creating ? 'wait' : 'pointer' }}>
+                {creating ? 'Creating...' : `Create ${selected.size} Drafts`}
+              </button>
+              <button onClick={() => setSelected(new Set())} style={{ fontSize: 10, padding: '6px 10px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Clear</button>
+            </>
+          )}
+        </div>
+      </div>
+      {loading ? <div style={{ textAlign: 'center', padding: 40, color: '#999' }}><Loader2 size={20} className="animate-spin" style={{ color: '#06b6d4' }} /></div> :
+       filtered.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>No deals found. Import source products first.</div> : (
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#f5f3ef', borderBottom: '2px solid #e5e2dc' }}>
+              <th style={{ padding: '8px 6px', width: 32 }}><input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={() => selected.size === filtered.length ? setSelected(new Set()) : setSelected(new Set(filtered.map((d: any) => d.id)))} /></th>
+              <th style={{ padding: 8, textAlign: 'left' }}>Product</th>
+              <th style={{ padding: 8 }}>Source</th>
+              <th style={{ padding: 8 }}>Cost</th>
+              <th style={{ padding: 8 }}>Market</th>
+              <th style={{ padding: 8 }}>Profit</th>
+              <th style={{ padding: 8 }}>ROI</th>
+              <th style={{ padding: 8 }}>Score</th>
+              <th style={{ padding: 8 }}>Actions</th>
+            </tr></thead>
+            <tbody>{filtered.map((d: any) => (
+              <tr key={d.id} style={{ borderBottom: '1px solid #f0ede6', background: selected.has(d.id) ? '#f0fdf4' : 'transparent' }}>
+                <td style={{ padding: '6px' }}><input type="checkbox" checked={selected.has(d.id)} onChange={() => toggleSelect(d.id)} /></td>
+                <td style={{ padding: '6px 8px', maxWidth: 200 }}>
+                  <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.title}</div>
+                  {d.deal_reason && <div style={{ fontSize: 10, color: '#888', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.deal_reason}</div>}
+                </td>
+                <td style={{ padding: 8, color: '#666' }}>{d.source_platform}</td>
+                <td style={{ padding: 8, fontWeight: 600 }}>${(d.source_price || 0).toFixed(2)}</td>
+                <td style={{ padding: 8, color: '#16a34a' }}>${(d.market_estimate?.market_price || 0).toFixed(2)}</td>
+                <td style={{ padding: 8, fontWeight: 600, color: '#16a34a' }}>${(d.estimated_profit || 0).toFixed(2)}</td>
+                <td style={{ padding: 8, color: '#666' }}>{(d.roi_percent || 0).toFixed(0)}%</td>
+                <td style={{ padding: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: labelColor(d.deal_label) }}>{d.deal_score}/100</span>
+                  <span style={{ fontSize: 10, marginLeft: 4, color: labelColor(d.deal_label) }}>{d.deal_label}</span>
+                </td>
+                <td style={{ padding: 8 }}>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button style={{ fontSize: 10, padding: '3px 8px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}
+                      onClick={async () => {
+                        const yourPrice = d.market_estimate?.market_price || d.source_price * 2;
+                        await fetch(`${RA_API}/listings/from-source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_id: d.id, platform: 'ebay', your_price: yourPrice, platform_fee_percent: 13 }) });
+                      }}>Draft</button>
+                    <button style={{ fontSize: 10, padding: '3px 8px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                      onClick={async () => { await fetch(`${RA_API}/sources/${d.id}/analyze`, { method: 'POST' }); loadDeals(); }}>Refresh</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
         </div>
       )}
     </div>
@@ -177,7 +378,7 @@ function ScoutSection() {
 function ListingsSection() {
   const [listings, setListings] = useState<any[]>([]);
   const [filter, setFilter] = useState('all');
-  useEffect(() => { fetch(`${RA_API}/listings`).then(r => r.json()).then(d => setListings(d.listings || d || [])).catch(() => {}); }, []);
+  useEffect(() => { fetch(`${RA_API}/listings`).then(r => r.json()).then(d => setListings(d.items || d.listings || [])).catch(() => {}); }, []);
   const filtered = filter === 'all' ? listings : listings.filter((l: any) => l.status === filter);
   return (
     <div>
@@ -222,7 +423,7 @@ function CrossListSection() {
 
 function OrdersSection() {
   const [orders, setOrders] = useState<any[]>([]);
-  useEffect(() => { fetch(`${RA_API}/orders`).then(r => r.json()).then(d => setOrders(d.orders || d || [])).catch(() => {}); }, []);
+  useEffect(() => { fetch(`${RA_API}/orders`).then(r => r.json()).then(d => setOrders(d.items || d.orders || [])).catch(() => {}); }, []);
   const STAGES = ['Buyer Paid', 'Source Ordered', 'Shipped', 'Delivered', 'Completed'];
   const stageKeys = ['new', 'source_ordered', 'shipped', 'delivered', 'completed'];
   return (
@@ -249,7 +450,77 @@ function OrdersSection() {
 }
 
 function PriceMonitorSection() {
-  return <div><SH title="Price Monitor" subtitle="Watch source prices for changes" /><div style={{ textAlign: 'center', padding: 40, color: '#999' }}>No products being monitored. Add source products first.</div></div>;
+  const [sources, setSources] = useState<any[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [results, setResults] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { fetch(`${RA_API}/sources`).then(r => r.json()).then(d => setSources(d.items || [])).catch(() => {}).finally(() => setLoading(false)); }, []);
+
+  const checkAll = async () => {
+    setChecking(true);
+    setResults(null);
+    try {
+      const res = await fetch(`${RA_API}/sources/bulk-refresh`, { method: 'POST' });
+      const data = await res.json();
+      setResults(data);
+      setSources(prev => prev.map((s: any) => { const r = data.results?.find((x: any) => x.id === s.id); return r ? { ...s, last_checked: new Date().toISOString() } : s; }));
+    } catch {}
+    setChecking(false);
+  };
+
+  const recColor = (r: string) => r === 'keep' ? '#16a34a' : r === 'reprice' ? '#ca8a04' : r === 'review' ? '#dc2626' : '#888';
+
+  return (
+    <div>
+      <SH title="Price Monitor" subtitle="Watch source prices for changes" action={
+        <button onClick={checkAll} disabled={checking || sources.length === 0} style={{ padding: '8px 16px', background: checking ? '#9ca3af' : '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: checking ? 'wait' : 'pointer' }}>
+          {checking ? 'Checking...' : 'Check All Prices'}
+        </button>
+      } />
+      {results && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          {[['keep', 'Keep'], ['reprice', 'Reprice'], ['review', 'Review'], ['delist', 'Delist']].map(([r, label]) => (
+            <div key={r} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, padding: '10px 14px', flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: recColor(r as string) }}>{results.summary?.[r] ?? 0}</div>
+              <div style={{ fontSize: 10, color: '#888' }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {loading ? <div style={{ textAlign: 'center', padding: 40, color: '#999' }}><Loader2 size={20} className="animate-spin" style={{ color: '#06b6d4' }} /></div> :
+       sources.length === 0 ? <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>No source products yet. Import products from the Product Scout first.</div> : (
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, overflow: 'hidden' }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: '#f5f3ef', borderBottom: '2px solid #e5e2dc' }}>
+              <th style={{ padding: 8, textAlign: 'left' }}>Product</th>
+              <th style={{ padding: 8 }}>Prev Price</th>
+              <th style={{ padding: 8 }}>Current</th>
+              <th style={{ padding: 8 }}>Change</th>
+              <th style={{ padding: 8 }}>Est. Profit</th>
+              <th style={{ padding: 8 }}>Recommendation</th>
+            </tr></thead>
+            <tbody>{sources.map((s: any) => {
+              const r = results?.results?.find((x: any) => x.id === s.id);
+              return (
+                <tr key={s.id} style={{ borderBottom: '1px solid #f0ede6' }}>
+                  <td style={{ padding: 8, fontWeight: 500, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</td>
+                  <td style={{ padding: 8, color: '#888' }}>{r ? `$${(r.prev_price || 0).toFixed(2)}` : '—'}</td>
+                  <td style={{ padding: 8, fontWeight: 600 }}>${(s.source_price || 0).toFixed(2)}</td>
+                  <td style={{ padding: 8, fontWeight: 600, color: r?.price_change > 0 ? '#16a34a' : r?.price_change < 0 ? '#dc2626' : '#888' }}>
+                    {r ? (r.price_change > 0 ? '+' : '') + `$${r.price_change.toFixed(2)}` : '—'}
+                  </td>
+                  <td style={{ padding: 8, color: '#16a34a', fontWeight: 600 }}>${(r?.estimated_profit || s.market_estimate?.estimated_profit || 0).toFixed(2)}</td>
+                  <td style={{ padding: 8 }}>
+                    {r ? <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 8, background: recColor(r.recommendation) + '20', color: recColor(r.recommendation) }}>{r.recommendation.toUpperCase()}</span> : '—'}
+                  </td>
+                </tr>
+              );
+            })}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function CalculatorSection() {

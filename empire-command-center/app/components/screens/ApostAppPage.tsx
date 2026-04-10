@@ -1598,6 +1598,34 @@ export default function ApostAppPage() {
     </div>
   );
 
+  const downloadFromLibrary = async (form: typeof FORMS_LIBRARY[0]) => {
+    try {
+      const emptyFields: Record<string, string> = {};
+      form.fields.forEach(f => { emptyFields[f] = ''; });
+      const res = await fetch(`${API}/apostapp/forms/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          form_name: form.name,
+          agency: form.agency,
+          purpose: form.purpose,
+          fee: form.fee,
+          fields: emptyFields,
+          client_name: '',
+          order_number: '',
+          notes: 'Blank form — fill in fields before submitting',
+        }),
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, '_blank');
+        if (win) win.focus();
+      }
+    } catch { alert('Failed to generate form. Make sure the backend is running.'); }
+  };
+
   const renderFormsLibrary = () => {
     const filtered = formsSearch
       ? FORMS_LIBRARY.filter(f => f.name.toLowerCase().includes(formsSearch.toLowerCase()) || f.agency.toLowerCase().includes(formsSearch.toLowerCase()) || f.purpose.toLowerCase().includes(formsSearch.toLowerCase()))
@@ -1668,15 +1696,15 @@ export default function ApostAppPage() {
         responsible_party: selectedClient?.fullName || '', business_name: '',
         address: `${selectedClient?.street || ''}, ${selectedClient?.city || ''}, ${selectedClient?.state || ''} ${selectedClient?.zip || ''}`.replace(/^, /, ''),
         dob: selectedClient?.dateOfBirth || '', ssn: selectedClient?.ssnLast4 ? `***-**-${selectedClient.ssnLast4}` : '',
-        document_type: selectedClient?.documents?.[0]?.docType || selectedOrder?.documents?.[0]?.doc_type || '',
+        document_type: selectedClient?.documents?.[0]?.docType || ((selectedOrder as any)?.documents?.[0]?.doc_type as any) || '',
         date_of_document: new Date().toISOString().split('T')[0],
-        destination_country: selectedClient?.documents?.[0]?.destinationCountry || selectedOrder?.documents?.[0]?.destination_country || '',
-        document_description: (selectedClient?.documents || []).map((d: any) => d.docType).join(', ') || (selectedOrder?.documents || []).map((d: any) => d.doc_type).join(', ') || '',
-        document_info: (selectedClient?.documents || []).map((d: any) => d.docType).join(', ') || (selectedOrder?.documents || []).map((d: any) => d.doc_type).join(', ') || '',
+        destination_country: selectedClient?.documents?.[0]?.destinationCountry || ((selectedOrder as any)?.documents?.[0]?.destination_country as any) || '',
+        document_description: (selectedClient?.documents || []).map((d: any) => d.docType).join(', ') || ((selectedOrder as any)?.documents || []).map((d: any) => d.doc_type).join(', ') || '',
+        document_info: (selectedClient?.documents || []).map((d: any) => d.docType).join(', ') || ((selectedOrder as any)?.documents || []).map((d: any) => d.doc_type).join(', ') || '',
         notary_info: '', notary_county: '', notary_details: '', notary_name: '', commission_expiry: '',
-        state: selectedClient?.state || selectedOrder?.documents?.[0]?.state_of_origin || '',
+        state: selectedClient?.state || ((selectedOrder as any)?.documents?.[0]?.state_of_origin as any) || '',
         date: new Date().toISOString().split('T')[0],
-        type: selectedClient?.documents?.[0]?.docType || selectedOrder?.documents?.[0]?.doc_type || '', relationship: '', purpose: '',
+        type: selectedClient?.documents?.[0]?.docType || ((selectedOrder as any)?.documents?.[0]?.doc_type as any) || '', relationship: '', purpose: '',
         fingerprints: 'Required — schedule at local FBI office or approved merchant',
         notaries: '',
       };
@@ -1691,7 +1719,7 @@ export default function ApostAppPage() {
     const downloadForm = async () => {
       if (!selectedForm) return;
       const clientName = selectedClient?.fullName || selectedOrder?.customer?.name || '';
-      const orderNumber = selectedOrder?.orderNumber || selectedOrder?.order_number || '';
+      const orderNumber = selectedOrder?.orderNumber || (selectedOrder as any)?.order_number || '';
       try {
         const res = await fetch(`${API}/apostapp/forms/generate`, {
           method: 'POST',
@@ -1705,34 +1733,6 @@ export default function ApostAppPage() {
             client_name: clientName,
             order_number: orderNumber,
             notes: '',
-          }),
-        });
-        if (res.ok) {
-          const html = await res.text();
-          const blob = new Blob([html], { type: 'text/html' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (win) win.focus();
-        }
-      } catch { alert('Failed to generate form. Make sure the backend is running.'); }
-    };
-
-    const downloadFromLibrary = async (form: typeof FORMS_LIBRARY[0]) => {
-      try {
-        const emptyFields: Record<string, string> = {};
-        form.fields.forEach(f => { emptyFields[f] = ''; });
-        const res = await fetch(`${API}/apostapp/forms/generate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            form_name: form.name,
-            agency: form.agency,
-            purpose: form.purpose,
-            fee: form.fee,
-            fields: emptyFields,
-            client_name: '',
-            order_number: '',
-            notes: 'Blank form — fill in fields before submitting',
           }),
         });
         if (res.ok) {
@@ -1779,14 +1779,14 @@ export default function ApostAppPage() {
               <label style={labelStyle}>Select Order (optional — for real order data)</label>
               <select value={aiFillOrder} onChange={e => { setAiFillOrder(e.target.value); setAiFillFields({}); setAiFillGenerated(false); }} style={inputStyle}>
                 <option value="">Choose an order...</option>
-                {orders.map(o => <option key={o.id} value={o.id}>{o.orderNumber || o.id} — {o.customer?.name || o.customer_name || 'No name'}</option>)}
+                {orders.map(o => <option key={o.id} value={o.id}>{o.orderNumber || o.id} — {o.customer?.name || (o as any).customer_name || 'No name'}</option>)}
               </select>
             </div>
             {selectedOrder && (
               <div style={{ padding: '8px 12px', background: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0', fontSize: 12, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                <div style={{ fontWeight: 600 }}>{selectedOrder.customer?.name || selectedOrder.customer_name || '—'}</div>
-                <div style={{ color: '#6b7280' }}>{selectedOrder.documents?.length || 0} doc(s) · {selectedOrder.status} · {selectedOrder.shippingMethod || selectedOrder.shipping_method || 'standard'}</div>
-                <div style={{ color: '#6b7280' }}>{selectedOrder.documents?.[0]?.destinationCountry || selectedOrder.documents?.[0]?.destination_country || ''}</div>
+                <div style={{ fontWeight: 600 }}>{selectedOrder.customer?.name || (selectedOrder as any).customer_name || '—'}</div>
+                <div style={{ color: '#6b7280' }}>{selectedOrder.documents?.length || 0} doc(s) · {selectedOrder.status} · {selectedOrder.shippingMethod || (selectedOrder as any).shipping_method || 'standard'}</div>
+                <div style={{ color: '#6b7280' }}>{selectedOrder.documents?.[0]?.destinationCountry || (selectedOrder.documents?.[0] as any)?.destination_country || ''}</div>
               </div>
             )}
           </div>

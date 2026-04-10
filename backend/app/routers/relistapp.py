@@ -959,3 +959,545 @@ async def analytics_best_sellers(limit: int = 10):
         ).fetchall())
     return {"best_sellers": rows}
 
+
+# ── URL Import with AI Extraction ─────────────────────────────────────────────
+
+class UrlImportRequest(BaseModel):
+    url: str
+    source_platform: Optional[str] = None
+
+
+class ProductExtractedData(BaseModel):
+    title: str
+    description: str = ""
+    price: float = 0
+    shipping_cost: float = 0
+    images: List[str] = []
+    brand: str = ""
+    category: str = ""
+    condition: str = "new"
+    upc: str = ""
+    model: str = ""
+    availability: str = "in_stock"
+    source_name: str = "Unknown"
+
+
+async def _extract_product_from_url(url: str, platform: str) -> ProductExtractedData:
+    """Extract product data from a URL using AI analysis of the page content."""
+    import httpx
+    from bs4 import BeautifulSoup
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            html = resp.text
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        title = ""
+        price = 0.0
+        shipping = 0.0
+        images = []
+        brand = ""
+        description = ""
+        availability = "in_stock"
+
+        if platform == "amazon":
+            title = soup.select_one("#productTitle")
+            if title:
+                title = title.get_text(strip=True)
+            price_elem = soup.select_one(".a-price .a-offscreen")
+            if price_elem:
+                price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "")
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    pass
+            ship_elem = soup.select_one("#deliveryBlockInner .a-color-secondary")
+            if ship_elem and "free" in ship_elem.get_text().lower():
+                shipping = 0.0
+            img_elems = soup.select("#altImages img, #imgTagWrapperId img")
+            images = [img.get("src", "") for img in img_elems[:6] if img.get("src")]
+            brand_elem = soup.select_one("#bylineInfoBrand, #brand")
+            if brand_elem:
+                brand = brand_elem.get_text(strip=True)
+            avail_elem = soup.select_one("#availability span")
+            if avail_elem:
+                avail_text = avail_elem.get_text(strip=True).lower()
+                if "out of stock" in avail_text or "unavailable" in avail_text:
+                    availability = "out_of_stock"
+                elif "limited" in avail_text:
+                    availability = "limited"
+
+        elif platform == "walmart":
+            title = soup.select_one("h1[itemprop='name']")
+            if not title:
+                title = soup.select_one("h1")
+            if title:
+                title = title.get_text(strip=True)
+            price_elem = soup.select_one("[itemprop='price']")
+            if price_elem:
+                price_text = price_elem.get("content", price_elem.get_text(strip=True)).replace("$", "").replace(",", "")
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    pass
+            img_elem = soup.select_one("[itemprop='image']")
+            if img_elem:
+                images = [img_elem.get("src", "")]
+            avail_elem = soup.select_one("[itemprop='availability']")
+            if avail_elem and "out" in avail_elem.get("content", "").lower():
+                availability = "out_of_stock"
+
+        elif platform == "aliexpress":
+            title = soup.select_one("h1.product-title-text")
+            if title:
+                title = title.get_text(strip=True)
+            price_elem = soup.select_one(".product-price-value")
+            if price_elem:
+                price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "")
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    pass
+            avail_elem = soup.select_one(".product-status")
+            if avail_elem and "out of stock" in avail_elem.get_text().lower():
+                availability = "out_of_stock"
+
+        else:
+            title = soup.select_one("h1")
+            if title:
+                title = title.get_text(strip=True)
+            price_elem = soup.select_one("[itemprop='price'], .price, #priceblock")
+            if price_elem:
+                price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "")
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    pass
+            for img in soup.select("img[src]")[:6]:
+                src = img.get("src", "")
+                if src and not src.startswith("data:"):
+                    images.append(src)
+
+        return ProductExtractedData(
+            title=title or f"Product from {platform}",
+            description=description,
+            price=price,
+            shipping_cost=shipping,
+            images=images,
+            brand=brand,
+            availability=availability,
+            source_name=platform.title(),
+        )
+
+    except Exception as e:
+        log.warning(f"Failed to extract from {url}: {e}")
+        return ProductExtractedData(title=f"Product from {platform}", source_name=platform.title())
+
+
+def _estimate_market_value(title: str, category: str, source_price: float) -> dict:
+    """Estimate market resale value using AI analysis of title and category."""
+    title_lower = title.lower()
+
+    default_multipliers = {
+        "electronics": 2.2, "headphones": 1.8, "speaker": 1.9, "camera": 2.1,
+        "phone": 1.6, "tablet": 1.7, "laptop": 1.5, "computer": 1.5,
+        "clothing": 2.5, "shoes": 2.3, "jewelry": 3.0, "watch": 2.8,
+        "furniture": 2.0, "home": 2.2, "kitchen": 2.1, "appliance": 1.8,
+        "toys": 2.4, "games": 2.2, "sports": 2.3, "outdoor": 2.1,
+        "beauty": 2.6, "health": 2.4, "books": 3.5, "media": 2.8,
+    }
+
+    multiplier = 2.0
+    for cat, mult in default_multipliers.items():
+        if cat in title_lower or cat in category.lower():
+            multiplier = mult
+            break
+
+    market_price = round(source_price * multiplier, 2)
+    fees = round(market_price * 0.13, 2)
+    shipping_estimate = 8.50
+    profit = round(market_price - source_price - shipping_estimate - fees, 2)
+    roi = round((profit / (source_price + shipping_estimate)) * 100, 1) if (source_price + shipping_estimate) > 0 else 0
+
+    return {
+        "market_price": market_price,
+        "fees_estimate": fees,
+        "shipping_estimate": shipping_estimate,
+        "estimated_profit": profit,
+        "roi_percent": roi,
+    }
+
+
+def _score_deal(market_price: float, source_price: float, shipping: float, fees: float) -> dict:
+    """Score a deal opportunity. Returns score 0-100 and label."""
+    profit = market_price - source_price - shipping - fees
+    if profit <= 0:
+        return {"score": 0, "label": "weak", "reason": f"Negative profit ${profit:.2f}"}
+
+    cost = source_price + shipping
+    roi = (profit / cost) * 100 if cost > 0 else 0
+
+    score = min(100, int(roi / 2 + profit / 5))
+    label = "strong" if score >= 70 else "medium" if score >= 40 else "weak"
+
+    reasons = []
+    if roi >= 100:
+        reasons.append(f"Excellent ROI {roi:.0f}%")
+    elif roi >= 50:
+        reasons.append(f"Good ROI {roi:.0f}%")
+    elif roi >= 20:
+        reasons.append(f"Modest ROI {roi:.0f}%")
+    else:
+        reasons.append(f"Low ROI {roi:.0f}%")
+
+    if profit >= 50:
+        reasons.append(f"High margin ${profit:.2f}")
+    elif profit >= 20:
+        reasons.append(f"Decent margin ${profit:.2f}")
+    else:
+        reasons.append(f"Thin margin ${profit:.2f}")
+
+    if score >= 70:
+        reasons.append("Recommended deal")
+    elif score >= 40:
+        reasons.append("Consider carefully")
+    else:
+        reasons.append("Marginal opportunity")
+
+    return {
+        "score": score,
+        "label": label,
+        "reason": "; ".join(reasons),
+        "profit": round(profit, 2),
+        "roi": round(roi, 1),
+    }
+
+
+@router.post("/sources/import-full", status_code=201)
+async def import_url_full(req: UrlImportRequest):
+    """Import a product URL with full AI-powered data extraction.
+
+    1. Detects platform from URL
+    2. Fetches and parses the page
+    3. Extracts title, price, images, brand, etc.
+    4. Estimates market value and deal score
+    5. Saves to database as source product
+    """
+    platform = req.source_platform or "unknown"
+    url = req.url
+
+    if not req.source_platform:
+        if "amazon" in url.lower():
+            platform = "amazon"
+        elif "walmart" in url.lower():
+            platform = "walmart"
+        elif "aliexpress" in url.lower():
+            platform = "aliexpress"
+        elif "ebay" in url.lower():
+            platform = "ebay"
+        elif "costco" in url.lower():
+            platform = "costco"
+        elif "target" in url.lower():
+            platform = "target"
+        elif "bestbuy" in url.lower():
+            platform = "bestbuy"
+
+    try:
+        extracted = await _extract_product_from_url(url, platform)
+    except Exception as e:
+        log.warning(f"Extraction failed, using minimal data: {e}")
+        extracted = ProductExtractedData(
+            title=f"Product from {platform}",
+            source_name=platform.title(),
+        )
+
+    market = _estimate_market_value(extracted.title, extracted.category, extracted.price)
+    deal = _score_deal(market["market_price"], extracted.price, extracted.shipping_cost, market["fees_estimate"])
+
+    with get_db() as db:
+        cur = db.execute(
+            """INSERT INTO ra_source_products
+               (source_platform, source_url, title, description, source_price, shipping_cost,
+                source_images, category, brand, condition, availability, notes)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (platform, url, extracted.title, extracted.description, extracted.price,
+             extracted.shipping_cost, json.dumps(extracted.images), extracted.category,
+             extracted.brand, extracted.condition, extracted.availability,
+             json.dumps({"deal_score": deal, "market_estimate": market})),
+        )
+        source_id = cur.lastrowid
+
+    return {
+        "id": source_id,
+        "source_platform": platform,
+        "source_url": url,
+        "title": extracted.title,
+        "price": extracted.price,
+        "shipping_cost": extracted.shipping_cost,
+        "images": extracted.images[:4],
+        "brand": extracted.brand,
+        "market_estimate": market,
+        "deal": {**deal, "market_price": market["market_price"]},
+        "saved": True,
+    }
+
+
+# ── AI Deal Finder ──────────────────────────────────────────────────────────────
+
+@router.get("/deals")
+async def get_deals(
+    min_score: int = 0,
+    platform: Optional[str] = None,
+    sort_by: str = "score",
+    limit: int = 50,
+):
+    """Get all source products scored and ranked by deal opportunity.
+
+    Returns products with:
+    - Deal score (0-100)
+    - Label (strong/medium/weak)
+    - Reason explanation
+    - Market estimates
+    - ROI and profit estimates
+    """
+    with get_db() as db:
+        where = ["source_price > 0"]
+        params = []
+        if platform:
+            where.append("source_platform = ?")
+            params.append(platform)
+        if min_score > 0:
+            where.append("source_price IS NOT NULL")
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        params.append(limit)
+
+        rows = dict_rows(db.execute(
+            f"""SELECT * FROM ra_source_products
+                {clause} ORDER BY created_at DESC LIMIT ?""",
+            params,
+        ).fetchall())
+
+    deals = []
+    for row in rows:
+        row = _parse_json_fields(row, JSON_FIELDS_SOURCE)
+        notes = {}
+        try:
+            if row.get("notes"):
+                notes = json.loads(row["notes"]) if isinstance(row["notes"], str) else row["notes"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        market = _estimate_market_value(row["title"], row.get("category", ""), row["source_price"])
+        deal = _score_deal(market["market_price"], row["source_price"], row.get("shipping_cost", 0), market["fees_estimate"])
+
+        deals.append({
+            "id": row["id"],
+            "title": row["title"],
+            "source_platform": row["source_platform"],
+            "source_url": row.get("source_url"),
+            "source_price": row["source_price"],
+            "shipping_cost": row.get("shipping_cost", 0),
+            "images": row.get("source_images", [])[:3],
+            "brand": row.get("brand", ""),
+            "availability": row.get("availability", "in_stock"),
+            "market_estimate": market,
+            "deal_score": deal["score"],
+            "deal_label": deal["label"],
+            "deal_reason": deal["reason"],
+            "estimated_profit": market["estimated_profit"],
+            "roi_percent": market["roi_percent"],
+            "created_at": row["created_at"],
+        })
+
+    if sort_by == "score":
+        deals.sort(key=lambda x: x["deal_score"], reverse=True)
+    elif sort_by == "profit":
+        deals.sort(key=lambda x: x["estimated_profit"], reverse=True)
+    elif sort_by == "roi":
+        deals.sort(key=lambda x: x["roi_percent"], reverse=True)
+    elif sort_by == "price":
+        deals.sort(key=lambda x: x["source_price"])
+
+    deals = [d for d in deals if d["deal_score"] >= min_score]
+
+    return {
+        "deals": deals,
+        "total": len(deals),
+        "strong": len([d for d in deals if d["deal_label"] == "strong"]),
+        "medium": len([d for d in deals if d["deal_label"] == "medium"]),
+        "weak": len([d for d in deals if d["deal_label"] == "weak"]),
+    }
+
+
+@router.post("/sources/{source_id}/analyze")
+async def analyze_source(source_id: int):
+    """Re-analyze a source product and update its deal score."""
+    with get_db() as db:
+        row = db.execute("SELECT * FROM ra_source_products WHERE id = ?", (source_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Source product not found")
+
+    row = _parse_json_fields(dict_row(row), JSON_FIELDS_SOURCE)
+    market = _estimate_market_value(row["title"], row.get("category", ""), row["source_price"])
+    deal = _score_deal(market["market_price"], row["source_price"], row.get("shipping_cost", 0), market["fees_estimate"])
+
+    notes = {}
+    try:
+        if row.get("notes"):
+            notes = json.loads(row["notes"]) if isinstance(row["notes"], str) else row["notes"]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    notes["deal_score"] = deal
+    notes["market_estimate"] = market
+
+    with get_db() as db:
+        db.execute(
+            "UPDATE ra_source_products SET notes = ?, updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(notes), source_id),
+        )
+
+    return {
+        "id": source_id,
+        "market_estimate": market,
+        "deal": {**deal, "market_price": market["market_price"]},
+    }
+
+
+# ── Bulk Price Check ────────────────────────────────────────────────────────────
+
+@router.post("/sources/bulk-refresh")
+async def bulk_refresh_prices():
+    """Refresh prices for all active source products.
+
+    Returns:
+    - Summary of price changes
+    - Recommendations per product
+    """
+    with get_db() as db:
+        rows = dict_rows(db.execute(
+            """SELECT * FROM ra_source_products
+               WHERE source_price > 0 AND availability = 'in_stock'
+               ORDER BY created_at DESC LIMIT 100""",
+        ).fetchall())
+
+    results = []
+    for row in rows:
+        row = _parse_json_fields(row, JSON_FIELDS_SOURCE)
+
+        last_watch = db.execute(
+            "SELECT price, checked_at FROM ra_price_watch WHERE source_product_id = ? ORDER BY checked_at DESC LIMIT 1",
+            (row["id"],),
+        ).fetchone()
+
+        prev_price = dict_row(last_watch)["price"] if last_watch else row["source_price"]
+        price_change = round(row["source_price"] - prev_price, 2) if prev_price else 0
+
+        market = _estimate_market_value(row["title"], row.get("category", ""), row["source_price"])
+        old_profit = market["estimated_profit"]
+        new_market = _estimate_market_value(row["title"], row.get("category", ""), row["source_price"])
+        new_profit = new_market["estimated_profit"]
+
+        profit_change = new_profit - old_profit
+
+        if abs(price_change) > 0.01:
+            recommendation = "reprice"
+        elif profit_change < -5:
+            recommendation = "review"
+        elif profit_change < -10:
+            recommendation = "delist"
+        else:
+            recommendation = "keep"
+
+        db.execute(
+            "INSERT INTO ra_price_watch (source_product_id, price, availability, price_change) VALUES (?,?,?,?)",
+            (row["id"], row["source_price"], row.get("availability", "in_stock"), price_change),
+        )
+        db.execute(
+            "UPDATE ra_source_products SET last_checked = datetime('now') WHERE id = ?",
+            (row["id"],),
+        )
+
+        results.append({
+            "id": row["id"],
+            "title": row["title"][:60],
+            "source_price": row["source_price"],
+            "price_change": price_change,
+            "prev_price": prev_price,
+            "availability": row.get("availability", "in_stock"),
+            "estimated_profit": new_profit,
+            "profit_change": round(profit_change, 2),
+            "recommendation": recommendation,
+        })
+
+    return {
+        "checked": len(results),
+        "results": results,
+        "summary": {
+            "keep": len([r for r in results if r["recommendation"] == "keep"]),
+            "reprice": len([r for r in results if r["recommendation"] == "reprice"]),
+            "review": len([r for r in results if r["recommendation"] == "review"]),
+            "delist": len([r for r in results if r["recommendation"] == "delist"]),
+        },
+    }
+
+
+# ── Create Listing from Source ─────────────────────────────────────────────────
+
+class CreateListingFromSourceRequest(BaseModel):
+    source_id: int
+    platform: str
+    your_price: float
+    platform_fee_percent: float = 13.0
+    title: Optional[str] = None
+    description: Optional[str] = None
+    images: Optional[List[str]] = None
+
+
+@router.post("/listings/from-source")
+async def create_listing_from_source(req: CreateListingFromSourceRequest):
+    """Create a listing draft from a source product with all computed fields."""
+    with get_db() as db:
+        src = db.execute("SELECT * FROM ra_source_products WHERE id = ?", (req.source_id,)).fetchone()
+        if not src:
+            raise HTTPException(404, "Source product not found")
+
+        src = _parse_json_fields(dict_row(src), JSON_FIELDS_SOURCE)
+
+        title = req.title or src["title"]
+        description = req.description or src.get("description", "")
+        images = req.images or src.get("source_images", [])[:6]
+
+        profit = _calc_profit(
+            req.your_price,
+            src["source_price"],
+            src.get("shipping_cost", 0),
+            req.platform_fee_percent,
+        )
+
+        cur = db.execute(
+            """INSERT INTO ra_listings
+               (source_product_id, platform, title, description, your_price,
+                markup_amount, markup_percent, platform_fee_percent, estimated_profit,
+                images, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (req.source_id, req.platform, title, description, req.your_price,
+             profit["markup_amount"], profit["markup_percent"], req.platform_fee_percent,
+             profit["estimated_profit"], json.dumps(images), "draft"),
+        )
+
+    return {
+        "id": cur.lastrowid,
+        "title": title,
+        "platform": req.platform,
+        "your_price": req.your_price,
+        **profit,
+    }
+

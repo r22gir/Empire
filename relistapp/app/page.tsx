@@ -13,6 +13,9 @@ import AnalyticsSection from './components/AnalyticsSection';
 import SettingsSection from './components/SettingsSection';
 import SellerProfileSection from './components/SellerProfileSection';
 import SmartListerSection from './components/SmartListerSection';
+import ImportSection from './components/ImportSection';
+import DealsSection from './components/DealsSection';
+import OrdersSection from './components/OrdersSection';
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState('dashboard');
@@ -21,6 +24,9 @@ export default function Home() {
     switch (activeSection) {
       case 'dashboard': return <DashboardSection onNavigate={setActiveSection} />;
       case 'profile': return <SellerProfileSection />;
+      case 'import': return <ImportSection />;
+      case 'deals': return <DealsSection />;
+      case 'orders': return <OrdersSection />;
       case 'smartlister': return <SmartListerSection />;
       case 'listings': return <ListingsSection />;
       case 'crosspost': return <CrossPostSection />;

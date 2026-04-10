@@ -3,13 +3,17 @@
 import {
   LayoutDashboard, List, Share2, Globe, DollarSign,
   Clock, BarChart3, Settings, UserCircle, Camera,
+  Import, Search, ShoppingCart,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'profile', label: 'Seller Profile', icon: UserCircle },
+  { id: 'import', label: 'Import URL', icon: Import },
+  { id: 'deals', label: 'AI Deal Finder', icon: Search },
   { id: 'smartlister', label: 'Smart Lister', icon: Camera },
   { id: 'listings', label: 'Listings', icon: List },
+  { id: 'orders', label: 'Orders', icon: ShoppingCart },
   { id: 'crosspost', label: 'Cross-Post', icon: Share2 },
   { id: 'platforms', label: 'Platforms', icon: Globe },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },

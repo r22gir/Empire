@@ -213,6 +213,7 @@ load_router("app.routers.openclaw_tasks", "", ["openclaw-tasks"])
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])
 load_router("app.routers.ollama_manager", "/api/v1", ["ollama"])
+load_router("app.routers.recovery_control", "/api/v1", ["recovery"])
 
 # Serve intake uploads as static files
 from fastapi.staticfiles import StaticFiles
