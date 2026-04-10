@@ -12,6 +12,7 @@ import sqlite3
 from datetime import datetime, date
 
 from app.db.database import get_db, dict_rows, dict_row, DB_PATH
+from app.config.pricing_tiers import PRICING_TIERS, check_relist_within_limit, get_relist_limit
 
 router = APIRouter(prefix="/relist", tags=["relistapp"])
 log = logging.getLogger("relistapp")
@@ -398,6 +399,70 @@ async def check_price(source_id: int):
         "message": "Price check recorded. Live scraping not yet connected.",
     }
 
+
+
+# ── Usage & Plans ────────────────────────────────────────────────────────────
+
+@router.get("/usage")
+async def get_usage(tier: str = "lite"):
+    """Get current usage vs limits for RelistApp features.
+    
+    Tier defaults to 'lite' for shared DB (no per-user auth yet).
+    Pass tier=pro or tier=empire to see limits for those plans.
+    """
+    tier = tier.lower() if tier else "lite"
+    if tier not in PRICING_TIERS:
+        tier = "lite"
+    
+    with get_db() as db:
+        source_products = db.execute("SELECT COUNT(*) FROM ra_source_products").fetchone()[0]
+        listings = db.execute("SELECT COUNT(*) FROM ra_listings").fetchone()[0]
+        listings_active = db.execute("SELECT COUNT(*) FROM ra_listings WHERE status = 'active'").fetchone()[0]
+        orders_total = db.execute("SELECT COUNT(*) FROM ra_orders").fetchone()[0]
+        orders_completed = db.execute("SELECT COUNT(*) FROM ra_orders WHERE status = 'completed'").fetchone()[0]
+    
+    tier_config = PRICING_TIERS[tier].get("relist", {})
+    
+    return {
+        "tier": tier,
+        "tier_name": PRICING_TIERS[tier]["name"],
+        "price_monthly": PRICING_TIERS[tier]["price_monthly"],
+        "usage": {
+            "source_products": {
+                "used": source_products,
+                **check_relist_within_limit(tier, "source_products_limit", source_products),
+            },
+            "listings": {
+                "used": listings,
+                **check_relist_within_limit(tier, "listings_limit", listings),
+            },
+            "active_listings": {
+                "used": listings_active,
+                "limit": get_relist_limit(tier, "listings_limit"),
+            },
+            "orders": {
+                "used": orders_total,
+                **check_relist_within_limit(tier, "orders_limit", orders_total),
+            },
+            "completed_orders": {
+                "used": orders_completed,
+            },
+        },
+        "limits": {
+            "ai_analysis_limit": get_relist_limit(tier, "ai_analysis_limit"),
+            "crosslist_limit": get_relist_limit(tier, "crosslist_limit"),
+            "ai_deal_finder": tier_config.get("ai_deal_finder", False),
+            "auto_relist": tier_config.get("auto_relist", False),
+            "price_alerts": get_relist_limit(tier, "price_alerts"),
+        },
+        "upgrade_available": tier in ("lite", "pro"),
+        "upgrade_to": {
+            "lite": "pro",
+            "pro": "empire",
+            "empire": None,
+            "founder": None,
+        }.get(tier),
+    }
 
 # ── Listings ──────────────────────────────────────────────────────────────────
 
@@ -821,3 +886,4 @@ async def analytics_best_sellers(limit: int = 10):
             (limit,),
         ).fetchall())
     return {"best_sellers": rows}
+

@@ -11,6 +11,16 @@ PRICING_TIERS = {
         "allowed_models": ["groq", "ollama", "openclaw"],
         "features": ["chat", "web_search"],
         "priority": "low",
+        "relist": {
+            "source_products_limit": 25,
+            "listings_limit": 50,
+            "ai_analysis_limit": 10,
+            "crosslist_limit": 20,
+            "orders_limit": 30,
+            "ai_deal_finder": False,
+            "auto_relist": False,
+            "price_alerts": 5,
+        },
     },
     "pro": {
         "name": "Pro",
@@ -19,6 +29,16 @@ PRICING_TIERS = {
         "allowed_models": ["grok", "claude-haiku", "groq", "ollama", "openclaw"],
         "features": ["chat", "chat/stream", "vision", "tts", "web_search", "quote", "desk_task"],
         "priority": "normal",
+        "relist": {
+            "source_products_limit": 200,
+            "listings_limit": 500,
+            "ai_analysis_limit": 100,
+            "crosslist_limit": 200,
+            "orders_limit": 200,
+            "ai_deal_finder": True,
+            "auto_relist": True,
+            "price_alerts": 50,
+        },
     },
     "empire": {
         "name": "Empire",
@@ -27,6 +47,16 @@ PRICING_TIERS = {
         "allowed_models": ["grok", "claude-sonnet", "claude-haiku", "groq", "ollama", "openclaw"],
         "features": ["chat", "chat/stream", "vision", "tts", "stt", "web_search", "quote", "desk_task", "image_gen", "inpaint", "mockup", "email"],
         "priority": "high",
+        "relist": {
+            "source_products_limit": -1,    # unlimited
+            "listings_limit": -1,
+            "ai_analysis_limit": -1,
+            "crosslist_limit": -1,
+            "orders_limit": -1,
+            "ai_deal_finder": True,
+            "auto_relist": True,
+            "price_alerts": -1,
+        },
     },
     "founder": {
         "name": "Founder",
@@ -35,6 +65,16 @@ PRICING_TIERS = {
         "allowed_models": ["*"],      # all models including opus
         "features": ["*"],            # all features
         "priority": "max",
+        "relist": {
+            "source_products_limit": -1,
+            "listings_limit": -1,
+            "ai_analysis_limit": -1,
+            "crosslist_limit": -1,
+            "orders_limit": -1,
+            "ai_deal_finder": True,
+            "auto_relist": True,
+            "price_alerts": -1,
+        },
     },
 }
 
@@ -59,3 +99,28 @@ def is_feature_allowed(tier_id: str, feature: str) -> bool:
     if "*" in tier["features"]:
         return True
     return feature in tier["features"]
+
+
+def get_relist_limit(tier_id: str, limit_name: str):
+    tier = get_tier(tier_id)
+    relist = tier.get("relist", {})
+    limit = relist.get(limit_name, 0)
+    return limit
+
+
+def is_relist_unlimited(tier_id: str, limit_name: str) -> bool:
+    limit = get_relist_limit(tier_id, limit_name)
+    return limit == -1
+
+
+def check_relist_within_limit(tier_id: str, limit_name: str, current_count: int) -> dict:
+    limit = get_relist_limit(tier_id, limit_name)
+    if limit == -1:
+        return {"allowed": True, "limit": "unlimited", "remaining": "unlimited"}
+    remaining = max(0, limit - current_count)
+    return {
+        "allowed": remaining > 0,
+        "limit": limit,
+        "used": current_count,
+        "remaining": remaining,
+    }

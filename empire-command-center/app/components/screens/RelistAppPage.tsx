@@ -6,7 +6,7 @@ import {
   BarChart3, Search, Package, RefreshCw, ShoppingCart, DollarSign,
   TrendingUp, AlertTriangle, ExternalLink, Plus, Eye, Heart,
   ArrowRight, Clock, CheckCircle, Loader2, Link, Target, Tag,
-  Calculator, Activity, Filter, ChevronRight, Globe, Star
+  Calculator, Activity, Filter, ChevronRight, Globe, Star, Crown, Zap, Lock
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 
@@ -21,6 +21,7 @@ const NAV = [
   { id: 'pricemon', label: 'Price Monitor', icon: TrendingUp },
   { id: 'calculator', label: 'Profit Calculator', icon: Calculator },
   { id: 'analytics', label: 'Analytics', icon: Activity },
+  { id: 'plans', label: 'Plans', icon: Crown },
   { id: 'docs', label: 'Docs', icon: BarChart3 },
 ] as const;
 
@@ -49,6 +50,7 @@ export default function RelistAppPage({ initialSection }: RelistAppPageProps) {
       case 'pricemon': return <PriceMonitorSection />;
       case 'calculator': return <CalculatorSection />;
       case 'analytics': return <AnalyticsSection />;
+      case 'plans': return <PlansSection />;
       case 'docs': return <ProductDocs product="relist" />;
       default: return <DashboardSection />;
     }
@@ -292,4 +294,142 @@ function CalculatorSection() {
 
 function AnalyticsSection() {
   return <div><SH title="Analytics" subtitle="Profit trends, platform comparison, best sellers" /><div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Analytics will populate as you make sales.</div></div>;
+}
+
+function UsageBar({ used, limit, label }: { used: number; limit: number | string; label: string }) {
+  const isUnlimited = limit === -1 || limit === 'unlimited';
+  const pct = isUnlimited ? 0 : Math.min(100, (used / (limit as number)) * 100);
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+        <span style={{ color: '#666' }}>{label}</span>
+        <span style={{ color: '#888' }}>{isUnlimited ? `${used} (unlimited)` : `${used} / ${limit}`}</span>
+      </div>
+      {!isUnlimited && (
+        <div style={{ height: 6, background: '#f0ede6', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: pct > 90 ? '#dc2626' : pct > 75 ? '#b8960c' : '#06b6d4', borderRadius: 3 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlansSection() {
+  const [usage, setUsage] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [upgrading, setUpgrading] = useState(false);
+  const [tier, setTier] = useState('lite');
+
+  useEffect(() => {
+    fetch(`${RA_API}/usage?tier=${tier}`).then(r => r.json()).then(d => { setUsage(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [tier]);
+
+  const handleUpgrade = async () => {
+    if (!usage?.upgrade_to) return;
+    setUpgrading(true);
+    try {
+      const res = await fetch(`${API}/payments/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: usage.upgrade_to }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      }
+    } catch (e) {
+      console.error('Upgrade failed', e);
+    }
+    setUpgrading(false);
+  };
+
+  const TIERS = [
+    { id: 'lite', name: 'Lite', price: 29, color: '#6b7280', features: ['25 source products', '50 listings', '10 AI analyses/mo', 'Basic support'] },
+    { id: 'pro', name: 'Pro', price: 79, color: '#3b82f6', features: ['200 source products', '500 listings', '100 AI analyses/mo', 'AI Deal Finder', 'Auto-relist', 'Priority support'], popular: true },
+    { id: 'empire', name: 'Empire', price: 199, color: '#8b5cf6', features: ['Unlimited products', 'Unlimited listings', 'Unlimited AI analyses', 'AI Deal Finder', 'Auto-relist', 'Price alerts', 'VIP support'] },
+  ];
+
+  return (
+    <div>
+      <SH title="Plans & Usage" subtitle="Manage your RelistApp subscription" />
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="animate-spin" style={{ color: '#06b6d4' }} /></div>
+      ) : (
+        <>
+          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 20, marginBottom: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <Crown size={18} style={{ color: '#b8960c' }} />
+              <span style={{ fontSize: 14, fontWeight: 700 }}>Current Plan: {usage?.tier_name || tier}</span>
+              <span style={{ fontSize: 11, color: '#888', marginLeft: 'auto' }}>${usage?.price_monthly || 0}/month</span>
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginBottom: 16 }}>Your usage this billing cycle:</div>
+            {usage && (
+              <>
+                <UsageBar used={usage.usage?.source_products?.used || 0} limit={usage.usage?.source_products?.limit || 0} label="Source Products" />
+                <UsageBar used={usage.usage?.listings?.used || 0} limit={usage.usage?.listings?.limit || 0} label="Listings" />
+                <UsageBar used={usage.usage?.orders?.used || 0} limit={usage.usage?.orders?.limit || 0} label="Orders" />
+              </>
+            )}
+          </div>
+
+          {usage?.upgrade_available && (
+            <button
+              onClick={handleUpgrade}
+              disabled={upgrading}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px',
+                background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 10,
+                fontSize: 13, fontWeight: 600, cursor: upgrading ? 'wait' : 'pointer', marginBottom: 20,
+              }}
+            >
+              {upgrading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+              Upgrade to {usage.upgrade_to === 'pro' ? 'Pro ($79/mo)' : 'Empire ($199/mo)'}
+            </button>
+          )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+            {TIERS.map(t => (
+              <div key={t.id} style={{
+                background: '#fff', border: `2px solid ${t.id === tier ? t.color : '#e5e2dc'}`,
+                borderRadius: 12, padding: 20, position: 'relative',
+              }}>
+                {t.popular && (
+                  <div style={{ position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)', background: t.color, color: '#fff', fontSize: 10, fontWeight: 700, padding: '2px 10px', borderRadius: 10 }}>
+                    MOST POPULAR
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                  <Crown size={16} style={{ color: t.color }} />
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>{t.name}</span>
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 700, color: t.color, marginBottom: 12 }}>${t.price}<span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>/mo</span></div>
+                <div style={{ marginBottom: 12 }}>
+                  {t.features.map((f, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#666', marginBottom: 4 }}>
+                      <CheckCircle size={12} style={{ color: '#16a34a' }} /> {f}
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setTier(t.id)}
+                  style={{
+                    width: '100%', padding: '8px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    cursor: 'pointer', border: t.id === tier ? 'none' : `1px solid ${t.color}`,
+                    background: t.id === tier ? t.color : 'transparent', color: t.id === tier ? '#fff' : t.color,
+                  }}
+                >
+                  {t.id === tier ? 'Current Plan' : 'Select Plan'}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 20, padding: 16, background: '#fef3cd', borderRadius: 10, fontSize: 12, color: '#856404' }}>
+            <Lock size={14} style={{ display: 'inline', marginRight: 6 }} />
+            Plans are billed monthly through Stripe. Cancel anytime from your account settings.
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
