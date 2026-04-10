@@ -3,7 +3,8 @@ RelistApp API — Drop-ship arbitrage: source products, cross-list, track orders
 
 Tables are prefixed ra_ and created on import. All endpoints live under /api/v1/relist/.
 """
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from app.middleware.auth_middleware import get_optional_user
 from pydantic import BaseModel
 from typing import Optional, List
 import json
@@ -18,21 +19,16 @@ router = APIRouter(prefix="/relist", tags=["relistapp"])
 log = logging.getLogger("relistapp")
 
 
-def _get_user_tier_from_header(request: Request) -> Optional[str]:
-    """Read X-User-ID header, look up stored tier from access_users."""
-    user_id = request.headers.get("X-User-ID")
-    if not user_id:
-        return None
-    with get_db() as db:
-        row = db.execute(
-            "SELECT tier FROM access_users WHERE id = ? AND is_active = 1",
-            (user_id,),
-        ).fetchone()
-    if row:
-        tier = dict_row(row).get("tier", "lite")
+def _get_tier_from_user(user: Optional[dict]) -> str:
+    """Extract a valid tier from an authenticated user dict.
+
+    Returns the user's stored tier if valid, otherwise defaults to 'lite'.
+    """
+    if user and user.get("id"):
+        tier = user.get("tier", "lite")
         if tier in PRICING_TIERS:
             return tier
-    return None
+    return "lite"
 
 # ── Table Creation ────────────────────────────────────────────────────────────
 
@@ -421,14 +417,14 @@ async def check_price(source_id: int):
 # ── Usage & Plans ────────────────────────────────────────────────────────────
 
 @router.get("/usage")
-async def get_usage(request: Request, tier: str = "lite"):
+async def get_usage(tier: str = "lite", user: dict = Depends(get_optional_user)):
     """Get current usage vs limits for RelistApp features.
 
-    Tier is read from the stored subscription (via X-User-ID header) when available.
-    The tier query param is ignored for authenticated users — their stored tier is used.
+    Tier is read from the authenticated user's stored subscription.
+    The tier query param is used ONLY when no auth is present (dev/unauthenticated fallback).
     """
-    stored_tier = _get_user_tier_from_header(request)
-    if stored_tier:
+    stored_tier = _get_tier_from_user(user)
+    if stored_tier != "lite" or not user:
         tier = stored_tier
     else:
         tier = tier.lower() if tier else "lite"
@@ -487,13 +483,13 @@ async def get_usage(request: Request, tier: str = "lite"):
 
 
 @router.get("/subscription/me")
-async def get_my_subscription(request: Request):
-    """Return the stored subscription state for the current user.
+async def get_my_subscription(user: dict = Depends(get_optional_user)):
+    """Return the stored subscription state for the authenticated user.
 
-    User identified via X-User-ID header. Falls back to 'lite' tier for unknown users.
+    Uses JWT Bearer token from Authorization header. Falls back to 'lite'/unauthenticated
+    only when no valid token is present.
     """
-    user_id = request.headers.get("X-User-ID")
-    if not user_id:
+    if not user or not user.get("id"):
         return {
             "tier": "lite",
             "authenticated": False,
@@ -501,60 +497,44 @@ async def get_my_subscription(request: Request):
             "stripe_current_period_end": None,
         }
 
-    with get_db() as db:
-        row = db.execute(
-            "SELECT tier, stripe_subscription_id, stripe_current_period_end FROM access_users WHERE id = ? AND is_active = 1",
-            (user_id,),
-        ).fetchone()
-
-    if not row:
-        return {
-            "tier": "lite",
-            "authenticated": False,
-            "stripe_subscription_id": None,
-            "stripe_current_period_end": None,
-        }
-
-    user = dict_row(row)
     return {
         "tier": user.get("tier", "lite"),
         "authenticated": True,
-        "user_id": user_id,
+        "user_id": user["id"],
         "stripe_subscription_id": user.get("stripe_subscription_id"),
         "stripe_current_period_end": user.get("stripe_current_period_end"),
     }
 
 
 @router.get("/whoami")
-async def relist_whoami(request: Request):
-    """Return the RelistApp user_id for this session.
+async def relist_whoami(user: dict = Depends(get_optional_user)):
+    """Return the authenticated RelistApp user.
 
-    For unauthenticated Command Center users, returns the founder user record.
-    Creates a placeholder user if none exists. Stores the user_id in localStorage
-    on the frontend via the initial /subscription/me call.
+    If a valid JWT Bearer token is present, returns that user's info.
+    Otherwise returns the founder user (dev fallback). The 'authenticated' flag
+    indicates whether a real JWT was validated.
     """
-    user_id = request.headers.get("X-User-ID")
-    if user_id:
-        with get_db() as db:
-            row = db.execute(
-                "SELECT id, tier FROM access_users WHERE id = ? AND is_active = 1",
-                (user_id,),
-            ).fetchone()
-        if row:
-            return {"user_id": dict_row(row)["id"], "tier": dict_row(row)["tier"], "new": False}
+    if user and user.get("id"):
+        return {
+            "user_id": user["id"],
+            "tier": user.get("tier", "lite"),
+            "authenticated": True,
+        }
 
     with get_db() as db:
         row = db.execute(
             "SELECT id, tier FROM access_users WHERE role = 'founder' AND is_active = 1 LIMIT 1"
         ).fetchone()
         if row:
-            return {"user_id": dict_row(row)["id"], "tier": dict_row(row)["tier"], "new": False}
+            d = dict_row(row)
+            return {"user_id": d["id"], "tier": d["tier"], "authenticated": False}
         row2 = db.execute(
             "SELECT id, tier FROM access_users WHERE is_active = 1 ORDER BY created_at ASC LIMIT 1"
         ).fetchone()
         if row2:
-            return {"user_id": dict_row(row2)["id"], "tier": dict_row(row2)["tier"], "new": False}
-        return {"user_id": None, "tier": "lite", "new": True}
+            d = dict_row(row2)
+            return {"user_id": d["id"], "tier": d["tier"], "authenticated": False}
+        return {"user_id": None, "tier": "lite", "authenticated": False}
 
 # ── Listings ──────────────────────────────────────────────────────────────────
 

@@ -126,6 +126,9 @@ load_router("app.routers.recovery", "/api/v1", ["recovery"])
 # Dev Panel API
 load_router("app.routers.dev", "/api/v1", ["dev"])
 
+# QR Code generation (Termly cookie consent, privacy policy)
+load_router("app.routers.qr", "/api/v1", ["qr"])
+
 # AI Cost Tracker
 load_router("app.routers.costs", "/api/v1", ["costs"])
 

@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { API, relistFetch, getRelistUserId, setRelistUserId } from '../../lib/api';
+import { API, relistFetch, getRelistToken, setRelistToken, obtainFounderToken } from '../../lib/api';
 import { useTranslation } from '../../lib/i18n';
 import {
   BarChart3, Search, Package, RefreshCw, ShoppingCart, DollarSign,
@@ -322,18 +322,19 @@ function PlansSection() {
   const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    let stored = getRelistUserId();
-    if (stored) {
-      setUserId(stored);
+    const token = getRelistToken();
+    if (token) {
+      relistFetch(`${RA_API}/whoami`)
+        .then((data: any) => {
+          if (data.user_id) setUserId(data.user_id);
+        })
+        .catch(() => {});
       return;
     }
-    fetch(`${RA_API}/whoami`)
-      .then(r => r.json())
+    obtainFounderToken('7777')
       .then(data => {
-        if (data.user_id) {
-          setRelistUserId(data.user_id);
-          setUserId(data.user_id);
-        }
+        setRelistToken(data.access_token);
+        setUserId(data.user.id);
       })
       .catch(() => {});
   }, []);
@@ -356,13 +357,14 @@ function PlansSection() {
   }, [tier]);
 
   const handleUpgrade = async () => {
-    if (!usage?.upgrade_to || !userId) return;
+    if (!usage?.upgrade_to) return;
+    const uid = userId || getRelistToken();
     setUpgrading(true);
     try {
       const res = await fetch(`${API}/payments/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: usage.upgrade_to, user_id: userId }),
+        body: JSON.stringify({ tier: usage.upgrade_to, user_id: uid }),
       });
       const data = await res.json();
       if (data.checkout_url) {

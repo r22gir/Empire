@@ -20,28 +20,38 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
   return res.json();
 }
 
-const RELIST_USER_ID_KEY = 'relist_user_id';
+const RELIST_TOKEN_KEY = 'relist_token';
 
-export function getRelistUserId(): string | null {
+export function getRelistToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem(RELIST_USER_ID_KEY);
+  return localStorage.getItem(RELIST_TOKEN_KEY);
 }
 
-export function setRelistUserId(userId: string): void {
+export function setRelistToken(token: string): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(RELIST_USER_ID_KEY, userId);
+  localStorage.setItem(RELIST_TOKEN_KEY, token);
 }
 
 export async function relistFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
-  const userId = getRelistUserId();
+  const token = getRelistToken();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (userId) headers['X-User-ID'] = userId;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(bustCache(`${API}${path}`), {
     ...opts,
     headers: { ...headers, ...opts?.headers },
     cache: 'no-store',
   });
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`);
+  return res.json();
+}
+
+export async function obtainFounderToken(pin: string): Promise<{ access_token: string; user: any }> {
+  const res = await fetch(`${API}/auth/founder-token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin }),
+  });
+  if (!res.ok) throw new Error(`Founder token failed: ${res.status}`);
   return res.json();
 }
 

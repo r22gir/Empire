@@ -168,6 +168,49 @@ def logout():
     return {"status": "ok", "message": "Tokens should be discarded by the client"}
 
 
+class FounderPinRequest(BaseModel):
+    pin: str
+
+
+@router.post("/founder-token")
+def founder_token(data: FounderPinRequest):
+    """Issue a JWT for the founder user after FOUNDER_PIN verification.
+
+    This lets the Command Center (which has no login screen) obtain a real
+    Bearer token for the founder without requiring email/password auth.
+    The PIN is verified against the FOUNDER_PIN env var.
+    """
+    import os
+    founder_pin = os.getenv("FOUNDER_PIN", "7777")
+    if not data.pin or data.pin != founder_pin:
+        raise HTTPException(status_code=401, detail="Invalid founder PIN")
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, name, email, role, tier FROM access_users WHERE role = 'founder' AND is_active = 1 LIMIT 1"
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="No founder user found")
+
+    user = dict_row(row)
+    token_data = {"user_id": user["id"], "email": user.get("email", "")}
+    access = create_access_token(token_data)
+    refresh = create_refresh_token(token_data)
+
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user.get("email"),
+            "role": user["role"],
+            "tier": user.get("tier", "lite"),
+        },
+    }
+
+
 @router.get("/me")
 def get_me(user: dict = Depends(_get_current_user)):
     """Get current authenticated user profile."""
