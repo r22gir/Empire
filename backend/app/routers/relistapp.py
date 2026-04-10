@@ -3,7 +3,7 @@ RelistApp API — Drop-ship arbitrage: source products, cross-list, track orders
 
 Tables are prefixed ra_ and created on import. All endpoints live under /api/v1/relist/.
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List
 import json
@@ -16,6 +16,23 @@ from app.config.pricing_tiers import PRICING_TIERS, check_relist_within_limit, g
 
 router = APIRouter(prefix="/relist", tags=["relistapp"])
 log = logging.getLogger("relistapp")
+
+
+def _get_user_tier_from_header(request: Request) -> Optional[str]:
+    """Read X-User-ID header, look up stored tier from access_users."""
+    user_id = request.headers.get("X-User-ID")
+    if not user_id:
+        return None
+    with get_db() as db:
+        row = db.execute(
+            "SELECT tier FROM access_users WHERE id = ? AND is_active = 1",
+            (user_id,),
+        ).fetchone()
+    if row:
+        tier = dict_row(row).get("tier", "lite")
+        if tier in PRICING_TIERS:
+            return tier
+    return None
 
 # ── Table Creation ────────────────────────────────────────────────────────────
 
@@ -404,25 +421,29 @@ async def check_price(source_id: int):
 # ── Usage & Plans ────────────────────────────────────────────────────────────
 
 @router.get("/usage")
-async def get_usage(tier: str = "lite"):
+async def get_usage(request: Request, tier: str = "lite"):
     """Get current usage vs limits for RelistApp features.
-    
-    Tier defaults to 'lite' for shared DB (no per-user auth yet).
-    Pass tier=pro or tier=empire to see limits for those plans.
+
+    Tier is read from the stored subscription (via X-User-ID header) when available.
+    The tier query param is ignored for authenticated users — their stored tier is used.
     """
-    tier = tier.lower() if tier else "lite"
-    if tier not in PRICING_TIERS:
-        tier = "lite"
-    
+    stored_tier = _get_user_tier_from_header(request)
+    if stored_tier:
+        tier = stored_tier
+    else:
+        tier = tier.lower() if tier else "lite"
+        if tier not in PRICING_TIERS:
+            tier = "lite"
+
     with get_db() as db:
         source_products = db.execute("SELECT COUNT(*) FROM ra_source_products").fetchone()[0]
         listings = db.execute("SELECT COUNT(*) FROM ra_listings").fetchone()[0]
         listings_active = db.execute("SELECT COUNT(*) FROM ra_listings WHERE status = 'active'").fetchone()[0]
         orders_total = db.execute("SELECT COUNT(*) FROM ra_orders").fetchone()[0]
         orders_completed = db.execute("SELECT COUNT(*) FROM ra_orders WHERE status = 'completed'").fetchone()[0]
-    
+
     tier_config = PRICING_TIERS[tier].get("relist", {})
-    
+
     return {
         "tier": tier,
         "tier_name": PRICING_TIERS[tier]["name"],
@@ -463,6 +484,77 @@ async def get_usage(tier: str = "lite"):
             "founder": None,
         }.get(tier),
     }
+
+
+@router.get("/subscription/me")
+async def get_my_subscription(request: Request):
+    """Return the stored subscription state for the current user.
+
+    User identified via X-User-ID header. Falls back to 'lite' tier for unknown users.
+    """
+    user_id = request.headers.get("X-User-ID")
+    if not user_id:
+        return {
+            "tier": "lite",
+            "authenticated": False,
+            "stripe_subscription_id": None,
+            "stripe_current_period_end": None,
+        }
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT tier, stripe_subscription_id, stripe_current_period_end FROM access_users WHERE id = ? AND is_active = 1",
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return {
+            "tier": "lite",
+            "authenticated": False,
+            "stripe_subscription_id": None,
+            "stripe_current_period_end": None,
+        }
+
+    user = dict_row(row)
+    return {
+        "tier": user.get("tier", "lite"),
+        "authenticated": True,
+        "user_id": user_id,
+        "stripe_subscription_id": user.get("stripe_subscription_id"),
+        "stripe_current_period_end": user.get("stripe_current_period_end"),
+    }
+
+
+@router.get("/whoami")
+async def relist_whoami(request: Request):
+    """Return the RelistApp user_id for this session.
+
+    For unauthenticated Command Center users, returns the founder user record.
+    Creates a placeholder user if none exists. Stores the user_id in localStorage
+    on the frontend via the initial /subscription/me call.
+    """
+    user_id = request.headers.get("X-User-ID")
+    if user_id:
+        with get_db() as db:
+            row = db.execute(
+                "SELECT id, tier FROM access_users WHERE id = ? AND is_active = 1",
+                (user_id,),
+            ).fetchone()
+        if row:
+            return {"user_id": dict_row(row)["id"], "tier": dict_row(row)["tier"], "new": False}
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT id, tier FROM access_users WHERE role = 'founder' AND is_active = 1 LIMIT 1"
+        ).fetchone()
+        if row:
+            return {"user_id": dict_row(row)["id"], "tier": dict_row(row)["tier"], "new": False}
+        row2 = db.execute(
+            "SELECT id, tier FROM access_users WHERE is_active = 1 ORDER BY created_at ASC LIMIT 1"
+        ).fetchone()
+        if row2:
+            return {"user_id": dict_row(row2)["id"], "tier": dict_row(row2)["tier"], "new": False}
+        return {"user_id": None, "tier": "lite", "new": True}
 
 # ── Listings ──────────────────────────────────────────────────────────────────
 

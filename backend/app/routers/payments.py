@@ -72,6 +72,7 @@ class CheckoutRequest(BaseModel):
     """Create a SaaS subscription checkout session."""
     tier: str  # lite, pro, empire
     customer_email: Optional[str] = None
+    user_id: Optional[str] = None  # internal user id for subscription persistence
     success_url: str = "https://studio.empirebox.store/payments/success?session_id={CHECKOUT_SESSION_ID}"
     cancel_url: str = "https://studio.empirebox.store/payments/cancel"
 
@@ -220,10 +221,12 @@ async def create_checkout_session(request: Request, req: CheckoutRequest):
             "line_items": [{"price": price_id, "quantity": 1}],
             "success_url": req.success_url,
             "cancel_url": req.cancel_url,
-            "metadata": {"tier": tier, "flow": "saas_subscription"},
+            "metadata": {"tier": tier, "flow": "saas_subscription", "user_id": req.user_id or ""},
         }
         if req.customer_email:
             session_params["customer_email"] = req.customer_email
+        if req.user_id:
+            session_params["client_reference_id"] = req.user_id
 
         session = stripe.checkout.Session.create(**session_params)
 
@@ -343,6 +346,30 @@ async def stripe_webhook(request: Request):
             tier = metadata.get("tier", "unknown")
             customer_email = data.get("customer_email", "")
             subscription_id = data.get("subscription", "")
+            client_ref = data.get("client_reference_id", "")
+            stripe_customer_id = data.get("customer", "")
+            period_end = None
+            if subscription_id:
+                try:
+                    sub = stripe.Subscription.retrieve(subscription_id)
+                    period_end = sub.get("current_period_end")
+                except Exception:
+                    pass
+
+            if client_ref:
+                with get_db() as conn:
+                    conn.execute(
+                        """UPDATE access_users SET
+                           tier = ?,
+                           stripe_customer_id = COALESCE(?, stripe_customer_id),
+                           stripe_subscription_id = ?,
+                           stripe_current_period_end = ?,
+                           updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (tier, stripe_customer_id, subscription_id,
+                         period_end, client_ref),
+                    )
+
             await _notify_internal(
                 title=f"New {tier.title()} Subscription",
                 message=f"Customer {customer_email} subscribed to {tier.title()} plan (${TIER_AMOUNTS.get(tier, 0) / 100:.0f}/mo)",
@@ -351,6 +378,7 @@ async def stripe_webhook(request: Request):
                     "customer_email": customer_email,
                     "subscription_id": subscription_id,
                     "stripe_session_id": data.get("id"),
+                    "user_id": client_ref,
                 },
             )
 
@@ -389,6 +417,17 @@ async def stripe_webhook(request: Request):
                 tier = t
                 break
 
+        period_end = data.get("current_period_end")
+
+        if customer_id:
+            with get_db() as conn:
+                conn.execute(
+                    """UPDATE access_users SET
+                       tier = ?, stripe_current_period_end = ?, updated_at = datetime('now')
+                       WHERE stripe_customer_id = ?""",
+                    (tier, period_end, customer_id),
+                )
+
         await _notify_internal(
             title=f"Subscription Updated",
             message=f"Subscription {subscription_id} updated to {tier} (status: {status})",
@@ -404,9 +443,19 @@ async def stripe_webhook(request: Request):
     elif event_type == "customer.subscription.deleted":
         subscription_id = data.get("id", "")
         customer_id = data.get("customer", "")
+
+        if customer_id:
+            with get_db() as conn:
+                conn.execute(
+                    """UPDATE access_users SET
+                       tier = 'lite', stripe_subscription_id = NULL, updated_at = datetime('now')
+                       WHERE stripe_customer_id = ?""",
+                    (customer_id,),
+                )
+
         await _notify_internal(
             title="Subscription Cancelled",
-            message=f"Subscription {subscription_id} cancelled — customer downgraded to free",
+            message=f"Subscription {subscription_id} cancelled — customer downgraded to lite",
             context={
                 "subscription_id": subscription_id,
                 "customer_id": customer_id,

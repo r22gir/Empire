@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { API } from '../../lib/api';
+import { API, relistFetch, getRelistUserId, setRelistUserId } from '../../lib/api';
 import { useTranslation } from '../../lib/i18n';
 import {
   BarChart3, Search, Package, RefreshCw, ShoppingCart, DollarSign,
@@ -319,19 +319,50 @@ function PlansSection() {
   const [loading, setLoading] = useState(true);
   const [upgrading, setUpgrading] = useState(false);
   const [tier, setTier] = useState('lite');
+  const [userId, setUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${RA_API}/usage?tier=${tier}`).then(r => r.json()).then(d => { setUsage(d); setLoading(false); }).catch(() => setLoading(false));
+    let stored = getRelistUserId();
+    if (stored) {
+      setUserId(stored);
+      return;
+    }
+    fetch(`${RA_API}/whoami`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.user_id) {
+          setRelistUserId(data.user_id);
+          setUserId(data.user_id);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    relistFetch(`${RA_API}/subscription/me`)
+      .then((sub: any) => {
+        if (sub.tier) setTier(sub.tier);
+      })
+      .catch(() => {});
+  }, [userId]);
+
+  useEffect(() => {
+    if (!tier) return;
+    setLoading(true);
+    relistFetch(`${RA_API}/usage`)
+      .then((d: any) => { setUsage(d); setLoading(false); })
+      .catch(() => setLoading(false));
   }, [tier]);
 
   const handleUpgrade = async () => {
-    if (!usage?.upgrade_to) return;
+    if (!usage?.upgrade_to || !userId) return;
     setUpgrading(true);
     try {
       const res = await fetch(`${API}/payments/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: usage.upgrade_to }),
+        body: JSON.stringify({ tier: usage.upgrade_to, user_id: userId }),
       });
       const data = await res.json();
       if (data.checkout_url) {
