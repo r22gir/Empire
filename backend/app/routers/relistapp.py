@@ -140,11 +140,262 @@ def _init_tables():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ra_services (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            service_key TEXT UNIQUE NOT NULL,
+            display_name TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            service_type TEXT NOT NULL DEFAULT 'free_public',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            mode TEXT NOT NULL DEFAULT 'manual',
+            auth_present INTEGER NOT NULL DEFAULT 0,
+            auth_required INTEGER NOT NULL DEFAULT 0,
+            schedule TEXT DEFAULT '',
+            quota_daily INTEGER DEFAULT 0,
+            rate_limit INTEGER DEFAULT 0,
+            cost_class TEXT NOT NULL DEFAULT 'free',
+            last_run TEXT,
+            last_success TEXT,
+            last_error TEXT,
+            health TEXT DEFAULT 'unknown',
+            weight INTEGER DEFAULT 100,
+            scope TEXT DEFAULT '{}',
+            pause_reason TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     conn.commit()
     conn.close()
     log.info("RelistApp tables initialized")
 
 _init_tables()
+
+
+# ── Service Registry Defaults ──────────────────────────────────────────────────
+
+DEFAULT_SERVICES = [
+    {
+        "service_key": "scout_url_import",
+        "display_name": "URL Import Scout",
+        "description": "Import products via URL from Amazon, Walmart, AliExpress, and other supported sites",
+        "service_type": "free_public",
+        "enabled": 1,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "healthy",
+        "weight": 100,
+    },
+    {
+        "service_key": "scout_amazon_bestsellers",
+        "display_name": "Amazon Best Sellers Scout",
+        "description": "Automatically pull top sellers from Amazon Best Sellers pages",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 50,
+    },
+    {
+        "service_key": "scout_amazon_movers",
+        "display_name": "Amazon Movers & Shakers Scout",
+        "description": "Track products with rapid rank movement on Amazon",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 50,
+    },
+    {
+        "service_key": "scout_google_trends",
+        "display_name": "Google Trends Scout",
+        "description": "Track trending products via Google Trends signals",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 50,
+    },
+    {
+        "service_key": "scout_tiktok",
+        "display_name": "TikTok Trend Scout",
+        "description": "Track products trending on TikTok Shop and hashtag signals",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 50,
+    },
+    {
+        "service_key": "amazon_spapi",
+        "display_name": "Amazon SP-API",
+        "description": "Official Amazon Selling Partner API for product data, pricing, and inventory",
+        "service_type": "official_api",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 1,
+        "cost_class": "paid",
+        "health": "no_auth",
+        "weight": 100,
+    },
+    {
+        "service_key": "ebay_api",
+        "display_name": "eBay API",
+        "description": "Official eBay API for listing, inventory, and order management",
+        "service_type": "official_api",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 1,
+        "cost_class": "paid",
+        "health": "no_auth",
+        "weight": 100,
+    },
+    {
+        "service_key": "walmart_api",
+        "display_name": "Walmart API",
+        "description": "Official Walmart API for product data and inventory",
+        "service_type": "official_api",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 1,
+        "cost_class": "paid",
+        "health": "no_auth",
+        "weight": 100,
+    },
+    {
+        "service_key": "jungle_scout",
+        "display_name": "Jungle Scout",
+        "description": "Premium product research and analytics via Jungle Scout API",
+        "service_type": "premium_optional",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 1,
+        "cost_class": "premium",
+        "health": "not_configured",
+        "weight": 100,
+    },
+    {
+        "service_key": "helium_10",
+        "display_name": "Helium 10",
+        "description": "Premium Amazon product research via Helium 10 API",
+        "service_type": "premium_optional",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 1,
+        "cost_class": "premium",
+        "health": "not_configured",
+        "weight": 100,
+    },
+    {
+        "service_key": "selleramp",
+        "display_name": "SellerAmp",
+        "description": "Premium Amazon seller tools via SellerAmp API",
+        "service_type": "premium_optional",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 1,
+        "cost_class": "premium",
+        "health": "not_configured",
+        "weight": 100,
+    },
+    {
+        "service_key": "ai_deal_finder",
+        "display_name": "AI Deal Finder",
+        "description": "Score and rank imported products by arbitrage opportunity",
+        "service_type": "free_public",
+        "enabled": 1,
+        "mode": "assist",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "healthy",
+        "weight": 100,
+    },
+    {
+        "service_key": "price_monitor",
+        "display_name": "Price Monitor",
+        "description": "Track source product prices and alert on changes",
+        "service_type": "free_public",
+        "enabled": 1,
+        "mode": "assist",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "stub",
+        "weight": 100,
+    },
+    {
+        "service_key": "inventory_sync",
+        "display_name": "Inventory Sync",
+        "description": "Sync inventory levels across platforms and handle OOS",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 100,
+    },
+    {
+        "service_key": "auto_relist",
+        "display_name": "Auto-Relist",
+        "description": "Automatically relist sold-out or expired items",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "off",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 100,
+    },
+    {
+        "service_key": "order_router",
+        "display_name": "Order Router",
+        "description": "Route and fulfill orders from sales channels to source suppliers",
+        "service_type": "free_public",
+        "enabled": 0,
+        "mode": "manual",
+        "auth_required": 0,
+        "cost_class": "free",
+        "health": "not_implemented",
+        "weight": 100,
+    },
+]
+
+
+def _init_services():
+    """Initialize default services if not already present."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    for svc in DEFAULT_SERVICES:
+        existing = conn.execute(
+            "SELECT id FROM ra_services WHERE service_key = ?",
+            (svc["service_key"],)
+        ).fetchone()
+        if not existing:
+            conn.execute(
+                """INSERT INTO ra_services
+                   (service_key, display_name, description, service_type, enabled, mode,
+                    auth_required, cost_class, health, weight)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (svc["service_key"], svc["display_name"], svc["description"], svc["service_type"],
+                 svc["enabled"], svc["mode"], svc["auth_required"], svc["cost_class"],
+                 svc["health"], svc["weight"]),
+            )
+    conn.commit()
+    conn.close()
+
+
+_init_services()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -379,37 +630,62 @@ async def delete_source(source_id: int):
 
 @router.post("/sources/{source_id}/check-price")
 async def check_price(source_id: int):
-    """Stub: re-check the source price. Logs a price-watch entry with current stored price."""
+    """Check the live price of a source product by scraping its URL.
+
+    Returns the scraped price or honest error if scraping fails.
+    Does NOT update the stored price — caller decides whether to apply.
+    """
     with get_db() as db:
         row = db.execute(
-            "SELECT id, source_price, availability FROM ra_source_products WHERE id = ?",
+            "SELECT id, source_url, source_platform, source_price, availability FROM ra_source_products WHERE id = ?",
             (source_id,),
         ).fetchone()
         if not row:
             raise HTTPException(404, "Source product not found")
         src = dict_row(row)
-        # In a real implementation we'd scrape the source URL here.
-        # For now, record the current known price.
+
+    url = src.get("source_url", "")
+    platform = src.get("source_platform", "unknown")
+
+    if not url:
+        return {
+            "source_product_id": source_id,
+            "price": src["source_price"],
+            "availability": src["availability"],
+            "success": False,
+            "error": "No source URL — cannot check live price",
+            "message": "This product was imported without a URL. Update the source URL to enable live price checks.",
+        }
+
+    live = await _scrape_live_price(url, platform)
+    scraped_price = live["price"]
+    scraped_avail = live["availability"]
+    change = round(scraped_price - src["source_price"], 2) if scraped_price > 0 else 0
+
+    with get_db() as db:
         last_watch = db.execute(
             "SELECT price FROM ra_price_watch WHERE source_product_id = ? ORDER BY checked_at DESC LIMIT 1",
             (source_id,),
         ).fetchone()
         prev_price = dict_row(last_watch)["price"] if last_watch else src["source_price"]
-        change = round(src["source_price"] - prev_price, 2)
         db.execute(
             "INSERT INTO ra_price_watch (source_product_id, price, availability, price_change) VALUES (?,?,?,?)",
-            (source_id, src["source_price"], src["availability"], change),
+            (source_id, scraped_price if scraped_price > 0 else prev_price, scraped_avail, change),
         )
         db.execute(
             "UPDATE ra_source_products SET last_checked = datetime('now') WHERE id = ?",
             (source_id,),
         )
+
     return {
         "source_product_id": source_id,
-        "price": src["source_price"],
+        "scraped_price": scraped_price if live["success"] else None,
+        "prev_price": prev_price,
         "price_change": change,
-        "availability": src["availability"],
-        "message": "Price check recorded. Live scraping not yet connected.",
+        "availability": scraped_avail if live["success"] else src["availability"],
+        "success": live["success"],
+        "error": live["error"],
+        "message": "Live price scraped successfully" if live["success"] else f"Scraping failed: {live['error']}",
     }
 
 
@@ -982,14 +1258,20 @@ class ProductExtractedData(BaseModel):
     source_name: str = "Unknown"
 
 
-async def _extract_product_from_url(url: str, platform: str) -> ProductExtractedData:
-    """Extract product data from a URL using AI analysis of the page content."""
+async def _scrape_live_price(url: str, platform: str) -> dict:
+    """Scrape the live price from a product URL.
+
+    Returns {"price": float, "availability": str, "success": bool, "error": str or None}
+    """
     import httpx
     from bs4 import BeautifulSoup
 
+    if not url or not url.startswith("http"):
+        return {"price": 0, "availability": "unknown", "success": False, "error": "No valid URL"}
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     }
 
@@ -999,34 +1281,17 @@ async def _extract_product_from_url(url: str, platform: str) -> ProductExtracted
             html = resp.text
 
         soup = BeautifulSoup(html, "html.parser")
-
-        title = ""
         price = 0.0
-        shipping = 0.0
-        images = []
-        brand = ""
-        description = ""
         availability = "in_stock"
 
         if platform == "amazon":
-            title = soup.select_one("#productTitle")
-            if title:
-                title = title.get_text(strip=True)
-            price_elem = soup.select_one(".a-price .a-offscreen")
+            price_elem = soup.select_one(".a-price .a-offscreen") or soup.select_one("#priceblock_ourprice") or soup.select_one("#priceblock_dealprice") or soup.select_one(".a-color-price")
             if price_elem:
                 price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "")
                 try:
                     price = float(price_text)
                 except ValueError:
                     pass
-            ship_elem = soup.select_one("#deliveryBlockInner .a-color-secondary")
-            if ship_elem and "free" in ship_elem.get_text().lower():
-                shipping = 0.0
-            img_elems = soup.select("#altImages img, #imgTagWrapperId img")
-            images = [img.get("src", "") for img in img_elems[:6] if img.get("src")]
-            brand_elem = soup.select_one("#bylineInfoBrand, #brand")
-            if brand_elem:
-                brand = brand_elem.get_text(strip=True)
             avail_elem = soup.select_one("#availability span")
             if avail_elem:
                 avail_text = avail_elem.get_text(strip=True).lower()
@@ -1036,11 +1301,6 @@ async def _extract_product_from_url(url: str, platform: str) -> ProductExtracted
                     availability = "limited"
 
         elif platform == "walmart":
-            title = soup.select_one("h1[itemprop='name']")
-            if not title:
-                title = soup.select_one("h1")
-            if title:
-                title = title.get_text(strip=True)
             price_elem = soup.select_one("[itemprop='price']")
             if price_elem:
                 price_text = price_elem.get("content", price_elem.get_text(strip=True)).replace("$", "").replace(",", "")
@@ -1048,17 +1308,11 @@ async def _extract_product_from_url(url: str, platform: str) -> ProductExtracted
                     price = float(price_text)
                 except ValueError:
                     pass
-            img_elem = soup.select_one("[itemprop='image']")
-            if img_elem:
-                images = [img_elem.get("src", "")]
             avail_elem = soup.select_one("[itemprop='availability']")
             if avail_elem and "out" in avail_elem.get("content", "").lower():
                 availability = "out_of_stock"
 
         elif platform == "aliexpress":
-            title = soup.select_one("h1.product-title-text")
-            if title:
-                title = title.get_text(strip=True)
             price_elem = soup.select_one(".product-price-value")
             if price_elem:
                 price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "")
@@ -1070,10 +1324,16 @@ async def _extract_product_from_url(url: str, platform: str) -> ProductExtracted
             if avail_elem and "out of stock" in avail_elem.get_text().lower():
                 availability = "out_of_stock"
 
+        elif platform == "ebay":
+            price_elem = soup.select_one(".x-price-primary span") or soup.select_one("[itemprop='price']")
+            if price_elem:
+                price_text = price_elem.get("content", price_elem.get_text(strip=True)).replace("$", "").replace(",", "")
+                try:
+                    price = float(price_text)
+                except ValueError:
+                    pass
+
         else:
-            title = soup.select_one("h1")
-            if title:
-                title = title.get_text(strip=True)
             price_elem = soup.select_one("[itemprop='price'], .price, #priceblock")
             if price_elem:
                 price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "")
@@ -1081,25 +1341,14 @@ async def _extract_product_from_url(url: str, platform: str) -> ProductExtracted
                     price = float(price_text)
                 except ValueError:
                     pass
-            for img in soup.select("img[src]")[:6]:
-                src = img.get("src", "")
-                if src and not src.startswith("data:"):
-                    images.append(src)
 
-        return ProductExtractedData(
-            title=title or f"Product from {platform}",
-            description=description,
-            price=price,
-            shipping_cost=shipping,
-            images=images,
-            brand=brand,
-            availability=availability,
-            source_name=platform.title(),
-        )
+        if price <= 0:
+            return {"price": 0, "availability": availability, "success": False, "error": f"No price found on {platform}"}
+
+        return {"price": price, "availability": availability, "success": True, "error": None}
 
     except Exception as e:
-        log.warning(f"Failed to extract from {url}: {e}")
-        return ProductExtractedData(title=f"Product from {platform}", source_name=platform.title())
+        return {"price": 0, "availability": "unknown", "success": False, "error": str(e)}
 
 
 def _estimate_market_value(title: str, category: str, source_price: float) -> dict:
@@ -1375,76 +1624,108 @@ async def analyze_source(source_id: int):
 
 @router.post("/sources/bulk-refresh")
 async def bulk_refresh_prices():
-    """Refresh prices for all active source products.
+    """Refresh prices for all active source products with live URL scraping.
+
+    Scrapes each product's source URL for the current live price.
+    Only processes products with valid URLs.
+    Returns honest results including scrape failures.
 
     Returns:
     - Summary of price changes
-    - Recommendations per product
+    - Per-product results with success/failure
     """
     with get_db() as db:
         rows = dict_rows(db.execute(
             """SELECT * FROM ra_source_products
-               WHERE source_price > 0 AND availability = 'in_stock'
-               ORDER BY created_at DESC LIMIT 100""",
+               WHERE source_price > 0
+               AND availability = 'in_stock'
+               AND source_url IS NOT NULL
+               AND source_url != ''
+               ORDER BY created_at DESC LIMIT 50""",
         ).fetchall())
 
     results = []
+    successful = 0
+    failed = 0
+
     for row in rows:
         row = _parse_json_fields(row, JSON_FIELDS_SOURCE)
+        product_id = row["id"]
+        url = row.get("source_url", "")
+        platform = row.get("source_platform", "unknown")
 
         last_watch = db.execute(
-            "SELECT price, checked_at FROM ra_price_watch WHERE source_product_id = ? ORDER BY checked_at DESC LIMIT 1",
-            (row["id"],),
+            "SELECT price FROM ra_price_watch WHERE source_product_id = ? ORDER BY checked_at DESC LIMIT 1",
+            (product_id,),
         ).fetchone()
-
         prev_price = dict_row(last_watch)["price"] if last_watch else row["source_price"]
-        price_change = round(row["source_price"] - prev_price, 2) if prev_price else 0
 
-        market = _estimate_market_value(row["title"], row.get("category", ""), row["source_price"])
-        old_profit = market["estimated_profit"]
-        new_market = _estimate_market_value(row["title"], row.get("category", ""), row["source_price"])
-        new_profit = new_market["estimated_profit"]
+        live = await _scrape_live_price(url, platform)
+        scraped_price = live["price"] if live["success"] else row["source_price"]
+        scraped_avail = live["availability"] if live["success"] else row.get("availability", "in_stock")
 
+        if scraped_price > 0 and scraped_price != row["source_price"]:
+            db.execute(
+                "UPDATE ra_source_products SET source_price = ?, availability = ?, last_checked = datetime('now') WHERE id = ?",
+                (scraped_price, scraped_avail, product_id),
+            )
+
+        price_change = round(scraped_price - prev_price, 2) if prev_price else 0
+
+        market = _estimate_market_value(row["title"], row.get("category", ""), scraped_price if scraped_price > 0 else row["source_price"])
+        new_profit = market["estimated_profit"]
+
+        old_profit = row.get("_cached_profit", market["estimated_profit"])
         profit_change = new_profit - old_profit
 
-        if abs(price_change) > 0.01:
+        if scraped_price <= 0 or not live["success"]:
+            recommendation = "unavailable"
+            failed += 1
+        elif abs(price_change) > 0.01:
             recommendation = "reprice"
+            successful += 1
         elif profit_change < -5:
             recommendation = "review"
+            successful += 1
         elif profit_change < -10:
             recommendation = "delist"
+            successful += 1
         else:
             recommendation = "keep"
+            successful += 1
 
         db.execute(
             "INSERT INTO ra_price_watch (source_product_id, price, availability, price_change) VALUES (?,?,?,?)",
-            (row["id"], row["source_price"], row.get("availability", "in_stock"), price_change),
-        )
-        db.execute(
-            "UPDATE ra_source_products SET last_checked = datetime('now') WHERE id = ?",
-            (row["id"],),
+            (product_id, scraped_price if scraped_price > 0 else prev_price, scraped_avail, price_change),
         )
 
         results.append({
-            "id": row["id"],
+            "id": product_id,
             "title": row["title"][:60],
-            "source_price": row["source_price"],
+            "source_url": url[:50] + "..." if len(url) > 50 else url,
+            "scraped_price": scraped_price if live["success"] else None,
+            "stored_price": row["source_price"],
             "price_change": price_change,
             "prev_price": prev_price,
-            "availability": row.get("availability", "in_stock"),
+            "availability": scraped_avail,
             "estimated_profit": new_profit,
             "profit_change": round(profit_change, 2),
             "recommendation": recommendation,
+            "scrape_success": live["success"],
+            "scrape_error": live["error"] if not live["success"] else None,
         })
 
     return {
         "checked": len(results),
+        "successful": successful,
+        "failed": failed,
         "results": results,
         "summary": {
             "keep": len([r for r in results if r["recommendation"] == "keep"]),
             "reprice": len([r for r in results if r["recommendation"] == "reprice"]),
             "review": len([r for r in results if r["recommendation"] == "review"]),
             "delist": len([r for r in results if r["recommendation"] == "delist"]),
+            "unavailable": len([r for r in results if r["recommendation"] == "unavailable"]),
         },
     }
 
@@ -1500,4 +1781,484 @@ async def create_listing_from_source(req: CreateListingFromSourceRequest):
         "your_price": req.your_price,
         **profit,
     }
+
+
+# ── Service Registry ────────────────────────────────────────────────────────────
+
+class ServiceUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    mode: Optional[str] = None
+    weight: Optional[int] = None
+    schedule: Optional[str] = None
+    quota_daily: Optional[int] = None
+    rate_limit: Optional[int] = None
+    scope: Optional[dict] = None
+
+
+@router.get("/services")
+async def list_services():
+    """List all RelistApp services with their current state.
+
+    Returns all registered services including disabled/not-implemented ones.
+    Health values: healthy, stub, not_implemented, no_auth, not_configured, error, unknown
+    """
+    with get_db() as db:
+        rows = dict_rows(db.execute(
+            "SELECT * FROM ra_services ORDER BY service_type, display_name"
+        ).fetchall())
+    for row in rows:
+        if row.get("scope") and isinstance(row["scope"], str):
+            try:
+                row["scope"] = json.loads(row["scope"])
+            except (json.JSONDecodeError, TypeError):
+                row["scope"] = {}
+    return {"services": rows, "total": len(rows)}
+
+
+@router.get("/services/{service_key}")
+async def get_service(service_key: str):
+    """Get a specific service by key."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM ra_services WHERE service_key = ?", (service_key,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Service '{service_key}' not found")
+    row = dict_row(row)
+    if row.get("scope") and isinstance(row["scope"], str):
+        try:
+            row["scope"] = json.loads(row["scope"])
+        except (json.JSONDecodeError, TypeError):
+            row["scope"] = {}
+    return row
+
+
+@router.patch("/services/{service_key}")
+async def update_service(service_key: str, req: ServiceUpdate):
+    """Update a service's configuration.
+
+    Supports: enabled, mode, weight, schedule, quota_daily, rate_limit, scope
+    Mode values: off, manual, assist, auto
+    """
+    valid_modes = ("off", "manual", "assist", "auto")
+    if req.mode is not None and req.mode not in valid_modes:
+        raise HTTPException(400, f"Invalid mode. Must be one of: {', '.join(valid_modes)}")
+
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(400, "No fields to update")
+
+    if "scope" in updates:
+        updates["scope"] = json.dumps(updates["scope"])
+
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    values = list(updates.values()) + [service_key]
+    with get_db() as db:
+        affected = db.execute(
+            f"UPDATE ra_services SET {set_clause}, updated_at = datetime('now') WHERE service_key = ?",
+            values,
+        ).rowcount
+    if not affected:
+        raise HTTPException(404, f"Service '{service_key}' not found")
+
+    row = db.execute(
+        "SELECT * FROM ra_services WHERE service_key = ?", (service_key,)
+    ).fetchone()
+    row = dict_row(row)
+    if row.get("scope") and isinstance(row["scope"], str):
+        try:
+            row["scope"] = json.loads(row["scope"])
+        except (json.JSONDecodeError, TypeError):
+            row["scope"] = {}
+    return row
+
+
+@router.post("/services/{service_key}/pause")
+async def pause_service(service_key: str, reason: str = ""):
+    """Pause a service. Sets mode to 'off' and records pause reason."""
+    with get_db() as db:
+        affected = db.execute(
+            """UPDATE ra_services SET enabled = 0, mode = 'off',
+               pause_reason = ?, updated_at = datetime('now')
+               WHERE service_key = ?""",
+            (reason, service_key),
+        ).rowcount
+    if not affected:
+        raise HTTPException(404, f"Service '{service_key}' not found")
+    return {"service_key": service_key, "enabled": False, "mode": "off", "pause_reason": reason}
+
+
+@router.post("/services/{service_key}/resume")
+async def resume_service(service_key: str):
+    """Resume a paused service. Restores previous mode if it was 'off'."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT service_type, pause_reason FROM ra_services WHERE service_key = ?",
+            (service_key,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Service '{service_key}' not found")
+    row = dict_row(row)
+
+    default_mode = "manual"
+    if row["service_type"] == "free_public":
+        default_mode = "assist"
+    elif row["service_type"] == "official_api":
+        default_mode = "manual"
+    else:
+        default_mode = "off"
+
+    with get_db() as db:
+        affected = db.execute(
+            """UPDATE ra_services SET enabled = 1, mode = ?, pause_reason = '',
+               updated_at = datetime('now') WHERE service_key = ?""",
+            (default_mode, service_key),
+        ).rowcount
+    return {"service_key": service_key, "enabled": True, "mode": default_mode}
+
+
+@router.post("/services/{service_key}/run-now")
+async def run_service_now(service_key: str):
+    """Trigger an immediate run of a service.
+
+    Returns the result of the run or an error if the service is not runnable.
+    For manual services, this initiates the scout/pricing operation immediately.
+    """
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM ra_services WHERE service_key = ?", (service_key,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Service '{service_key}' not found")
+    row = dict_row(row)
+
+    if row["service_key"] == "scout_url_import":
+        return {"service_key": service_key, "status": "noop", "message": "Use POST /sources/import-full to import a URL. URL import is manual."}
+    elif row["service_key"] == "ai_deal_finder":
+        return {"service_key": service_key, "status": "noop", "message": "AI deal finder runs automatically on imported products."}
+    elif row["service_key"] == "price_monitor":
+        return {"service_key": service_key, "status": "triggered", "message": "Price check triggered. Use POST /sources/bulk-refresh for bulk refresh."}
+    elif row["service_key"] == "amazon_spapi":
+        return {"service_key": service_key, "status": "not_implemented", "message": "Amazon SP-API integration not yet built."}
+    elif row["service_key"] == "ebay_api":
+        return {"service_key": service_key, "status": "not_implemented", "message": "eBay API integration not yet built."}
+    elif row["service_key"] == "walmart_api":
+        return {"service_key": service_key, "status": "not_implemented", "message": "Walmart API integration not yet built."}
+    elif row["service_key"].startswith("scout_"):
+        return {"service_key": service_key, "status": "not_implemented", "message": f"Scout source '{service_key}' not yet implemented."}
+    elif row["service_key"].startswith("premium_"):
+        return {"service_key": service_key, "status": "not_configured", "message": f"Premium service '{service_key}' requires API credentials."}
+    else:
+        return {"service_key": service_key, "status": "noop", "message": f"Service '{service_key}' does not support run-now."}
+
+
+# ── Scout Orchestrator ────────────────────────────────────────────────────────────
+
+class ScoutResult(BaseModel):
+    source_platform: str
+    source_url: Optional[str] = None
+    source_product_id: Optional[str] = None
+    title: str
+    source_price: float = 0
+    shipping_cost: float = 0
+    currency: str = "USD"
+    category: str = ""
+    brand: str = ""
+    condition: str = "new"
+    availability: str = "in_stock"
+    source_images: List[str] = []
+    scout_source: str = "unknown"
+    scout_confidence: float = 0.5
+    scout_signals: dict = {}
+
+
+async def _scout_amazon_best_sellers(category: str = "", limit: int = 20) -> List[ScoutResult]:
+    """Scrape Amazon Best Sellers pages for product opportunities.
+
+    Returns a list of ScoutResult objects with source attribution.
+    This is a free/public signal — no API key required.
+    """
+    import httpx
+    from bs4 import BeautifulSoup
+
+    results = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+
+    categories = [
+        "electronics", "computers", "camera", "headphones", "speaker",
+        "home", "kitchen", "appliances", "home-improvement",
+        "toys", "games", "sports", "outdoors",
+        "beauty", "health", "clothing", "shoes", "jewelry",
+    ] if not category else [category]
+
+    for cat in categories[:3]:
+        url = f"https://www.amazon.com/gp/bestsellers/{cat}/"
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                resp = await client.get(url, headers=headers)
+                html = resp.text
+
+            soup = BeautifulSoup(html, "html.parser")
+            items = soup.select("#zg_better-root .zg_itemImmersion") or soup.select(".p13n-sc-truncated")
+
+            for item in items[:limit]:
+                try:
+                    title_elem = item.select_one("._cDEzb_p13n-sc-css-line-clamp-3") or item.select_one("a.a-size-small") or item.select_one("span.a-size-small")
+                    title = title_elem.get_text(strip=True) if title_elem else ""
+                    if not title:
+                        continue
+
+                    price_elem = item.select_one(".p13n-sc-price")
+                    price_text = price_elem.get_text(strip=True).replace("$", "").replace(",", "") if price_elem else "0"
+                    try:
+                        price = float(price_text)
+                    except ValueError:
+                        price = 0.0
+
+                    link_elem = item.select_one("a.a-link-normal") or item.select_one("a")
+                    href = link_elem.get("href", "") if link_elem else ""
+                    product_url = f"https://www.amazon.com{href}" if href.startswith("/") else href
+
+                    results.append(ScoutResult(
+                        source_platform="amazon",
+                        source_url=product_url,
+                        source_product_id=href.split("/dp/")[-1].split("/")[0] if "/dp/" in href else None,
+                        title=title,
+                        source_price=price,
+                        currency="USD",
+                        category=cat,
+                        availability="in_stock",
+                        scout_source="amazon_bestsellers",
+                        scout_confidence=0.7,
+                        scout_signals={"rank_position": len(results) + 1, "page": cat, "type": "best_seller"},
+                    ))
+                except Exception:
+                    continue
+
+        except Exception as e:
+            log.warning(f"Failed to scrape Amazon best sellers for {cat}: {e}")
+            continue
+
+    return results
+
+
+async def _scout_walmart_trends(limit: int = 20) -> List[ScoutResult]:
+    """Scrape Walmart's trending items as a free/public signal."""
+    import httpx
+    from bs4 import BeautifulSoup
+
+    results = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,*/*",
+    }
+
+    url = "https://www.walmart.com/trending"
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            html = resp.text
+
+        soup = BeautifulSoup(html, "html.parser")
+        items = soup.select(".search-result-gridview-item") or soup.select("[data-item-id]")[:limit]
+
+        for item in items[:limit]:
+            title_elem = item.select_one("a span") or item.select_one("span")
+            title = title_elem.get_text(strip=True) if title_elem else ""
+            if not title:
+                continue
+
+            price_elem = item.select_one("[itemprop='price']")
+            price_text = price_elem.get("content", price_elem.get_text(strip=True)).replace("$", "").replace(",", "") if price_elem else "0"
+            try:
+                price = float(price_text)
+            except ValueError:
+                price = 0.0
+
+            link_elem = item.select_one("a")
+            href = link_elem.get("href", "") if link_elem else ""
+            product_url = f"https://www.walmart.com{href}" if href.startswith("/") else href
+
+            results.append(ScoutResult(
+                source_platform="walmart",
+                source_url=product_url,
+                title=title,
+                source_price=price,
+                currency="USD",
+                availability="in_stock",
+                scout_source="walmart_trending",
+                scout_confidence=0.5,
+                scout_signals={"type": "trending"},
+            ))
+    except Exception as e:
+        log.warning(f"Failed to scrape Walmart trending: {e}")
+
+    return results
+
+
+def _deduplicate_scout_results(existing: List[dict], new_results: List[ScoutResult]) -> List[ScoutResult]:
+    """Remove duplicates based on title similarity and URL."""
+    existing_titles = {r.get("title", "").lower()[:50]: r for r in existing if r.get("title")}
+    existing_urls = {r.get("source_url", ""): r for r in existing if r.get("source_url")}
+
+    deduped = []
+    for result in new_results:
+        url_key = result.source_url or ""
+        title_key = result.title.lower()[:50]
+
+        if url_key and url_key in existing_urls:
+            continue
+        if title_key in existing_titles:
+            continue
+
+        deduped.append(result)
+
+    return deduped
+
+
+async def _run_scout_sources(sources: List[str], category: str = "", limit_per_source: int = 30) -> List[ScoutResult]:
+    """Run multiple scout sources and aggregate results."""
+    all_results: List[ScoutResult] = []
+
+    for source in sources:
+        try:
+            if source == "amazon_bestsellers":
+                results = await _scout_amazon_best_sellers(category=category, limit=limit_per_source)
+                all_results.extend(results)
+            elif source == "walmart_trending":
+                results = await _scout_walmart_trends(limit=limit_per_source)
+                all_results.extend(results)
+        except Exception as e:
+            log.warning(f"Scout source {source} failed: {e}")
+
+    return all_results
+
+
+@router.post("/scout/run")
+async def scout_run(
+    sources: Optional[List[str]] = None,
+    category: str = "",
+    limit_per_source: int = Query(30, ge=1, le=100),
+):
+    """Run the scout orchestrator across enabled sources.
+
+    Runs specified scout sources and imports new products into ra_source_products.
+    Deduplicates against existing products by URL and title.
+    """
+    if sources is None:
+        sources = ["amazon_bestsellers"]
+
+    results = await _run_scout_sources(sources, category=category, limit_per_source=limit_per_source)
+
+    if not results:
+        return {"scouted": 0, "imported": 0, "skipped_duplicates": 0, "results": []}
+
+    with get_db() as db:
+        existing = dict_rows(db.execute(
+            "SELECT title, source_url, source_platform FROM ra_source_products LIMIT 500"
+        ).fetchall())
+
+    deduped = _deduplicate_scout_results(existing, results)
+
+    imported = 0
+    import_results = []
+    for r in deduped:
+        try:
+            with get_db() as db:
+                cur = db.execute(
+                    """INSERT INTO ra_source_products
+                       (source_platform, source_url, source_product_id, title, source_price,
+                        shipping_cost, source_images, category, brand, condition, availability,
+                        notes, scout_source, scout_confidence)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        r.source_platform, r.source_url, r.source_product_id, r.title,
+                        r.source_price, r.shipping_cost,
+                        json.dumps(r.source_images[:4]), r.category, r.brand, r.condition,
+                        r.availability,
+                        json.dumps({"scout_signals": r.scout_signals}),
+                        r.scout_source, r.scout_confidence,
+                    ),
+                )
+                new_id = cur.lastrowid
+
+            import_results.append({
+                "id": new_id,
+                "title": r.title[:60],
+                "source_platform": r.source_platform,
+                "source_price": r.source_price,
+                "scout_source": r.scout_source,
+                "scout_confidence": r.scout_confidence,
+            })
+            imported += 1
+        except Exception as e:
+            log.warning(f"Failed to import scout result: {e}")
+
+    return {
+        "scouted": len(results),
+        "imported": imported,
+        "skipped_duplicates": len(results) - len(deduped),
+        "results": import_results,
+    }
+
+
+@router.get("/scout/sources")
+async def list_scout_sources():
+    """List available scout sources and their status."""
+    with get_db() as db:
+        rows = dict_rows(db.execute(
+            """SELECT service_key, display_name, description, enabled, mode,
+                      health, weight, last_run, last_success, last_error
+               FROM ra_services
+               WHERE service_key LIKE 'scout_%'"""
+        ).fetchall())
+
+    return {"sources": rows}
+
+
+@router.get("/scout/opportunities")
+async def list_scout_opportunities(
+    min_confidence: float = Query(0, ge=0, le=1),
+    platform: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List imported products that came from scout sources (not manual URL import).
+
+    Useful for reviewing AI-scored opportunities from automated scout runs.
+    """
+    with get_db() as db:
+        where = ["scout_source IS NOT NULL AND scout_source != ''"]
+        params = []
+        if platform:
+            where.append("source_platform = ?")
+            params.append(platform)
+        clause = f"WHERE {' AND '.join(where)}"
+        params.append(limit)
+
+        rows = dict_rows(db.execute(
+            f"""SELECT id, title, source_platform, source_price, scout_source,
+                       scout_confidence, category, brand, availability,
+                       notes, created_at, last_checked
+                FROM ra_source_products
+                {clause}
+                ORDER BY scout_confidence DESC, created_at DESC
+                LIMIT ?""",
+            params,
+        ).fetchall())
+
+    for row in rows:
+        if row.get("notes"):
+            try:
+                notes = json.loads(row["notes"]) if isinstance(row["notes"], str) else row["notes"]
+                row["scout_signals"] = notes.get("scout_signals", {})
+            except (json.JSONDecodeError, TypeError):
+                row["scout_signals"] = {}
+
+    return {"opportunities": rows, "total": len(rows)}
+
+
 

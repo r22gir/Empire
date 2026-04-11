@@ -20,8 +20,9 @@ const NAV = [
   { id: 'crosslist', label: 'Cross-List', icon: Link },
   { id: 'orders', label: 'Orders', icon: ShoppingCart },
   { id: 'pricemon', label: 'Price Monitor', icon: TrendingUp },
+  { id: 'services', label: 'Services', icon: Activity },
   { id: 'calculator', label: 'Profit Calculator', icon: Calculator },
-  { id: 'analytics', label: 'Analytics', icon: Activity },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'plans', label: 'Plans', icon: Crown },
   { id: 'docs', label: 'Docs', icon: BarChart3 },
 ] as const;
@@ -50,6 +51,7 @@ export default function RelistAppPage({ initialSection }: RelistAppPageProps) {
       case 'crosslist': return <CrossListSection />;
       case 'orders': return <OrdersSection />;
       case 'pricemon': return <PriceMonitorSection />;
+      case 'services': return <ServicesSection />;
       case 'calculator': return <CalculatorSection />;
       case 'analytics': return <AnalyticsSection />;
       case 'plans': return <PlansSection />;
@@ -146,6 +148,10 @@ function ScoutSection() {
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState('');
   const [lastResult, setLastResult] = useState<any>(null);
+  const [scoutRunning, setScoutRunning] = useState(false);
+  const [scoutResult, setScoutResult] = useState<any>(null);
+  const [selectedSources, setSelectedSources] = useState<string[]>(['amazon_bestsellers']);
+
   useEffect(() => { fetch(`${RA_API}/sources`).then(r => r.json()).then(d => setSources(d.items || [])).catch(() => {}); }, []);
 
   const doImport = async () => {
@@ -170,9 +176,75 @@ function ScoutSection() {
     }
   };
 
+  const runScout = async () => {
+    setScoutRunning(true);
+    setScoutResult(null);
+    try {
+      const res = await fetch(`${RA_API}/scout/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sources: selectedSources, limit_per_source: 20 }),
+      });
+      const data = await res.json();
+      setScoutResult(data);
+      if (data.imported > 0) {
+        fetch(`${RA_API}/sources`).then(r => r.json()).then(d => setSources(d.items || [])).catch(() => {});
+      }
+    } catch (e: any) {
+      setScoutResult({ error: e.message });
+    } finally {
+      setScoutRunning(false);
+    }
+  };
+
+  const toggleSource = (src: string) => {
+    setSelectedSources(prev =>
+      prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src]
+    );
+  };
+
   return (
     <div>
       <SH title="Product Scout" subtitle="Import products to analyze and resell at a profit" />
+
+      <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Automated Scout</div>
+        <div style={{ fontSize: 11, color: '#888', marginBottom: 10 }}>
+          Run automated product discovery from free public sources.
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {[
+            { key: 'amazon_bestsellers', label: 'Amazon Best Sellers', badge: 'Free/Public' },
+            { key: 'walmart_trending', label: 'Walmart Trending', badge: 'Free/Public' },
+          ].map(src => (
+            <button key={src.key} onClick={() => toggleSource(src.key)} style={{
+              padding: '6px 12px', borderRadius: 8, border: `1.5px solid ${selectedSources.includes(src.key) ? '#06b6d4' : '#e5e2dc'}`,
+              background: selectedSources.includes(src.key) ? '#ecfeff' : '#fff',
+              cursor: 'pointer', fontSize: 11, fontWeight: selectedSources.includes(src.key) ? 600 : 400,
+            }}>
+              {src.label}
+              <span style={{ marginLeft: 6, fontSize: 9, padding: '1px 5px', borderRadius: 8, background: selectedSources.includes(src.key) ? '#dcfce7' : '#f5f3ef', color: selectedSources.includes(src.key) ? '#16a34a' : '#888' }}>
+                {src.badge}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={runScout} disabled={scoutRunning || selectedSources.length === 0}
+            style={{ padding: '8px 16px', background: scoutRunning ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 12, cursor: scoutRunning ? 'wait' : 'pointer' }}>
+            {scoutRunning ? <><Loader2 size={12} className="animate-spin" /> Scanning...</> : 'Run Scout'}
+          </button>
+          {scoutResult && !scoutResult.error && (
+            <span style={{ fontSize: 11, color: scoutResult.imported > 0 ? '#16a34a' : '#888' }}>
+              Found {scoutResult.scouted} products, imported {scoutResult.imported} new, skipped {scoutResult.skipped_duplicates} duplicates
+            </span>
+          )}
+          {scoutResult?.error && (
+            <span style={{ fontSize: 11, color: '#dc2626' }}>{scoutResult.error}</span>
+          )}
+        </div>
+      </div>
+
       <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, marginBottom: 16 }}>
         <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Import Product from URL</div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -203,7 +275,7 @@ function ScoutSection() {
       <div style={{ fontSize: 11, color: '#888', marginBottom: 12 }}>{sources.length} products imported</div>
       {sources.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
-          No source products yet. Paste a URL above to import your first product.
+          No source products yet. Run automated scout or paste a URL above to import your first product.
         </div>
       ) : (
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
@@ -418,7 +490,161 @@ function ListingsSection() {
 }
 
 function CrossListSection() {
-  return <div><SH title="Cross-List" subtitle="Post to multiple platforms at once" /><div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Select a source product, then choose platforms to list on.</div></div>;
+  const [listings, setListings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<any>(null);
+  const [targetPlatform, setTargetPlatform] = useState('ebay');
+  const [yourPrice, setYourPrice] = useState<number>(0);
+  const [platformFee, setPlatformFee] = useState(13);
+  const [crossListing, setCrossListing] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const platforms = [
+    { key: 'ebay', label: 'eBay', color: '#e53238' },
+    { key: 'poshmark', label: 'Poshmark', color: '#7b2d8e' },
+    { key: 'mercari', label: 'Mercari', color: '#4dc0ff' },
+    { key: 'facebook_marketplace', label: 'Facebook Marketplace', color: '#1877f2' },
+    { key: 'offerup', label: 'OfferUp', color: '#00ab80' },
+    { key: 'etsy', label: 'Etsy', color: '#f56400' },
+  ];
+
+  useEffect(() => {
+    fetch(`${RA_API}/listings?status=active&limit=100`)
+      .then(r => r.json())
+      .then(d => { setListings(d.items || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleSelect = (listing: any) => {
+    setSelected(listing);
+    setYourPrice(listing.your_price || 0);
+    setResult(null);
+    setError(null);
+    const otherPlatforms = platforms.filter(p => p.key !== listing.platform);
+    if (otherPlatforms.length > 0) setTargetPlatform(otherPlatforms[0].key);
+  };
+
+  const handleCrossList = async () => {
+    if (!selected) return;
+    setCrossListing(true);
+    setError(null);
+    setResult(null);
+    try {
+      const res = await fetch(`${RA_API}/listings/${selected.id}/cross-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_platform: targetPlatform, your_price: yourPrice, platform_fee_percent: platformFee }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Cross-list failed');
+      setResult(data);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setCrossListing(false);
+    }
+  };
+
+  const availableTargets = platforms.filter(p => p.key !== selected?.platform);
+
+  return (
+    <div>
+      <SH title="Cross-List" subtitle="Clone an existing listing to another platform" />
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="animate-spin" style={{ color: '#06b6d4' }} /></div>
+      ) : listings.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
+          No active listings to cross-list. Import and list products first.
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: '#666' }}>Select a listing to cross-list</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {listings.map((l: any) => (
+                <div key={l.id} onClick={() => handleSelect(l)} style={{
+                  padding: 12, borderRadius: 10, border: `2px solid ${selected?.id === l.id ? '#06b6d4' : '#e5e2dc'}`,
+                  background: selected?.id === l.id ? '#ecfeff' : '#fff', cursor: 'pointer', transition: 'all 0.15s',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: (PLATFORM_COLORS[l.platform] || '#888') + '20', color: PLATFORM_COLORS[l.platform] || '#888' }}>
+                      {l.platform}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{l.title?.slice(0, 40)}{l.title?.length > 40 ? '...' : ''}</span>
+                  </div>
+                  <div style={{ fontSize: 11, color: '#888' }}>${(l.your_price || 0).toFixed(2)} — Est. profit ${(l.estimated_profit || 0).toFixed(2)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            {selected ? (
+              <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Cross-list to another platform</div>
+                <div style={{ fontSize: 11, color: '#666', marginBottom: 12 }}>
+                  Listing: <b>{selected.title?.slice(0, 50)}</b> on <b>{selected.platform}</b> at <b>${(selected.your_price || 0).toFixed(2)}</b>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Target Platform</label>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {availableTargets.map(p => (
+                      <button key={p.key} onClick={() => setTargetPlatform(p.key)} style={{
+                        padding: '6px 12px', borderRadius: 8, border: `1.5px solid ${targetPlatform === p.key ? p.color : '#e5e2dc'}`,
+                        background: targetPlatform === p.key ? p.color + '15' : '#fff', color: targetPlatform === p.key ? p.color : '#666',
+                        fontSize: 11, fontWeight: targetPlatform === p.key ? 600 : 400, cursor: 'pointer',
+                      }}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Your Price ($)</label>
+                    <input type="number" value={yourPrice} onChange={e => setYourPrice(parseFloat(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 13 }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Platform Fee (%)</label>
+                    <input type="number" value={platformFee} onChange={e => setPlatformFee(parseFloat(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 13 }} />
+                  </div>
+                </div>
+
+                <button onClick={handleCrossList} disabled={crossListing || availableTargets.length === 0}
+                  style={{ width: '100%', padding: '10px 16px', background: crossListing ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: crossListing ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  {crossListing ? <><Loader2 size={14} className="animate-spin" /> Cross-Listing...</> : <><ArrowRight size={14} /> Cross-List to {platforms.find(p => p.key === targetPlatform)?.label}</>}
+                </button>
+
+                {error && <div style={{ marginTop: 10, padding: '8px 12px', background: '#fee2e2', borderRadius: 8, fontSize: 12, color: '#dc2626' }}>{error}</div>}
+
+                {result && (
+                  <div style={{ marginTop: 12, padding: 14, background: '#f0fdf4', borderRadius: 10, border: '1px solid #86efac' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                      <CheckCircle size={16} style={{ color: '#16a34a' }} />
+                      <span style={{ fontWeight: 700, color: '#16a34a' }}>Cross-list successful!</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#666' }}>
+                      <div>New listing on <b>{result.platform}</b></div>
+                      <div>Price: <b>${(result.your_price || 0).toFixed(2)}</b> — Est. profit: <b style={{ color: '#16a34a' }}>${(result.estimated_profit || 0).toFixed(2)}</b></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
+                Select a listing from the left to cross-list it to another platform.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function OrdersSection() {
@@ -564,7 +790,292 @@ function CalculatorSection() {
 }
 
 function AnalyticsSection() {
-  return <div><SH title="Analytics" subtitle="Profit trends, platform comparison, best sellers" /><div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Analytics will populate as you make sales.</div></div>;
+  const [dash, setDash] = useState<any>(null);
+  const [platforms, setPlatforms] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`${RA_API}/analytics/dashboard`).then(r => r.json()),
+      fetch(`${RA_API}/analytics/by-platform`).then(r => r.json()),
+    ]).then(([d, p]) => {
+      setDash(d);
+      setPlatforms(p.platforms || []);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div><SH title="Analytics" subtitle="Profit trends, platform comparison, best sellers" /><div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="animate-spin" style={{ color: '#06b6d4' }} /></div></div>;
+
+  const hasData = dash && (dash.orders.total > 0 || dash.listings.total > 0);
+
+  return (
+    <div>
+      <SH title="Analytics" subtitle="Profit trends, platform comparison, best sellers" />
+      {!hasData ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
+          Analytics will populate as you make sales. Import products and create listings to see your metrics here.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+            {[
+              { label: 'Total Revenue', value: `$${(dash.financials.total_revenue || 0).toFixed(2)}`, color: '#06b6d4' },
+              { label: 'Total Profit', value: `$${(dash.financials.total_profit || 0).toFixed(2)}`, color: '#16a34a' },
+              { label: 'Items Sold', value: dash.listings.sold || 0, color: '#8b5cf6' },
+              { label: 'Active Listings', value: dash.listings.active || 0, color: '#e53238' },
+            ].map((k, i) => (
+              <div key={i} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16, textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color: k.color }}>{k.value}</div>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>{k.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {platforms.length > 0 && (
+            <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Performance by Platform</div>
+              <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                <thead><tr style={{ borderBottom: '2px solid #e5e2dc' }}>
+                  <th style={{ padding: 8, textAlign: 'left' }}>Platform</th>
+                  <th style={{ padding: 8 }}>Listings</th>
+                  <th style={{ padding: 8 }}>Sold</th>
+                  <th style={{ padding: 8 }}>Revenue</th>
+                  <th style={{ padding: 8 }}>Profit</th>
+                  <th style={{ padding: 8 }}>Avg Markup</th>
+                </tr></thead>
+                <tbody>
+                  {platforms.map((p: any) => (
+                    <tr key={p.platform} style={{ borderBottom: '1px solid #f0ede6' }}>
+                      <td style={{ padding: 8 }}>
+                        <span style={{ fontWeight: 600, color: PLATFORM_COLORS[p.platform] || '#666' }}>{p.platform}</span>
+                      </td>
+                      <td style={{ padding: 8 }}>{p.total_listings || 0}</td>
+                      <td style={{ padding: 8 }}>{p.sold || 0}</td>
+                      <td style={{ padding: 8, fontWeight: 600 }}>${(p.revenue || 0).toFixed(2)}</td>
+                      <td style={{ padding: 8, fontWeight: 600, color: '#16a34a' }}>${(p.profit || 0).toFixed(2)}</td>
+                      <td style={{ padding: 8 }}>{((p.avg_markup || 0) * 100).toFixed(1)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const HEALTH_COLORS: Record<string, string> = {
+  healthy: '#16a34a',
+  stub: '#ca8a04',
+  not_implemented: '#9ca3af',
+  no_auth: '#dc2626',
+  not_configured: '#dc2626',
+  error: '#dc2626',
+  unknown: '#9ca3af',
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  free_public: 'Free/Public',
+  official_api: 'Official API',
+  premium_optional: 'Premium Optional',
+};
+
+const MODE_LABELS: Record<string, string> = {
+  off: 'Off',
+  manual: 'Manual',
+  assist: 'Assist',
+  auto: 'Auto',
+};
+
+function ServicesSection() {
+  const [services, setServices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState<string | null>(null);
+  const [filter, setFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
+
+  const loadServices = () => {
+    setLoading(true);
+    fetch(`${RA_API}/services`)
+      .then(r => r.json())
+      .then(d => { setServices(d.services || []); setLoading(false); })
+      .catch(() => setLoading(false));
+  };
+
+  useEffect(() => { loadServices(); }, []);
+
+  const updateService = async (key: string, updates: any) => {
+    setUpdating(key);
+    try {
+      await fetch(`${RA_API}/services/${key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      loadServices();
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const pauseService = async (key: string) => {
+    setUpdating(key);
+    try {
+      const reason = prompt('Pause reason (optional):') || '';
+      await fetch(`${RA_API}/services/${key}/pause?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+      loadServices();
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const resumeService = async (key: string) => {
+    setUpdating(key);
+    try {
+      await fetch(`${RA_API}/services/${key}/resume`, { method: 'POST' });
+      loadServices();
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  const filtered = services.filter((s: any) => {
+    const matchesEnabled = filter === 'all' || (filter === 'enabled' && s.enabled) || (filter === 'disabled' && !s.enabled);
+    const matchesType = typeFilter === 'all' || s.service_type === typeFilter;
+    return matchesEnabled && matchesType;
+  });
+
+  const grouped = filtered.reduce((acc: Record<string, any[]>, s: any) => {
+    if (!acc[s.service_type]) acc[s.service_type] = [];
+    acc[s.service_type].push(s);
+    return acc;
+  }, {});
+
+  return (
+    <div>
+      <SH title="Service Control Panel" subtitle="Enable, pause, and configure RelistApp services" />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['all', 'enabled', 'disabled'].map(f => (
+            <button key={f} onClick={() => setFilter(f)} style={{
+              fontSize: 11, padding: '4px 12px', borderRadius: 12, cursor: 'pointer',
+              border: filter === f ? '2px solid #06b6d4' : '1px solid #e5e2dc',
+              background: filter === f ? '#ecfeff' : '#fff', color: filter === f ? '#06b6d4' : '#666',
+              fontWeight: filter === f ? 600 : 400,
+            }}>
+              {f === 'all' ? 'All' : f === 'enabled' ? 'Enabled' : 'Paused'}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {['all', 'free_public', 'official_api', 'premium_optional'].map(f => (
+            <button key={f} onClick={() => setTypeFilter(f)} style={{
+              fontSize: 10, padding: '3px 10px', borderRadius: 10, cursor: 'pointer',
+              border: typeFilter === f ? '2px solid #06b6d4' : '1px solid #e5e2dc',
+              background: typeFilter === f ? '#ecfeff' : '#fff', color: typeFilter === f ? '#06b6d4' : '#888',
+              fontWeight: typeFilter === f ? 600 : 400,
+            }}>
+              {f === 'all' ? 'All Types' : TYPE_LABELS[f] || f}
+            </button>
+          ))}
+        </div>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888' }}>
+          {services.filter((s: any) => s.enabled).length} enabled / {services.length} total
+        </span>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}><Loader2 size={20} className="animate-spin" style={{ color: '#06b6d4' }} /></div>
+      ) : (
+        Object.entries(grouped).map(([type, svcs]) => (
+          <div key={type} style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700,
+                background: type === 'free_public' ? '#dcfce7' : type === 'official_api' ? '#dbeafe' : '#f3e8ff',
+                color: type === 'free_public' ? '#16a34a' : type === 'official_api' ? '#2563eb' : '#7c3aed',
+              }}>
+                {TYPE_LABELS[type] || type}
+              </span>
+              <span style={{ color: '#aaa' }}>{type === 'free_public' ? 'On by default — free to use' : type === 'official_api' ? 'Off until credentials provided' : 'Off — premium subscription required'}</span>
+            </div>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+              {(svcs as any[]).map((svc: any) => {
+                const healthColor = HEALTH_COLORS[svc.health] || HEALTH_COLORS.unknown;
+                const isUpdating = updating === svc.service_key;
+                return (
+                  <div key={svc.service_key} style={{
+                    background: '#fff', border: `1px solid ${svc.enabled ? '#e5e2dc' : '#fee2e2'}`,
+                    borderRadius: 10, padding: 14,
+                    opacity: svc.enabled ? 1 : 0.7,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{svc.display_name}</div>
+                        <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{svc.description}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                        {!svc.enabled ? (
+                          <button onClick={() => resumeService(svc.service_key)} disabled={isUpdating}
+                            style={{ fontSize: 10, padding: '4px 8px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, cursor: isUpdating ? 'wait' : 'pointer', fontWeight: 600 }}>
+                            Resume
+                          </button>
+                        ) : (
+                          <button onClick={() => pauseService(svc.service_key)} disabled={isUpdating}
+                            style={{ fontSize: 10, padding: '4px 8px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, cursor: isUpdating ? 'wait' : 'pointer' }}>
+                            Pause
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: svc.enabled ? '#dcfce7' : '#fee2e2', color: svc.enabled ? '#16a34a' : '#dc2626', fontWeight: 600 }}>
+                        {svc.enabled ? 'Enabled' : 'Paused'}
+                      </span>
+                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: '#f5f3ef', color: '#666' }}>
+                        {MODE_LABELS[svc.mode] || svc.mode}
+                      </span>
+                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: svc.auth_required && !svc.auth_present ? '#fee2e2' : '#f5f3ef', color: svc.auth_required && !svc.auth_present ? '#dc2626' : '#888' }}>
+                        {svc.auth_required ? (svc.auth_present ? 'Auth OK' : 'Auth Missing') : 'No Auth'}
+                      </span>
+                      <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: healthColor + '20', color: healthColor, fontWeight: 600 }}>
+                        {svc.health.replace('_', ' ')}
+                      </span>
+                    </div>
+
+                    {svc.last_error && (
+                      <div style={{ fontSize: 10, color: '#dc2626', marginBottom: 6, padding: '4px 8px', background: '#fee2e2', borderRadius: 6 }}>
+                        Error: {svc.last_error.slice(0, 80)}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <select value={svc.mode} onChange={e => updateService(svc.service_key, { mode: e.target.value })}
+                        style={{ fontSize: 11, padding: '3px 6px', border: '1px solid #e5e2dc', borderRadius: 6, background: '#fff', cursor: 'pointer' }}>
+                        <option value="off">Off</option>
+                        <option value="manual">Manual</option>
+                        <option value="assist">Assist</option>
+                        <option value="auto">Auto</option>
+                      </select>
+                      <span style={{ fontSize: 10, color: '#888' }}>Weight</span>
+                      <input type="range" min="0" max="200" value={svc.weight}
+                        onChange={e => updateService(svc.service_key, { weight: parseInt(e.target.value) })}
+                        style={{ flex: 1, cursor: 'pointer' }} />
+                      <span style={{ fontSize: 10, fontWeight: 600, color: '#666', minWidth: 28 }}>{svc.weight}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 }
 
 function UsageBar({ used, limit, label }: { used: number; limit: number | string; label: string }) {

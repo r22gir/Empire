@@ -25,6 +25,48 @@ export interface PaymentRecord {
 
 type PaymentMethod = 'card' | 'paypal' | 'crypto' | 'invoice' | 'zelle';
 
+interface CanonicalCryptoPayment {
+  payment_id: string;
+  invoice_id: string;
+  invoice_number?: string;
+  address: string;
+  chain: string;
+  token: string;
+  amount_usd: number;
+  amount_crypto: number;
+  discount_pct: number;
+  expires_at: string;
+  status: 'pending' | 'confirming' | 'confirmed' | 'expired' | 'refunded';
+}
+
+interface InvoiceCryptoStatus {
+  invoice_id: string;
+  invoice_number?: string;
+  invoice_status: string;
+  balance_due: number;
+  total: number;
+  crypto_payments: Array<{
+    payment_id: string;
+    chain: string;
+    token: string;
+    address: string;
+    expected_amount: number;
+    received_amount?: number;
+    tx_hash?: string;
+    status: string;
+    discount_pct: number;
+    created_at: string;
+    confirmed_at?: string;
+    expires_at: string;
+  }>;
+}
+
+interface LegacyAddressInfo {
+  address: string;
+  label: string;
+  network: string;
+}
+
 export interface PaymentModuleProps {
   product: string; // 'llc' | 'apost' | 'workroom' | 'craft' | etc
   orderId?: string;
@@ -101,25 +143,132 @@ export default function PaymentModule({
 
   // Crypto state
   const [cryptoToken, setCryptoToken] = useState('');
-  const [cryptoTimer, setCryptoTimer] = useState(1800);
-  const [cryptoAddresses, setCryptoAddresses] = useState<Record<string, { address: string; label: string; network: string }>>({});
+  const [cryptoTimer, setCryptoTimer] = useState(0);
+  const [cryptoAddresses, setCryptoAddresses] = useState<Record<string, LegacyAddressInfo>>({});
   const [cryptoLoading, setCryptoLoading] = useState(false);
+  const [cryptoCanonical, setCryptoCanonical] = useState<CanonicalCryptoPayment | null>(null);
+  const [cryptoStatus, setCryptoStatus] = useState<InvoiceCryptoStatus | null>(null);
+  const [cryptoUsingLegacy, setCryptoUsingLegacy] = useState(false);
+  const [cryptoPollInterval, setCryptoPollInterval] = useState<NodeJS.Timeout | null>(null);
 
-  // Fetch crypto addresses from backend
+  // Fetch canonical invoice crypto payment
+  const fetchCanonicalCrypto = useCallback(async (invoiceId: string, token: string) => {
+    try {
+      const chainRes = await fetch(`${API}/crypto-payments/chains`);
+      const chainsData = await chainRes.json();
+      const resolvedChain = chainsData.chain_token_map?.[token] || '';
+
+      const res = await fetch(
+        `${API}/crypto-payments/invoice/${invoiceId}/generate-address?token=${token}&chain=${resolvedChain}`
+      );
+      if (!res.ok) throw new Error('Canonical endpoint unavailable');
+      const data = await res.json();
+      setCryptoCanonical(data);
+      setCryptoUsingLegacy(false);
+
+      // Calculate remaining seconds until expiry
+      if (data.expires_at) {
+        const expiresAt = new Date(data.expires_at).getTime();
+        const now = Date.now();
+        const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
+        setCryptoTimer(remaining);
+      }
+      return data;
+    } catch {
+      setCryptoUsingLegacy(true);
+      return null;
+    }
+  }, [API]);
+
+  // Poll canonical invoice status
+  const pollCanonicalStatus = useCallback(async (invoiceId: string) => {
+    try {
+      const res = await fetch(`${API}/crypto-payments/invoice/${invoiceId}/status`);
+      if (!res.ok) return;
+      const data: InvoiceCryptoStatus = await res.json();
+      setCryptoStatus(data);
+
+      // Update canonical payment with latest status
+      if (data.crypto_payments?.length > 0) {
+        const latest = data.crypto_payments[0];
+        setCryptoCanonical(prev => prev ? {
+          ...prev,
+          status: latest.status as CanonicalCryptoPayment['status'],
+        } : null);
+
+        // Stop polling if terminal state
+        if (latest.status === 'confirmed' || latest.status === 'expired' || latest.status === 'refunded') {
+          if (cryptoPollInterval) {
+            clearInterval(cryptoPollInterval);
+            setCryptoPollInterval(null);
+          }
+        }
+      }
+    } catch {
+      // Silently fail polling
+    }
+  }, [API, cryptoPollInterval]);
+
+  // Fetch legacy static addresses
+  const fetchLegacyAddresses = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/crypto-checkout/addresses`);
+      if (!res.ok) throw new Error('Legacy endpoint unavailable');
+      const data = await res.json();
+      setCryptoAddresses(data.addresses || {});
+      return data.addresses || {};
+    } catch {
+      return {};
+    }
+  }, [API]);
+
+  // Crypto effect: try canonical first, fallback to legacy
   useEffect(() => {
-    if (method !== 'crypto') return;
-    setCryptoLoading(true);
-    fetch(`${API}/crypto-checkout/addresses`)
-      .then(res => res.ok ? res.json() : Promise.reject('Failed'))
-      .then(data => {
-        const addrs = data.addresses || {};
-        setCryptoAddresses(addrs);
-        const keys = Object.keys(addrs);
-        if (keys.length > 0 && !cryptoToken) setCryptoToken(keys[0]);
-      })
-      .catch(() => {})
-      .finally(() => setCryptoLoading(false));
-  }, [method]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (method !== 'crypto') {
+      // Cleanup polling on unmount or method change
+      if (cryptoPollInterval) {
+        clearInterval(cryptoPollInterval);
+        setCryptoPollInterval(null);
+      }
+      return;
+    }
+
+    const initCrypto = async () => {
+      setCryptoLoading(true);
+      setCryptoCanonical(null);
+      setCryptoStatus(null);
+      setCryptoUsingLegacy(false);
+
+      // If we have an orderId, try canonical invoice flow first
+      if (orderId) {
+        const canonical = await fetchCanonicalCrypto(orderId, cryptoToken || 'USDC');
+        if (canonical) {
+          // Start polling for status
+          const interval = setInterval(() => pollCanonicalStatus(orderId), 15000);
+          setCryptoPollInterval(interval);
+          setCryptoLoading(false);
+          return;
+        }
+      }
+
+      // Fall back to legacy static addresses
+      const addrs = await fetchLegacyAddresses();
+      setCryptoUsingLegacy(true);
+      const keys = Object.keys(addrs);
+      if (keys.length > 0 && !cryptoToken) setCryptoToken(keys[0]);
+      setCryptoTimer(1800); // Legacy fallback timer
+      setCryptoLoading(false);
+    };
+
+    initCrypto();
+
+    return () => {
+      if (cryptoPollInterval) {
+        clearInterval(cryptoPollInterval);
+        setCryptoPollInterval(null);
+      }
+    };
+  }, [method, orderId, cryptoToken, fetchCanonicalCrypto, fetchLegacyAddresses, pollCanonicalStatus, cryptoPollInterval]);
 
   // Invoice state
   const [invoiceTerms, setInvoiceTerms] = useState<'net15' | 'net30' | 'net60'>('net30');
@@ -315,9 +464,6 @@ export default function PaymentModule({
 
   // ---- Crypto ----
   const renderCrypto = () => {
-    const availableTokens = Object.keys(cryptoAddresses);
-    const activeAddr = cryptoAddresses[cryptoToken];
-    const displayName = CRYPTO_DISPLAY[cryptoToken] || cryptoToken.toUpperCase();
     const mins = Math.floor(cryptoTimer / 60);
     const secs = cryptoTimer % 60;
 
@@ -330,6 +476,130 @@ export default function PaymentModule({
         </div>
       );
     }
+
+    // Canonical invoice flow
+    if (cryptoCanonical && !cryptoUsingLegacy) {
+      const canonical = cryptoCanonical;
+      const statusColors: Record<string, { bg: string; color: string }> = {
+        pending: { bg: '#fef3c7', color: '#92400e' },
+        confirming: { bg: '#dbeafe', color: '#2563eb' },
+        confirmed: { bg: '#dcfce7', color: '#16a34a' },
+        expired: { bg: '#fee2e2', color: '#dc2626' },
+        refunded: { bg: '#f3e8ff', color: '#7c3aed' },
+      };
+      const statusLabels: Record<string, string> = {
+        pending: 'Awaiting Payment',
+        confirming: 'Confirming...',
+        confirmed: 'Payment Confirmed!',
+        expired: 'Payment Expired',
+        refunded: 'Refunded',
+      };
+      const sc = statusColors[canonical.status] || statusColors.pending;
+
+      return (
+        <div style={sectionCard}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Wallet size={18} style={{ color: GOLD }} />
+            <span style={{ fontWeight: 600, fontSize: 15 }}>Crypto Payment</span>
+            {canonical.discount_pct > 0 && (
+              <span style={{
+                marginLeft: 'auto', background: '#dcfce7', color: '#16a34a',
+                fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 12,
+              }}>
+                {canonical.discount_pct}% discount
+              </span>
+            )}
+          </div>
+
+          {/* Status badge */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, background: sc.bg,
+            color: sc.color, fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8, marginBottom: 16,
+          }}>
+            {canonical.status === 'pending' && <Loader2 size={13} className="animate-spin" />}
+            {canonical.status === 'confirming' && <Loader2 size={13} className="animate-spin" />}
+            {canonical.status === 'confirmed' && <CheckCircle size={13} />}
+            {canonical.status === 'expired' && <AlertTriangle size={13} />}
+            {statusLabels[canonical.status] || canonical.status}
+          </div>
+
+          {/* Token selector */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 6 }}>Token</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {['USDC', 'ETH', 'SOL', 'BTC', 'USDT'].map(t => (
+                <button key={t} onClick={() => {
+                  setCryptoToken(t);
+                  if (orderId) fetchCanonicalCrypto(orderId, t);
+                }} style={{
+                  padding: '8px 16px', borderRadius: 8, border: `1.5px solid ${canonical.token === t ? GOLD : BORDER}`,
+                  background: canonical.token === t ? GOLD_BG : '#fff', fontWeight: canonical.token === t ? 600 : 400,
+                  fontSize: 13, cursor: 'pointer', color: canonical.token === t ? GOLD : '#374151', transition: 'all 0.15s',
+                }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Wallet address */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 4 }}>
+              Send to Wallet Address <span style={{ fontWeight: 400 }}>({canonical.chain})</span>
+            </label>
+            <div style={{ fontFamily: 'monospace', fontSize: 13, background: PAGE_BG, padding: '10px 12px', borderRadius: 8, border: `1px solid ${BORDER}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', wordBreak: 'break-all' }}>
+              <span>{canonical.address}</span>
+              <button onClick={() => { navigator.clipboard.writeText(canonical.address).catch(() => {}); }}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: MUTED, flexShrink: 0, marginLeft: 8 }}><Copy size={14} /></button>
+            </div>
+          </div>
+
+          {/* Amount */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: MUTED, display: 'block', marginBottom: 4 }}>Amount</label>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#111' }}>
+              ${canonical.amount_usd.toFixed(2)} USD
+            </div>
+            <div style={{ fontSize: 12, color: MUTED }}>
+              {canonical.amount_crypto.toFixed(8)} {canonical.token}
+            </div>
+          </div>
+
+          {/* QR + Timer row */}
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', marginBottom: 16 }}>
+            <div style={{
+              width: 120, height: 120, borderRadius: 10, border: `2px dashed ${BORDER}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 4, color: MUTED, flexShrink: 0,
+            }}>
+              <QrCode size={24} />
+              <span style={{ fontSize: 10 }}>{canonical.token} QR</span>
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <Timer size={14} style={{ color: cryptoTimer < 300 ? '#dc2626' : GOLD }} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: cryptoTimer < 300 ? '#dc2626' : '#374151' }}>
+                  {canonical.status === 'expired' ? 'Expired' : `Expires in ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Loader2 size={14} className="animate-spin" style={{ color: GOLD }} />
+                <span style={{ fontSize: 13, color: MUTED }}>
+                  {canonical.status === 'pending' ? 'Waiting for payment...' :
+                   canonical.status === 'confirming' ? 'Blockchain confirmations...' :
+                   canonical.status === 'confirmed' ? 'Payment confirmed!' :
+                   canonical.status === 'expired' ? 'Please generate new address' : ''}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Legacy static address flow
+    const availableTokens = Object.keys(cryptoAddresses);
+    const activeAddr = cryptoAddresses[cryptoToken];
+    const displayName = CRYPTO_DISPLAY[cryptoToken] || cryptoToken.toUpperCase();
 
     if (availableTokens.length === 0) {
       return (
@@ -350,6 +620,12 @@ export default function PaymentModule({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
           <Wallet size={18} style={{ color: GOLD }} />
           <span style={{ fontWeight: 600, fontSize: 15 }}>Crypto Payment</span>
+          <span style={{
+            marginLeft: 'auto', background: '#fef3c7', color: '#92400e',
+            fontSize: 11, fontWeight: 500, padding: '2px 8px', borderRadius: 12,
+          }}>
+            Legacy mode
+          </span>
         </div>
 
         {/* Discount badge */}

@@ -87,6 +87,9 @@ def _record_invoice_crypto_payment(invoice_id: str, amount: float, chain: str,
     """
     from app.db.database import get_db as get_finance_db, dict_row
     from datetime import date, datetime
+    import uuid
+
+    now_str = datetime.now().isoformat()
 
     with get_finance_db() as conn:
         inv = conn.execute(
@@ -98,12 +101,12 @@ def _record_invoice_crypto_payment(invoice_id: str, amount: float, chain: str,
 
         inv_dict = dict_row(inv)
 
-        # Insert payment record
         conn.execute(
             """INSERT INTO payments
                (id, invoice_id, customer_id, amount, method, reference, notes, payment_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
+                str(uuid.uuid4()),
                 invoice_id,
                 inv_dict.get("customer_id"),
                 amount,
@@ -114,7 +117,6 @@ def _record_invoice_crypto_payment(invoice_id: str, amount: float, chain: str,
             )
         )
 
-        # Recalculate invoice totals
         subtotal = inv_dict.get("subtotal", 0) or 0
         tax_rate = inv_dict.get("tax_rate", 0) or 0
         tax_amount = round(subtotal * tax_rate, 2)
@@ -133,22 +135,21 @@ def _record_invoice_crypto_payment(invoice_id: str, amount: float, chain: str,
 
         paid_at = None
         if status == "paid":
-            paid_at = datetime.now().isoformat()
+            paid_at = now_str
 
         conn.execute(
             """UPDATE invoices SET tax_amount = ?, total = ?, amount_paid = ?,
                balance_due = ?, status = ?, paid_at = COALESCE(paid_at, ?),
-               updated_at = datetime('now') WHERE id = ?""",
-            (tax_amount, total, amount_paid, max(balance_due, 0), status, paid_at, invoice_id)
+               updated_at = ? WHERE id = ?""",
+            (tax_amount, total, amount_paid, max(balance_due, 0), status, paid_at, now_str, invoice_id)
         )
 
-        # Update customer total_revenue if linked
         if inv_dict.get("customer_id"):
             conn.execute(
                 """UPDATE customers SET total_revenue = (
                      SELECT COALESCE(SUM(amount), 0) FROM payments WHERE customer_id = ?
-                   ), updated_at = datetime('now') WHERE id = ?""",
-                (inv_dict["customer_id"], inv_dict["customer_id"])
+                   ), updated_at = ? WHERE id = ?""",
+                (inv_dict["customer_id"], now_str, inv_dict["customer_id"])
             )
 
         return True
