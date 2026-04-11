@@ -432,17 +432,25 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
 
+  const canSendDraft = (draft: any) => Boolean(draft?.to_email && ['edited', 'reviewed'].includes(draft?.status));
+  const sendableDrafts = drafts.filter(canSendDraft);
+
   useEffect(() => {
     fetch(`${LF_API}/leadforge/campaigns/drafts?campaign_id=${campaignId}`)
       .then(r => r.json()).then(d => setDrafts(d.drafts || d || [])).catch(() => {});
   }, [campaignId]);
 
   const sendDraft = async (draftId: number) => {
+    const draft = drafts.find(d => d.id === draftId);
+    if (!canSendDraft(draft)) {
+      alert('Review or edit this draft before sending.');
+      return;
+    }
     setSending(draftId);
     try {
       const res = await fetch(`${LF_API}/leadforge/campaigns/drafts/${draftId}/send`, { method: 'POST' });
       const data = await res.json();
-      if (data.success) {
+      if (data.success || data.status === 'sent') {
         setDrafts(prev => prev.map(d => d.id === draftId ? { ...d, status: 'sent' } : d));
         setSelectedDraft(null);
       } else {
@@ -464,6 +472,10 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
   };
 
   const sendAllReviewed = async () => {
+    if (sendableDrafts.length === 0) {
+      alert('No reviewed or edited drafts are ready to send.');
+      return;
+    }
     const res = await fetch(`${LF_API}/leadforge/campaigns/${campaignId}/send-reviewed`, { method: 'POST' });
     const data = await res.json();
     alert(`Sent: ${data.sent || 0}, Failed: ${data.failed || 0}, Skipped: ${data.skipped || 0}`);
@@ -487,8 +499,9 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
     <div style={{ marginTop: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
         <div style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>DRAFTS ({drafts.length})</div>
-        <button onClick={sendAllReviewed} style={{ fontSize: 9, padding: '3px 8px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>
-          Send All Reviewed
+        <button onClick={sendAllReviewed} disabled={sendableDrafts.length === 0}
+          style={{ fontSize: 9, padding: '3px 8px', background: sendableDrafts.length === 0 ? '#d1d5db' : '#16a34a', color: '#fff', border: 'none', borderRadius: 4, cursor: sendableDrafts.length === 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+          Send Reviewed ({sendableDrafts.length})
         </button>
       </div>
 
@@ -549,7 +562,7 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
                   {selectedDraft.body || selectedDraft.script || selectedDraft.linkedin_message || 'No content'}
                 </div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {selectedDraft.to_email && selectedDraft.status !== 'sent' && (
+                  {canSendDraft(selectedDraft) && (
                     <button onClick={() => sendDraft(selectedDraft.id)} disabled={sending === selectedDraft.id}
                       style={{ padding: '6px 14px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                       {sending === selectedDraft.id ? 'Sending...' : '📧 Send via Gmail'}
@@ -557,6 +570,9 @@ function DraftReviewPanel({ campaignId }: { campaignId: number }) {
                   )}
                   {!selectedDraft.to_email && (
                     <span style={{ fontSize: 10, color: '#dc2626', padding: '6px 0' }}>No email address — find and add manually</span>
+                  )}
+                  {selectedDraft.to_email && !canSendDraft(selectedDraft) && selectedDraft.status !== 'sent' && (
+                    <span style={{ fontSize: 10, color: '#b8960c', padding: '6px 0' }}>Review or edit this draft before sending</span>
                   )}
                   <button onClick={() => setEditMode(true)}
                     style={{ padding: '6px 14px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}>

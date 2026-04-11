@@ -1257,6 +1257,9 @@ async def send_draft(draft_id: int) -> dict:
     if not draft.get("to_email"):
         return {"error": "No recipient email on this draft"}
 
+    if draft.get("status") not in ("edited", "reviewed"):
+        return {"error": "Draft must be reviewed or edited before sending"}
+
     email_svc = EmailService()
     if not email_svc.is_configured:
         return {"error": "Email service not configured (no SendGrid/SMTP credentials)"}
