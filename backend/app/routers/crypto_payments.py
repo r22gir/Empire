@@ -212,6 +212,7 @@ async def list_crypto_payments(
     Requires CRYPTO_MASTER_SEED to be configured.
     """
     _require_crypto()
+    from app.models.crypto_payment import CryptoPayment
 
     query = db.query(CryptoPayment)
     if status:
