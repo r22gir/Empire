@@ -182,6 +182,7 @@ async def create_crypto_payment(
     the expected amount and payment expiry timestamp.  A 15% discount is applied
     for any crypto payment; 20% when paying with the EMPIRE token.
     """
+    _require_crypto()
     try:
         payment = CryptoPaymentService.create_payment(db, data)
     except ValueError as exc:
