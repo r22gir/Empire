@@ -163,7 +163,7 @@ function DashboardSection() {
 
 function PipelineSection() {
   const [leads, setLeads] = useState<any[]>([]);
-  useEffect(() => { fetch(`${LF_API}/pipeline`).then(r => r.json()).then(d => setLeads(d.pipeline || d.leads || d || [])).catch(() => setLeads([])); }, []);
+  useEffect(() => { fetch(`${LF_API}?limit=500`).then(r => r.json()).then(d => setLeads(d.leads || d || [])).catch(() => setLeads([])); }, []);
 
   const COLS = [
     { key: 'new', label: 'New' },
