@@ -48,7 +48,7 @@ def _dict(row):
     if row is None:
         return None
     d = dict(row)
-    for k in ("details",):
+    for k in ("details", "attachments"):
         if k in d and isinstance(d[k], str):
             try:
                 d[k] = json.loads(d[k])
@@ -123,6 +123,40 @@ CREATE TABLE IF NOT EXISTS campaign_activity (
     step_id INTEGER,
     action_type TEXT,
     details TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS campaign_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+    enrollment_id INTEGER REFERENCES campaign_enrollments(id) ON DELETE SET NULL,
+    prospect_id INTEGER,
+    step_id INTEGER REFERENCES campaign_steps(id) ON DELETE SET NULL,
+    step_type TEXT,
+    to_email TEXT,
+    to_name TEXT,
+    subject TEXT,
+    body TEXT,
+    phone_number TEXT,
+    script TEXT,
+    linkedin_message TEXT,
+    attachments TEXT DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK(status IN ('draft','edited','reviewed','sent','failed','skipped')),
+    edited_at TEXT,
+    sent_at TEXT,
+    send_result TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS campaign_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    target_audience TEXT,
+    description TEXT,
+    file_path TEXT,
+    mime_type TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 """
@@ -263,6 +297,7 @@ def delete_campaign(campaign_id: int) -> bool:
         if not conn.execute("SELECT 1 FROM campaigns WHERE id = ?", (campaign_id,)).fetchone():
             return False
         conn.execute("DELETE FROM campaign_activity WHERE campaign_id = ?", (campaign_id,))
+        conn.execute("DELETE FROM campaign_drafts WHERE campaign_id = ?", (campaign_id,))
         conn.execute("DELETE FROM campaign_enrollments WHERE campaign_id = ?", (campaign_id,))
         conn.execute("DELETE FROM campaign_steps WHERE campaign_id = ?", (campaign_id,))
         conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
