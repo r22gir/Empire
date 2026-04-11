@@ -167,6 +167,16 @@ def _init_tables():
         )
     """)
 
+    # Compatibility for existing SQLite dev DBs created before the scout
+    # orchestrator added source attribution columns.
+    existing_source_cols = {
+        row[1] for row in cur.execute("PRAGMA table_info(ra_source_products)").fetchall()
+    }
+    if "scout_source" not in existing_source_cols:
+        cur.execute("ALTER TABLE ra_source_products ADD COLUMN scout_source TEXT DEFAULT ''")
+    if "scout_confidence" not in existing_source_cols:
+        cur.execute("ALTER TABLE ra_source_products ADD COLUMN scout_confidence REAL DEFAULT 0")
+
     conn.commit()
     conn.close()
     log.info("RelistApp tables initialized")
@@ -1654,21 +1664,16 @@ async def bulk_refresh_prices():
         url = row.get("source_url", "")
         platform = row.get("source_platform", "unknown")
 
-        last_watch = db.execute(
-            "SELECT price FROM ra_price_watch WHERE source_product_id = ? ORDER BY checked_at DESC LIMIT 1",
-            (product_id,),
-        ).fetchone()
+        with get_db() as db:
+            last_watch = db.execute(
+                "SELECT price FROM ra_price_watch WHERE source_product_id = ? ORDER BY checked_at DESC LIMIT 1",
+                (product_id,),
+            ).fetchone()
         prev_price = dict_row(last_watch)["price"] if last_watch else row["source_price"]
 
         live = await _scrape_live_price(url, platform)
         scraped_price = live["price"] if live["success"] else row["source_price"]
         scraped_avail = live["availability"] if live["success"] else row.get("availability", "in_stock")
-
-        if scraped_price > 0 and scraped_price != row["source_price"]:
-            db.execute(
-                "UPDATE ra_source_products SET source_price = ?, availability = ?, last_checked = datetime('now') WHERE id = ?",
-                (scraped_price, scraped_avail, product_id),
-            )
 
         price_change = round(scraped_price - prev_price, 2) if prev_price else 0
 
@@ -1694,10 +1699,22 @@ async def bulk_refresh_prices():
             recommendation = "keep"
             successful += 1
 
-        db.execute(
-            "INSERT INTO ra_price_watch (source_product_id, price, availability, price_change) VALUES (?,?,?,?)",
-            (product_id, scraped_price if scraped_price > 0 else prev_price, scraped_avail, price_change),
-        )
+        with get_db() as db:
+            if scraped_price > 0 and scraped_price != row["source_price"]:
+                db.execute(
+                    "UPDATE ra_source_products SET source_price = ?, availability = ?, last_checked = datetime('now') WHERE id = ?",
+                    (scraped_price, scraped_avail, product_id),
+                )
+            else:
+                db.execute(
+                    "UPDATE ra_source_products SET last_checked = datetime('now') WHERE id = ?",
+                    (product_id,),
+                )
+
+            db.execute(
+                "INSERT INTO ra_price_watch (source_product_id, price, availability, price_change) VALUES (?,?,?,?)",
+                (product_id, scraped_price if scraped_price > 0 else prev_price, scraped_avail, price_change),
+            )
 
         results.append({
             "id": product_id,
@@ -1858,12 +1875,12 @@ async def update_service(service_key: str, req: ServiceUpdate):
             f"UPDATE ra_services SET {set_clause}, updated_at = datetime('now') WHERE service_key = ?",
             values,
         ).rowcount
-    if not affected:
-        raise HTTPException(404, f"Service '{service_key}' not found")
+        if not affected:
+            raise HTTPException(404, f"Service '{service_key}' not found")
 
-    row = db.execute(
-        "SELECT * FROM ra_services WHERE service_key = ?", (service_key,)
-    ).fetchone()
+        row = db.execute(
+            "SELECT * FROM ra_services WHERE service_key = ?", (service_key,)
+        ).fetchone()
     row = dict_row(row)
     if row.get("scope") and isinstance(row["scope"], str):
         try:
@@ -2259,6 +2276,3 @@ async def list_scout_opportunities(
                 row["scout_signals"] = {}
 
     return {"opportunities": rows, "total": len(rows)}
-
-
-
