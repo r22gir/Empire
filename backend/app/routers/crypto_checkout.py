@@ -1,9 +1,12 @@
 """
-Empire Crypto Checkout — Lightweight crypto payment option for workroom invoices.
+Empire Crypto Checkout — Lightweight customer-facing invoice checkout.
 
 Provides wallet addresses + live crypto prices so customers can pay invoices
 with BTC, ETH, SOL, USDT, or USDC at a 10% discount. Owner verifies on-chain
 manually — no automated blockchain monitoring.
+
+This is a legacy facade. Canonical payment records are managed in crypto_payments.py.
+Shared config (chains, tokens, discounts) comes from empire_pay_config.py.
 """
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -16,22 +19,20 @@ import httpx
 
 from app.db.database import get_db, dict_row
 from app.middleware.rate_limiter import limiter
+from app.services.empire_pay_config import (
+    LEGACY_COIN_KEYS,
+    LEGACY_COIN_TO_TOKEN,
+    LEGACY_COIN_TO_CHAIN,
+    DISCOUNT_LEGACY,
+)
 
 logger = logging.getLogger("empire.crypto_checkout")
 
 router = APIRouter(prefix="/crypto-checkout", tags=["crypto-checkout"])
 
-# ── Wallet addresses from env ────────────────────────────────────────
+WALLETS = LEGACY_COIN_KEYS
 
-WALLETS = {
-    "btc":        {"env": "CRYPTO_BTC_ADDRESS",         "label": "Bitcoin (BTC)",       "network": "Bitcoin"},
-    "eth":        {"env": "CRYPTO_ETH_ADDRESS",         "label": "Ethereum (ETH)",      "network": "Ethereum (ERC-20)"},
-    "sol":        {"env": "CRYPTO_SOL_ADDRESS",         "label": "Solana (SOL)",        "network": "Solana"},
-    "usdt_trc20": {"env": "CRYPTO_USDT_TRC20_ADDRESS",  "label": "USDT (TRC-20)",      "network": "Tron (TRC-20)"},
-    "usdt_erc20": {"env": "CRYPTO_USDT_ERC20_ADDRESS",  "label": "USDT (ERC-20)",      "network": "Ethereum (ERC-20)"},
-}
-
-CRYPTO_DISCOUNT = 0.10  # 10% discount for crypto payments
+CRYPTO_DISCOUNT = DISCOUNT_LEGACY / 100.0
 
 # CoinGecko IDs mapped to our wallet keys for price lookup
 COINGECKO_IDS = {

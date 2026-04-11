@@ -145,7 +145,7 @@ class TestCreatePayment:
         db = _make_db()
         data = CryptoPaymentCreate(
             order_id="order-789",
-            chain="bitcoin",
+            chain="polygon",
             token="BTC",
             expected_amount=Decimal("0.01"),
         )

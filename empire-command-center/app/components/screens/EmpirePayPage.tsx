@@ -18,6 +18,7 @@ const NAV_SECTIONS = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'wallets', label: 'Wallets', icon: Wallet },
   { id: 'transactions', label: 'Transactions', icon: ArrowUpDown },
+  { id: 'crypto-payments', label: 'Crypto Payments', icon: Coins },
   { id: 'payment-links', label: 'Payment Links', icon: Link2 },
   { id: 'empire-token', label: 'EMPIRE Token', icon: Coins },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -167,6 +168,49 @@ function truncAddr(addr: string) {
 }
 
 // ============ CUSTOM HOOKS ============
+
+interface CryptoPaymentRecord {
+  id: string;
+  order_id: string;
+  chain: string;
+  token: string;
+  wallet_address: string;
+  expected_amount: string;
+  received_amount?: string;
+  tx_hash?: string;
+  status: string;
+  discount_pct: number;
+  created_at: string;
+  confirmed_at?: string;
+  expires_at: string;
+}
+
+function useCryptoPayments(limit = 50) {
+  const [payments, setPayments] = useState<CryptoPaymentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchPayments = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/crypto-payments/?limit=${limit}`);
+      if (!res.ok) {
+        if (res.status === 503) throw new Error("Crypto payments not configured");
+        throw new Error(`Failed to load payments (${res.status})`);
+      }
+      const data = await res.json();
+      setPayments(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load crypto payments");
+    } finally {
+      setLoading(false);
+    }
+  }, [limit]);
+
+  useEffect(() => { fetchPayments(); }, [fetchPayments]);
+  return { payments, loading, error, refetch: fetchPayments };
+}
 
 function useChains() {
   const [chains, setChains] = useState<ChainInfo[]>([]);
@@ -473,6 +517,117 @@ function TransactionsSection() {
   );
 }
 
+// ============ CRYPTO PAYMENTS SECTION ============
+
+function CryptoPaymentsSection() {
+  const { payments, loading, error, refetch } = useCryptoPayments(50);
+  const [filter, setFilter] = useState<string>('all');
+
+  const filtered = filter === 'all'
+    ? payments
+    : payments.filter(p => p.status === filter);
+
+  if (loading) return <Spinner label="Loading crypto payments..." />;
+
+  const statusOptions = ['all', ...Array.from(new Set(payments.map(p => p.status || 'unknown')))];
+
+  return (
+    <div style={{ padding: 24 }}>
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#1a1a1a' }}>Crypto Payments</div>
+          <div style={{ fontSize: 12, color: '#999' }}>On-chain payment records from the canonical EmpirePay system</div>
+        </div>
+        <div className="flex gap-2">
+          {statusOptions.slice(0, 6).map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              className="cursor-pointer"
+              style={{
+                padding: '6px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: '1.5px solid',
+                background: filter === f ? ACCENT_BG : '#fff',
+                color: filter === f ? ACCENT : '#666',
+                borderColor: filter === f ? ACCENT_BORDER : '#ece8e0',
+                textTransform: 'capitalize',
+              }}>
+              {f}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {error && <ErrorBanner message={error} onRetry={refetch} />}
+
+      <div className="empire-card" style={{ padding: 0 }}>
+        {filtered.length === 0 && !error ? (
+          <EmptyState
+            icon={<ArrowUpDown size={32} />}
+            title="No crypto payments yet"
+            subtitle={filter === 'all' ? 'Payment records will appear here when customers pay with crypto' : `No payments with status "${filter}"`}
+          />
+        ) : (
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #ece8e0', color: '#999', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <th style={{ padding: '10px 18px', textAlign: 'left' }}>Payment ID</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Order / Invoice</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Chain</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Token</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Expected</th>
+                <th style={{ padding: '10px 12px', textAlign: 'right' }}>Discount</th>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Status</th>
+                <th style={{ padding: '10px 18px', textAlign: 'right' }}>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => {
+                const statusKey = (p.status || 'pending').toLowerCase();
+                const st = STATUS_MAP[statusKey] || STATUS_MAP.pending;
+                const StIcon = st.icon;
+                return (
+                  <tr key={p.id} style={{ borderBottom: '1px solid #f5f3ef' }}>
+                    <td style={{ padding: '10px 18px', fontWeight: 600, color: '#1a1a1a', fontFamily: 'monospace', fontSize: 11 }}>
+                      {truncAddr(p.id)}
+                    </td>
+                    <td style={{ padding: '10px 12px', color: '#666', fontSize: 11 }}>
+                      {p.order_id.startsWith('invoice:') ? p.order_id.replace('invoice:', 'INV ') : p.order_id.slice(0, 12) + '...'}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                        background: `${CHAIN_COLORS[p.chain] || '#666'}18`,
+                        color: CHAIN_COLORS[p.chain] || '#666',
+                      }}>
+                        {p.chain}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 12px', fontWeight: 600, color: TOKEN_COLORS[p.token] || '#1a1a1a', fontSize: 11 }}>
+                      {p.token}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'monospace', color: '#1a1a1a' }}>
+                      {parseFloat(p.expected_amount).toFixed(4)}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: ACCENT }}>
+                      {p.discount_pct > 0 ? `${p.discount_pct}%` : '-'}
+                    </td>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span className="flex items-center gap-1" style={{ color: st.color, fontWeight: 600, fontSize: 11 }}>
+                        <StIcon size={13} />{p.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 18px', textAlign: 'right', color: '#999', fontSize: 11 }}>
+                      {p.created_at ? new Date(p.created_at).toLocaleDateString() : '-'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============ PAYMENT LINKS SECTION ============
 
 function PaymentLinksSection() {
@@ -639,6 +794,7 @@ export default function EmpirePayPage() {
       case 'dashboard': return <DashboardSection />;
       case 'wallets': return <WalletsSection />;
       case 'transactions': return <TransactionsSection />;
+      case 'crypto-payments': return <CryptoPaymentsSection />;
       case 'payment-links': return <PaymentLinksSection />;
       case 'empire-token': return <EmpireTokenSection />;
       case 'settings': return <SettingsSection />;

@@ -3,16 +3,19 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Optional
 
+from app.services.empire_pay_config import (
+    SUPPORTED_CHAINS,
+    SUPPORTED_TOKENS,
+    DISCOUNT_CRYPTO,
+    DISCOUNT_EMPIRE,
+)
 
-# ---------------------------------------------------------------------------
-# Supported chains and tokens
-# ---------------------------------------------------------------------------
-SUPPORTED_CHAINS = {"solana", "bnb", "cardano", "ethereum", "bitcoin"}
-SUPPORTED_TOKENS = {"SOL", "USDC", "EMPIRE", "BNB", "USDT", "BUSD", "ADA", "ETH", "BTC"}
-
-# Discount percentages per payment method
-DISCOUNT_CRYPTO = 15   # 15% off for any crypto payment
-DISCOUNT_EMPIRE = 20   # 20% off when paying with EMPIRE token
+__all__ = [
+    "SUPPORTED_CHAINS",
+    "SUPPORTED_TOKENS",
+    "DISCOUNT_CRYPTO",
+    "DISCOUNT_EMPIRE",
+]
 
 
 # ---------------------------------------------------------------------------

@@ -199,6 +199,25 @@ async def list_supported_chains():
     }
 
 
+@router.get("/", response_model=List[CryptoPaymentResponse])
+async def list_crypto_payments(
+    limit: int = Query(50, ge=1, le=200, description="Max records to return"),
+    status: Optional[str] = Query(None, description="Filter by status: pending, confirming, confirmed, expired, refunded"),
+    db: Session = Depends(get_db),
+):
+    """
+    List recent crypto payments across all orders/invoices.
+    Used by the admin EmpirePay dashboard to show payment activity.
+    Requires CRYPTO_MASTER_SEED to be configured.
+    """
+    _require_crypto()
+
+    query = db.query(CryptoPayment)
+    if status:
+        query = query.filter(CryptoPayment.status == status)
+    return query.order_by(CryptoPayment.created_at.desc()).limit(limit).all()
+
+
 @router.get("/order/{order_id}", response_model=List[CryptoPaymentResponse])
 async def get_payments_for_order(
     order_id: str,
