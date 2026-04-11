@@ -66,6 +66,14 @@ class MaxScheduler:
             name="Nightly Brain Sync",
         )
 
+        # Every 15 minutes — expire stale pending crypto payments
+        self.scheduler.add_job(
+            self.expire_crypto_payments,
+            CronTrigger(minute="*/15"),
+            id="expire_crypto_payments",
+            name="Expire Stale Crypto Payments",
+        )
+
         self.scheduler.start()
         jobs = self.scheduler.get_jobs()
         for job in jobs:
@@ -439,6 +447,28 @@ class MaxScheduler:
 
         except Exception as e:
             logger.error(f"Brain sync failed: {e}")
+
+    async def expire_crypto_payments(self):
+        """Run every 15 minutes to expire stale pending crypto payments."""
+        try:
+            from app.database import SessionLocal
+            from app.services.crypto_payment_service import CryptoPaymentService
+            db = SessionLocal()
+            try:
+                count = CryptoPaymentService.expire_stale_payments(db)
+                if count > 0:
+                    logger.info(f"Crypto expiry job: {count} stale payment(s) marked expired")
+                    from app.routers.notifications import notify_founder
+                    notify_founder(
+                        "Business", "business_event",
+                        f"{count} Crypto Payment(s) Expired",
+                        f"{count} pending crypto payment(s) have expired and been marked expired.",
+                        "low"
+                    )
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"Crypto payment expiry job failed: {e}")
 
     def get_status(self) -> dict:
         """Return scheduler status for health checks."""

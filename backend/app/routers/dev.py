@@ -152,3 +152,49 @@ async def dev_health():
         "passed": passed,
         "failed": failed,
     }
+
+
+@router.get("/dev/crypto-status")
+async def dev_crypto_status():
+    """
+    Admin view: crypto payment stats and configuration status.
+    No auth gate — accessed via FOUNDER_PIN in practice.
+    """
+    try:
+        from app.database import SessionLocal
+        from app.models.crypto_payment import CryptoPayment
+        db = SessionLocal()
+        try:
+            pending = db.query(CryptoPayment).filter(CryptoPayment.status == "pending").count()
+            confirming = db.query(CryptoPayment).filter(CryptoPayment.status == "confirming").count()
+            confirmed = db.query(CryptoPayment).filter(CryptoPayment.status == "confirmed").count()
+            expired = db.query(CryptoPayment).filter(CryptoPayment.status == "expired").count()
+            total = db.query(CryptoPayment).count()
+            return {
+                "configured": bool(__import__("os").getenv("CRYPTO_MASTER_SEED")),
+                "seed_set": bool(__import__("os").getenv("CRYPTO_MASTER_SEED")),
+                "totals": {"total": total, "pending": pending, "confirming": confirming, "confirmed": confirmed, "expired": expired},
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.post("/dev/crypto-expire")
+async def dev_crypto_expire():
+    """
+    Manually trigger stale payment expiration.
+    Returns number of payments expired.
+    """
+    try:
+        from app.database import SessionLocal
+        from app.services.crypto_payment_service import CryptoPaymentService
+        db = SessionLocal()
+        try:
+            count = CryptoPaymentService.expire_stale_payments(db)
+            return {"expired": count}
+        finally:
+            db.close()
+    except Exception as e:
+        return {"error": str(e)}
