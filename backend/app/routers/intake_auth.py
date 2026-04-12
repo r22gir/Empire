@@ -30,6 +30,7 @@ JWT_EXPIRE_HOURS = 72
 
 DB_PATH = os.path.expanduser("~/empire-repo/backend/data/intake.db")
 UPLOADS_DIR = os.path.expanduser("~/empire-repo/backend/data/intake_uploads")
+PHOTOS_DIR = os.path.expanduser("~/empire-repo/backend/data/photos")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
@@ -718,6 +719,7 @@ async def convert_to_quote(request: Request, project_id: str):
     measurements_raw = json.loads(project.get("measurements") or "[]")
     rooms_raw = json.loads(project.get("rooms") or "[]")
     photos_raw = json.loads(project.get("photos") or "[]")
+    scans_raw = json.loads(project.get("scans") or "[]")
 
     body = await request.json()
     business_unit = body.get("business_unit", "workroom")
@@ -732,7 +734,9 @@ async def convert_to_quote(request: Request, project_id: str):
                 "width": float(m.get("width", 0)),
                 "height": float(m.get("height", 0)),
                 "quantity": 1,
+                "treatment_type": project.get("treatment", "drapery"),
                 "treatmentType": project.get("treatment", "drapery"),
+                "notes": m.get("notes", ""),
             }],
         })
 
@@ -746,6 +750,7 @@ async def convert_to_quote(request: Request, project_id: str):
                     "width": 0,
                     "height": 0,
                     "quantity": 1,
+                    "treatment_type": r.get("treatment", project.get("treatment", "")),
                     "treatmentType": r.get("treatment", project.get("treatment", "")),
                     "description": r.get("description", ""),
                 }],
@@ -796,8 +801,8 @@ async def convert_to_quote(request: Request, project_id: str):
             import shutil
             from datetime import datetime as dt
 
-            intake_uploads_dir = Path(os.path.expanduser("~/empire-repo/backend/data/intake_uploads")) / project_id
-            photos_dest_dir = Path(os.path.expanduser("~/empire-repo/backend/data/photos/quote")) / quote_id
+            intake_uploads_dir = Path(UPLOADS_DIR) / project_id
+            photos_dest_dir = Path(PHOTOS_DIR) / "quote" / quote_id
             photos_dest_dir.mkdir(parents=True, exist_ok=True)
 
             quote_photos = []
@@ -840,6 +845,18 @@ async def convert_to_quote(request: Request, project_id: str):
             quote_obj["intake_project_id"] = project_id
             quote_obj["intake_code"] = project.get("intake_code", "")
             quote_obj["photos"] = quote_photos
+            quote_obj["scan_3d_files"] = [
+                {
+                    "filename": s.get("filename", ""),
+                    "url": s.get("path") or f"/intake_uploads/{project_id}/{s.get('filename', '')}",
+                    "original_name": s.get("original_name", s.get("filename", "")),
+                    "uploaded_at": s.get("uploaded_at", ""),
+                    "source": "intake",
+                    "intake_project_id": project_id,
+                }
+                for s in scans_raw
+                if s.get("filename")
+            ]
             quotes_mod._save_quote(quote_obj)
 
         # Update intake project status
