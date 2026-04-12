@@ -1,10 +1,12 @@
 import importlib
+from itertools import count
 
 from starlette.requests import Request
 
+_request_count = count()
 
 def _request() -> Request:
-    return Request({"type": "http", "method": "GET", "path": "/test", "headers": []})
+    return Request({"type": "http", "method": "GET", "path": f"/test/{next(_request_count)}", "headers": []})
 
 
 def _load_finance(monkeypatch, tmp_path):
@@ -67,16 +69,26 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
             date="2026-04-12",
         ),
     )
+    sent_response = finance.mark_invoice_sent(_request(), invoice["id"])
 
     listed_invoices = finance.list_invoices(_request(), limit=100, offset=0)
+    workroom_invoices = finance.list_invoices(_request(), business="workroom", limit=100, offset=0)
+    woodcraft_invoices = finance.list_invoices(_request(), business="woodcraft", limit=100, offset=0)
     listed_payments = finance.list_payments(_request(), limit=100, offset=0)
     listed_expenses = finance.list_expenses(_request(), limit=100, offset=0)
     dashboard = finance.finance_dashboard(_request())
+
+    assert sent_response["status"] == "sent"
+    assert sent_response["invoice"]["status"] == "sent"
+    assert sent_response["invoice"]["sent_at"]
+    assert sent_response["invoice"]["sent_date"]
 
     assert listed_invoices["items"] == listed_invoices["invoices"]
     assert listed_invoices["items"][0]["customer_name"] == "Mina Manual"
     assert listed_invoices["items"][0]["amount"] == 220
     assert listed_invoices["items"][0]["balance"] == 150
+    assert [inv["id"] for inv in workroom_invoices["items"]] == [invoice["id"]]
+    assert woodcraft_invoices["items"] == []
 
     assert listed_payments["items"] == listed_payments["payments"]
     assert listed_payments["items"][0]["customer_id"] == invoice["customer_id"]

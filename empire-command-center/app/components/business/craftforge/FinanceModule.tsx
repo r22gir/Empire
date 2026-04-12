@@ -234,6 +234,8 @@ export default function FinanceModule() {
         total: Number(i.amount),
       }));
       const body = {
+        customer_name: invCustomer.trim(),
+        business_unit: 'woodcraft',
         subtotal: invSubtotal,
         tax_rate: (parseFloat(invTaxRate) || 0) / 100,
         line_items: lineItems,

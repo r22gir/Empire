@@ -191,6 +191,7 @@ def _ensure_finance_extensions(conn):
         "deposit_received": "REAL DEFAULT 0",
         "payment_status": "TEXT DEFAULT 'unpaid'",
         "invoice_date": "TEXT",
+        "sent_date": "TEXT",
     }
     for col, ctype in inv_cols.items():
         parts = ctype.split(" DEFAULT ")
@@ -731,6 +732,8 @@ def list_invoices(
     request: Request,
     status: Optional[str] = None,
     customer_id: Optional[str] = None,
+    business: Optional[str] = None,
+    business_unit: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
@@ -746,6 +749,10 @@ def list_invoices(
     if customer_id:
         clauses.append("i.customer_id = ?")
         params.append(customer_id)
+    biz_filter = _normalise_business(business_unit or business)
+    if biz_filter != "all":
+        clauses.append("i.business_unit = ?")
+        params.append(biz_filter)
     if date_from:
         clauses.append("i.created_at >= ?")
         params.append(date_from)
@@ -857,7 +864,14 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
 def get_invoice(request: Request, invoice_id: str):
     """Get invoice detail with payments."""
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+        _ensure_finance_extensions(conn)
+        row = conn.execute(
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i
+               LEFT JOIN customers c ON c.id = i.customer_id
+               WHERE i.id = ?""",
+            (invoice_id,),
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Invoice not found")
 
@@ -881,6 +895,36 @@ def get_invoice(request: Request, invoice_id: str):
         invoice["payments"] = payments
         invoice["customer"] = customer
         return {"invoice": invoice}
+
+
+@limiter.limit("30/minute")
+@router.post("/invoices/{invoice_id}/send")
+def mark_invoice_sent(request: Request, invoice_id: str):
+    """Mark an invoice as sent without sending outbound email."""
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        _ensure_finance_extensions(conn)
+        row = conn.execute("SELECT id FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+
+        conn.execute(
+            """UPDATE invoices
+               SET status = 'sent',
+                   sent_at = COALESCE(sent_at, ?),
+                   sent_date = COALESCE(sent_date, ?),
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (now, now, invoice_id),
+        )
+        updated = conn.execute(
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i
+               LEFT JOIN customers c ON c.id = i.customer_id
+               WHERE i.id = ?""",
+            (invoice_id,),
+        ).fetchone()
+        return {"invoice": _enrich_invoice(dict_row(updated)), "status": "sent"}
 
 
 @limiter.limit("30/minute")
