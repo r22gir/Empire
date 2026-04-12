@@ -286,6 +286,41 @@ class AIRouter:
         else:
             return None, f"[Unsupported file type: {path.suffix}]"
 
+    async def _prepend_local_vision_triage(self, messages: List[AIMessage], image_path: Optional[Path]) -> List[AIMessage]:
+        """Run lightweight local Ollama vision triage before cloud escalation."""
+        if not image_path or not self._is_image(image_path) or not messages:
+            return messages
+
+        try:
+            from app.services.ollama_vision_router import generate_vision_response, vision_model_order
+
+            _, image_b64 = self._encode_image(image_path)
+            prompt = (
+                "You are MAX's local lightweight vision triage. Describe the image, "
+                "list visible objects/text, call out business-relevant details, and say "
+                "what a cloud model should inspect next. Keep it concise and factual."
+            )
+            analysis, model_used = await generate_vision_response(
+                prompt=prompt,
+                image_b64=image_b64,
+                timeout=20.0,
+            )
+            if not analysis:
+                return messages
+
+            last = messages[-1]
+            routing = " -> ".join(vision_model_order())
+            local_context = (
+                f"[Local Ollama vision triage via {model_used}; route {routing}]\n"
+                f"{analysis.strip()}\n\n"
+            )
+            updated = list(messages)
+            updated[-1] = AIMessage(role=last.role, content=local_context + last.content, image_path=last.image_path)
+            return updated
+        except Exception as e:
+            logger.warning(f"Local Ollama vision triage skipped: {e}")
+            return messages
+
     def _encode_image(self, path: Path) -> tuple:
         ext = path.suffix.lower()
         media_types = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp'}
@@ -457,12 +492,17 @@ class AIRouter:
         business = desk or "general"
 
         image_path = None
+        local_attachment_answer = None
         if image_filename:
             image_path, attachment_text = self._process_attachment(image_filename)
             if attachment_text and messages:
                 last = messages[-1]
                 messages = list(messages)
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
+                local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
+            messages = await self._prepend_local_vision_triage(messages, image_path)
+            if image_path and messages and messages[-1].content.startswith("[Local Ollama vision triage"):
+                local_attachment_answer = messages[-1].content.split("\n\n", 1)[0]
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
 
@@ -482,6 +522,9 @@ class AIRouter:
 
             # If tiered chain exhausted, fall through to legacy chain below
             logger.warning("[MAX] Tiered chain exhausted, falling through to legacy chain")
+            if local_attachment_answer:
+                model_used = "ollama-vision" if image_path else "attachment-reader"
+                return AIResponse(content=local_attachment_answer, model_used=model_used, fallback_used=True)
 
         # Legacy fallback chain for desk routing / explicit model requests
         # Resolve Claude variants to the base CLAUDE provider for fallback chain
@@ -601,12 +644,17 @@ class AIRouter:
         business = desk or "general"
 
         image_path = None
+        local_attachment_answer = None
         if image_filename:
             image_path, attachment_text = self._process_attachment(image_filename)
             if attachment_text and messages:
                 last = messages[-1]
                 messages = list(messages)
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
+                local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
+            messages = await self._prepend_local_vision_triage(messages, image_path)
+            if image_path and messages and messages[-1].content.startswith("[Local Ollama vision triage"):
+                local_attachment_answer = messages[-1].content.split("\n\n", 1)[0]
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
 
@@ -675,6 +723,9 @@ class AIRouter:
 
             # If tiered chain exhausted, fall through to legacy chain
             logger.warning("[MAX] Tiered stream chain exhausted, falling through to legacy chain")
+            if local_attachment_answer:
+                yield local_attachment_answer, ("ollama-vision" if image_path else "attachment-reader")
+                return
 
         # Legacy fallback chain for desk routing / explicit model requests
         # Resolve Claude variants

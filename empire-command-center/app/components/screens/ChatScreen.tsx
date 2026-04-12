@@ -71,6 +71,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const [ttsPlaying, setTtsPlaying] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState<string>(''); // Recording/uploading/transcribing status
   const [aiStatus, setAiStatus] = useState<string>(''); // Thinking/tool status for all messages
+  const [maxStatus, setMaxStatus] = useState<any>(null);
   const [recordingTimer, setRecordingTimer] = useState(0);
   const [showMoreActions, setShowMoreActions] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -85,6 +86,18 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   useEffect(() => {
     msgsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent, codeTask]);
+
+  useEffect(() => {
+    const fetchMaxStatus = async () => {
+      try {
+        const res = await fetch(API + '/max/orchestration/status', { signal: AbortSignal.timeout(5000) });
+        if (res.ok) setMaxStatus(await res.json());
+      } catch { /* status is advisory */ }
+    };
+    fetchMaxStatus();
+    const interval = setInterval(fetchMaxStatus, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Keep voiceMode ref in sync
   useEffect(() => { voiceModeRef.current = voiceMode; }, [voiceMode]);
@@ -375,6 +388,16 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     } catch { /* silent */ }
   };
 
+  const primaryModel = maxStatus?.providers?.cloud?.find((p: any) => p.primary)?.name || streamingModel || 'MAX routing';
+  const localVision = maxStatus?.local_vision;
+  const localVisionLabel = localVision?.online
+    ? `Vision ${localVision.primary || 'moondream'} -> ${localVision.fallback || 'llava'}`
+    : 'Vision offline';
+  const voiceLabel = maxStatus?.capabilities?.voice_input && maxStatus?.capabilities?.voice_output
+    ? 'Voice ready'
+    : maxStatus ? 'Voice partial' : 'Voice checking';
+  const openClawOnline = !!maxStatus?.capabilities?.openclaw_delegation;
+
   const toggleRecording = useCallback(async () => {
     if (recording) {
       mediaRecorderRef.current?.stop();
@@ -452,6 +475,48 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           </span>
         )}
       </div>
+
+      {maxStatus && (
+        <div
+          data-testid="max-orchestration-status"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '7px 12px',
+            borderBottom: '1px solid var(--border)',
+            background: '#faf9f7',
+            overflowX: 'auto',
+          }}
+        >
+          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap' }}>
+            Founder {'>'} MAX
+          </span>
+          <StatusChip label={primaryModel} tone="dark" />
+          <StatusChip label={localVisionLabel} tone={localVision?.online ? 'ok' : 'warn'} />
+          <StatusChip label={voiceLabel} tone={maxStatus.capabilities?.voice_input ? 'ok' : 'warn'} />
+          <StatusChip label={`OpenClaw ${openClawOnline ? 'online' : 'offline'}`} tone={openClawOnline ? 'ok' : 'warn'} />
+          <button
+            data-testid="max-desks-status-button"
+            onClick={() => onScreenChange?.('desks')}
+            style={{
+              border: '1px solid #d8d3cb',
+              background: '#fff',
+              borderRadius: 8,
+              padding: '3px 8px',
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--text)',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+            }}
+          >
+            {maxStatus.desks?.count || 0} desks subordinate
+          </button>
+          <StatusChip label="Upload image/doc" tone="ok" />
+        </div>
+      )}
 
       {/* Messages */}
       <div style={{
@@ -741,9 +806,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         flexShrink: 0,
         background: 'var(--chat-bg)',
       }}>
-        <input ref={fileInputRef} type="file" style={{ display: 'none' }} accept="image/*" onChange={handleFileUpload} />
+        <input ref={fileInputRef} type="file" style={{ display: 'none' }} accept="image/*,.pdf,.txt,.md,.csv,.json" onChange={handleFileUpload} />
 
-        {/* Attached image indicator */}
+        {/* Attached file indicator */}
         {attachedImage && (
           <div style={{
             display: 'inline-flex',
@@ -1011,6 +1076,31 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         onNewChat={() => { if (onNewChat) onNewChat(); }}
       />
     </div>
+  );
+}
+
+function StatusChip({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'dark' }) {
+  const styles = tone === 'ok'
+    ? { background: '#f0fdf4', border: '#bbf7d0', color: '#15803d' }
+    : tone === 'warn'
+      ? { background: '#fffbeb', border: '#fde68a', color: '#b45309' }
+      : { background: '#1a1a1a', border: '#1a1a1a', color: '#fff' };
+
+  return (
+    <span
+      style={{
+        border: `1px solid ${styles.border}`,
+        background: styles.background,
+        color: styles.color,
+        borderRadius: 8,
+        padding: '3px 8px',
+        fontSize: 11,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
   );
 }
 

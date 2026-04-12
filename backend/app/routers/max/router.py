@@ -1222,6 +1222,143 @@ async def health_check():
     return {"status": "healthy", "service": "MAX AI Assistant Manager", "desks_online": len(desk_manager.get_all_desks()), "telegram_configured": telegram_bot.is_configured}
 
 
+@router.get("/orchestration/status")
+async def orchestration_status():
+    """Canonical Command Center status for MAX as the orchestration brain."""
+    import httpx
+
+    async def _probe_json(url: str, timeout: float = 3.0) -> tuple[bool, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url)
+            if resp.status_code >= 400:
+                return False, {"status_code": resp.status_code}
+            try:
+                return True, resp.json()
+            except Exception:
+                return True, {}
+        except Exception as e:
+            return False, {"error": str(e)}
+
+    from app.services.max.stt_service import stt_service
+    from app.services.max.tts_service import tts_service
+    from app.services.ollama_vision_router import (
+        OLLAMA_URL,
+        PRIMARY_VISION_MODEL,
+        FALLBACK_VISION_MODEL,
+        vision_model_order,
+    )
+
+    ollama_ok, ollama_data = await _probe_json(f"{OLLAMA_URL}/api/tags")
+    openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
+    openclaw_ok, openclaw_data = await _probe_json(f"{openclaw_url}/health")
+    ollama_models = [m.get("name", "") for m in ollama_data.get("models", [])] if isinstance(ollama_data, dict) else []
+    normalized_ollama_models = {m.split(":")[0] for m in ollama_models}
+
+    desks = desk_manager.get_all_desks()
+    try:
+        desk_statuses = await ai_desk_manager.get_all_statuses()
+    except Exception:
+        desk_statuses = []
+
+    configured_models = ai_router.get_available_models()
+    cloud_providers = [
+        {
+            "id": model["id"],
+            "name": model["name"],
+            "configured": bool(model["available"]),
+            "primary": bool(model.get("primary")),
+            "status_source": "env_configured",
+        }
+        for model in configured_models
+        if model.get("type") == "cloud"
+    ]
+
+    local_vision_order = vision_model_order()
+    local_vision_ready = ollama_ok and all(
+        candidate in normalized_ollama_models
+        or any(model == candidate or model.startswith(f"{candidate}:") for model in ollama_models)
+        for candidate in [PRIMARY_VISION_MODEL, FALLBACK_VISION_MODEL]
+    )
+
+    return {
+        "role": {
+            "founder": "top",
+            "max": "primary_command_center_brain",
+            "ai_desks": "subordinate_specialists",
+            "openclaw": "execution_delegation_layer",
+        },
+        "entrypoints": {
+            "web_chat": "/api/v1/max/chat/stream",
+            "telegram_chat": "/api/v1/max/chat",
+            "voice_stt": "/api/v1/voice/transcribe",
+            "voice_tts": "/api/v1/max/tts",
+            "upload": "/api/v1/files/upload",
+            "desk_tasks": "/api/v1/max/ai-desks/tasks",
+            "openclaw": "/api/v1/openclaw/tasks",
+        },
+        "routing": {
+            "normal_web_chat": "simple: Gemini -> Grok -> Groq -> Claude Sonnet; moderate: Grok -> Groq -> Claude Sonnet -> Gemini; complex: Claude Sonnet -> Grok -> OpenAI GPT-4o -> Groq; critical/code: Claude Opus -> Claude Sonnet",
+            "telegram_chat": "MAX chat with Telegram brevity directive and founder channel persistence",
+            "voice_input": "Groq Whisper STT through /api/v1/voice/transcribe; transcribed text enters MAX chat",
+            "voice_output": "xAI Grok TTS through /api/v1/max/tts",
+            "image_analysis": f"local Ollama triage {PRIMARY_VISION_MODEL} -> {FALLBACK_VISION_MODEL}, then MAX cloud routing as needed",
+            "document_analysis": "uploaded PDF/text/code content is extracted and prepended to MAX chat context",
+            "desk_delegation": "MAX run_desk_task / ai-desks tasks; CodeForge uses Claude Opus; finance/support/sales/etc. use desk routing",
+            "openclaw_execution": "MAX tools can dispatch or queue OpenClaw tasks below desk/MAX control",
+        },
+        "providers": {
+            "cloud": cloud_providers,
+            "local": [
+                {
+                    "id": "ollama",
+                    "name": "Ollama",
+                    "online": ollama_ok,
+                    "status_source": "live_http",
+                    "models": ollama_models,
+                },
+                {
+                    "id": "openclaw",
+                    "name": "OpenClaw",
+                    "online": openclaw_ok,
+                    "status_source": "live_http",
+                    "detail": openclaw_data,
+                },
+            ],
+        },
+        "capabilities": {
+            "text_chat": True,
+            "image_upload_analysis": local_vision_ready or ollama_ok,
+            "document_upload_analysis": True,
+            "voice_input": stt_service.is_configured,
+            "voice_output": tts_service.is_configured,
+            "desk_delegation": len(desks) > 0,
+            "openclaw_delegation": openclaw_ok,
+        },
+        "local_vision": {
+            "online": ollama_ok,
+            "ready": local_vision_ready,
+            "primary": PRIMARY_VISION_MODEL,
+            "fallback": FALLBACK_VISION_MODEL,
+            "route": local_vision_order,
+            "installed_models": ollama_models,
+        },
+        "desks": {
+            "count": len(desks),
+            "statuses": desk_statuses,
+        },
+        "voice": {
+            "stt_service": "groq-whisper" if stt_service.is_configured else "unconfigured",
+            "tts_service": "grok-tts" if tts_service.is_configured else "unconfigured",
+        },
+        "uploads": {
+            "accepted_categories": ["images", "documents", "audio", "code"],
+            "command_center_max_accept": ["image/*", ".pdf", ".txt", ".md", ".csv", ".json"],
+        },
+        "checked_at": datetime.utcnow().isoformat(),
+    }
+
+
 @router.post("/telegram/send")
 async def send_telegram_message(request: TelegramMessageRequest):
     if not telegram_bot.is_configured:
