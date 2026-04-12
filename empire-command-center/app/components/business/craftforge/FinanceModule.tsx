@@ -133,7 +133,7 @@ export default function FinanceModule() {
       fetch(`${API}/craftforge/designs`).then(r => r.json()),
       fetch(`${API}/finance/invoices`).then(r => r.json()),
       fetch(`${API}/finance/payments?limit=10`).then(r => r.json()),
-      fetch(`${API}/finance/expenses?limit=100`).then(r => r.json()),
+      fetch(`${API}/finance/expenses?limit=100&business=woodcraft`).then(r => r.json()),
     ]).then(([dashRes, desRes, invRes, payRes, expRes]) => {
       if (dashRes.status === 'fulfilled') setDashboard(dashRes.value);
       if (desRes.status === 'fulfilled') {
@@ -169,7 +169,7 @@ export default function FinanceModule() {
   }, []);
 
   const refreshExpenses = useCallback(() => {
-    fetch(`${API}/finance/expenses?limit=100`).then(r => r.json()).then(raw => {
+    fetch(`${API}/finance/expenses?limit=100&business=woodcraft`).then(r => r.json()).then(raw => {
       setExpenses(Array.isArray(raw) ? raw : raw.expenses || []);
     }).catch(() => {});
     fetch(`${API}/finance/dashboard`).then(r => r.json()).then(d => setDashboard(d)).catch(() => {});

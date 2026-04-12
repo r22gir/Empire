@@ -95,6 +95,8 @@ class ExpenseCreate(BaseModel):
     receipt_path: Optional[str] = None
     expense_date: Optional[str] = None
     date: Optional[str] = None
+    business: Optional[str] = None
+    business_unit: Optional[str] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -196,6 +198,26 @@ def _ensure_finance_extensions(conn):
     for col, ctype in inv_cols.items():
         parts = ctype.split(" DEFAULT ")
         _safe_alter(conn, "invoices", col, parts[0], parts[1] if len(parts) > 1 else None)
+
+
+def _ensure_expense_extensions(conn):
+    _safe_alter(conn, "expenses", "business_unit", "TEXT", "'workroom'")
+
+
+def _normalise_expense_category(raw: str | None) -> str:
+    category = (raw or "other").strip().lower()
+    aliases = {
+        "materials": "hardware",
+        "cnc_supplies": "tools",
+        "cnc supplies": "tools",
+        "supplies": "other",
+    }
+    category = aliases.get(category, category)
+    allowed = {
+        "fabric", "hardware", "labor", "shipping", "rent", "utilities",
+        "marketing", "tools", "vehicle", "insurance", "other",
+    }
+    return category if category in allowed else "other"
 
 
 def _find_or_create_customer_for_invoice(
@@ -1520,6 +1542,8 @@ def list_expenses(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     vendor: Optional[str] = None,
+    business: Optional[str] = None,
+    business_unit: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
@@ -1529,7 +1553,11 @@ def list_expenses(
 
     if category:
         clauses.append("category = ?")
-        params.append(category)
+        params.append(_normalise_expense_category(category))
+    biz_filter = _normalise_business(business_unit or business)
+    if biz_filter != "all":
+        clauses.append("business_unit = ?")
+        params.append(biz_filter)
     if date_from:
         clauses.append("expense_date >= ?")
         params.append(date_from)
@@ -1545,6 +1573,7 @@ def list_expenses(
     params.extend([limit, offset])
 
     with get_db() as conn:
+        _ensure_expense_extensions(conn)
         rows = conn.execute(
             f"SELECT * FROM expenses{where} ORDER BY expense_date DESC LIMIT ? OFFSET ?",
             params
@@ -1565,18 +1594,24 @@ def list_expenses(
 def create_expense(request: Request, expense: ExpenseCreate):
     """Create a new expense."""
     with get_db() as conn:
+        _ensure_expense_extensions(conn)
         exp_date = expense.expense_date or expense.date or date.today().isoformat()
+        business_unit = _normalise_business(expense.business_unit or expense.business or "workroom")
+        if business_unit == "all":
+            business_unit = "workroom"
+        category = _normalise_expense_category(expense.category)
         conn.execute(
             """INSERT INTO expenses
-               (id, category, vendor, description, amount, receipt_path, expense_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?)""",
+               (id, category, vendor, description, amount, receipt_path, expense_date, business_unit)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?)""",
             (
-                expense.category,
+                category,
                 expense.vendor,
                 expense.description,
                 expense.amount,
                 expense.receipt_path,
                 exp_date,
+                business_unit,
             )
         )
 

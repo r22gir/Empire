@@ -69,6 +69,17 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
             date="2026-04-12",
         ),
     )
+    finance.create_expense(
+        _request(),
+        finance.ExpenseCreate(
+            category="materials",
+            vendor="Wood Vendor",
+            description="Woodcraft material",
+            amount=45,
+            expense_date="2026-04-12",
+            business="woodcraft",
+        ),
+    )
     sent_response = finance.mark_invoice_sent(_request(), invoice["id"])
 
     listed_invoices = finance.list_invoices(_request(), limit=100, offset=0)
@@ -76,6 +87,8 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
     woodcraft_invoices = finance.list_invoices(_request(), business="woodcraft", limit=100, offset=0)
     listed_payments = finance.list_payments(_request(), limit=100, offset=0)
     listed_expenses = finance.list_expenses(_request(), limit=100, offset=0)
+    workroom_expenses = finance.list_expenses(_request(), business="workroom", limit=100, offset=0)
+    woodcraft_expenses = finance.list_expenses(_request(), business="woodcraft", limit=100, offset=0)
     dashboard = finance.finance_dashboard(_request())
 
     assert sent_response["status"] == "sent"
@@ -94,16 +107,20 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
     assert listed_payments["items"][0]["customer_id"] == invoice["customer_id"]
 
     assert listed_expenses["items"] == listed_expenses["expenses"]
-    assert listed_expenses["items"][0]["expense_date"] == "2026-04-12"
-    assert listed_expenses["items"][0]["date"] == "2026-04-12"
+    assert {exp["business_unit"] for exp in listed_expenses["items"]} == {"workroom", "woodcraft"}
+    assert workroom_expenses["items"][0]["vendor"] == "Tool Vendor"
+    assert workroom_expenses["items"][0]["expense_date"] == "2026-04-12"
+    assert workroom_expenses["items"][0]["date"] == "2026-04-12"
+    assert woodcraft_expenses["items"][0]["vendor"] == "Wood Vendor"
+    assert woodcraft_expenses["items"][0]["category"] == "hardware"
 
     assert dashboard["revenue"]["mtd"] == 70
-    assert dashboard["expenses"]["mtd"] == 30
-    assert dashboard["net_profit"]["mtd"] == 40
+    assert dashboard["expenses"]["mtd"] == 75
+    assert dashboard["net_profit"]["mtd"] == -5
     assert dashboard["outstanding"]["total"] == 150
     assert dashboard["revenue_mtd"] == 70
-    assert dashboard["expenses_mtd"] == 30
-    assert dashboard["net_profit_mtd"] == 40
+    assert dashboard["expenses_mtd"] == 75
+    assert dashboard["net_profit_mtd"] == -5
     assert dashboard["outstanding_total"] == 150
     assert dashboard["aging"] == [
         {"label": "0-30 days", "amount": 150},
