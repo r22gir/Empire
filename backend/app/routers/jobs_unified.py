@@ -1572,10 +1572,29 @@ def record_payment(invoice_id: str, payment: PaymentRecord):
             "SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY created_at DESC LIMIT 1",
             (invoice_id,),
         ).fetchone()
+        pay = dict_row(pay_row)
+        finance_method = payment.method if payment.method in {
+            "cash", "check", "card", "zelle", "venmo", "wire", "crypto", "other",
+        } else "other"
+        conn.execute(
+            """INSERT OR IGNORE INTO payments
+               (id, invoice_id, customer_id, amount, method, reference, notes, payment_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                pay["id"],
+                invoice_id,
+                customer_id,
+                payment.amount,
+                finance_method,
+                payment.reference,
+                payment.notes,
+                date.today().isoformat(),
+            ),
+        )
 
         return {
             "invoice": _enrich_invoice(dict_row(updated)),
-            "payment": dict_row(pay_row),
+            "payment": pay,
             "message": f"Payment of ${payment.amount:,.2f} recorded. Balance: ${max(new_balance, 0):,.2f}",
         }
 
