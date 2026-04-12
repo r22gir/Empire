@@ -145,6 +145,75 @@ def _find_or_create_customer_for_quote(conn, quote: dict, business_unit: str) ->
     return cust["id"] if cust else None
 
 
+def _find_or_create_customer_for_invoice(conn, inv, business_unit: str) -> Optional[str]:
+    customer_name = (inv.client_name or "").strip()
+    customer_email = (inv.client_email or "").strip()
+    customer_phone = (inv.client_phone or "").strip()
+    customer_address = (inv.client_address or "").strip()
+
+    customer_id = None
+    if customer_email:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(email) = lower(?)",
+            (customer_email,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if not customer_id and customer_name:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(name) = lower(?)",
+            (customer_name,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if customer_id:
+        conn.execute(
+            """UPDATE customers
+               SET email = COALESCE(NULLIF(email, ''), ?),
+                   phone = COALESCE(NULLIF(phone, ''), ?),
+                   address = COALESCE(NULLIF(address, ''), ?),
+                   business = CASE WHEN business IS NULL OR business = '' OR business = 'empire'
+                                   THEN ? ELSE business END,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                customer_email or None,
+                customer_phone or None,
+                customer_address or None,
+                business_unit,
+                customer_id,
+            ),
+        )
+        return customer_id
+
+    if not customer_name:
+        return None
+
+    conn.execute(
+        """INSERT INTO customers
+           (name, email, phone, address, type, tags, notes, total_revenue,
+            lifetime_quotes, source, business)
+           VALUES (?, ?, ?, ?, 'residential', '[]', ?, 0, 0, 'invoice', ?)""",
+        (
+            customer_name,
+            customer_email or None,
+            customer_phone or None,
+            customer_address or None,
+            inv.notes,
+            business_unit,
+        ),
+    )
+    cust = conn.execute(
+        """SELECT id FROM customers
+           WHERE name = ? AND COALESCE(email, '') = COALESCE(?, '')
+           ORDER BY created_at DESC LIMIT 1""",
+        (customer_name, customer_email or None),
+    ).fetchone()
+    return cust["id"] if cust else None
+
+
 # ── Schema init ────────────────────────────────────────────────────────
 
 def _safe_alter(conn, table: str, column: str, col_type: str, default=None):
@@ -377,7 +446,28 @@ def _enrich_invoice(row):
     if not row:
         return row
     d = dict_row(row) if not isinstance(row, dict) else row
-    return _parse_json_fields(d, _INV_JSON_FIELDS)
+    d = _parse_json_fields(d, _INV_JSON_FIELDS)
+    d["customer_name"] = d.get("customer_name") or d.get("client_name")
+    d["amount"] = d.get("total") or 0
+    d["balance"] = d.get("balance_due") or 0
+    return d
+
+
+def _canonical_invoice_payments(conn, invoice_id: str) -> list[dict]:
+    payments = dict_rows(conn.execute(
+        "SELECT * FROM payments WHERE invoice_id = ? ORDER BY payment_date DESC, created_at DESC",
+        (invoice_id,),
+    ).fetchall())
+    if payments:
+        return payments
+
+    legacy = dict_rows(conn.execute(
+        "SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY created_at DESC",
+        (invoice_id,),
+    ).fetchall())
+    for payment in legacy:
+        payment["payment_date"] = payment.get("created_at")
+    return legacy
 
 
 def _next_job_number(conn) -> str:
@@ -1341,7 +1431,7 @@ def list_invoices(
 
     with get_db() as conn:
         rows = conn.execute(
-            f"""SELECT i.*, c.name as customer_name
+            f"""SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
                 FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
                 {where} ORDER BY i.created_at DESC LIMIT ? OFFSET ?""",
             params,
@@ -1358,6 +1448,13 @@ def list_invoices(
 def create_invoice(inv: InvoiceCreateSchema):
     """Create a new invoice."""
     with get_db() as conn:
+        business_unit = _normalise_business(inv.business_unit)
+        if business_unit == "all":
+            business_unit = "workroom"
+        customer_id = inv.customer_id
+        if not customer_id:
+            customer_id = _find_or_create_customer_for_invoice(conn, inv, business_unit)
+
         inv_number = _next_invoice_number(conn)
 
         subtotal = inv.subtotal
@@ -1382,20 +1479,22 @@ def create_invoice(inv: InvoiceCreateSchema):
                        ?, ?, ?, ?,
                        ?, 'unpaid')""",
             (
-                inv_number, inv.customer_id, inv.quote_id, inv.job_id,
+                inv_number, customer_id, inv.quote_id, inv.job_id,
                 subtotal, inv.tax_rate, tax_amount, total, total,
                 json.dumps(inv.line_items) if inv.line_items else None,
                 inv.notes, inv.terms, due,
                 inv.client_name, inv.client_email, inv.client_phone,
                 inv.client_address, inv.billing_address,
-                _normalise_business(inv.business_unit), inv.discount_amount,
+                business_unit, inv.discount_amount,
                 inv.discount_type, inv.deposit_required,
                 inv.invoice_date or date.today().isoformat(),
             ),
         )
 
         row = conn.execute(
-            "SELECT * FROM invoices ORDER BY created_at DESC LIMIT 1"
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
+               ORDER BY i.created_at DESC LIMIT 1"""
         ).fetchone()
         result = _enrich_invoice(dict_row(row))
 
@@ -1416,7 +1515,7 @@ def get_invoice(invoice_id: str):
     """Get invoice detail with payments."""
     with get_db() as conn:
         row = conn.execute(
-            """SELECT i.*, c.name as customer_name
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
                FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id
                WHERE i.id = ?""",
             (invoice_id,),
@@ -1426,12 +1525,7 @@ def get_invoice(invoice_id: str):
 
         inv = _enrich_invoice(dict_row(row))
 
-        payments = [dict_row(r) for r in conn.execute(
-            "SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY created_at DESC",
-            (invoice_id,),
-        ).fetchall()]
-
-        inv["payments"] = payments
+        inv["payments"] = _canonical_invoice_payments(conn, invoice_id)
         return {"invoice": inv}
 
 
@@ -1603,11 +1697,8 @@ def record_payment(invoice_id: str, payment: PaymentRecord):
 def list_payments(invoice_id: str):
     """List all payments for an invoice."""
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY created_at DESC",
-            (invoice_id,),
-        ).fetchall()
-        return {"payments": [dict_row(r) for r in rows]}
+        payments = _canonical_invoice_payments(conn, invoice_id)
+        return {"payments": payments, "items": payments}
 
 
 @router.post("/invoices/from-quote/{quote_id}")
@@ -1802,10 +1893,7 @@ def invoice_pdf(invoice_id: str):
             if cust_row:
                 customer = dict_row(cust_row)
 
-        payments = [dict_row(r) for r in conn.execute(
-            "SELECT * FROM invoice_payments WHERE invoice_id = ? ORDER BY created_at",
-            (invoice_id,),
-        ).fetchall()]
+        payments = _canonical_invoice_payments(conn, invoice_id)
 
         # Linked job info
         job = None
