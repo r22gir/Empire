@@ -283,6 +283,9 @@ class DrawingAssetRequest(BaseModel):
     svg: str
     room_id: Optional[str] = None
     item_id: Optional[str] = None
+    assigned_room_id: Optional[str] = None
+    assigned_item_id: Optional[str] = None
+    item_key: Optional[str] = None
     quote_id: Optional[str] = None
     dimensions: dict = {}
     notes: str = ""
@@ -303,6 +306,9 @@ async def save_drawing_asset(req: DrawingAssetRequest):
         f.write(req.svg)
 
     route_to = route_to_for_item_type(req.item_type, req.route_to)
+    assigned_room_id = req.assigned_room_id or req.room_id
+    assigned_item_id = req.assigned_item_id or req.item_id
+    item_key = req.item_key or assigned_item_id
 
     asset = {
         "id": filename.rsplit(".", 1)[0],
@@ -311,9 +317,9 @@ async def save_drawing_asset(req: DrawingAssetRequest):
         "route_to": route_to,
         "url": f"/api/v1/drawings/files/{filename}",
         "filename": filename,
-        "assigned_room_id": req.room_id,
-        "assigned_item_id": req.item_id,
-        "item_key": req.item_id,
+        "assigned_room_id": assigned_room_id,
+        "assigned_item_id": assigned_item_id,
+        "item_key": item_key,
         "dimensions": req.dimensions,
         "notes": req.notes,
         "created_at": datetime.utcnow().isoformat(),
