@@ -370,6 +370,130 @@ def _customer_statement_payload(conn, customer_id: str, business: str | None = N
     }
 
 
+def _next_collection_action(open_balance: float, overdue_balance: float, last_action: str | None) -> str:
+    if open_balance <= 0:
+        return "current"
+    if overdue_balance <= 0:
+        return "monitor_open_balance"
+    if last_action in {"reminder_logged", "statement_sent", "statement_printed"}:
+        return "follow_up"
+    return "send_reminder"
+
+
+def _collections_worklist(conn, business: str | None = None, include_current: bool = False, limit: int = 100) -> dict:
+    _ensure_finance_extensions(conn)
+    _ensure_collection_extensions(conn)
+    biz_key = _normalise_business(business)
+    today = date.today().isoformat()
+
+    clauses = ["i.status NOT IN ('paid', 'cancelled')", "COALESCE(i.balance_due, 0) > 0"]
+    params: list = []
+    if not include_current:
+        clauses.append("i.status != 'draft'")
+    if biz_key != "all":
+        clauses.append("COALESCE(i.business_unit, c.business, 'empire') = ?")
+        params.append(biz_key)
+    query_params = [today] * 8 + params + [limit]
+
+    rows = dict_rows(conn.execute(
+        f"""SELECT
+               COALESCE(i.customer_id, '') AS customer_id,
+               COALESCE(NULLIF(c.name, ''), NULLIF(i.client_name, ''), 'Unknown customer') AS customer_name,
+               COALESCE(NULLIF(c.email, ''), NULLIF(i.client_email, '')) AS customer_email,
+               COALESCE(i.business_unit, c.business, 'empire') AS business_unit,
+               ROUND(COALESCE(SUM(i.balance_due), 0), 2) AS open_balance,
+               COUNT(*) AS open_invoice_count,
+               ROUND(COALESCE(SUM(CASE
+                   WHEN i.status != 'draft' AND i.due_date IS NOT NULL AND julianday(?) - julianday(i.due_date) > 0
+                   THEN i.balance_due ELSE 0 END), 0), 2) AS overdue_balance,
+               SUM(CASE
+                   WHEN i.status != 'draft' AND i.due_date IS NOT NULL AND julianday(?) - julianday(i.due_date) > 0
+                   THEN 1 ELSE 0 END) AS overdue_invoice_count,
+               ROUND(COALESCE(SUM(CASE
+                   WHEN i.status != 'draft' AND i.due_date IS NOT NULL AND julianday(?) - julianday(i.due_date) <= 30
+                   THEN i.balance_due ELSE 0 END), 0), 2) AS aging_0_30,
+               ROUND(COALESCE(SUM(CASE
+                   WHEN i.status != 'draft' AND i.due_date IS NOT NULL AND julianday(?) - julianday(i.due_date) > 30
+                    AND julianday(?) - julianday(i.due_date) <= 60
+                   THEN i.balance_due ELSE 0 END), 0), 2) AS aging_31_60,
+               ROUND(COALESCE(SUM(CASE
+                   WHEN i.status != 'draft' AND i.due_date IS NOT NULL AND julianday(?) - julianday(i.due_date) > 60
+                    AND julianday(?) - julianday(i.due_date) <= 90
+                   THEN i.balance_due ELSE 0 END), 0), 2) AS aging_61_90,
+               ROUND(COALESCE(SUM(CASE
+                   WHEN i.status != 'draft' AND i.due_date IS NOT NULL AND julianday(?) - julianday(i.due_date) > 90
+                   THEN i.balance_due ELSE 0 END), 0), 2) AS aging_90_plus
+            FROM invoices i
+            LEFT JOIN customers c ON c.id = i.customer_id
+            WHERE {' AND '.join(clauses)}
+            GROUP BY COALESCE(i.customer_id, ''), COALESCE(i.business_unit, c.business, 'empire')
+            ORDER BY overdue_balance DESC, open_balance DESC, customer_name ASC
+            LIMIT ?""",
+        query_params,
+    ).fetchall())
+
+    items = []
+    totals = {
+        "open_balance": 0.0,
+        "overdue_balance": 0.0,
+        "open_invoice_count": 0,
+        "overdue_invoice_count": 0,
+        "aging": {"0_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0},
+    }
+    for row in rows:
+        customer_id = row.get("customer_id") or None
+        business_unit = row.get("business_unit") or "empire"
+        aging = {
+            "0_30": round(row.get("aging_0_30") or 0, 2),
+            "31_60": round(row.get("aging_31_60") or 0, 2),
+            "61_90": round(row.get("aging_61_90") or 0, 2),
+            "90_plus": round(row.get("aging_90_plus") or 0, 2),
+        }
+        last_event = None
+        if customer_id:
+            last_event = dict_row(conn.execute(
+                """SELECT * FROM finance_collection_events
+                   WHERE customer_id = ? AND (business_unit = ? OR business_unit = 'all')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (customer_id, business_unit),
+            ).fetchone())
+
+        item = {
+            "customer_id": customer_id,
+            "customer_name": row.get("customer_name"),
+            "customer_email": row.get("customer_email"),
+            "business_unit": business_unit,
+            "open_balance": round(row.get("open_balance") or 0, 2),
+            "overdue_balance": round(row.get("overdue_balance") or 0, 2),
+            "aging": aging,
+            "open_invoice_count": row.get("open_invoice_count") or 0,
+            "overdue_invoice_count": row.get("overdue_invoice_count") or 0,
+            "last_collection_action": last_event.get("action") if last_event else None,
+            "last_collection_notes": last_event.get("notes") if last_event else None,
+            "last_action_date": last_event.get("created_at") if last_event else None,
+            "next_action": _next_collection_action(
+                row.get("open_balance") or 0,
+                row.get("overdue_balance") or 0,
+                last_event.get("action") if last_event else None,
+            ),
+        }
+        items.append(item)
+        totals["open_balance"] = round(totals["open_balance"] + item["open_balance"], 2)
+        totals["overdue_balance"] = round(totals["overdue_balance"] + item["overdue_balance"], 2)
+        totals["open_invoice_count"] += item["open_invoice_count"]
+        totals["overdue_invoice_count"] += item["overdue_invoice_count"]
+        for bucket in totals["aging"]:
+            totals["aging"][bucket] = round(totals["aging"][bucket] + aging[bucket], 2)
+
+    return {
+        "business": "all" if biz_key == "all" else biz_key,
+        "items": items,
+        "customers": items,
+        "total": len(items),
+        "totals": totals,
+    }
+
+
 def _safe_alter(conn, table: str, column: str, col_type: str, default=None):
     try:
         dflt = f" DEFAULT {default}" if default is not None else ""
@@ -1489,6 +1613,21 @@ def customer_finance_ledger(
     """Canonical customer statement: invoices, payments, balances, and AR aging contribution."""
     with get_db() as conn:
         return _customer_finance_ledger(conn, customer_id, business)
+
+
+@limiter.limit("30/minute")
+@router.get("/collections/worklist")
+def collections_worklist(
+    request: Request,
+    business: Optional[str] = None,
+    include_current: bool = False,
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Cross-customer AR collections queue built from canonical invoices/payments/events."""
+    with get_db() as conn:
+        if not isinstance(limit, int):
+            limit = 100
+        return _collections_worklist(conn, business, include_current, limit)
 
 
 @limiter.limit("30/minute")

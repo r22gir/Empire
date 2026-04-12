@@ -236,6 +236,47 @@ def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_
     assert reminder["event"]["overdue_balance"] == 600
     assert reminder["statement"]["collections"][0]["notes"] == "Reminder logged from test"
 
+    second_workroom_invoice = finance.create_invoice(
+        _request(),
+        finance.InvoiceCreate(
+            customer_name="Second AR Client",
+            customer_email="second-ar@example.com",
+            business_unit="workroom",
+            subtotal=300,
+            tax_rate=0,
+            due_date="2026-04-20",
+        ),
+    )["invoice"]
+    finance.mark_invoice_sent(_request(), second_workroom_invoice["id"])
+
+    workroom_queue = finance.collections_worklist(_request(), business="workroom")
+    woodcraft_queue = finance.collections_worklist(_request(), business="woodcraft")
+    all_queue = finance.collections_worklist(_request())
+
+    ledger_client = next(item for item in workroom_queue["items"] if item["customer_name"] == "Ledger Client")
+    second_client = next(item for item in workroom_queue["items"] if item["customer_name"] == "Second AR Client")
+
+    assert workroom_queue["business"] == "workroom"
+    assert workroom_queue["totals"]["open_balance"] == 900
+    assert workroom_queue["totals"]["overdue_balance"] == 600
+    assert workroom_queue["totals"]["open_invoice_count"] == 2
+    assert workroom_queue["totals"]["overdue_invoice_count"] == 1
+    assert ledger_client["open_balance"] == 600
+    assert ledger_client["overdue_balance"] == 600
+    assert ledger_client["last_collection_action"] == "reminder_logged"
+    assert ledger_client["last_collection_notes"] == "Reminder logged from test"
+    assert ledger_client["next_action"] == "follow_up"
+    assert second_client["open_balance"] == 300
+    assert second_client["overdue_balance"] == 0
+    assert second_client["next_action"] == "monitor_open_balance"
+
+    assert woodcraft_queue["business"] == "woodcraft"
+    assert woodcraft_queue["totals"]["open_balance"] == 700
+    assert woodcraft_queue["items"][0]["customer_name"] == "Ledger Client"
+    assert woodcraft_queue["items"][0]["last_collection_action"] is None
+    assert all_queue["totals"]["open_balance"] == 1600
+    assert {item["business_unit"] for item in all_queue["items"]} == {"workroom", "woodcraft"}
+
 
 def test_smart_invoice_composer_milestones_payments_and_sources(monkeypatch, tmp_path):
     finance, database = _load_finance(monkeypatch, tmp_path)

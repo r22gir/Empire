@@ -94,7 +94,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
 
     switch (section) {
       case 'finance':
-        return <Suspense fallback={<Loading />}><FinanceDashboard /></Suspense>;
+        return <Suspense fallback={<Loading />}><FinanceDashboard onSelectCustomer={(id) => setSelectedCustomer(id)} /></Suspense>;
       case 'invoices':
         return <Suspense fallback={<Loading />}><InvoiceList /></Suspense>;
       case 'expenses':

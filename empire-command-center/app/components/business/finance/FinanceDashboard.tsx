@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { PieChart, DollarSign, ArrowDownCircle, TrendingUp, Clock, AlertCircle } from 'lucide-react';
+import { PieChart, DollarSign, ArrowDownCircle, TrendingUp, Clock, AlertCircle, Send } from 'lucide-react';
 import { API } from '../../../lib/api';
 import KPICard from '../shared/KPICard';
 import DataTable, { Column } from '../shared/DataTable';
@@ -30,6 +30,24 @@ interface Transaction {
   amount: number;
   status: string;
 }
+
+interface CollectionsWorkItem {
+  customer_id: string | null;
+  customer_name: string;
+  customer_email?: string | null;
+  business_unit: string;
+  open_balance: number;
+  overdue_balance: number;
+  aging: Record<string, number>;
+  open_invoice_count: number;
+  overdue_invoice_count: number;
+  last_collection_action?: string | null;
+  last_collection_notes?: string | null;
+  last_action_date?: string | null;
+  next_action?: string | null;
+}
+
+type BusinessFilter = 'workroom' | 'woodcraft' | 'all';
 
 const DATE_RANGES: { value: DateRange; label: string }[] = [
   { value: 'this_month', label: 'This Month' },
@@ -85,10 +103,17 @@ function fmtTrend(n: number): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
-export default function FinanceDashboard() {
+function actionLabel(action?: string | null): string {
+  return (action || 'none').replace(/_/g, ' ');
+}
+
+export default function FinanceDashboard({ onSelectCustomer }: { onSelectCustomer?: (id: string) => void }) {
   const [range, setRange] = useState<DateRange>('this_month');
+  const [businessFilter, setBusinessFilter] = useState<BusinessFilter>('workroom');
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [collections, setCollections] = useState<CollectionsWorkItem[]>([]);
+  const [collectionsTotals, setCollectionsTotals] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,7 +161,23 @@ export default function FinanceDashboard() {
     }
   }, [range]);
 
+  const fetchCollections = useCallback(async () => {
+    try {
+      const suffix = businessFilter === 'all' ? '' : `?business=${businessFilter}`;
+      const res = await fetch(`${API}/finance/collections/worklist${suffix}`);
+      if (!res.ok) throw new Error(`Failed to load collections worklist (${res.status})`);
+      const data = await res.json();
+      setCollections(data.items || []);
+      setCollectionsTotals(data.totals || null);
+    } catch (err: any) {
+      setCollections([]);
+      setCollectionsTotals(null);
+      setError(err.message || 'Failed to load collections worklist');
+    }
+  }, [businessFilter]);
+
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchCollections(); }, [fetchCollections]);
 
   const txnColumns: Column[] = [
     { key: 'date', label: 'Date', sortable: true, render: (r) => (
@@ -152,6 +193,43 @@ export default function FinanceDashboard() {
       </span>
     )},
     { key: 'status', label: 'Status', render: (r) => <StatusBadge status={r.status} /> },
+  ];
+
+  const collectionColumns: Column[] = [
+    { key: 'customer_name', label: 'Customer', sortable: true, render: (r: CollectionsWorkItem) => (
+      <div>
+        <div className="font-bold text-[#1a1a1a]">{r.customer_name || 'Unknown customer'}</div>
+        <div className="text-[11px] text-[#999]">{r.customer_email || 'No email'} · {r.business_unit}</div>
+      </div>
+    )},
+    { key: 'open_balance', label: 'Open', sortable: true, render: (r: CollectionsWorkItem) => <span className="font-bold text-[#1a1a1a]">{fmt(r.open_balance || 0)}</span> },
+    { key: 'overdue_balance', label: 'Overdue', sortable: true, render: (r: CollectionsWorkItem) => <span className="font-bold text-[#dc2626]">{fmt(r.overdue_balance || 0)}</span> },
+    { key: 'open_invoice_count', label: 'Invoices', sortable: true, render: (r: CollectionsWorkItem) => (
+      <span className="text-xs text-[#555]">{r.open_invoice_count || 0} open · {r.overdue_invoice_count || 0} overdue</span>
+    )},
+    { key: 'aging', label: 'Aging', render: (r: CollectionsWorkItem) => (
+      <span className="text-xs text-[#555]">
+        0-30 {fmt(r.aging?.['0_30'] || 0)} · 31-60 {fmt(r.aging?.['31_60'] || 0)} · 61+ {fmt((r.aging?.['61_90'] || 0) + (r.aging?.['90_plus'] || 0))}
+      </span>
+    )},
+    { key: 'last_collection_action', label: 'Last Action', sortable: true, render: (r: CollectionsWorkItem) => (
+      <div>
+        <div className="text-xs font-bold text-[#555] capitalize">{actionLabel(r.last_collection_action)}</div>
+        <div className="text-[11px] text-[#999]" suppressHydrationWarning>{r.last_action_date ? new Date(r.last_action_date).toLocaleDateString() : 'No action logged'}</div>
+        {r.last_collection_notes && <div className="text-[11px] text-[#999] truncate max-w-[180px]">{r.last_collection_notes}</div>}
+      </div>
+    )},
+    { key: 'next_action', label: 'Next', sortable: true, render: (r: CollectionsWorkItem) => <StatusBadge status={actionLabel(r.next_action)} /> },
+    { key: 'customer_id', label: '', render: (r: CollectionsWorkItem) => (
+      <button
+        disabled={!r.customer_id}
+        onClick={() => r.customer_id && onSelectCustomer?.(r.customer_id)}
+        className="px-3 py-2 text-xs font-bold rounded-lg disabled:opacity-50"
+        style={{ color: '#fff', background: '#b8960c', border: 'none', cursor: r.customer_id ? 'pointer' : 'not-allowed' }}
+      >
+        Statement
+      </button>
+    )},
   ];
 
   const d = dashboard;
@@ -252,6 +330,33 @@ export default function FinanceDashboard() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Collections Worklist */}
+        <div className="empire-card flat" style={{ padding: 20, marginBottom: 24 }}>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div>
+              <div className="section-label">Collections Worklist</div>
+              <div className="text-xs text-[#777]">
+                {fmt(collectionsTotals?.open_balance || 0)} open · {fmt(collectionsTotals?.overdue_balance || 0)} overdue · {collectionsTotals?.overdue_invoice_count || 0} overdue invoices
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {(['workroom', 'woodcraft', 'all'] as BusinessFilter[]).map((biz) => (
+                <button
+                  key={biz}
+                  onClick={() => setBusinessFilter(biz)}
+                  className={`filter-tab ${businessFilter === biz ? 'active' : ''}`}
+                >
+                  {biz === 'all' ? 'All' : biz === 'woodcraft' ? 'WoodCraft' : 'Workroom'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <DataTable columns={collectionColumns} data={collections} loading={loading} emptyMessage="No open AR to collect." />
+          <div className="mt-3 flex items-center gap-2 text-xs text-[#777]">
+            <Send size={13} /> Reminder history comes from the customer collections event log. No email delivery is assumed here.
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
