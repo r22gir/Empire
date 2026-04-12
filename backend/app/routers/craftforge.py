@@ -541,6 +541,68 @@ def _load_woodcraft_config() -> dict:
         return {"business_name": "WoodCraft by Empire", "business_email": "", "business_phone": "", "business_address": "", "business_website": ""}
 
 
+def _find_or_create_woodcraft_customer(conn, design: dict) -> Optional[str]:
+    """Return a CRM customer id for Woodcraft design-origin records."""
+    from app.db.database import dict_row
+
+    customer_name = (design.get("customer_name") or "").strip()
+    customer_email = (design.get("customer_email") or "").strip()
+    customer_phone = (design.get("customer_phone") or "").strip()
+    customer_address = (design.get("customer_address") or "").strip()
+
+    customer_id = None
+    if customer_email:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(email) = lower(?)",
+            (customer_email,),
+        ).fetchone()
+        if cust:
+            customer_id = dict_row(cust)["id"]
+    if not customer_id and customer_name:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(name) = lower(?)",
+            (customer_name,),
+        ).fetchone()
+        if cust:
+            customer_id = dict_row(cust)["id"]
+
+    if customer_id:
+        conn.execute(
+            """UPDATE customers
+               SET email = COALESCE(NULLIF(email, ''), ?),
+                   phone = COALESCE(NULLIF(phone, ''), ?),
+                   address = COALESCE(NULLIF(address, ''), ?),
+                   business = 'woodcraft',
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                customer_email or None,
+                customer_phone or None,
+                customer_address or None,
+                customer_id,
+            ),
+        )
+        return customer_id
+
+    if not customer_name:
+        return None
+
+    conn.execute(
+        """INSERT INTO customers
+           (id, name, email, phone, address, type, total_revenue,
+            lifetime_quotes, source, business)
+           VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'residential', 0, 1, 'woodcraft', 'woodcraft')""",
+        (customer_name, customer_email or None, customer_phone or None, customer_address or None),
+    )
+    cust = conn.execute(
+        """SELECT id FROM customers
+           WHERE name = ? AND COALESCE(email, '') = COALESCE(?, '')
+           ORDER BY created_at DESC LIMIT 1""",
+        (customer_name, customer_email or None),
+    ).fetchone()
+    return dict_row(cust)["id"] if cust else None
+
+
 @router.post("/designs/{design_id}/pdf")
 async def generate_design_pdf(design_id: str):
     """Generate a professional PDF quote for a CraftForge design."""
@@ -983,30 +1045,11 @@ async def create_invoice_from_design(design_id: str):
     total = design.get("total", 0)
 
     with get_db() as conn:
-        # Find or create customer
-        customer_id = None
+        customer_id = _find_or_create_woodcraft_customer(conn, design)
         customer_name = design.get("customer_name", "")
         customer_email = design.get("customer_email", "")
-
-        if customer_email:
-            cust = conn.execute("SELECT id FROM customers WHERE email = ?", (customer_email,)).fetchone()
-            if cust:
-                customer_id = dict_row(cust)["id"]
-        if not customer_id and customer_name:
-            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
-            if cust:
-                customer_id = dict_row(cust)["id"]
-
-        if not customer_id and customer_name:
-            # Create customer
-            conn.execute(
-                """INSERT INTO customers (id, name, email, phone, address, type, total_revenue, lifetime_quotes, source, business)
-                   VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'residential', 0, 0, 'direct', 'woodcraft')""",
-                (customer_name, customer_email, design.get("customer_phone", ""), design.get("customer_address", ""))
-            )
-            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
-            if cust:
-                customer_id = dict_row(cust)["id"]
+        customer_phone = design.get("customer_phone", "")
+        customer_address = design.get("customer_address", "")
 
         # Generate invoice number
         year = datetime.now().year
@@ -1021,12 +1064,20 @@ async def create_invoice_from_design(design_id: str):
             inv_number = f"INV-{year}-001"
 
         due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        discount_amount = design.get("discount_amount", 0) or 0
+        discount_type = design.get("discount_type", "dollar") or "dollar"
+        deposit_percent = design.get("deposit_percent", 0) or 0
+        deposit_required = round(total * (deposit_percent / 100), 2) if deposit_percent > 0 else 0
 
         conn.execute(
             """INSERT INTO invoices
                (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
-                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?)""",
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+                client_name, client_email, client_phone, client_address, business_unit,
+                discount_amount, discount_type, deposit_required, deposit_received)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?,
+                       ?, ?, ?, ?, 'woodcraft',
+                       ?, ?, ?, 0)""",
             (
                 inv_number,
                 customer_id,
@@ -1039,6 +1090,13 @@ async def create_invoice_from_design(design_id: str):
                 json.dumps(inv_line_items),
                 f"Generated from WoodCraft design {design.get('design_number', design_id)}",
                 due,
+                customer_name,
+                customer_email,
+                customer_phone,
+                customer_address,
+                discount_amount,
+                discount_type,
+                deposit_required,
             )
         )
 
@@ -1063,28 +1121,20 @@ async def create_job_from_design(design_id: str):
 
     design = _load(DESIGNS_DIR, design_id)
 
-    # Find customer
-    customer_id = None
-    customer_name = design.get("customer_name", "")
-    customer_email = design.get("customer_email", "")
-
     with get_db() as conn:
-        if customer_email:
-            cust = conn.execute("SELECT id FROM customers WHERE email = ?", (customer_email,)).fetchone()
-            if cust:
-                customer_id = dict_row(cust)["id"]
-        if not customer_id and customer_name:
-            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
-            if cust:
-                customer_id = dict_row(cust)["id"]
+        customer_id = _find_or_create_woodcraft_customer(conn, design)
 
         job_id = str(uuid.uuid4())[:16]
 
         conn.execute(
             """INSERT INTO jobs
                (id, title, customer_id, quote_id, status, job_type, priority,
-                estimated_hours, materials_cost, labor_cost, notes, address)
-               VALUES (?, ?, ?, ?, 'pending', 'fabrication', 'normal', ?, ?, ?, ?, ?)""",
+                estimated_hours, materials_cost, labor_cost, notes, address,
+                client_name, client_email, client_phone, client_address,
+                business_unit, description, pipeline_stage, estimated_value, quoted_amount)
+               VALUES (?, ?, ?, ?, 'pending', 'fabrication', 'normal', ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?,
+                       'woodcraft', ?, 'approved', ?, ?)""",
             (
                 job_id,
                 f"{design.get('name', 'CraftForge Job')} — {design.get('design_number', '')}",
@@ -1095,6 +1145,13 @@ async def create_job_from_design(design_id: str):
                 design.get("labor_cost", 0),
                 design.get("notes", ""),
                 design.get("customer_address", ""),
+                design.get("customer_name", ""),
+                design.get("customer_email", ""),
+                design.get("customer_phone", ""),
+                design.get("customer_address", ""),
+                design.get("description", "") or design.get("name", ""),
+                design.get("total", 0),
+                design.get("total", 0),
             )
         )
 
