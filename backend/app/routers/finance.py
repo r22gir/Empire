@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import json
 import os
+import secrets
 import sqlite3
 from pathlib import Path
 from datetime import datetime, date, timedelta
@@ -97,6 +98,12 @@ class InvoiceComposeRequest(BaseModel):
     terms: Optional[str] = None
     notes: Optional[str] = None
     due_date: Optional[str] = None
+
+
+class CollectionReminderRequest(BaseModel):
+    business: Optional[str] = None
+    action: str = "reminder_logged"
+    notes: Optional[str] = None
 
 
 class ExpenseCreate(BaseModel):
@@ -204,6 +211,7 @@ def _aging_bucket(days: int) -> str:
 def _customer_finance_ledger(conn, customer_id: str, business: str | None = None) -> dict:
     """Build the canonical customer finance statement from invoices + payments."""
     _ensure_finance_extensions(conn)
+    _ensure_collection_extensions(conn)
     biz_key = _normalise_business(business)
     customer_row = conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
     if not customer_row:
@@ -251,6 +259,15 @@ def _customer_finance_ledger(conn, customer_id: str, business: str | None = None
         2,
     )
     open_invoice_count = sum(1 for inv in invoices if inv.get("status") not in ("paid", "cancelled"))
+    open_invoices = [
+        inv for inv in invoices
+        if inv.get("status") not in ("paid", "cancelled") and (inv.get("balance_due") or 0) > 0
+    ]
+    overdue_invoices = [
+        inv for inv in open_invoices
+        if inv.get("due_date") and _days_overdue(inv.get("due_date")) > 0 and inv.get("status") != "draft"
+    ]
+    overdue_balance = round(sum((inv.get("balance_due") or 0) for inv in overdue_invoices), 2)
 
     aging = {"0_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0}
     for inv in invoices:
@@ -300,22 +317,56 @@ def _customer_finance_ledger(conn, customer_id: str, business: str | None = None
             })
 
     transactions.sort(key=lambda item: item.get("date") or "", reverse=True)
+
+    collection_clauses = ["customer_id = ?"]
+    collection_params: list = [customer_id]
+    if biz_key != "all":
+        collection_clauses.append("(business_unit = ? OR business_unit = 'all')")
+        collection_params.append(biz_key)
+    collections = dict_rows(conn.execute(
+        f"""SELECT * FROM finance_collection_events
+            WHERE {' AND '.join(collection_clauses)}
+            ORDER BY created_at DESC LIMIT 50""",
+        collection_params,
+    ).fetchall())
+
     return {
         "customer": customer,
         "business": "all" if biz_key == "all" else biz_key,
         "invoices": invoices,
+        "open_invoices": open_invoices,
+        "overdue_invoices": overdue_invoices,
         "payments": payments,
+        "collections": collections,
         "aging": aging,
         "summary": {
             "invoice_count": len(invoices),
             "payment_count": len(payments),
             "open_invoice_count": open_invoice_count,
+            "overdue_invoice_count": len(overdue_invoices),
             "total_invoiced": total_invoiced,
             "total_paid": total_paid,
             "current_balance": current_balance,
+            "overdue_balance": overdue_balance,
             "aging_total": round(sum(aging.values()), 2),
         },
         "transactions": transactions,
+    }
+
+
+def _customer_statement_payload(conn, customer_id: str, business: str | None = None) -> dict:
+    ledger = _customer_finance_ledger(conn, customer_id, business)
+    generated_at = datetime.now().isoformat()
+    return {
+        "statement": {
+            "customer_id": customer_id,
+            "customer_name": ledger["customer"].get("name"),
+            "customer_email": ledger["customer"].get("email"),
+            "business": ledger["business"],
+            "generated_at": generated_at,
+            "as_of": date.today().isoformat(),
+        },
+        **ledger,
     }
 
 
@@ -355,6 +406,22 @@ def _ensure_finance_extensions(conn):
 
 def _ensure_expense_extensions(conn):
     _safe_alter(conn, "expenses", "business_unit", "TEXT", "'workroom'")
+
+
+def _ensure_collection_extensions(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS finance_collection_events (
+            id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)))),
+            customer_id TEXT NOT NULL,
+            business_unit TEXT DEFAULT 'all',
+            action TEXT NOT NULL,
+            notes TEXT,
+            open_balance REAL DEFAULT 0,
+            overdue_balance REAL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (customer_id) REFERENCES customers(id)
+        )
+    """)
 
 
 def _normalise_expense_category(raw: str | None) -> str:
@@ -1422,6 +1489,63 @@ def customer_finance_ledger(
     """Canonical customer statement: invoices, payments, balances, and AR aging contribution."""
     with get_db() as conn:
         return _customer_finance_ledger(conn, customer_id, business)
+
+
+@limiter.limit("30/minute")
+@router.get("/customers/{customer_id}/statement")
+def customer_statement_export(
+    request: Request,
+    customer_id: str,
+    business: Optional[str] = None,
+):
+    """Statement-friendly JSON export for a customer's canonical AR ledger."""
+    with get_db() as conn:
+        return _customer_statement_payload(conn, customer_id, business)
+
+
+@limiter.limit("30/minute")
+@router.post("/customers/{customer_id}/collections/reminder")
+def log_customer_collection_reminder(
+    request: Request,
+    customer_id: str,
+    payload: CollectionReminderRequest = CollectionReminderRequest(),
+):
+    """Persist a collections/reminder action without claiming email delivery."""
+    with get_db() as conn:
+        statement = _customer_statement_payload(conn, customer_id, payload.business)
+        business_unit = statement["business"]
+        action = (payload.action or "reminder_logged").strip() or "reminder_logged"
+        allowed_actions = {"reminder_logged", "statement_sent", "statement_printed", "collection_note"}
+        if action not in allowed_actions:
+            raise HTTPException(status_code=400, detail=f"Unsupported collections action: {action}")
+
+        event_id = secrets.token_hex(8)
+        conn.execute(
+            """INSERT INTO finance_collection_events
+               (id, customer_id, business_unit, action, notes, open_balance, overdue_balance)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                event_id,
+                customer_id,
+                business_unit,
+                action,
+                payload.notes,
+                statement["summary"]["current_balance"],
+                statement["summary"]["overdue_balance"],
+            ),
+        )
+        event = dict_row(conn.execute(
+            "SELECT * FROM finance_collection_events WHERE id = ?",
+            (event_id,),
+        ).fetchone())
+
+        updated = _customer_statement_payload(conn, customer_id, payload.business)
+        return {
+            "status": "logged",
+            "delivered": False,
+            "event": event,
+            "statement": updated,
+        }
 
 
 @limiter.limit("30/minute")

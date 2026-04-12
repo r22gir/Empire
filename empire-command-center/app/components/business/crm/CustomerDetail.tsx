@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   ArrowLeft, User, DollarSign, FileText, CreditCard, MessageSquare,
   AlertCircle, Pencil, Save, X, Phone, Mail, MapPin, Building2,
-  Tag, Crown, ClipboardList, Plus, Loader2
+  Tag, Crown, ClipboardList, Plus, Loader2, Printer, Send
 } from 'lucide-react';
 import { API } from '../../../lib/api';
 import DataTable, { Column } from '../shared/DataTable';
@@ -45,16 +45,21 @@ interface CustomerInfo {
 interface CustomerFinanceLedger {
   business: string;
   invoices: any[];
+  open_invoices?: any[];
+  overdue_invoices?: any[];
   payments: any[];
   transactions: any[];
+  collections?: any[];
   aging: Record<string, number>;
   summary: {
     invoice_count: number;
     payment_count: number;
     open_invoice_count: number;
+    overdue_invoice_count: number;
     total_invoiced: number;
     total_paid: number;
     current_balance: number;
+    overdue_balance: number;
     aging_total: number;
   };
 }
@@ -66,6 +71,12 @@ function fmt(n: number): string {
 function cleanName(raw: string): string {
   if (!raw) return '';
   return raw.replace(/^\\?"?|"?\\?$/g, '').replace(/^"|"$/g, '').trim();
+}
+
+function escapeHtml(raw: unknown): string {
+  return String(raw ?? '').replace(/[&<>"']/g, char => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char
+  ));
 }
 
 function initials(name: string): string {
@@ -93,6 +104,8 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   const [tabData, setTabData] = useState<any[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
   const [financeLedger, setFinanceLedger] = useState<CustomerFinanceLedger | null>(null);
+  const [collectionBusy, setCollectionBusy] = useState(false);
+  const [collectionMessage, setCollectionMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', address: '', company: '', notes: '', type: '' });
   const [saving, setSaving] = useState(false);
@@ -189,6 +202,88 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
       }
     } catch { /* ignore */ }
     setSaving(false);
+  };
+
+  const statementUrl = () => {
+    const business = financeLedger?.business || customer?.business || '';
+    const suffix = business && business !== 'empire' ? `?business=${encodeURIComponent(business)}` : '';
+    return `${API}/finance/customers/${customerId}/statement${suffix}`;
+  };
+
+  const handleExportStatement = () => {
+    window.open(statementUrl(), '_blank');
+  };
+
+  const handlePrintStatement = () => {
+    if (!customer) return;
+    const ledger = financeLedger || customer.finance_ledger;
+    if (!ledger) return;
+    const popup = window.open('', '_blank');
+    if (!popup) return;
+    const rows = (ledger.transactions || []).map((txn: any) => `
+      <tr>
+        <td>${txn.date ? new Date(txn.date).toLocaleDateString() : ''}</td>
+        <td>${txn.type === 'payment' ? 'Payment' : 'Invoice'} ${escapeHtml(txn.invoice_number)}</td>
+        <td>${escapeHtml(txn.reference || txn.status || '')}</td>
+        <td style="text-align:right">${txn.type === 'payment' ? '-' : ''}${fmt(txn.amount || 0)}</td>
+        <td style="text-align:right">${fmt(txn.running_balance || 0)}</td>
+      </tr>
+    `).join('');
+    const safeName = escapeHtml(cleanName(customer.name));
+    const safeEmail = escapeHtml(customer.email || '');
+    const safeBusiness = escapeHtml(ledger.business || 'all');
+    popup.document.write(`
+      <html><head><title>Customer Statement - ${safeName}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:32px;color:#1a1a1a}
+        h1{font-size:22px;margin:0 0 6px} h2{font-size:14px;margin:24px 0 8px}
+        table{width:100%;border-collapse:collapse;margin-top:12px}
+        th,td{border-bottom:1px solid #ddd;padding:8px;font-size:12px;text-align:left}
+        th{background:#f5f3ef}
+        .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}
+        .box{border:1px solid #ddd;padding:12px;border-radius:8px}.label{font-size:10px;color:#777;text-transform:uppercase}.value{font-size:16px;font-weight:700}
+      </style></head><body>
+        <h1>Customer Statement</h1>
+        <div>${safeName}${safeEmail ? ` - ${safeEmail}` : ''}</div>
+        <div>Business: ${safeBusiness} | As of ${new Date().toLocaleDateString()}</div>
+        <div class="summary">
+          <div class="box"><div class="label">Invoiced</div><div class="value">${fmt(ledger.summary.total_invoiced || 0)}</div></div>
+          <div class="box"><div class="label">Paid</div><div class="value">${fmt(ledger.summary.total_paid || 0)}</div></div>
+          <div class="box"><div class="label">Balance</div><div class="value">${fmt(ledger.summary.current_balance || 0)}</div></div>
+          <div class="box"><div class="label">Overdue</div><div class="value">${fmt(ledger.summary.overdue_balance || 0)}</div></div>
+        </div>
+        <h2>Statement Activity</h2>
+        <table><thead><tr><th>Date</th><th>Type</th><th>Status/Reference</th><th>Amount</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table>
+      </body></html>
+    `);
+    popup.document.close();
+    popup.print();
+  };
+
+  const handleLogReminder = async () => {
+    if (!customer) return;
+    setCollectionBusy(true);
+    setCollectionMessage(null);
+    try {
+      const res = await fetch(`${API}/finance/customers/${customerId}/collections/reminder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          business: financeLedger?.business || customer.business,
+          action: 'reminder_logged',
+          notes: 'Reminder logged from customer finance statement.',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Failed to log reminder (${res.status})`);
+      setFinanceLedger(data.statement);
+      setCustomer({ ...customer, finance_ledger: data.statement, invoices: data.statement.invoices || [], payments: data.statement.payments || [] });
+      setCollectionMessage('Reminder logged. No email was sent.');
+    } catch (err: any) {
+      setCollectionMessage(err.message || 'Failed to log reminder');
+    } finally {
+      setCollectionBusy(false);
+    }
   };
 
   const TABS: { key: Tab; label: string; icon: React.ReactNode }[] = [
@@ -467,14 +562,34 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
             {/* Finance Statement */}
             <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ece8e0', padding: 20 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <DollarSign size={15} style={{ color: '#16a34a' }} /> Finance Statement
-              </h3>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <DollarSign size={15} style={{ color: '#16a34a' }} /> Finance Statement
+                </h3>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <button onClick={handleExportStatement} className="flex items-center gap-1 cursor-pointer" style={{ fontSize: 11, fontWeight: 700, color: '#555', background: '#faf9f7', border: '1px solid #ece8e0', borderRadius: 8, padding: '7px 10px' }}>
+                    <FileText size={12} /> Export JSON
+                  </button>
+                  <button onClick={handlePrintStatement} className="flex items-center gap-1 cursor-pointer" style={{ fontSize: 11, fontWeight: 700, color: '#555', background: '#faf9f7', border: '1px solid #ece8e0', borderRadius: 8, padding: '7px 10px' }}>
+                    <Printer size={12} /> Print
+                  </button>
+                  <button onClick={handleLogReminder} disabled={collectionBusy || !ledgerSummary?.current_balance} className="flex items-center gap-1 cursor-pointer disabled:opacity-50" style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: '#b8960c', border: '1px solid #b8960c', borderRadius: 8, padding: '7px 10px' }}>
+                    {collectionBusy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Log Reminder
+                  </button>
+                </div>
+              </div>
+              {collectionMessage && (
+                <div style={{ fontSize: 12, color: collectionMessage.includes('Failed') ? '#b91c1c' : '#166534', background: collectionMessage.includes('Failed') ? '#fef2f2' : '#f0fdf4', border: `1px solid ${collectionMessage.includes('Failed') ? '#fecaca' : '#bbf7d0'}`, borderRadius: 8, padding: '8px 10px', marginBottom: 12 }}>
+                  {collectionMessage}
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <DetailRow label="Business" value={ledger?.business || customer.business || 'all'} />
                 <DetailRow label="Invoiced" value={fmt(ledgerSummary?.total_invoiced ?? 0)} />
                 <DetailRow label="Paid" value={fmt(ledgerSummary?.total_paid ?? 0)} />
                 <DetailRow label="Balance" value={fmt(ledgerSummary?.current_balance ?? 0)} />
+                <DetailRow label="Open Invoices" value={String(ledgerSummary?.open_invoice_count ?? 0)} />
+                <DetailRow label="Overdue" value={fmt(ledgerSummary?.overdue_balance ?? 0)} />
               </div>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 8 }}>Aging Contribution</div>
               <div className="grid grid-cols-4 gap-2 mb-4">
@@ -503,6 +618,20 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
                 </div>
               ) : (
                 <div style={{ fontSize: 13, color: '#aaa', textAlign: 'center', padding: '16px 0' }}>No finance activity yet</div>
+              )}
+              {(ledger?.collections || []).length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 8 }}>Collections History</div>
+                  <div className="space-y-2">
+                    {(ledger?.collections || []).slice(0, 4).map((event: any) => (
+                      <div key={event.id} style={{ padding: '8px 10px', borderRadius: 8, background: '#faf9f7', border: '1px solid #ece8e0', fontSize: 12, color: '#555' }}>
+                        <strong>{event.action}</strong> - {event.created_at ? new Date(event.created_at).toLocaleString() : ''}
+                        <span style={{ float: 'right', fontWeight: 700 }}>{fmt(event.open_balance || 0)}</span>
+                        {event.notes && <div style={{ color: '#999', fontSize: 11, marginTop: 3 }}>{event.notes}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>

@@ -213,6 +213,29 @@ def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_
     assert woodcraft_ledger["payments"] == []
     assert woodcraft_ledger["summary"]["current_balance"] == 700
 
+    statement = finance.customer_statement_export(_request(), workroom_invoice["customer_id"], business="workroom")
+    assert statement["statement"]["customer_email"] == "ledger@example.com"
+    assert statement["statement"]["business"] == "workroom"
+    assert statement["summary"]["current_balance"] == 600
+    assert statement["summary"]["overdue_balance"] == 600
+    assert statement["overdue_invoices"][0]["id"] == workroom_invoice["id"]
+
+    reminder = finance.log_customer_collection_reminder(
+        _request(),
+        workroom_invoice["customer_id"],
+        finance.CollectionReminderRequest(
+            business="workroom",
+            action="reminder_logged",
+            notes="Reminder logged from test",
+        ),
+    )
+    assert reminder["status"] == "logged"
+    assert reminder["delivered"] is False
+    assert reminder["event"]["business_unit"] == "workroom"
+    assert reminder["event"]["open_balance"] == 600
+    assert reminder["event"]["overdue_balance"] == 600
+    assert reminder["statement"]["collections"][0]["notes"] == "Reminder logged from test"
+
 
 def test_smart_invoice_composer_milestones_payments_and_sources(monkeypatch, tmp_path):
     finance, database = _load_finance(monkeypatch, tmp_path)
