@@ -14,6 +14,7 @@ from typing import Optional, List
 import json
 import sqlite3
 import os
+import uuid
 from pathlib import Path
 from datetime import datetime, date, timedelta
 
@@ -212,6 +213,89 @@ def _find_or_create_customer_for_invoice(conn, inv, business_unit: str) -> Optio
         (customer_name, customer_email or None),
     ).fetchone()
     return cust["id"] if cust else None
+
+
+def _quote_item_name(item: dict) -> str:
+    item_type = item.get("type") or item.get("treatment_type") or item.get("name") or "Item"
+    return str(item.get("name") or item_type).replace("_", " ").title()
+
+
+def _quote_room_items(quote: dict) -> list[dict]:
+    """Flatten quote room/item data while preserving room and item IDs."""
+    flattened: list[dict] = []
+    for room in quote.get("rooms") or []:
+        room_id = room.get("id")
+        room_name = room.get("name") or "Room"
+        for item in room.get("items") or room.get("windows") or []:
+            item_id = item.get("id") or item.get("item_key") or item.get("name")
+            measurements = item.get("measurements") or item.get("dimensions") or {
+                "width": item.get("width"),
+                "height": item.get("height"),
+                "depth": item.get("depth"),
+            }
+            flattened.append({
+                "id": item_id,
+                "item_key": item_id,
+                "room_id": room_id,
+                "room": room_name,
+                "item_type": item.get("type") or item.get("treatment_type"),
+                "name": _quote_item_name(item),
+                "measurements": measurements,
+                "notes": item.get("notes") or item.get("description"),
+                "quantity": item.get("quantity", 1),
+                "source": "quote",
+            })
+    return flattened
+
+
+def _quote_visual_documents(quote: dict) -> list[dict]:
+    """Normalize quote photos/scans/drawings into job document rows."""
+    documents: list[dict] = []
+    for photo in quote.get("photos") or []:
+        if isinstance(photo, str):
+            url = photo
+            filename = Path(photo).name
+            item_key = None
+        else:
+            url = photo.get("url") or photo.get("path") or photo.get("server_url")
+            filename = photo.get("original_name") or photo.get("filename") or (Path(url).name if url else "photo")
+            item_key = photo.get("assigned_item_id") or photo.get("item_key")
+        if url:
+            documents.append({
+                "document_type": "photo",
+                "item_key": item_key,
+                "url": url,
+                "filename": filename,
+            })
+
+    for scan in quote.get("scan_3d_files") or []:
+        url = scan.get("url") or scan.get("path")
+        if url:
+            documents.append({
+                "document_type": "scan_3d",
+                "item_key": scan.get("assigned_item_id") or scan.get("item_key"),
+                "url": url,
+                "filename": scan.get("original_name") or scan.get("filename") or Path(url).name,
+            })
+
+    for drawing in quote.get("drawings") or []:
+        if isinstance(drawing, str):
+            url = drawing
+            filename = Path(drawing).name
+            item_key = None
+        else:
+            url = drawing.get("url") or drawing.get("path") or drawing.get("pdf_url")
+            filename = drawing.get("filename") or drawing.get("name") or (Path(url).name if url else "drawing")
+            item_key = drawing.get("assigned_item_id") or drawing.get("item_key")
+        if url:
+            documents.append({
+                "document_type": "drawing",
+                "item_key": item_key,
+                "url": url,
+                "filename": filename,
+            })
+
+    return documents
 
 
 # ── Schema init ────────────────────────────────────────────────────────
@@ -1304,11 +1388,14 @@ def create_job_from_quote(quote_id: str):
     with open(quote_file) as f:
         quote = json.load(f)
 
+    quote_items = _quote_room_items(quote)
+    quote_documents = _quote_visual_documents(quote)
     rooms_desc = []
     for room in (quote.get("rooms") or []):
         room_name = room.get("name", "Room")
-        windows = [w.get("name", "Window") for w in room.get("windows", [])]
-        rooms_desc.append(f"{room_name}: {', '.join(windows)}")
+        room_items = room.get("items") or room.get("windows") or []
+        item_names = [_quote_item_name(item) for item in room_items]
+        rooms_desc.append(f"{room_name}: {', '.join(item_names)}" if item_names else room_name)
     description = "; ".join(rooms_desc) if rooms_desc else "Job from quote"
 
     customer_name = quote.get("customer_name", "")
@@ -1320,6 +1407,7 @@ def create_job_from_quote(quote_id: str):
     with get_db() as conn:
         customer_id = _find_or_create_customer_for_quote(conn, quote, business_unit)
 
+        job_id = str(uuid.uuid4())[:8]
         job_number = _next_job_number(conn)
         title = f"Job for {customer_name or 'Unknown'} — {quote.get('quote_number', quote_id)}"
         total = quote.get("grand_total", quote.get("total", 0))
@@ -1328,25 +1416,59 @@ def create_job_from_quote(quote_id: str):
             """INSERT INTO jobs
                (id, job_number, title, customer_id, quote_id, status, job_type, notes, metadata,
                 client_name, client_email, client_phone, client_address, business_unit,
+                photos, items, drawings,
                 pipeline_stage, quoted_amount, description, quote_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'pending', 'fabrication', ?, ?,
+               VALUES (?, ?, ?, ?, ?, 'pending', 'fabrication', ?, ?,
                        ?, ?, ?, ?, ?,
+                       ?, ?, ?,
                        'quoted', ?, ?, ?)""",
             (
-                job_number, title, customer_id, quote_id, description,
+                job_id, job_number, title, customer_id, quote_id, description,
                 json.dumps({
                     "source": "quote",
                     "quote_number": quote.get("quote_number"),
                     "intake_project_id": quote.get("intake_project_id"),
                     "intake_code": quote.get("intake_code"),
+                    "visual_document_count": len(quote_documents),
+                    "area_item_count": len(quote_items),
                 }),
                 customer_name, customer_email, customer_phone, customer_address,
-                business_unit, total, description, datetime.now().isoformat(),
+                business_unit,
+                json.dumps(quote.get("photos") or []),
+                json.dumps(quote_items),
+                json.dumps(quote.get("drawings") or []),
+                total, description, datetime.now().isoformat(),
             ),
         )
 
-        row = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         result = _enrich_job(dict_row(row))
+        for item in quote_items:
+            conn.execute(
+                """INSERT INTO job_items (job_id, item_key, item_type, room, name, measurements, status)
+                   VALUES (?, ?, ?, ?, ?, ?, 'quoted')""",
+                (
+                    result["id"],
+                    item.get("item_key"),
+                    item.get("item_type"),
+                    item.get("room"),
+                    item.get("name"),
+                    json.dumps(item.get("measurements") or {}),
+                ),
+            )
+        for doc in quote_documents:
+            conn.execute(
+                """INSERT INTO job_documents
+                   (job_id, document_type, item_key, url, filename, visible_to_client)
+                   VALUES (?, ?, ?, ?, ?, 1)""",
+                (
+                    result["id"],
+                    doc.get("document_type"),
+                    doc.get("item_key"),
+                    doc.get("url"),
+                    doc.get("filename"),
+                ),
+            )
         _add_event(conn, result["id"], "created", f"Job {job_number} created from quote {quote_id}")
         return {"job": result, "quote_id": quote_id}
 

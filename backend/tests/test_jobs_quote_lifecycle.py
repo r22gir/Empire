@@ -41,13 +41,45 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
         "intake_code": "INT-2026-0200",
         "rooms": [
             {
+                "id": "room-primary",
                 "name": "Primary Bedroom",
-                "windows": [
+                "items": [
                     {
-                        "name": "East Window",
-                        "treatment_type": "drapery",
+                        "id": "item-east-window",
+                        "type": "drapery",
+                        "dimensions": {"width": "84", "height": "96", "depth": "6"},
+                        "quantity": 1,
+                        "notes": "East wall silk panels",
+                    },
+                    {
+                        "id": "item-banquette",
+                        "type": "bench_l_shaped",
+                        "dimensions": {"width": "120", "height": "36", "depth": "24"},
+                        "quantity": 1,
+                        "notes": "Shape: l bench | A: 120\" B: 60\" | D: 24\"",
                     }
                 ],
+            }
+        ],
+        "photos": [
+            {
+                "url": "/uploads/quote/east-window.jpg",
+                "original_name": "east-window.jpg",
+                "assigned_room_id": "room-primary",
+                "assigned_item_id": "item-east-window",
+            },
+            {
+                "url": "/uploads/quote/banquette-ref.jpg",
+                "original_name": "banquette-ref.jpg",
+                "assigned_room_id": "room-primary",
+                "assigned_item_id": "item-banquette",
+            },
+        ],
+        "drawings": [
+            {
+                "url": "/drawings/files/banquette.pdf",
+                "filename": "banquette.pdf",
+                "assigned_item_id": "item-banquette",
             }
         ],
     }
@@ -71,6 +103,12 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
     assert job["metadata"]["quote_number"] == "EST-2026-0200"
     assert job["metadata"]["intake_project_id"] == "intake-job-1"
     assert job["metadata"]["intake_code"] == "INT-2026-0200"
+    assert job["metadata"]["visual_document_count"] == 3
+    assert job["metadata"]["area_item_count"] == 2
+    assert job["photos"][0]["assigned_item_id"] == "item-east-window"
+    assert job["items"][0]["room"] == "Primary Bedroom"
+    assert job["items"][0]["item_key"] == "item-east-window"
+    assert job["items"][1]["item_key"] == "item-banquette"
 
     with database.get_db() as conn:
         customer = conn.execute(
@@ -81,6 +119,26 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
         assert customer["phone"] == "555-0222"
         assert customer["address"] == "22 Job Lane"
         assert customer["business"] == "workroom"
+
+        job_items = conn.execute(
+            "SELECT * FROM job_items WHERE job_id = ? ORDER BY item_key", (job["id"],)
+        ).fetchall()
+        job_documents = conn.execute(
+            "SELECT * FROM job_documents WHERE job_id = ? ORDER BY filename", (job["id"],)
+        ).fetchall()
+
+    assert len(job_items) == 2
+    job_items_by_key = {item["item_key"]: item for item in job_items}
+    assert job_items_by_key["item-east-window"]["room"] == "Primary Bedroom"
+    assert json.loads(job_items_by_key["item-east-window"]["measurements"]) == {"width": "84", "height": "96", "depth": "6"}
+    assert job_items_by_key["item-banquette"]["room"] == "Primary Bedroom"
+    assert len(job_documents) == 3
+    assert {d["item_key"] for d in job_documents} == {"item-east-window", "item-banquette"}
+    assert {d["document_type"] for d in job_documents} == {"photo", "drawing"}
+
+    detail = jobs_unified.get_job(job["id"])["job"]
+    assert {item["item_key"] for item in detail["items"]} == {"item-east-window", "item-banquette"}
+    assert {doc["filename"] for doc in detail["documents"]} == {"east-window.jpg", "banquette-ref.jpg", "banquette.pdf"}
 
 
 def test_jobs_invoice_compatibility_uses_crm_and_canonical_payments(monkeypatch, tmp_path):
