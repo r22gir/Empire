@@ -44,6 +44,11 @@ interface CfLot { id: number; lot_number: string; block: string; area_m2: number
 
 interface ConstructionForgePageProps { initialSection?: string; }
 
+function getValidProjectId(project: CfProject | null): number | null {
+  const id = project?.id ?? null;
+  return typeof id === 'number' && Number.isFinite(id) && id > 0 ? id : null;
+}
+
 export default function ConstructionForgePage({ initialSection }: ConstructionForgePageProps) {
   const [section, setSection] = useState<Section>((initialSection as Section) || 'dashboard');
   const { t, locale } = useTranslation('construction');
@@ -141,13 +146,16 @@ function DashboardSection() {
     fetch(`${CF_API}/projects`).then(r => r.json()).then(data => {
       const list = data.projects || data || [];
       setProjects(list);
-      if (list.length > 0) setProject(list[0]);
+      const firstValid = list.find((p: CfProject) => Number.isFinite(p.id) && p.id > 0) || null;
+      if (firstValid) setProject(firstValid);
     }).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (project) {
-      fetch(`${CF_API}/projects/${project.id}/dashboard`).then(r => r.json()).then(setDashboard).catch(() => {});
+      const projectId = getValidProjectId(project);
+      if (!projectId) return;
+      fetch(`${CF_API}/projects/${projectId}/dashboard`).then(r => r.json()).then(setDashboard).catch(() => {});
     }
   }, [project]);
 
@@ -162,7 +170,10 @@ function DashboardSection() {
         title={locale === 'es' ? 'Tablero Ejecutivo' : 'Executive Dashboard'}
         subtitle={project?.name || ''}
         action={projects.length > 1 ? (
-          <select value={project?.id || ''} onChange={e => setProject(projects.find(p => p.id === Number(e.target.value)) || null)}
+          <select value={project?.id || ''} onChange={e => {
+            const nextId = Number(e.target.value);
+            setProject(projects.find(p => p.id === nextId) || null);
+          }}
             style={{ fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid #e5e2dc' }}>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>

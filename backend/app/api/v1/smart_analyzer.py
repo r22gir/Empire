@@ -15,6 +15,8 @@ import io
 import re
 from typing import Optional, Dict, Any
 
+from app.services.ollama_vision_router import generate_vision_response
+
 router = APIRouter(prefix="/smart-analyze", tags=["AI Analysis"])
 
 # Standard window sizes database (inches)
@@ -50,13 +52,13 @@ ROOM_DEFAULTS = {
 
 
 async def method_1_llava(image_b64: str, reference: Optional[str] = None) -> Dict[str, Any]:
-    """Method 1: Ollama LLaVA Vision Model"""
+    """Method 1: Ollama vision model, routed moondream first then LLaVA."""
     try:
         ref_prompt = ""
         if reference and reference in REFERENCE_SIZES:
             ref = REFERENCE_SIZES[reference]
             ref_prompt = f"\n\nIMPORTANT: A {reference.replace('_', ' ')} ({ref['width']}\" x {ref['height']}\") is visible. Use it for scale."
-        
+
         prompt = f"""Analyze this window photo for a drapery workroom.{ref_prompt}
 
 Estimate these measurements in INCHES:
@@ -73,15 +75,11 @@ HEIGHT: [number]
 WINDOW_TYPE: [type]
 ROOM: [room]"""
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                "http://localhost:11434/api/generate",
-                json={"model": "llava", "prompt": prompt, "images": [image_b64], "stream": False}
-            )
-            
-            if resp.status_code == 200:
-                text = resp.json().get("response", "")
-                return parse_llava_response(text)
+        text, model = await generate_vision_response(prompt=prompt, image_b64=image_b64, preferred_model="moondream")
+        if text:
+            parsed = parse_llava_response(text)
+            parsed["model"] = model or parsed.get("model", "moondream")
+            return parsed
     except Exception as e:
         print(f"LLaVA error: {e}")
     

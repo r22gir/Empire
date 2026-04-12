@@ -30,9 +30,10 @@ PROGRESS_FILE = "/data/images/ollama_progress.json"
 CLASSIFIED_DIR = "/data/images/classified"
 OLLAMA_URL = "http://localhost:11434"
 
-# Model selection: llava (7B, more accurate) or moondream (1B, faster)
-# Set OLLAMA_MODEL env var to override, e.g.: OLLAMA_MODEL=moondream
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llava")
+# Model selection: moondream (1B, faster) with llava fallback.
+# Set OLLAMA_MODEL env var to override, e.g.: OLLAMA_MODEL=llava
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "moondream")
+FALLBACK_MODEL = "llava" if OLLAMA_MODEL != "llava" else "moondream"
 
 WORKERS = int(os.environ.get("CLASSIFY_WORKERS", "4"))  # Parallel workers (Xeon has 20 cores)
 SAVE_EVERY = 25             # Save progress every N images
@@ -89,51 +90,55 @@ def classify_one(filepath):
     """Classify a single image through Ollama. Synchronous (CPU is the bottleneck)."""
     img_b64 = prepare_image(filepath)
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": CLASSIFY_PROMPT,
-        "images": [img_b64],
-        "stream": False
+    for model in [OLLAMA_MODEL, FALLBACK_MODEL] if FALLBACK_MODEL != OLLAMA_MODEL else [OLLAMA_MODEL]:
+        payload = {
+            "model": model,
+            "prompt": CLASSIFY_PROMPT,
+            "images": [img_b64],
+            "stream": False
+        }
+
+        try:
+            req_data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                f"{OLLAMA_URL}/api/generate",
+                data=req_data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                raw = json.loads(resp.read().decode("utf-8")).get("response", "")
+
+            # Parse JSON
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            result = json.loads(cleaned)
+
+            return {
+                "business": result.get("business", "general"),
+                "category": result.get("category", "misc"),
+                "description": result.get("description", ""),
+                "quality": result.get("quality", "medium"),
+                "social_ready": result.get("social_ready", False),
+                "confidence": result.get("confidence", 0.5),
+                "classified_by": f"ollama-{model}",
+                "error": None
+            }
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    return {
+        "business": "general",
+        "category": "misc",
+        "description": f"Ollama error: {last_error[:100] if 'last_error' in locals() else 'unknown'}",
+        "quality": "low",
+        "social_ready": False,
+        "confidence": 0.0,
+        "classified_by": f"ollama-{OLLAMA_MODEL}",
+        "error": last_error[:200] if 'last_error' in locals() else "unknown",
     }
-
-    try:
-        req_data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            f"{OLLAMA_URL}/api/generate",
-            data=req_data,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            raw = json.loads(resp.read().decode("utf-8")).get("response", "")
-
-        # Parse JSON
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        result = json.loads(cleaned)
-
-        return {
-            "business": result.get("business", "general"),
-            "category": result.get("category", "misc"),
-            "description": result.get("description", ""),
-            "quality": result.get("quality", "medium"),
-            "social_ready": result.get("social_ready", False),
-            "confidence": result.get("confidence", 0.5),
-            "classified_by": "ollama-llava",
-            "error": None
-        }
-    except Exception as e:
-        return {
-            "business": "general",
-            "category": "misc",
-            "description": f"Ollama error: {str(e)[:100]}",
-            "quality": "low",
-            "social_ready": False,
-            "confidence": 0.0,
-            "classified_by": "ollama-llava",
-            "error": str(e)[:200]
-        }
 
 
 def load_progress():

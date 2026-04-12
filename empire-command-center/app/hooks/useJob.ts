@@ -55,6 +55,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
 
   const loadJob = useCallback(async (id: number) => {
+    if (!Number.isFinite(id) || id <= 0) return;
     setIsLoading(true);
     try {
       const res = await fetch(`${API}/jobs/${id}`);
@@ -85,7 +86,12 @@ export function JobProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const savedId = localStorage.getItem(STORAGE_KEY);
     if (savedId) {
-      loadJob(Number(savedId));
+      const parsed = Number(savedId);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        loadJob(parsed);
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     }
   }, [loadJob]);
 

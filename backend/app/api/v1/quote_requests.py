@@ -73,6 +73,8 @@ from typing import Dict
 import base64
 import re
 
+from app.services.ollama_vision_router import generate_vision_response
+
 @router.post("/analyze-photo")
 async def analyze_photo(data: dict):
     """
@@ -121,35 +123,23 @@ Provide measurements in inches. If you see a standard door (80" tall) or outlet 
 Return as JSON format."""
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                "http://localhost:11434/api/generate",
-                json={
-                    "model": "llava",  # Vision model
-                    "prompt": prompt,
-                    "images": [image_data],
-                    "stream": False
-                }
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                ai_response = result.get("response", "")
-                
-                # Try to parse JSON from response
-                measurements = parse_ai_measurements(ai_response)
-                
-                return {
-                    "status": "success",
-                    "analysis": ai_response,
-                    "measurements": measurements,
-                    "confidence": "medium",
-                    "note": "AI estimates - verify with tape measure"
-                }
-            else:
-                # Fallback to text model analysis description
-                return await fallback_analysis(data)
-                
+        ai_response, model = await generate_vision_response(
+            prompt=prompt,
+            image_b64=image_data,
+            preferred_model="moondream",
+            timeout=60.0,
+        )
+        if ai_response:
+            measurements = parse_ai_measurements(ai_response)
+            return {
+                "status": "success",
+                "analysis": ai_response,
+                "measurements": measurements,
+                "confidence": "medium",
+                "model": model or "moondream",
+                "note": "AI estimates - verify with tape measure"
+            }
+        return await fallback_analysis(data)
     except Exception as e:
         return await fallback_analysis(data, str(e))
 
@@ -168,7 +158,7 @@ async def fallback_analysis(data: dict, error: str = None):
         },
         "confidence": "low",
         "error": error,
-        "note": "Please enter measurements manually or ensure Ollama llava model is installed"
+        "note": "Please enter measurements manually or ensure Ollama moondream/llava models are installed"
     }
 
 
