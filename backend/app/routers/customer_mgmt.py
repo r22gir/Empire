@@ -456,7 +456,7 @@ def _find_quotes_for_customer(name: str, email: Optional[str] = None) -> list:
                 "total": quote_total,
                 "status": quote.get("status"),
                 "created_at": quote.get("created_at"),
-                "rooms": len(quote.get("rooms", [])),
+                "rooms": len(quote.get("rooms") or []),
             })
 
     return quotes

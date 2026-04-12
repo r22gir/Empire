@@ -33,11 +33,30 @@ interface CustomerInfo {
   last_activity: string;
   notes: string;
   source: string;
+  business: string;
   created_at: string;
   updated_at: string;
   quotes: any[];
   invoices: any[];
   payments: any[];
+  finance_ledger?: CustomerFinanceLedger;
+}
+
+interface CustomerFinanceLedger {
+  business: string;
+  invoices: any[];
+  payments: any[];
+  transactions: any[];
+  aging: Record<string, number>;
+  summary: {
+    invoice_count: number;
+    payment_count: number;
+    open_invoice_count: number;
+    total_invoiced: number;
+    total_paid: number;
+    current_balance: number;
+    aging_total: number;
+  };
 }
 
 function fmt(n: number): string {
@@ -73,6 +92,7 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
   const [tab, setTab] = useState<Tab>('overview');
   const [tabData, setTabData] = useState<any[]>([]);
   const [tabLoading, setTabLoading] = useState(false);
+  const [financeLedger, setFinanceLedger] = useState<CustomerFinanceLedger | null>(null);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', email: '', phone: '', address: '', company: '', notes: '', type: '' });
   const [saving, setSaving] = useState(false);
@@ -89,6 +109,18 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
       if (typeof c.tags === 'string') {
         try { c.tags = JSON.parse(c.tags); } catch { c.tags = []; }
       }
+      const businessParam = c.business && c.business !== 'empire' ? `?business=${encodeURIComponent(c.business)}` : '';
+      const ledgerRes = await fetch(`${API}/finance/customers/${customerId}/ledger${businessParam}`);
+      if (ledgerRes.ok) {
+        const ledger = await ledgerRes.json();
+        setFinanceLedger(ledger);
+        c.finance_ledger = ledger;
+        c.invoices = ledger.invoices || c.invoices || [];
+        c.payments = ledger.payments || c.payments || [];
+        c.total_revenue = ledger.summary?.total_paid ?? c.total_revenue;
+      } else {
+        setFinanceLedger(null);
+      }
       setCustomer(c);
     } catch (err: any) {
       setError(err.message);
@@ -104,8 +136,15 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
     }
     setTabLoading(true);
     try {
-      const endpoint = t === 'payments' ? 'invoices' : t;
-      const res = await fetch(`${API}/crm/customers/${customerId}/${endpoint}`);
+      if (t === 'payments' || t === 'invoices') {
+        const res = await fetch(`${API}/finance/customers/${customerId}/ledger`);
+        if (!res.ok) throw new Error(`Failed to load ${t}`);
+        const data = await res.json();
+        setFinanceLedger(data);
+        setTabData(t === 'payments' ? data.payments || [] : data.invoices || []);
+        return;
+      }
+      const res = await fetch(`${API}/crm/customers/${customerId}/${t}`);
       if (!res.ok) throw new Error(`Failed to load ${t}`);
       const data = await res.json();
       setTabData(Array.isArray(data) ? data : data.quotes || data.invoices || data.payments || data.items || []);
@@ -173,8 +212,9 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
   const invoiceColumns: Column[] = [
     { key: 'invoice_number', label: 'Invoice #', sortable: true },
-    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="font-bold">{fmt(r.amount || 0)}</span> },
-    { key: 'balance', label: 'Balance', sortable: true, render: (r) => <span className="font-bold text-[#b8960c]">{fmt(r.balance ?? r.amount ?? 0)}</span> },
+    { key: 'invoice_stage', label: 'Stage', render: (r) => <span className="text-xs text-[#999]">{r.invoice_stage || 'manual'}</span> },
+    { key: 'amount', label: 'Amount', sortable: true, render: (r) => <span className="font-bold">{fmt(r.total ?? r.amount ?? 0)}</span> },
+    { key: 'balance', label: 'Balance', sortable: true, render: (r) => <span className="font-bold text-[#b8960c]">{fmt(r.balance_due ?? r.balance ?? r.total ?? 0)}</span> },
     { key: 'due_date', label: 'Due Date', sortable: true, render: (r) => (
       <span className="text-xs text-[#999]" suppressHydrationWarning>{r.due_date ? new Date(r.due_date).toLocaleDateString() : '—'}</span>
     )},
@@ -188,6 +228,7 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
     { key: 'amount', label: 'Amount', sortable: true, render: (r) => (
       <span className="text-[#22c55e] font-bold">{fmt(r.amount || 0)}</span>
     )},
+    { key: 'invoice_number', label: 'Invoice #' },
     { key: 'method', label: 'Method' },
     { key: 'reference', label: 'Reference' },
   ];
@@ -242,8 +283,10 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
   // Get data from the customer detail endpoint (which includes quotes, invoices, payments inline)
   const custQuotes = customer.quotes || [];
-  const custInvoices = customer.invoices || [];
-  const custPayments = customer.payments || [];
+  const ledger = financeLedger || customer.finance_ledger || null;
+  const custInvoices = ledger?.invoices || customer.invoices || [];
+  const custPayments = ledger?.payments || customer.payments || [];
+  const ledgerSummary = ledger?.summary;
   const totalQuoteValue = custQuotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0);
 
   return (
@@ -350,10 +393,10 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
-          <KPICard icon={<DollarSign size={20} />} label="Total Revenue" value={fmt(customer.total_revenue || 0)} color="#16a34a" />
+          <KPICard icon={<DollarSign size={20} />} label="Total Paid" value={fmt(ledgerSummary?.total_paid ?? customer.total_revenue ?? 0)} color="#16a34a" />
           <KPICard icon={<ClipboardList size={20} />} label="Quotes" value={String(custQuotes.length || customer.lifetime_quotes || 0)} color="#b8960c" />
-          <KPICard icon={<FileText size={20} />} label="Invoices" value={String(custInvoices.length || 0)} color="#2563eb" />
-          <KPICard icon={<DollarSign size={20} />} label="Quote Value" value={fmt(totalQuoteValue)} color="#7c3aed" />
+          <KPICard icon={<FileText size={20} />} label="Open Balance" value={fmt(ledgerSummary?.current_balance ?? 0)} color="#ea580c" />
+          <KPICard icon={<DollarSign size={20} />} label="Aging" value={fmt(ledgerSummary?.aging_total ?? 0)} color="#7c3aed" />
         </div>
 
         {/* Tabs */}
@@ -419,6 +462,47 @@ export default function CustomerDetail({ customerId, onBack }: CustomerDetailPro
                   <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 6 }}>Notes</div>
                   <div style={{ fontSize: 13, color: '#555', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{customer.notes}</div>
                 </div>
+              )}
+            </div>
+
+            {/* Finance Statement */}
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #ece8e0', padding: 20 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <DollarSign size={15} style={{ color: '#16a34a' }} /> Finance Statement
+              </h3>
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <DetailRow label="Business" value={ledger?.business || customer.business || 'all'} />
+                <DetailRow label="Invoiced" value={fmt(ledgerSummary?.total_invoiced ?? 0)} />
+                <DetailRow label="Paid" value={fmt(ledgerSummary?.total_paid ?? 0)} />
+                <DetailRow label="Balance" value={fmt(ledgerSummary?.current_balance ?? 0)} />
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 8 }}>Aging Contribution</div>
+              <div className="grid grid-cols-4 gap-2 mb-4">
+                {['0_30', '31_60', '61_90', '90_plus'].map(bucket => (
+                  <div key={bucket} style={{ padding: 10, borderRadius: 10, background: '#faf9f7', border: '1px solid #ece8e0' }}>
+                    <div style={{ fontSize: 10, color: '#999', fontWeight: 700 }}>{bucket.replace('_', '-')}</div>
+                    <div style={{ fontSize: 13, color: '#1a1a1a', fontWeight: 800 }}>{fmt(ledger?.aging?.[bucket] ?? 0)}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#999', textTransform: 'uppercase', marginBottom: 8 }}>Recent Activity</div>
+              {(ledger?.transactions || []).length > 0 ? (
+                <div className="space-y-2">
+                  {(ledger?.transactions || []).slice(0, 6).map((txn: any) => (
+                    <div key={txn.id} style={{ padding: '9px 10px', borderRadius: 10, border: '1px solid #ece8e0', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 12, color: '#1a1a1a', fontWeight: 700 }}>{txn.type === 'payment' ? 'Payment' : 'Invoice'} {txn.invoice_number || ''}</div>
+                        <div style={{ fontSize: 10, color: '#999' }}>{txn.date ? new Date(txn.date).toLocaleDateString() : 'No date'} {txn.reference ? `- ${txn.reference}` : ''}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: 13, color: txn.type === 'payment' ? '#16a34a' : '#1a1a1a', fontWeight: 800 }}>{txn.type === 'payment' ? '-' : ''}{fmt(txn.amount || 0)}</div>
+                        <div style={{ fontSize: 10, color: '#999' }}>Balance {fmt(txn.running_balance || 0)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: '#aaa', textAlign: 'center', padding: '16px 0' }}>No finance activity yet</div>
               )}
             </div>
           </div>

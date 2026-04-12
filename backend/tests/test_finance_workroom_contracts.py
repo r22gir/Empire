@@ -151,6 +151,69 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
         assert customer["business"] == "workroom"
 
 
+def test_customer_finance_ledger_statement_and_business_filter(monkeypatch, tmp_path):
+    finance, database = _load_finance(monkeypatch, tmp_path)
+
+    workroom_invoice = finance.create_invoice(
+        _request(),
+        finance.InvoiceCreate(
+            customer_name="Ledger Client",
+            customer_email="ledger@example.com",
+            business_unit="workroom",
+            subtotal=1000,
+            tax_rate=0,
+            line_items=[{"description": "Workroom statement invoice", "quantity": 1, "rate": 1000, "amount": 1000}],
+            due_date="2026-04-01",
+        ),
+    )["invoice"]
+    finance.mark_invoice_sent(_request(), workroom_invoice["id"])
+
+    finance.record_payment(
+        _request(),
+        workroom_invoice["id"],
+        finance.PaymentCreate(amount=400, method="check", reference="LEDGER-400", payment_date="2026-04-12"),
+    )
+
+    woodcraft_invoice = finance.create_invoice(
+        _request(),
+        finance.InvoiceCreate(
+            customer_id=workroom_invoice["customer_id"],
+            customer_name="Ledger Client",
+            customer_email="ledger@example.com",
+            business_unit="woodcraft",
+            subtotal=700,
+            tax_rate=0,
+            line_items=[{"description": "Woodcraft statement invoice", "quantity": 1, "rate": 700, "amount": 700}],
+            due_date="2026-04-01",
+        ),
+    )["invoice"]
+    finance.mark_invoice_sent(_request(), woodcraft_invoice["id"])
+
+    all_ledger = finance.customer_finance_ledger(_request(), workroom_invoice["customer_id"])
+    workroom_ledger = finance.customer_finance_ledger(_request(), workroom_invoice["customer_id"], business="workroom")
+    woodcraft_ledger = finance.customer_finance_ledger(_request(), workroom_invoice["customer_id"], business="woodcraft")
+
+    assert all_ledger["customer"]["email"] == "ledger@example.com"
+    assert all_ledger["summary"]["invoice_count"] == 2
+    assert all_ledger["summary"]["payment_count"] == 1
+    assert all_ledger["summary"]["total_invoiced"] == 1700
+    assert all_ledger["summary"]["total_paid"] == 400
+    assert all_ledger["summary"]["current_balance"] == 1300
+    assert all_ledger["summary"]["aging_total"] == 1300
+    assert {txn["type"] for txn in all_ledger["transactions"]} == {"invoice", "payment"}
+    assert any(txn["reference"] == "LEDGER-400" for txn in all_ledger["transactions"] if txn["type"] == "payment")
+
+    assert [inv["id"] for inv in workroom_ledger["invoices"]] == [workroom_invoice["id"]]
+    assert workroom_ledger["summary"]["total_invoiced"] == 1000
+    assert workroom_ledger["summary"]["total_paid"] == 400
+    assert workroom_ledger["summary"]["current_balance"] == 600
+    assert workroom_ledger["summary"]["aging_total"] == 600
+
+    assert [inv["id"] for inv in woodcraft_ledger["invoices"]] == [woodcraft_invoice["id"]]
+    assert woodcraft_ledger["payments"] == []
+    assert woodcraft_ledger["summary"]["current_balance"] == 700
+
+
 def test_smart_invoice_composer_milestones_payments_and_sources(monkeypatch, tmp_path):
     finance, database = _load_finance(monkeypatch, tmp_path)
 

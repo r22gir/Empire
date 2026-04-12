@@ -181,6 +181,144 @@ def _enrich_invoice(inv: dict) -> dict:
     return inv
 
 
+def _days_overdue(due_date: str | None) -> int:
+    if not due_date:
+        return 0
+    try:
+        due = datetime.fromisoformat(str(due_date)[:10])
+    except ValueError:
+        return 0
+    return (datetime.now() - due).days
+
+
+def _aging_bucket(days: int) -> str:
+    if days <= 30:
+        return "0_30"
+    if days <= 60:
+        return "31_60"
+    if days <= 90:
+        return "61_90"
+    return "90_plus"
+
+
+def _customer_finance_ledger(conn, customer_id: str, business: str | None = None) -> dict:
+    """Build the canonical customer finance statement from invoices + payments."""
+    _ensure_finance_extensions(conn)
+    biz_key = _normalise_business(business)
+    customer_row = conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    if not customer_row:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    customer = dict_row(customer_row)
+    invoice_clauses = ["i.customer_id = ?"]
+    invoice_params: list = [customer_id]
+    if biz_key != "all":
+        invoice_clauses.append("COALESCE(i.business_unit, c.business, 'empire') = ?")
+        invoice_params.append(biz_key)
+    invoice_where = " AND ".join(invoice_clauses)
+
+    invoices = [
+        _enrich_invoice(dict_row(row))
+        for row in conn.execute(
+            f"""SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+                FROM invoices i
+                LEFT JOIN customers c ON c.id = i.customer_id
+                WHERE {invoice_where}
+                ORDER BY COALESCE(i.invoice_date, i.created_at) DESC, i.invoice_number DESC""",
+            invoice_params,
+        ).fetchall()
+    ]
+
+    invoice_ids = [inv["id"] for inv in invoices]
+    payments: list[dict] = []
+    if invoice_ids:
+        placeholders = ",".join("?" for _ in invoice_ids)
+        payments = dict_rows(conn.execute(
+            f"""SELECT p.*, i.invoice_number, i.invoice_stage, i.source_type, i.source_id,
+                       COALESCE(i.business_unit, c.business, 'empire') as business_unit
+                FROM payments p
+                LEFT JOIN invoices i ON i.id = p.invoice_id
+                LEFT JOIN customers c ON c.id = p.customer_id
+                WHERE p.invoice_id IN ({placeholders})
+                ORDER BY p.payment_date DESC, p.created_at DESC""",
+            invoice_ids,
+        ).fetchall())
+
+    total_invoiced = round(sum((inv.get("total") or 0) for inv in invoices), 2)
+    total_paid = round(sum((payment.get("amount") or 0) for payment in payments), 2)
+    current_balance = round(
+        sum((inv.get("balance_due") or 0) for inv in invoices if inv.get("status") not in ("paid", "cancelled")),
+        2,
+    )
+    open_invoice_count = sum(1 for inv in invoices if inv.get("status") not in ("paid", "cancelled"))
+
+    aging = {"0_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0}
+    for inv in invoices:
+        if inv.get("status") in ("paid", "cancelled", "draft") or not inv.get("due_date"):
+            continue
+        balance = inv.get("balance_due") or 0
+        if balance <= 0:
+            continue
+        bucket = _aging_bucket(_days_overdue(inv.get("due_date")))
+        aging[bucket] = round(aging[bucket] + balance, 2)
+
+    transactions = []
+    running_balance = 0.0
+    for inv in sorted(invoices, key=lambda item: item.get("created_at") or ""):
+        if inv.get("status") != "cancelled":
+            running_balance = round(running_balance + (inv.get("total") or 0), 2)
+            transactions.append({
+                "id": f"invoice:{inv['id']}",
+                "type": "invoice",
+                "date": inv.get("invoice_date") or inv.get("created_at"),
+                "invoice_id": inv["id"],
+                "invoice_number": inv.get("invoice_number"),
+                "invoice_stage": inv.get("invoice_stage"),
+                "status": inv.get("status"),
+                "business_unit": inv.get("business_unit") or customer.get("business"),
+                "amount": inv.get("total") or 0,
+                "running_balance": running_balance,
+            })
+        for payment in sorted(
+            [p for p in payments if p.get("invoice_id") == inv["id"]],
+            key=lambda item: item.get("payment_date") or item.get("created_at") or "",
+        ):
+            running_balance = round(running_balance - (payment.get("amount") or 0), 2)
+            transactions.append({
+                "id": f"payment:{payment['id']}",
+                "type": "payment",
+                "date": payment.get("payment_date") or payment.get("created_at"),
+                "payment_id": payment["id"],
+                "invoice_id": payment.get("invoice_id"),
+                "invoice_number": payment.get("invoice_number"),
+                "invoice_stage": payment.get("invoice_stage"),
+                "method": payment.get("method"),
+                "reference": payment.get("reference"),
+                "business_unit": payment.get("business_unit") or customer.get("business"),
+                "amount": payment.get("amount") or 0,
+                "running_balance": running_balance,
+            })
+
+    transactions.sort(key=lambda item: item.get("date") or "", reverse=True)
+    return {
+        "customer": customer,
+        "business": "all" if biz_key == "all" else biz_key,
+        "invoices": invoices,
+        "payments": payments,
+        "aging": aging,
+        "summary": {
+            "invoice_count": len(invoices),
+            "payment_count": len(payments),
+            "open_invoice_count": open_invoice_count,
+            "total_invoiced": total_invoiced,
+            "total_paid": total_paid,
+            "current_balance": current_balance,
+            "aging_total": round(sum(aging.values()), 2),
+        },
+        "transactions": transactions,
+    }
+
+
 def _safe_alter(conn, table: str, column: str, col_type: str, default=None):
     try:
         dflt = f" DEFAULT {default}" if default is not None else ""
@@ -1272,6 +1410,18 @@ def compose_invoice(request: Request, payload: InvoiceComposeRequest):
                 "percent": composed["percent"],
             },
         }
+
+
+@limiter.limit("30/minute")
+@router.get("/customers/{customer_id}/ledger")
+def customer_finance_ledger(
+    request: Request,
+    customer_id: str,
+    business: Optional[str] = None,
+):
+    """Canonical customer statement: invoices, payments, balances, and AR aging contribution."""
+    with get_db() as conn:
+        return _customer_finance_ledger(conn, customer_id, business)
 
 
 @limiter.limit("30/minute")
