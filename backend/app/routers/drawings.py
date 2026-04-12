@@ -3,12 +3,16 @@ from fastapi import APIRouter, Response, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
+from datetime import datetime
 import os
 import re
 import json
 import logging
 import tempfile
 import httpx
+import uuid
+
+from app.services.business_routing import route_to_for_item_type
 
 router = APIRouter()
 log = logging.getLogger("drawings")
@@ -270,6 +274,51 @@ class GeneralDrawingRequest(BaseModel):
     lf: float = 0
     rate: float = 0
     quote_num: str = ""
+
+
+class DrawingAssetRequest(BaseModel):
+    name: str = "Drawing"
+    item_type: str = "generic"
+    route_to: Optional[str] = None
+    svg: str
+    room_id: Optional[str] = None
+    item_id: Optional[str] = None
+    quote_id: Optional[str] = None
+    dimensions: dict = {}
+    notes: str = ""
+
+
+@router.post("/drawings/assets")
+async def save_drawing_asset(req: DrawingAssetRequest):
+    """Persist a generated SVG as a quote/job attachable drawing asset."""
+    if "<svg" not in req.svg:
+        raise HTTPException(status_code=400, detail="SVG drawing content required")
+
+    base_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
+    os.makedirs(base_dir, exist_ok=True)
+    safe_type = re.sub(r"[^a-zA-Z0-9_-]+", "_", req.item_type or "drawing").strip("_") or "drawing"
+    filename = f"{safe_type}_{uuid.uuid4().hex[:10]}.svg"
+    file_path = os.path.join(base_dir, filename)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(req.svg)
+
+    route_to = route_to_for_item_type(req.item_type, req.route_to)
+
+    asset = {
+        "id": filename.rsplit(".", 1)[0],
+        "name": req.name,
+        "item_type": req.item_type,
+        "route_to": route_to,
+        "url": f"/api/v1/drawings/files/{filename}",
+        "filename": filename,
+        "assigned_room_id": req.room_id,
+        "assigned_item_id": req.item_id,
+        "item_key": req.item_id,
+        "dimensions": req.dimensions,
+        "notes": req.notes,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    return {"status": "saved", "asset": asset}
 
 
 class UniversalDrawingRequest(BaseModel):

@@ -17,6 +17,7 @@ import httpx
 import logging
 
 from app.services.max.response_quality_engine import quality_engine, Channel
+from app.services.business_routing import route_to_for_item_type
 
 logger = logging.getLogger(__name__)
 
@@ -233,6 +234,70 @@ def _compute_financials(data: dict) -> dict:
         data["deposit"] = dep
 
     return data
+
+
+def _quote_item_drawings(rooms: list) -> list:
+    drawings = []
+    for room in rooms or []:
+        for item in room.get("items", []) or room.get("windows", []) or []:
+            item_route_to = route_to_for_item_type(
+                item.get("type") or item.get("item_type"),
+                item.get("route_to") or item.get("routeTo"),
+            )
+            for drawing in item.get("drawings") or []:
+                if isinstance(drawing, dict):
+                    drawing_route_to = route_to_for_item_type(
+                        drawing.get("item_type") or item.get("type") or item.get("item_type"),
+                        drawing.get("route_to") or drawing.get("routeTo") or item_route_to,
+                    )
+                    enriched = {
+                        **drawing,
+                        "assigned_room_id": drawing.get("assigned_room_id") or room.get("id"),
+                        "assigned_item_id": drawing.get("assigned_item_id") or item.get("id"),
+                        "item_key": drawing.get("item_key") or item.get("id"),
+                        "route_to": drawing_route_to,
+                    }
+                    drawings.append(enriched)
+    return drawings
+
+
+def _quote_rooms_with_route_to(rooms: list) -> list:
+    normalized_rooms = []
+    for room in rooms or []:
+        if not isinstance(room, dict):
+            normalized_rooms.append(room)
+            continue
+        normalized_room = {**room}
+        for key in ("items", "windows"):
+            if key not in room or not isinstance(room.get(key), list):
+                continue
+            normalized_room[key] = []
+            for item in room.get(key) or []:
+                if not isinstance(item, dict):
+                    normalized_room[key].append(item)
+                    continue
+                item_route_to = route_to_for_item_type(
+                    item.get("type") or item.get("item_type"),
+                    item.get("route_to") or item.get("routeTo"),
+                )
+                normalized_item = {**item, "route_to": item_route_to}
+                if item.get("drawings"):
+                    drawings = []
+                    for drawing in item.get("drawings") or []:
+                        if not isinstance(drawing, dict):
+                            drawings.append(drawing)
+                            continue
+                        drawings.append({
+                            **drawing,
+                            "route_to": route_to_for_item_type(
+                                drawing.get("item_type") or item.get("type") or item.get("item_type"),
+                                drawing.get("route_to") or drawing.get("routeTo") or item_route_to,
+                            ),
+                        })
+                    normalized_item["drawings"] = drawings
+                normalized_room[key].append(normalized_item)
+        normalized_rooms.append(normalized_room)
+    return normalized_rooms
 
 
 def _normalise_business(raw: Optional[str]) -> str:
@@ -486,8 +551,9 @@ async def create_quote_from_rooms(body: dict):
                 old_quote["customer_phone"] = body.get("customer_phone", old_quote.get("customer_phone"))
                 old_quote["customer_address"] = body.get("customer_address", old_quote.get("customer_address"))
                 if body.get("rooms"):
-                    old_quote["rooms"] = body["rooms"]
+                    old_quote["rooms"] = _quote_rooms_with_route_to(body["rooms"])
                 old_quote["photos"] = body.get("photos", old_quote.get("photos", []))
+                old_quote["drawings"] = body.get("drawings") or _quote_item_drawings(old_quote.get("rooms", [])) or old_quote.get("drawings", [])
                 old_quote["options"] = body.get("options", old_quote.get("options", {}))
                 old_quote["updated_at"] = datetime.utcnow().isoformat()
                 # Recompute flat financials from line_items
@@ -583,7 +649,8 @@ async def create_quote_from_rooms(body: dict):
     quote["customer_address"] = customer_address
     quote["fabric_grade"] = fabric_grade
     quote["photos"] = photos
-    quote["rooms"] = rooms
+    quote["rooms"] = _quote_rooms_with_route_to(rooms)
+    quote["drawings"] = body.get("drawings") or _quote_item_drawings(rooms)
     quote["options"] = options
 
     if options.get("rush_order"):
@@ -3012,4 +3079,3 @@ async def download_pdf(quote_id: str):
             "Content-Disposition": f'attachment; filename="{quote["quote_number"]}.pdf"'
         },
     )
-

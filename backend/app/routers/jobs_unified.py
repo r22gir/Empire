@@ -19,6 +19,7 @@ from pathlib import Path
 from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.business_routing import route_to_for_item_type
 
 router = APIRouter(tags=["jobs-unified"])
 
@@ -220,6 +221,13 @@ def _quote_item_name(item: dict) -> str:
     return str(item.get("name") or item_type).replace("_", " ").title()
 
 
+def _quote_item_route_to(item: dict) -> str:
+    return route_to_for_item_type(
+        item.get("type") or item.get("item_type"),
+        item.get("route_to") or item.get("routeTo"),
+    )
+
+
 def _quote_room_items(quote: dict) -> list[dict]:
     """Flatten quote room/item data while preserving room and item IDs."""
     flattened: list[dict] = []
@@ -243,6 +251,7 @@ def _quote_room_items(quote: dict) -> list[dict]:
                 "measurements": measurements,
                 "notes": item.get("notes") or item.get("description"),
                 "quantity": item.get("quantity", 1),
+                "route_to": _quote_item_route_to(item),
                 "source": "quote",
             })
     return flattened
@@ -251,6 +260,13 @@ def _quote_room_items(quote: dict) -> list[dict]:
 def _quote_visual_documents(quote: dict) -> list[dict]:
     """Normalize quote photos/scans/drawings into job document rows."""
     documents: list[dict] = []
+    route_to_by_item_key = {}
+    for room in quote.get("rooms") or []:
+        for item in room.get("items") or room.get("windows") or []:
+            item_key = item.get("id") or item.get("item_key") or item.get("name")
+            if item_key:
+                route_to_by_item_key[item_key] = _quote_item_route_to(item)
+
     for photo in quote.get("photos") or []:
         if isinstance(photo, str):
             url = photo
@@ -264,6 +280,7 @@ def _quote_visual_documents(quote: dict) -> list[dict]:
             documents.append({
                 "document_type": "photo",
                 "item_key": item_key,
+                "route_to": route_to_by_item_key.get(item_key),
                 "url": url,
                 "filename": filename,
             })
@@ -274,6 +291,7 @@ def _quote_visual_documents(quote: dict) -> list[dict]:
             documents.append({
                 "document_type": "scan_3d",
                 "item_key": scan.get("assigned_item_id") or scan.get("item_key"),
+                "route_to": route_to_by_item_key.get(scan.get("assigned_item_id") or scan.get("item_key")),
                 "url": url,
                 "filename": scan.get("original_name") or scan.get("filename") or Path(url).name,
             })
@@ -291,11 +309,36 @@ def _quote_visual_documents(quote: dict) -> list[dict]:
             documents.append({
                 "document_type": "drawing",
                 "item_key": item_key,
+                "route_to": route_to_by_item_key.get(item_key) or drawing.get("route_to"),
                 "url": url,
                 "filename": filename,
             })
 
-    return documents
+    for room in quote.get("rooms") or []:
+        for item in room.get("items") or room.get("windows") or []:
+            for drawing in item.get("drawings") or []:
+                if not isinstance(drawing, dict):
+                    continue
+                url = drawing.get("url") or drawing.get("path") or drawing.get("pdf_url")
+                if url:
+                    documents.append({
+                        "document_type": "drawing",
+                        "item_key": drawing.get("assigned_item_id") or drawing.get("item_key") or item.get("id"),
+                        "route_to": route_to_by_item_key.get(drawing.get("assigned_item_id") or drawing.get("item_key") or item.get("id")) or drawing.get("route_to"),
+                        "url": url,
+                        "filename": drawing.get("filename") or drawing.get("name") or Path(url).name,
+                    })
+
+    unique_documents = []
+    seen_documents = set()
+    for document in documents:
+        key = (document.get("document_type"), document.get("url"), document.get("item_key"))
+        if key in seen_documents:
+            continue
+        seen_documents.add(key)
+        unique_documents.append(document)
+
+    return unique_documents
 
 
 # ── Schema init ────────────────────────────────────────────────────────
@@ -401,6 +444,7 @@ def init_schema():
                 room TEXT,
                 name TEXT,
                 measurements TEXT,
+                route_to TEXT,
                 approval_status TEXT DEFAULT 'pending',
                 selected_revision INTEGER DEFAULT 1,
                 status TEXT DEFAULT 'draft',
@@ -413,6 +457,7 @@ def init_schema():
                 job_id TEXT NOT NULL REFERENCES jobs(id),
                 document_type TEXT,
                 item_key TEXT,
+                route_to TEXT,
                 url TEXT,
                 filename TEXT,
                 revision INTEGER DEFAULT 1,
@@ -484,6 +529,12 @@ def init_schema():
         ]:
             try:
                 conn.execute(idx)
+            except sqlite3.OperationalError:
+                pass
+
+        for table, column in [("job_items", "route_to"), ("job_documents", "route_to")]:
+            try:
+                _safe_alter(conn, table, column, "TEXT")
             except sqlite3.OperationalError:
                 pass
 
@@ -678,6 +729,7 @@ class StatusChange(BaseModel):
 class ItemCreate(BaseModel):
     item_key: Optional[str] = None
     item_type: Optional[str] = None
+    route_to: Optional[str] = None
     room: Optional[str] = None
     name: str
     measurements: Optional[dict] = None
@@ -692,6 +744,7 @@ class ItemApproval(BaseModel):
 class DocumentCreate(BaseModel):
     document_type: str
     item_key: Optional[str] = None
+    route_to: Optional[str] = None
     url: str
     filename: Optional[str] = None
     revision: int = 1
@@ -1257,9 +1310,9 @@ def add_job_item(job_id: str, item: ItemCreate):
             raise HTTPException(status_code=404, detail="Job not found")
 
         conn.execute(
-            """INSERT INTO job_items (id, job_id, item_key, item_type, room, name, measurements, status)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?)""",
-            (job_id, item.item_key, item.item_type, item.room, item.name,
+            """INSERT INTO job_items (id, job_id, item_key, item_type, route_to, room, name, measurements, status)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_id, item.item_key, item.item_type, item.route_to, item.room, item.name,
              json.dumps(item.measurements) if item.measurements else None, item.status),
         )
 
@@ -1323,9 +1376,9 @@ def add_job_document(job_id: str, doc: DocumentCreate):
             raise HTTPException(status_code=404, detail="Job not found")
 
         conn.execute(
-            """INSERT INTO job_documents (id, job_id, document_type, item_key, url, filename, revision, visible_to_client)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?)""",
-            (job_id, doc.document_type, doc.item_key, doc.url, doc.filename,
+            """INSERT INTO job_documents (id, job_id, document_type, item_key, route_to, url, filename, revision, visible_to_client)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_id, doc.document_type, doc.item_key, doc.route_to, doc.url, doc.filename,
              doc.revision, 1 if doc.visible_to_client else 0),
         )
 
@@ -1445,12 +1498,13 @@ def create_job_from_quote(quote_id: str):
         result = _enrich_job(dict_row(row))
         for item in quote_items:
             conn.execute(
-                """INSERT INTO job_items (job_id, item_key, item_type, room, name, measurements, status)
-                   VALUES (?, ?, ?, ?, ?, ?, 'quoted')""",
+                """INSERT INTO job_items (job_id, item_key, item_type, route_to, room, name, measurements, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'quoted')""",
                 (
                     result["id"],
                     item.get("item_key"),
                     item.get("item_type"),
+                    item.get("route_to"),
                     item.get("room"),
                     item.get("name"),
                     json.dumps(item.get("measurements") or {}),
@@ -1459,12 +1513,13 @@ def create_job_from_quote(quote_id: str):
         for doc in quote_documents:
             conn.execute(
                 """INSERT INTO job_documents
-                   (job_id, document_type, item_key, url, filename, visible_to_client)
-                   VALUES (?, ?, ?, ?, ?, 1)""",
+                   (job_id, document_type, item_key, route_to, url, filename, visible_to_client)
+                   VALUES (?, ?, ?, ?, ?, ?, 1)""",
                 (
                     result["id"],
                     doc.get("document_type"),
                     doc.get("item_key"),
+                    doc.get("route_to"),
                     doc.get("url"),
                     doc.get("filename"),
                 ),

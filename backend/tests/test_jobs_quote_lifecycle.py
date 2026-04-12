@@ -57,6 +57,13 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
                         "dimensions": {"width": "120", "height": "36", "depth": "24"},
                         "quantity": 1,
                         "notes": "Shape: l bench | A: 120\" B: 60\" | D: 24\"",
+                        "drawings": [
+                            {
+                                "url": "/api/v1/drawings/files/banquette.svg",
+                                "filename": "banquette.svg",
+                                "assigned_item_id": "item-banquette",
+                            }
+                        ],
                     }
                 ],
             }
@@ -74,13 +81,6 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
                 "assigned_room_id": "room-primary",
                 "assigned_item_id": "item-banquette",
             },
-        ],
-        "drawings": [
-            {
-                "url": "/drawings/files/banquette.pdf",
-                "filename": "banquette.pdf",
-                "assigned_item_id": "item-banquette",
-            }
         ],
     }
     (quotes_dir / "quote-job-1.json").write_text(json.dumps(quote))
@@ -108,7 +108,9 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
     assert job["photos"][0]["assigned_item_id"] == "item-east-window"
     assert job["items"][0]["room"] == "Primary Bedroom"
     assert job["items"][0]["item_key"] == "item-east-window"
+    assert job["items"][0]["route_to"] == "workroom"
     assert job["items"][1]["item_key"] == "item-banquette"
+    assert job["items"][1]["route_to"] == "woodcraft"
 
     with database.get_db() as conn:
         customer = conn.execute(
@@ -131,14 +133,18 @@ def test_job_from_quote_carries_client_business_and_crm_link(monkeypatch, tmp_pa
     job_items_by_key = {item["item_key"]: item for item in job_items}
     assert job_items_by_key["item-east-window"]["room"] == "Primary Bedroom"
     assert json.loads(job_items_by_key["item-east-window"]["measurements"]) == {"width": "84", "height": "96", "depth": "6"}
+    assert job_items_by_key["item-east-window"]["route_to"] == "workroom"
     assert job_items_by_key["item-banquette"]["room"] == "Primary Bedroom"
+    assert job_items_by_key["item-banquette"]["route_to"] == "woodcraft"
     assert len(job_documents) == 3
     assert {d["item_key"] for d in job_documents} == {"item-east-window", "item-banquette"}
     assert {d["document_type"] for d in job_documents} == {"photo", "drawing"}
+    drawing_doc = next(d for d in job_documents if d["document_type"] == "drawing")
+    assert drawing_doc["route_to"] == "woodcraft"
 
     detail = jobs_unified.get_job(job["id"])["job"]
     assert {item["item_key"] for item in detail["items"]} == {"item-east-window", "item-banquette"}
-    assert {doc["filename"] for doc in detail["documents"]} == {"east-window.jpg", "banquette-ref.jpg", "banquette.pdf"}
+    assert {doc["filename"] for doc in detail["documents"]} == {"east-window.jpg", "banquette-ref.jpg", "banquette.svg"}
 
 
 def test_jobs_invoice_compatibility_uses_crm_and_canonical_payments(monkeypatch, tmp_path):

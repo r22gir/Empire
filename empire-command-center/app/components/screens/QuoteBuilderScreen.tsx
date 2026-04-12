@@ -54,6 +54,8 @@ interface RoomItem {
   depth: string;
   quantity: number;
   notes: string;
+  routeTo?: 'workroom' | 'woodcraft';
+  drawings?: DrawingAsset[];
   panelConfig?: PanelConfig;
   _uploadPath?: string;
   _3dUrl?: string;
@@ -79,6 +81,21 @@ interface Room {
   id: string;
   name: string;
   items: RoomItem[];
+}
+
+interface DrawingAsset {
+  id: string;
+  name: string;
+  item_type: string;
+  route_to?: 'workroom' | 'woodcraft' | null;
+  url: string;
+  filename: string;
+  assigned_room_id?: string | null;
+  assigned_item_id?: string | null;
+  item_key?: string | null;
+  dimensions?: Record<string, string>;
+  notes?: string;
+  created_at?: string;
 }
 
 type ItemCategory = 'upholstery' | 'drapery';
@@ -269,6 +286,30 @@ function getItemCategory(type: string): ItemCategory {
   if (DRAPERY_TYPES.includes(type)) return 'drapery';
   if (type.startsWith('drapery') || type.startsWith('roman') || type.startsWith('valance') || type.startsWith('cornice') || type.startsWith('sheer')) return 'drapery';
   return 'upholstery';
+}
+
+function inferRouteTo(itemType: string, explicit?: string | null): 'workroom' | 'woodcraft' {
+  const normalized = (explicit || '').trim().toLowerCase();
+  if (normalized === 'workroom' || normalized === 'empire workroom') return 'workroom';
+  if (normalized === 'woodcraft' || normalized === 'empire woodcraft' || normalized === 'craftforge') return 'woodcraft';
+
+  const t = (itemType || '').trim().toLowerCase();
+  if (
+    t.includes('bench') ||
+    t.includes('banquette') ||
+    t.includes('booth') ||
+    t.includes('cabinet') ||
+    t.includes('closet') ||
+    t.includes('desk') ||
+    t.includes('millwork') ||
+    t.includes('shelving') ||
+    t.includes('table') ||
+    t.includes('vanity') ||
+    t.includes('bookcase')
+  ) {
+    return 'woodcraft';
+  }
+  return 'workroom';
 }
 
 // Map AI-detected furniture names to ITEM_TYPES keys
@@ -675,6 +716,8 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               depth: w.dimensions?.depth || w.depth || '',
               quantity: w.quantity || 1,
               notes: w.notes || w.description || '',
+              routeTo: w.route_to || w.routeTo || undefined,
+              drawings: w.drawings || [],
               ...(w.panel_config ? { panelConfig: w.panel_config } : {}),
               ...(w.fabric_id ? { fabric: { id: w.fabric_id, code: w.fabric_code || '', name: w.fabric_name || '', color_pattern: null, material_type: null, supplier: null, cost_per_yard: w.fabric_cost_at_quote || 0, margin_percent: w.fabric_margin_at_quote || 0, width_inches: 54, pattern_repeat_v: 0, pattern_repeat_h: 0, backing_fabric_id: null, swatch_photo_path: null, notes: null } as Fabric } : {}),
               ...(w.fabric_yards_needed ? { fabricYards: w.fabric_yards_needed } : {}),
@@ -937,6 +980,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       depth: it.depth || '',
       quantity: 1,
       notes: [it.description, it.condition].filter(Boolean).join(' - '),
+      routeTo: inferRouteTo(ITEM_TYPES.includes(it.type) ? it.type : 'sofa_3cushion'),
     }));
 
     setRooms(prev => {
@@ -960,6 +1004,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       depth: item.depth || '',
       quantity: 1,
       notes: item.description || '',
+      routeTo: inferRouteTo(ITEM_TYPES.includes(item.type) ? item.type : 'sofa_3cushion'),
       _uploadPath: item._uploadPath,
     };
     setRooms(prev => {
@@ -1079,6 +1124,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
     setRooms(prev => prev.map(r => r.id === roomId ? {
       ...r, items: [...r.items, {
         id: crypto.randomUUID(), type: defaultType, width: '', height: '', depth: '', quantity: 1, notes: '',
+        routeTo: inferRouteTo(defaultType),
       }]
     } : r));
   };
@@ -1104,6 +1150,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
       ...r, items: [...r.items, {
         id: crypto.randomUUID(), type: itemType, width: '', height: '', depth: '', quantity: 1,
         notes: DIAGRAM_MAP[diagramKey]?.label || '',
+        routeTo: inferRouteTo(itemType),
       }]
     } : r));
     setShowCatalog(false);
@@ -1139,15 +1186,24 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         customer_phone: customer.phone,
         customer_address: customer.address,
         photos: savedPhotos,
+        drawings: rooms.flatMap(r => r.items.flatMap(it => (it.drawings || []).map(d => ({
+          ...d,
+          route_to: d.route_to || inferRouteTo(it.type, it.routeTo),
+          assigned_room_id: d.assigned_room_id || r.id,
+          assigned_item_id: d.assigned_item_id || it.id,
+          item_key: d.item_key || it.id,
+        })))),
         rooms: rooms.map(r => ({
           id: r.id,
           name: r.name,
           items: r.items.map(it => ({
             id: it.id,
             type: it.type,
+            route_to: inferRouteTo(it.type, it.routeTo),
             dimensions: { width: it.width, height: it.height, depth: it.depth },
             quantity: it.quantity,
             notes: it.notes,
+            drawings: it.drawings || [],
             ...(it.panelConfig && it.panelConfig.style !== 'flat' ? { panel_config: it.panelConfig } : {}),
             ...(it.fabric ? {
               fabric_id: it.fabric.id,
@@ -2693,6 +2749,74 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
 }) {
   const [addMenuRoom, setAddMenuRoom] = useState<string | null>(null);
   const [dragOverItem, setDragOverItem] = useState<string | null>(null);
+  const [drawingItemId, setDrawingItemId] = useState<string | null>(null);
+
+  const generateItemDrawing = async (room: Room, item: RoomItem) => {
+    setDrawingItemId(item.id);
+    try {
+      const dimensions = { width: item.width, height: item.height, depth: item.depth };
+      const itemName = `${formatItemType(item.type)} - ${room.name}`;
+      const isBench = isBenchType(item.type);
+      const routeTo = inferRouteTo(item.type, item.routeTo);
+      const drawingBody = isBench
+        ? {
+            bench_type: item.type.includes('_u') || item.type.includes('u_') ? 'u_shape' : item.type.includes('_l') || item.type.includes('l_') ? 'l_shape' : 'straight',
+            name: itemName,
+            lf: Math.max((parseFloat(item.width) || 0) / 12, 1),
+            seat_depth: parseFloat(item.depth) || 20,
+            seat_height: parseFloat(item.height) || 18,
+            back_height: parseFloat(item.height) || 18,
+            panel_style: item.panelConfig?.style || 'vertical_channels',
+          }
+        : {
+            name: itemName,
+            item_type: item.type,
+            dimensions,
+            notes: item.notes || '',
+            bench_type: 'straight',
+            lf: 0,
+            quote_num: '',
+          };
+      const drawingRes = await fetch(`${API}/drawings/${isBench ? 'bench' : 'general'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(drawingBody),
+      });
+      if (!drawingRes.ok) throw new Error(`Drawing failed: ${drawingRes.status}`);
+      const drawingData = await drawingRes.json();
+      if (!drawingData.svg) throw new Error('Drawing response missing SVG');
+
+      const assetRes = await fetch(`${API}/drawings/assets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: itemName,
+          item_type: item.type,
+          route_to: routeTo,
+          svg: drawingData.svg,
+          room_id: room.id,
+          item_id: item.id,
+          dimensions,
+          notes: item.notes || '',
+        }),
+      });
+      if (!assetRes.ok) throw new Error(`Asset save failed: ${assetRes.status}`);
+      const assetData = await assetRes.json();
+      const asset: DrawingAsset = {
+        ...assetData.asset,
+        assigned_room_id: room.id,
+        assigned_item_id: item.id,
+        item_key: item.id,
+        dimensions,
+        route_to: assetData.asset?.route_to || routeTo,
+      };
+      updateItem(room.id, item.id, 'drawings', [...(item.drawings || []), asset]);
+    } catch (err) {
+      console.error('Drawing generation failed', err);
+    } finally {
+      setDrawingItemId(null);
+    }
+  };
 
   // Print helper: generates a clean printable view for items
   const printItems = (roomName: string, itemsToPrint: RoomItem[], allRooms?: boolean) => {
@@ -3120,6 +3244,35 @@ function StepRooms({ rooms, photos, scan3DFiles, apiBase, addRoom, removeRoom, m
                         </button>
                       </div>
                     )}
+                    {/* Fabric selection row */}
+                    <div className="col-span-6" style={{ marginTop: 4 }}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => generateItemDrawing(room, item)}
+                          disabled={drawingItemId === item.id || (!item.width && !item.height && !item.depth)}
+                          className="cursor-pointer transition-all hover:bg-[#fdf8eb] hover:border-[#b8960c] disabled:opacity-50"
+                          style={{
+                            padding: '5px 12px', borderRadius: 7,
+                            border: '1.5px solid #ece8e0', background: '#faf9f7',
+                            fontSize: 10, fontWeight: 700, color: '#b8960c',
+                            minHeight: 32,
+                          }}
+                        >
+                          {drawingItemId === item.id ? 'Generating Drawing...' : 'Generate Drawing'}
+                        </button>
+                        {(item.drawings || []).map((drawing) => (
+                          <a key={drawing.id || drawing.url} href={drawing.url} target="_blank" rel="noreferrer"
+                            style={{
+                              padding: '5px 10px', borderRadius: 7, border: '1.5px solid #d1fae5',
+                              background: '#f0fdf4', color: '#15803d', fontSize: 10, fontWeight: 700,
+                              textDecoration: 'none', minHeight: 32, display: 'inline-flex', alignItems: 'center',
+                            }}>
+                            Drawing Attached
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+
                     {/* Fabric selection row */}
                     <div className="col-span-6" style={{ marginTop: 4 }}>
                       <div className="flex flex-wrap items-center gap-2">
