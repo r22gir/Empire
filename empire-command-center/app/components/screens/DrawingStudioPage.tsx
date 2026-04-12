@@ -39,6 +39,25 @@ interface AnalyzedDrawing {
   item_type: string;
 }
 
+interface DrawingRequest {
+  previewUrl: string;
+  pdfUrl: string;
+  body: Record<string, unknown>;
+  filenameType: string;
+}
+
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableSerialize).join(',')}]`;
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => (
+      `${JSON.stringify(key)}:${stableSerialize((value as Record<string, unknown>)[key])}`
+    )).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 export default function DrawingStudioPage() {
   const [view, setView] = useState<'studio' | 'catalog'>('studio');
   const [itemType, setItemType] = useState('generic');
@@ -55,6 +74,7 @@ export default function DrawingStudioPage() {
   const [statusMsg, setStatusMsg] = useState('');
   const [sketchLoading, setSketchLoading] = useState(false);
   const [sketchPreview, setSketchPreview] = useState('');
+  const [previewSignature, setPreviewSignature] = useState('');
 
   // Multi-item analysis results
   const [analyzedItems, setAnalyzedItems] = useState<AnalyzedItem[]>([]);
@@ -97,6 +117,7 @@ export default function DrawingStudioPage() {
     setAnalyzedDrawings([]);
     setSelectedItemId(null);
     setMultiMode(false);
+    setPreviewSignature('');
     try {
       const reader = new FileReader();
       const b64 = await new Promise<string>((resolve) => {
@@ -128,7 +149,10 @@ export default function DrawingStudioPage() {
               setMultiMode(true);
               setSelectedItemId(items[0].id);
               const firstDrawing = drawings.find(d => d.item_id === items[0].id) || drawings.find(d => d.item_id === 0) || drawings[0];
-              if (firstDrawing?.svg) setSvgPreview(firstDrawing.svg);
+              if (firstDrawing?.svg) {
+                setSvgPreview(firstDrawing.svg);
+                setPreviewSignature('');
+              }
               showStatus(`Detected ${items.length} items — tap any item card to view its drawing`, 8000);
             } else {
               // Single item from multi-analyzer — populate form like before
@@ -140,7 +164,10 @@ export default function DrawingStudioPage() {
               if (item.dimensions && Object.keys(item.dimensions).length > 0) {
                 setDimensions(item.dimensions);
               }
-              if (drawings[0]?.svg) setSvgPreview(drawings[0].svg);
+              if (drawings[0]?.svg) {
+                setSvgPreview(drawings[0].svg);
+                setPreviewSignature('');
+              }
 
               const typeLabel = ITEM_TYPES.find(t => t.id === item.item_type)?.label || item.item_type;
               const dimCount = Object.keys(item.dimensions || {}).length;
@@ -222,7 +249,10 @@ export default function DrawingStudioPage() {
             });
             genData = await genRes.json();
           }
-          if (genData.svg) setSvgPreview(genData.svg);
+          if (genData.svg) {
+            setSvgPreview(genData.svg);
+            setPreviewSignature('');
+          }
         } catch { /* user can still click Generate manually */ }
       }
     } catch {
@@ -238,7 +268,10 @@ export default function DrawingStudioPage() {
     setSelectedItemId(itemId);
     const item = analyzedItems.find(i => i.id === itemId);
     const drawing = analyzedDrawings.find(d => d.item_id === itemId);
-    if (drawing?.svg) setSvgPreview(drawing.svg);
+    if (drawing?.svg) {
+      setSvgPreview(drawing.svg);
+      setPreviewSignature('');
+    }
     if (item) {
       setItemType(item.item_type);
       setName(item.name);
@@ -252,7 +285,7 @@ export default function DrawingStudioPage() {
   const hasDimensions = Object.keys(dimensions).length > 0 || (itemType === 'bench' && lf > 0);
 
   // Parse a dimension value from the dimensions dict
-  const parseDimVal = (key: string, def: number): number => {
+  const parseDimVal = useCallback((key: string, def: number): number => {
     for (const [k, v] of Object.entries(dimensions)) {
       if (k.toLowerCase().replace(/\s+/g, '_').includes(key)) {
         const n = parseFloat(String(v).replace(/[^0-9.]/g, ''));
@@ -260,82 +293,101 @@ export default function DrawingStudioPage() {
       }
     }
     return def;
-  };
+  }, [dimensions]);
+
+  const buildDrawingRequest = useCallback((): DrawingRequest => {
+    if (itemType === 'bench') {
+      return {
+        previewUrl: `${API}/drawings/bench`,
+        pdfUrl: `${API}/drawings/bench/pdf`,
+        filenameType: 'bench',
+        body: {
+          bench_type: benchType,
+          name: name || 'Bench',
+          lf: lf || 10,
+          seat_depth: parseDimVal('seat_depth', parseDimVal('depth', 20)),
+          seat_height: parseDimVal('seat_height', 18),
+          back_height: parseDimVal('back_height', 18),
+          panel_style: 'vertical_channels',
+          quote_num: quoteNum,
+        },
+      };
+    }
+
+    return {
+      previewUrl: `${API}/drawings/general`,
+      pdfUrl: `${API}/drawings/general/pdf`,
+      filenameType: itemType,
+      body: {
+        name: name || 'Drawing',
+        item_type: itemType,
+        dimensions,
+        notes,
+        bench_type: benchType,
+        lf,
+        quote_num: quoteNum,
+      },
+    };
+  }, [benchType, dimensions, itemType, lf, name, notes, parseDimVal, quoteNum]);
+
+  const currentPreviewSignature = stableSerialize(buildDrawingRequest().body);
+  const previewIsCurrent = Boolean(svgPreview && previewSignature === currentPreviewSignature);
 
   const generatePreview = useCallback(async () => {
     if (!hasDimensions) return;
     setLoading(true);
     try {
-      let data;
-      if (itemType === 'bench') {
-        // Professional 4-quadrant bench renderer (instant, no AI wait)
-        setStatusMsg('Generating professional drawing...');
-        const res = await fetch(`${API}/drawings/bench`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bench_type: benchType,
-            name: name || 'Bench',
-            lf: lf || 10,
-            seat_depth: parseDimVal('seat_depth', parseDimVal('depth', 20)),
-            seat_height: parseDimVal('seat_height', 18),
-            back_height: parseDimVal('back_height', 18),
-            panel_style: 'vertical_channels',
-            quote_num: quoteNum,
-          }),
-        });
-        data = await res.json();
-      } else {
-        // Non-bench items use deterministic renderer
-        const res = await fetch(`${API}/drawings/general`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name || 'Drawing', item_type: itemType, dimensions, notes, bench_type: benchType, lf, quote_num: quoteNum }),
-        });
-        data = await res.json();
-      }
+      const drawingRequest = buildDrawingRequest();
+      setStatusMsg('Generating professional drawing...');
+      const res = await fetch(drawingRequest.previewUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(drawingRequest.body),
+      });
+      if (!res.ok) throw new Error(`Preview failed: ${res.status}`);
+      const data = await res.json();
       setSvgPreview(data.svg || '');
-      if (data.svg) setStatusMsg('');
+      if (data.svg) {
+        setPreviewSignature(stableSerialize(drawingRequest.body));
+        setStatusMsg('');
+      }
     } catch {
       showStatus('Preview generation failed');
     } finally {
       setLoading(false);
     }
-  }, [hasDimensions, name, itemType, dimensions, notes, benchType, lf, quoteNum]);
+  }, [buildDrawingRequest, hasDimensions]);
 
   const downloadPdf = useCallback(async () => {
     if (!hasDimensions) return;
     setPdfLoading(true);
     try {
-      let res;
-      if (itemType === 'bench') {
-        setStatusMsg('Generating PDF...');
-        res = await fetch(`${API}/drawings/bench/pdf`, {
+      const drawingRequest = buildDrawingRequest();
+      const drawingSignature = stableSerialize(drawingRequest.body);
+      if (previewSignature !== drawingSignature) {
+        setStatusMsg('Updating drawing from current dimensions...');
+        const previewRes = await fetch(drawingRequest.previewUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bench_type: benchType,
-            name: name || 'Bench',
-            lf: lf || 10,
-            seat_depth: parseDimVal('seat_depth', parseDimVal('depth', 20)),
-            seat_height: parseDimVal('seat_height', 18),
-            back_height: parseDimVal('back_height', 18),
-            panel_style: 'vertical_channels',
-            quote_num: quoteNum,
-          }),
+          body: JSON.stringify(drawingRequest.body),
         });
-      } else {
-        res = await fetch(`${API}/drawings/general/pdf`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name || 'Drawing', item_type: itemType, dimensions, notes, bench_type: benchType, lf, quote_num: quoteNum }),
-        });
+        if (!previewRes.ok) throw new Error(`Preview refresh failed: ${previewRes.status}`);
+        const previewData = await previewRes.json();
+        setSvgPreview(previewData.svg || '');
+        setPreviewSignature(drawingSignature);
       }
+      setStatusMsg('Generating PDF...');
+      const res = await fetch(drawingRequest.pdfUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(drawingRequest.body),
+      });
+      if (!res.ok) throw new Error(`PDF failed: ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `drawing_${itemType}_${(name || 'item').replace(/\s+/g, '_')}.pdf`;
+      a.download = `drawing_${drawingRequest.filenameType}_${(name || 'item').replace(/\s+/g, '_')}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
       setStatusMsg('');
@@ -344,7 +396,7 @@ export default function DrawingStudioPage() {
     } finally {
       setPdfLoading(false);
     }
-  }, [hasDimensions, name, itemType, dimensions, notes, benchType, lf, quoteNum]);
+  }, [buildDrawingRequest, hasDimensions, name, previewSignature]);
 
   const emailPdf = useCallback(async () => {
     setEmailLoading(true);
@@ -587,13 +639,13 @@ export default function DrawingStudioPage() {
               background: hasDimensions ? 'linear-gradient(135deg, #b8960c, #d4af37)' : '#ddd',
               color: hasDimensions ? '#1a1a2e' : '#999',
             }}>
-              {loading ? 'Generating...' : 'Generate Drawing'}
+              {loading ? 'Generating...' : previewIsCurrent ? 'Regenerate Drawing' : svgPreview ? 'Update Drawing' : 'Generate Drawing'}
             </button>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={downloadPdf} disabled={pdfLoading || !svgPreview} style={{
-                ...btnBase, flex: 1, background: svgPreview ? '#1a1a2e' : '#eee', color: svgPreview ? '#d4af37' : '#bbb',
+              <button onClick={downloadPdf} disabled={pdfLoading || !hasDimensions} style={{
+                ...btnBase, flex: 1, background: hasDimensions ? '#1a1a2e' : '#eee', color: hasDimensions ? '#d4af37' : '#bbb',
               }}>
-                {pdfLoading ? '...' : 'Download PDF'}
+                {pdfLoading ? '...' : svgPreview && !previewIsCurrent ? 'Update + PDF' : 'Download PDF'}
               </button>
               <button onClick={emailPdf} disabled={emailLoading || !svgPreview} style={{
                 ...btnBase, flex: 1, background: svgPreview ? '#16a34a' : '#eee', color: svgPreview ? '#fff' : '#bbb',
@@ -618,6 +670,14 @@ export default function DrawingStudioPage() {
                 color: statusMsg.includes('Detected') ? '#b8960c' : statusMsg.includes('sent') || statusMsg.includes('Sent') ? '#16a34a' : '#ef4444',
               }}>
                 {statusMsg}
+              </div>
+            )}
+            {svgPreview && !previewIsCurrent && !statusMsg && (
+              <div style={{
+                textAlign: 'center', fontSize: 12, fontWeight: 600, padding: '8px', borderRadius: 8,
+                background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa',
+              }}>
+                Preview needs updating from the current dimensions.
               </div>
             )}
           </div>
