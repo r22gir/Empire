@@ -235,6 +235,30 @@ def _compute_financials(data: dict) -> dict:
     return data
 
 
+def _normalise_business(raw: Optional[str]) -> str:
+    """Return the canonical business key used by quote list filters."""
+    if not raw:
+        return "workroom"
+    value = raw.strip().lower()
+    aliases = {
+        "empire workroom": "workroom",
+        "workroom": "workroom",
+        "wood craft": "woodcraft",
+        "woodcraft": "woodcraft",
+        "craftforge": "woodcraft",
+        "empire": "empire",
+    }
+    return aliases.get(value, value)
+
+
+def _quote_business_key(quote: dict) -> str:
+    return _normalise_business(
+        quote.get("business_unit")
+        or quote.get("business")
+        or quote.get("business_name")
+    )
+
+
 # ── CRUD Endpoints ────────────────────────────────────────────
 
 @router.post("")
@@ -342,6 +366,8 @@ async def list_quotes(
         with open(os.path.join(QUOTES_DIR, fname)) as f:
             q = json.load(f)
         if status and q.get("status") != status:
+            continue
+        if business and _quote_business_key(q) != _normalise_business(business):
             continue
         quotes.append(q)
     quotes.sort(key=lambda q: q.get("created_at", ""), reverse=True)
@@ -2986,5 +3012,4 @@ async def download_pdf(quote_id: str):
             "Content-Disposition": f'attachment; filename="{quote["quote_number"]}.pdf"'
         },
     )
-
 

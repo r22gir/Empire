@@ -39,6 +39,13 @@ def _normalise_business(raw: str | None) -> str:
         return "all"
     return _BUSINESS_ALIASES.get(raw.strip().lower(), raw.strip().lower())
 
+
+def _quote_business_key(quote: dict) -> str:
+    business = _normalise_business(
+        quote.get("business_unit") or quote.get("business_name") or "workroom"
+    )
+    return "workroom" if business == "all" else business
+
 QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
 
 
@@ -107,7 +114,12 @@ def _recalc_invoice(conn, invoice_id: str):
     subtotal = inv["subtotal"] or 0
     tax_rate = inv["tax_rate"] or 0
     tax_amount = round(subtotal * tax_rate, 2)
-    total = round(subtotal + tax_amount, 2)
+    discount_raw = inv.get("discount_amount") or 0
+    if inv.get("discount_type") == "percent" and discount_raw > 0:
+        applied_discount = round(subtotal * (discount_raw / 100), 2)
+    else:
+        applied_discount = discount_raw
+    total = round(subtotal + tax_amount - applied_discount, 2)
 
     # Sum all payments for this invoice
     paid_row = conn.execute(
@@ -141,6 +153,77 @@ def _enrich_invoice(inv: dict) -> dict:
     if inv:
         inv["line_items"] = json.loads(inv["line_items"]) if inv.get("line_items") else []
     return inv
+
+
+def _find_or_create_customer_for_quote(conn, quote: dict, business_unit: str) -> Optional[str]:
+    """Return a CRM customer id for quote-origin invoices without sending mail."""
+    customer_name = (quote.get("customer_name") or "").strip()
+    customer_email = (quote.get("customer_email") or "").strip()
+    customer_phone = (quote.get("customer_phone") or "").strip()
+    customer_address = (quote.get("customer_address") or "").strip()
+
+    customer_id = None
+    if customer_email:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(email) = lower(?)",
+            (customer_email,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if not customer_id and customer_name:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(name) = lower(?)",
+            (customer_name,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if customer_id:
+        conn.execute(
+            """UPDATE customers
+               SET email = COALESCE(NULLIF(email, ''), ?),
+                   phone = COALESCE(NULLIF(phone, ''), ?),
+                   address = COALESCE(NULLIF(address, ''), ?),
+                   business = CASE WHEN business IS NULL OR business = '' OR business = 'empire'
+                                   THEN ? ELSE business END,
+                   lifetime_quotes = COALESCE(lifetime_quotes, 0) + 1,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                customer_email or None,
+                customer_phone or None,
+                customer_address or None,
+                business_unit,
+                customer_id,
+            ),
+        )
+        return customer_id
+
+    if not customer_name:
+        return None
+
+    conn.execute(
+        """INSERT INTO customers
+           (name, email, phone, address, type, tags, notes, total_revenue,
+            lifetime_quotes, source, business)
+           VALUES (?, ?, ?, ?, 'residential', '[]', ?, 0, 1, 'quote', ?)""",
+        (
+            customer_name,
+            customer_email or None,
+            customer_phone or None,
+            customer_address or None,
+            quote.get("project_description") or quote.get("notes"),
+            business_unit,
+        ),
+    )
+    cust = conn.execute(
+        """SELECT id FROM customers
+           WHERE name = ? AND COALESCE(email, '') = COALESCE(?, '')
+           ORDER BY created_at DESC LIMIT 1""",
+        (customer_name, customer_email or None),
+    ).fetchone()
+    return cust["id"] if cust else None
 
 
 # ── Dashboard ────────────────────────────────────────────────────────
@@ -748,11 +831,12 @@ def create_invoice_from_quote(request: Request, quote_id: str):
         for room in (quote.get("rooms") or []):
             room_name = room.get("name", "Room")
             for window in room.get("windows", []):
+                item_total = window.get("total") or window.get("price") or 0
                 line_items.append({
                     "description": f"{room_name} - {window.get('name', 'Window')} - {window.get('treatment_type', 'Treatment')}",
                     "quantity": 1,
-                    "unit_price": window.get("total", 0),
-                    "total": window.get("total", 0),
+                    "unit_price": item_total,
+                    "total": item_total,
                 })
 
     # Strategy 3: Flat line_items array
@@ -783,29 +867,32 @@ def create_invoice_from_quote(request: Request, quote_id: str):
 
     tax_rate = quote.get("tax_rate", 0.06)
 
-    # Try to find or create customer
     customer_name = quote.get("customer_name", "")
     customer_email = quote.get("customer_email", "")
-    customer_id = None
+    business_unit = _quote_business_key(quote)
 
     with get_db() as conn:
-        # Look up customer
-        if customer_email:
-            cust = conn.execute(
-                "SELECT id FROM customers WHERE email = ?", (customer_email,)
-            ).fetchone()
-            if cust:
-                customer_id = cust["id"]
-        if not customer_id and customer_name:
-            cust = conn.execute(
-                "SELECT id FROM customers WHERE name = ?", (customer_name,)
-            ).fetchone()
-            if cust:
-                customer_id = cust["id"]
+        customer_id = _find_or_create_customer_for_quote(conn, quote, business_unit)
 
         inv_number = _next_invoice_number(conn)
         tax_amount = round(subtotal * tax_rate, 2)
-        total = round(subtotal + tax_amount, 2)
+        discount_raw = quote.get("discount_amount", 0) or 0
+        discount_type = quote.get("discount_type", "dollar") or "dollar"
+        if discount_type == "percent" and discount_raw > 0:
+            applied_discount = round(subtotal * (discount_raw / 100), 2)
+        else:
+            applied_discount = discount_raw
+        total = round(subtotal + tax_amount - applied_discount, 2)
+        deposit = quote.get("deposit") or {}
+        deposit_required = deposit.get("deposit_amount") or 0
+        if not deposit_required and deposit.get("deposit_percent"):
+            deposit_required = round(total * (deposit.get("deposit_percent") or 0) / 100, 2)
+        deposit_received = (
+            deposit.get("deposit_received")
+            or deposit.get("amount_received")
+            or deposit.get("paid_amount")
+            or 0
+        )
 
         from datetime import timedelta
         due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -838,11 +925,11 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 customer_email,
                 quote.get("customer_phone", ""),
                 quote.get("customer_address", ""),
-                quote.get("business_unit") or "workroom",
-                (quote.get("deposit") or {}).get("deposit_percent") or 0,
-                (quote.get("deposit") or {}).get("deposit_amount") or 0,
-                quote.get("discount_amount", 0),
-                quote.get("discount_type", "dollar"),
+                business_unit,
+                deposit_required,
+                deposit_received,
+                discount_raw,
+                discount_type,
             )
         )
 
