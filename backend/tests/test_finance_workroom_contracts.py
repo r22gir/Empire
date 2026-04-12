@@ -1,4 +1,5 @@
 import importlib
+import json
 from itertools import count
 
 from starlette.requests import Request
@@ -139,3 +140,157 @@ def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeyp
         assert customer["phone"] == "555-0444"
         assert customer["address"] == "44 Ledger Lane"
         assert customer["business"] == "workroom"
+
+
+def test_smart_invoice_composer_milestones_payments_and_sources(monkeypatch, tmp_path):
+    finance, database = _load_finance(monkeypatch, tmp_path)
+
+    from app.routers import jobs_unified
+
+    importlib.reload(jobs_unified)
+
+    quotes_dir = tmp_path / "quotes"
+    designs_dir = tmp_path / "craftforge" / "designs"
+    quotes_dir.mkdir()
+    designs_dir.mkdir(parents=True)
+    monkeypatch.setattr(finance, "QUOTES_DIR", quotes_dir)
+    monkeypatch.setattr(finance, "DESIGNS_DIR", designs_dir)
+
+    quote = {
+        "id": "composer-quote",
+        "quote_number": "EST-2026-099",
+        "customer_name": "Composer Client",
+        "customer_email": "composer@example.com",
+        "customer_phone": "555-0999",
+        "customer_address": "99 Ledger Way",
+        "business_unit": "workroom",
+        "line_items": [{"description": "Milestone Drapery", "quantity": 1, "rate": 1000, "amount": 1000}],
+        "subtotal": 1000,
+        "tax_rate": 0.1,
+        "tax_amount": 100,
+        "discount_amount": 100,
+        "discount_type": "dollar",
+        "total": 1000,
+        "deposit": {"deposit_percent": 50},
+        "terms": "50% deposit, progress draw, balance on install",
+        "notes": "Carry composer notes",
+    }
+    (quotes_dir / "composer-quote.json").write_text(json.dumps(quote))
+
+    with database.get_db() as conn:
+        conn.execute(
+            """INSERT INTO jobs
+               (id, title, quote_id, status, business_unit, description, quoted_amount)
+               VALUES ('composer-job', 'Composer Job', 'composer-quote', 'pending', 'workroom',
+                       'Install milestone drapery', 1000)"""
+        )
+
+    deposit = finance.compose_invoice(
+        _request(),
+        finance.InvoiceComposeRequest(source_type="quote", source_id="composer-quote", invoice_type="deposit"),
+    )["invoice"]
+    progress = finance.compose_invoice(
+        _request(),
+        finance.InvoiceComposeRequest(source_type="quote", source_id="composer-quote", invoice_type="progress", percent=25),
+    )["invoice"]
+    final = finance.compose_invoice(
+        _request(),
+        finance.InvoiceComposeRequest(source_type="job", source_id="composer-job", invoice_type="final"),
+    )["invoice"]
+
+    assert deposit["invoice_stage"] == "deposit"
+    assert deposit["source_type"] == "quote"
+    assert deposit["source_id"] == "composer-quote"
+    assert deposit["quote_id"] == "composer-quote"
+    assert deposit["customer_id"]
+    assert deposit["customer_name"] == "Composer Client"
+    assert deposit["business_unit"] == "workroom"
+    assert deposit["subtotal"] == 500
+    assert deposit["tax_amount"] == 50
+    assert deposit["discount_amount"] == 50
+    assert deposit["discount_type"] == "dollar"
+    assert deposit["total"] == 500
+    assert deposit["deposit_required"] == 500
+    assert deposit["balance_due"] == 500
+    assert deposit["terms"] == "50% deposit, progress draw, balance on install"
+    assert "Carry composer notes" in deposit["notes"]
+    assert deposit["line_items"][0]["description"] == "Deposit 50% - Milestone Drapery"
+
+    assert progress["invoice_stage"] == "progress"
+    assert progress["total"] == 250
+    assert progress["discount_amount"] == 25
+    assert progress["deposit_required"] == 0
+
+    assert final["invoice_stage"] == "final"
+    assert final["source_type"] == "job"
+    assert final["source_id"] == "composer-job"
+    assert final["quote_id"] == "composer-quote"
+    assert final["job_id"] == "composer-job"
+    assert final["total"] == 250
+    assert final["discount_amount"] == 25
+
+    paid_deposit = finance.record_payment(
+        _request(),
+        deposit["id"],
+        finance.PaymentCreate(amount=500, method="check", reference="DEP-500", payment_date="2026-04-12"),
+    )["invoice"]
+    paid_final = finance.record_payment(
+        _request(),
+        final["id"],
+        finance.PaymentCreate(amount=250, method="zelle", reference="FINAL-250", payment_date="2026-04-12"),
+    )["invoice"]
+
+    assert paid_deposit["status"] == "paid"
+    assert paid_deposit["balance_due"] == 0
+    assert paid_final["status"] == "paid"
+    assert paid_final["balance_due"] == 0
+
+    detail = finance.get_invoice(_request(), final["id"])["invoice"]
+    assert detail["customer"]["email"] == "composer@example.com"
+    assert detail["payments"][0]["reference"] == "FINAL-250"
+
+    design = {
+        "id": "composer-design",
+        "design_number": "CF-2026-099",
+        "customer_name": "Design Composer",
+        "customer_email": "design-composer@example.com",
+        "customer_phone": "555-0888",
+        "customer_address": "88 CNC Way",
+        "description": "Walnut composer valance",
+        "materials": [{"name": "Walnut", "quantity": 2, "cost_per_unit": 100}],
+        "labor_cost": 100,
+        "subtotal": 300,
+        "tax_rate": 0.1,
+        "tax_amount": 30,
+        "discount_amount": 30,
+        "discount_type": "dollar",
+        "deposit_percent": 50,
+        "total": 300,
+        "notes": "Design notes carry",
+    }
+    (designs_dir / "composer-design.json").write_text(json.dumps(design))
+    design_invoice = finance.compose_invoice(
+        _request(),
+        finance.InvoiceComposeRequest(source_type="design", source_id="composer-design", invoice_type="deposit"),
+    )["invoice"]
+
+    assert design_invoice["business_unit"] == "woodcraft"
+    assert design_invoice["quote_id"] == "composer-design"
+    assert design_invoice["invoice_stage"] == "deposit"
+    assert design_invoice["total"] == 150
+    assert design_invoice["deposit_required"] == 150
+    assert "Design notes carry" in design_invoice["notes"]
+
+    dashboard = finance.finance_dashboard(_request())
+    assert dashboard["revenue"]["mtd"] == 750
+    assert dashboard["outstanding"]["total"] == 400
+
+    with database.get_db() as conn:
+        customer = conn.execute(
+            "SELECT * FROM customers WHERE id = ?", (deposit["customer_id"],)
+        ).fetchone()
+        job = conn.execute("SELECT * FROM jobs WHERE id = 'composer-job'").fetchone()
+
+    assert customer["email"] == "composer@example.com"
+    assert customer["total_revenue"] == 750
+    assert job["invoice_id"] == final["id"]

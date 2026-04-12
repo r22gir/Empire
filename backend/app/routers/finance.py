@@ -8,7 +8,7 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
 from app.middleware.rate_limiter import limiter
@@ -48,6 +48,7 @@ def _quote_business_key(quote: dict) -> str:
     return "workroom" if business == "all" else business
 
 QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
+DESIGNS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "craftforge" / "designs"
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
@@ -85,6 +86,17 @@ class PaymentCreate(BaseModel):
     reference: Optional[str] = None
     notes: Optional[str] = None
     payment_date: Optional[str] = None
+
+
+class InvoiceComposeRequest(BaseModel):
+    source_type: str = "quote"
+    source_id: str
+    invoice_type: str = "deposit"
+    percent: Optional[float] = None
+    amount: Optional[float] = None
+    terms: Optional[str] = None
+    notes: Optional[str] = None
+    due_date: Optional[str] = None
 
 
 class ExpenseCreate(BaseModel):
@@ -194,6 +206,9 @@ def _ensure_finance_extensions(conn):
         "payment_status": "TEXT DEFAULT 'unpaid'",
         "invoice_date": "TEXT",
         "sent_date": "TEXT",
+        "source_type": "TEXT",
+        "source_id": "TEXT",
+        "invoice_stage": "TEXT",
     }
     for col, ctype in inv_cols.items():
         parts = ctype.split(" DEFAULT ")
@@ -367,6 +382,294 @@ def _find_or_create_customer_for_quote(conn, quote: dict, business_unit: str) ->
         (customer_name, customer_email or None),
     ).fetchone()
     return cust["id"] if cust else None
+
+
+def _to_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _line_amount(item: dict) -> float:
+    qty = _to_float(item.get("quantity", item.get("qty", 1)), 1)
+    rate = _to_float(item.get("unit_price", item.get("rate", 0)))
+    return _to_float(item.get("total", item.get("amount")), qty * rate)
+
+
+def _quote_line_items(quote: dict) -> list[dict]:
+    line_items = []
+    selected_tier = quote.get("selected_tier") or "A"
+    tiers = quote.get("tiers") or {}
+    tier_data = tiers.get(selected_tier) or tiers.get("A") or tiers.get("B") or tiers.get("C")
+    if tier_data and tier_data.get("items"):
+        for tier_item in tier_data["items"]:
+            for li in tier_item.get("line_items", []):
+                amount = _line_amount(li)
+                line_items.append({
+                    "description": li.get("description", "Item"),
+                    "quantity": li.get("quantity", 1),
+                    "unit_price": _to_float(li.get("unit_price", li.get("rate", amount))),
+                    "total": amount,
+                })
+    if not line_items:
+        for room in quote.get("rooms") or []:
+            room_name = room.get("name", "Room")
+            for item in (room.get("items") or room.get("windows") or []):
+                amount = _to_float(item.get("total", item.get("price", 0)))
+                line_items.append({
+                    "description": f"{room_name} - {item.get('name') or item.get('type') or item.get('treatment_type') or 'Item'}",
+                    "quantity": item.get("quantity", 1),
+                    "unit_price": amount,
+                    "total": amount,
+                })
+    if not line_items:
+        for item in quote.get("line_items") or []:
+            amount = _line_amount(item)
+            qty = _to_float(item.get("quantity", item.get("qty", 1)), 1)
+            line_items.append({
+                "description": item.get("description", "Item"),
+                "quantity": qty,
+                "unit_price": _to_float(item.get("unit_price", item.get("rate", amount))),
+                "total": amount,
+            })
+    return line_items
+
+
+def _design_line_items(design: dict) -> list[dict]:
+    line_items = []
+    for material in design.get("materials") or []:
+        if not isinstance(material, dict):
+            continue
+        qty = _to_float(material.get("quantity"), 1)
+        unit_price = _to_float(material.get("cost_per_unit"))
+        total = qty * unit_price
+        if material.get("name") and total:
+            line_items.append({
+                "description": material.get("name"),
+                "quantity": qty,
+                "unit_price": unit_price,
+                "total": total,
+            })
+    for item in design.get("line_items") or []:
+        if not isinstance(item, dict):
+            continue
+        amount = _line_amount(item)
+        line_items.append({
+            "description": item.get("description", "Item"),
+            "quantity": item.get("quantity", 1),
+            "unit_price": _to_float(item.get("unit_price", item.get("rate", amount))),
+            "total": amount,
+        })
+    for label, key in (("Labor", "labor_cost"), ("Overhead", "overhead"), ("CNC Machine Time", "cnc_time_cost")):
+        amount = _to_float(design.get(key))
+        if amount:
+            line_items.append({"description": label, "quantity": 1, "unit_price": amount, "total": amount})
+    return line_items
+
+
+def _load_composer_source(conn, source_type: str, source_id: str) -> dict:
+    source_type = source_type.strip().lower()
+    if source_type == "quote":
+        quote_file = QUOTES_DIR / f"{source_id}.json"
+        if not quote_file.exists():
+            raise HTTPException(status_code=404, detail=f"Quote file not found: {source_id}")
+        quote = json.loads(quote_file.read_text())
+        line_items = _quote_line_items(quote)
+        subtotal = _to_float(quote.get("subtotal")) or sum(item["total"] for item in line_items)
+        tax_rate = _to_float(quote.get("tax_rate"), 0.06)
+        discount_amount = _to_float(quote.get("discount_amount"))
+        discount_type = quote.get("discount_type", "dollar") or "dollar"
+        tax_amount = _to_float(quote.get("tax_amount"), round(subtotal * tax_rate, 2))
+        total = _to_float(quote.get("total")) or round(
+            subtotal + tax_amount - (round(subtotal * discount_amount / 100, 2) if discount_type == "percent" else discount_amount),
+            2,
+        )
+        return {
+            "source_type": "quote",
+            "source_id": source_id,
+            "quote_id": source_id,
+            "job_id": None,
+            "customer_name": quote.get("customer_name", ""),
+            "customer_email": quote.get("customer_email", ""),
+            "customer_phone": quote.get("customer_phone", ""),
+            "customer_address": quote.get("customer_address", ""),
+            "business_unit": _quote_business_key(quote),
+            "subtotal": subtotal,
+            "tax_rate": tax_rate,
+            "discount_amount": discount_amount,
+            "discount_type": discount_type,
+            "total": total,
+            "deposit_percent": _to_float((quote.get("deposit") or {}).get("deposit_percent"), 50),
+            "line_items": line_items,
+            "notes": quote.get("notes") or quote.get("project_description") or "",
+            "terms": quote.get("terms") or "Net 30",
+        }
+
+    if source_type == "job":
+        job = dict_row(conn.execute("SELECT * FROM jobs WHERE id = ?", (source_id,)).fetchone())
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job not found: {source_id}")
+        if job.get("quote_id") and (QUOTES_DIR / f"{job['quote_id']}.json").exists():
+            source = _load_composer_source(conn, "quote", job["quote_id"])
+            source.update({
+                "source_type": "job",
+                "source_id": source_id,
+                "job_id": source_id,
+                "customer_name": job.get("client_name") or source["customer_name"],
+                "customer_email": job.get("client_email") or source["customer_email"],
+                "customer_phone": job.get("client_phone") or source["customer_phone"],
+                "customer_address": job.get("client_address") or source["customer_address"],
+                "business_unit": _normalise_business(job.get("business_unit") or source["business_unit"]),
+                "notes": job.get("description") or job.get("notes") or source["notes"],
+            })
+            return source
+        total = _to_float(job.get("quoted_amount") or job.get("estimated_value"))
+        subtotal = total
+        return {
+            "source_type": "job",
+            "source_id": source_id,
+            "quote_id": job.get("quote_id"),
+            "job_id": source_id,
+            "customer_name": job.get("client_name", ""),
+            "customer_email": job.get("client_email", ""),
+            "customer_phone": job.get("client_phone", ""),
+            "customer_address": job.get("client_address", ""),
+            "business_unit": _normalise_business(job.get("business_unit") or "workroom"),
+            "subtotal": subtotal,
+            "tax_rate": 0,
+            "discount_amount": 0,
+            "discount_type": "dollar",
+            "total": total,
+            "deposit_percent": 50,
+            "line_items": [{"description": job.get("title") or "Job", "quantity": 1, "unit_price": subtotal, "total": subtotal}],
+            "notes": job.get("description") or job.get("notes") or "",
+            "terms": "Net 30",
+        }
+
+    if source_type == "design":
+        design_file = DESIGNS_DIR / f"{source_id}.json"
+        if not design_file.exists():
+            raise HTTPException(status_code=404, detail=f"Design file not found: {source_id}")
+        design = json.loads(design_file.read_text())
+        line_items = _design_line_items(design)
+        subtotal = _to_float(design.get("subtotal")) or sum(item["total"] for item in line_items)
+        tax_rate = _to_float(design.get("tax_rate"))
+        discount_amount = _to_float(design.get("discount_amount"))
+        discount_type = design.get("discount_type", "dollar") or "dollar"
+        tax_amount = _to_float(design.get("tax_amount"), round(subtotal * tax_rate, 2))
+        total = _to_float(design.get("total")) or round(
+            subtotal + tax_amount - (round(subtotal * discount_amount / 100, 2) if discount_type == "percent" else discount_amount),
+            2,
+        )
+        return {
+            "source_type": "design",
+            "source_id": source_id,
+            "quote_id": source_id,
+            "job_id": None,
+            "customer_name": design.get("customer_name", ""),
+            "customer_email": design.get("customer_email", ""),
+            "customer_phone": design.get("customer_phone", ""),
+            "customer_address": design.get("customer_address", ""),
+            "business_unit": "woodcraft",
+            "subtotal": subtotal,
+            "tax_rate": tax_rate,
+            "discount_amount": discount_amount,
+            "discount_type": discount_type,
+            "total": total,
+            "deposit_percent": _to_float(design.get("deposit_percent"), 50),
+            "line_items": line_items,
+            "notes": design.get("notes") or design.get("description") or "",
+            "terms": design.get("terms") or "Net 30",
+        }
+
+    raise HTTPException(status_code=400, detail="source_type must be quote, job, or design")
+
+
+def _source_prior_invoiced_total(conn, source_type: str, source_id: str, quote_id: str | None) -> float:
+    row = conn.execute(
+        """SELECT COALESCE(SUM(total), 0) AS total
+           FROM invoices
+           WHERE status != 'cancelled'
+             AND (
+               (source_type = ? AND source_id = ?)
+               OR (? IS NOT NULL AND quote_id = ? AND source_type IS NOT NULL)
+             )""",
+        (source_type, source_id, quote_id, quote_id),
+    ).fetchone()
+    return _to_float(row["total"] if row else 0)
+
+
+def _compose_stage_invoice(conn, source: dict, request: InvoiceComposeRequest) -> dict:
+    stage = request.invoice_type.strip().lower()
+    if stage not in {"deposit", "progress", "final"}:
+        raise HTTPException(status_code=400, detail="invoice_type must be deposit, progress, or final")
+    source_total = _to_float(source["total"])
+    if source_total <= 0:
+        raise HTTPException(status_code=400, detail="Source total must be greater than zero")
+
+    if request.amount is not None:
+        percent = round((_to_float(request.amount) / source_total) * 100, 6)
+    elif request.percent is not None:
+        percent = _to_float(request.percent)
+    elif stage == "deposit":
+        percent = _to_float(source.get("deposit_percent"), 50)
+    elif stage == "progress":
+        percent = 25
+    else:
+        prior_total = _source_prior_invoiced_total(conn, source["source_type"], source["source_id"], source.get("quote_id"))
+        percent = round((max(source_total - prior_total, 0) / source_total) * 100, 6)
+
+    if percent <= 0 or percent > 100:
+        raise HTTPException(status_code=400, detail="Invoice percent must be greater than 0 and no more than 100")
+
+    factor = percent / 100
+    subtotal = round(_to_float(source["subtotal"]) * factor, 2)
+    tax_rate = _to_float(source["tax_rate"])
+    tax_amount = round(subtotal * tax_rate, 2)
+    discount_type = source.get("discount_type") or "dollar"
+    source_discount = _to_float(source.get("discount_amount"))
+    discount_amount = source_discount if discount_type == "percent" else round(source_discount * factor, 2)
+    applied_discount = round(subtotal * discount_amount / 100, 2) if discount_type == "percent" else discount_amount
+    total = round(subtotal + tax_amount - applied_discount, 2)
+    if request.amount is not None:
+        total = round(_to_float(request.amount), 2)
+
+    line_items = []
+    for item in source["line_items"]:
+        item_total = round(_line_amount(item) * factor, 2)
+        line_items.append({
+            "description": f"{stage.title()} {percent:g}% - {item.get('description', 'Item')}",
+            "quantity": item.get("quantity", 1),
+            "unit_price": item_total,
+            "total": item_total,
+        })
+
+    default_terms = {
+        "deposit": "Deposit due on receipt",
+        "progress": "Progress payment due on receipt",
+        "final": "Final balance due on receipt",
+    }[stage]
+    source_note = source.get("notes") or ""
+    notes = request.notes or f"{stage.title()} invoice from {source['source_type']} {source['source_id']}"
+    if source_note and source_note not in notes:
+        notes = f"{notes}. {source_note}"
+
+    return {
+        "stage": stage,
+        "percent": percent,
+        "subtotal": subtotal,
+        "tax_rate": tax_rate,
+        "tax_amount": tax_amount,
+        "discount_amount": discount_amount,
+        "discount_type": discount_type,
+        "total": total,
+        "line_items": line_items,
+        "notes": notes,
+        "terms": request.terms or source.get("terms") or default_terms,
+        "due_date": request.due_date or (date.today() + timedelta(days=30)).isoformat(),
+        "deposit_required": total if stage == "deposit" else 0,
+    }
 
 
 # ── Dashboard ────────────────────────────────────────────────────────
@@ -879,6 +1182,96 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
             (inv_number,)
         ).fetchone()
         return {"invoice": _enrich_invoice(dict_row(row))}
+
+
+@limiter.limit("30/minute")
+@router.post("/invoices/compose")
+def compose_invoice(request: Request, payload: InvoiceComposeRequest):
+    """Compose a deposit, progress, or final invoice from a quote, job, or WoodCraft design."""
+    with get_db() as conn:
+        _ensure_finance_extensions(conn)
+        source = _load_composer_source(conn, payload.source_type, payload.source_id)
+        business_unit = _normalise_business(source["business_unit"] or "workroom")
+        if business_unit == "all":
+            business_unit = "workroom"
+        customer_id = _find_or_create_customer_for_invoice(
+            conn,
+            source["customer_name"],
+            source["customer_email"],
+            source["customer_phone"],
+            source["customer_address"],
+            business_unit,
+        )
+        composed = _compose_stage_invoice(conn, source, payload)
+        inv_number = _next_invoice_number(conn)
+
+        conn.execute(
+            """INSERT INTO invoices
+               (id, invoice_number, customer_id, quote_id, job_id, status, subtotal, tax_rate,
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+                client_name, client_email, client_phone, client_address, business_unit,
+                deposit_required, deposit_received, discount_amount, discount_type,
+                invoice_date, payment_status, source_type, source_id, invoice_stage)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft', ?, ?,
+                       ?, ?, 0, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?,
+                       ?, 0, ?, ?,
+                       ?, 'unpaid', ?, ?, ?)""",
+            (
+                inv_number,
+                customer_id,
+                source.get("quote_id"),
+                source.get("job_id"),
+                composed["subtotal"],
+                composed["tax_rate"],
+                composed["tax_amount"],
+                composed["total"],
+                composed["total"],
+                json.dumps(composed["line_items"]),
+                composed["notes"],
+                composed["terms"],
+                composed["due_date"],
+                source["customer_name"],
+                source["customer_email"],
+                source["customer_phone"],
+                source["customer_address"],
+                business_unit,
+                composed["deposit_required"],
+                composed["discount_amount"],
+                composed["discount_type"],
+                date.today().isoformat(),
+                source["source_type"],
+                source["source_id"],
+                composed["stage"],
+            ),
+        )
+
+        row = conn.execute(
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i
+               LEFT JOIN customers c ON c.id = i.customer_id
+               WHERE i.invoice_number = ?""",
+            (inv_number,),
+        ).fetchone()
+        invoice = _enrich_invoice(dict_row(row))
+
+        if source.get("job_id"):
+            conn.execute("UPDATE jobs SET invoice_id = ? WHERE id = ?", (invoice["id"], source["job_id"]))
+
+        return {
+            "invoice": invoice,
+            "source": {
+                "type": source["source_type"],
+                "id": source["source_id"],
+                "quote_id": source.get("quote_id"),
+                "job_id": source.get("job_id"),
+                "total": source["total"],
+            },
+            "composition": {
+                "invoice_type": composed["stage"],
+                "percent": composed["percent"],
+            },
+        }
 
 
 @limiter.limit("30/minute")
