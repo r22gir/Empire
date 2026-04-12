@@ -69,6 +69,82 @@ def _normalise_business(raw: str | None) -> str:
     return _BUSINESS_ALIASES.get(raw.strip().lower(), raw.strip().lower())
 
 
+def _quote_business_key(quote: dict) -> str:
+    business = _normalise_business(
+        quote.get("business_unit") or quote.get("business_name") or "workroom"
+    )
+    return "workroom" if business == "all" else business
+
+
+def _find_or_create_customer_for_quote(conn, quote: dict, business_unit: str) -> Optional[str]:
+    customer_name = (quote.get("customer_name") or "").strip()
+    customer_email = (quote.get("customer_email") or "").strip()
+    customer_phone = (quote.get("customer_phone") or "").strip()
+    customer_address = (quote.get("customer_address") or "").strip()
+
+    customer_id = None
+    if customer_email:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(email) = lower(?)",
+            (customer_email,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if not customer_id and customer_name:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(name) = lower(?)",
+            (customer_name,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if customer_id:
+        conn.execute(
+            """UPDATE customers
+               SET email = COALESCE(NULLIF(email, ''), ?),
+                   phone = COALESCE(NULLIF(phone, ''), ?),
+                   address = COALESCE(NULLIF(address, ''), ?),
+                   business = CASE WHEN business IS NULL OR business = '' OR business = 'empire'
+                                   THEN ? ELSE business END,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                customer_email or None,
+                customer_phone or None,
+                customer_address or None,
+                business_unit,
+                customer_id,
+            ),
+        )
+        return customer_id
+
+    if not customer_name:
+        return None
+
+    conn.execute(
+        """INSERT INTO customers
+           (name, email, phone, address, type, tags, notes, total_revenue,
+            lifetime_quotes, source, business)
+           VALUES (?, ?, ?, ?, 'residential', '[]', ?, 0, 1, 'quote', ?)""",
+        (
+            customer_name,
+            customer_email or None,
+            customer_phone or None,
+            customer_address or None,
+            quote.get("project_description") or quote.get("notes"),
+            business_unit,
+        ),
+    )
+    cust = conn.execute(
+        """SELECT id FROM customers
+           WHERE name = ? AND COALESCE(email, '') = COALESCE(?, '')
+           ORDER BY created_at DESC LIMIT 1""",
+        (customer_name, customer_email or None),
+    ).fetchone()
+    return cust["id"] if cust else None
+
+
 # ── Schema init ────────────────────────────────────────────────────────
 
 def _safe_alter(conn, table: str, column: str, col_type: str, default=None):
@@ -1147,17 +1223,12 @@ def create_job_from_quote(quote_id: str):
 
     customer_name = quote.get("customer_name", "")
     customer_email = quote.get("customer_email", "")
+    customer_phone = quote.get("customer_phone", "")
+    customer_address = quote.get("customer_address", "")
+    business_unit = _quote_business_key(quote)
 
     with get_db() as conn:
-        customer_id = None
-        if customer_email:
-            cust = conn.execute("SELECT id FROM customers WHERE email = ?", (customer_email,)).fetchone()
-            if cust:
-                customer_id = cust["id"]
-        if not customer_id and customer_name:
-            cust = conn.execute("SELECT id FROM customers WHERE name = ?", (customer_name,)).fetchone()
-            if cust:
-                customer_id = cust["id"]
+        customer_id = _find_or_create_customer_for_quote(conn, quote, business_unit)
 
         job_number = _next_job_number(conn)
         title = f"Job for {customer_name or 'Unknown'} — {quote.get('quote_number', quote_id)}"
@@ -1166,13 +1237,21 @@ def create_job_from_quote(quote_id: str):
         conn.execute(
             """INSERT INTO jobs
                (id, job_number, title, customer_id, quote_id, status, job_type, notes, metadata,
-                client_name, client_email, pipeline_stage, quoted_amount, description, quote_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'quoted', 'fabrication', ?, ?,
-                       ?, ?, 'quoted', ?, ?, ?)""",
+                client_name, client_email, client_phone, client_address, business_unit,
+                pipeline_stage, quoted_amount, description, quote_date)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'pending', 'fabrication', ?, ?,
+                       ?, ?, ?, ?, ?,
+                       'quoted', ?, ?, ?)""",
             (
                 job_number, title, customer_id, quote_id, description,
-                json.dumps({"source": "quote", "quote_number": quote.get("quote_number")}),
-                customer_name, customer_email, total, description, datetime.now().isoformat(),
+                json.dumps({
+                    "source": "quote",
+                    "quote_number": quote.get("quote_number"),
+                    "intake_project_id": quote.get("intake_project_id"),
+                    "intake_code": quote.get("intake_code"),
+                }),
+                customer_name, customer_email, customer_phone, customer_address,
+                business_unit, total, description, datetime.now().isoformat(),
             ),
         )
 

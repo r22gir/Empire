@@ -87,7 +87,7 @@ export default function JobsScreen({ business }: JobsScreenProps) {
         /* Pipeline / Kanban view */
         <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 12 }}>
           {PIPELINE_STAGES.map(stage => {
-            const cards = filteredJobs.filter((j: any) => (j.status || j.pipeline_stage) === stage.key);
+            const cards = filteredJobs.filter((j: any) => (j.pipeline_stage || j.status) === stage.key);
             const total = cards.reduce((s: number, j: any) => s + (j.estimated_value || j.quoted_amount || 0), 0);
             return (
               <div key={stage.key} style={{ minWidth: 200, background: '#f5f3ef', borderRadius: 10, padding: 10, flex: 1 }}>
@@ -132,7 +132,7 @@ export default function JobsScreen({ business }: JobsScreenProps) {
                   <td style={{ padding: 8, fontFamily: 'monospace', fontSize: 11, color: '#b8960c', fontWeight: 600 }}>{job.job_number || `JOB-${job.id}`}</td>
                   <td style={{ padding: 8, fontWeight: 500 }}>{job.client_name || job.title}</td>
                   <td style={{ padding: 8, color: '#666' }}>{job.room || job.description?.slice(0, 40) || '—'}</td>
-                  <td style={{ padding: 8 }}>{STATUS_BADGE(job.status || job.pipeline_stage || 'intake')}</td>
+                  <td style={{ padding: 8 }}>{STATUS_BADGE(job.pipeline_stage || job.status || 'intake')}</td>
                   <td style={{ padding: 8, fontWeight: 600 }}>{(job.estimated_value || job.quoted_amount) ? `$${(job.estimated_value || job.quoted_amount).toLocaleString()}` : '—'}</td>
                   <td style={{ padding: 8, color: '#888', fontSize: 11 }}>{job.created_at?.slice(0, 10) || '—'}</td>
                 </tr>
@@ -165,7 +165,7 @@ export default function JobsScreen({ business }: JobsScreenProps) {
           {/* Status */}
           <div style={{ marginBottom: 12 }}>
             <span style={{ fontSize: 10, fontWeight: 600, color: '#888' }}>STATUS</span>
-            <div style={{ marginTop: 4 }}>{STATUS_BADGE(selected.status || 'intake')}</div>
+            <div style={{ marginTop: 4 }}>{STATUS_BADGE(selected.pipeline_stage || selected.status || 'intake')}</div>
           </div>
 
           {/* Room / Description */}
