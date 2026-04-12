@@ -22,8 +22,16 @@ export default function InvoiceScreen() {
   const [summary, setSummary] = useState<any>({});
 
   useEffect(() => {
-    fetch(`${API}/invoices`).then(r => r.json()).then(d => setInvoices(d.invoices || d || [])).catch(() => {});
-    fetch(`${API}/invoices/summary`).then(r => r.json()).then(setSummary).catch(() => {});
+    fetch(`${API}/finance/invoices`).then(r => r.json()).then(d => {
+      const items = Array.isArray(d) ? d : d.invoices || d.items || [];
+      setInvoices(items);
+      setSummary({
+        total_invoiced: items.reduce((sum: number, inv: any) => sum + (inv.total || inv.amount || 0), 0),
+        total_collected: items.reduce((sum: number, inv: any) => sum + (inv.amount_paid || inv.paid_amount || 0), 0),
+        total_outstanding: items.reduce((sum: number, inv: any) => sum + (inv.balance_due ?? inv.balance ?? 0), 0),
+        total_overdue: items.filter((inv: any) => inv.status === 'overdue').reduce((sum: number, inv: any) => sum + (inv.balance_due ?? inv.balance ?? 0), 0),
+      });
+    }).catch(() => {});
   }, []);
 
   const filtered = filter === 'all' ? invoices : invoices.filter((i: any) => i.status === filter || i.payment_status === filter);
@@ -91,11 +99,11 @@ export default function InvoiceScreen() {
             return (
               <tr key={inv.id} style={{ borderBottom: '1px solid #f0ede6' }}>
                 <td style={{ padding: 8, fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{inv.invoice_number}</td>
-                <td style={{ padding: 8, fontWeight: 500 }}>{inv.client_name || '—'}</td>
+                <td style={{ padding: 8, fontWeight: 500 }}>{inv.customer_name || inv.client_name || '—'}</td>
                 <td style={{ padding: 8, fontWeight: 600 }}>${(inv.total || 0).toFixed(2)}</td>
                 <td style={{ padding: 8, color: '#16a34a' }}>${(inv.amount_paid || inv.paid_amount || 0).toFixed(2)}</td>
                 <td style={{ padding: 8, color: (inv.balance_due || 0) > 0 ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
-                  ${(inv.balance_due || (inv.total || 0) - (inv.amount_paid || inv.paid_amount || 0)).toFixed(2)}
+                  ${((inv.balance_due ?? inv.balance) ?? (inv.total || 0) - (inv.amount_paid || inv.paid_amount || 0)).toFixed(2)}
                 </td>
                 <td style={{ padding: 8 }}>
                   <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 8, background: sc.bg, color: sc.color }}>{sc.label}</span>
@@ -104,7 +112,7 @@ export default function InvoiceScreen() {
                 <td style={{ padding: 8 }}>
                   <div style={{ display: 'flex', gap: 4 }}>
                     <button title="Download PDF" style={{ padding: 4, background: '#f5f3ef', border: 'none', borderRadius: 4, cursor: 'pointer' }}
-                      onClick={() => window.open(`${API}/invoices/${inv.id}/pdf`, '_blank')}>
+                      onClick={() => window.open(`${API}/finance/invoices/${inv.id}/pdf`, '_blank')}>
                       <Download size={12} />
                     </button>
                     <button title="Send to Client" style={{ padding: 4, background: '#f5f3ef', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
