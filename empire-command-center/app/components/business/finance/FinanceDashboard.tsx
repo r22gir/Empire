@@ -38,6 +38,44 @@ const DATE_RANGES: { value: DateRange; label: string }[] = [
   { value: 'ytd', label: 'YTD' },
 ];
 
+const EMPTY_DASHBOARD: DashboardData = {
+  revenue_mtd: 0,
+  revenue_trend: 0,
+  expenses_mtd: 0,
+  expenses_trend: 0,
+  net_profit: 0,
+  profit_trend: 0,
+  outstanding: 0,
+  aging: [
+    { label: '0-30 days', amount: 0 },
+    { label: '31-60 days', amount: 0 },
+    { label: '61-90 days', amount: 0 },
+    { label: '90+ days', amount: 0 },
+  ],
+  top_customers: [],
+};
+
+function normalizeDashboardData(data: any): DashboardData {
+  const aging = data?.aging ?? (data?.accounts_receivable_aging ? [
+    { label: '0-30 days', amount: data.accounts_receivable_aging['0_30'] ?? 0 },
+    { label: '31-60 days', amount: data.accounts_receivable_aging['31_60'] ?? 0 },
+    { label: '61-90 days', amount: data.accounts_receivable_aging['61_90'] ?? 0 },
+    { label: '90+ days', amount: data.accounts_receivable_aging['90_plus'] ?? 0 },
+  ] : EMPTY_DASHBOARD.aging);
+
+  return {
+    revenue_mtd: data?.revenue_mtd ?? data?.revenue?.mtd ?? 0,
+    revenue_trend: data?.revenue_trend ?? 0,
+    expenses_mtd: data?.expenses_mtd ?? data?.expenses?.mtd ?? 0,
+    expenses_trend: data?.expenses_trend ?? 0,
+    net_profit: data?.net_profit_mtd ?? (typeof data?.net_profit === 'number' ? data.net_profit : data?.net_profit?.mtd) ?? 0,
+    profit_trend: data?.profit_trend ?? 0,
+    outstanding: data?.outstanding_total ?? (typeof data?.outstanding === 'number' ? data.outstanding : data?.outstanding?.total) ?? 0,
+    aging,
+    top_customers: data?.top_customers ?? [],
+  };
+}
+
 function fmt(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(n);
 }
@@ -66,30 +104,9 @@ export default function FinanceDashboard() {
 
       if (dashRes.status === 'fulfilled' && dashRes.value.ok) {
         const data = await dashRes.value.json();
-        setDashboard({
-          revenue_mtd: 0, revenue_trend: 0, expenses_mtd: 0, expenses_trend: 0,
-          net_profit: 0, profit_trend: 0, outstanding: 0,
-          aging: [
-            { label: '0-30 days', amount: 0 },
-            { label: '31-60 days', amount: 0 },
-            { label: '61-90 days', amount: 0 },
-            { label: '90+ days', amount: 0 },
-          ],
-          top_customers: [],
-          ...data,
-        });
+        setDashboard(normalizeDashboardData(data));
       } else {
-        setDashboard({
-          revenue_mtd: 0, revenue_trend: 0, expenses_mtd: 0, expenses_trend: 0,
-          net_profit: 0, profit_trend: 0, outstanding: 0,
-          aging: [
-            { label: '0-30 days', amount: 0 },
-            { label: '31-60 days', amount: 0 },
-            { label: '61-90 days', amount: 0 },
-            { label: '90+ days', amount: 0 },
-          ],
-          top_customers: [],
-        });
+        setDashboard(EMPTY_DASHBOARD);
       }
 
       const txns: Transaction[] = [];

@@ -77,7 +77,7 @@ export default function ExpenseTracker() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          date: formDate,
+          expense_date: formDate,
           vendor: formVendor.trim(),
           category: formCategory,
           amount: Number(formAmount),

@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import json
 import os
+import sqlite3
 from pathlib import Path
 from datetime import datetime, date
 
@@ -54,6 +55,11 @@ QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
 class InvoiceCreate(BaseModel):
     customer_id: Optional[str] = None
     quote_id: Optional[str] = None
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_phone: Optional[str] = None
+    customer_address: Optional[str] = None
+    business_unit: Optional[str] = "workroom"
     subtotal: float = 0
     tax_rate: float = 0.06
     line_items: Optional[List[dict]] = None
@@ -88,6 +94,7 @@ class ExpenseCreate(BaseModel):
     amount: float
     receipt_path: Optional[str] = None
     expense_date: Optional[str] = None
+    date: Optional[str] = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -152,7 +159,120 @@ def _enrich_invoice(inv: dict) -> dict:
     """Parse JSON fields in an invoice row."""
     if inv:
         inv["line_items"] = json.loads(inv["line_items"]) if inv.get("line_items") else []
+        customer_name = inv.get("customer_name") or inv.get("client_name")
+        if customer_name:
+            inv["customer_name"] = customer_name
+        inv["amount"] = inv.get("total") or 0
+        inv["balance"] = inv.get("balance_due") or 0
     return inv
+
+
+def _safe_alter(conn, table: str, column: str, col_type: str, default=None):
+    try:
+        dflt = f" DEFAULT {default}" if default is not None else ""
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}{dflt}")
+    except sqlite3.OperationalError:
+        pass
+
+
+def _ensure_finance_extensions(conn):
+    """Keep legacy finance endpoints safe when jobs_unified has not run first."""
+    inv_cols = {
+        "job_id": "TEXT",
+        "client_name": "TEXT",
+        "client_email": "TEXT",
+        "client_phone": "TEXT",
+        "client_address": "TEXT",
+        "billing_address": "TEXT",
+        "business_unit": "TEXT DEFAULT 'workroom'",
+        "discount_amount": "REAL DEFAULT 0",
+        "discount_type": "TEXT DEFAULT 'flat'",
+        "deposit_required": "REAL DEFAULT 0",
+        "deposit_received": "REAL DEFAULT 0",
+        "payment_status": "TEXT DEFAULT 'unpaid'",
+        "invoice_date": "TEXT",
+    }
+    for col, ctype in inv_cols.items():
+        parts = ctype.split(" DEFAULT ")
+        _safe_alter(conn, "invoices", col, parts[0], parts[1] if len(parts) > 1 else None)
+
+
+def _find_or_create_customer_for_invoice(
+    conn,
+    name: str | None,
+    email: str | None,
+    phone: str | None,
+    address: str | None,
+    business_unit: str | None,
+) -> Optional[str]:
+    customer_name = (name or "").strip()
+    customer_email = (email or "").strip()
+    customer_phone = (phone or "").strip()
+    customer_address = (address or "").strip()
+    business_key = _normalise_business(business_unit or "workroom")
+    if business_key == "all":
+        business_key = "workroom"
+
+    customer_id = None
+    if customer_email:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(email) = lower(?)",
+            (customer_email,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if not customer_id and customer_name:
+        cust = conn.execute(
+            "SELECT id FROM customers WHERE lower(name) = lower(?)",
+            (customer_name,),
+        ).fetchone()
+        if cust:
+            customer_id = cust["id"]
+
+    if customer_id:
+        conn.execute(
+            """UPDATE customers
+               SET email = COALESCE(NULLIF(email, ''), ?),
+                   phone = COALESCE(NULLIF(phone, ''), ?),
+                   address = COALESCE(NULLIF(address, ''), ?),
+                   business = CASE WHEN business IS NULL OR business = '' OR business = 'empire'
+                                   THEN ? ELSE business END,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                customer_email or None,
+                customer_phone or None,
+                customer_address or None,
+                business_key,
+                customer_id,
+            ),
+        )
+        return customer_id
+
+    if not customer_name:
+        return None
+
+    conn.execute(
+        """INSERT INTO customers
+           (name, email, phone, address, type, tags, notes, total_revenue,
+            lifetime_quotes, source, business)
+           VALUES (?, ?, ?, ?, 'residential', '[]', NULL, 0, 0, 'invoice', ?)""",
+        (
+            customer_name,
+            customer_email or None,
+            customer_phone or None,
+            customer_address or None,
+            business_key,
+        ),
+    )
+    cust = conn.execute(
+        """SELECT id FROM customers
+           WHERE name = ? AND COALESCE(email, '') = COALESCE(?, '')
+           ORDER BY created_at DESC LIMIT 1""",
+        (customer_name, customer_email or None),
+    ).fetchone()
+    return cust["id"] if cust else None
 
 
 def _find_or_create_customer_for_quote(conn, quote: dict, business_unit: str) -> Optional[str]:
@@ -237,6 +357,7 @@ def finance_dashboard(request: Request):
     year_start = f"{now.year}-01-01"
 
     with get_db() as conn:
+        _ensure_finance_extensions(conn)
         # Revenue MTD
         rev_mtd = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE payment_date >= ?",
@@ -289,7 +410,10 @@ def finance_dashboard(request: Request):
 
         # Recent invoices
         recent_invoices = dict_rows(conn.execute(
-            "SELECT * FROM invoices ORDER BY created_at DESC LIMIT 5"
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i
+               LEFT JOIN customers c ON c.id = i.customer_id
+               ORDER BY i.created_at DESC LIMIT 5"""
         ).fetchall())
         for inv in recent_invoices:
             inv["line_items"] = json.loads(inv["line_items"]) if inv.get("line_items") else []
@@ -300,26 +424,56 @@ def finance_dashboard(request: Request):
             (month_start,)
         ).fetchall())
 
+        top_customers = dict_rows(conn.execute(
+            """SELECT name, COALESCE(total_revenue, 0) as revenue
+               FROM customers
+               ORDER BY COALESCE(total_revenue, 0) DESC, updated_at DESC
+               LIMIT 5"""
+        ).fetchall())
+
+        aging_list = [
+            {"label": "0-30 days", "amount": aging["0_30"]},
+            {"label": "31-60 days", "amount": aging["31_60"]},
+            {"label": "61-90 days", "amount": aging["61_90"]},
+            {"label": "90+ days", "amount": aging["90_plus"]},
+        ]
+        rev_mtd = round(rev_mtd, 2)
+        rev_ytd = round(rev_ytd, 2)
+        exp_mtd = round(exp_mtd, 2)
+        exp_ytd = round(exp_ytd, 2)
+        net_mtd = round(rev_mtd - exp_mtd, 2)
+        net_ytd = round(rev_ytd - exp_ytd, 2)
+        outstanding_total = round(outstanding["total"], 2)
+
         return {
             "revenue": {
-                "mtd": round(rev_mtd, 2),
-                "ytd": round(rev_ytd, 2),
+                "mtd": rev_mtd,
+                "ytd": rev_ytd,
             },
             "expenses": {
-                "mtd": round(exp_mtd, 2),
-                "ytd": round(exp_ytd, 2),
+                "mtd": exp_mtd,
+                "ytd": exp_ytd,
                 "breakdown_mtd": expense_breakdown,
             },
             "net_profit": {
-                "mtd": round(rev_mtd - exp_mtd, 2),
-                "ytd": round(rev_ytd - exp_ytd, 2),
+                "mtd": net_mtd,
+                "ytd": net_ytd,
             },
             "outstanding": {
-                "total": round(outstanding["total"], 2),
+                "total": outstanding_total,
                 "count": outstanding["count"],
             },
             "accounts_receivable_aging": aging,
             "recent_invoices": recent_invoices,
+            "revenue_mtd": rev_mtd,
+            "revenue_trend": 0,
+            "expenses_mtd": exp_mtd,
+            "expenses_trend": 0,
+            "net_profit_mtd": net_mtd,
+            "outstanding_total": outstanding_total,
+            "profit_trend": 0,
+            "aging": aging_list,
+            "top_customers": top_customers,
         }
 
 
@@ -587,16 +741,16 @@ def list_invoices(
     params = []
 
     if status:
-        clauses.append("status = ?")
+        clauses.append("i.status = ?")
         params.append(status)
     if customer_id:
-        clauses.append("customer_id = ?")
+        clauses.append("i.customer_id = ?")
         params.append(customer_id)
     if date_from:
-        clauses.append("created_at >= ?")
+        clauses.append("i.created_at >= ?")
         params.append(date_from)
     if date_to:
-        clauses.append("created_at <= ?")
+        clauses.append("i.created_at <= ?")
         params.append(date_to)
 
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
@@ -604,17 +758,21 @@ def list_invoices(
     params.extend([limit, offset])
 
     with get_db() as conn:
+        _ensure_finance_extensions(conn)
         rows = conn.execute(
-            f"SELECT * FROM invoices{where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            f"""SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+                FROM invoices i
+                LEFT JOIN customers c ON c.id = i.customer_id
+                {where} ORDER BY i.created_at DESC LIMIT ? OFFSET ?""",
             params
         ).fetchall()
 
         total = conn.execute(
-            f"SELECT COUNT(*) FROM invoices{where}", params_count
+            f"SELECT COUNT(*) FROM invoices i {where}", params_count
         ).fetchone()[0]
 
         invoices = [_enrich_invoice(dict_row(r)) for r in rows]
-        return {"invoices": invoices, "total": total, "limit": limit, "offset": offset}
+        return {"invoices": invoices, "items": invoices, "total": total, "limit": limit, "offset": offset}
 
 
 @limiter.limit("30/minute")
@@ -622,6 +780,21 @@ def list_invoices(
 def create_invoice(request: Request, invoice: InvoiceCreate):
     """Create a new invoice."""
     with get_db() as conn:
+        _ensure_finance_extensions(conn)
+        business_unit = _normalise_business(invoice.business_unit or "workroom")
+        if business_unit == "all":
+            business_unit = "workroom"
+        customer_id = invoice.customer_id
+        if not customer_id and invoice.customer_name:
+            customer_id = _find_or_create_customer_for_invoice(
+                conn,
+                invoice.customer_name,
+                invoice.customer_email,
+                invoice.customer_phone,
+                invoice.customer_address,
+                business_unit,
+            )
+
         inv_number = _next_invoice_number(conn)
         tax_amount = round(invoice.subtotal * invoice.tax_rate, 2)
         total = round(invoice.subtotal + tax_amount, 2)
@@ -641,11 +814,15 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
         conn.execute(
             """INSERT INTO invoices
                (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
-                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date)
-               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)""",
+                tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
+                client_name, client_email, client_phone, client_address, business_unit,
+                invoice_date, payment_status)
+               VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?,
+                       ?, 'unpaid')""",
             (
                 inv_number,
-                invoice.customer_id,
+                customer_id,
                 invoice.quote_id,
                 invoice.subtotal,
                 invoice.tax_rate,
@@ -656,11 +833,21 @@ def create_invoice(request: Request, invoice: InvoiceCreate):
                 invoice.notes,
                 invoice.terms,
                 due,
+                invoice.customer_name,
+                invoice.customer_email,
+                invoice.customer_phone,
+                invoice.customer_address,
+                business_unit,
+                date.today().isoformat(),
             )
         )
 
         row = conn.execute(
-            "SELECT * FROM invoices WHERE invoice_number = ?", (inv_number,)
+            """SELECT i.*, COALESCE(NULLIF(i.client_name, ''), c.name) as customer_name
+               FROM invoices i
+               LEFT JOIN customers c ON c.id = i.customer_id
+               WHERE i.invoice_number = ?""",
+            (inv_number,)
         ).fetchone()
         return {"invoice": _enrich_invoice(dict_row(row))}
 
@@ -1275,7 +1462,8 @@ def list_payments(
             f"SELECT COUNT(*) FROM payments{where}", params_count
         ).fetchone()[0]
 
-        return {"payments": dict_rows(rows), "total": total, "limit": limit, "offset": offset}
+        payments = dict_rows(rows)
+        return {"payments": payments, "items": payments, "total": total, "limit": limit, "offset": offset}
 
 
 # ── Expenses ─────────────────────────────────────────────────────────
@@ -1322,7 +1510,10 @@ def list_expenses(
             f"SELECT COUNT(*) FROM expenses{where}", params_count
         ).fetchone()[0]
 
-        return {"expenses": dict_rows(rows), "total": total, "limit": limit, "offset": offset}
+        expenses = dict_rows(rows)
+        for exp in expenses:
+            exp["date"] = exp.get("expense_date")
+        return {"expenses": expenses, "items": expenses, "total": total, "limit": limit, "offset": offset}
 
 
 @limiter.limit("30/minute")
@@ -1330,7 +1521,7 @@ def list_expenses(
 def create_expense(request: Request, expense: ExpenseCreate):
     """Create a new expense."""
     with get_db() as conn:
-        exp_date = expense.expense_date or date.today().isoformat()
+        exp_date = expense.expense_date or expense.date or date.today().isoformat()
         conn.execute(
             """INSERT INTO expenses
                (id, category, vendor, description, amount, receipt_path, expense_date)
@@ -1348,7 +1539,9 @@ def create_expense(request: Request, expense: ExpenseCreate):
         row = conn.execute(
             "SELECT * FROM expenses ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
-        return {"expense": dict_row(row)}
+        result = dict_row(row)
+        result["date"] = result.get("expense_date")
+        return {"expense": result}
 
 
 @limiter.limit("30/minute")
