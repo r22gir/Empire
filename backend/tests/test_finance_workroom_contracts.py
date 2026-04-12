@@ -1,6 +1,7 @@
 import importlib
 import json
 from itertools import count
+from pathlib import Path
 
 from starlette.requests import Request
 
@@ -26,6 +27,14 @@ def _load_finance(monkeypatch, tmp_path):
 
     importlib.reload(finance)
     return finance, database
+
+
+def test_canonical_finance_router_precedes_legacy_financial_router():
+    main_source = Path(__file__).resolve().parents[1].joinpath("app", "main.py").read_text()
+
+    assert main_source.index('load_router("app.routers.finance"') < main_source.index(
+        'load_router("app.routers.financial"'
+    )
 
 
 def test_workroom_finance_ui_contracts_preserve_customer_and_list_shapes(monkeypatch, tmp_path):

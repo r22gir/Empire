@@ -131,7 +131,7 @@ export default function FinanceModule() {
     Promise.allSettled([
       fetch(`${API}/finance/dashboard`).then(r => r.json()),
       fetch(`${API}/craftforge/designs`).then(r => r.json()),
-      fetch(`${API}/finance/invoices`).then(r => r.json()),
+      fetch(`${API}/finance/invoices?business=woodcraft`).then(r => r.json()),
       fetch(`${API}/finance/payments?limit=10`).then(r => r.json()),
       fetch(`${API}/finance/expenses?limit=100&business=woodcraft`).then(r => r.json()),
     ]).then(([dashRes, desRes, invRes, payRes, expRes]) => {
@@ -159,7 +159,7 @@ export default function FinanceModule() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const refreshInvoices = useCallback(() => {
-    fetch(`${API}/finance/invoices`).then(r => r.json()).then(raw => {
+    fetch(`${API}/finance/invoices?business=woodcraft`).then(r => r.json()).then(raw => {
       setInvoices(Array.isArray(raw) ? raw : raw.invoices || []);
     }).catch(() => {});
     fetch(`${API}/finance/payments?limit=10`).then(r => r.json()).then(raw => {
