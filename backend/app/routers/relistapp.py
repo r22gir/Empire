@@ -10,7 +10,9 @@ from typing import Optional, List
 import json
 import logging
 import sqlite3
+import re
 from datetime import datetime, date
+from urllib.parse import unquote, urlparse
 
 from app.db.database import get_db, dict_rows, dict_row, DB_PATH
 from app.config.pricing_tiers import PRICING_TIERS, check_relist_within_limit, get_relist_limit
@@ -1266,6 +1268,135 @@ class ProductExtractedData(BaseModel):
     model: str = ""
     availability: str = "in_stock"
     source_name: str = "Unknown"
+    extraction_status: str = "live"
+    extraction_error: str = ""
+    needs_manual_review: bool = False
+
+
+def _parse_price_text(value: str | None) -> float:
+    if not value:
+        return 0.0
+    match = re.search(r"\$?\s*([0-9][0-9,]*(?:\.[0-9]{2})?)", value.replace("\xa0", " "))
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return 0.0
+
+
+def _title_from_url(url: str, platform: str) -> str:
+    parsed = urlparse(url)
+    host = parsed.netloc.replace("www.", "") or platform or "source"
+    tail = unquote(parsed.path.rstrip("/").split("/")[-1] if parsed.path else "").replace("-", " ").replace("_", " ").strip()
+    if tail and not tail.lower().startswith(("dp", "ip", "gp")):
+        return tail[:120]
+    return f"Unverified product from {host}"
+
+
+def _extract_product_from_html(url: str, platform: str, html: str) -> ProductExtractedData:
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "html.parser")
+    title = ""
+    for selector in [
+        "#productTitle",
+        "h1[itemprop='name']",
+        "h1",
+        "meta[property='og:title']",
+        "meta[name='twitter:title']",
+        "title",
+    ]:
+        elem = soup.select_one(selector)
+        if not elem:
+            continue
+        title = elem.get("content", "") if elem.name == "meta" else elem.get_text(" ", strip=True)
+        if title:
+            break
+    title = re.sub(r"\s+", " ", title).strip(" -|") or _title_from_url(url, platform)
+
+    description = ""
+    desc_elem = soup.select_one("meta[name='description']") or soup.select_one("meta[property='og:description']")
+    if desc_elem:
+        description = desc_elem.get("content", "").strip()
+
+    price = 0.0
+    for selector in [
+        "meta[property='product:price:amount']",
+        "meta[itemprop='price']",
+        "[itemprop='price']",
+        ".a-price .a-offscreen",
+        "#priceblock_ourprice",
+        "#priceblock_dealprice",
+        ".x-price-primary span",
+        "[data-testid='price-wrap']",
+        ".price",
+    ]:
+        elem = soup.select_one(selector)
+        if not elem:
+            continue
+        raw = elem.get("content", "") if elem.name == "meta" else elem.get_text(" ", strip=True)
+        price = _parse_price_text(raw)
+        if price > 0:
+            break
+
+    images = []
+    for selector in ["meta[property='og:image']", "img#landingImage", "img[itemprop='image']"]:
+        elem = soup.select_one(selector)
+        ref = elem.get("content") if elem and elem.name == "meta" else elem.get("src") if elem else ""
+        if ref and ref not in images:
+            images.append(ref)
+
+    availability = "in_stock"
+    availability_text = " ".join([
+        elem.get("content", "") if elem.name == "meta" else elem.get_text(" ", strip=True)
+        for elem in soup.select("[itemprop='availability'], #availability, .availability")
+    ]).lower()
+    if "out of stock" in availability_text or "unavailable" in availability_text:
+        availability = "out_of_stock"
+    elif "limited" in availability_text:
+        availability = "limited"
+
+    brand = ""
+    brand_elem = soup.select_one("[itemprop='brand']") or soup.select_one("meta[property='product:brand']")
+    if brand_elem:
+        brand = brand_elem.get("content", "") if brand_elem.name == "meta" else brand_elem.get_text(" ", strip=True)
+
+    category = ""
+    category_elem = soup.select_one("meta[property='product:category']") or soup.select_one("nav[aria-label='Breadcrumb']") or soup.select_one("#wayfinding-breadcrumbs_container")
+    if category_elem:
+        category = category_elem.get("content", "") if category_elem.name == "meta" else category_elem.get_text(" ", strip=True)
+
+    return ProductExtractedData(
+        title=title[:220],
+        description=description[:1000],
+        price=price,
+        images=images[:6],
+        brand=brand[:120],
+        category=category[:180],
+        availability=availability,
+        source_name=(platform or urlparse(url).netloc or "source").title(),
+        extraction_status="live" if price > 0 and not title.startswith("Unverified product") else "partial",
+        needs_manual_review=price <= 0 or title.startswith("Unverified product"),
+        extraction_error="" if price > 0 else "No source price found; founder review needed before draft listing.",
+    )
+
+
+async def _extract_product_from_url(url: str, platform: str) -> ProductExtractedData:
+    import httpx
+
+    if not url or not url.startswith(("http://", "https://")):
+        raise ValueError("A valid http(s) product URL is required")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.8",
+    }
+    async with httpx.AsyncClient(timeout=18.0, follow_redirects=True) as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        return _extract_product_from_html(str(resp.url), platform, resp.text)
 
 
 async def _scrape_live_price(url: str, platform: str) -> dict:
@@ -1474,12 +1605,17 @@ async def import_url_full(req: UrlImportRequest):
     except Exception as e:
         log.warning(f"Extraction failed, using minimal data: {e}")
         extracted = ProductExtractedData(
-            title=f"Product from {platform}",
+            title=_title_from_url(url, platform),
             source_name=platform.title(),
+            availability="unknown",
+            extraction_status="failed",
+            extraction_error=str(e),
+            needs_manual_review=True,
         )
 
     market = _estimate_market_value(extracted.title, extracted.category, extracted.price)
-    deal = _score_deal(market["market_price"], extracted.price, extracted.shipping_cost, market["fees_estimate"])
+    effective_shipping = extracted.shipping_cost if extracted.shipping_cost > 0 else market["shipping_estimate"]
+    deal = _score_deal(market["market_price"], extracted.price, effective_shipping, market["fees_estimate"])
 
     with get_db() as db:
         cur = db.execute(
@@ -1488,9 +1624,15 @@ async def import_url_full(req: UrlImportRequest):
                 source_images, category, brand, condition, availability, notes)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (platform, url, extracted.title, extracted.description, extracted.price,
-             extracted.shipping_cost, json.dumps(extracted.images), extracted.category,
+             effective_shipping, json.dumps(extracted.images), extracted.category,
              extracted.brand, extracted.condition, extracted.availability,
-             json.dumps({"deal_score": deal, "market_estimate": market})),
+             json.dumps({
+                 "deal_score": deal,
+                 "market_estimate": market,
+                 "extraction_status": extracted.extraction_status,
+                 "extraction_error": extracted.extraction_error,
+                 "needs_manual_review": extracted.needs_manual_review,
+             })),
         )
         source_id = cur.lastrowid
 
@@ -1500,11 +1642,14 @@ async def import_url_full(req: UrlImportRequest):
         "source_url": url,
         "title": extracted.title,
         "price": extracted.price,
-        "shipping_cost": extracted.shipping_cost,
+        "shipping_cost": effective_shipping,
         "images": extracted.images[:4],
         "brand": extracted.brand,
         "market_estimate": market,
         "deal": {**deal, "market_price": market["market_price"]},
+        "extraction_status": extracted.extraction_status,
+        "extraction_error": extracted.extraction_error,
+        "needs_manual_review": extracted.needs_manual_review,
         "saved": True,
     }
 

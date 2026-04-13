@@ -151,6 +151,7 @@ function ScoutSection() {
   const [scoutRunning, setScoutRunning] = useState(false);
   const [scoutResult, setScoutResult] = useState<any>(null);
   const [selectedSources, setSelectedSources] = useState<string[]>(['amazon_bestsellers']);
+  const [draftStatus, setDraftStatus] = useState<Record<number, string>>({});
 
   useEffect(() => { fetch(`${RA_API}/sources`).then(r => r.json()).then(d => setSources(d.items || [])).catch(() => {}); }, []);
 
@@ -201,6 +202,32 @@ function ScoutSection() {
     setSelectedSources(prev =>
       prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src]
     );
+  };
+
+  const createDraftFromSource = async (s: any) => {
+    if (!s.source_price || s.source_price <= 0) {
+      setDraftStatus(prev => ({ ...prev, [s.id]: 'Add a real source price before creating a draft.' }));
+      return;
+    }
+    let notes: any = {};
+    try { if (s.notes) notes = typeof s.notes === 'string' ? JSON.parse(s.notes) : s.notes; } catch {}
+    const marketEstimate = s.market_estimate || notes.market_estimate;
+    setDraftStatus(prev => ({ ...prev, [s.id]: 'Creating draft...' }));
+    const res = await fetch(`${RA_API}/listings/from-source`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_id: s.id,
+        platform: 'ebay',
+        your_price: marketEstimate?.market_price || s.source_price * 2 || 29.99,
+        platform_fee_percent: 13,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setDraftStatus(prev => ({
+      ...prev,
+      [s.id]: res.ok ? `Draft #${data.id} created for ${data.platform || 'ebay'}.` : (data.detail || 'Draft creation failed.'),
+    }));
   };
 
   return (
@@ -269,6 +296,11 @@ function ScoutSection() {
               <span>Score: <b>{lastResult.deal?.score || 0}/100</b> <span style={{ color: lastResult.deal?.label === 'strong' ? '#16a34a' : lastResult.deal?.label === 'medium' ? '#ca8a04' : '#dc2626' }}>({lastResult.deal?.label})</span></span>
             </div>
             {lastResult.deal?.reason && <div style={{ fontSize: 11, color: '#888', marginTop: 4 }}>{lastResult.deal.reason}</div>}
+            {lastResult.needs_manual_review && (
+              <div style={{ fontSize: 11, color: '#b45309', marginTop: 6 }}>
+                Needs review: {lastResult.extraction_error || 'source price/details were not fully verified.'}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -281,29 +313,40 @@ function ScoutSection() {
         <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
           {sources.map((s: any) => {
             let deal = { score: 0, label: 'weak', reason: '' };
+            let notes: any = {};
             try { if (s.notes) { const n = typeof s.notes === 'string' ? JSON.parse(s.notes) : s.notes; deal = n.deal_score || deal; } } catch {}
+            try { if (s.notes) notes = typeof s.notes === 'string' ? JSON.parse(s.notes) : s.notes; } catch {}
+            const marketEstimate = s.market_estimate || notes.market_estimate;
+            const needsReview = !!notes.needs_manual_review || !s.source_price || s.source_price <= 0;
             return (
               <div key={s.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 14 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{s.title?.slice(0, 60)}</div>
                 <div style={{ fontSize: 11, color: '#888' }}>{s.source_platform} — ${(s.source_price || 0).toFixed(2)}</div>
-                {s.market_estimate && (
+                {needsReview && (
+                  <div style={{ fontSize: 10, color: '#b45309', marginTop: 4 }}>
+                    Needs price/details review before listing.
+                  </div>
+                )}
+                {marketEstimate && (
                   <div style={{ fontSize: 11, marginTop: 4 }}>
-                    <span style={{ color: '#16a34a' }}>Profit ${(s.market_estimate.estimated_profit || 0).toFixed(2)}</span>
-                    <span style={{ marginLeft: 8, color: '#888' }}>ROI {(s.market_estimate.roi_percent || 0).toFixed(0)}%</span>
+                    <span style={{ color: '#16a34a' }}>Profit ${(marketEstimate.estimated_profit || 0).toFixed(2)}</span>
+                    <span style={{ marginLeft: 8, color: '#888' }}>ROI {(marketEstimate.roi_percent || 0).toFixed(0)}%</span>
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                  <button style={{ fontSize: 10, padding: '4px 10px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
-                    onClick={async () => {
-                      await fetch(`${RA_API}/listings/from-source`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source_id: s.id, platform: 'ebay', your_price: s.market_estimate?.market_price || s.source_price * 2 || 29.99, platform_fee_percent: 13 }) });
-                    }}>
-                    Create Draft
+                  <button disabled={needsReview} style={{ fontSize: 10, padding: '4px 10px', background: needsReview ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 6, cursor: needsReview ? 'not-allowed' : 'pointer', fontWeight: 600 }}
+                    onClick={() => createDraftFromSource(s)}>
+                    {needsReview ? 'Needs Price' : 'Create Draft'}
                   </button>
                   <button style={{ fontSize: 10, padding: '4px 10px', background: '#f5f3ef', color: '#666', border: 'none', borderRadius: 6, cursor: 'pointer' }}
-                    onClick={async () => { await fetch(`${RA_API}/sources/${s.id}/analyze`, { method: 'POST' }); }}>
+                    onClick={async () => {
+                      const res = await fetch(`${RA_API}/sources/${s.id}/analyze`, { method: 'POST' });
+                      setDraftStatus(prev => ({ ...prev, [s.id]: res.ok ? 'Deal score refreshed.' : 'Refresh failed.' }));
+                    }}>
                     Refresh
                   </button>
                 </div>
+                {draftStatus[s.id] && <div style={{ fontSize: 10, color: draftStatus[s.id].includes('failed') || draftStatus[s.id].includes('Add') ? '#dc2626' : '#16a34a', marginTop: 6 }}>{draftStatus[s.id]}</div>}
               </div>
             );
           })}
