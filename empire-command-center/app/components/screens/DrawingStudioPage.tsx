@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback, useRef, lazy, Suspense } from 'react';
+import { useState, useCallback, useRef, lazy, Suspense, useEffect } from 'react';
 import { API } from '../../lib/api';
 const ProductCatalogPage = lazy(() => import('./ProductCatalogPage'));
 
@@ -46,6 +46,17 @@ interface DrawingRequest {
   filenameType: string;
 }
 
+interface CatalogStyle {
+  style_key: string;
+  style_name: string;
+  business_unit: string;
+}
+
+interface CatalogCategory {
+  key: string;
+  name: string;
+}
+
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableSerialize).join(',')}]`;
@@ -58,8 +69,8 @@ function stableSerialize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export default function DrawingStudioPage() {
-  const [view, setView] = useState<'studio' | 'catalog'>('studio');
+export default function DrawingStudioPage({ initialView = 'studio' }: { initialView?: 'studio' | 'catalog' } = {}) {
+  const [view, setView] = useState<'studio' | 'catalog'>(initialView);
   const [itemType, setItemType] = useState('generic');
   const [name, setName] = useState('');
   const [quoteNum, setQuoteNum] = useState('');
@@ -87,6 +98,10 @@ export default function DrawingStudioPage() {
   const [lf, setLf] = useState(0);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setView(initialView);
+  }, [initialView]);
 
   const showStatus = (msg: string, duration = 4000) => {
     setStatusMsg(msg);
@@ -358,6 +373,77 @@ export default function DrawingStudioPage() {
     }
   }, [buildDrawingRequest, hasDimensions]);
 
+  const generateCatalogDrawing = useCallback(async (style: CatalogStyle, category: CatalogCategory, mode: string) => {
+    const drawingMode = mode === 'shop' ? 'shop_drawing' : mode;
+    const isWindow = category.key === 'window';
+    const defaultDimensions: Record<string, string> = isWindow
+      ? { width: '72"', height: '96"', drop: '96"' }
+      : { width: '48"', depth: '24"', height: '36"' };
+    const catalogNotes = drawingMode === 'shop_drawing'
+      ? 'Shop drawing generated from Product Catalog. Verify final field measurements before fabrication.'
+      : 'Presentation drawing generated from Product Catalog.';
+    const nextName = `${style.style_name} ${category.name}`;
+    const nextDimensions = defaultDimensions;
+    const nextItemType = isWindow ? 'window' : category.key;
+
+    setView('studio');
+    setItemType(nextItemType);
+    setName(nextName);
+    setQuoteNum('');
+    setNotes(catalogNotes);
+    setDimensions(nextDimensions);
+    setSvgPreview('');
+    setPreviewSignature('');
+    setMultiMode(false);
+    setAnalyzedItems([]);
+    setAnalyzedDrawings([]);
+    setSelectedItemId(null);
+    setLoading(true);
+    setStatusMsg(`Generating ${drawingMode === 'shop_drawing' ? 'shop drawing' : 'presentation drawing'} for ${style.style_name}...`);
+
+    try {
+      const res = await fetch(`${API}/drawings/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_text: `${style.style_name} ${category.name} ${drawingMode}`,
+          params: {
+            name: nextName,
+            item_type: nextItemType,
+            style_key: style.style_key,
+            drawing_mode: drawingMode,
+            dimensions: nextDimensions,
+            notes: catalogNotes,
+            treatment_type: isWindow ? style.style_key : undefined,
+            pleat_style: isWindow ? style.style_key : undefined,
+            mount_type: isWindow ? 'outside' : undefined,
+            panels: isWindow ? 2 : undefined,
+            fullness: isWindow ? 2.5 : undefined,
+            stack_direction: isWindow ? 'split' : undefined,
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(`Catalog drawing failed: ${res.status}`);
+      const data = await res.json();
+      if (!data.svg) throw new Error('Catalog drawing response did not include SVG');
+      setSvgPreview(data.svg);
+      setPreviewSignature(stableSerialize({
+        name: nextName,
+        item_type: nextItemType,
+        dimensions: nextDimensions,
+        notes: catalogNotes,
+        bench_type: benchType,
+        lf,
+        quote_num: '',
+      }));
+      setStatusMsg('');
+    } catch {
+      showStatus('Catalog drawing generation failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [benchType, lf]);
+
   const downloadPdf = useCallback(async () => {
     if (!hasDimensions) return;
     setPdfLoading(true);
@@ -483,7 +569,7 @@ export default function DrawingStudioPage() {
       {/* Catalog view */}
       {view === 'catalog' && (
         <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: '#999' }}>Loading catalog...</div>}>
-          <ProductCatalogPage />
+          <ProductCatalogPage onDrawStyle={generateCatalogDrawing} />
         </Suspense>
       )}
 

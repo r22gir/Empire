@@ -38,7 +38,6 @@ import VetForgePage from './components/screens/VetForgePage';
 import PetForgePage from './components/screens/PetForgePage';
 import VisionAnalysisPage from './components/screens/VisionAnalysisPage';
 import DrawingStudioPage from './components/screens/DrawingStudioPage';
-import ProductCatalogPage from './components/screens/ProductCatalogPage';
 import ForgeCRMPage from './components/screens/ForgeCRMPage';
 import BusinessProfileScreen from './components/screens/BusinessProfileScreen';
 import DesksScreen from './components/screens/DesksScreen';
@@ -322,7 +321,7 @@ export default function CommandCenter() {
         case 'vision':
           return <VisionAnalysisPage />;
         case 'drawings':
-          return activeSection === 'catalog' ? <ProductCatalogPage /> : <DrawingStudioPage />;
+          return <DrawingStudioPage initialView={activeSection === 'catalog' ? 'catalog' : 'studio'} />;
         default: return <DashboardScreen activeTab={activeTab} />;
       }
     }

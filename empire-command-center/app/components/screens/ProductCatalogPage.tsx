@@ -41,7 +41,11 @@ interface CatalogCategory {
   modes: string[]; styles: { style_key: string; style_name: string; renderer: string; readiness: string; business_unit: string; modes: string[] }[];
 }
 
-export default function ProductCatalogPage() {
+interface ProductCatalogPageProps {
+  onDrawStyle?: (style: CatalogCategory['styles'][number], category: CatalogCategory, mode: string) => void;
+}
+
+export default function ProductCatalogPage({ onDrawStyle }: ProductCatalogPageProps = {}) {
   const [catalog, setCatalog] = useState<{ categories: CatalogCategory[]; total_styles: number; total_categories: number } | null>(null);
   const [search, setSearch] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -73,8 +77,11 @@ export default function ProductCatalogPage() {
 
   // Navigate to Drawing Studio with pre-selected style
   const handleDrawThis = (style: any) => {
-    // Switch parent view back to studio with the item type pre-selected
-    // For now, send a MAX chat message to generate the drawing
+    if (selectedCategory && onDrawStyle) {
+      onDrawStyle(style, selectedCategory, drawMode);
+      return;
+    }
+
     const msg = `Draw a ${style.style_name} (${selectedCategory?.name}) in ${drawMode} mode`;
     window.open(`/?screen=chat&autoMessage=${encodeURIComponent(msg)}`, '_self');
   };
