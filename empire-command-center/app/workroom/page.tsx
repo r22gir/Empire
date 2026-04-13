@@ -23,6 +23,12 @@ const services = [
 export default function WorkroomLanding() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f5f3ef', fontFamily: "'Outfit', 'Segoe UI', sans-serif" }}>
+      <nav style={{ display: 'flex', gap: 14, alignItems: 'center', justifyContent: 'center', padding: '14px 20px', background: '#fff', borderBottom: '1px solid #e5e0d8' }}>
+        <a href="/max" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>MAX</a>
+        <a href="/workroom" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>Workroom</a>
+        <a href="/woodcraft" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>WoodCraft</a>
+        <a href="/" style={{ color: '#1a1a2e', textDecoration: 'none', fontSize: 13, fontWeight: 800 }}>Command Center</a>
+      </nav>
       {/* Hero */}
       <header style={{
         background: 'linear-gradient(135deg, #1a1a2e 0%, #2d2d44 100%)',
@@ -82,6 +88,19 @@ export default function WorkroomLanding() {
           </a>
         </div>
       </header>
+
+      <section style={{ maxWidth: 1040, margin: '0 auto', padding: '44px 24px 0', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        {[
+          ['/diagrams/window-treatments/drapery_pinch_pleat.svg', 'Custom drapery'],
+          ['/diagrams/window-treatments/roman_flat.svg', 'Roman shades'],
+          ['/diagrams/furniture/bench_banquette.svg', 'Banquette cushions'],
+        ].map(([src, label]) => (
+          <div key={src} style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 8, padding: 18, textAlign: 'center' }}>
+            <img src={src} alt="" style={{ width: '100%', maxHeight: 150, objectFit: 'contain' }} />
+            <div style={{ marginTop: 10, color: '#1a1a2e', fontSize: 13, fontWeight: 800 }}>{label}</div>
+          </div>
+        ))}
+      </section>
 
       {/* Services */}
       <section style={{ maxWidth: 1100, margin: '0 auto', padding: '64px 24px' }}>
@@ -151,6 +170,16 @@ export default function WorkroomLanding() {
           marginRight: 'auto',
         }}>
           Get a free consultation and estimate. We&apos;ll measure, design, and install — you just enjoy the result.
+        </p>
+        <p style={{
+          color: '#333',
+          fontSize: 15,
+          marginBottom: 24,
+          maxWidth: 520,
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }}>
+          AI-assisted quote prep is available for photos, measurements, fabric notes, and project intake.
         </p>
         <a
           href="/intake/signup"
