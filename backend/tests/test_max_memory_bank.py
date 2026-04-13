@@ -1,4 +1,5 @@
 from app.services.max.unified_message_store import UnifiedMessageStore
+from app.routers.webhooks import classify_max_email
 
 
 def test_memory_bank_canonical_fields_and_filters(tmp_path):
@@ -64,3 +65,19 @@ def test_memory_bank_keeps_unverified_email_truthful(tmp_path):
     assert all_email[0]["founder_verified"] is False
     assert all_email[0]["sender"] == "someone@example.com"
     assert founder_email == []
+
+
+def test_email_intake_classification_is_truthful_and_deterministic():
+    task = classify_max_email(
+        "Please create a task",
+        "Please review this supplier PDF and follow up tomorrow.",
+        [{"type": "email_file", "ref": "supplier.pdf"}],
+    )
+    question = classify_max_email("Question", "Can you check where this order stands?", None)
+    attachment = classify_max_email("Fabric sample", "Use this for the quote.", ["fabric.jpg"])
+
+    assert task["classification"] == "task"
+    assert {"task", "attachment", "instruction"}.issubset(set(task["tags"]))
+    assert task["attachment_count"] == 1
+    assert question["classification"] == "question"
+    assert attachment["classification"] == "attachment"

@@ -12,6 +12,38 @@ logger = logging.getLogger("empire.webhooks")
 router = APIRouter(tags=["Webhooks"])
 
 
+def classify_max_email(subject: str, body: str, attachments: list | dict | str | None) -> dict:
+    """Cheap deterministic tag for founder email intake; no fake AI classification."""
+    text = f"{subject or ''} {body or ''}".lower()
+    attachment_count = len(attachments) if isinstance(attachments, list) else (1 if attachments else 0)
+    tags = []
+    if attachment_count:
+        tags.append("attachment")
+    if any(word in text for word in ("todo", "task", "please do", "follow up", "remind", "schedule", "create", "fix")):
+        tags.append("task")
+    if "?" in text or any(word in text for word in ("can you", "what ", "why ", "how ", "when ", "where ")):
+        tags.append("question")
+    if any(word in text for word in ("review", "analyze", "summarize", "check", "look at", "use this")):
+        tags.append("instruction")
+    if not tags:
+        tags.append("instruction")
+
+    if "task" in tags:
+        classification = "task"
+    elif "attachment" in tags:
+        classification = "attachment"
+    elif "question" in tags:
+        classification = "question"
+    else:
+        classification = "instruction"
+
+    return {
+        "classification": classification,
+        "tags": tags,
+        "attachment_count": attachment_count,
+    }
+
+
 @router.post("/webhooks/email/inbound")
 @router.post("/email/inbound")
 async def handle_inbound_email(request: Request):
@@ -38,6 +70,7 @@ async def handle_inbound_email(request: Request):
         if e.strip()
     }
     founder_verified = sender.strip().lower() in founder_emails
+    email_classification = classify_max_email(subject, body, attachments)
     logger.info(f"Inbound email from {sender}: {subject}")
 
     try:
@@ -56,11 +89,15 @@ async def handle_inbound_email(request: Request):
             attachment_refs=attachments,
             summary=subject,
             founder_verified=founder_verified,
+            linked_refs=[{"type": "email_intent", "id": email_classification["classification"]}],
             metadata={
                 "subject": subject,
                 "sender": sender,
                 "recipient": recipient,
                 "attachments": attachments,
+                "classification": email_classification["classification"],
+                "tags": email_classification["tags"],
+                "attachment_count": email_classification["attachment_count"],
                 "trust": "founder_sender_match" if founder_verified else "unverified_sender",
             },
         )
@@ -89,6 +126,8 @@ async def handle_inbound_email(request: Request):
         "subject": subject,
         "thread_id": thread_id,
         "founder_verified": founder_verified,
+        "classification": email_classification["classification"],
+        "tags": email_classification["tags"],
         "ledger": "unified_messages",
     }
 
