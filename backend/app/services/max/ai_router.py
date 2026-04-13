@@ -922,7 +922,7 @@ class AIRouter:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 8192}
+                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 2048}
             )
             if resp.status_code != 200:
                 raise Exception(f"Groq HTTP {resp.status_code}: {resp.text}")
@@ -935,7 +935,7 @@ class AIRouter:
                 "POST",
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 8192, "stream": True}
+                json={"model": "llama-3.3-70b-versatile", "messages": api_messages, "max_tokens": 2048, "stream": True}
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()

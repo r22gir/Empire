@@ -84,6 +84,23 @@ def test_orchestration_status_reports_max_hierarchy_and_live_local_routes(monkey
     assert status["code_mode"]["executor"] == "CodeForge / Atlas"
     assert status["self_heal"]["mode"] == "guided_self_heal"
     assert status["self_heal"]["full_autonomous_repair_verified"] is False
+    assert status["voice"]["stt"]["configured"] is not None
+    assert status["voice"]["tts"]["last_status"] in {"not_checked", "ok", "failed", "unconfigured"}
+
+
+def test_compact_prompt_is_used_only_for_ordinary_text():
+    from app.services.max.system_prompt import (
+        get_compact_system_prompt,
+        get_system_prompt,
+        is_ordinary_text_request,
+    )
+
+    assert len(get_compact_system_prompt()) < 1500
+    assert len(get_system_prompt()) > len(get_compact_system_prompt()) * 10
+    assert is_ordinary_text_request("MAX text routing proof. Reply briefly.") is True
+    assert is_ordinary_text_request("create a task for the forge desk") is False
+    assert is_ordinary_text_request("show my invoices") is False
+    assert is_ordinary_text_request("analyze this quote") is False
 
 
 def test_code_mode_service_manager_uses_actual_portal_unit():

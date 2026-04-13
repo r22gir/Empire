@@ -43,6 +43,39 @@ def _load_session_context() -> str:
     return ""
 
 
+def is_ordinary_text_request(message: str) -> bool:
+    """Return True for plain chat that should not need the full tool/catalog prompt."""
+    msg = (message or "").lower().strip()
+    if not msg:
+        return False
+
+    full_prompt_patterns = [
+        # Tool/action paths need the full registry and execution instructions.
+        "create", "add", "send", "email", "invoice", "quote", "task", "job",
+        "customer", "payment", "finance", "ledger", "statement", "drawing",
+        "upload", "attach", "file", "git", "commit", "push", "pull", "build",
+        "test", "restart", "service", "openclaw", "desk", "delegate",
+        "analyze", "analysis", "calculate", "price", "pricing", "yardage",
+        "search", "find", "look up", "check my", "show my", "report",
+    ]
+    return not any(pattern in msg for pattern in full_prompt_patterns)
+
+
+def get_compact_system_prompt() -> str:
+    """Small MAX prompt for ordinary text chat when provider token budget is tight."""
+    founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+    openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
+    today = datetime.now().strftime("%B %d, %Y")
+    return f"""You are MAX, the primary Command Center brain for the Founder.
+
+Hierarchy: Founder is above everything. MAX is the primary brain/orchestrator. Code Mode and AI Desks are subordinate to MAX. OpenClaw is the execution/delegation layer beneath MAX and the desks.
+
+Answer ordinary founder chat directly, concisely, and truthfully. Do not describe yourself as Codex, Claude, Atlas, or OpenClaw. Do not claim an action was performed unless a tool result proves it. If the request requires a tool, database lookup, code change, desk delegation, OpenClaw execution, quote/invoice/job/customer lookup, or current external fact, say that you need to check it rather than guessing.
+
+Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
+"""
+
+
 def get_system_prompt() -> str:
     # Return cached prompt if still valid
     now = time.time()

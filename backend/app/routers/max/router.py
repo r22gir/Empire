@@ -22,7 +22,7 @@ from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
-from app.services.max.system_prompt import get_system_prompt_with_brain
+from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
     REALTIME_LEARNING_ENABLED,
@@ -227,13 +227,16 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Build brain-enriched system prompt (non-desk requests only)
         enriched_prompt = None
         if not request.desk:
-            try:
-                enriched_prompt = await get_system_prompt_with_brain(
-                    user_message=request.message,
-                    conversation_history=request.history,
-                )
-            except Exception as e:
-                logger.warning(f"Brain context failed, using base prompt: {e}")
+            if not request.image_filename and is_ordinary_text_request(request.message):
+                enriched_prompt = get_compact_system_prompt()
+            else:
+                try:
+                    enriched_prompt = await get_system_prompt_with_brain(
+                        user_message=request.message,
+                        conversation_history=request.history,
+                    )
+                except Exception as e:
+                    logger.warning(f"Brain context failed, using base prompt: {e}")
 
         # Append channel-specific directives
         if request.channel == "telegram" and enriched_prompt:
@@ -548,13 +551,16 @@ async def chat_stream(request: ChatRequest):
     # Build brain-enriched system prompt before streaming (non-desk only)
     enriched_prompt = None
     if not request.desk:
-        try:
-            enriched_prompt = await get_system_prompt_with_brain(
-                user_message=request.message,
-                conversation_history=request.history,
-            )
-        except Exception as e:
-            logger.warning(f"Brain context failed, using base prompt: {e}")
+        if not request.image_filename and is_ordinary_text_request(request.message):
+            enriched_prompt = get_compact_system_prompt()
+        else:
+            try:
+                enriched_prompt = await get_system_prompt_with_brain(
+                    user_message=request.message,
+                    conversation_history=request.history,
+                )
+            except Exception as e:
+                logger.warning(f"Brain context failed, using base prompt: {e}")
 
     # Append channel-specific directives
     if request.channel == "telegram" and enriched_prompt:
@@ -1390,7 +1396,7 @@ async def orchestration_status():
             "image_upload_analysis": local_vision_ready or ollama_ok,
             "document_upload_analysis": True,
             "voice_input": stt_service.is_configured,
-            "voice_output": tts_service.is_configured,
+            "voice_output": tts_service.is_configured and tts_service.get_status().get("last_status") != "failed",
             "desk_delegation": len(desks) > 0,
             "openclaw_delegation": openclaw_ok,
         },
@@ -1409,6 +1415,8 @@ async def orchestration_status():
         "voice": {
             "stt_service": "groq-whisper" if stt_service.is_configured else "unconfigured",
             "tts_service": "grok-tts" if tts_service.is_configured else "unconfigured",
+            "stt": stt_service.get_status(),
+            "tts": tts_service.get_status(),
         },
         "code_mode": code_mode_status,
         "self_heal": self_heal_status,

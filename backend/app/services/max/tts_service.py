@@ -30,6 +30,8 @@ class TTSService:
     def __init__(self):
         self.cache_dir = Path(tempfile.gettempdir()) / "max_tts_cache"
         self.cache_dir.mkdir(exist_ok=True)
+        self.last_status = "not_checked"
+        self.last_error = ""
 
     @property
     def is_configured(self) -> bool:
@@ -43,6 +45,8 @@ class TTSService:
     ) -> Optional[Path]:
         """Convert text to speech audio file via xAI TTS API."""
         if not self.is_configured or not text or not text.strip():
+            self.last_status = "unconfigured" if not self.is_configured else "failed"
+            self.last_error = "TTS not configured or empty text"
             return None
 
         clean_text = text.strip()[:MAX_TEXT_LENGTH]
@@ -65,11 +69,15 @@ class TTSService:
 
             if resp.status_code != 200:
                 logger.error(f"xAI TTS API error {resp.status_code}: {resp.text[:300]}")
+                self.last_status = "failed"
+                self.last_error = f"xAI TTS API error {resp.status_code}: {resp.text[:300]}"
                 return None
 
             audio_data = resp.content
             if not audio_data or len(audio_data) < 100:
                 logger.warning("xAI TTS returned empty or tiny audio")
+                self.last_status = "failed"
+                self.last_error = "xAI TTS returned empty or tiny audio"
                 return None
 
             suffix = f".{output_format}"
@@ -77,10 +85,14 @@ class TTSService:
             audio_path.write_bytes(audio_data)
             logger.info(f"TTS generated via xAI (Rex): {len(audio_data)} bytes → {audio_path.name}")
             token_tracker.log_fixed_cost("grok-tts", feature="tts", source="tts_service")
+            self.last_status = "ok"
+            self.last_error = ""
             return audio_path
 
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
+            self.last_status = "failed"
+            self.last_error = str(e)[:300]
             return None
 
     async def synthesize_for_telegram(self, text: str) -> Optional[Path]:
@@ -90,6 +102,8 @@ class TTSService:
     async def synthesize_for_web(self, text: str) -> Optional[bytes]:
         """Generate audio bytes for web playback (mp3 format)."""
         if not self.is_configured or not text or not text.strip():
+            self.last_status = "unconfigured" if not self.is_configured else "failed"
+            self.last_error = "TTS not configured or empty text"
             return None
 
         clean_text = text.strip()[:MAX_TEXT_LENGTH]
@@ -112,18 +126,33 @@ class TTSService:
 
             if resp.status_code != 200:
                 logger.error(f"xAI TTS API error {resp.status_code}: {resp.text[:300]}")
+                self.last_status = "failed"
+                self.last_error = f"xAI TTS API error {resp.status_code}: {resp.text[:300]}"
                 return None
 
             audio_data = resp.content
             if not audio_data or len(audio_data) < 100:
+                self.last_status = "failed"
+                self.last_error = "xAI TTS returned empty or tiny audio"
                 return None
 
             token_tracker.log_fixed_cost("grok-tts", feature="tts", source="tts_service")
+            self.last_status = "ok"
+            self.last_error = ""
             return audio_data
 
         except Exception as e:
             logger.error(f"TTS web synthesis failed: {e}")
+            self.last_status = "failed"
+            self.last_error = str(e)[:300]
             return None
+
+    def get_status(self) -> dict:
+        return {
+            "configured": self.is_configured,
+            "last_status": self.last_status,
+            "last_error": self.last_error,
+        }
 
 
 # Singleton

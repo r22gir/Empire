@@ -18,6 +18,8 @@ class STTService:
     def __init__(self):
         self._client = None
         self._init_attempted = False
+        self.last_status = "not_checked"
+        self.last_error = ""
 
     def _get_client(self):
         """Lazy-init the Groq client (key may be loaded after import time)."""
@@ -66,9 +68,16 @@ class STTService:
                 cache_path.write_text(result)
                 logger.info(f"Transcribed {audio_path.name}: {len(result)} chars")
                 token_tracker.log_fixed_cost("groq-whisper", feature="stt", source="stt_service")
+                self.last_status = "ok"
+                self.last_error = ""
+            elif result.startswith("["):
+                self.last_status = "failed"
+                self.last_error = result[:300]
             return result
         except Exception as e:
             logger.error(f"STT error: {e}")
+            self.last_status = "failed"
+            self.last_error = str(e)[:300]
             return f"[Transcription failed: {e}]"
 
     def _transcribe_sync_internal(self, audio_path: Path, language: str | None = None) -> str:
@@ -113,10 +122,24 @@ class STTService:
             if result and not result.startswith("["):
                 cache_path.write_text(result)
                 logger.info(f"Transcribed {audio_path.name}: {len(result)} chars")
+                self.last_status = "ok"
+                self.last_error = ""
+            elif result.startswith("["):
+                self.last_status = "failed"
+                self.last_error = result[:300]
             return result
         except Exception as e:
             logger.error(f"STT sync error: {e}")
+            self.last_status = "failed"
+            self.last_error = str(e)[:300]
             return f"[Transcription failed: {e}]"
+
+    def get_status(self) -> dict:
+        return {
+            "configured": self.is_configured,
+            "last_status": self.last_status,
+            "last_error": self.last_error,
+        }
 
     async def translate_to_english(self, audio_path: str | Path) -> str:
         """Translate any language audio to English text."""

@@ -389,13 +389,22 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   };
 
   const primaryModel = maxStatus?.providers?.cloud?.find((p: any) => p.primary)?.name || streamingModel || 'MAX routing';
+  const latestAssistantModel = [...messages].reverse().find(m => m.role === 'assistant' && m.model)?.model;
+  const textRoutingModel = streamingModel || latestAssistantModel;
+  const textRoutingFallback = !!textRoutingModel
+    && !primaryModel.toLowerCase().includes(textRoutingModel.split('-')[0].toLowerCase());
+  const textRoutingLabel = textRoutingModel
+    ? `Text ${textRoutingModel}${textRoutingFallback ? ' fallback' : ''}`
+    : 'Text routing ready';
   const localVision = maxStatus?.local_vision;
   const localVisionLabel = localVision?.online
     ? `Vision ${localVision.primary || 'moondream'} -> ${localVision.fallback || 'llava'}`
     : 'Vision offline';
-  const voiceLabel = maxStatus?.capabilities?.voice_input && maxStatus?.capabilities?.voice_output
-    ? 'Voice ready'
-    : maxStatus ? 'Voice partial' : 'Voice checking';
+  const voiceLabel = maxStatus?.voice?.tts?.last_status === 'failed'
+    ? 'Voice STT ready · TTS blocked'
+    : maxStatus?.capabilities?.voice_input && maxStatus?.capabilities?.voice_output
+      ? 'Voice configured'
+      : maxStatus ? 'Voice partial' : 'Voice checking';
   const openClawOnline = !!maxStatus?.capabilities?.openclaw_delegation;
   const openClawQueueTotal = maxStatus?.providers?.local?.find((p: any) => p.id === 'openclaw')?.queue_stats?.total;
   const codeModeLabel = maxStatus?.code_mode?.available
@@ -501,8 +510,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             Founder {'>'} MAX
           </span>
           <StatusChip label={primaryModel} tone="dark" />
+          <StatusChip label={textRoutingLabel} tone={textRoutingFallback ? 'warn' : 'ok'} />
           <StatusChip label={localVisionLabel} tone={localVision?.online ? 'ok' : 'warn'} />
-          <StatusChip label={voiceLabel} tone={maxStatus.capabilities?.voice_input ? 'ok' : 'warn'} />
+          <StatusChip label={voiceLabel} tone={maxStatus?.voice?.tts?.last_status === 'failed' ? 'warn' : maxStatus.capabilities?.voice_input ? 'ok' : 'warn'} />
           <StatusChip label={`OpenClaw ${openClawOnline ? 'online' : 'offline'}${Number.isFinite(openClawQueueTotal) ? ` · ${openClawQueueTotal} tasks` : ''}`} tone={openClawOnline ? 'ok' : 'warn'} />
           <StatusChip label={codeModeLabel} tone={maxStatus?.code_mode?.available ? 'ok' : 'warn'} />
           <StatusChip label={selfHealLabel} tone="warn" />
