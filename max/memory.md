@@ -185,3 +185,33 @@ Instant ballpark from dimensions + material + complexity → 3 tiers (Essential/
 - v5.0 (Mar 18 AM): CRM bug fix, inventory categorization, yardage calc, Kanban job board, dashboard KPIs
 - v5.0 (Mar 18 PM): Tool execution fix — shell allowlist, file_edit fuzzy+line mode, env/db tools, 12/12 tests passing (commit ec0a091)
 - v5.1 (Mar 18 EVE): Knowledge build, quote pipeline API, system prompt update, vision+chat enhancements
+
+## AUTO-SYNC (updated nightly by brain_sync)
+Last sync: 2026-04-12 23:00
+
+### Database Counts (empire.db)
+- tasks: 488
+- customers: 138
+- invoices: 15
+- payments: 1
+- expenses: 6
+- inventory_items: 155
+- vendors: 51
+- contacts: 2
+- desk_configs: 15
+- task_activity: 348
+
+### File Storage
+- Quote JSONs: 114
+- Inbox messages: 170
+- Brain memories: 9067
+
+### Finance Snapshot
+- Revenue: $100 | Expenses: $5,380 | Outstanding: $4,175 | Net: $-5,280
+
+### Active Tasks by Desk
+- forge: 1
+
+### System
+- CPU: 6.5% | RAM: 12.5% (3GB/31GB) | Disk: 60.6% (52GB/91GB)
+- Backend routers loaded: 80
