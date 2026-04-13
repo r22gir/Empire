@@ -54,12 +54,13 @@ interface Props {
   onSend: (msg: string, imageFilename?: string | null) => void;
   onStop: () => void;
   onScreenChange?: (screen: string) => void;
+  onProductNavigate?: (product: string, screen?: string) => void;
   setOnMessageComplete?: (cb: ((msg: Message) => void) | null) => void;
   onLoadChat?: (chatId: string) => void;
   onNewChat?: () => void;
 }
 
-export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
+export default function ChatScreen({ messages, isStreaming, streamingContent, streamingModel, onSend, onStop, onScreenChange, onProductNavigate, setOnMessageComplete, onLoadChat, onNewChat }: Props) {
   const [input, setInput] = useState('');
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
@@ -550,6 +551,40 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           >
             Memory Bank
           </button>
+          <button
+            data-testid="max-relistapp-button"
+            onClick={() => onProductNavigate?.('relist', 'dashboard')}
+            style={{
+              border: '1px solid #d8d3cb',
+              background: '#fff',
+              borderRadius: 8,
+              padding: '3px 8px',
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--text)',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+            }}
+          >
+            RelistApp
+          </button>
+          <a
+            data-testid="max-public-page-link"
+            href="/max"
+            style={{
+              border: '1px solid #d8d3cb',
+              background: '#fff',
+              borderRadius: 8,
+              padding: '3px 8px',
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--text)',
+              whiteSpace: 'nowrap',
+              textDecoration: 'none',
+            }}
+          >
+            Public MAX
+          </a>
           <StatusChip label="Upload image/doc" tone="ok" />
         </div>
       )}
