@@ -3648,7 +3648,7 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 SERVICE_MAP = {
     "backend": {"port": 8000, "systemd": "empire-backend", "log": "/tmp/backend.log"},
-    "cc": {"port": 3005, "systemd": "empire-cc", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "cc": {"port": 3005, "systemd": "empire-portal", "log_dir": os.path.expanduser("~/empire-repo/logs")},
     "openclaw": {"port": 7878, "systemd": "empire-openclaw", "log": "/tmp/openclaw.log"},
     "ollama": {"port": 11434, "systemd": "ollama", "log": None},
     "recoveryforge": {"port": 3077, "systemd": None, "log_dir": os.path.expanduser("~/empire-repo/logs")},
@@ -3656,7 +3656,22 @@ SERVICE_MAP = {
 }
 
 # Systemd service names for monitored services
-SYSTEMD_SERVICES = ["empire-backend", "empire-cc", "empire-openclaw"]
+SYSTEMD_SERVICES = ["empire-backend", "empire-portal", "empire-openclaw"]
+
+
+def _systemctl_cmd(systemd_unit: str, *args: str) -> list[str]:
+    """Use the user service manager for Empire units, system manager otherwise."""
+    base = ["systemctl"]
+    if systemd_unit.startswith("empire-"):
+        base.append("--user")
+    return base + list(args) + [systemd_unit]
+
+
+def _should_retry_systemctl_with_sudo(systemd_unit: str, stderr: str) -> bool:
+    if systemd_unit.startswith("empire-"):
+        return False
+    lower_stderr = (stderr or "").lower()
+    return "access denied" in lower_stderr or "authentication required" in lower_stderr
 
 
 @tool("service_manager")
@@ -3692,7 +3707,7 @@ def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
             if systemd_unit:
                 try:
                     r = subprocess.run(
-                        ["systemctl", "is-active", "--quiet", systemd_unit],
+                        _systemctl_cmd(systemd_unit, "is-active", "--quiet"),
                         capture_output=True, text=True, timeout=5,
                     )
                     state = "active" if r.returncode == 0 else "inactive"
@@ -3703,7 +3718,7 @@ def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
                 if state == "active":
                     try:
                         r = subprocess.run(
-                            ["systemctl", "show", systemd_unit, "--property=MainPID,ActiveEnterTimestamp", "--no-pager"],
+                            _systemctl_cmd(systemd_unit, "show", "--property=MainPID,ActiveEnterTimestamp", "--no-pager"),
                             capture_output=True, text=True, timeout=5,
                         )
                         for line in r.stdout.strip().split("\n"):
@@ -3747,10 +3762,10 @@ def _service_manager(params: dict, desk: Optional[str] = None) -> ToolResult:
             try:
                 # Try without sudo first, fallback to sudo
                 r = subprocess.run(
-                    ["systemctl", command, systemd_unit],
+                    _systemctl_cmd(systemd_unit, command),
                     capture_output=True, text=True, timeout=30,
                 )
-                if r.returncode != 0 and "Access denied" in (r.stderr or "") or "authentication required" in (r.stderr or "").lower():
+                if r.returncode != 0 and _should_retry_systemctl_with_sudo(systemd_unit, r.stderr):
                     # Retry with sudo
                     r = subprocess.run(
                         ["sudo", "systemctl", command, systemd_unit],

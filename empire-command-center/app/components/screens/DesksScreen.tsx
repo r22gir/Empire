@@ -189,9 +189,11 @@ export default function DesksScreen({ desks, onSendTask, initialDeskId, onDeskCh
         body: JSON.stringify({ title: taskInput, description: `[Desk: ${deskId}] ${taskInput}`, priority: 'normal', source: 'founder' }),
       });
       const data = await res.json();
+      const state = data.state || data.status || 'submitted';
+      const taskId = data.task_id || data.id || 'unknown';
       setTaskResult({
         desk: deskId,
-        result: res.ok ? `Task "${data.title}" assigned to ${data.desk || deskId} (${data.status})` : (data.detail ? JSON.stringify(data.detail) : JSON.stringify(data)),
+        result: res.ok ? `MAX delegated task ${taskId} to ${data.desk || deskId}; state=${state}` : (data.detail ? JSON.stringify(data.detail) : JSON.stringify(data)),
         success: res.ok,
       });
       setTaskInput('');

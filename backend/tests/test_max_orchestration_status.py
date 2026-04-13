@@ -11,7 +11,7 @@ def test_local_vision_triage_is_prepended_to_image_context(tmp_path, monkeypatch
     async def fake_generate_vision_response(*, prompt, image_b64, preferred_model=None, timeout=120.0):
         assert "local lightweight vision triage" in prompt
         assert image_b64
-        assert timeout == 20.0
+        assert timeout == 60.0
         return "local image summary", "moondream"
 
     monkeypatch.setattr(vision_router, "generate_vision_response", fake_generate_vision_response)
@@ -80,3 +80,35 @@ def test_orchestration_status_reports_max_hierarchy_and_live_local_routes(monkey
     assert status["local_vision"]["fallback"] == "llava"
     assert status["local_vision"]["ready"] is True
     assert status["desks"]["count"] == 2
+    assert status["code_mode"]["mode"] == "subordinate_to_max"
+    assert status["code_mode"]["executor"] == "CodeForge / Atlas"
+    assert status["self_heal"]["mode"] == "guided_self_heal"
+    assert status["self_heal"]["full_autonomous_repair_verified"] is False
+
+
+def test_code_mode_service_manager_uses_actual_portal_unit():
+    from app.services.max.tool_executor import (
+        SERVICE_MAP,
+        SYSTEMD_SERVICES,
+        _should_retry_systemctl_with_sudo,
+        _systemctl_cmd,
+    )
+
+    assert SERVICE_MAP["cc"]["systemd"] == "empire-portal"
+    assert "empire-portal" in SYSTEMD_SERVICES
+    assert "empire-cc" not in SYSTEMD_SERVICES
+    assert _systemctl_cmd("empire-portal", "is-active", "--quiet") == [
+        "systemctl",
+        "--user",
+        "is-active",
+        "--quiet",
+        "empire-portal",
+    ]
+    assert _systemctl_cmd("ollama", "is-active", "--quiet") == [
+        "systemctl",
+        "is-active",
+        "--quiet",
+        "ollama",
+    ]
+    assert _should_retry_systemctl_with_sudo("empire-portal", "Access denied") is False
+    assert _should_retry_systemctl_with_sudo("ollama", "Access denied") is True

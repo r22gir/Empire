@@ -1254,6 +1254,63 @@ async def orchestration_status():
     openclaw_ok, openclaw_data = await _probe_json(f"{openclaw_url}/health")
     ollama_models = [m.get("name", "") for m in ollama_data.get("models", [])] if isinstance(ollama_data, dict) else []
     normalized_ollama_models = {m.split(":")[0] for m in ollama_models}
+    openclaw_stats: Dict[str, Any] = {}
+    recent_openclaw_tasks: List[Dict[str, Any]] = []
+    try:
+        from app.db.database import get_db, dict_rows
+        with get_db() as db:
+            rows = db.execute("SELECT status, COUNT(*) as count FROM openclaw_tasks GROUP BY status").fetchall()
+            openclaw_stats = {row[0]: row[1] for row in rows}
+            openclaw_stats["total"] = sum(openclaw_stats.values())
+            recent_openclaw_tasks = dict_rows(db.execute(
+                """SELECT id, title, desk, status, source, created_at, completed_at, result, error
+                   FROM openclaw_tasks
+                   ORDER BY id DESC LIMIT 5"""
+            ).fetchall())
+    except Exception as e:
+        openclaw_stats = {"error": str(e)}
+
+    code_mode_status: Dict[str, Any]
+    try:
+        from app.services.max.code_task_runner import code_task_runner
+        tasks = list(code_task_runner._tasks.values())
+        active_tasks = [t for t in tasks if t.state.value in ("queued", "running")]
+        code_mode_status = {
+            "available": True,
+            "mode": "subordinate_to_max",
+            "executor": "CodeForge / Atlas",
+            "endpoint": "/api/v1/max/code-task",
+            "active_tasks": len(active_tasks),
+            "recent_tasks": [
+                {
+                    "id": t.id,
+                    "state": t.state.value,
+                    "prompt": t.prompt[:120],
+                    "files_changed": t.files_changed[:5],
+                    "error": t.error,
+                }
+                for t in tasks[-5:]
+            ],
+            "allowed_tools": [
+                "file_read", "file_write", "file_edit", "file_append", "git_ops",
+                "test_runner", "shell_execute", "package_manager", "service_manager",
+                "project_scaffold",
+            ],
+        }
+    except Exception as e:
+        code_mode_status = {"available": False, "error": str(e)}
+
+    self_heal_status: Dict[str, Any]
+    try:
+        from app.services.max.self_heal import get_heal_status
+        self_heal_status = {
+            "mode": "guided_self_heal",
+            "full_autonomous_repair_verified": False,
+            "path": "MAX diagnosis -> Code Mode/CodeForge -> tests -> targeted service restart -> verification -> founder report",
+            "status": get_heal_status(),
+        }
+    except Exception as e:
+        self_heal_status = {"mode": "guided_self_heal", "error": str(e)}
 
     desks = desk_manager.get_all_desks()
     try:
@@ -1323,6 +1380,8 @@ async def orchestration_status():
                     "online": openclaw_ok,
                     "status_source": "live_http",
                     "detail": openclaw_data,
+                    "queue_stats": openclaw_stats,
+                    "recent_tasks": recent_openclaw_tasks,
                 },
             ],
         },
@@ -1351,6 +1410,8 @@ async def orchestration_status():
             "stt_service": "groq-whisper" if stt_service.is_configured else "unconfigured",
             "tts_service": "grok-tts" if tts_service.is_configured else "unconfigured",
         },
+        "code_mode": code_mode_status,
+        "self_heal": self_heal_status,
         "uploads": {
             "accepted_categories": ["images", "documents", "audio", "code"],
             "command_center_max_accept": ["image/*", ".pdf", ".txt", ".md", ".csv", ".json"],

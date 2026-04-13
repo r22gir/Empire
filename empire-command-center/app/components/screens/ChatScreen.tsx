@@ -397,6 +397,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     ? 'Voice ready'
     : maxStatus ? 'Voice partial' : 'Voice checking';
   const openClawOnline = !!maxStatus?.capabilities?.openclaw_delegation;
+  const openClawQueueTotal = maxStatus?.providers?.local?.find((p: any) => p.id === 'openclaw')?.queue_stats?.total;
+  const codeModeLabel = maxStatus?.code_mode?.available
+    ? `Code Mode ${maxStatus.code_mode.executor || 'CodeForge'}`
+    : 'Code Mode unavailable';
+  const selfHealLabel = maxStatus?.self_heal?.full_autonomous_repair_verified
+    ? 'Self-heal autonomous'
+    : 'Self-heal guided';
 
   const toggleRecording = useCallback(async () => {
     if (recording) {
@@ -496,7 +503,9 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           <StatusChip label={primaryModel} tone="dark" />
           <StatusChip label={localVisionLabel} tone={localVision?.online ? 'ok' : 'warn'} />
           <StatusChip label={voiceLabel} tone={maxStatus.capabilities?.voice_input ? 'ok' : 'warn'} />
-          <StatusChip label={`OpenClaw ${openClawOnline ? 'online' : 'offline'}`} tone={openClawOnline ? 'ok' : 'warn'} />
+          <StatusChip label={`OpenClaw ${openClawOnline ? 'online' : 'offline'}${Number.isFinite(openClawQueueTotal) ? ` · ${openClawQueueTotal} tasks` : ''}`} tone={openClawOnline ? 'ok' : 'warn'} />
+          <StatusChip label={codeModeLabel} tone={maxStatus?.code_mode?.available ? 'ok' : 'warn'} />
+          <StatusChip label={selfHealLabel} tone="warn" />
           <button
             data-testid="max-desks-status-button"
             onClick={() => onScreenChange?.('desks')}
@@ -694,7 +703,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             }}>
               <Terminal size={14} style={{ color: codeTask.state === 'error' ? '#dc2626' : '#b8960c' }} />
               <span style={{ fontSize: 12, fontWeight: 700, color: codeTask.state === 'error' ? '#dc2626' : '#b8960c', flex: 1 }}>
-                Code Mode — {codeTask.state === 'queued' ? 'Queued' : codeTask.state === 'running' ? 'Atlas Working...' : codeTask.state === 'completed' ? 'Done' : 'Error'}
+                MAX Code Mode — CodeForge / Atlas — {codeTask.state === 'queued' ? 'Queued' : codeTask.state === 'running' ? 'Working...' : codeTask.state === 'completed' ? 'Verified / Done' : 'Error'}
               </span>
               {(codeTask.state === 'running' || codeTask.state === 'queued') && (
                 <Loader2 size={14} style={{ color: '#b8960c', animation: 'spin 1s linear infinite' }} />
@@ -1009,7 +1018,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             }}
           >
             <Terminal size={13} />
-            {codeMode ? 'Code Mode ON' : 'Code Mode'}
+            {codeMode ? 'MAX Code Mode ON' : 'Code Mode'}
           </button>
         </div>
 

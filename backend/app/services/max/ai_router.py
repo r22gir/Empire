@@ -303,7 +303,7 @@ class AIRouter:
             analysis, model_used = await generate_vision_response(
                 prompt=prompt,
                 image_b64=image_b64,
-                timeout=20.0,
+                timeout=60.0,
             )
             if not analysis:
                 return messages
@@ -503,6 +503,9 @@ class AIRouter:
             messages = await self._prepend_local_vision_triage(messages, image_path)
             if image_path and messages and messages[-1].content.startswith("[Local Ollama vision triage"):
                 local_attachment_answer = messages[-1].content.split("\n\n", 1)[0]
+            if local_attachment_answer and model is None and not desk:
+                model_used = "ollama-vision" if image_path else "attachment-reader"
+                return AIResponse(content=local_attachment_answer, model_used=model_used, fallback_used=False)
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
 
@@ -655,6 +658,9 @@ class AIRouter:
             messages = await self._prepend_local_vision_triage(messages, image_path)
             if image_path and messages and messages[-1].content.startswith("[Local Ollama vision triage"):
                 local_attachment_answer = messages[-1].content.split("\n\n", 1)[0]
+            if local_attachment_answer and model is None and not desk:
+                yield local_attachment_answer, ("ollama-vision" if image_path else "attachment-reader")
+                return
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
 
