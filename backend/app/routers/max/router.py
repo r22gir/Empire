@@ -413,7 +413,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Save to unified cross-channel store
         try:
             from app.services.max.unified_message_store import unified_store
-            unified_store.add_message(conv_id, request.channel or "web", "user", request.message)
+            user_metadata = {"image_filename": request.image_filename} if request.image_filename else None
+            attachment_refs = [{"type": "upload", "ref": request.image_filename}] if request.image_filename else None
+            unified_store.add_message(
+                conv_id, request.channel or "web", "user", request.message,
+                metadata=user_metadata,
+                attachment_refs=attachment_refs,
+                founder_verified=founder,
+            )
             unified_store.add_message(
                 conv_id, request.channel or "web", "assistant", strip_tool_blocks(final_content),
                 model=response.model_used,
@@ -573,7 +580,14 @@ async def chat_stream(request: ChatRequest):
     # Save user message to unified cross-channel store
     try:
         from app.services.max.unified_message_store import unified_store
-        unified_store.add_message(conv_id, request.channel or "web", "user", request.message)
+        user_metadata = {"image_filename": request.image_filename} if request.image_filename else None
+        attachment_refs = [{"type": "upload", "ref": request.image_filename}] if request.image_filename else None
+        unified_store.add_message(
+            conv_id, request.channel or "web", "user", request.message,
+            metadata=user_metadata,
+            attachment_refs=attachment_refs,
+            founder_verified=founder,
+        )
     except Exception as _ums_err:
         logger.warning(f"Unified message store (stream user) failed: {_ums_err}")
 

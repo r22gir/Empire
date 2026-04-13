@@ -4,12 +4,15 @@ Email (SendGrid inbound), eBay notifications, and Stripe (see payments.py for pr
 """
 from fastapi import APIRouter, Request
 import logging
+import os
+from uuid import uuid4
 
 logger = logging.getLogger("empire.webhooks")
 
-router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+router = APIRouter(tags=["Webhooks"])
 
 
+@router.post("/webhooks/email/inbound")
 @router.post("/email/inbound")
 async def handle_inbound_email(request: Request):
     """Handle incoming email webhook from SendGrid Inbound Parse.
@@ -23,8 +26,46 @@ async def handle_inbound_email(request: Request):
         data = {}
 
     sender = data.get("from", data.get("sender", "unknown"))
+    recipient = data.get("to", data.get("recipient", os.getenv("MAX_EMAIL", "max@empirebox.store")))
     subject = data.get("subject", "No subject")
+    body = data.get("text") or data.get("body") or data.get("html") or ""
+    attachments = data.get("attachments") or data.get("attachment_refs") or []
+    source_message_id = data.get("message_id") or data.get("Message-Id") or data.get("headers", {}).get("Message-Id")
+    thread_id = data.get("thread_id") or source_message_id or f"email-{uuid4().hex[:12]}"
+    founder_emails = {
+        e.strip().lower()
+        for e in (os.getenv("FOUNDER_EMAILS") or os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")).split(",")
+        if e.strip()
+    }
+    founder_verified = sender.strip().lower() in founder_emails
     logger.info(f"Inbound email from {sender}: {subject}")
+
+    try:
+        from app.services.max.unified_message_store import unified_store
+        unified_store.add_message(
+            conversation_id=thread_id,
+            channel="email",
+            role="user",
+            content=body or subject,
+            direction="inbound",
+            sender=sender,
+            recipient=recipient,
+            thread_id=thread_id,
+            source_message_id=source_message_id,
+            subject=subject,
+            attachment_refs=attachments,
+            summary=subject,
+            founder_verified=founder_verified,
+            metadata={
+                "subject": subject,
+                "sender": sender,
+                "recipient": recipient,
+                "attachments": attachments,
+                "trust": "founder_sender_match" if founder_verified else "unverified_sender",
+            },
+        )
+    except Exception as exc:
+        logger.warning(f"Unified message store email write failed: {exc}")
 
     # Log to notifications if available
     try:
@@ -36,14 +77,23 @@ async def handle_inbound_email(request: Request):
                 "title": f"Email from {sender}",
                 "message": subject,
                 "priority": "medium",
-                "context": {"sender": sender, "subject": subject},
+                "context": {"sender": sender, "subject": subject, "recipient": recipient},
             })
     except Exception:
         pass
 
-    return {"status": "received", "sender": sender, "subject": subject}
+    return {
+        "status": "received",
+        "sender": sender,
+        "recipient": recipient,
+        "subject": subject,
+        "thread_id": thread_id,
+        "founder_verified": founder_verified,
+        "ledger": "unified_messages",
+    }
 
 
+@router.post("/webhooks/ebay/notification")
 @router.post("/ebay/notification")
 async def handle_ebay_notification(request: Request):
     """Handle eBay notification webhook.
@@ -77,6 +127,7 @@ async def handle_ebay_notification(request: Request):
     return {"status": "received", "event_type": event_type}
 
 
+@router.post("/webhooks/stripe")
 @router.post("/stripe")
 async def handle_stripe_webhook(request: Request):
     """Legacy Stripe webhook endpoint.

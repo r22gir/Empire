@@ -185,7 +185,21 @@ def _append_and_save(chat_id: str, role: str, content: str, **meta):
     # Save to unified cross-channel store
     try:
         from app.services.max.unified_message_store import unified_store
-        unified_store.add_message(f"telegram-{chat_id}", "telegram", role, content)
+        attachment_refs = []
+        if meta.get("image") or meta.get("image_filename"):
+            attachment_refs.append({"type": "telegram_image", "ref": meta.get("image") or meta.get("image_filename")})
+        if meta.get("file") or meta.get("filename"):
+            attachment_refs.append({"type": "telegram_file", "ref": meta.get("file") or meta.get("filename")})
+        unified_store.add_message(
+            f"telegram-{chat_id}",
+            "telegram",
+            role,
+            content,
+            metadata=meta or None,
+            source_message_id=str(meta.get("telegram_message_id")) if meta.get("telegram_message_id") else None,
+            attachment_refs=attachment_refs or None,
+            founder_verified=True,
+        )
     except Exception as e:
         logger.warning(f"Unified message store write failed: {e}")
 
@@ -866,7 +880,11 @@ class TelegramBot:
 
             # Get natural MAX response (always shown to user)
             chat_id = str(update.effective_chat.id) if update.effective_chat else None
-            html_response, plain_text, tool_results = await self._chat_with_max(text, chat_id=chat_id)
+            html_response, plain_text, tool_results = await self._chat_with_max(
+                text,
+                chat_id=chat_id,
+                user_meta={"telegram_message_id": msg_id, "type": "text"},
+            )
             # Quality check on Telegram response
             from app.services.max.response_quality_engine import quality_engine, Channel
             qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
@@ -986,7 +1004,11 @@ class TelegramBot:
                 # 4. Send transcript TEXT to Grok (same as if user typed it)
                 await update.message.reply_chat_action("typing")
                 voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-                html_response, plain_text, _ = await self._chat_with_max(transcript, chat_id=voice_chat_id, user_meta={"type": "voice"})
+                html_response, plain_text, _ = await self._chat_with_max(
+                    transcript,
+                    chat_id=voice_chat_id,
+                    user_meta={"type": "voice", "telegram_message_id": update.message.message_id},
+                )
                 # Quality check on voice response
                 from app.services.max.response_quality_engine import quality_engine, Channel
                 qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
@@ -1174,7 +1196,12 @@ class TelegramBot:
                 except Exception:
                     pass  # If check fails, proceed anyway
 
-                html_response, plain_text, tool_results = await self._chat_with_max(caption, image_filename=dest.name, chat_id=photo_chat_id, user_meta={"type": "photo", "image": dest.name})
+                html_response, plain_text, tool_results = await self._chat_with_max(
+                    caption,
+                    image_filename=dest.name,
+                    chat_id=photo_chat_id,
+                    user_meta={"type": "photo", "image": dest.name, "telegram_message_id": update.message.message_id},
+                )
                 if len(html_response) > 4000:
                     html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
                 await update.message.reply_html(html_response)

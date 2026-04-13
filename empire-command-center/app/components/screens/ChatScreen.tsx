@@ -533,6 +533,23 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           >
             {maxStatus.desks?.count || 0} desks subordinate
           </button>
+          <button
+            data-testid="max-memory-bank-button"
+            onClick={() => onScreenChange?.('memory-bank')}
+            style={{
+              border: '1px solid #d8d3cb',
+              background: '#fff',
+              borderRadius: 8,
+              padding: '3px 8px',
+              fontSize: 11,
+              fontWeight: 700,
+              color: 'var(--text)',
+              whiteSpace: 'nowrap',
+              cursor: 'pointer',
+            }}
+          >
+            Memory Bank
+          </button>
           <StatusChip label="Upload image/doc" tone="ok" />
         </div>
       )}

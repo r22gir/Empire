@@ -45,6 +45,7 @@ import DesksScreen from './components/screens/DesksScreen';
 import InboxScreen from './components/screens/InboxScreen';
 import SystemReportScreen from './components/screens/SystemReportScreen';
 import TelegramScreen from './components/screens/TelegramScreen';
+import MemoryBankScreen from './components/screens/MemoryBankScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppScreen from './components/screens/RelistAppScreen';
@@ -329,6 +330,7 @@ export default function CommandCenter() {
     if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
+    if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
     if (activeScreen === 'telegram') return <TelegramScreen />;
     if (activeScreen === 'report') return <SystemReportScreen />;
     if (activeScreen === 'tasks') return <TasksScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : activeProduct === 'owner' ? undefined : activeProduct} />;

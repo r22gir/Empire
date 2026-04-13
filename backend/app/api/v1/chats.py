@@ -227,6 +227,48 @@ async def cross_channel_search(q: str, channel: str = None, limit: int = 20):
     return {"results": results, "count": len(results), "query": q}
 
 
+@router.get("/memory-bank")
+async def memory_bank(
+    channel: str = "all",
+    q: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    founder_only: bool = False,
+    attachments_only: bool = False,
+    limit: int = 100,
+):
+    """Founder-visible MAX Memory Bank over the canonical communications ledger."""
+    from app.services.max.unified_message_store import unified_store
+    messages = unified_store.list_memory_bank(
+        channel=channel,
+        query=q,
+        thread_id=thread_id,
+        founder_only=founder_only,
+        has_attachments=attachments_only or channel == "attachments",
+        limit=limit,
+    )
+    stats = unified_store.get_stats()
+    return {
+        "messages": messages,
+        "count": len(messages),
+        "stats": stats,
+        "filters": {
+            "channel": channel,
+            "q": q,
+            "thread_id": thread_id,
+            "founder_only": founder_only,
+            "attachments_only": attachments_only or channel == "attachments",
+        },
+    }
+
+
+@router.get("/memory-bank/threads")
+async def memory_bank_threads(limit: int = 100):
+    """List Memory Bank threads for founder navigation."""
+    from app.services.max.unified_message_store import unified_store
+    threads = unified_store.get_memory_threads(limit=limit)
+    return {"threads": threads, "count": len(threads)}
+
+
 @router.get("/{chat_id}")
 async def load_chat(chat_id: str, user_id: str = "founder"):
     chat_file = CHATS_DIR / user_id / f"{chat_id}.json"
