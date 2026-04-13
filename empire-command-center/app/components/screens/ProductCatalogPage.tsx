@@ -24,6 +24,18 @@ const READINESS: Record<string, { bg: string; color: string; label: string }> = 
   fallback: { bg: '#f3f4f6', color: '#6b7280', label: '↩ Fallback' },
 };
 
+const WINDOW_GROUPS: Record<string, { label: string; styles: string[] }> = {
+  drapery: { label: '🪟 Drapery (12 pleat styles)', styles: ['pinch_pleat','french_pleat','euro_pleat','goblet','ripplefold','grommet','rod_pocket','tab_top','inverted_box','cartridge','pencil','smocked'] },
+  roman: { label: '🏠 Roman Shades (7 styles)', styles: ['flat_roman','hobbled_roman','balloon_roman','austrian','relaxed_roman','london_roman','tulip_roman'] },
+  cornice: { label: '🎭 Cornices & Valances (12 styles)', styles: ['straight_cornice','arched_cornice','scalloped_cornice','shaped_cornice','upholstered_cornice','swag_jabot','balloon_valance','box_pleat_valance','kingston_valance','rod_pocket_valance','board_mounted_valance','scarf_swag'] },
+};
+
+const MODE_INFO: Record<string, { label: string; desc: string; color: string; bg: string }> = {
+  presentation: { label: 'Presentation', desc: 'Client-friendly view — clean visuals, fabric emphasis, minimal technical detail', color: '#2563eb', bg: '#dbeafe' },
+  shop: { label: 'Shop Drawing', desc: 'For your fabrication team — exact dimensions, construction notes, material schedule', color: '#d97706', bg: '#fef3c7' },
+  construction: { label: 'Construction', desc: 'Builder view — exploded frame, numbered parts, cut list, assembly diagram', color: '#dc2626', bg: '#fef2f2' },
+};
+
 interface CatalogCategory {
   key: string; name: string; business_unit: string; style_count: number;
   modes: string[]; styles: { style_key: string; style_name: string; renderer: string; readiness: string; business_unit: string; modes: string[] }[];
@@ -36,6 +48,8 @@ export default function ProductCatalogPage() {
   const [bizFilter, setBizFilter] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<CatalogCategory | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drawMode, setDrawMode] = useState('presentation');
+  const [subFilter, setSubFilter] = useState<string>('all');
 
   useEffect(() => {
     fetch(`${API}/drawings/catalog`).then(r => r.json()).then(d => { setCatalog(d); setLoading(false); }).catch(() => setLoading(false));
@@ -56,22 +70,6 @@ export default function ProductCatalogPage() {
 
   if (loading) return <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>Loading product catalog...</div>;
   if (!catalog) return <div style={{ textAlign: 'center', padding: 40, color: '#dc2626' }}>Could not load catalog</div>;
-
-  // Sub-category groupings for window treatments
-  const WINDOW_GROUPS: Record<string, { label: string; styles: string[] }> = {
-    drapery: { label: '🪟 Drapery (12 pleat styles)', styles: ['pinch_pleat','french_pleat','euro_pleat','goblet','ripplefold','grommet','rod_pocket','tab_top','inverted_box','cartridge','pencil','smocked'] },
-    roman: { label: '🏠 Roman Shades (7 styles)', styles: ['flat_roman','hobbled_roman','balloon_roman','austrian','relaxed_roman','london_roman','tulip_roman'] },
-    cornice: { label: '🎭 Cornices & Valances (12 styles)', styles: ['straight_cornice','arched_cornice','scalloped_cornice','shaped_cornice','upholstered_cornice','swag_jabot','balloon_valance','box_pleat_valance','kingston_valance','rod_pocket_valance','board_mounted_valance','scarf_swag'] },
-  };
-
-  const MODE_INFO: Record<string, { label: string; desc: string; color: string; bg: string }> = {
-    presentation: { label: 'Presentation', desc: 'Client-friendly view — clean visuals, fabric emphasis, minimal technical detail', color: '#2563eb', bg: '#dbeafe' },
-    shop: { label: 'Shop Drawing', desc: 'For your fabrication team — exact dimensions, construction notes, material schedule', color: '#d97706', bg: '#fef3c7' },
-    construction: { label: 'Construction', desc: 'Builder view — exploded frame, numbered parts, cut list, assembly diagram', color: '#dc2626', bg: '#fef2f2' },
-  };
-
-  const [drawMode, setDrawMode] = useState('presentation');
-  const [subFilter, setSubFilter] = useState<string>('all');
 
   // Navigate to Drawing Studio with pre-selected style
   const handleDrawThis = (style: any) => {
