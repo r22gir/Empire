@@ -66,10 +66,10 @@ interface CatalogTemplateState {
 }
 
 const CATALOG_TEMPLATE_DEFAULTS: Record<string, Record<string, string>> = {
-  window: { width: '72"', height: '96"', drop: '96"', return: '3.5"' },
-  banquette: { width: '120"', depth: '20"', height: '34"', seat_height: '18"', back_height: '16"' },
-  chair: { width: '32"', depth: '34"', height: '36"', seat_height: '18"', back_height: '18"' },
-  shelving: { width: '48"', depth: '12"', height: '84"', shelves: '4' },
+  window: { width: '96"', height: '102"', drop: '102"', return: '4"', panels: '2', fullness: '2.5', mount_type: 'outside', stack_direction: 'split' },
+  banquette: { width: '120"', depth: '20"', height: '34"', seat_height: '18"', back_height: '16"', arm_configuration: 'none', base_type: 'toe_kick' },
+  chair: { width: '32"', depth: '34"', height: '36"', seat_height: '18"', back_height: '18"', arm_height: '24"', back_profile: 'straight', leg_type: 'tapered' },
+  shelving: { width: '48"', depth: '12"', height: '84"', shelves: '4', material_thickness: '0.75"', bay_spacing: '24"', door_style: 'open' },
 };
 
 function stableSerialize(value: unknown): string {
