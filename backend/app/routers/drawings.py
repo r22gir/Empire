@@ -394,10 +394,25 @@ async def generate_universal_drawing(req: UniversalDrawingRequest):
     Returns SVG + classification info.
     """
     from app.services.vision.drawing_service import classify_item, generate_drawing
+    from app.services.vision.parametric_templates import render_template_instance
 
     params = req.params or {}
     user_text = req.user_text or ""
     name = params.get("name", "")
+    style_key = params.get("style_key") or params.get("template_key")
+
+    if style_key:
+        template_result = render_template_instance(style_key, params)
+        if template_result:
+            return {
+                **template_result,
+                "classification": {
+                    "type": template_result["item_type"],
+                    "renderer": "parametric_template",
+                    "views": 4,
+                    "confidence": 1.0,
+                },
+            }
 
     # Classify
     classification = classify_item(

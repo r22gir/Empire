@@ -57,6 +57,14 @@ interface CatalogCategory {
   name: string;
 }
 
+interface CatalogTemplateState {
+  styleKey: string;
+  styleName: string;
+  categoryKey: string;
+  categoryName: string;
+  mode: string;
+}
+
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableSerialize).join(',')}]`;
@@ -86,6 +94,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   const [sketchLoading, setSketchLoading] = useState(false);
   const [sketchPreview, setSketchPreview] = useState('');
   const [previewSignature, setPreviewSignature] = useState('');
+  const [catalogTemplate, setCatalogTemplate] = useState<CatalogTemplateState | null>(null);
 
   // Multi-item analysis results
   const [analyzedItems, setAnalyzedItems] = useState<AnalyzedItem[]>([]);
@@ -123,6 +132,10 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
     });
   };
 
+  const updateDimension = (key: string, value: string) => {
+    setDimensions(prev => ({ ...prev, [key]: value }));
+  };
+
   const handleSketchUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -133,6 +146,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
     setSelectedItemId(null);
     setMultiMode(false);
     setPreviewSignature('');
+    setCatalogTemplate(null);
     try {
       const reader = new FileReader();
       const b64 = await new Promise<string>((resolve) => {
@@ -311,6 +325,37 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   }, [dimensions]);
 
   const buildDrawingRequest = useCallback((): DrawingRequest => {
+    if (catalogTemplate) {
+      const drawingMode = catalogTemplate.mode === 'shop' ? 'shop_drawing' : catalogTemplate.mode;
+      const isWindow = catalogTemplate.categoryKey === 'window';
+      const catalogNotes = notes || (drawingMode === 'shop_drawing'
+        ? 'Shop drawing generated from Product Catalog. Verify final field measurements before fabrication.'
+        : 'Presentation drawing generated from Product Catalog.');
+
+      return {
+        previewUrl: `${API}/drawings/generate`,
+        pdfUrl: `${API}/drawings/general/pdf`,
+        filenameType: catalogTemplate.styleKey,
+        body: {
+          user_text: `${catalogTemplate.styleName} ${catalogTemplate.categoryName} ${drawingMode}`,
+          params: {
+            name: name || `${catalogTemplate.styleName} ${catalogTemplate.categoryName}`,
+            item_type: isWindow ? 'window' : catalogTemplate.categoryKey,
+            style_key: catalogTemplate.styleKey,
+            drawing_mode: drawingMode,
+            dimensions,
+            notes: catalogNotes,
+            treatment_type: isWindow ? catalogTemplate.styleKey : undefined,
+            pleat_style: isWindow ? catalogTemplate.styleKey : undefined,
+            mount_type: isWindow ? 'outside' : undefined,
+            panels: isWindow ? 2 : undefined,
+            fullness: isWindow ? 2.5 : undefined,
+            stack_direction: isWindow ? 'split' : undefined,
+          },
+        },
+      };
+    }
+
     if (itemType === 'bench') {
       return {
         previewUrl: `${API}/drawings/bench`,
@@ -343,7 +388,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
         quote_num: quoteNum,
       },
     };
-  }, [benchType, dimensions, itemType, lf, name, notes, parseDimVal, quoteNum]);
+  }, [benchType, catalogTemplate, dimensions, itemType, lf, name, notes, parseDimVal, quoteNum]);
 
   const currentPreviewSignature = stableSerialize(buildDrawingRequest().body);
   const previewIsCurrent = Boolean(svgPreview && previewSignature === currentPreviewSignature);
@@ -392,6 +437,13 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
     setQuoteNum('');
     setNotes(catalogNotes);
     setDimensions(nextDimensions);
+    setCatalogTemplate({
+      styleKey: style.style_key,
+      styleName: style.style_name,
+      categoryKey: category.key,
+      categoryName: category.name,
+      mode,
+    });
     setSvgPreview('');
     setPreviewSignature('');
     setMultiMode(false);
@@ -428,13 +480,21 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
       if (!data.svg) throw new Error('Catalog drawing response did not include SVG');
       setSvgPreview(data.svg);
       setPreviewSignature(stableSerialize({
-        name: nextName,
-        item_type: nextItemType,
-        dimensions: nextDimensions,
-        notes: catalogNotes,
-        bench_type: benchType,
-        lf,
-        quote_num: '',
+        user_text: `${style.style_name} ${category.name} ${drawingMode}`,
+        params: {
+          name: nextName,
+          item_type: nextItemType,
+          style_key: style.style_key,
+          drawing_mode: drawingMode,
+          dimensions: nextDimensions,
+          notes: catalogNotes,
+          treatment_type: isWindow ? style.style_key : undefined,
+          pleat_style: isWindow ? style.style_key : undefined,
+          mount_type: isWindow ? 'outside' : undefined,
+          panels: isWindow ? 2 : undefined,
+          fullness: isWindow ? 2.5 : undefined,
+          stack_direction: isWindow ? 'split' : undefined,
+        },
       }));
       setStatusMsg('');
     } catch {
@@ -636,7 +696,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
             <label style={labelStyle}>Item Type</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 5, marginTop: 6 }}>
               {ITEM_TYPES.map(t => (
-                <button key={t.id} onClick={() => setItemType(t.id)} style={{
+                <button key={t.id} onClick={() => { setCatalogTemplate(null); setItemType(t.id); }} style={{
                   ...btnBase, padding: '8px 6px', fontSize: 11, flexDirection: 'column', gap: 1,
                   background: itemType === t.id ? '#fdf8eb' : '#f8f6f2',
                   border: itemType === t.id ? '2px solid #b8960c' : '2px solid transparent',
@@ -692,7 +752,8 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
                 {Object.entries(dimensions).map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f8f6f2', padding: '8px 10px', borderRadius: 8 }}>
                     <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: '#555' }}>{k}</span>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#b8960c' }}>{v}</span>
+                    <input aria-label={`${k} value`} value={v} onChange={e => updateDimension(k, e.target.value)}
+                      style={{ width: 82, padding: '4px 6px', border: '1px solid #e5e0d8', borderRadius: 6, fontSize: 13, fontWeight: 700, color: '#b8960c', background: '#fff' }} />
                     <button onClick={() => removeDimension(k)} style={{
                       background: 'none', border: 'none', color: '#ccc', cursor: 'pointer', fontSize: 16, padding: '0 4px',
                     }}>×</button>
