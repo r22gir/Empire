@@ -40,6 +40,13 @@ SHELVING_STYLES = frozenset({
     "display_case", "modular_cube", "entertainment_center", "plate_rail",
 })
 
+CABINET_STYLES = frozenset({"closed_cabinet", "built_in_cabinetry", "display_case"})
+NIGHTSTAND_STYLES = frozenset({"nightstand"})
+ENTERTAINMENT_STYLES = frozenset({"entertainment_center"})
+WALL_UNIT_STYLES = frozenset({"built_in", "built_in_cabinetry"})
+DESK_TABLE_STYLES = frozenset({"writing", "executive", "standing", "secretary", "corner", "floating", "reception", "craft_sewing", "vanity", "dining", "extension", "coffee", "side_end", "console", "nesting", "bar_pub", "kitchen_island", "pedestal", "trestle", "parsons"})
+WOODCRAFT_CASEWORK_KEYS = frozenset({"cabinet_carcass", "nightstand", "entertainment_center", "wall_unit", "desk_table"})
+
 
 @dataclass(frozen=True)
 class TemplateDef:
@@ -107,6 +114,51 @@ TEMPLATE_REGISTRY: dict[str, TemplateDef] = {
         presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
         shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
     ),
+    "cabinet_carcass": TemplateDef(
+        key="cabinet_carcass",
+        family="WoodCraft / Cabinet Carcass",
+        default_dimensions={"width": 36, "depth": 24, "height": 34.5, "shelves": 1, "drawer_count": 1, "material_thickness": 0.75, "bay_spacing": 18},
+        editable_parameters=("width", "height", "depth", "material_thickness", "shelves", "drawer_count", "door_layout", "base_style"),
+        supported_views=("front", "side", "plan", "perspective"),
+        presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
+        shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
+    ),
+    "nightstand": TemplateDef(
+        key="nightstand",
+        family="WoodCraft / Nightstand",
+        default_dimensions={"width": 24, "depth": 18, "height": 28, "shelves": 1, "drawer_count": 2, "material_thickness": 0.75, "bay_spacing": 24},
+        editable_parameters=("width", "height", "depth", "material_thickness", "drawer_count", "shelves", "door_layout", "base_style"),
+        supported_views=("front", "side", "plan", "perspective"),
+        presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
+        shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
+    ),
+    "entertainment_center": TemplateDef(
+        key="entertainment_center",
+        family="WoodCraft / Entertainment Center",
+        default_dimensions={"width": 96, "depth": 18, "height": 72, "shelves": 3, "drawer_count": 2, "material_thickness": 0.75, "bay_spacing": 32},
+        editable_parameters=("width", "height", "depth", "material_thickness", "shelves", "drawer_count", "bay_spacing", "door_layout", "base_style"),
+        supported_views=("front", "side", "plan", "perspective"),
+        presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
+        shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
+    ),
+    "wall_unit": TemplateDef(
+        key="wall_unit",
+        family="WoodCraft / Built-In Wall Unit",
+        default_dimensions={"width": 120, "depth": 16, "height": 96, "shelves": 5, "drawer_count": 0, "material_thickness": 0.75, "bay_spacing": 30},
+        editable_parameters=("width", "height", "depth", "material_thickness", "shelves", "drawer_count", "bay_spacing", "door_layout", "base_style"),
+        supported_views=("front", "side", "plan", "perspective"),
+        presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
+        shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
+    ),
+    "desk_table": TemplateDef(
+        key="desk_table",
+        family="WoodCraft / Table & Desk",
+        default_dimensions={"width": 60, "depth": 30, "height": 30, "drawer_count": 1, "material_thickness": 1.25, "bay_spacing": 30},
+        editable_parameters=("width", "height", "depth", "material_thickness", "drawer_count", "leg_type", "base_style"),
+        supported_views=("front", "side", "plan", "perspective"),
+        presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
+        shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
+    ),
 }
 
 
@@ -117,6 +169,16 @@ def get_template_for_style(style_key: str | None, item_type: str | None = None) 
         return TEMPLATE_REGISTRY["banquette"]
     if item == "chair" and style in CHAIR_STYLES:
         return TEMPLATE_REGISTRY["chair"]
+    if style in NIGHTSTAND_STYLES and item == "table":
+        return TEMPLATE_REGISTRY["nightstand"]
+    if style in ENTERTAINMENT_STYLES and item == "shelving":
+        return TEMPLATE_REGISTRY["entertainment_center"]
+    if style in WALL_UNIT_STYLES and item in {"shelving", "millwork"}:
+        return TEMPLATE_REGISTRY["wall_unit"]
+    if style in CABINET_STYLES and item in {"shelving", "millwork"}:
+        return TEMPLATE_REGISTRY["cabinet_carcass"]
+    if style in DESK_TABLE_STYLES and item in {"desk", "table"}:
+        return TEMPLATE_REGISTRY["desk_table"]
     if item == "shelving" and style in SHELVING_STYLES:
         return TEMPLATE_REGISTRY["shelving"]
     if style in DRAPERY_STYLES:
@@ -195,6 +257,7 @@ def _merge_dimensions(template: TemplateDef, params: dict[str, Any]) -> dict[str
     dims["seat_thickness"] = _num(raw_dims.get("seat_thickness", params.get("seat_thickness")), dims.get("seat_thickness", 5))
     dims["leg_taper"] = _num(raw_dims.get("leg_taper", params.get("leg_taper")), dims.get("leg_taper", 1.5))
     dims["shelves"] = _num(raw_dims.get("shelves", params.get("shelves")), dims.get("shelves", 4))
+    dims["drawer_count"] = _num(raw_dims.get("drawer_count", params.get("drawer_count")), dims.get("drawer_count", 0))
     dims["shelf_spacing"] = _num(raw_dims.get("shelf_spacing", params.get("shelf_spacing")), dims.get("shelf_spacing", 15))
     dims["material_thickness"] = _num(raw_dims.get("material_thickness", params.get("material_thickness")), dims.get("material_thickness", 0.75))
     dims["bay_spacing"] = _num(raw_dims.get("bay_spacing", params.get("bay_spacing")), dims.get("bay_spacing", 24))
@@ -205,6 +268,7 @@ def _merge_dimensions(template: TemplateDef, params: dict[str, Any]) -> dict[str
     dims["leg_type"] = _choice(raw_dims, params, "leg_type", "tapered")
     dims["arm_profile"] = _choice(raw_dims, params, "arm_profile", "track")
     dims["door_style"] = _choice(raw_dims, params, "door_style", "open")
+    dims["door_layout"] = _choice(raw_dims, params, "door_layout", "open")
     dims["base_style"] = _choice(raw_dims, params, "base_style", "toe_kick")
     dims["mount_type"] = _choice(raw_dims, params, "mount_type", "outside")
     dims["stack_direction"] = _choice(raw_dims, params, "stack_direction", "split")
@@ -413,6 +477,8 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
         else:
             parts.append(_rect(x0, arm_top_y, arm_w, arm_bottom_y - arm_top_y, 1.4, "#fff", "#111", arm_radius))
             parts.append(_rect(x0 + dw - arm_w, arm_top_y, arm_w, arm_bottom_y - arm_top_y, 1.4, "#fff", "#111", arm_radius))
+    elif template.key in WOODCRAFT_CASEWORK_KEYS:
+        _draw_casework_front(parts, template, x0, y0, dw, dh, dims, mode)
     else:
         shelf_count = max(2, min(8, int(dims["shelves"])))
         thickness = max(1.5, min(8, dims["material_thickness"] * scale))
@@ -484,6 +550,8 @@ def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: floa
         if dims.get("arm_configuration") in {"left", "right", "both"}:
             parts.append(_rect(x0, back_y + back_h * 0.15, dd * 0.14, floor_y - (back_y + back_h * 0.15), 1.0, "#fff", "#111", 2))
             parts.append(_text(x0 + dd * 0.5, floor_y + 32, str(dims["arm_configuration"]).replace("_", " ").title(), 8, fill="#667085"))
+    elif template.key in WOODCRAFT_CASEWORK_KEYS:
+        _draw_casework_side(parts, template, x0, y0, dd, dh, dims, mode)
     else:
         parts.append(_rect(x0, y0, dd, dh, 1.4, "#fff", "#111"))
         if template.key == "shelving":
@@ -531,6 +599,8 @@ def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: floa
             parts.append(_rect(x0, y0, arm_d, dd, 0.9, "none", "#667085"))
         if arm_config in {"right", "both"}:
             parts.append(_rect(x0 + dw - arm_d, y0, arm_d, dd, 0.9, "none", "#667085"))
+    elif template.key in WOODCRAFT_CASEWORK_KEYS:
+        _draw_casework_plan(parts, template, x0, y0, dw, dd, dims)
     else:
         bay_count = max(1, min(6, round(width / max(dims.get("bay_spacing", 24), 1))))
         for i in range(1, bay_count):
@@ -557,6 +627,8 @@ def _draw_family_perspective(parts: list[str], template: TemplateDef, style: str
         if dims.get("leg_type") in {"tapered", "legs"}:
             parts.append(_line(cx - 42, cy + 58, cx - 48, cy + 86, 1.0))
             parts.append(_line(cx + 38, cy + 40, cx + 48, cy + 68, 1.0))
+    elif template.key in WOODCRAFT_CASEWORK_KEYS:
+        _draw_casework_perspective(parts, template, cx, cy, dims)
     else:
         parts.append(f'<path d="M {cx - 78:.1f} {cy - 42:.1f} L {cx + 52:.1f} {cy - 64:.1f} L {cx + 86:.1f} {cy + 32:.1f} L {cx - 44:.1f} {cy + 58:.1f} Z" fill="#f8fafc" stroke="#111" stroke-width="1.2"/>')
         if template.key == "shelving":
@@ -573,11 +645,132 @@ def _draw_family_perspective(parts: list[str], template: TemplateDef, style: str
     parts.append(_text(cx, y + h - 16, f'{template.family} / {_title(style)}', 9, fill="#667085"))
 
 
+def _draw_casework_front(parts: list[str], template: TemplateDef, x0: float, y0: float, dw: float, dh: float, dims: dict[str, Any], mode: str) -> None:
+    thickness = max(2, min(9, dims["material_thickness"] * (dh / max(dims["height"], 1))))
+    shelves = max(0, min(8, int(dims.get("shelves", 0))))
+    drawers = max(0, min(6, int(dims.get("drawer_count", 0))))
+    door_layout = dims.get("door_layout", "open")
+    base_style = dims.get("base_style", "toe_kick")
+    bay_count = max(1, min(5, round(dims["width"] / max(dims.get("bay_spacing", 30), 1))))
+    base_h = max(8, min(30, dh * 0.12))
+
+    if template.key == "desk_table":
+        top_h = max(7, thickness * 1.4)
+        apron_h = max(10, dh * 0.12)
+        parts.append(_rect(x0, y0 + dh * 0.12, dw, top_h, 1.3, "#f8fafc", "#111", 2))
+        parts.append(_rect(x0 + dw * 0.08, y0 + dh * 0.12 + top_h, dw * 0.84, apron_h, 1.0, "#fff", "#111"))
+        if drawers:
+            drawer_w = dw * 0.32
+            parts.append(_rect(x0 + dw / 2 - drawer_w / 2, y0 + dh * 0.12 + top_h + 2, drawer_w, apron_h - 4, 0.8, "none", "#667085"))
+        leg_w = max(6, dw * 0.035)
+        for lx in (x0 + dw * 0.1, x0 + dw * 0.88):
+            if dims.get("leg_type") in {"tapered", "legs", "tapered_legs"}:
+                parts.append(f'<path d="M {lx:.1f} {y0 + dh * 0.12 + top_h + apron_h:.1f} L {lx + leg_w:.1f} {y0 + dh * 0.12 + top_h + apron_h:.1f} L {lx + leg_w * 1.5:.1f} {y0 + dh:.1f} L {lx - leg_w * 0.5:.1f} {y0 + dh:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
+            else:
+                parts.append(_rect(lx, y0 + dh * 0.12 + top_h + apron_h, leg_w, dh * 0.72, 1.0, "#fff", "#111"))
+        return
+
+    parts.append(_rect(x0, y0, dw, dh, 1.6, "#fff", "#111"))
+    parts.append(_rect(x0 + thickness, y0 + thickness, dw - thickness * 2, dh - thickness * 2, 0.8, "none", "#98a2b3"))
+
+    if template.key in {"entertainment_center", "wall_unit"}:
+        for i in range(1, bay_count):
+            px = x0 + dw * i / bay_count
+            parts.append(_rect(px - thickness / 2, y0 + thickness, thickness, dh - thickness * 2, 0.7, "#f8fafc", "#111"))
+
+    usable_top = y0 + thickness
+    usable_bottom = y0 + dh - thickness - (base_h if base_style in {"toe_kick", "plinth"} else 0)
+    usable_h = max(20, usable_bottom - usable_top)
+    if shelves:
+        spacing = usable_h / (shelves + 1)
+        for i in range(1, shelves + 1):
+            py = usable_top + spacing * i
+            parts.append(_rect(x0 + thickness, py - thickness / 2, dw - thickness * 2, thickness, 0.6, "#f8fafc", "#111"))
+
+    if drawers:
+        drawer_zone_h = min(usable_h * 0.45, max(24, drawers * 24))
+        drawer_h = drawer_zone_h / drawers
+        drawer_y = usable_bottom - drawer_zone_h
+        for i in range(drawers):
+            parts.append(_rect(x0 + thickness * 1.5, drawer_y + drawer_h * i + 2, dw - thickness * 3, drawer_h - 4, 0.8, "#fff", "#667085", 2))
+            parts.append(_line(x0 + dw / 2 - 8, drawer_y + drawer_h * i + drawer_h / 2, x0 + dw / 2 + 8, drawer_y + drawer_h * i + drawer_h / 2, 0.8, "#667085"))
+
+    if door_layout in {"doors", "double", "closed"}:
+        door_top = usable_top + usable_h * (0.52 if drawers else 0.08)
+        door_h = usable_bottom - door_top
+        parts.append(_rect(x0 + thickness, door_top, (dw - thickness * 2) / 2, door_h, 0.8, "none", "#667085"))
+        parts.append(_rect(x0 + dw / 2, door_top, (dw - thickness * 2) / 2, door_h, 0.8, "none", "#667085"))
+    elif door_layout in {"single", "left", "right"}:
+        parts.append(_rect(x0 + thickness, usable_top + usable_h * 0.3, dw - thickness * 2, usable_h * 0.6, 0.8, "none", "#667085"))
+
+    if template.key == "nightstand":
+        leg_h = max(8, dh * 0.12)
+        for lx in (x0 + dw * 0.12, x0 + dw * 0.82):
+            parts.append(_rect(lx, y0 + dh, max(5, dw * 0.04), leg_h, 0.8, "#fff", "#111"))
+    elif base_style in {"toe_kick", "plinth"}:
+        inset = 0 if base_style == "plinth" else max(8, dw * 0.07)
+        parts.append(_rect(x0 + inset, y0 + dh - base_h, dw - inset * 2, base_h, 1.0, "#fff", "#111"))
+
+
+def _draw_casework_side(parts: list[str], template: TemplateDef, x0: float, y0: float, dd: float, dh: float, dims: dict[str, Any], mode: str) -> None:
+    thickness = max(2, min(8, dims["material_thickness"] * (dh / max(dims["height"], 1))))
+    if template.key == "desk_table":
+        top_h = max(7, thickness * 1.4)
+        top_y = y0 + dh * 0.12
+        parts.append(_rect(x0, top_y, dd, top_h, 1.2, "#f8fafc", "#111", 2))
+        parts.append(_rect(x0 + dd * 0.12, top_y + top_h, dd * 0.76, max(10, dh * 0.12), 0.9, "#fff", "#111"))
+        for lx in (x0 + dd * 0.14, x0 + dd * 0.78):
+            parts.append(_rect(lx, top_y + top_h + dh * 0.12, max(5, dd * 0.06), dh * 0.68, 0.8, "#fff", "#111"))
+        return
+
+    base_style = dims.get("base_style", "toe_kick")
+    base_h = max(8, min(28, dh * 0.12))
+    parts.append(_rect(x0, y0, dd, dh, 1.4, "#fff", "#111"))
+    parts.append(_rect(x0 + thickness, y0 + thickness, dd - thickness * 2, dh - thickness * 2, 0.7, "none", "#98a2b3"))
+    shelves = max(0, min(8, int(dims.get("shelves", 0))))
+    usable_h = dh - thickness * 2 - (base_h if base_style in {"toe_kick", "plinth"} else 0)
+    for i in range(1, shelves + 1):
+        py = y0 + thickness + usable_h * i / (shelves + 1)
+        parts.append(_rect(x0 + thickness, py - thickness / 2, dd - thickness * 2, thickness, 0.5, "#f8fafc", "#98a2b3"))
+    if base_style in {"toe_kick", "plinth"}:
+        parts.append(_rect(x0, y0 + dh - base_h, dd, base_h, 0.8, "#fff", "#111"))
+
+
+def _draw_casework_plan(parts: list[str], template: TemplateDef, x0: float, y0: float, dw: float, dd: float, dims: dict[str, Any]) -> None:
+    parts.append(_rect(x0, y0, dw, dd, 1.2, "#fff", "#111"))
+    thickness = max(2, min(8, dims["material_thickness"] * (dd / max(dims["depth"], 1))))
+    if template.key == "desk_table":
+        parts.append(_rect(x0 + dw * 0.08, y0 + dd * 0.12, dw * 0.84, dd * 0.76, 0.8, "#f8fafc", "#98a2b3", 2))
+        return
+    bay_count = max(1, min(5, round(dims["width"] / max(dims.get("bay_spacing", 30), 1))))
+    for i in range(1, bay_count):
+        px = x0 + dw * i / bay_count
+        parts.append(_line(px, y0, px, y0 + dd, 0.8, "#98a2b3"))
+    parts.append(_rect(x0 + thickness, y0 + thickness, dw - thickness * 2, dd - thickness * 2, 0.7, "none", "#98a2b3"))
+    parts.append(_text(x0 + dw / 2, y0 + dd / 2 + 4, f'{bay_count} BAY LAYOUT', 8, fill="#667085"))
+
+
+def _draw_casework_perspective(parts: list[str], template: TemplateDef, cx: float, cy: float, dims: dict[str, Any]) -> None:
+    if template.key == "desk_table":
+        parts.append(f'<path d="M {cx - 86:.1f} {cy - 18:.1f} L {cx + 60:.1f} {cy - 42:.1f} L {cx + 90:.1f} {cy - 18:.1f} L {cx - 54:.1f} {cy + 8:.1f} Z" fill="#f8fafc" stroke="#111" stroke-width="1.2"/>')
+        for lx in (-62, 48):
+            parts.append(_line(cx + lx, cy + 2, cx + lx - 10, cy + 60, 1.0))
+        return
+    parts.append(f'<path d="M {cx - 70:.1f} {cy - 62:.1f} L {cx + 42:.1f} {cy - 82:.1f} L {cx + 80:.1f} {cy + 40:.1f} L {cx - 32:.1f} {cy + 64:.1f} Z" fill="#f8fafc" stroke="#111" stroke-width="1.2"/>')
+    parts.append(f'<path d="M {cx - 70:.1f} {cy - 62:.1f} L {cx - 32:.1f} {cy + 64:.1f} L {cx - 32:.1f} {cy + 84:.1f} L {cx - 70:.1f} {cy - 42:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.0"/>')
+    bay_count = max(1, min(4, round(dims["width"] / max(dims.get("bay_spacing", 30), 1))))
+    for i in range(1, bay_count):
+        x = cx - 70 + i * 112 / bay_count
+        parts.append(_line(x, cy - 62 + i * 2, x + 38, cy + 52 + i * 2, 0.7, "#98a2b3"))
+
+
 def _shop_family_note(template: TemplateDef) -> str:
     if template.key == "banquette":
         return "VERIFY SEAT HEIGHT, TOE KICK, BACK PITCH, CUSHION BREAKS"
     if template.key == "chair":
         return "VERIFY FRAME WIDTH, SEAT DECK, ARM HEIGHT, BACK PITCH"
+    if template.key in WOODCRAFT_CASEWORK_KEYS:
+        return "VERIFY CARCASS WIDTH, DEPTH, MATERIAL THICKNESS, DOOR/DRAWER CLEARANCES, AND SITE CONDITIONS"
     return "VERIFY CARCASS, SHELF SPACING, MATERIAL THICKNESS, WALL CONDITIONS"
 
 
@@ -585,7 +778,7 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
     w, h = 1320, 900
     margin = 34
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
-    company = "EMPIRE WOODCRAFT" if template.key in {"banquette", "shelving"} else "EMPIRE WORKROOM"
+    company = "EMPIRE WOODCRAFT" if template.key in {"banquette", "shelving"} or template.key in WOODCRAFT_CASEWORK_KEYS else "EMPIRE WORKROOM"
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" style="font-family: Arial, Helvetica, sans-serif;">',
         '<rect width="1320" height="900" fill="#ffffff"/>',
@@ -641,6 +834,15 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
             f'Bay spacing: {dims["bay_spacing"]:.0f}"',
             f'Doors: {str(dims["door_style"]).replace("_", " ").title()}',
             f'Base: {str(dims["base_style"]).replace("_", " ").title()}',
+        ])
+    if template.key in WOODCRAFT_CASEWORK_KEYS:
+        spec_lines.extend([
+            f'Material: {dims["material_thickness"]:.2f}"',
+            f'Shelves: {dims["shelves"]:.0f}',
+            f'Drawers: {dims["drawer_count"]:.0f}',
+            f'Doors: {str(dims["door_layout"]).replace("_", " ").title()}',
+            f'Base: {str(dims["base_style"]).replace("_", " ").title()}',
+            f'Bay spacing: {dims["bay_spacing"]:.0f}"',
         ])
     spec_lines.append(_shop_family_note(template) if mode == "shop" else "Client-facing scale sheet for design review.")
     for i, line in enumerate(spec_lines):

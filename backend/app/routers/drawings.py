@@ -725,6 +725,7 @@ async def get_product_catalog(business_unit: str = None, mode: str = None):
     """Browse the full product catalog — 18 categories, 204+ styles."""
     from app.services.vision.product_catalog import PRODUCT_CATALOG, get_total_styles
     from app.services.vision.renderer_registry import RENDERER_MAP, get_renderer, get_business_unit as get_biz
+    from app.services.vision.parametric_templates import get_template_for_style
 
     # Renderer mode truth — which modes produce genuinely different output
     RENDERER_MODE_TRUTH = {
@@ -760,8 +761,11 @@ async def get_product_catalog(business_unit: str = None, mode: str = None):
         for style_key in cat_info.get("styles", []):
             renderer = get_renderer(style_key)
             renderer_name = renderer.__name__ if hasattr(renderer, '__name__') else str(renderer)
+            parametric_template = get_template_for_style(style_key, cat_key)
             # Determine readiness
-            if "generic" in renderer_name:
+            if parametric_template:
+                readiness = "dedicated"
+            elif "generic" in renderer_name:
                 readiness = "fallback"
             elif "bench" in renderer_name:
                 readiness = "dedicated"
@@ -776,7 +780,10 @@ async def get_product_catalog(business_unit: str = None, mode: str = None):
             mode_truth = RENDERER_MODE_TRUTH.get(renderer_name, {"presentation": "active"})
             mode_status = {}
             for m in cat_info.get("modes", ["presentation"]):
-                mode_status[m] = mode_truth.get(m, "planned")
+                if parametric_template and m in {"presentation", "shop"}:
+                    mode_status[m] = "active"
+                else:
+                    mode_status[m] = mode_truth.get(m, "planned")
 
             styles.append({
                 "style_key": style_key,

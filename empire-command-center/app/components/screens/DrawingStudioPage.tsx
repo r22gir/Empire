@@ -70,7 +70,23 @@ const CATALOG_TEMPLATE_DEFAULTS: Record<string, Record<string, string>> = {
   banquette: { width: '120"', depth: '22"', height: '36"', seat_height: '18"', back_height: '18"', arm_configuration: 'none', base_type: 'toe_kick', cushion_segments: '4' },
   chair: { width: '32"', depth: '34"', height: '36"', seat_height: '18"', back_height: '18"', arm_height: '24"', seat_thickness: '5"', back_profile: 'straight', leg_type: 'tapered', leg_taper: '1.5"', arm_profile: 'track' },
   shelving: { width: '54"', depth: '14"', height: '84"', shelves: '5', shelf_spacing: '15"', material_thickness: '0.75"', bay_spacing: '24"', door_style: 'open', base_style: 'toe_kick' },
+  table: { width: '60"', depth: '30"', height: '30"', material_thickness: '1.25"', drawer_count: '1', leg_type: 'tapered', base_style: 'legs' },
+  desk: { width: '60"', depth: '30"', height: '30"', material_thickness: '1.25"', drawer_count: '2', leg_type: 'boxed', base_style: 'pedestal' },
+  millwork: { width: '120"', depth: '16"', height: '96"', shelves: '5', drawer_count: '0', material_thickness: '0.75"', bay_spacing: '30"', door_layout: 'open', base_style: 'toe_kick' },
 };
+
+const CATALOG_STYLE_DEFAULTS: Record<string, Record<string, string>> = {
+  closed_cabinet: { width: '36"', depth: '24"', height: '34.5"', material_thickness: '0.75"', shelves: '1', drawer_count: '1', door_layout: 'double', base_style: 'toe_kick' },
+  display_case: { width: '42"', depth: '16"', height: '78"', material_thickness: '0.75"', shelves: '4', drawer_count: '0', door_layout: 'doors', base_style: 'plinth', bay_spacing: '21"' },
+  nightstand: { width: '24"', depth: '18"', height: '28"', material_thickness: '0.75"', shelves: '1', drawer_count: '2', door_layout: 'open', base_style: 'legs' },
+  entertainment_center: { width: '96"', depth: '18"', height: '72"', material_thickness: '0.75"', shelves: '3', drawer_count: '2', door_layout: 'double', base_style: 'toe_kick', bay_spacing: '32"' },
+  built_in: { width: '120"', depth: '16"', height: '96"', material_thickness: '0.75"', shelves: '5', drawer_count: '0', door_layout: 'open', base_style: 'toe_kick', bay_spacing: '30"' },
+  built_in_cabinetry: { width: '120"', depth: '18"', height: '96"', material_thickness: '0.75"', shelves: '5', drawer_count: '2', door_layout: 'double', base_style: 'toe_kick', bay_spacing: '30"' },
+};
+
+function getCatalogTemplateDefaults(style: CatalogStyle, category: CatalogCategory): Record<string, string> {
+  return { ...(CATALOG_TEMPLATE_DEFAULTS[category.key] || { width: '48"', depth: '24"', height: '36"' }), ...(CATALOG_STYLE_DEFAULTS[style.style_key] || {}) };
+}
 
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
@@ -428,7 +444,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   const generateCatalogDrawing = useCallback(async (style: CatalogStyle, category: CatalogCategory, mode: string) => {
     const drawingMode = mode === 'shop' ? 'shop_drawing' : mode;
     const isWindow = category.key === 'window';
-    const defaultDimensions: Record<string, string> = CATALOG_TEMPLATE_DEFAULTS[category.key] || { width: '48"', depth: '24"', height: '36"' };
+    const defaultDimensions: Record<string, string> = getCatalogTemplateDefaults(style, category);
     const catalogNotes = drawingMode === 'shop_drawing'
       ? 'Shop drawing generated from Product Catalog. Verify final field measurements before fabrication.'
       : 'Presentation drawing generated from Product Catalog.';
