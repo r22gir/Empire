@@ -66,10 +66,10 @@ interface CatalogTemplateState {
 }
 
 const CATALOG_TEMPLATE_DEFAULTS: Record<string, Record<string, string>> = {
-  window: { width: '96"', height: '102"', drop: '102"', return: '4"', panels: '2', fullness: '2.5', mount_type: 'outside', stack_direction: 'split' },
-  banquette: { width: '120"', depth: '20"', height: '34"', seat_height: '18"', back_height: '16"', arm_configuration: 'none', base_type: 'toe_kick' },
-  chair: { width: '32"', depth: '34"', height: '36"', seat_height: '18"', back_height: '18"', arm_height: '24"', back_profile: 'straight', leg_type: 'tapered' },
-  shelving: { width: '48"', depth: '12"', height: '84"', shelves: '4', material_thickness: '0.75"', bay_spacing: '24"', door_style: 'open' },
+  window: { width: '108"', height: '108"', drop: '108"', return: '4.5"', panels: '2', fullness: '2.5', hem: '4"', mount_type: 'outside', stack_direction: 'split' },
+  banquette: { width: '120"', depth: '22"', height: '36"', seat_height: '18"', back_height: '18"', arm_configuration: 'none', base_type: 'toe_kick', cushion_segments: '4' },
+  chair: { width: '32"', depth: '34"', height: '36"', seat_height: '18"', back_height: '18"', arm_height: '24"', seat_thickness: '5"', back_profile: 'straight', leg_type: 'tapered', leg_taper: '1.5"', arm_profile: 'track' },
+  shelving: { width: '54"', depth: '14"', height: '84"', shelves: '5', shelf_spacing: '15"', material_thickness: '0.75"', bay_spacing: '24"', door_style: 'open', base_style: 'toe_kick' },
 };
 
 function stableSerialize(value: unknown): string {

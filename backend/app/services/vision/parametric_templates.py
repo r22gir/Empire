@@ -56,7 +56,7 @@ TEMPLATE_REGISTRY: dict[str, TemplateDef] = {
     "drapery": TemplateDef(
         key="drapery",
         family="Window Treatment / Drapery",
-        default_dimensions={"width": 96, "height": 102, "drop": 102, "return": 4, "panels": 2, "fullness": 2.5},
+        default_dimensions={"width": 108, "height": 108, "drop": 108, "return": 4.5, "panels": 2, "fullness": 2.5, "hem": 4},
         editable_parameters=("width", "height", "drop", "return", "panels", "fullness", "mount_type", "stack_direction"),
         supported_views=("front", "side", "top", "perspective"),
         presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
@@ -65,7 +65,7 @@ TEMPLATE_REGISTRY: dict[str, TemplateDef] = {
     "roman_shade": TemplateDef(
         key="roman_shade",
         family="Window Treatment / Roman Shade",
-        default_dimensions={"width": 48, "height": 64, "drop": 64, "return": 1.5},
+        default_dimensions={"width": 54, "height": 72, "drop": 72, "return": 1.5, "fold_spacing": 8},
         editable_parameters=("width", "height", "drop", "return", "fold_spacing"),
         supported_views=("front", "side", "top", "perspective"),
         presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
@@ -83,8 +83,8 @@ TEMPLATE_REGISTRY: dict[str, TemplateDef] = {
     "banquette": TemplateDef(
         key="banquette",
         family="WoodCraft / Bench & Banquette",
-        default_dimensions={"width": 120, "depth": 20, "height": 34, "seat_height": 18, "back_height": 16},
-        editable_parameters=("width", "depth", "height", "seat_height", "back_height", "arm_configuration", "base_type"),
+        default_dimensions={"width": 120, "depth": 22, "height": 36, "seat_height": 18, "back_height": 18, "cushion_segments": 4},
+        editable_parameters=("width", "depth", "height", "seat_height", "back_height", "arm_configuration", "base_type", "cushion_segments"),
         supported_views=("front", "side", "plan", "perspective"),
         presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
         shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
@@ -92,8 +92,8 @@ TEMPLATE_REGISTRY: dict[str, TemplateDef] = {
     "chair": TemplateDef(
         key="chair",
         family="Workroom / Chair Upholstery",
-        default_dimensions={"width": 32, "depth": 34, "height": 36, "seat_height": 18, "back_height": 18, "arm_height": 24},
-        editable_parameters=("width", "depth", "height", "seat_height", "arm_height", "back_profile", "leg_type"),
+        default_dimensions={"width": 32, "depth": 34, "height": 36, "seat_height": 18, "back_height": 18, "arm_height": 24, "seat_thickness": 5, "leg_taper": 1.5},
+        editable_parameters=("width", "depth", "height", "seat_height", "back_height", "arm_height", "back_profile", "seat_thickness", "leg_type", "leg_taper", "arm_profile"),
         supported_views=("front", "side", "plan", "perspective"),
         presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
         shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
@@ -101,8 +101,8 @@ TEMPLATE_REGISTRY: dict[str, TemplateDef] = {
     "shelving": TemplateDef(
         key="shelving",
         family="WoodCraft / Shelving & Cabinet Carcass",
-        default_dimensions={"width": 48, "depth": 12, "height": 84, "shelves": 4, "material_thickness": 0.75, "bay_spacing": 24},
-        editable_parameters=("width", "height", "depth", "shelves", "material_thickness", "bay_spacing", "door_style"),
+        default_dimensions={"width": 54, "depth": 14, "height": 84, "shelves": 5, "shelf_spacing": 15, "material_thickness": 0.75, "bay_spacing": 24},
+        editable_parameters=("width", "height", "depth", "shelves", "shelf_spacing", "material_thickness", "bay_spacing", "door_style", "base_style"),
         supported_views=("front", "side", "plan", "perspective"),
         presentation_rules={"dimensions": "primary", "callouts": "client", "title": "Presentation Sheet"},
         shop_rules={"dimensions": "full", "callouts": "technical", "title": "Shop Drawing"},
@@ -192,16 +192,23 @@ def _merge_dimensions(template: TemplateDef, params: dict[str, Any]) -> dict[str
     dims["seat_height"] = _num(raw_dims.get("seat_height", params.get("seat_height")), dims.get("seat_height", 18))
     dims["back_height"] = _num(raw_dims.get("back_height", params.get("back_height")), dims.get("back_height", 18))
     dims["arm_height"] = _num(raw_dims.get("arm_height", params.get("arm_height")), dims.get("arm_height", 24))
+    dims["seat_thickness"] = _num(raw_dims.get("seat_thickness", params.get("seat_thickness")), dims.get("seat_thickness", 5))
+    dims["leg_taper"] = _num(raw_dims.get("leg_taper", params.get("leg_taper")), dims.get("leg_taper", 1.5))
     dims["shelves"] = _num(raw_dims.get("shelves", params.get("shelves")), dims.get("shelves", 4))
+    dims["shelf_spacing"] = _num(raw_dims.get("shelf_spacing", params.get("shelf_spacing")), dims.get("shelf_spacing", 15))
     dims["material_thickness"] = _num(raw_dims.get("material_thickness", params.get("material_thickness")), dims.get("material_thickness", 0.75))
     dims["bay_spacing"] = _num(raw_dims.get("bay_spacing", params.get("bay_spacing")), dims.get("bay_spacing", 24))
+    dims["cushion_segments"] = _num(raw_dims.get("cushion_segments", params.get("cushion_segments")), dims.get("cushion_segments", 4))
     dims["arm_configuration"] = _choice(raw_dims, params, "arm_configuration", "none")
     dims["base_type"] = _choice(raw_dims, params, "base_type", "toe_kick")
     dims["back_profile"] = _choice(raw_dims, params, "back_profile", "straight")
     dims["leg_type"] = _choice(raw_dims, params, "leg_type", "tapered")
+    dims["arm_profile"] = _choice(raw_dims, params, "arm_profile", "track")
     dims["door_style"] = _choice(raw_dims, params, "door_style", "open")
+    dims["base_style"] = _choice(raw_dims, params, "base_style", "toe_kick")
     dims["mount_type"] = _choice(raw_dims, params, "mount_type", "outside")
     dims["stack_direction"] = _choice(raw_dims, params, "stack_direction", "split")
+    dims["hem"] = _num(raw_dims.get("hem", params.get("hem")), dims.get("hem", 4))
     return dims
 
 
@@ -266,6 +273,8 @@ def _draw_front(parts: list[str], template: TemplateDef, style: str, x: float, y
         for i in range(1, int(dims["panels"])):
             px = x0 + panel_w * i
             parts.append(_line(px, y0 - 2, px, y0 + dh, 1.1, "#555"))
+        hem_h = max(4, min(22, dims.get("hem", 4) * (dh / max(drop, 1))))
+        parts.append(_rect(x0 + 4, y0 + dh - hem_h - 3, dw - 8, hem_h, 0.8, "none", "#98a2b3"))
     elif template.key == "roman_shade":
         folds = max(5, int(drop / max(dims["fold_spacing"], 1)))
         for i in range(1, folds):
@@ -285,7 +294,7 @@ def _draw_front(parts: list[str], template: TemplateDef, style: str, x: float, y
     _dim_h(parts, x0, x0 + dw, y0 + dh + 8, f'{width:.0f}" W')
     _dim_v(parts, x0 + dw + 10, y0, y0 + dh, f'{drop:.0f}" DROP')
     if mode == "shop":
-        parts.append(_text(x0, y0 + dh + 58, "VERIFY FINISHED WIDTH, DROP, RETURNS, AND MOUNT HEIGHT", 8, "start", "700", "#8a5a00"))
+        parts.append(_text(x0, y0 + dh + 58, "VERIFY FINISHED WIDTH, DROP, RETURNS, HEMS, HARDWARE, AND MOUNT HEIGHT", 8, "start", "700", "#8a5a00"))
 
 
 def _draw_side(parts: list[str], x: float, y: float, w: float, h: float, dims: dict[str, float], mode: str) -> None:
@@ -342,60 +351,87 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
     parts.append(_text(x + w / 2, y + 18, "FRONT ELEVATION", 11, weight="700"))
 
     if template.key == "banquette":
-        seat_h = min(dh * 0.55, dims["seat_height"] * scale)
-        back_h = min(dh - seat_h, dims["back_height"] * scale)
+        floor_y = y0 + dh
+        seat_top_y = max(y0 + dh * 0.34, floor_y - dims["seat_height"] * scale)
+        cushion_h = max(10, min(24, dims.get("seat_thickness", 5) * scale))
+        back_h = max(24, min(seat_top_y - y0 + cushion_h * 0.25, dims["back_height"] * scale))
+        back_y = max(y0, seat_top_y - back_h)
         base_type = dims.get("base_type", "toe_kick")
         arm_config = dims.get("arm_configuration", "none")
-        base_h = max(7, min(seat_h * 0.34, 12 if base_type == "toe_kick" else 20))
+        base_h = max(8, min(28, (floor_y - seat_top_y) * 0.45))
         if base_type == "legs":
             leg_w = max(5, dw * 0.035)
-            for leg_x in (x0 + leg_w, x0 + dw - leg_w * 2):
-                parts.append(_rect(leg_x, y0 + back_h + seat_h - base_h, leg_w, base_h, 1, "#fff", "#111"))
+            for leg_x in (x0 + leg_w, x0 + dw * 0.33, x0 + dw * 0.66, x0 + dw - leg_w * 2):
+                parts.append(_rect(leg_x, floor_y - base_h, leg_w, base_h, 1, "#fff", "#111"))
+        elif base_type in {"plinth", "box", "box_base"}:
+            parts.append(_rect(x0, floor_y - base_h, dw, base_h, 1.2, "#f8fafc", "#111"))
         else:
             toe_inset = max(8, dw * 0.035)
-            parts.append(_rect(x0 + toe_inset, y0 + back_h + seat_h - base_h, dw - toe_inset * 2, base_h, 1.2, "#fff", "#111"))
-        parts.append(_rect(x0, y0 + back_h, dw, seat_h, 1.5, "#f6f2ea", "#111"))
-        parts.append(_rect(x0, y0, dw, back_h, 1.5, "#ffffff", "#111"))
+            parts.append(_rect(x0 + toe_inset, floor_y - base_h, dw - toe_inset * 2, base_h, 1.2, "#fff", "#111"))
+        parts.append(_rect(x0, seat_top_y - cushion_h, dw, cushion_h, 1.5, "#f6f2ea", "#111", 3))
+        parts.append(_rect(x0, back_y, dw, seat_top_y - back_y, 1.5, "#ffffff", "#111", 3))
         arm_w = max(10, dw * 0.06)
         if arm_config in {"left", "both"}:
-            parts.append(_rect(x0 - arm_w, y0 + back_h * 0.28, arm_w, back_h + seat_h * 0.72, 1.4, "#fff", "#111"))
+            parts.append(_rect(x0 - arm_w, back_y + back_h * 0.15, arm_w, floor_y - (back_y + back_h * 0.15), 1.4, "#fff", "#111", 2))
         if arm_config in {"right", "both"}:
-            parts.append(_rect(x0 + dw, y0 + back_h * 0.28, arm_w, back_h + seat_h * 0.72, 1.4, "#fff", "#111"))
-        channel_count = max(4, min(10, int(width / 16)))
+            parts.append(_rect(x0 + dw, back_y + back_h * 0.15, arm_w, floor_y - (back_y + back_h * 0.15), 1.4, "#fff", "#111", 2))
+        channel_count = max(2, min(10, int(dims.get("cushion_segments", width / 30))))
         for i in range(1, channel_count):
             px = x0 + dw * i / channel_count
-            parts.append(_line(px, y0 + 4, px, y0 + back_h - 4, 0.7, "#98a2b3"))
+            parts.append(_line(px, back_y + 4, px, seat_top_y - cushion_h - 2, 0.7, "#98a2b3"))
+            parts.append(_line(px, seat_top_y - cushion_h + 2, px, seat_top_y - 2, 0.7, "#98a2b3"))
     elif template.key == "chair":
-        seat_h = min(dh * 0.4, dims["seat_height"] * scale)
-        back_h = dh - seat_h
-        arm_h = max(seat_h * 0.65, min(dh * 0.78, dims["arm_height"] * scale))
+        floor_y = y0 + dh
+        seat_top_y = max(y0 + dh * 0.42, floor_y - dims["seat_height"] * scale)
+        cushion_h = max(8, min(28, dims["seat_thickness"] * scale))
+        seat_bottom_y = min(floor_y - 8, seat_top_y + cushion_h)
+        back_h = max(28, min(seat_top_y - y0 + cushion_h * 0.3, dims["back_height"] * scale))
+        back_y = max(y0, seat_top_y - back_h)
+        arm_top_y = max(back_y + 8, floor_y - dims["arm_height"] * scale)
+        arm_bottom_y = seat_bottom_y + max(8, (floor_y - seat_bottom_y) * 0.55)
         leg_type = dims.get("leg_type", "tapered")
         back_profile = dims.get("back_profile", "straight")
+        arm_profile = dims.get("arm_profile", "track")
         arm_w = max(14, dw * 0.16)
+        leg_h = max(10, floor_y - seat_bottom_y)
         if leg_type in {"tapered", "legs"}:
-            leg_h = max(8, seat_h * 0.3)
-            parts.append(f'<path d="M {x0 + arm_w + 6:.1f} {y0 + back_h + seat_h - 2:.1f} L {x0 + arm_w + 14:.1f} {y0 + back_h + seat_h - 2:.1f} L {x0 + arm_w + 11:.1f} {y0 + back_h + seat_h + leg_h:.1f} L {x0 + arm_w + 3:.1f} {y0 + back_h + seat_h + leg_h:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
-            parts.append(f'<path d="M {x0 + dw - arm_w - 14:.1f} {y0 + back_h + seat_h - 2:.1f} L {x0 + dw - arm_w - 6:.1f} {y0 + back_h + seat_h - 2:.1f} L {x0 + dw - arm_w - 3:.1f} {y0 + back_h + seat_h + leg_h:.1f} L {x0 + dw - arm_w - 11:.1f} {y0 + back_h + seat_h + leg_h:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
-        parts.append(_rect(x0 + arm_w, y0 + back_h, dw - arm_w * 2, seat_h, 1.5, "#f7f4ef", "#111", 4))
+            taper = max(0.5, min(5, dims.get("leg_taper", 1.5))) * scale
+            for leg_x, direction in ((x0 + arm_w + 8, -1), (x0 + dw - arm_w - 18, 1)):
+                parts.append(f'<path d="M {leg_x:.1f} {seat_bottom_y - 1:.1f} L {leg_x + 10:.1f} {seat_bottom_y - 1:.1f} L {leg_x + 10 + direction * taper:.1f} {floor_y:.1f} L {leg_x + direction * taper:.1f} {floor_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
+        elif leg_type in {"skirt", "boxed"}:
+            parts.append(_rect(x0 + arm_w * 0.7, seat_bottom_y, dw - arm_w * 1.4, leg_h, 1.0, "#fff", "#111"))
+        parts.append(_rect(x0 + arm_w, seat_top_y, dw - arm_w * 2, cushion_h, 1.5, "#f7f4ef", "#111", 4))
         if back_profile in {"curved", "wingback"}:
-            parts.append(f'<path d="M {x0 + arm_w * 0.7:.1f} {y0 + back_h + 8:.1f} Q {x0 + dw / 2:.1f} {y0 - 24:.1f} {x0 + dw - arm_w * 0.7:.1f} {y0 + back_h + 8:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.5"/>')
+            wing = arm_w * (0.55 if back_profile == "wingback" else 0.25)
+            parts.append(f'<path d="M {x0 + arm_w * 0.7 - wing:.1f} {seat_top_y + 8:.1f} Q {x0 + dw / 2:.1f} {back_y - 18:.1f} {x0 + dw - arm_w * 0.7 + wing:.1f} {seat_top_y + 8:.1f} L {x0 + dw - arm_w * 0.65:.1f} {seat_top_y + 14:.1f} Q {x0 + dw / 2:.1f} {back_y + 12:.1f} {x0 + arm_w * 0.65:.1f} {seat_top_y + 14:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.5"/>')
         else:
-            parts.append(_rect(x0 + arm_w * 0.7, y0, dw - arm_w * 1.4, back_h + 8, 1.5, "#fff", "#111", 6))
-        arm_y = y0 + back_h + seat_h - arm_h
-        parts.append(_rect(x0, arm_y, arm_w, arm_h, 1.4, "#fff", "#111", 5))
-        parts.append(_rect(x0 + dw - arm_w, arm_y, arm_w, arm_h, 1.4, "#fff", "#111", 5))
+            parts.append(_rect(x0 + arm_w * 0.7, back_y, dw - arm_w * 1.4, seat_top_y - back_y + 8, 1.5, "#fff", "#111", 6))
+        arm_radius = 8 if arm_profile in {"rolled", "round"} else 3
+        if arm_profile in {"sloped", "slope"}:
+            parts.append(f'<path d="M {x0:.1f} {arm_top_y + 10:.1f} L {x0 + arm_w:.1f} {arm_top_y:.1f} L {x0 + arm_w:.1f} {arm_bottom_y:.1f} L {x0:.1f} {arm_bottom_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
+            parts.append(f'<path d="M {x0 + dw - arm_w:.1f} {arm_top_y:.1f} L {x0 + dw:.1f} {arm_top_y + 10:.1f} L {x0 + dw:.1f} {arm_bottom_y:.1f} L {x0 + dw - arm_w:.1f} {arm_bottom_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
+        else:
+            parts.append(_rect(x0, arm_top_y, arm_w, arm_bottom_y - arm_top_y, 1.4, "#fff", "#111", arm_radius))
+            parts.append(_rect(x0 + dw - arm_w, arm_top_y, arm_w, arm_bottom_y - arm_top_y, 1.4, "#fff", "#111", arm_radius))
     else:
         shelf_count = max(2, min(8, int(dims["shelves"])))
         thickness = max(1.5, min(8, dims["material_thickness"] * scale))
         door_style = dims.get("door_style", "open")
+        base_style = dims.get("base_style", "toe_kick")
         parts.append(_rect(x0, y0, dw, dh, 1.6, "#fff", "#111"))
+        usable_h = dh - (max(8, thickness * 2.5) if base_style in {"toe_kick", "plinth"} else 0)
+        spacing = max(thickness * 3, min(usable_h / 2, dims.get("shelf_spacing", height / shelf_count) * scale))
         for i in range(1, shelf_count):
-            py = y0 + dh * i / shelf_count
+            py = y0 + min(usable_h - thickness, i * spacing)
             parts.append(_rect(x0, py - thickness / 2, dw, thickness, 0.8, "#f8fafc", "#111"))
         parts.append(_line(x0 + dw / 2, y0, x0 + dw / 2, y0 + dh, 0.8, "#98a2b3"))
         if door_style in {"closed", "doors"}:
             parts.append(_rect(x0, y0 + dh * 0.55, dw / 2, dh * 0.45, 1.0, "none", "#667085"))
             parts.append(_rect(x0 + dw / 2, y0 + dh * 0.55, dw / 2, dh * 0.45, 1.0, "none", "#667085"))
+        if base_style in {"toe_kick", "plinth"}:
+            base_h = max(8, thickness * 2.8)
+            inset = 0 if base_style == "plinth" else max(8, dw * 0.06)
+            parts.append(_rect(x0 + inset, y0 + dh - base_h, dw - inset * 2, base_h, 1.0, "#fff", "#111"))
 
     _dim_h(parts, x0, x0 + dw, y0 + dh + 8, f'{width:.0f}" W')
     _dim_v(parts, x0 + dw + 12, y0, y0 + dh, f'{height:.0f}" H')
@@ -413,19 +449,53 @@ def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: floa
     y0 = y + 52 + (h - 112 - dh) / 2
     parts.append(_text(x + w / 2, y + 18, "SIDE ELEVATION", 11, weight="700"))
     if template.key == "chair":
-        parts.append(_rect(x0, y0 + dh * 0.52, dd, dh * 0.28, 1.3, "#f7f4ef", "#111", 4))
+        floor_y = y0 + dh
+        seat_top_y = max(y0 + dh * 0.42, floor_y - dims["seat_height"] * scale)
+        cushion_h = max(8, min(28, dims["seat_thickness"] * scale))
+        seat_bottom_y = min(floor_y - 8, seat_top_y + cushion_h)
+        arm_top_y = max(y0 + 24, floor_y - dims["arm_height"] * scale)
+        parts.append(_rect(x0, seat_top_y, dd, cushion_h, 1.3, "#f7f4ef", "#111", 4))
         if dims.get("back_profile") in {"curved", "wingback"}:
-            parts.append(f'<path d="M {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Q {x0 + dd * 0.83:.1f} {y0 + dh * 0.18:.1f} {x0 + dd:.1f} {y0 + dh * 0.55:.1f} L {x0 + dd * 0.7:.1f} {y0 + dh * 0.58:.1f} Q {x0 + dd * 0.56:.1f} {y0 + dh * 0.28:.1f} {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
+            parts.append(f'<path d="M {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Q {x0 + dd * 0.83:.1f} {y0 + dh * 0.18:.1f} {x0 + dd:.1f} {seat_top_y:.1f} L {x0 + dd * 0.7:.1f} {seat_top_y + 8:.1f} Q {x0 + dd * 0.56:.1f} {y0 + dh * 0.28:.1f} {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
         else:
-            parts.append(f'<path d="M {x0 + dd * 0.65:.1f} {y0:.1f} L {x0 + dd:.1f} {y0 + dh * 0.55:.1f} L {x0 + dd * 0.7:.1f} {y0 + dh * 0.58:.1f} L {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
+            parts.append(f'<path d="M {x0 + dd * 0.65:.1f} {y0:.1f} L {x0 + dd:.1f} {seat_top_y:.1f} L {x0 + dd * 0.7:.1f} {seat_top_y + 8:.1f} L {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
+        parts.append(_rect(x0 + dd * 0.08, arm_top_y, dd * 0.82, seat_bottom_y - arm_top_y, 1.0, "none", "#667085", 4))
+        if dims.get("leg_type") in {"tapered", "legs"}:
+            taper = max(0.5, min(5, dims.get("leg_taper", 1.5))) * scale
+            parts.append(f'<path d="M {x0 + dd * 0.18:.1f} {seat_bottom_y:.1f} L {x0 + dd * 0.26:.1f} {seat_bottom_y:.1f} L {x0 + dd * 0.26 + taper:.1f} {floor_y:.1f} L {x0 + dd * 0.18 - taper:.1f} {floor_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
+            parts.append(f'<path d="M {x0 + dd * 0.74:.1f} {seat_bottom_y:.1f} L {x0 + dd * 0.82:.1f} {seat_bottom_y:.1f} L {x0 + dd * 0.82 + taper:.1f} {floor_y:.1f} L {x0 + dd * 0.74 - taper:.1f} {floor_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
+    elif template.key == "banquette":
+        floor_y = y0 + dh
+        seat_top_y = max(y0 + dh * 0.36, floor_y - dims["seat_height"] * scale)
+        cushion_h = max(9, min(22, dims.get("seat_thickness", 5) * scale))
+        back_h = max(26, min(seat_top_y - y0 + cushion_h * 0.3, dims["back_height"] * scale))
+        back_y = max(y0, seat_top_y - back_h)
+        base_type = dims.get("base_type", "toe_kick")
+        parts.append(_rect(x0 + dd * 0.08, seat_top_y - cushion_h, dd * 0.84, cushion_h, 1.2, "#f6f2ea", "#111", 3))
+        parts.append(_rect(x0 + dd * 0.16, back_y, dd * 0.74, seat_top_y - back_y, 1.2, "#fff", "#111", 3))
+        if base_type == "legs":
+            for leg_x in (x0 + dd * 0.18, x0 + dd * 0.76):
+                parts.append(_rect(leg_x, seat_top_y, max(5, dd * 0.06), floor_y - seat_top_y, 0.8, "#fff", "#111"))
+        elif base_type in {"plinth", "box", "box_base"}:
+            parts.append(_rect(x0 + dd * 0.08, floor_y - max(8, (floor_y - seat_top_y) * 0.45), dd * 0.84, max(8, (floor_y - seat_top_y) * 0.45), 0.9, "#f8fafc", "#111"))
+        else:
+            inset = max(6, dd * 0.12)
+            parts.append(_rect(x0 + inset, floor_y - max(8, (floor_y - seat_top_y) * 0.4), dd - inset * 2, max(8, (floor_y - seat_top_y) * 0.4), 0.9, "#fff", "#111"))
+        if dims.get("arm_configuration") in {"left", "right", "both"}:
+            parts.append(_rect(x0, back_y + back_h * 0.15, dd * 0.14, floor_y - (back_y + back_h * 0.15), 1.0, "#fff", "#111", 2))
+            parts.append(_text(x0 + dd * 0.5, floor_y + 32, str(dims["arm_configuration"]).replace("_", " ").title(), 8, fill="#667085"))
     else:
         parts.append(_rect(x0, y0, dd, dh, 1.4, "#fff", "#111"))
         if template.key == "shelving":
             shelf_count = max(2, min(8, int(dims["shelves"])))
             thickness = max(1.2, min(6, dims["material_thickness"] * scale))
+            spacing = max(thickness * 3, min(dh / 2, dims.get("shelf_spacing", height / shelf_count) * scale))
             for i in range(1, shelf_count):
-                py = y0 + dh * i / shelf_count
+                py = y0 + min(dh - thickness, i * spacing)
                 parts.append(_rect(x0, py - thickness / 2, dd, thickness, 0.6, "#f8fafc", "#98a2b3"))
+            if dims.get("base_style") in {"toe_kick", "plinth"}:
+                base_h = max(7, thickness * 2.5)
+                parts.append(_rect(x0, y0 + dh - base_h, dd, base_h, 0.8, "#fff", "#111"))
     _dim_h(parts, x0, x0 + dd, y0 + dh + 8, f'{depth:.0f}" D')
     if mode == "shop":
         _dim_v(parts, x0 + dd + 10, y0, y0 + dh, f'{height:.0f}" H')
@@ -442,9 +512,16 @@ def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: floa
     parts.append(_text(x + w / 2, y + 18, "PLAN VIEW", 11, weight="700"))
     parts.append(_rect(x0, y0, dw, dd, 1.4, "#fff", "#111"))
     if template.key == "chair":
-        parts.append(_rect(x0 + dw * 0.12, y0 + dd * 0.12, dw * 0.76, dd * 0.72, 0.9, "#f7f4ef", "#667085", 5))
+        arm_profile = dims.get("arm_profile", "track")
+        back_depth = dd * (0.26 if dims.get("back_profile") in {"curved", "wingback"} else 0.18)
+        parts.append(_rect(x0 + dw * 0.16, y0 + dd * 0.2, dw * 0.68, dd * 0.58, 0.9, "#f7f4ef", "#667085", 5))
+        parts.append(_rect(x0 + dw * 0.13, y0 + dd * 0.08, dw * 0.74, back_depth, 0.9, "none", "#667085", 5))
+        arm_w = dw * 0.16
+        arm_rx = 7 if arm_profile in {"rolled", "round"} else 2
+        parts.append(_rect(x0, y0 + dd * 0.18, arm_w, dd * 0.68, 0.9, "none", "#667085", arm_rx))
+        parts.append(_rect(x0 + dw - arm_w, y0 + dd * 0.18, arm_w, dd * 0.68, 0.9, "none", "#667085", arm_rx))
     elif template.key == "banquette":
-        cushion_count = max(2, min(6, int(width / 30)))
+        cushion_count = max(2, min(8, int(dims.get("cushion_segments", width / 30))))
         for i in range(1, cushion_count):
             px = x0 + dw * i / cushion_count
             parts.append(_line(px, y0, px, y0 + dd, 0.8, "#98a2b3"))
@@ -475,11 +552,24 @@ def _draw_family_perspective(parts: list[str], template: TemplateDef, style: str
             parts.append(f'<path d="M {cx - 4:.1f} {cy - 12:.1f} Q {cx + 36:.1f} {cy - 92:.1f} {cx + 58:.1f} {cy - 38:.1f} L {cx + 52:.1f} {cy + 10:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.2"/>')
         else:
             parts.append(f'<path d="M {cx + 8:.1f} {cy - 70:.1f} L {cx + 58:.1f} {cy - 38:.1f} L {cx + 52:.1f} {cy + 10:.1f} L {cx - 4:.1f} {cy - 12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.2"/>')
+        if dims.get("arm_profile") in {"rolled", "round"}:
+            parts.append(f'<path d="M {cx - 70:.1f} {cy + 8:.1f} Q {cx - 58:.1f} {cy - 20:.1f} {cx - 34:.1f} {cy + 4:.1f}" fill="none" stroke="#111" stroke-width="1.2"/>')
+        if dims.get("leg_type") in {"tapered", "legs"}:
+            parts.append(_line(cx - 42, cy + 58, cx - 48, cy + 86, 1.0))
+            parts.append(_line(cx + 38, cy + 40, cx + 48, cy + 68, 1.0))
     else:
         parts.append(f'<path d="M {cx - 78:.1f} {cy - 42:.1f} L {cx + 52:.1f} {cy - 64:.1f} L {cx + 86:.1f} {cy + 32:.1f} L {cx - 44:.1f} {cy + 58:.1f} Z" fill="#f8fafc" stroke="#111" stroke-width="1.2"/>')
         if template.key == "shelving":
             for i in range(3):
                 parts.append(_line(cx - 60 + i * 38, cy - 48 + i * 2, cx - 30 + i * 38, cy + 48 + i * 2, 0.7, "#98a2b3"))
+            if dims.get("base_style") in {"toe_kick", "plinth"}:
+                parts.append(f'<path d="M {cx - 48:.1f} {cy + 38:.1f} L {cx + 80:.1f} {cy + 14:.1f} L {cx + 86:.1f} {cy + 32:.1f} L {cx - 44:.1f} {cy + 58:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.0"/>')
+        elif template.key == "banquette":
+            if dims.get("base_type") == "legs":
+                parts.append(_line(cx - 58, cy + 46, cx - 64, cy + 70, 1.0))
+                parts.append(_line(cx + 56, cy + 24, cx + 62, cy + 48, 1.0))
+            if dims.get("arm_configuration") in {"left", "right", "both"}:
+                parts.append(f'<path d="M {cx - 88:.1f} {cy - 34:.1f} L {cx - 68:.1f} {cy - 38:.1f} L {cx - 32:.1f} {cy + 54:.1f} L {cx - 52:.1f} {cy + 58:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.1"/>')
     parts.append(_text(cx, y + h - 16, f'{template.family} / {_title(style)}', 9, fill="#667085"))
 
 
@@ -533,14 +623,31 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
     if template.key in {"banquette", "chair"}:
         spec_lines.extend([f'Seat height: {dims["seat_height"]:.0f}"', f'Back height: {dims["back_height"]:.0f}"'])
     if template.key == "banquette":
-        spec_lines.extend([f'Arms: {str(dims["arm_configuration"]).replace("_", " ").title()}', f'Base: {str(dims["base_type"]).replace("_", " ").title()}'])
+        spec_lines.extend([f'Arms: {str(dims["arm_configuration"]).replace("_", " ").title()}', f'Base: {str(dims["base_type"]).replace("_", " ").title()}', f'Cushion breaks: {dims["cushion_segments"]:.0f}'])
     if template.key == "chair":
-        spec_lines.extend([f'Arm height: {dims["arm_height"]:.0f}"', f'Back profile: {str(dims["back_profile"]).replace("_", " ").title()}', f'Leg type: {str(dims["leg_type"]).replace("_", " ").title()}'])
+        spec_lines.extend([
+            f'Arm height: {dims["arm_height"]:.0f}"',
+            f'Seat thickness: {dims["seat_thickness"]:.0f}"',
+            f'Back profile: {str(dims["back_profile"]).replace("_", " ").title()}',
+            f'Arm profile: {str(dims["arm_profile"]).replace("_", " ").title()}',
+            f'Leg type: {str(dims["leg_type"]).replace("_", " ").title()}',
+            f'Leg taper: {dims["leg_taper"]:.1f}"',
+        ])
     if template.key == "shelving":
-        spec_lines.extend([f'Shelves: {dims["shelves"]:.0f}', f'Material: {dims["material_thickness"]:.2f}"', f'Bay spacing: {dims["bay_spacing"]:.0f}"', f'Doors: {str(dims["door_style"]).replace("_", " ").title()}'])
+        spec_lines.extend([
+            f'Shelves: {dims["shelves"]:.0f}',
+            f'Shelf spacing: {dims["shelf_spacing"]:.0f}"',
+            f'Material: {dims["material_thickness"]:.2f}"',
+            f'Bay spacing: {dims["bay_spacing"]:.0f}"',
+            f'Doors: {str(dims["door_style"]).replace("_", " ").title()}',
+            f'Base: {str(dims["base_style"]).replace("_", " ").title()}',
+        ])
     spec_lines.append(_shop_family_note(template) if mode == "shop" else "Client-facing scale sheet for design review.")
     for i, line in enumerate(spec_lines):
-        parts.append(_text(spec_x, spec_y + 26 + i * 20, line, 10, "start", "600" if i == 0 else "400", "#344054"))
+        col = 0 if i < 7 else 1
+        row = i if i < 7 else i - 7
+        line_x = spec_x + col * 250
+        parts.append(_text(line_x, spec_y + 26 + row * 20, line, 10, "start", "600" if i == 0 else "400", "#344054"))
 
     tb_x, tb_y, tb_w, tb_h = w - 382, h - 98, 348, 62
     parts.append(_rect(tb_x, tb_y, tb_w, tb_h, 1.1, "#fff", "#111827"))
@@ -595,7 +702,13 @@ def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str,
         f'Return: {dims["return"]:.1f}"',
     ]
     if template.key == "drapery":
-        spec_lines.extend([f'Panels: {dims["panels"]:.0f}', f'Fullness: {dims["fullness"]:.1f}x'])
+        spec_lines.extend([
+            f'Panels: {dims["panels"]:.0f}',
+            f'Fullness: {dims["fullness"]:.1f}x',
+            f'Hem: {dims["hem"]:.0f}"',
+            f'Mount: {str(dims["mount_type"]).replace("_", " ").title()}',
+            f'Stack: {str(dims["stack_direction"]).replace("_", " ").title()}',
+        ])
     if mode == "shop":
         spec_lines.extend(["Seams, hems, hardware, and lining to be verified before cut.", "Use field measure for final fabrication."])
     else:
