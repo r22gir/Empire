@@ -65,6 +65,13 @@ interface CatalogTemplateState {
   mode: string;
 }
 
+const CATALOG_TEMPLATE_DEFAULTS: Record<string, Record<string, string>> = {
+  window: { width: '72"', height: '96"', drop: '96"', return: '3.5"' },
+  banquette: { width: '120"', depth: '20"', height: '34"', seat_height: '18"', back_height: '16"' },
+  chair: { width: '32"', depth: '34"', height: '36"', seat_height: '18"', back_height: '18"' },
+  shelving: { width: '48"', depth: '12"', height: '84"', shelves: '4' },
+};
+
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableSerialize).join(',')}]`;
@@ -421,9 +428,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
   const generateCatalogDrawing = useCallback(async (style: CatalogStyle, category: CatalogCategory, mode: string) => {
     const drawingMode = mode === 'shop' ? 'shop_drawing' : mode;
     const isWindow = category.key === 'window';
-    const defaultDimensions: Record<string, string> = isWindow
-      ? { width: '72"', height: '96"', drop: '96"' }
-      : { width: '48"', depth: '24"', height: '36"' };
+    const defaultDimensions: Record<string, string> = CATALOG_TEMPLATE_DEFAULTS[category.key] || { width: '48"', depth: '24"', height: '36"' };
     const catalogNotes = drawingMode === 'shop_drawing'
       ? 'Shop drawing generated from Product Catalog. Verify final field measurements before fabrication.'
       : 'Presentation drawing generated from Product Catalog.';
