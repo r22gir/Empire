@@ -341,7 +341,7 @@ export default function DrawingStudioPage({ initialView = 'studio' }: { initialV
 
       return {
         previewUrl: `${API}/drawings/generate`,
-        pdfUrl: `${API}/drawings/general/pdf`,
+        pdfUrl: `${API}/drawings/generate/pdf`,
         filenameType: catalogTemplate.styleKey,
         body: {
           user_text: `${catalogTemplate.styleName} ${catalogTemplate.categoryName} ${drawingMode}`,

@@ -393,6 +393,11 @@ async def generate_universal_drawing(req: UniversalDrawingRequest):
     Accepts user_text (what the user asked for) and params (dimensions, name, etc).
     Returns SVG + classification info.
     """
+    return _render_universal_drawing(req)
+
+
+def _render_universal_drawing(req: UniversalDrawingRequest) -> dict:
+    """Render the universal drawing request once for preview and PDF paths."""
     from app.services.vision.drawing_service import classify_item, generate_drawing
     from app.services.vision.parametric_templates import render_template_instance
 
@@ -473,6 +478,34 @@ async def generate_universal_drawing(req: UniversalDrawingRequest):
         "classification": classification,
         "name": result["name"],
     }
+
+
+@router.post("/drawings/generate/pdf")
+async def generate_universal_drawing_pdf(req: UniversalDrawingRequest):
+    """Generate a PDF from the same SVG used by /drawings/generate."""
+    from app.services.vision.bench_renderer import drawings_to_pdf
+
+    result = _render_universal_drawing(req)
+    svg = result.get("svg") or ""
+    if "<svg" not in svg:
+        raise HTTPException(status_code=422, detail="No SVG drawing generated")
+
+    params = req.params or {}
+    name = result.get("name") or params.get("name") or "drawing"
+    item_type = result.get("template") or result.get("item_type") or "drawing"
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(name)).strip("_") or "drawing"
+    safe_type = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(item_type)).strip("_") or "drawing"
+    output_path = os.path.join(tempfile.gettempdir(), f"drawing_{safe_type}_{safe_name}.pdf")
+    drawings_to_pdf([{"name": name, "svg": svg, "lf": 0}], output_path)
+
+    with open(output_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="drawing_{safe_type}.pdf"'},
+    )
 
 
 @router.post("/drawings/general")
