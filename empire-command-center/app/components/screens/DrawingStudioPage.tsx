@@ -76,6 +76,12 @@ const CATALOG_TEMPLATE_DEFAULTS: Record<string, Record<string, string>> = {
 };
 
 const CATALOG_STYLE_DEFAULTS: Record<string, Record<string, string>> = {
+  wingback: { back_profile: 'wingback', arm_profile: 'rolled', arm_height: '27"', seat_thickness: '6"', leg_type: 'tapered' },
+  club: { back_profile: 'curved', arm_profile: 'rolled', arm_height: '26"', seat_thickness: '7"', leg_type: 'tapered' },
+  barrel: { back_profile: 'curved', arm_profile: 'rolled', arm_height: '25"', seat_thickness: '6"', leg_type: 'tapered' },
+  dining: { width: '22"', depth: '24"', height: '36"', seat_height: '18"', back_height: '18"', back_profile: 'straight', arm_profile: 'armless', leg_type: 'straight' },
+  parsons: { width: '21"', depth: '25"', height: '38"', seat_height: '19"', back_height: '20"', back_profile: 'straight', arm_profile: 'armless', leg_type: 'straight' },
+  slipper: { width: '24"', depth: '30"', height: '32"', seat_height: '17"', back_height: '15"', back_profile: 'curved', arm_profile: 'armless', leg_type: 'tapered' },
   closed_cabinet: { width: '36"', depth: '24"', height: '34.5"', material_thickness: '0.75"', shelves: '1', drawer_count: '1', door_layout: 'double', base_style: 'toe_kick' },
   display_case: { width: '42"', depth: '16"', height: '78"', material_thickness: '0.75"', shelves: '4', drawer_count: '0', door_layout: 'doors', base_style: 'plinth', bay_spacing: '21"' },
   nightstand: { width: '24"', depth: '18"', height: '28"', material_thickness: '0.75"', shelves: '1', drawer_count: '2', door_layout: 'open', base_style: 'legs' },

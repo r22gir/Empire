@@ -197,6 +197,7 @@ def render_template_instance(style_key: str, params: dict[str, Any]) -> dict[str
 
     mode = _sheet_mode(params.get("drawing_mode") or params.get("mode"))
     dims = _merge_dimensions(template, params)
+    _apply_style_defaults(template, style_key, dims, params)
     name = params.get("name") or _title(style_key)
     if template.key in {"drapery", "roman_shade", "cornice_valance"}:
         svg = _render_window_treatment_sheet(template, style_key, name, dims, params, mode)
@@ -279,6 +280,24 @@ def _merge_dimensions(template: TemplateDef, params: dict[str, Any]) -> dict[str
 def _sheet_mode(mode: Any) -> str:
     raw = _norm(str(mode or "presentation"))
     return "shop" if raw in {"shop", "shop_drawing", "technical"} else "presentation"
+
+
+def _apply_style_defaults(template: TemplateDef, style_key: str, dims: dict[str, Any], params: dict[str, Any]) -> None:
+    raw_dims = params.get("dimensions") or {}
+    style = _norm(style_key)
+    if template.key == "chair":
+        if "back_profile" not in raw_dims and "back_profile" not in params:
+            if style == "wingback":
+                dims["back_profile"] = "wingback"
+            elif style in {"club", "barrel", "bergere", "chesterfield", "lounge"}:
+                dims["back_profile"] = "curved"
+        if "arm_profile" not in raw_dims and "arm_profile" not in params:
+            if style in {"dining", "parsons", "slipper"}:
+                dims["arm_profile"] = "armless"
+            elif style in {"club", "barrel", "bergere", "chesterfield", "wingback"}:
+                dims["arm_profile"] = "rolled"
+        if "leg_type" not in raw_dims and "leg_type" not in params and style in {"parsons", "dining"}:
+            dims["leg_type"] = "straight"
 
 
 def _line(x1: float, y1: float, x2: float, y2: float, sw: float = 1, stroke: str = "#111") -> str:
@@ -459,7 +478,8 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
         leg_type = dims.get("leg_type", "tapered")
         back_profile = dims.get("back_profile", "straight")
         arm_profile = dims.get("arm_profile", "track")
-        arm_w = max(14, dw * 0.16)
+        armless = arm_profile in {"armless", "none", "no_arms"}
+        arm_w = 0 if armless else max(14, dw * 0.16)
         leg_h = max(10, floor_y - seat_bottom_y)
         if leg_type in {"tapered", "legs"}:
             taper = max(0.5, min(5, dims.get("leg_taper", 1.5))) * scale
@@ -469,12 +489,16 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
             parts.append(_rect(x0 + arm_w * 0.7, seat_bottom_y, dw - arm_w * 1.4, leg_h, 1.0, "#fff", "#111"))
         parts.append(_rect(x0 + arm_w, seat_top_y, dw - arm_w * 2, cushion_h, 1.5, "#f7f4ef", "#111", 4))
         if back_profile in {"curved", "wingback"}:
-            wing = arm_w * (0.55 if back_profile == "wingback" else 0.25)
-            parts.append(f'<path d="M {x0 + arm_w * 0.7 - wing:.1f} {seat_top_y + 8:.1f} Q {x0 + dw / 2:.1f} {back_y - 18:.1f} {x0 + dw - arm_w * 0.7 + wing:.1f} {seat_top_y + 8:.1f} L {x0 + dw - arm_w * 0.65:.1f} {seat_top_y + 14:.1f} Q {x0 + dw / 2:.1f} {back_y + 12:.1f} {x0 + arm_w * 0.65:.1f} {seat_top_y + 14:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.5"/>')
+            wing = (max(14, dw * 0.16) if armless else arm_w) * (0.55 if back_profile == "wingback" else 0.25)
+            back_inset = max(8, dw * 0.08) if armless else arm_w * 0.7
+            parts.append(f'<path d="M {x0 + back_inset - wing:.1f} {seat_top_y + 8:.1f} Q {x0 + dw / 2:.1f} {back_y - 18:.1f} {x0 + dw - back_inset + wing:.1f} {seat_top_y + 8:.1f} L {x0 + dw - back_inset * 0.92:.1f} {seat_top_y + 14:.1f} Q {x0 + dw / 2:.1f} {back_y + 12:.1f} {x0 + back_inset * 0.92:.1f} {seat_top_y + 14:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.5"/>')
         else:
-            parts.append(_rect(x0 + arm_w * 0.7, back_y, dw - arm_w * 1.4, seat_top_y - back_y + 8, 1.5, "#fff", "#111", 6))
+            back_inset = max(8, dw * 0.08) if armless else arm_w * 0.7
+            parts.append(_rect(x0 + back_inset, back_y, dw - back_inset * 2, seat_top_y - back_y + 8, 1.5, "#fff", "#111", 6))
         arm_radius = 8 if arm_profile in {"rolled", "round"} else 3
-        if arm_profile in {"sloped", "slope"}:
+        if armless:
+            pass
+        elif arm_profile in {"sloped", "slope"}:
             parts.append(f'<path d="M {x0:.1f} {arm_top_y + 10:.1f} L {x0 + arm_w:.1f} {arm_top_y:.1f} L {x0 + arm_w:.1f} {arm_bottom_y:.1f} L {x0:.1f} {arm_bottom_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
             parts.append(f'<path d="M {x0 + dw - arm_w:.1f} {arm_top_y:.1f} L {x0 + dw:.1f} {arm_top_y + 10:.1f} L {x0 + dw:.1f} {arm_bottom_y:.1f} L {x0 + dw - arm_w:.1f} {arm_bottom_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
         else:
@@ -528,7 +552,8 @@ def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: floa
             parts.append(f'<path d="M {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Q {x0 + dd * 0.83:.1f} {y0 + dh * 0.18:.1f} {x0 + dd:.1f} {seat_top_y:.1f} L {x0 + dd * 0.7:.1f} {seat_top_y + 8:.1f} Q {x0 + dd * 0.56:.1f} {y0 + dh * 0.28:.1f} {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
         else:
             parts.append(f'<path d="M {x0 + dd * 0.65:.1f} {y0:.1f} L {x0 + dd:.1f} {seat_top_y:.1f} L {x0 + dd * 0.7:.1f} {seat_top_y + 8:.1f} L {x0 + dd * 0.42:.1f} {y0 + dh * 0.12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.4"/>')
-        parts.append(_rect(x0 + dd * 0.08, arm_top_y, dd * 0.82, seat_bottom_y - arm_top_y, 1.0, "none", "#667085", 4))
+        if dims.get("arm_profile") not in {"armless", "none", "no_arms"}:
+            parts.append(_rect(x0 + dd * 0.08, arm_top_y, dd * 0.82, seat_bottom_y - arm_top_y, 1.0, "none", "#667085", 4))
         if dims.get("leg_type") in {"tapered", "legs"}:
             taper = max(0.5, min(5, dims.get("leg_taper", 1.5))) * scale
             parts.append(f'<path d="M {x0 + dd * 0.18:.1f} {seat_bottom_y:.1f} L {x0 + dd * 0.26:.1f} {seat_bottom_y:.1f} L {x0 + dd * 0.26 + taper:.1f} {floor_y:.1f} L {x0 + dd * 0.18 - taper:.1f} {floor_y:.1f} Z" fill="#fff" stroke="#111" stroke-width="1"/>')
@@ -587,10 +612,11 @@ def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: floa
         back_depth = dd * (0.26 if dims.get("back_profile") in {"curved", "wingback"} else 0.18)
         parts.append(_rect(x0 + dw * 0.16, y0 + dd * 0.2, dw * 0.68, dd * 0.58, 0.9, "#f7f4ef", "#667085", 5))
         parts.append(_rect(x0 + dw * 0.13, y0 + dd * 0.08, dw * 0.74, back_depth, 0.9, "none", "#667085", 5))
-        arm_w = dw * 0.16
-        arm_rx = 7 if arm_profile in {"rolled", "round"} else 2
-        parts.append(_rect(x0, y0 + dd * 0.18, arm_w, dd * 0.68, 0.9, "none", "#667085", arm_rx))
-        parts.append(_rect(x0 + dw - arm_w, y0 + dd * 0.18, arm_w, dd * 0.68, 0.9, "none", "#667085", arm_rx))
+        if arm_profile not in {"armless", "none", "no_arms"}:
+            arm_w = dw * 0.16
+            arm_rx = 7 if arm_profile in {"rolled", "round"} else 2
+            parts.append(_rect(x0, y0 + dd * 0.18, arm_w, dd * 0.68, 0.9, "none", "#667085", arm_rx))
+            parts.append(_rect(x0 + dw - arm_w, y0 + dd * 0.18, arm_w, dd * 0.68, 0.9, "none", "#667085", arm_rx))
     elif template.key == "banquette":
         cushion_count = max(2, min(8, int(dims.get("cushion_segments", width / 30))))
         for i in range(1, cushion_count):
@@ -627,6 +653,8 @@ def _draw_family_perspective(parts: list[str], template: TemplateDef, style: str
             parts.append(f'<path d="M {cx + 8:.1f} {cy - 70:.1f} L {cx + 58:.1f} {cy - 38:.1f} L {cx + 52:.1f} {cy + 10:.1f} L {cx - 4:.1f} {cy - 12:.1f} Z" fill="#fff" stroke="#111" stroke-width="1.2"/>')
         if dims.get("arm_profile") in {"rolled", "round"}:
             parts.append(f'<path d="M {cx - 70:.1f} {cy + 8:.1f} Q {cx - 58:.1f} {cy - 20:.1f} {cx - 34:.1f} {cy + 4:.1f}" fill="none" stroke="#111" stroke-width="1.2"/>')
+        elif dims.get("arm_profile") in {"armless", "none", "no_arms"}:
+            parts.append(_text(cx - 8, cy + 86, "ARMLESS SIDE CHAIR PROFILE", 8, fill="#667085"))
         if dims.get("leg_type") in {"tapered", "legs"}:
             parts.append(_line(cx - 42, cy + 58, cx - 48, cy + 86, 1.0))
             parts.append(_line(cx + 38, cy + 40, cx + 48, cy + 68, 1.0))
@@ -803,7 +831,7 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
         (mid_w - 90) / max(dims["depth"], 1),
         (450 - 112) / max(dims["height"], 1),
         (left_w - 110) / max(dims["width"], 1),
-        (210 - 90) / max(dims["depth"], 1),
+        (210 - 65) / max(dims["depth"], 1),
     )
     parts.append(_rect(margin, top_y, left_w, 450, 0.6, "#fff", "#d0d5dd"))
     parts.append(_rect(margin + left_w + 24, top_y, mid_w, 450, 0.6, "#fff", "#d0d5dd"))
