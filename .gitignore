@@ -58,3 +58,7 @@ backend/data/
 versions/*.tar.gz
 
 .opencode/private/
+
+# Generated drawing artifacts
+uploads/arch_drawings/*.pdf
+uploads/arch_drawings/*.svg
