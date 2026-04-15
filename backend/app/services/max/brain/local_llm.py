@@ -11,9 +11,10 @@ from .brain_config import OLLAMA_BASE_URL, REASONING_MODEL, FALLBACK_MODEL
 
 logger = logging.getLogger("max.brain.llm")
 
-XAI_API_URL = "https://api.x.ai/v1/chat/completions"
-# Use a fast, cheap model for brain ops (not the main chat model)
-XAI_BRAIN_MODEL = "grok-3-mini-fast"
+XAI_BASE_URL = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/")
+XAI_API_URL = f"{XAI_BASE_URL}/chat/completions"
+# Use the configured xAI model unless a separate brain model is explicitly set.
+XAI_BRAIN_MODEL = os.getenv("XAI_BRAIN_MODEL") or os.getenv("XAI_MODEL", "grok-4-fast-non-reasoning")
 
 
 class LocalLLM:
@@ -21,7 +22,9 @@ class LocalLLM:
         self.base_url = OLLAMA_BASE_URL
         self.model = REASONING_MODEL
         self.fallback = FALLBACK_MODEL
-        self._xai_key = os.getenv("XAI_API_KEY", "")
+        self._xai_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY", "")
+        self._xai_url = XAI_API_URL
+        self._xai_model = XAI_BRAIN_MODEL
         self._ollama_available: bool | None = None
 
     async def generate(self, prompt: str, system: str = "", max_tokens: int = 500) -> str:
@@ -64,20 +67,20 @@ class LocalLLM:
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                XAI_API_URL,
+                self._xai_url,
                 headers={
                     "Authorization": f"Bearer {self._xai_key}",
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": XAI_BRAIN_MODEL,
+                    "model": self._xai_model,
                     "messages": messages,
                     "max_tokens": max_tokens,
-                    "temperature": 0.3,
                 },
                 timeout=30.0,
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                raise Exception(f"xAI HTTP {resp.status_code} model={self._xai_model} base_url={XAI_BASE_URL}: {resp.text}")
             return resp.json()["choices"][0]["message"]["content"]
 
     async def is_available(self) -> bool:

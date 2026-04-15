@@ -169,7 +169,13 @@ DESK_MODEL_ROUTING = {
 class AIRouter:
     def __init__(self):
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
-        self.xai_key = os.getenv("XAI_API_KEY", "")
+        self.xai_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY", "")
+        self.xai_base_url = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/")
+        self.xai_model = os.getenv("XAI_MODEL", "grok-4-fast-non-reasoning")
+        try:
+            self.xai_max_tokens = int(os.getenv("XAI_MAX_TOKENS", "8192"))
+        except ValueError:
+            self.xai_max_tokens = 8192
         self.groq_key = os.getenv("GROQ_API_KEY", "")
         self.gemini_key = os.getenv("GOOGLE_GEMINI_API_KEY", "")
         self.openai_key = os.getenv("OPENAI_API_KEY", "")
@@ -192,11 +198,11 @@ class AIRouter:
         if self.openai_key: providers.append("OpenAI")
         providers += ["OpenClaw", "Ollama"]
         model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama"}
-        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)}")
+        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {self.xai_base_url} {self.xai_model}")
 
     def get_available_models(self):
         return [
-            {"id": "grok", "name": "xAI Grok", "available": bool(self.xai_key), "primary": self.primary_model == AIModel.GROK, "type": "cloud"},
+            {"id": "grok", "name": "xAI Grok", "available": bool(self.xai_key), "configured": bool(self.xai_key), "primary": self.primary_model == AIModel.GROK, "type": "cloud", "model": self.xai_model, "base_url": self.xai_base_url, "status_source": "env_configured"},
             {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud"},
             {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
             {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
@@ -372,7 +378,7 @@ class AIRouter:
 
         Routing policy (owner-defined):
         - Gemini Flash: ONLY single-word greetings and vision tasks (SIMPLE)
-        - Grok 3 Fast: DEFAULT for all normal conversation (MODERATE)
+        - xAI Grok: DEFAULT for all normal conversation (MODERATE)
         - Claude Sonnet: Analysis, quality writing, memory/search (COMPLEX)
         - Claude Opus: Code Mode only (CRITICAL)
         """
@@ -390,7 +396,7 @@ class AIRouter:
                 providers_chain.append(("claude", "claude-sonnet-4-6"))
 
         elif complexity == TaskComplexity.MODERATE:
-            # MODERATE: Grok 3 Fast (DEFAULT) -> Groq -> Sonnet -> Gemini (last resort)
+            # MODERATE: xAI Grok (DEFAULT) -> Groq -> Sonnet -> Gemini (last resort)
             if self.xai_key:
                 providers_chain.append(("grok", None))
             if self.groq_key:
@@ -434,10 +440,10 @@ class AIRouter:
         """Try a single provider for non-streaming chat. Returns AIResponse on success, None on failure."""
         try:
             if provider_type == "grok":
-                logger.info(f"[MAX] Chat via xAI Grok{' (fallback)' if fallback else ''}")
+                logger.info(f"[MAX] Chat via xAI Grok ({self.xai_model}){' (fallback)' if fallback else ''}")
                 resp = await self._grok_chat(full_messages, image_path)
-                self._log_chat_cost(full_messages, resp, "grok", feature, business, tenant_id)
-                return AIResponse(content=resp, model_used="grok", fallback_used=fallback)
+                self._log_chat_cost(full_messages, resp, self.xai_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=self.xai_model, fallback_used=fallback)
 
             elif provider_type == "claude":
                 model_id = model_override or "claude-sonnet-4-6"
@@ -589,10 +595,10 @@ class AIRouter:
 
             if provider == AIModel.GROK and self.xai_key:
                 try:
-                    logger.info(f"[MAX] Chat via xAI Grok{' (fallback)' if fallback else ''}")
+                    logger.info(f"[MAX] Chat via xAI Grok ({self.xai_model}){' (fallback)' if fallback else ''}")
                     resp = await self._grok_chat(full_messages, image_path)
-                    self._log_chat_cost(full_messages, resp, "grok", feature, business, tenant_id)
-                    return AIResponse(content=resp, model_used="grok", fallback_used=fallback)
+                    self._log_chat_cost(full_messages, resp, self.xai_model, feature, business, tenant_id)
+                    return AIResponse(content=resp, model_used=self.xai_model, fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Grok failed: {type(e).__name__}: {e}")
 
@@ -678,12 +684,12 @@ class AIRouter:
                 is_first = False
                 try:
                     if provider_type == "grok":
-                        logger.info(f"[MAX] Streaming via xAI Grok{' (fallback)' if fallback else ''}")
+                        logger.info(f"[MAX] Streaming via xAI Grok ({self.xai_model}){' (fallback)' if fallback else ''}")
                         collected = []
                         async for chunk in self._grok_chat_stream(full_messages, image_path):
                             collected.append(chunk)
-                            yield chunk, "grok"
-                        self._log_chat_cost(full_messages, "".join(collected), "grok", feature, business, tenant_id)
+                            yield chunk, self.xai_model
+                        self._log_chat_cost(full_messages, "".join(collected), self.xai_model, feature, business, tenant_id)
                         return
 
                     elif provider_type == "claude":
@@ -775,12 +781,12 @@ class AIRouter:
         for provider in providers:
             if provider == AIModel.GROK and self.xai_key:
                 try:
-                    logger.info("[MAX] Streaming via xAI Grok")
+                    logger.info(f"[MAX] Streaming via xAI Grok ({self.xai_model})")
                     collected = []
                     async for chunk in self._grok_chat_stream(full_messages, image_path):
                         collected.append(chunk)
-                        yield chunk, "grok"
-                    self._log_chat_cost(full_messages, "".join(collected), "grok", feature, business, tenant_id)
+                        yield chunk, self.xai_model
+                    self._log_chat_cost(full_messages, "".join(collected), self.xai_model, feature, business, tenant_id)
                     return
                 except Exception as e:
                     logger.warning(f"Grok stream failed: {e}")
@@ -835,16 +841,32 @@ class AIRouter:
 
     # ── xAI Grok (OpenAI-compatible API) ──────────────────────────────
 
+    def _xai_payload(self, api_messages: list, *, stream: bool = False) -> dict:
+        """Build the minimal xAI-compatible chat payload.
+
+        Keep provider-specific fields out of this path. xAI rejects several
+        common OpenAI/Anthropic-style extras on reasoning models, including
+        stop, presencePenalty, frequencyPenalty, reasoning_effort, and logprobs.
+        """
+        payload = {
+            "model": self.xai_model,
+            "messages": api_messages,
+            "max_tokens": self.xai_max_tokens,
+        }
+        if stream:
+            payload["stream"] = True
+        return payload
+
     async def _grok_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
         api_messages = self._prepare_openai_messages(messages, image_path)
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
-                "https://api.x.ai/v1/chat/completions",
+                f"{self.xai_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
-                json={"model": "grok-3-fast", "messages": api_messages, "max_tokens": 8192}
+                json=self._xai_payload(api_messages)
             )
             if resp.status_code != 200:
-                raise Exception(f"xAI HTTP {resp.status_code}: {resp.text}")
+                raise Exception(f"xAI HTTP {resp.status_code} model={self.xai_model} base_url={self.xai_base_url}: {resp.text}")
             return resp.json()["choices"][0]["message"]["content"]
 
     async def _grok_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
@@ -852,13 +874,13 @@ class AIRouter:
         async with httpx.AsyncClient(timeout=60.0) as client:
             async with client.stream(
                 "POST",
-                "https://api.x.ai/v1/chat/completions",
+                f"{self.xai_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
-                json={"model": "grok-3-fast", "messages": api_messages, "max_tokens": 8192, "stream": True}
+                json=self._xai_payload(api_messages, stream=True)
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()
-                    raise Exception(f"xAI HTTP {response.status_code}: {error_body.decode()}")
+                    raise Exception(f"xAI HTTP {response.status_code} model={self.xai_model} base_url={self.xai_base_url}: {error_body.decode()}")
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue

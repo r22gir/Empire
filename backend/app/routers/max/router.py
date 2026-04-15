@@ -1346,6 +1346,8 @@ async def orchestration_status():
             "configured": bool(model["available"]),
             "primary": bool(model.get("primary")),
             "status_source": "env_configured",
+            **({"model": model["model"]} if model.get("model") else {}),
+            **({"base_url": model["base_url"]} if model.get("base_url") else {}),
         }
         for model in configured_models
         if model.get("type") == "cloud"
