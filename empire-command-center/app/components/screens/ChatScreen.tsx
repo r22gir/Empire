@@ -393,10 +393,13 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
   const primaryModel = maxStatus?.providers?.cloud?.find((p: any) => p.primary)?.name || streamingModel || 'MAX routing';
   const latestAssistantModel = [...messages].reverse().find(m => m.role === 'assistant' && m.model)?.model;
   const textRoutingModel = streamingModel || latestAssistantModel;
-  const textRoutingFallback = !!textRoutingModel
+  const drawingRouterActive = textRoutingModel === 'drawing-router';
+  const textRoutingFallback = !!textRoutingModel && !drawingRouterActive
     && !primaryModel.toLowerCase().includes(textRoutingModel.split('-')[0].toLowerCase());
   const textRoutingLabel = textRoutingModel
-    ? `Text ${textRoutingModel}${textRoutingFallback ? ' fallback' : ''}`
+    ? drawingRouterActive
+      ? 'Drawing router'
+      : `Text ${textRoutingModel}${textRoutingFallback ? ' fallback' : ''}`
     : 'Text routing ready';
   const localVision = maxStatus?.local_vision;
   const localVisionLabel = localVision?.online

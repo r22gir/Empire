@@ -28,6 +28,18 @@ def test_four_view_items_identified_does_not_fabricate_without_source():
     assert handoff.tool_payload is None
 
 
+def test_bare_drawing_with_source_image_still_requires_extracted_dimensions():
+    from app.services.max.drawing_intent import build_drawing_handoff
+
+    handoff = build_drawing_handoff("drawing", image_filename="uploaded-photo.jpg")
+
+    assert handoff.is_drawing_intent is True
+    assert handoff.ready is False
+    assert handoff.source_image == "uploaded-photo.jpg"
+    assert "real extracted dimensions" in handoff.missing
+    assert handoff.tool_payload is None
+
+
 def test_bench_drawing_with_dimensions_builds_tool_payload():
     from app.services.max.drawing_intent import build_drawing_handoff
 

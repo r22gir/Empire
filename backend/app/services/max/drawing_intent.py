@@ -151,8 +151,6 @@ def _extract_dimensions(text: str) -> dict[str, str]:
 
 
 def _has_enough_dimensions(item_type: str, dimensions: dict[str, str], source_image: str | None) -> tuple[bool, list[str]]:
-    if source_image:
-        return True, []
     if item_type == "bench":
         missing = []
         if "width" not in dimensions:
@@ -202,7 +200,12 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         source_image=image_filename,
     )
 
-    if not subject and not image_filename:
+    if image_filename and not dimensions:
+        handoff.missing = [
+            "real extracted dimensions",
+            "confirmed item type" if not subject else "confirmed dimensions from source image",
+        ]
+    elif not subject:
         handoff.missing = ["subject/item", "dimensions or source image"]
     elif not enough:
         handoff.missing = missing
