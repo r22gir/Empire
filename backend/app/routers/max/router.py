@@ -139,8 +139,9 @@ def _drawing_missing_response(handoff) -> str:
         "dimensions_missing": handoff.missing,
         "views": handoff.views,
         "output_format": handoff.output_format,
-        "source_image": handoff.source_image,
     }
+    if handoff.source_image:
+        payload["source_image"] = handoff.source_image
     return f"{handoff.response}\n\nStructured drawing handoff:\n```json\n{json.dumps(payload, indent=2)}\n```"
 
 

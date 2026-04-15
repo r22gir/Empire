@@ -38,6 +38,19 @@ def test_bare_drawing_with_source_image_still_requires_extracted_dimensions():
     assert handoff.source_image == "uploaded-photo.jpg"
     assert "real extracted dimensions" in handoff.missing
     assert handoff.tool_payload is None
+    assert handoff.response.startswith("Image detected in the current request")
+
+
+def test_missing_response_omits_source_image_when_no_active_image():
+    import importlib
+    from app.services.max.drawing_intent import build_drawing_handoff
+
+    max_router = importlib.import_module("app.routers.max.router")
+    handoff = build_drawing_handoff("drawing")
+    response = max_router._drawing_missing_response(handoff)
+
+    assert '"source_image"' not in response
+    assert "Missing: confirmed item type and real dimensions, or attach a source image." in response
 
 
 def test_bench_drawing_with_dimensions_builds_tool_payload():

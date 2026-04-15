@@ -211,11 +211,16 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         handoff.missing = missing
 
     if handoff.missing:
-        handoff.response = (
-            "I need drawing inputs before I generate anything. "
-            f"Missing: {', '.join(dict.fromkeys(handoff.missing))}. "
-            "Send the item type plus real dimensions, or attach/source an image from Drawing Studio."
-        )
+        if image_filename:
+            handoff.response = (
+                "Image detected in the current request, but I still need confirmed item type "
+                "and real extracted dimensions before generating a drawing."
+            )
+        else:
+            handoff.response = (
+                "I need drawing inputs before I generate anything. "
+                "Missing: confirmed item type and real dimensions, or attach a source image."
+            )
         return handoff
 
     name = subject.title() if subject else "Source Image Drawing"
