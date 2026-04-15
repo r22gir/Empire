@@ -20,6 +20,7 @@ from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_m
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
+from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
@@ -121,6 +122,39 @@ def _log_quality_metric(quality_result, model_used: str, channel: str, response_
         logger.debug(f"Quality metric log failed: {e}")
 
 
+def _drawing_tool_result_dict(result) -> dict:
+    return {
+        "tool": result.tool,
+        "success": result.success,
+        "result": result.result,
+        "error": result.error,
+    }
+
+
+def _drawing_missing_response(handoff) -> str:
+    payload = {
+        "subject": handoff.subject,
+        "item_type": handoff.item_type,
+        "dimensions_known": handoff.dimensions,
+        "dimensions_missing": handoff.missing,
+        "views": handoff.views,
+        "output_format": handoff.output_format,
+        "source_image": handoff.source_image,
+    }
+    return f"{handoff.response}\n\nStructured drawing handoff:\n```json\n{json.dumps(payload, indent=2)}\n```"
+
+
+def _execute_drawing_handoff(handoff):
+    logger.info(
+        "[MAX] Drawing intent routed to sketch_to_drawing: item_type=%s views=%s dims=%s source_image=%s",
+        handoff.item_type,
+        ",".join(handoff.views),
+        sorted(handoff.dimensions.keys()),
+        bool(handoff.source_image),
+    )
+    return execute_tool({"tool": "sketch_to_drawing", **(handoff.tool_payload or {})})
+
+
 # Brain instances (shared across requests)
 conversation_tracker = ConversationTracker()
 
@@ -208,6 +242,34 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
+    if drawing_handoff.is_drawing_intent:
+        logger.info(
+            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s message=%r",
+            drawing_handoff.ready,
+            drawing_handoff.missing,
+            request.message[:160],
+        )
+        if not drawing_handoff.ready:
+            return ChatResponse(
+                response=_drawing_missing_response(drawing_handoff),
+                model_used="drawing-router",
+                fallback_used=False,
+                tool_results=None,
+            )
+        drawing_result = _execute_drawing_handoff(drawing_handoff)
+        response_text = (
+            "Drawing generated through Drawing Studio."
+            if drawing_result.success
+            else f"Drawing workflow failed: {drawing_result.error}"
+        )
+        return ChatResponse(
+            response=response_text,
+            model_used="drawing-router",
+            fallback_used=False,
+            tool_results=[_drawing_tool_result_dict(drawing_result)],
+        )
 
     try:
         # Apply conversation windowing to prevent context overload
@@ -535,6 +597,35 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
+    if drawing_handoff.is_drawing_intent:
+        logger.info(
+            "[MAX] Drawing intent intercepted before stream model: ready=%s missing=%s message=%r",
+            drawing_handoff.ready,
+            drawing_handoff.missing,
+            request.message[:160],
+        )
+
+        async def drawing_gen():
+            conv_id = request.conversation_id or str(uuid.uuid4())
+            if not drawing_handoff.ready:
+                yield f"data: {json.dumps({'type': 'text', 'content': _drawing_missing_response(drawing_handoff)})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'model_used': 'drawing-router', 'conversation_id': conv_id})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'text', 'content': 'Starting the Drawing Studio workflow. '})}\n\n"
+            result = _execute_drawing_handoff(drawing_handoff)
+            yield f"data: {json.dumps({'type': 'tool_result', **_drawing_tool_result_dict(result)})}\n\n"
+            final_text = (
+                "Drawing generated through Drawing Studio."
+                if result.success
+                else f"Drawing workflow failed: {result.error}"
+            )
+            yield f"data: {json.dumps({'type': 'text', 'content': final_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'drawing-router', 'conversation_id': conv_id})}\n\n"
+
+        return StreamingResponse(drawing_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     # Apply conversation windowing
     windowed_history = _window_conversation(request.history)

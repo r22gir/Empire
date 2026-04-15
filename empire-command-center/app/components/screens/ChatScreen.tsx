@@ -113,6 +113,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
     search_fabrics: '🔍 Looking up fabrics...',
     calculate_yardage: '🧮 Calculating yardage...',
     generate_pdf: '📄 Generating PDF...',
+    sketch_to_drawing: '📐 Generating drawing...',
     send_email: '📧 Sending email...',
     check_email: '📧 Checking inbox...',
     file_read: '📂 Reading files...',
