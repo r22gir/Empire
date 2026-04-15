@@ -312,7 +312,7 @@ def _dim_v(parts: list[str], x: float, y1: float, y2: float, label: str, offset:
 def _draw_front(parts: list[str], template: TemplateDef, style: str, x: float, y: float, w: float, h: float, dims: dict[str, float], mode: str) -> None:
     width = dims["width"]
     drop = dims["drop"]
-    scale = min((w - 80) / max(width, 1), (h - 95) / max(drop, 1))
+    scale = dims.get("_ortho_scale") or min((w - 80) / max(width, 1), (h - 95) / max(drop, 1))
     dw = width * scale
     dh = drop * scale
     x0 = x + w / 2 - dw / 2
@@ -365,8 +365,10 @@ def _draw_side(parts: list[str], x: float, y: float, w: float, h: float, dims: d
     parts.append(_text(x + w / 2, y + 18, "SIDE RETURN", 11, weight="700"))
     sx = x + w / 2 - 18
     sy = y + 50
-    sh = h - 105
-    ret = max(10, min(46, dims["return"] * 6))
+    scale = dims.get("_ortho_scale") or min((h - 105) / max(dims["drop"], 1), 6)
+    sh = min(h - 105, dims["drop"] * scale)
+    sy = y + 52 + (h - 112 - sh) / 2
+    ret = max(10, min(46, dims["return"] * scale))
     parts.append(_rect(sx, sy, 22, sh, 1.2, "#ffffff", "#111"))
     parts.append(_rect(sx - ret, sy + 15, ret, 28, 1.1, "#f3efe8", "#111"))
     _dim_v(parts, sx + 30, sy, sy + sh, f'{dims["drop"]:.0f}"', 16)
@@ -377,10 +379,11 @@ def _draw_side(parts: list[str], x: float, y: float, w: float, h: float, dims: d
 
 def _draw_top(parts: list[str], x: float, y: float, w: float, h: float, dims: dict[str, float], mode: str) -> None:
     parts.append(_text(x + w / 2, y + 18, "TOP PLAN", 11, weight="700"))
-    x0 = x + 34
-    y0 = y + h / 2 - 18
-    ww = w - 68
-    depth = max(18, min(48, dims["return"] * 7))
+    scale = dims.get("_ortho_scale") or ((w - 68) / max(dims["width"], 1))
+    ww = dims["width"] * scale
+    depth = max(10, dims["return"] * scale)
+    x0 = x + w / 2 - ww / 2
+    y0 = y + h / 2 - depth / 2 + 10
     parts.append(_rect(x0, y0, ww, depth, 1.3, "#ffffff", "#111"))
     parts.append(_line(x0 + 12, y0 + depth / 2, x0 + ww - 12, y0 + depth / 2, 0.8, "#98a2b3"))
     _dim_h(parts, x0, x0 + ww, y0 + depth + 6, f'{dims["width"]:.0f}"')
@@ -406,7 +409,7 @@ def _draw_perspective(parts: list[str], x: float, y: float, w: float, h: float, 
 def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: float, y: float, w: float, h: float, dims: dict[str, Any], mode: str) -> None:
     width = dims["width"]
     height = dims["height"]
-    scale = min((w - 110) / max(width, 1), (h - 112) / max(height, 1))
+    scale = dims.get("_ortho_scale") or min((w - 110) / max(width, 1), (h - 112) / max(height, 1))
     dw = width * scale
     dh = height * scale
     x0 = x + w / 2 - dw / 2
@@ -508,7 +511,7 @@ def _draw_family_front(parts: list[str], template: TemplateDef, style: str, x: f
 def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: float, w: float, h: float, dims: dict[str, Any], mode: str) -> None:
     depth = dims["depth"]
     height = dims["height"]
-    scale = min((w - 90) / max(depth, 1), (h - 112) / max(height, 1))
+    scale = dims.get("_ortho_scale") or min((w - 90) / max(depth, 1), (h - 112) / max(height, 1))
     dd = depth * scale
     dh = height * scale
     x0 = x + w / 2 - dd / 2
@@ -572,7 +575,7 @@ def _draw_family_side(parts: list[str], template: TemplateDef, x: float, y: floa
 def _draw_family_plan(parts: list[str], template: TemplateDef, x: float, y: float, w: float, h: float, dims: dict[str, Any], mode: str) -> None:
     width = dims["width"]
     depth = dims["depth"]
-    scale = min((w - 110) / max(width, 1), (h - 90) / max(depth, 1))
+    scale = dims.get("_ortho_scale") or min((w - 110) / max(width, 1), (h - 90) / max(depth, 1))
     dw = width * scale
     dd = depth * scale
     x0 = x + w / 2 - dw / 2
@@ -777,6 +780,7 @@ def _shop_family_note(template: TemplateDef) -> str:
 def _render_product_family_sheet(template: TemplateDef, style: str, name: str, dims: dict[str, Any], mode: str) -> str:
     w, h = 1320, 900
     margin = 34
+    dims = dict(dims)
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
     company = "EMPIRE WOODCRAFT" if template.key in {"banquette", "shelving"} or template.key in WOODCRAFT_CASEWORK_KEYS else "EMPIRE WORKROOM"
     parts = [
@@ -793,6 +797,14 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
     left_w = 620
     mid_w = 290
     right_w = 300
+    dims["_ortho_scale"] = min(
+        (left_w - 110) / max(dims["width"], 1),
+        (450 - 112) / max(dims["height"], 1),
+        (mid_w - 90) / max(dims["depth"], 1),
+        (450 - 112) / max(dims["height"], 1),
+        (left_w - 110) / max(dims["width"], 1),
+        (210 - 90) / max(dims["depth"], 1),
+    )
     parts.append(_rect(margin, top_y, left_w, 450, 0.6, "#fff", "#d0d5dd"))
     parts.append(_rect(margin + left_w + 24, top_y, mid_w, 450, 0.6, "#fff", "#d0d5dd"))
     parts.append(_rect(margin + left_w + mid_w + 48, top_y, right_w, 450, 0.6, "#fff", "#d0d5dd"))
@@ -866,6 +878,7 @@ def _render_product_family_sheet(template: TemplateDef, style: str, name: str, d
 def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str, dims: dict[str, float], params: dict[str, Any], mode: str) -> str:
     w, h = 1320, 900
     margin = 34
+    dims = dict(dims)
     title = template.shop_rules["title"] if mode == "shop" else template.presentation_rules["title"]
     stroke = "#111827"
     parts = [
@@ -883,6 +896,12 @@ def _render_window_treatment_sheet(template: TemplateDef, style: str, name: str,
     left_w = 640
     mid_w = 270
     right_w = 300
+    dims["_ortho_scale"] = min(
+        (left_w - 80) / max(dims["width"], 1),
+        (450 - 95) / max(dims["drop"], 1),
+        (left_w - 68) / max(dims["width"], 1),
+        (210 - 90) / max(dims["return"], 1),
+    )
     parts.append(_rect(margin, top_y, left_w, 450, 0.6, "#fff", "#d0d5dd"))
     parts.append(_rect(margin + left_w + 24, top_y, mid_w, 450, 0.6, "#fff", "#d0d5dd"))
     parts.append(_rect(margin + left_w + mid_w + 48, top_y, right_w, 450, 0.6, "#fff", "#d0d5dd"))
