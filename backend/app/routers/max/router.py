@@ -19,7 +19,7 @@ from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
-from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool
+from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
@@ -153,7 +153,100 @@ def _execute_drawing_handoff(handoff):
         sorted(handoff.dimensions.keys()),
         bool(handoff.source_image),
     )
-    return execute_tool({"tool": "sketch_to_drawing", **(handoff.tool_payload or {})})
+    result = execute_tool({"tool": "sketch_to_drawing", **(handoff.tool_payload or {})})
+    return _quality_gate_drawing_result(handoff, result)
+
+
+def _quality_gate_drawing_result(handoff, result):
+    if not result.success:
+        return result
+
+    payload = result.result or {}
+    svg = payload.get("svg") or ""
+    errors = []
+    checks = []
+
+    if "<svg" not in svg:
+        errors.append("drawing renderer did not return SVG output")
+    else:
+        checks.append("svg_present")
+
+    forbidden = ["MEASUREMENT DIAGRAM", "measurement diagram", "placeholder", "generic measurement"]
+    if any(token in svg for token in forbidden):
+        errors.append("renderer returned a placeholder/generic measurement diagram")
+    else:
+        checks.append("no_placeholder_measurement_diagram")
+
+    if handoff.item_type == "generic" or payload.get("item_type") == "generic":
+        errors.append("drawing output is generic instead of product-specific")
+    else:
+        checks.append("product_specific_item_type")
+
+    lower_svg = svg.lower()
+    view_requirements = {
+        "plan": ("plan",),
+        "isometric": ("isometric",),
+        "elevation": ("elevation", "front"),
+        "front_elevation": ("front", "elevation"),
+        "side_elevation": ("side", "elevation"),
+    }
+    for view in handoff.views:
+        if view == "side_elevation" and "side" not in lower_svg:
+            # Existing bench sheets do not yet include a distinct side view; do not
+            # mark them production-complete, but do not block plan/front/isometric output.
+            payload.setdefault("quality_warnings", []).append("side_elevation_requested_but_not_distinct")
+            continue
+        tokens = view_requirements.get(view)
+        if tokens and not any(token in lower_svg for token in tokens):
+            errors.append(f"requested view not evident in SVG: {view}")
+    if not errors:
+        checks.append("requested_views_evident")
+
+    for label, value in (handoff.dimensions or {}).items():
+        numeric = re.sub(r"[^0-9.]", "", str(value))
+        if numeric and numeric not in svg:
+            errors.append(f"provided dimension missing from SVG: {label}={value}")
+    if not errors:
+        checks.append("provided_dimensions_evident")
+
+    if not payload.get("pdf_url"):
+        errors.append("drawing PDF artifact URL missing")
+    else:
+        checks.append("pdf_artifact_present")
+
+    if errors:
+        return ToolResult(
+            tool=result.tool,
+            success=False,
+            error="Drawing quality gate blocked artifact: " + "; ".join(dict.fromkeys(errors)),
+            result={
+                "quality_gate": {
+                    "passed": False,
+                    "errors": list(dict.fromkeys(errors)),
+                    "checks": checks,
+                    "handoff": {
+                        "item_type": handoff.item_type,
+                        "dimensions": handoff.dimensions,
+                        "views": handoff.views,
+                        "source_image": handoff.source_image,
+                    },
+                }
+            },
+        )
+
+    payload["quality_gate"] = {
+        "passed": True,
+        "checks": checks,
+        "warnings": payload.get("quality_warnings", []),
+        "handoff": {
+            "item_type": handoff.item_type,
+            "dimensions": handoff.dimensions,
+            "views": handoff.views,
+            "source_image": handoff.source_image,
+        },
+    }
+    result.result = payload
+    return result
 
 
 # Brain instances (shared across requests)

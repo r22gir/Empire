@@ -62,3 +62,7 @@ versions/*.tar.gz
 # Generated drawing artifacts
 uploads/arch_drawings/*.pdf
 uploads/arch_drawings/*.svg
+
+# Local env backups
+*.env.save
+.env.save

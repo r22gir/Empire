@@ -97,11 +97,11 @@ def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
         return ToolResult(
             tool="sketch_to_drawing",
             success=True,
-            result={
-                "svg": "<svg><text>bench proof</text></svg>",
-                "pdf_url": "/api/v1/drawings/files/proof.pdf",
-                "item_type": "bench",
-            },
+                result={
+                    "svg": "<svg><text>PLAN</text><text>ISOMETRIC</text><text>FRONT ELEVATION</text><text>96</text><text>22</text><text>18</text></svg>",
+                    "pdf_url": "/api/v1/drawings/files/proof.pdf",
+                    "item_type": "bench",
+                },
         )
 
     monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool)
@@ -118,3 +118,55 @@ def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
     assert response.tool_results[0]["success"] is True
     assert calls[0]["item_type"] == "bench"
     assert calls[0]["dimensions"]["width"] == '96"'
+
+
+def test_drawing_quality_gate_blocks_placeholder_svg():
+    import importlib
+    from app.services.max.drawing_intent import build_drawing_handoff
+    from app.services.max.tool_executor import ToolResult
+
+    max_router = importlib.import_module("app.routers.max.router")
+    handoff = build_drawing_handoff(
+        'Create a straight bench drawing 96" wide 22" deep with 18" seat height and 18" back height'
+    )
+    result = ToolResult(
+        tool="sketch_to_drawing",
+        success=True,
+        result={
+            "item_type": "generic",
+            "svg": "<svg><text>MEASUREMENT DIAGRAM</text></svg>",
+            "pdf_url": "/api/v1/drawings/files/fake.pdf",
+        },
+    )
+
+    gated = max_router._quality_gate_drawing_result(handoff, result)
+
+    assert gated.success is False
+    assert "placeholder" in gated.error
+    assert gated.result["quality_gate"]["passed"] is False
+
+
+def test_drawing_quality_gate_passes_grounded_bench_svg():
+    import importlib
+    from app.services.max.drawing_intent import build_drawing_handoff
+    from app.services.max.tool_executor import ToolResult
+
+    max_router = importlib.import_module("app.routers.max.router")
+    handoff = build_drawing_handoff(
+        'Create a straight bench drawing 96" wide 22" deep with 18" seat height and 18" back height'
+    )
+    result = ToolResult(
+        tool="sketch_to_drawing",
+        success=True,
+        result={
+            "item_type": "bench",
+            "svg": "<svg><text>PLAN</text><text>ISOMETRIC</text><text>FRONT ELEVATION</text><text>96</text><text>22</text><text>18</text></svg>",
+            "pdf_url": "/api/v1/drawings/files/bench.pdf",
+        },
+    )
+
+    gated = max_router._quality_gate_drawing_result(handoff, result)
+
+    assert gated.success is True
+    assert gated.result["quality_gate"]["passed"] is True
+    assert "no_placeholder_measurement_diagram" in gated.result["quality_gate"]["checks"]
