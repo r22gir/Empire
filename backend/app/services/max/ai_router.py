@@ -145,6 +145,7 @@ class AIResponse:
     content: str
     model_used: str
     fallback_used: bool = False
+    function_calls: Optional[list] = None  # xAI /v1/responses function calls
 
 from .system_prompt import get_system_prompt
 from .desk_prompt import get_desk_system_prompt
@@ -436,14 +437,15 @@ class AIRouter:
         except Exception as e:
             logger.debug(f"Cost logging failed: {e}")
 
-    async def _try_provider_chat(self, provider_type: str, model_override: Optional[str], full_messages: List[AIMessage], messages: List[AIMessage], image_path: Optional[Path], fallback: bool, feature: str, business: str, tenant_id: str) -> Optional[AIResponse]:
+    async def _try_provider_chat(self, provider_type: str, model_override: Optional[str], full_messages: List[AIMessage], messages: List[AIMessage], image_path: Optional[Path], fallback: bool, feature: str, business: str, tenant_id: str, tools: Optional[list] = None) -> Optional[AIResponse]:
         """Try a single provider for non-streaming chat. Returns AIResponse on success, None on failure."""
         try:
             if provider_type == "grok":
                 logger.info(f"[MAX] Chat via xAI Grok ({self.xai_model}){' (fallback)' if fallback else ''}")
-                resp = await self._grok_chat(full_messages, image_path)
-                self._log_chat_cost(full_messages, resp, self.xai_model, feature, business, tenant_id)
-                return AIResponse(content=resp, model_used=self.xai_model, fallback_used=fallback)
+                resp = await self._grok_chat(full_messages, image_path, tools=tools)
+                self._log_chat_cost(full_messages, resp.content, self.xai_model, feature, business, tenant_id)
+                resp.fallback_used = fallback
+                return resp
 
             elif provider_type == "claude":
                 model_id = model_override or "claude-sonnet-4-6"
@@ -487,7 +489,7 @@ class AIRouter:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
         return None
 
-    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AIResponse:
+    async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -524,7 +526,7 @@ class AIRouter:
 
             is_first = True
             for provider_type, model_override in providers_chain:
-                result = await self._try_provider_chat(provider_type, model_override, full_messages, messages, image_path, not is_first, feature, business, tenant_id)
+                result = await self._try_provider_chat(provider_type, model_override, full_messages, messages, image_path, not is_first, feature, business, tenant_id, tools=tools)
                 is_first = False
                 if result:
                     return result
@@ -596,9 +598,10 @@ class AIRouter:
             if provider == AIModel.GROK and self.xai_key:
                 try:
                     logger.info(f"[MAX] Chat via xAI Grok ({self.xai_model}){' (fallback)' if fallback else ''}")
-                    resp = await self._grok_chat(full_messages, image_path)
-                    self._log_chat_cost(full_messages, resp, self.xai_model, feature, business, tenant_id)
-                    return AIResponse(content=resp, model_used=self.xai_model, fallback_used=fallback)
+                    resp = await self._grok_chat(full_messages, image_path, tools=tools)
+                    self._log_chat_cost(full_messages, resp.content, self.xai_model, feature, business, tenant_id)
+                    resp.fallback_used = fallback
+                    return resp
                 except Exception as e:
                     logger.warning(f"Grok failed: {type(e).__name__}: {e}")
 
@@ -842,7 +845,7 @@ class AIRouter:
     # ── xAI Grok (OpenAI-compatible API) ──────────────────────────────
 
     def _xai_payload(self, api_messages: list, *, stream: bool = False) -> dict:
-        """Build the minimal xAI-compatible chat payload.
+        """Build the minimal xAI-compatible chat payload for /v1/chat/completions.
 
         Keep provider-specific fields out of this path. xAI rejects several
         common OpenAI/Anthropic-style extras on reasoning models, including
@@ -857,17 +860,76 @@ class AIRouter:
             payload["stream"] = True
         return payload
 
-    async def _grok_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
+    def _xai_responses_payload(self, api_messages: list, tools: list) -> dict:
+        """Build xAI /v1/responses payload (native function calling endpoint).
+
+        xAI /v1/responses uses input[] array (not messages[]) and a flat tool
+        structure: {type, name, description, parameters} (not nested under 'function').
+        """
+        # Build input array from api_messages
+        input_array = []
+        for msg in api_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                # Multimodal content — handle text parts
+                text_parts = []
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = " ".join(text_parts)
+            input_array.append({"role": role, "content": content})
+
+        payload = {
+            "model": self.xai_model,
+            "input": input_array,
+            "tools": tools,
+            "tool_choice": "auto",
+            "max_tokens": self.xai_max_tokens,
+        }
+        return payload
+
+    async def _grok_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None, tools: Optional[list] = None) -> AIResponse:
+        """Call xAI. When tools are provided, uses /v1/responses endpoint (which supports
+        function calling) and returns AIResponse with function_calls populated.
+        Otherwise uses /v1/chat/completions and returns AIResponse with content only."""
+        from .tool_executor import parse_xai_function_calls
+
         api_messages = self._prepare_openai_messages(messages, image_path)
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self.xai_base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
-                json=self._xai_payload(api_messages)
-            )
-            if resp.status_code != 200:
-                raise Exception(f"xAI HTTP {resp.status_code} model={self.xai_model} base_url={self.xai_base_url}: {resp.text}")
-            return resp.json()["choices"][0]["message"]["content"]
+            if tools:
+                # /v1/responses — xAI-native function calling
+                resp = await client.post(
+                    f"{self.xai_base_url}/responses",
+                    headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
+                    json=self._xai_responses_payload(api_messages, tools)
+                )
+                if resp.status_code != 200:
+                    raise Exception(f"xAI responses HTTP {resp.status_code} model={self.xai_model}: {resp.text}")
+                data = resp.json()
+                function_calls = parse_xai_function_calls(data)
+
+                # Extract text output
+                text_output = ""
+                for item in data.get("output", []):
+                    if item.get("type") == "message":
+                        text_output = "".join(
+                            p.get("text", "") for p in item.get("content", [])
+                            if isinstance(p, dict)
+                        )
+                        break
+
+                return AIResponse(content=text_output, model_used=self.xai_model, function_calls=function_calls if function_calls else None)
+            else:
+                # /v1/chat/completions — plain text
+                resp = await client.post(
+                    f"{self.xai_base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.xai_key}", "Content-Type": "application/json"},
+                    json=self._xai_payload(api_messages)
+                )
+                if resp.status_code != 200:
+                    raise Exception(f"xAI HTTP {resp.status_code} model={self.xai_model} base_url={self.xai_base_url}: {resp.text}")
+                return AIResponse(content=resp.json()["choices"][0]["message"]["content"], model_used=self.xai_model)
 
     async def _grok_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         api_messages = self._prepare_openai_messages(messages, image_path)

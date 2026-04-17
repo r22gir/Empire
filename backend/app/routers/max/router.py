@@ -19,7 +19,7 @@ from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
-from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult
+from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
@@ -398,8 +398,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
 
+        # Pass tool definitions to xAI when image is attached — enables native function_call
+        # via /v1/responses endpoint (function_calls returned alongside or instead of text)
+        _tools = get_xai_tool_definitions() if request.image_filename else None
+
         response = await asyncio.wait_for(
-            ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or ""),
+            ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
             timeout=45.0,
         )
 
@@ -437,7 +441,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         current_response = response
 
         for _tool_round in range(3):
+            # Check for ```tool ... ``` blocks first (existing text-based format)
             tool_calls = parse_tool_blocks(current_response.content)
+            # Also check xAI /v1/responses function_calls format
+            if not tool_calls and hasattr(current_response, 'function_calls') and current_response.function_calls:
+                tool_calls = current_response.function_calls
             if not tool_calls:
                 break
 
@@ -510,7 +518,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             loop_messages.append(AIMessage(role="assistant", content=strip_tool_blocks(current_response.content)))
             loop_messages.append(AIMessage(role="user", content=f"{followup_instruction}\n\n{tool_summary}"))
 
-            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "")
+            current_response = await ai_router.chat(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools)
             # Only keep the FINAL round's response — previous rounds are context for the AI, not for the user
             final_content = current_response.content
 

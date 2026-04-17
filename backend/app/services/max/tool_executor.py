@@ -78,6 +78,81 @@ def strip_tool_blocks(text: str) -> str:
     return TOOL_BLOCK_RE.sub("", text).strip()
 
 
+def parse_xai_function_calls(response_data: dict) -> list[dict]:
+    """Parse xAI /v1/responses output into Empire tool call dicts.
+
+    xAI Responses API returns function calls as:
+      {"type": "function_call", "name": "...", "call_id": "...",
+       "arguments": "{...json...}", "status": "completed"}
+
+    Empire expects tool call dicts with "tool" and "params" keys.
+    """
+    results = []
+
+    # Handle the xAI responses output structure
+    output = response_data.get("output", [])
+    if not isinstance(output, list):
+        output = [output]
+
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "function_call":
+            func_name = item.get("name", "")
+            call_id = item.get("call_id", "")
+            raw_args = item.get("arguments", "{}")
+
+            # Parse arguments JSON
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+            except (json.JSONDecodeError, TypeError):
+                args = {"raw": raw_args}
+
+            # Build Empire-format tool call dict
+            # execute_tool passes the whole dict to the handler, so merge args
+            # at the top level (handlers expect params like image, prompt, etc. at root)
+            tool_call = {
+                "tool": func_name,
+                **args,   # merge so handlers can access params directly
+                "_xai_call_id": call_id,
+                "_xai_params": args,  # preserve original for debugging/audit
+            }
+            results.append(tool_call)
+
+    return results
+
+
+# ── xAI Tool Definitions (OpenAI-compatible format) ──────────────────
+# These are passed to xAI /v1/responses endpoint to enable native function calling.
+
+XAI_TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "name": "understand_image",
+        "description": "Understand and describe an image in detail. Analyzes the image and returns a structured response with: summary (overall description), notable_details (list of specific observations), confidence (high/medium/low), provider (which AI model was used), and latency_ms. Accepts image as URL (http/https), base64 data URI, or local file path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string",
+                    "description": "URL, base64 data URI, or local file path of the image to analyze"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Optional custom prompt to override the default 'describe what you see' instruction. Use to ask specific questions about the image."
+                }
+            },
+            "required": ["image"]
+        }
+    },
+]
+
+
+def get_xai_tool_definitions() -> list:
+    """Return OpenAI-format tool definitions for xAI /v1/responses endpoint."""
+    return XAI_TOOL_DEFINITIONS
+
+
 # ── Tool Dispatcher ────────────────────────────────────────────────
 
 TOOL_REGISTRY = {}
