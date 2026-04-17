@@ -200,6 +200,12 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "telegram": "send_telegram",
             "desk_task": "run_desk_task",
             "reset": "reset_max_state",
+            "analyze_image": "understand_image",
+            "describe_image": "understand_image",
+            "image_understanding": "understand_image",
+            "image_analysis": "understand_image",
+            "look_at_image": "understand_image",
+            "what_is_in_image": "understand_image",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -2047,6 +2053,249 @@ def _search_images(params: dict, desk: Optional[str] = None) -> ToolResult:
         return ToolResult(tool="search_images", success=True, result={"images": images, "query": query})
     except Exception as e:
         return ToolResult(tool="search_images", success=False, error=f"Image search failed: {e}")
+
+
+# ── IMAGE UNDERSTANDING TOOL ──────────────────────────────────────
+
+def _normalize_image_input(image: str) -> tuple[str, str]:
+    """Convert image input to a data URI or URL for vision APIs. Returns (image_url, error)."""
+    import base64
+    from pathlib import Path
+
+    if image.startswith(("http://", "https://")):
+        return image, ""
+    if image.startswith("data:"):
+        return image, ""
+
+    # Local file path
+    path = Path(image)
+    if not path.exists():
+        return "", f"Image file not found: {image}"
+    try:
+        image_bytes = path.read_bytes()
+        ext = path.suffix.lower()
+        mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}
+        mime = mime_map.get(ext, "image/jpeg")
+        b64 = base64.b64encode(image_bytes).decode()
+        return f"data:{mime};base64,{b64}", ""
+    except Exception as e:
+        return "", f"Failed to read image file: {e}"
+
+
+def _call_xai_vision(image_url: str, prompt: str) -> dict:
+    """Call xAI Grok vision API directly. Returns parsed JSON dict or raises."""
+    import os, httpx, json, re
+
+    xai_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY", "")
+    if not xai_key:
+        raise Exception("XAI_API_KEY not configured")
+
+    xai_model = os.getenv("XAI_MODEL", "grok-4-fast-non-reasoning")
+    async def _call():
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            res = await client.post(
+                "https://api.x.ai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"},
+                json={
+                    "model": xai_model,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                        {"type": "text", "text": prompt},
+                    ]}],
+                    "max_tokens": 4096,
+                    "temperature": 0.3,
+                },
+            )
+        if res.status_code != 200:
+            raise Exception(f"xAI vision HTTP {res.status_code}: {res.text[:200]}")
+        content = res.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        # Try to extract JSON object
+        m = re.search(r"\{[\s\S]*\}", content)
+        if not m:
+            # Return as plain text description if no JSON found
+            return {"summary": content.strip(), "notable_details": [], "confidence": "medium", "_raw": content}
+        return json.loads(m.group(0))
+
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _call())
+                return future.result(timeout=150)
+        return loop.run_until_complete(_call())
+    except Exception:
+        return asyncio.run(_call())
+
+
+def _call_openai_vision(image_url: str, prompt: str) -> dict:
+    """Call OpenAI GPT-4o vision API directly. Returns parsed JSON dict or raises."""
+    import os, httpx, json, re
+
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if not openai_key:
+        raise Exception("OPENAI_API_KEY not configured")
+
+    async def _call():
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            res = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "gpt-4o",
+                    "messages": [{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": image_url}},
+                        {"type": "text", "text": prompt},
+                    ]}],
+                    "max_tokens": 4096,
+                },
+            )
+        if res.status_code != 200:
+            raise Exception(f"OpenAI vision HTTP {res.status_code}: {res.text[:200]}")
+        content = res.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        m = re.search(r"\{[\s\S]*\}", content)
+        if not m:
+            return {"summary": content.strip(), "notable_details": [], "confidence": "medium", "_raw": content}
+        return json.loads(m.group(0))
+
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _call())
+                return future.result(timeout=150)
+        return loop.run_until_complete(_call())
+    except Exception:
+        return asyncio.run(_call())
+
+
+def _log_image_evaluation(response_id: str, provider: str, latency_ms: float,
+                          success: bool, fallback_used: bool, channel: str = "web_cc",
+                          capability: str = "understand_image"):
+    """Log image understanding call to token_tracker for evaluation loop."""
+    try:
+        from app.services.max.token_tracker import token_tracker
+        # Estimate tokens from latency as a proxy (actual tokens not returned by vision APIs in same way)
+        estimated_tokens = max(100, int(latency_ms * 0.5))  # rough proxy
+        token_tracker.log_usage(
+            model=f"vision-{provider}",
+            provider=provider,
+            input_tokens=estimated_tokens,
+            output_tokens=estimated_tokens,
+            endpoint="vision",
+            conversation_id=response_id,
+            feature="vision",
+            business="general",
+            source=f"understand_image/{channel}",
+        )
+    except Exception:
+        pass  # Non-critical — evaluation logging must never break the tool
+
+
+@tool("understand_image")
+def _understand_image(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Understand a general image — returns structured description with notable details.
+
+    Accepts: image URL (http/https), base64 data URI, or local file path.
+    Optional prompt overrides the default "describe what you see" instruction.
+
+    Provider routing: xAI Grok Vision (primary) → OpenAI GPT-4o Vision (fallback).
+
+    Returns structured result:
+      - summary: overall description
+      - notable_details: list of specific observations
+      - confidence: high/medium/low based on response clarity
+      - provider: which AI provider answered
+      - latency_ms: time taken
+      - response_id: unique call ID for evaluation tracking
+    """
+    import time, uuid
+
+    image = params.get("image", "").strip()
+    prompt = params.get(
+        "prompt",
+        "Describe what you see in this image in detail. Include notable objects, "
+        "any visible text, people, colors, setting/context, and specific details "
+        "that would be useful to know. Be precise and observant."
+    ).strip()
+
+    if not image:
+        return ToolResult(tool="understand_image", success=False,
+                         error="image parameter is required (URL, base64 data URI, or local file path)")
+
+    # Normalize image to data URI or URL
+    image_url, norm_error = _normalize_image_input(image)
+    if norm_error:
+        return ToolResult(tool="understand_image", success=False, error=norm_error)
+
+    start_time = time.time()
+    response_id = str(uuid.uuid4())[:8]
+    provider = "none"
+    fallback_used = False
+    raw_result = {}
+
+    # Try xAI Grok Vision (primary)
+    try:
+        raw_result = _call_xai_vision(image_url, prompt)
+        provider = "xai-grok"
+    except Exception as prim_err:
+        primary_error = str(prim_err)
+        logger.warning(f"understand_image primary (xAI Grok) failed: {primary_error}")
+
+        # Fallback: OpenAI GPT-4o
+        try:
+            raw_result = _call_openai_vision(image_url, prompt)
+            provider = "openai-gpt4o"
+            fallback_used = True
+        except Exception as fallback_err:
+            return ToolResult(
+                tool="understand_image",
+                success=False,
+                error=f"Image understanding failed. Primary (xAI Grok): {primary_error}. Fallback (OpenAI GPT-4o): {fallback_err}",
+            )
+
+    latency_ms = round((time.time() - start_time) * 1000, 1)
+
+    # Extract structured fields from provider response
+    if isinstance(raw_result, dict) and "_raw" not in raw_result:
+        summary = raw_result.get("summary", "")
+        notable = raw_result.get("notable_details", []) or raw_result.get("details", []) or []
+        confidence = raw_result.get("confidence", "medium")
+        if isinstance(notable, str):
+            notable = [notable]
+    else:
+        # Plain text response — wrap as summary
+        summary = raw_result.get("summary", str(raw_result)) if isinstance(raw_result, dict) else str(raw_result)
+        notable = []
+        confidence = "medium"
+
+    # Confidence heuristic: length + completeness of response
+    if len(summary) > 500 and notable:
+        confidence = "high"
+    elif len(summary) < 100:
+        confidence = "low"
+
+    # Log for evaluation loop
+    _log_image_evaluation(response_id, provider, latency_ms, True, fallback_used,
+                           channel=params.get("_channel", "web_cc"))
+
+    return ToolResult(
+        tool="understand_image",
+        success=True,
+        result={
+            "summary": summary,
+            "notable_details": notable,
+            "confidence": confidence,
+            "provider": provider,
+            "latency_ms": latency_ms,
+            "response_id": response_id,
+            "fallback_used": fallback_used,
+        },
+    )
 
 
 # ── WEB SEARCH TOOL ───────────────────────────────────────────────

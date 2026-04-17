@@ -2,6 +2,7 @@
   "capabilities": [
     {"capability_key": "inline_drawing_svg", "display_name": "Display drawings inline in web chat", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "SVG rendered in chat bubble with lightbox. DEFAULT for web channels."},
     {"capability_key": "drawing_generation", "display_name": "Generate architectural drawings", "enabled": true, "channel_scope": ["web_cc", "web", "telegram"], "notes": "Window, bench, chair, millwork, generic renderers via registry."},
+    {"capability_key": "understand_image", "display_name": "Understand and describe images in detail", "enabled": true, "channel_scope": ["web_cc", "web", "telegram"], "notes": "General-purpose image understanding via xAI Grok Vision (primary) + OpenAI GPT-4o (fallback). Accepts URL, base64, or local file path. Returns structured summary, notable details, confidence, and provider used."},
     {"capability_key": "quote_creation", "display_name": "Create quotes from photos or specs", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Photo analysis → measurements → quote assembly."},
     {"capability_key": "code_mode", "display_name": "Execute code tasks and file modifications", "enabled": true, "channel_scope": ["web_cc"], "notes": "Founder-only. No PIN on web_cc."},
     {"capability_key": "self_heal", "display_name": "Self-diagnose and fix own code", "enabled": true, "channel_scope": ["web_cc"], "notes": "Bounded scope. Cannot touch .env, auth, payments."},
