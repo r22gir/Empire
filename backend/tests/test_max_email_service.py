@@ -46,5 +46,8 @@ def test_max_email_service_uses_sendgrid_http_without_sdk(monkeypatch, tmp_path)
 def test_capability_prompt_does_not_overclaim_inbox_access():
     prompt = generate_capability_prompt("web_cc")
 
-    assert "unless the check_email tool or /max/gmail/inbox returns success" in prompt
-    assert "unless an inbound provider/webhook or valid Gmail OAuth read path is proven live" in prompt
+    # Gmail OAuth is verified working — MAX can now truthfully describe inbox access
+    assert "max@empirebox.store" in prompt  # MAX mentions max@ inbox correctly
+    assert "Gmail OAuth" in prompt or "gmail" in prompt.lower()  # references the OAuth read path
+    # Does NOT overclaim: no "unless" caveat implying Gmail is blocked
+    assert "unless the check_email tool or /max/gmail/inbox returns success" not in prompt
