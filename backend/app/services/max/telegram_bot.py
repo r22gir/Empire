@@ -14,6 +14,8 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 import re as _re
 import httpx
+from telegram import Update
+from telegram.ext import ContextTypes
 from app.services.max.brain.memory_store import MemoryStore
 
 try:
@@ -487,746 +489,699 @@ class TelegramBot:
         except Exception as e:
             logger.error(f"TTS voice reply failed: {e}")
 
-    # ── Full bot with python-telegram-bot ────────────────────────
+    # ── Bot handlers (shared between polling and webhook modes) ──────
 
-    async def start_bot(self):
-        """Start the full Telegram bot using python-telegram-bot."""
-        if not self.is_configured:
-            logger.warning("Telegram not configured — bot not started")
+    def _is_authorized(self, update) -> bool:
+        """Check if the update is from an authorized chat (founder only)."""
+        if not self.founder_chat_id:
+            return False
+        return update.effective_chat and update.effective_chat.id == int(self.founder_chat_id)
+
+    async def _cmd_start(self, update, context):
+        """Handler for /start command."""
+        if not self._is_authorized(update):
+            return
+        await update.message.reply_html(
+            "🏰 <b>MAX — Empire AI Assistant</b>\n\n"
+            "Send me text, voice notes, or photos.\n\n"
+            "<b>Commands:</b>\n"
+            "/status — System health\n"
+            "/desks — List active desks\n"
+            "/tasks — Show open tasks\n"
+            "/help — Show commands"
+        )
+
+    async def _cmd_status(self, update, context):
+        """Handler for /status command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get("http://localhost:8000/api/v1/max/health")
+                data = resp.json()
+                msg = (
+                    f"⚡ <b>System Status</b>\n\n"
+                    f"<b>Service:</b> {data.get('service', 'MAX')}\n"
+                    f"<b>Status:</b> {data.get('status', 'unknown')}\n"
+                    f"<b>Desks Online:</b> {data.get('desks_online', 0)}\n"
+                    f"<b>Telegram:</b> {'✅' if data.get('telegram_configured') else '❌'}"
+                )
+                await update.message.reply_html(msg)
+        except Exception as e:
+            await update.message.reply_text(f"Could not reach backend: {e}")
+
+    async def _cmd_desks(self, update, context):
+        """Handler for /desks command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get("http://localhost:8000/api/v1/max/desks")
+                desks = resp.json().get("desks", [])
+                if not desks:
+                    await update.message.reply_text("No desks configured.")
+                    return
+                msg = "🏢 <b>Active Desks</b>\n\n"
+                for d in desks:
+                    status_dot = "🟢" if d.get("status") == "idle" else "🟡"
+                    msg += f"{status_dot} <b>{d.get('name', d.get('id'))}</b>\n"
+                await update.message.reply_html(msg)
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def _cmd_tasks(self, update, context):
+        """Handler for /tasks command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
+                tasks = resp.json().get("tasks", [])
+                if not tasks:
+                    await update.message.reply_text("No active tasks.")
+                    return
+                msg = "📋 <b>Active Tasks</b>\n\n"
+                for t in tasks[:10]:
+                    msg += f"• <b>{t.get('title')}</b> — {t.get('status', 'unknown')}\n"
+                await update.message.reply_html(msg)
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def _cmd_pipeline(self, update, context):
+        """Handler for /pipeline command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            from app.services.max.pipeline import pipeline_engine
+            args_text = " ".join(context.args) if context.args else ""
+            if args_text:
+                await update.message.reply_text("🔄 Breaking down task into subtasks...")
+                result = await pipeline_engine.submit_pipeline(
+                    title=args_text,
+                    description=args_text,
+                    source="telegram",
+                    channel="telegram",
+                )
+                msg = f"🚀 <b>Pipeline Created</b>\n\n<b>ID:</b> {result['pipeline_id']}\n<b>Subtasks:</b>\n"
+                for st in result.get("subtasks", []):
+                    msg += f"  {st['order']+1}. [{st['desk']}] {st['title']}\n"
+                await update.message.reply_html(msg)
+            else:
+                pipelines = pipeline_engine.get_active_pipelines()
+                if not pipelines:
+                    await update.message.reply_text("No active pipelines.\n\nUse /pipeline <description> to create one.")
+                    return
+                msg = "🔄 <b>Active Pipelines</b>\n\n"
+                for pl in pipelines[:5]:
+                    prog = pl.get("progress", {})
+                    msg += (
+                        f"<b>{pl['title'][:50]}</b>\n"
+                        f"  {prog.get('done', 0)}/{prog.get('total', 0)} done"
+                        f" · {prog.get('in_review', 0)} in review\n\n"
+                    )
+                await update.message.reply_html(msg)
+        except Exception as e:
+            await update.message.reply_text(f"Pipeline error: {e}")
+
+    async def _cmd_review(self, update, context):
+        """Handler for /review command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            from app.services.max.pipeline import pipeline_engine
+            tasks = pipeline_engine.get_review_tasks()
+            if not tasks:
+                await update.message.reply_text("No tasks awaiting review. ✅")
+                return
+            for t in tasks[:5]:
+                msg = (
+                    f"🔍 <b>Review Required</b>\n\n"
+                    f"<b>Task:</b> {t.get('title', '?')}\n"
+                    f"<b>Desk:</b> {t.get('desk', '?')}\n"
+                    f"<b>Result:</b> {(t.get('result_summary') or 'No result')[:300]}\n"
+                )
+                markup = {
+                    "inline_keyboard": [[
+                        {"text": "✅ Approve", "callback_data": f"pl_approve_{t['id']}"},
+                        {"text": "❌ Reject", "callback_data": f"pl_reject_{t['id']}"},
+                    ]]
+                }
+                await update.message.reply_html(msg, reply_markup=markup)
+        except Exception as e:
+            await update.message.reply_text(f"Review error: {e}")
+
+    async def _cmd_voiceprint(self, update, context):
+        """Handler for /voiceprint command."""
+        if not self._is_authorized(update):
+            return
+        from app.services.max.security.voiceprint import voiceprint_verifier
+        user_id = str(update.effective_chat.id)
+
+        if not voiceprint_verifier.available:
+            await update.message.reply_text("Voiceprint verification requires resemblyzer.\nInstall: pip install resemblyzer")
+            return
+
+        if update.message.reply_to_message and (
+            update.message.reply_to_message.voice or update.message.reply_to_message.audio
+        ):
+            voice = update.message.reply_to_message.voice or update.message.reply_to_message.audio
+            audio_path = await self._download_telegram_file(voice.file_id, suffix=".ogg")
+            if not audio_path:
+                await update.message.reply_text("Failed to download audio for enrollment.")
+                return
+            try:
+                result = voiceprint_verifier.enroll(user_id, audio_path)
+                await update.message.reply_text(result["message"])
+            finally:
+                audio_path.unlink(missing_ok=True)
+            return
+
+        if voiceprint_verifier.is_enrolled(user_id):
+            await update.message.reply_html(
+                "🔊 <b>Voiceprint Status:</b> Enrolled\n\nYour voice is verified on every voice message.\n"
+                "To re-enroll: reply to a voice note with /voiceprint\nTo delete: /voiceprint delete"
+            )
+        else:
+            await update.message.reply_html(
+                "🔊 <b>Voiceprint Not Enrolled</b>\n\n"
+                "To enroll: send a voice note (5-10 sec of clear speech), then reply to it with /voiceprint"
+            )
+
+        args = context.args
+        if args and args[0].lower() == "delete":
+            deleted = voiceprint_verifier.delete_profile(user_id)
+            await update.message.reply_text("Voiceprint deleted." if deleted else "No voiceprint to delete.")
+
+    async def _cmd_security(self, update, context):
+        """Handler for /security command."""
+        if not self._is_authorized(update):
+            return
+        from app.services.max.security.sanitizer import sanitizer as _sanitizer
+        stats = _sanitizer.get_stats()
+        lines = [
+            "🛡 <b>Security Stats</b>\n",
+            f"Total checks: {stats['total_checks']}",
+            f"Blocked injections: {stats['blocked_injection']}",
+            f"Blocked topics: {stats['blocked_topic']}",
+            f"Blocked SQL: {stats['blocked_sql']}",
+            f"Blocked XSS: {stats['blocked_xss']}",
+            f"Rate limited: {stats['blocked_rate']}",
+        ]
+        await update.message.reply_html("\n".join(lines))
+
+    async def _cmd_brief(self, update, context):
+        """Handler for /brief command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get("http://localhost:8000/api/v1/system/metrics")
+                data = resp.json()
+
+            import psutil
+            from app.config.business_config import biz as _biz
+
+            ports = data.get("active_ports", {})
+            port_lines = []
+            for p, name in [("8000", "API"), ("3005", "CC"), ("7878", "OpenClaw"), ("11434", "Ollama"), ("3077", "Recovery")]:
+                status = "✅" if ports.get(p) else "❌"
+                port_lines.append(f"{status} {name}")
+
+            task_info = ""
+            try:
+                resp2 = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
+                tasks = resp2.json().get("tasks", [])
+                task_info = f"\n📋 <b>Tasks:</b> {len(tasks)} active"
+            except Exception:
+                pass
+
+            brief = (
+                f"<b>☀️ {_biz.business_name} Brief</b>\n"
+                f"<i>{datetime.now().strftime('%A, %B %d %I:%M %p')}</i>\n\n"
+                f"💻 CPU {data.get('cpu_percent', '?')}% | RAM {data.get('ram_percent', '?')}% | Disk {data.get('disk_percent', '?')}%\n"
+                f"🆙 Uptime: {int(data.get('uptime_seconds', 0)) // 3600}h {(int(data.get('uptime_seconds', 0)) % 3600) // 60}m\n"
+                f"💰 AI costs today: ${data.get('ai_costs_today', 0):.4f}\n"
+                f"⚠️ Errors (24h): {data.get('error_count_24h', 0)}\n\n"
+                f"<b>Services:</b> {' | '.join(port_lines)}"
+                f"{task_info}"
+            )
+            await update.message.reply_html(brief)
+        except Exception as e:
+            await update.message.reply_text(f"Brief error: {e}")
+
+    async def _cmd_notifications(self, update, context):
+        """Handler for /notifications command."""
+        if not self._is_authorized(update):
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get("http://localhost:8000/api/v1/notifications/log", params={"limit": 10})
+                data = resp.json()
+                notifs = data.get("notifications", [])
+                total = data.get("total", 0)
+                if not notifs:
+                    await update.message.reply_text("No notifications.")
+                    return
+                msg = f"<b>🔔 Recent Notifications</b> ({total} total)\n\n"
+                for n in notifs[:10]:
+                    icon = {"system_alert": "⚠️", "task_complete": "✅", "business_event": "💼", "error": "❌"}.get(n.get("type", ""), "📌")
+                    msg += f"{icon} <b>{n.get('title', '?')}</b>\n<i>{n.get('created_at', '?')[:16]}</i>\n\n"
+                await update.message.reply_html(msg)
+        except Exception as e:
+            await update.message.reply_text(f"Error: {e}")
+
+    async def _cmd_setpin(self, update, context):
+        """Handler for /setpin command."""
+        if not self._is_authorized(update):
+            return
+        if not access_controller:
+            await update.message.reply_text("Access control not available.")
+            return
+        chat_id = str(update.effective_chat.id)
+        try:
+            user = access_controller.resolve_user(chat_id, "telegram")
+        except Exception:
+            user = None
+        if not user or user.get("role") not in ("founder", "admin"):
+            await update.message.reply_text("Only founder or admin can set a PIN.")
+            return
+        pin_text = " ".join(context.args).strip() if context.args else ""
+        if not pin_text:
+            await update.message.reply_text("Usage: /setpin 1234 (4-6 digits)")
+            return
+        if not _re.match(r"^\d{4,6}$", pin_text):
+            await update.message.reply_text("PIN must be 4-6 digits.")
+            return
+        try:
+            access_controller.set_pin(user["id"], pin_text)
+            await update.message.reply_text("PIN updated.")
+        except Exception as e:
+            await update.message.reply_text(f"Error setting PIN: {e}")
+
+    async def _cmd_help(self, update, context):
+        """Handler for /help command."""
+        if not self._is_authorized(update):
+            return
+        await update.message.reply_html(
+            "🏰 <b>MAX Commands</b>\n\n"
+            "/start — Welcome message\n"
+            "/brief — On-demand system brief\n"
+            "/notifications — Check recent alerts\n"
+            "/status — System health check\n"
+            "/desks — List active desks\n"
+            "/tasks — Show open tasks\n"
+            "/pipeline — View/create pipelines\n"
+            "/review — Review pending approvals\n"
+            "/voiceprint — Enroll/check voice ID\n"
+            "/security — Security stats\n"
+            "/setpin — Set access control PIN\n"
+            "/help — Show this message\n\n"
+            "You can also send:\n"
+            "💬 <b>Text</b> — Chat with MAX\n"
+            "🎤 <b>Voice</b> — Transcribed and sent to MAX\n"
+            "📷 <b>Photo</b> — Analyzed with AI vision"
+        )
+
+    # ── Message handlers (class methods for use by both polling and webhook modes) ──
+
+    async def _handle_text(self, update, context):
+        """Handle text messages — respond naturally, classify silently in background."""
+        if not self._is_authorized(update):
+            return
+        text = update.message.text
+        msg_id = update.message.message_id
+
+        # Access control: intercept CONFIRM and PIN responses
+        if access_controller:
+            chat_id_str = str(update.effective_chat.id)
+            try:
+                pending = access_controller.get_pending_session(chat_id_str)
+                if pending and text.strip().upper() == "CONFIRM" and pending.get("level") == 2:
+                    result = access_controller.confirm_session(pending["id"])
+                    if result:
+                        from app.services.max.tool_executor import execute_tool
+                        tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
+                        if tr.success:
+                            await update.message.reply_text(f"Confirmed. {tr.tool} executed successfully.")
+                        else:
+                            await update.message.reply_text(f"Confirmed but tool failed: {tr.error}")
+                        access_controller.audit_log(pending.get("user_id", ""), result["tool_name"], 2, "confirmed", channel="telegram")
+                    else:
+                        await update.message.reply_text("Session expired or not found.")
+                    return
+                if pending and _re.match(r"^\d{4,6}$", text.strip()) and pending.get("level") == 3:
+                    result = access_controller.authorize_pin_session(pending["id"], text.strip())
+                    if result:
+                        from app.services.max.tool_executor import execute_tool
+                        tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
+                        if tr.success:
+                            await update.message.reply_text(f"Authorized. {tr.tool} executed successfully.")
+                        else:
+                            await update.message.reply_text(f"Authorized but tool failed: {tr.error}")
+                        access_controller.audit_log(pending.get("user_id", ""), result["tool_name"], 3, "pin_authorized", channel="telegram")
+                    else:
+                        await update.message.reply_text("Invalid PIN or session expired.")
+                    return
+            except Exception as ac_err:
+                logger.warning(f"Access control intercept error: {ac_err}")
+
+        # v6.0 — unified sanitizer check
+        from app.services.max.security.sanitizer import sanitizer as _sanitizer
+        sec = _sanitizer.check(text, channel="telegram", session_id=str(update.effective_chat.id))
+        if not sec["safe"]:
+            await update.message.reply_text(f"Blocked: {sec['reason']}")
+            return
+
+        await update.message.reply_chat_action("typing")
+
+        chat_id = str(update.effective_chat.id) if update.effective_chat else None
+        html_response, plain_text, tool_results = await self._chat_with_max(
+            text,
+            chat_id=chat_id,
+            user_meta={"telegram_message_id": msg_id, "type": "text"},
+        )
+        from app.services.max.response_quality_engine import quality_engine, Channel
+        qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
+        if qr.fixed_count > 0:
+            plain_text = qr.cleaned
+            html_response = f"{qr.cleaned}\n\n<i>— via MAX</i>"
+            logger.info(f"Quality engine fixed {qr.fixed_count} issues in Telegram response")
+        if len(html_response) > 4000:
+            html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
+        await update.message.reply_html(html_response)
+
+        if access_controller and tool_results:
+            for tr in tool_results:
+                err = tr.get("error") or ""
+                if err.startswith("__ACCESS_PENDING__"):
+                    parts = err.split("__", 4)
+                    if len(parts) >= 5:
+                        action_type = parts[3]
+                        summary = parts[4] if len(parts) > 4 else "Action requires authorization"
+                        if action_type == "confirm":
+                            await update.message.reply_text(f"⚠️ {summary}\nReply CONFIRM within 60 seconds to proceed.")
+                        elif action_type == "pin":
+                            await update.message.reply_text(f"🔐 {summary}\nEnter your PIN to authorize.")
+                    return
+
+        sent_files = set()
+        for tr in (tool_results or []):
+            if tr.get("success") and tr.get("result"):
+                res = tr["result"]
+                file_path = res.get("file_path") or res.get("pdf_path")
+                if file_path and os.path.exists(file_path) and file_path not in sent_files:
+                    caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
+                    await self.send_document(file_path, caption=caption, chat_id=chat_id)
+                    sent_files.add(file_path)
+                image_url = res.get("image_url") or res.get("url")
+                if image_url and image_url.startswith("http"):
+                    try:
+                        await update.message.reply_photo(photo=image_url, caption=res.get("caption", ""))
+                    except Exception as img_err:
+                        logger.warning(f"Failed to send image via Telegram: {img_err}")
+
+        if not sent_files:
+            text_lower = text.lower()
+            resp_lower = plain_text.lower()
+            wants_pdf = any(kw in text_lower for kw in ["pdf", "quote", "send me", "document", "estimate"])
+            ai_claims_sent = any(kw in resp_lower for kw in ["sent the pdf", "sending the pdf", "sent to your telegram", "delivered"])
+            if wants_pdf or ai_claims_sent:
+                latest_pdf = self._find_latest_pdf()
+                if latest_pdf:
+                    logger.info(f"Safety net: sending latest PDF {latest_pdf}")
+                    await self.send_document(latest_pdf, caption=f"📎 {os.path.basename(latest_pdf)}", chat_id=chat_id)
+                    sent_files.add(latest_pdf)
+
+        _auto_save_exchange_to_memory(text, plain_text, source="telegram", chat_id=chat_id or "")
+        await self._send_voice_reply(update, plain_text)
+        try:
+            await self._classify_and_store(text, telegram_message_id=msg_id)
+        except Exception as e:
+            logger.warning(f"Background classification failed: {e}")
+
+    async def _handle_voice(self, update, context):
+        """Handle voice messages — transcribe then send transcript text to Grok."""
+        if not self._is_authorized(update):
+            return
+        voice = update.message.voice or update.message.audio
+        if not voice:
+            return
+        await update.message.reply_chat_action("typing")
+        await update.message.reply_text("🎤 Transcribing voice...")
+
+        audio_path = await self._download_telegram_file(voice.file_id, suffix=".ogg")
+        if not audio_path:
+            await update.message.reply_text("Failed to download audio.")
             return
 
         try:
-            from telegram import Update
-            from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-        except ImportError:
-            logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
-            return
-
-        allowed_ids = {int(self.founder_chat_id)} if self.founder_chat_id else set()
-
-        def is_authorized(update: Update) -> bool:
-            return update.effective_chat and update.effective_chat.id in allowed_ids
-
-        # /start command
-        async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            await update.message.reply_html(
-                "🏰 <b>MAX — Empire AI Assistant</b>\n\n"
-                "Send me text, voice notes, or photos.\n\n"
-                "<b>Commands:</b>\n"
-                "/status — System health\n"
-                "/desks — List active desks\n"
-                "/tasks — Show open tasks\n"
-                "/help — Show commands"
-            )
-
-        # /status command
-        async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get("http://localhost:8000/api/v1/max/health")
-                    data = resp.json()
-                    msg = (
-                        f"⚡ <b>System Status</b>\n\n"
-                        f"<b>Service:</b> {data.get('service', 'MAX')}\n"
-                        f"<b>Status:</b> {data.get('status', 'unknown')}\n"
-                        f"<b>Desks Online:</b> {data.get('desks_online', 0)}\n"
-                        f"<b>Telegram:</b> {'✅' if data.get('telegram_configured') else '❌'}"
-                    )
-                    await update.message.reply_html(msg)
-            except Exception as e:
-                await update.message.reply_text(f"Could not reach backend: {e}")
-
-        # /desks command
-        async def cmd_desks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get("http://localhost:8000/api/v1/max/desks")
-                    desks = resp.json().get("desks", [])
-                    if not desks:
-                        await update.message.reply_text("No desks configured.")
-                        return
-                    msg = "🏢 <b>Active Desks</b>\n\n"
-                    for d in desks:
-                        status_dot = "🟢" if d.get("status") == "idle" else "🟡"
-                        msg += f"{status_dot} <b>{d.get('name', d.get('id'))}</b>\n"
-                    await update.message.reply_html(msg)
-            except Exception as e:
-                await update.message.reply_text(f"Error: {e}")
-
-        # /tasks command
-        async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
-                    tasks = resp.json().get("tasks", [])
-                    if not tasks:
-                        await update.message.reply_text("No active tasks.")
-                        return
-                    msg = "📋 <b>Active Tasks</b>\n\n"
-                    for t in tasks[:10]:
-                        msg += f"• <b>{t.get('title')}</b> — {t.get('status', 'unknown')}\n"
-                    await update.message.reply_html(msg)
-            except Exception as e:
-                await update.message.reply_text(f"Error: {e}")
-
-        # /pipeline command (v6.0)
-        async def cmd_pipeline(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            try:
-                from app.services.max.pipeline import pipeline_engine
-                # Check if user provided text after /pipeline
-                args_text = " ".join(context.args) if context.args else ""
-                if args_text:
-                    # Submit new pipeline
-                    await update.message.reply_text("🔄 Breaking down task into subtasks...")
-                    result = await pipeline_engine.submit_pipeline(
-                        title=args_text,
-                        description=args_text,
-                        source="telegram",
-                        channel="telegram",
-                    )
-                    msg = f"🚀 <b>Pipeline Created</b>\n\n<b>ID:</b> {result['pipeline_id']}\n<b>Subtasks:</b>\n"
-                    for st in result.get("subtasks", []):
-                        msg += f"  {st['order']+1}. [{st['desk']}] {st['title']}\n"
-                    await update.message.reply_html(msg)
-                else:
-                    # Show active pipelines
-                    pipelines = pipeline_engine.get_active_pipelines()
-                    if not pipelines:
-                        await update.message.reply_text("No active pipelines.\n\nUse /pipeline <description> to create one.")
-                        return
-                    msg = "🔄 <b>Active Pipelines</b>\n\n"
-                    for pl in pipelines[:5]:
-                        prog = pl.get("progress", {})
-                        msg += (
-                            f"<b>{pl['title'][:50]}</b>\n"
-                            f"  {prog.get('done', 0)}/{prog.get('total', 0)} done"
-                            f" · {prog.get('in_review', 0)} in review\n\n"
+                from app.services.max.security.voiceprint import voiceprint_verifier
+                user_id = str(update.effective_chat.id)
+                if voiceprint_verifier.is_enrolled(user_id):
+                    vp_result = voiceprint_verifier.verify(user_id, audio_path)
+                    if not vp_result["verified"] and vp_result["available"]:
+                        await update.message.reply_text(
+                            f"Voice verification FAILED (similarity: {vp_result['similarity']:.2f}). "
+                            f"Message blocked. If this is you, re-enroll with /voiceprint"
                         )
-                    await update.message.reply_html(msg)
-            except Exception as e:
-                await update.message.reply_text(f"Pipeline error: {e}")
-
-        # /review command (v6.0)
-        async def cmd_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            try:
-                from app.services.max.pipeline import pipeline_engine
-                tasks = pipeline_engine.get_review_tasks()
-                if not tasks:
-                    await update.message.reply_text("No tasks awaiting review. ✅")
-                    return
-                for t in tasks[:5]:
-                    msg = (
-                        f"🔍 <b>Review Required</b>\n\n"
-                        f"<b>Task:</b> {t.get('title', '?')}\n"
-                        f"<b>Desk:</b> {t.get('desk', '?')}\n"
-                        f"<b>Result:</b> {(t.get('result_summary') or 'No result')[:300]}\n"
-                    )
-                    markup = {
-                        "inline_keyboard": [[
-                            {"text": "✅ Approve", "callback_data": f"pl_approve_{t['id']}"},
-                            {"text": "❌ Reject", "callback_data": f"pl_reject_{t['id']}"},
-                        ]]
-                    }
-                    await update.message.reply_html(msg, reply_markup=markup)
-            except Exception as e:
-                await update.message.reply_text(f"Review error: {e}")
-
-        # /voiceprint command — enroll or check voice profile
-        async def cmd_voiceprint(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            from app.services.max.security.voiceprint import voiceprint_verifier
-            user_id = str(update.effective_chat.id)
-
-            if not voiceprint_verifier.available:
-                await update.message.reply_text(
-                    "Voiceprint verification requires resemblyzer.\n"
-                    "Install: pip install resemblyzer"
-                )
-                return
-
-            # If replying to a voice message, use it to enroll
-            if update.message.reply_to_message and (
-                update.message.reply_to_message.voice or update.message.reply_to_message.audio
-            ):
-                voice = update.message.reply_to_message.voice or update.message.reply_to_message.audio
-                audio_path = await self._download_telegram_file(voice.file_id, suffix=".ogg")
-                if not audio_path:
-                    await update.message.reply_text("Failed to download audio for enrollment.")
-                    return
-                try:
-                    result = voiceprint_verifier.enroll(user_id, audio_path)
-                    await update.message.reply_text(result["message"])
-                finally:
-                    audio_path.unlink(missing_ok=True)
-                return
-
-            # Status check
-            if voiceprint_verifier.is_enrolled(user_id):
-                await update.message.reply_html(
-                    "🔊 <b>Voiceprint Status:</b> Enrolled\n\n"
-                    "Your voice is verified on every voice message.\n"
-                    "To re-enroll: reply to a voice note with /voiceprint\n"
-                    "To delete: /voiceprint delete"
-                )
-            else:
-                await update.message.reply_html(
-                    "🔊 <b>Voiceprint Not Enrolled</b>\n\n"
-                    "To enroll: send a voice note (5-10 sec of clear speech), "
-                    "then reply to it with /voiceprint"
-                )
-
-            # Handle delete
-            args = context.args
-            if args and args[0].lower() == "delete":
-                deleted = voiceprint_verifier.delete_profile(user_id)
-                await update.message.reply_text(
-                    "Voiceprint deleted." if deleted else "No voiceprint to delete."
-                )
-
-        # /security command — view security stats
-        async def cmd_security(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            from app.services.max.security.sanitizer import sanitizer as _sanitizer
-            stats = _sanitizer.get_stats()
-            lines = [
-                "🛡 <b>Security Stats</b>\n",
-                f"Total checks: {stats['total_checks']}",
-                f"Blocked injections: {stats['blocked_injection']}",
-                f"Blocked topics: {stats['blocked_topic']}",
-                f"Blocked SQL: {stats['blocked_sql']}",
-                f"Blocked XSS: {stats['blocked_xss']}",
-                f"Rate limited: {stats['blocked_rate']}",
-            ]
-            await update.message.reply_html("\n".join(lines))
-
-        # /brief command — on-demand morning brief
-        async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.get("http://localhost:8000/api/v1/system/metrics")
-                    data = resp.json()
-
-                import psutil
-                from app.config.business_config import biz as _biz
-
-                # Build brief from live metrics
-                ports = data.get("active_ports", {})
-                port_lines = []
-                for p, name in [("8000", "API"), ("3005", "CC"), ("7878", "OpenClaw"), ("11434", "Ollama"), ("3077", "Recovery")]:
-                    status = "✅" if ports.get(p) else "❌"
-                    port_lines.append(f"{status} {name}")
-
-                # Tasks
-                task_info = ""
-                try:
-                    resp2 = await client.get("http://localhost:8000/api/v1/max/tasks", params={"status": "in_progress"})
-                    tasks = resp2.json().get("tasks", [])
-                    task_info = f"\n📋 <b>Tasks:</b> {len(tasks)} active"
-                except Exception:
-                    pass
-
-                brief = (
-                    f"<b>☀️ {_biz.business_name} Brief</b>\n"
-                    f"<i>{datetime.now().strftime('%A, %B %d %I:%M %p')}</i>\n\n"
-                    f"💻 CPU {data.get('cpu_percent', '?')}% | RAM {data.get('ram_percent', '?')}% | Disk {data.get('disk_percent', '?')}%\n"
-                    f"🆙 Uptime: {int(data.get('uptime_seconds', 0)) // 3600}h {(int(data.get('uptime_seconds', 0)) % 3600) // 60}m\n"
-                    f"💰 AI costs today: ${data.get('ai_costs_today', 0):.4f}\n"
-                    f"⚠️ Errors (24h): {data.get('error_count_24h', 0)}\n\n"
-                    f"<b>Services:</b> {' | '.join(port_lines)}"
-                    f"{task_info}"
-                )
-                await update.message.reply_html(brief)
-            except Exception as e:
-                await update.message.reply_text(f"Brief error: {e}")
-
-        # /notifications command — check recent notifications on demand
-        async def cmd_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get("http://localhost:8000/api/v1/notifications/log", params={"limit": 10})
-                    data = resp.json()
-                    notifs = data.get("notifications", [])
-                    total = data.get("total", 0)
-                    if not notifs:
-                        await update.message.reply_text("No notifications.")
                         return
-                    msg = f"<b>🔔 Recent Notifications</b> ({total} total)\n\n"
-                    for n in notifs[:10]:
-                        icon = {"system_alert": "⚠️", "task_complete": "✅", "business_event": "💼", "error": "❌"}.get(n.get("type", ""), "📌")
-                        msg += f"{icon} <b>{n.get('title', '?')}</b>\n<i>{n.get('created_at', '?')[:16]}</i>\n\n"
-                    await update.message.reply_html(msg)
-            except Exception as e:
-                await update.message.reply_text(f"Error: {e}")
+            except Exception as vp_err:
+                logger.debug(f"Voiceprint check skipped: {vp_err}")
 
-        # /setpin command — set access control PIN
-        async def cmd_setpin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            if not access_controller:
-                await update.message.reply_text("Access control not available.")
-                return
-            chat_id = str(update.effective_chat.id)
-            try:
-                user = access_controller.resolve_user(chat_id, "telegram")
-            except Exception:
-                user = None
-            if not user or user.get("role") not in ("founder", "admin"):
-                await update.message.reply_text("Only founder or admin can set a PIN.")
-                return
-            pin_text = " ".join(context.args).strip() if context.args else ""
-            if not pin_text:
-                await update.message.reply_text("Usage: /setpin 1234 (4-6 digits)")
-                return
-            if not _re.match(r"^\d{4,6}$", pin_text):
-                await update.message.reply_text("PIN must be 4-6 digits.")
-                return
-            try:
-                access_controller.set_pin(user["id"], pin_text)
-                await update.message.reply_text("PIN updated.")
-            except Exception as e:
-                await update.message.reply_text(f"Error setting PIN: {e}")
+            loop = asyncio.get_event_loop()
+            transcript = await loop.run_in_executor(None, self._transcribe_audio, audio_path)
 
-        # /help command
-        async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
+            if not transcript or transcript.startswith("["):
+                await update.message.reply_text(f"Transcription issue: {transcript or 'empty result'}")
                 return
-            await update.message.reply_html(
-                "🏰 <b>MAX Commands</b>\n\n"
-                "/start — Welcome message\n"
-                "/brief — On-demand system brief\n"
-                "/notifications — Check recent alerts\n"
-                "/status — System health check\n"
-                "/desks — List active desks\n"
-                "/tasks — Show open tasks\n"
-                "/pipeline — View/create pipelines\n"
-                "/review — Review pending approvals\n"
-                "/voiceprint — Enroll/check voice ID\n"
-                "/security — Security stats\n"
-                "/setpin — Set access control PIN\n"
-                "/help — Show this message\n\n"
-                "You can also send:\n"
-                "💬 <b>Text</b> — Chat with MAX\n"
-                "🎤 <b>Voice</b> — Transcribed and sent to MAX\n"
-                "📷 <b>Photo</b> — Analyzed with AI vision"
-            )
 
-        # Handle text messages — respond naturally, classify silently in background
-        async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            text = update.message.text
-            msg_id = update.message.message_id
-
-            # Access control: intercept CONFIRM and PIN responses
-            if access_controller:
-                chat_id_str = str(update.effective_chat.id)
-                try:
-                    pending = access_controller.get_pending_session(chat_id_str)
-                    if pending and text.strip().upper() == "CONFIRM" and pending.get("level") == 2:
-                        result = access_controller.confirm_session(pending["id"])
-                        if result:
-                            from app.services.max.tool_executor import execute_tool
-                            tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
-                            if tr.success:
-                                await update.message.reply_text(f"Confirmed. {tr.tool} executed successfully.")
-                            else:
-                                await update.message.reply_text(f"Confirmed but tool failed: {tr.error}")
-                            access_controller.audit_log(pending.get("user_id", ""), result["tool_name"], 2, "confirmed", channel="telegram")
-                        else:
-                            await update.message.reply_text("Session expired or not found.")
-                        return
-                    if pending and _re.match(r"^\d{4,6}$", text.strip()) and pending.get("level") == 3:
-                        result = access_controller.authorize_pin_session(pending["id"], text.strip())
-                        if result:
-                            from app.services.max.tool_executor import execute_tool
-                            tr = execute_tool({"tool": result["tool_name"], **result["tool_params"]}, desk=result.get("desk"))
-                            if tr.success:
-                                await update.message.reply_text(f"Authorized. {tr.tool} executed successfully.")
-                            else:
-                                await update.message.reply_text(f"Authorized but tool failed: {tr.error}")
-                            access_controller.audit_log(pending.get("user_id", ""), result["tool_name"], 3, "pin_authorized", channel="telegram")
-                        else:
-                            await update.message.reply_text("Invalid PIN or session expired.")
-                        return
-                except Exception as ac_err:
-                    logger.warning(f"Access control intercept error: {ac_err}")
-
-            # v6.0 — unified sanitizer check
-            from app.services.max.security.sanitizer import sanitizer as _sanitizer
-            sec = _sanitizer.check(text, channel="telegram", session_id=str(update.effective_chat.id))
-            if not sec["safe"]:
-                await update.message.reply_text(f"Blocked: {sec['reason']}")
-                return
+            await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
 
             await update.message.reply_chat_action("typing")
-
-            # Get natural MAX response (always shown to user)
-            chat_id = str(update.effective_chat.id) if update.effective_chat else None
-            html_response, plain_text, tool_results = await self._chat_with_max(
-                text,
-                chat_id=chat_id,
-                user_meta={"telegram_message_id": msg_id, "type": "text"},
+            voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+            html_response, plain_text, _ = await self._chat_with_max(
+                transcript,
+                chat_id=voice_chat_id,
+                user_meta={"type": "voice", "telegram_message_id": update.message.message_id},
             )
-            # Quality check on Telegram response
             from app.services.max.response_quality_engine import quality_engine, Channel
             qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
             if qr.fixed_count > 0:
                 plain_text = qr.cleaned
                 html_response = f"{qr.cleaned}\n\n<i>— via MAX</i>"
-                logger.info(f"Quality engine fixed {qr.fixed_count} issues in Telegram response")
+            if len(html_response) > 4000:
+                html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
+
+            await update.message.reply_html(html_response)
+            await self._send_voice_reply(update, plain_text)
+            _auto_save_exchange_to_memory(transcript, plain_text, source="telegram", chat_id=voice_chat_id or "")
+            try:
+                await self._classify_and_store(transcript, telegram_message_id=update.message.message_id)
+            except Exception as e:
+                logger.warning(f"Voice classification failed: {e}")
+        finally:
+            audio_path.unlink(missing_ok=True)
+
+    async def _handle_photo(self, update, context):
+        """Handle photo messages — analyze with AI vision."""
+        if not self._is_authorized(update):
+            return
+        photo = update.message.photo[-1] if update.message.photo else None
+        if not photo:
+            return
+        await update.message.reply_chat_action("typing")
+        await update.message.reply_text("📷 Analyzing image...")
+        photo_path = await self._download_telegram_file(photo.file_id, suffix=".jpg")
+        if not photo_path:
+            await update.message.reply_text("Failed to download photo.")
+            return
+        try:
+            dest = self.upload_dir / "images" / f"telegram_{photo_path.name}"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.move(str(photo_path), str(dest))
+
+            vision_context = ""
+            try:
+                import base64 as _b64_mod
+                with open(dest, "rb") as _img_f:
+                    _img_b64 = _b64_mod.b64encode(_img_f.read()).decode()
+                _ext = dest.suffix.lstrip(".").lower()
+                _mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(_ext, "image/jpeg")
+                _data_uri = f"data:{_mime};base64,{_img_b64}"
+                async with httpx.AsyncClient(timeout=120) as _vc:
+                    _vr = await _vc.post(
+                        "http://localhost:8000/api/v1/vision/measure",
+                        json={"image": _data_uri},
+                    )
+                if _vr.status_code == 200:
+                    _vm = _vr.json()
+                    _w = _vm.get("width_inches", 0)
+                    _h = _vm.get("height_inches", 0)
+                    _conf = _vm.get("confidence", 0)
+                    _wtype = _vm.get("window_type", "")
+                    _refs = ", ".join(_vm.get("reference_objects_used", []))
+                    _suggestions = ", ".join(_vm.get("treatment_suggestions", []))
+                    vision_context = (
+                        f"\n\nVISION MEASUREMENT RESULTS (from reference-calibrated analysis):\n"
+                        f"- Window dimensions: {_w}\" wide x {_h}\" tall\n"
+                        f"- Window type: {_wtype}\n"
+                        f"- Confidence: {_conf}%\n"
+                        f"- Reference objects used: {_refs}\n"
+                        f"- Treatment suggestions: {_suggestions}\n"
+                        f"- Notes: {_vm.get('notes', '')}\n"
+                        f"USE THESE MEASUREMENTS for the quote (width={_w}, height={_h}).\n"
+                    )
+                    logger.info(f"Vision measurement: {_w}\"x{_h}\" ({_conf}% confidence)")
+            except Exception as _ve:
+                logger.warning(f"Vision /measure call failed, falling back to AI estimation: {_ve}")
+
+            _user_caption = (update.message.caption or "").lower()
+            _notes_keywords = ["extract", "quote", "notes", "measurements", "read this", "read my", "field notes", "create quote from"]
+            if any(kw in _user_caption for kw in _notes_keywords):
+                try:
+                    await update.message.reply_text("📋 Reading your field notes...")
+                    async with httpx.AsyncClient(timeout=120) as _nc:
+                        with open(dest, "rb") as _nf:
+                            _nr = await _nc.post(
+                                "http://localhost:8000/api/v1/quotes/from-notes",
+                                files={"files": (dest.name, _nf, "image/jpeg")},
+                            )
+                    if _nr.status_code == 200:
+                        _nd = _nr.json()
+                        _items = _nd.get("items", [])
+                        _cust = _nd.get("customer", {})
+                        _match = _nd.get("customer_match")
+                        _lines = []
+                        _total = 0
+                        for _ni, _nit in enumerate(_items):
+                            _nm = _nit.get("measurements", {})
+                            _nw = _nm.get("width_inches", "?")
+                            _nh = _nm.get("height_inches", "?")
+                            _np = _nit.get("price_noted") or 0
+                            _total += _np
+                            _desc = f"{_nit.get('room', '')} {_nit.get('type', '')}".strip()
+                            _sub = _nit.get("subtype", "")
+                            if _sub:
+                                _desc += f", {_sub.replace('_', ' ')}"
+                            _lin = _nit.get("lining", "")
+                            if _lin:
+                                _desc += f", {_lin}"
+                            _lines.append(f"• {_desc}: {_nw}×{_nh}" + (f" — ${_np:,.0f}" if _np else ""))
+
+                        _cname = _cust.get("name") or "Unknown"
+                        _match_str = ""
+                        if _match and _match.get("matched_name"):
+                            _match_str = f" (matched in CRM ✅)"
+                        _summary = f"📋 <b>Extracted from your notes:</b>\n"
+                        _summary += f"Customer: {_cname}{_match_str}\n"
+                        _summary += f"{len(_items)} items found:\n"
+                        _summary += "\n".join(_lines)
+                        if _total > 0:
+                            _summary += f"\nTotal estimate: ${_total:,.0f}"
+
+                        async with httpx.AsyncClient(timeout=30) as _dc:
+                            _dr = await _dc.post(
+                                "http://localhost:8000/api/v1/quotes/from-notes/create-draft",
+                                json={
+                                    "customer": _cust,
+                                    "project": _nd.get("project"),
+                                    "items": _items,
+                                    "customer_match": _match,
+                                    "tax_rate": 0.06,
+                                },
+                            )
+                        if _dr.status_code == 200:
+                            _dd = _dr.json()
+                            _qnum = _dd.get("quote_number", "?")
+                            _qtotal = _dd.get("total", 0)
+                            _qid = _dd.get("quote_id", "")
+                            _summary += f"\n\nDraft quote <b>{_qnum}</b> created (${_qtotal:,.2f})"
+                            _summary += f"\n\n→ <a href='https://studio.empirebox.store/quotes/{_qid}'>Open in Command Center</a>"
+                            _summary += "\n\nReply <b>confirm</b> to finalize or open CC to edit."
+
+                            try:
+                                from pathlib import Path as _QPath
+                                _q_photo_dir = _QPath(os.path.expanduser("~/empire-repo/backend/data/photos/quote")) / _qid
+                                _q_photo_dir.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(str(dest), str(_q_photo_dir / f"telegram_{dest.name}"))
+                                import json as _json_mod
+                                with open(str(_q_photo_dir / f"telegram_{dest.name}.meta.json"), "w") as _mf:
+                                    _json_mod.dump({"source": "telegram", "entity_type": "quote", "entity_id": _qid, "uploaded_at": datetime.now().isoformat()}, _mf)
+                            except Exception as _pe:
+                                logger.warning(f"Failed to save photo to unified storage: {_pe}")
+
+                        await update.message.reply_html(_summary)
+                        await self._send_voice_reply(update, _summary.replace("<b>", "").replace("</b>", "").replace("<a href='", "").replace("'>", " ").replace("</a>", ""))
+                        return
+                except Exception as _ne:
+                    logger.warning(f"Notes extraction failed, falling back to normal flow: {_ne}")
+
+            caption = update.message.caption or (
+                "Analyze this image. If it shows a window, window treatment, curtain, drape, "
+                "or furniture that might need upholstery or a window treatment quote, "
+                "use the photo_to_quote tool to create a quote and send the PDF. "
+                "If it's not related to windows or furniture, just describe what you see."
+            )
+            caption += vision_context
+            photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
+
+            try:
+                with open(dest, 'rb') as img_f:
+                    header = img_f.read(8)
+                valid_sigs = [b'\xff\xd8\xff', b'\x89PNG', b'RIFF', b'GIF8']
+                if not any(header.startswith(sig) for sig in valid_sigs):
+                    await update.message.reply_text("⚠️ Invalid image file. Upload rejected.")
+                    dest.unlink(missing_ok=True)
+                    return
+            except Exception:
+                pass
+
+            html_response, plain_text, tool_results = await self._chat_with_max(
+                caption,
+                image_filename=dest.name,
+                chat_id=photo_chat_id,
+                user_meta={"type": "photo", "image": dest.name, "telegram_message_id": update.message.message_id},
+            )
             if len(html_response) > 4000:
                 html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
             await update.message.reply_html(html_response)
 
-            # Check for __ACCESS_PENDING__ sentinel in tool results
-            if access_controller and tool_results:
-                for tr in tool_results:
-                    err = tr.get("error") or ""
-                    if err.startswith("__ACCESS_PENDING__"):
-                        parts = err.split("__", 4)
-                        if len(parts) >= 5:
-                            action_type = parts[3]
-                            summary = parts[4] if len(parts) > 4 else "Action requires authorization"
-                            if action_type == "confirm":
-                                await update.message.reply_text(f"⚠️ {summary}\nReply CONFIRM within 60 seconds to proceed.")
-                            elif action_type == "pin":
-                                await update.message.reply_text(f"🔐 {summary}\nEnter your PIN to authorize.")
-                        return
-
-            # Send any documents/files produced by tool execution (deduplicate by path)
             sent_files = set()
-            for tr in (tool_results or []):
+            for tr in tool_results:
                 if tr.get("success") and tr.get("result"):
                     res = tr["result"]
                     file_path = res.get("file_path") or res.get("pdf_path")
                     if file_path and os.path.exists(file_path) and file_path not in sent_files:
-                        caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
-                        await self.send_document(file_path, caption=caption, chat_id=chat_id)
+                        doc_caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
+                        await self.send_document(file_path, caption=doc_caption, chat_id=photo_chat_id)
                         sent_files.add(file_path)
                     image_url = res.get("image_url") or res.get("url")
-                    if image_url and image_url.startswith("http"):
+                    if image_url and isinstance(image_url, str) and image_url.startswith("http"):
                         try:
                             await update.message.reply_photo(photo=image_url, caption=res.get("caption", ""))
                         except Exception as img_err:
                             logger.warning(f"Failed to send image via Telegram: {img_err}")
 
-            # Safety net: if user asked for a PDF but AI didn't use tools, find and send the latest PDF
-            if not sent_files:
-                text_lower = text.lower()
-                resp_lower = plain_text.lower()
-                wants_pdf = any(kw in text_lower for kw in ["pdf", "quote", "send me", "document", "estimate"])
-                ai_claims_sent = any(kw in resp_lower for kw in ["sent the pdf", "sending the pdf", "sent to your telegram", "delivered"])
-                if wants_pdf or ai_claims_sent:
-                    latest_pdf = self._find_latest_pdf()
-                    if latest_pdf:
-                        logger.info(f"Safety net: sending latest PDF {latest_pdf}")
-                        await self.send_document(
-                            latest_pdf,
-                            caption=f"📎 {os.path.basename(latest_pdf)}",
-                            chat_id=chat_id,
-                        )
-                        sent_files.add(latest_pdf)
-
-            # Auto-save valuable exchanges to shared memory store
-            _auto_save_exchange_to_memory(text, plain_text, source="telegram", chat_id=chat_id or "")
-
-            # Send voice reply (TTS)
             await self._send_voice_reply(update, plain_text)
+        except Exception as e:
+            await update.message.reply_text(f"Photo analysis failed: {e}")
 
-            # Classify and store in inbox silently (background, never shown to user)
-            try:
-                await self._classify_and_store(text, telegram_message_id=msg_id)
-            except Exception as e:
-                logger.warning(f"Background classification failed: {e}")
+    # ── Full bot with python-telegram-bot ────────────────────────
 
-        # Handle voice messages — transcribe then send transcript text to Grok
-        async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            voice = update.message.voice or update.message.audio
-            if not voice:
-                return
-            await update.message.reply_chat_action("typing")
-            await update.message.reply_text("🎤 Transcribing voice...")
+    async def start_bot(self):
+        """Start the full Telegram bot using python-telegram-bot (polling mode)."""
+        if not self.is_configured:
+            logger.warning("Telegram not configured — bot not started")
+            return
 
-            # 1. Download audio file
-            audio_path = await self._download_telegram_file(voice.file_id, suffix=".ogg")
-            if not audio_path:
-                await update.message.reply_text("Failed to download audio.")
-                return
+        try:
+            from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+        except ImportError:
+            logger.error("python-telegram-bot not installed. Run: pip install python-telegram-bot")
+            return
 
-            try:
-                # v6.0 — voiceprint verification (before transcription)
-                try:
-                    from app.services.max.security.voiceprint import voiceprint_verifier
-                    user_id = str(update.effective_chat.id)
-                    if voiceprint_verifier.is_enrolled(user_id):
-                        vp_result = voiceprint_verifier.verify(user_id, audio_path)
-                        if not vp_result["verified"] and vp_result["available"]:
-                            await update.message.reply_text(
-                                f"Voice verification FAILED (similarity: {vp_result['similarity']:.2f}). "
-                                f"Message blocked. If this is you, re-enroll with /voiceprint"
-                            )
-                            return
-                except Exception as vp_err:
-                    logger.debug(f"Voiceprint check skipped: {vp_err}")
-
-                # 2. Transcribe audio → text (run in thread to avoid blocking event loop)
-                loop = asyncio.get_event_loop()
-                transcript = await loop.run_in_executor(None, self._transcribe_audio, audio_path)
-
-                # Guard: if transcription failed, tell user and stop
-                if not transcript or transcript.startswith("["):
-                    await update.message.reply_text(f"Transcription issue: {transcript or 'empty result'}")
-                    return
-
-                # 3. Show transcript to user
-                await update.message.reply_html(f"📝 <b>Transcript:</b>\n<i>{transcript}</i>")
-
-                # 4. Send transcript TEXT to Grok (same as if user typed it)
-                await update.message.reply_chat_action("typing")
-                voice_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-                html_response, plain_text, _ = await self._chat_with_max(
-                    transcript,
-                    chat_id=voice_chat_id,
-                    user_meta={"type": "voice", "telegram_message_id": update.message.message_id},
-                )
-                # Quality check on voice response
-                from app.services.max.response_quality_engine import quality_engine, Channel
-                qr = quality_engine.validate(plain_text, channel=Channel.TELEGRAM)
-                if qr.fixed_count > 0:
-                    plain_text = qr.cleaned
-                    html_response = f"{qr.cleaned}\n\n<i>— via MAX</i>"
-                if len(html_response) > 4000:
-                    html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
-
-                # 5. Send Grok's text response back to Telegram
-                await update.message.reply_html(html_response)
-
-                # 5b. Send Grok's response as voice note (TTS)
-                await self._send_voice_reply(update, plain_text)
-
-                # 5c. Auto-save valuable exchanges to shared memory store
-                _auto_save_exchange_to_memory(transcript, plain_text, source="telegram", chat_id=voice_chat_id or "")
-
-                # 6. Silent background classification
-                try:
-                    await self._classify_and_store(transcript, telegram_message_id=update.message.message_id)
-                except Exception as e:
-                    logger.warning(f"Voice classification failed: {e}")
-            finally:
-                audio_path.unlink(missing_ok=True)
-
-        # Handle photo messages
-        async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            if not is_authorized(update):
-                return
-            photo = update.message.photo[-1] if update.message.photo else None
-            if not photo:
-                return
-            await update.message.reply_chat_action("typing")
-            await update.message.reply_text("📷 Analyzing image...")
-            photo_path = await self._download_telegram_file(photo.file_id, suffix=".jpg")
-            if not photo_path:
-                await update.message.reply_text("Failed to download photo.")
-                return
-            try:
-                # Save to uploads
-                dest = self.upload_dir / "images" / f"telegram_{photo_path.name}"
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                import shutil
-                shutil.move(str(photo_path), str(dest))
-                # Call /vision/measure for structured AI measurement before sending to MAX
-                vision_context = ""
-                try:
-                    import base64 as _b64_mod
-                    with open(dest, "rb") as _img_f:
-                        _img_b64 = _b64_mod.b64encode(_img_f.read()).decode()
-                    _ext = dest.suffix.lstrip(".").lower()
-                    _mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(_ext, "image/jpeg")
-                    _data_uri = f"data:{_mime};base64,{_img_b64}"
-                    async with httpx.AsyncClient(timeout=120) as _vc:
-                        _vr = await _vc.post(
-                            "http://localhost:8000/api/v1/vision/measure",
-                            json={"image": _data_uri},
-                        )
-                    if _vr.status_code == 200:
-                        _vm = _vr.json()
-                        _w = _vm.get("width_inches", 0)
-                        _h = _vm.get("height_inches", 0)
-                        _conf = _vm.get("confidence", 0)
-                        _wtype = _vm.get("window_type", "")
-                        _refs = ", ".join(_vm.get("reference_objects_used", []))
-                        _suggestions = ", ".join(_vm.get("treatment_suggestions", []))
-                        vision_context = (
-                            f"\n\nVISION MEASUREMENT RESULTS (from reference-calibrated analysis):\n"
-                            f"- Window dimensions: {_w}\" wide x {_h}\" tall\n"
-                            f"- Window type: {_wtype}\n"
-                            f"- Confidence: {_conf}%\n"
-                            f"- Reference objects used: {_refs}\n"
-                            f"- Treatment suggestions: {_suggestions}\n"
-                            f"- Notes: {_vm.get('notes', '')}\n"
-                            f"USE THESE MEASUREMENTS for the quote (width={_w}, height={_h}).\n"
-                        )
-                        logger.info(f"Vision measurement: {_w}\"x{_h}\" ({_conf}% confidence)")
-                except Exception as _ve:
-                    logger.warning(f"Vision /measure call failed, falling back to AI estimation: {_ve}")
-
-                # ── Notes-to-Quote extraction shortcut ──
-                _user_caption = (update.message.caption or "").lower()
-                _notes_keywords = ["extract", "quote", "notes", "measurements", "read this", "read my", "field notes", "create quote from"]
-                if any(kw in _user_caption for kw in _notes_keywords):
-                    try:
-                        await update.message.reply_text("📋 Reading your field notes...")
-                        async with httpx.AsyncClient(timeout=120) as _nc:
-                            with open(dest, "rb") as _nf:
-                                _nr = await _nc.post(
-                                    "http://localhost:8000/api/v1/quotes/from-notes",
-                                    files={"files": (dest.name, _nf, "image/jpeg")},
-                                )
-                        if _nr.status_code == 200:
-                            _nd = _nr.json()
-                            _items = _nd.get("items", [])
-                            _cust = _nd.get("customer", {})
-                            _match = _nd.get("customer_match")
-                            _lines = []
-                            _total = 0
-                            for _ni, _nit in enumerate(_items):
-                                _nm = _nit.get("measurements", {})
-                                _nw = _nm.get("width_inches", "?")
-                                _nh = _nm.get("height_inches", "?")
-                                _np = _nit.get("price_noted") or 0
-                                _total += _np
-                                _desc = f"{_nit.get('room', '')} {_nit.get('type', '')}".strip()
-                                _sub = _nit.get("subtype", "")
-                                if _sub:
-                                    _desc += f", {_sub.replace('_', ' ')}"
-                                _lin = _nit.get("lining", "")
-                                if _lin:
-                                    _desc += f", {_lin}"
-                                _lines.append(f"• {_desc}: {_nw}×{_nh}" + (f" — ${_np:,.0f}" if _np else ""))
-
-                            _cname = _cust.get("name") or "Unknown"
-                            _match_str = ""
-                            if _match and _match.get("matched_name"):
-                                _match_str = f" (matched in CRM ✅)"
-                            _summary = f"📋 <b>Extracted from your notes:</b>\n"
-                            _summary += f"Customer: {_cname}{_match_str}\n"
-                            _summary += f"{len(_items)} items found:\n"
-                            _summary += "\n".join(_lines)
-                            if _total > 0:
-                                _summary += f"\nTotal estimate: ${_total:,.0f}"
-
-                            # Create draft quote
-                            async with httpx.AsyncClient(timeout=30) as _dc:
-                                _dr = await _dc.post(
-                                    "http://localhost:8000/api/v1/quotes/from-notes/create-draft",
-                                    json={
-                                        "customer": _cust,
-                                        "project": _nd.get("project"),
-                                        "items": _items,
-                                        "customer_match": _match,
-                                        "tax_rate": 0.06,
-                                    },
-                                )
-                            if _dr.status_code == 200:
-                                _dd = _dr.json()
-                                _qnum = _dd.get("quote_number", "?")
-                                _qtotal = _dd.get("total", 0)
-                                _qid = _dd.get("quote_id", "")
-                                _summary += f"\n\nDraft quote <b>{_qnum}</b> created (${_qtotal:,.2f})"
-                                _summary += f"\n\n→ <a href='https://studio.empirebox.store/quotes/{_qid}'>Open in Command Center</a>"
-                                _summary += "\n\nReply <b>confirm</b> to finalize or open CC to edit."
-
-                                # Save photo to unified storage linked to quote
-                                try:
-                                    from pathlib import Path as _QPath
-                                    _q_photo_dir = _QPath(os.path.expanduser("~/empire-repo/backend/data/photos/quote")) / _qid
-                                    _q_photo_dir.mkdir(parents=True, exist_ok=True)
-                                    shutil.copy2(str(dest), str(_q_photo_dir / f"telegram_{dest.name}"))
-                                    # Write metadata
-                                    import json as _json_mod
-                                    with open(str(_q_photo_dir / f"telegram_{dest.name}.meta.json"), "w") as _mf:
-                                        _json_mod.dump({"source": "telegram", "entity_type": "quote", "entity_id": _qid, "uploaded_at": datetime.now().isoformat()}, _mf)
-                                except Exception as _pe:
-                                    logger.warning(f"Failed to save photo to unified storage: {_pe}")
-
-                            await update.message.reply_html(_summary)
-                            await self._send_voice_reply(update, _summary.replace("<b>", "").replace("</b>", "").replace("<a href='", "").replace("'>", " ").replace("</a>", ""))
-                            return
-                    except Exception as _ne:
-                        logger.warning(f"Notes extraction failed, falling back to normal flow: {_ne}")
-
-                caption = update.message.caption or (
-                    "Analyze this image. If it shows a window, window treatment, curtain, drape, "
-                    "or furniture that might need upholstery or a window treatment quote, "
-                    "use the photo_to_quote tool to create a quote and send the PDF. "
-                    "If it's not related to windows or furniture, just describe what you see."
-                )
-                caption += vision_context
-                photo_chat_id = str(update.effective_chat.id) if update.effective_chat else None
-
-                # Validate image file (basic magic bytes check)
-                try:
-                    with open(dest, 'rb') as img_f:
-                        header = img_f.read(8)
-                    valid_sigs = [b'\xff\xd8\xff', b'\x89PNG', b'RIFF', b'GIF8']
-                    if not any(header.startswith(sig) for sig in valid_sigs):
-                        await update.message.reply_text("⚠️ Invalid image file. Upload rejected.")
-                        dest.unlink(missing_ok=True)
-                        return
-                except Exception:
-                    pass  # If check fails, proceed anyway
-
-                html_response, plain_text, tool_results = await self._chat_with_max(
-                    caption,
-                    image_filename=dest.name,
-                    chat_id=photo_chat_id,
-                    user_meta={"type": "photo", "image": dest.name, "telegram_message_id": update.message.message_id},
-                )
-                if len(html_response) > 4000:
-                    html_response = html_response[:4000] + "\n\n<i>[truncated]</i>"
-                await update.message.reply_html(html_response)
-
-                # Send any documents/files produced by tool execution (deduplicate by path)
-                sent_files = set()
-                for tr in tool_results:
-                    if tr.get("success") and tr.get("result"):
-                        res = tr["result"]
-                        file_path = res.get("file_path") or res.get("pdf_path")
-                        if file_path and os.path.exists(file_path) and file_path not in sent_files:
-                            doc_caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
-                            await self.send_document(file_path, caption=doc_caption, chat_id=photo_chat_id)
-                            sent_files.add(file_path)
-                        image_url = res.get("image_url") or res.get("url")
-                        if image_url and isinstance(image_url, str) and image_url.startswith("http"):
-                            try:
-                                await update.message.reply_photo(photo=image_url, caption=res.get("caption", ""))
-                            except Exception as img_err:
-                                logger.warning(f"Failed to send image via Telegram: {img_err}")
-
-                # Send voice reply (TTS) — every response gets a voice note
-                await self._send_voice_reply(update, plain_text)
-            except Exception as e:
-                await update.message.reply_text(f"Photo analysis failed: {e}")
 
         # Build and run the bot — increase timeouts for reliability
         from telegram.request import HTTPXRequest
@@ -1291,26 +1246,26 @@ class TelegramBot:
                 except Exception as e:
                     await query.message.reply_text(f"Reject error: {e}")
 
-        app.add_handler(CommandHandler("start", cmd_start))
-        app.add_handler(CommandHandler("brief", cmd_brief))
-        app.add_handler(CommandHandler("notifications", cmd_notifications))
-        app.add_handler(CommandHandler("status", cmd_status))
-        app.add_handler(CommandHandler("desks", cmd_desks))
-        app.add_handler(CommandHandler("tasks", cmd_tasks))
-        app.add_handler(CommandHandler("pipeline", cmd_pipeline))
-        app.add_handler(CommandHandler("review", cmd_review))
-        app.add_handler(CommandHandler("voiceprint", cmd_voiceprint))
-        app.add_handler(CommandHandler("security", cmd_security))
-        app.add_handler(CommandHandler("setpin", cmd_setpin))
-        app.add_handler(CommandHandler("help", cmd_help))
-        app.add_handler(CallbackQueryHandler(handle_callback))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
-        app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+        app.add_handler(CommandHandler("start", self._cmd_start))
+        app.add_handler(CommandHandler("brief", self._cmd_brief))
+        app.add_handler(CommandHandler("notifications", self._cmd_notifications))
+        app.add_handler(CommandHandler("status", self._cmd_status))
+        app.add_handler(CommandHandler("desks", self._cmd_desks))
+        app.add_handler(CommandHandler("tasks", self._cmd_tasks))
+        app.add_handler(CommandHandler("pipeline", self._cmd_pipeline))
+        app.add_handler(CommandHandler("review", self._cmd_review))
+        app.add_handler(CommandHandler("voiceprint", self._cmd_voiceprint))
+        app.add_handler(CommandHandler("security", self._cmd_security))
+        app.add_handler(CommandHandler("setpin", self._cmd_setpin))
+        app.add_handler(CommandHandler("help", self._cmd_help))
+        app.add_handler(CallbackQueryHandler(self._handle_callback))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text))
+        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice))
+        app.add_handler(MessageHandler(filters.PHOTO, self._handle_photo))
 
         self._app = app
         self._running = True
-        logger.info("🤖 MAX Telegram Bot starting...")
+        logger.info("🤖 MAX Telegram Bot starting in polling mode...")
 
         # Retry startup up to 3 times
         for attempt in range(3):
@@ -1346,8 +1301,135 @@ class TelegramBot:
             pass
         logger.info("🤖 MAX Telegram Bot stopped")
 
+    async def start_webhook_mode(self):
+        """Initialize the bot for webhook mode without starting a polling loop.
+
+        Sets up the Application and starts its consumer task. FastAPI feeds
+        incoming webhook updates to app.update_queue directly.
+        """
+        from telegram.request import HTTPXRequest
+        from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+
+        self._webhook_ready = asyncio.Event()
+
+        request = HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=45.0,
+            write_timeout=30.0,
+            pool_timeout=15.0,
+            connection_pool_size=8,
+        )
+        get_updates_request = HTTPXRequest(
+            connect_timeout=30.0,
+            read_timeout=90.0,
+            write_timeout=30.0,
+            pool_timeout=15.0,
+        )
+        app = (
+            Application.builder()
+            .token(self.bot_token)
+            .request(request)
+            .get_updates_request(get_updates_request)
+            .build()
+        )
+
+        # Re-register all handlers (same as in start_bot)
+        app.add_handler(CommandHandler("start", self._cmd_start))
+        app.add_handler(CommandHandler("brief", self._cmd_brief))
+        app.add_handler(CommandHandler("notifications", self._cmd_notifications))
+        app.add_handler(CommandHandler("status", self._cmd_status))
+        app.add_handler(CommandHandler("desks", self._cmd_desks))
+        app.add_handler(CommandHandler("tasks", self._cmd_tasks))
+        app.add_handler(CommandHandler("pipeline", self._cmd_pipeline))
+        app.add_handler(CommandHandler("review", self._cmd_review))
+        app.add_handler(CommandHandler("voiceprint", self._cmd_voiceprint))
+        app.add_handler(CommandHandler("security", self._cmd_security))
+        app.add_handler(CommandHandler("setpin", self._cmd_setpin))
+        app.add_handler(CommandHandler("help", self._cmd_help))
+        app.add_handler(CallbackQueryHandler(self._handle_callback))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_text))
+        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice))
+        app.add_handler(MessageHandler(filters.PHOTO, self._handle_photo))
+
+        self._app = app
+
+        # Initialize and start the app (creates update_queue + starts consumer task)
+        await app.initialize()
+        await app.start()
+
+        self._running = True
+        self._webhook_ready.set()
+        logger.info("🤖 MAX Telegram Bot initialized in webhook mode")
+
+    async def _handle_callback(self, update, context):
+        """Handle callback queries from inline buttons."""
+        # Inline handlers moved here to avoid duplication in webhook mode
+        from telegram.ext import CallbackContext
+        query = update.callback_query
+        await query.answer()
+        data = query.data or ""
+        if data == "monitor_details":
+            from app.services.max.monitor import max_monitor
+            report = await max_monitor.get_full_report()
+            await query.message.reply_text(report, parse_mode="HTML")
+        elif data == "monitor_dismiss":
+            await query.message.edit_reply_markup(reply_markup=None)
+        elif data == "ack_alert":
+            await query.message.edit_text(query.message.text + "\n\n✅ Acknowledged", parse_mode="HTML")
+        elif data.startswith("pl_approve_"):
+            task_id = data.replace("pl_approve_", "")
+            try:
+                from app.services.max.pipeline import pipeline_engine
+                result = await pipeline_engine.approve_subtask(task_id)
+                if result.get("error"):
+                    await query.message.reply_text(f"⚠️ {result['error']}")
+                else:
+                    await query.message.edit_text(
+                        query.message.text + "\n\n✅ <b>APPROVED</b> by founder",
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                await query.message.reply_text(f"Approve error: {e}")
+        elif data.startswith("pl_reject_"):
+            task_id = data.replace("pl_reject_", "")
+            try:
+                from app.services.max.pipeline import pipeline_engine
+                result = await pipeline_engine.reject_subtask(task_id, "Rejected via Telegram")
+                if result.get("error"):
+                    await query.message.reply_text(f"⚠️ {result['error']}")
+                else:
+                    await query.message.edit_text(
+                        query.message.text + "\n\n❌ <b>REJECTED</b> — will retry",
+                        parse_mode="HTML",
+                    )
+            except Exception as e:
+                await query.message.reply_text(f"Reject error: {e}")
+
+    async def process_webhook_update(self, update_dict: dict) -> bool:
+        """Feed a webhook update dict received from Telegram into the bot's update queue.
+
+        Parses the dict as a telegram.Update object and puts it in the queue.
+        The app's consumer task (started by app.start()) will process it.
+        Returns True if the update was queued successfully.
+        """
+        if not hasattr(self, "_app") or self._app is None:
+            logger.error("Bot app not initialized - cannot process webhook update")
+            return False
+        if not hasattr(self, "_webhook_ready") or not self._webhook_ready.is_set():
+            logger.warning("Bot not yet ready for webhooks")
+            return False
+        try:
+            update = Update.de_json(update_dict, self._app.bot)
+            await self._app.update_queue.put(update)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to process webhook update: {e}")
+            return False
+
     def stop_bot(self):
         self._running = False
+        if hasattr(self, "_webhook_ready"):
+            self._webhook_ready.clear()
 
     # Legacy aliases for backward compat
     async def start_polling(self):

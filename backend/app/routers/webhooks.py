@@ -190,3 +190,33 @@ async def handle_stripe_webhook(request: Request):
     except Exception as e:
         logger.warning(f"Stripe webhook forward failed: {e}")
         return {"status": "received", "message": "Forwarded to main handler"}
+
+
+@router.post("/telegram-webhook")
+async def handle_telegram_webhook(request: Request):
+    """Receive incoming Telegram updates via webhook and feed them to the MAX bot.
+
+    Telegram sends POST requests to https://api.empirebox.store/telegram-webhook
+    (routed through Cloudflare Tunnel). This endpoint parses each update and
+    puts it in the bot's update queue for processing by registered handlers.
+    """
+    try:
+        update_dict = await request.json()
+    except Exception as e:
+        logger.warning(f"Telegram webhook failed to parse JSON: {e}")
+        return {"ok": False, "error": "invalid json"}
+
+    # Feed update to the bot's queue
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if not telegram_bot.is_configured:
+            return {"ok": False, "error": "bot not configured"}
+        success = await telegram_bot.process_webhook_update(update_dict)
+        if success:
+            return {"ok": True}
+        else:
+            # Bot not ready yet - return 200 so Telegram doesn't retry excessively
+            return {"ok": False, "error": "bot not ready"}
+    except Exception as e:
+        logger.error(f"Telegram webhook processing error: {e}")
+        return {"ok": False, "error": str(e)}

@@ -335,12 +335,12 @@ async def start_background_services():
     except Exception as _e:
         print(f"✗ Unified Business migration: {_e}")
 
-    # Telegram Bot
+    # Telegram Bot — webhook mode (avoids Conflict error from polling)
     try:
         from app.services.max.telegram_bot import telegram_bot
         if telegram_bot.is_configured:
-            asyncio.create_task(telegram_bot.start_bot())
-            print("✓ Telegram Bot: starting in background")
+            asyncio.create_task(telegram_bot.start_webhook_mode())
+            print("✓ Telegram Bot: starting in webhook mode")
         else:
             print("✗ Telegram Bot: not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_FOUNDER_CHAT_ID)")
     except Exception as e:
