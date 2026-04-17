@@ -260,7 +260,7 @@ ai_desk_manager = desk_manager
 class ChatRequest(BaseModel):
     message: str
     model: Optional[str] = None
-    history: List[Dict[str, str]] = []
+    history: List[Dict[str, Any]] = []
     image_filename: Optional[str] = None
     desk: Optional[str] = None
     conversation_id: Optional[str] = None

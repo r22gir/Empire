@@ -8,11 +8,17 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=True)
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from app.middleware.rate_limiter import limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 import os
+import logging
+
+validation_logger = logging.getLogger("max.validation")
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -26,6 +32,13 @@ app = FastAPI(
 # Rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Validation error logging
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    body = await request.body()
+    validation_logger.error(f"422 Validation Error: {exc.errors()}, body={body[:500]}")
+    return JSONResponse(status_code=422, content={"detail": exc.errors(), "body": body[:200].decode("utf-8", errors="replace")})
 
 # Configure CORS
 cors_origins = os.getenv("CORS_ORIGINS", "*").split(",")

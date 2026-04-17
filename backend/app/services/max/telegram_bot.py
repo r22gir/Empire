@@ -378,7 +378,7 @@ class TelegramBot:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     "http://localhost:8000/api/v1/max/chat",
-                    json={"message": classify_prompt, "history": []},
+                    json={"message": classify_prompt, "history": [], "channel": None, "chat_id": None, "conversation_id": None},
                 )
                 if resp.status_code == 200:
                     raw = resp.json().get("response", "")
@@ -1424,6 +1424,7 @@ class TelegramBot:
             logger.warning("Bot not yet ready for webhooks")
             return False
         try:
+            print(f"DEBUG process_webhook_update: queueing update_id={update_dict.get('update_id')}, msg={str(update_dict.get('message', {}).get('text', ''))[:50]}")
             update = Update.de_json(update_dict, self._app.bot)
             await self._app.update_queue.put(update)
             return True
