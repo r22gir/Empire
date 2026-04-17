@@ -80,55 +80,62 @@ class EmailService:
         attachments: list[str] | None = None,
         cc: str | None = None,
     ) -> bool:
-        """Send via SendGrid API."""
+        """Send via SendGrid v3 API using httpx.
+
+        The backend already depends on httpx. Keeping this path SDK-free avoids
+        a false "configured but unusable" state when the optional sendgrid
+        package is not installed.
+        """
         try:
-            from sendgrid import SendGridAPIClient
-            from sendgrid.helpers.mail import (
-                Mail, Attachment, FileContent, FileName, FileType, Disposition,
-            )
             import base64
             import mimetypes
+            import httpx
 
-            message = Mail(
-                from_email=self.sendgrid_from,
-                to_emails=to,
-                subject=subject,
-                html_content=body_html,
-            )
-
+            personalization: dict = {"to": [{"email": to}]}
             if cc:
-                from sendgrid.helpers.mail import Cc
-                message.add_cc(Cc(cc))
+                personalization["cc"] = [{"email": cc}]
 
-            # Attach files
+            payload: dict = {
+                "personalizations": [personalization],
+                "from": {"email": self.sendgrid_from, "name": self.from_name},
+                "subject": subject,
+                "content": [{"type": "text/html", "value": body_html}],
+            }
+
+            encoded_attachments = []
             for filepath in (attachments or []):
                 path = Path(filepath)
                 if not path.exists():
                     logger.warning(f"Attachment not found: {filepath}")
                     continue
-                with open(path, "rb") as f:
-                    file_data = f.read()
-                encoded_file = base64.b64encode(file_data).decode()
-                mime_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-                attachment = Attachment(
-                    FileContent(encoded_file),
-                    FileName(path.name),
-                    FileType(mime_type),
-                    Disposition("attachment"),
-                )
-                message.add_attachment(attachment)
+                encoded_attachments.append({
+                    "content": base64.b64encode(path.read_bytes()).decode("ascii"),
+                    "filename": path.name,
+                    "type": mimetypes.guess_type(str(path))[0] or "application/octet-stream",
+                    "disposition": "attachment",
+                })
+            if encoded_attachments:
+                payload["attachments"] = encoded_attachments
 
-            sg = SendGridAPIClient(self.sendgrid_key)
-            response = sg.send(message)
+            response = httpx.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {self.sendgrid_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=30,
+            )
             if response.status_code < 300:
                 logger.info(f"Email sent via SendGrid to {to} — subject: {subject}")
                 return True
-            else:
-                logger.error(f"SendGrid returned status {response.status_code} for {to}")
-                raise RuntimeError(f"SendGrid error: status {response.status_code}")
-        except ImportError:
-            logger.error("sendgrid package not installed — run: pip install sendgrid")
-            raise RuntimeError("sendgrid package not installed")
+            logger.error(
+                "SendGrid returned status %s for %s: %s",
+                response.status_code,
+                to,
+                response.text[:500],
+            )
+            raise RuntimeError(f"SendGrid error: status {response.status_code}")
         except Exception as e:
             logger.error(f"SendGrid send failed: {e}")
             raise

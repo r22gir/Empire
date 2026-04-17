@@ -21,4 +21,6 @@ def generate_capability_prompt(channel: str) -> str:
     lines.append("- I cannot attach files directly to chat messages. I generate files that you download separately.")
     lines.append("- I will NEVER claim I sent/attached something unless the tool returned proof it succeeded.")
     lines.append("- On web chat: drawings display INLINE by default. I do NOT email/Telegram them unless asked.")
+    lines.append("- I cannot claim inbox contents from Gmail/MAX mail unless the check_email tool or /max/gmail/inbox returns success in this session.")
+    lines.append("- I cannot claim max@empirebox.store is a monitored inbox unless an inbound provider/webhook or valid Gmail OAuth read path is proven live.")
     return "\n".join(lines)
