@@ -184,6 +184,27 @@ export default function RecoveryForgeScreen() {
   const shownEnd = Math.min(offset + images.length, imageTotal);
   const categories = Object.keys(facets.category || {}).sort();
 
+  const classifierLabel = (classified_by: string | undefined) => {
+    if (!classified_by || classified_by === 'none') return 'Unclassified';
+    if (classified_by.startsWith('ollama-')) {
+      const model = classified_by.replace('ollama-', '');
+      if (model === 'moondream') return 'Moondream (Ollama)';
+      if (model === 'llava') return 'LLaVA (Ollama)';
+      return `${model} (Ollama)`;
+    }
+    return classified_by;
+  };
+
+  const confidenceLabel = (confidence: number | undefined) => {
+    if (confidence === undefined || confidence === null) return null;
+    const pct = Math.round(confidence * 100);
+    let level = 'low';
+    let color = '#dc2626';
+    if (confidence >= 0.85) { level = 'high'; color = '#16a34a'; }
+    else if (confidence >= 0.65) { level = 'medium'; color = '#d97706'; }
+    return { pct, level, color };
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="flex flex-wrap items-center gap-3 px-4 sm:px-5 py-3" style={{ background: '#faf9f7', borderBottom: '1px solid #ece8e0', flexShrink: 0 }}>
@@ -272,7 +293,7 @@ export default function RecoveryForgeScreen() {
                     <div title={img.filename} style={{ fontSize: 12, fontWeight: 800, color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{img.filename}</div>
                     <TagRow img={img} />
                     <div style={{ fontSize: 11, color: '#555', minHeight: 42, lineHeight: 1.35 }}>{img.description || 'No generated description stored.'}</div>
-                    <div style={{ marginTop: 8, fontSize: 10, color: '#999' }}>{img.classified_by}{img.reviewed ? ' · reviewed' : ''}{img.in_social ? ' · social asset' : ''}</div>
+                    <div style={{ marginTop: 8, fontSize: 10, color: '#999' }}>{classifierLabel(img.classified_by)}{img.reviewed ? ' · reviewed' : ''}{img.in_social ? ' · social asset' : ''}</div>
                   </div>
                 </button>
               ))}
@@ -302,6 +323,21 @@ export default function RecoveryForgeScreen() {
                 {selected.image.image_url && <img src={`${apiBase}${selected.image.image_url}`} alt={selected.image.filename} style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: '#f5f3ef', borderRadius: 8, border: '1px solid #ece8e0' }} />}
                 <h3 style={{ fontSize: 15, fontWeight: 900, margin: '12px 0 6px', wordBreak: 'break-word' }}>{selected.image.filename}</h3>
                 <TagRow img={selected.image} />
+                {(() => {
+                  const conf = confidenceLabel(selected.image.confidence);
+                  return (
+                    <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Classifier:</span>
+                      <span style={{ fontSize: 11, color: '#333' }}>{classifierLabel(selected.image.classified_by)}</span>
+                      {conf && (
+                        <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 6, background: '#eff6ff', color: conf.color, fontWeight: 800 }}>
+                          {conf.pct}% confidence ({conf.level})
+                        </span>
+                      )}
+                      <span style={{ fontSize: 10, color: '#aaa' }}>{selected.image.reviewed ? '· reviewed' : '· unreviewed'}</span>
+                    </div>
+                  );
+                })()}
                 <DetailLabel label="Generated description" value={selected.image.description || 'No generated description stored.'} />
                 <DetailLabel label="OCR text" value={selected.ocr_text || 'No OCR text stored in this record.'} />
                 <DetailLabel label="Source path" value={selected.image.path || 'Not stored'} mono />
@@ -340,7 +376,14 @@ function TagRow({ img }: { img: RecoveryImage }) {
     <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', margin: '7px 0' }}>
       <span style={tagStyle('#fdf8eb', '#96750a')}>{img.business}</span>
       <span style={tagStyle('#f0fdf4', '#15803d')}>{img.category || 'misc'}</span>
-      {img.confidence !== undefined && img.confidence !== null && <span style={tagStyle('#eff6ff', '#2563eb')}>{Math.round(img.confidence * 100)}%</span>}
+      {(() => {
+        const conf = confidenceLabel(img.confidence);
+        return conf ? (
+          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 6, background: '#eff6ff', color: conf.color, fontWeight: 800 }}>
+            {conf.pct}% conf ({conf.level})
+          </span>
+        ) : null;
+      })()}
       {img.social_ready && <span style={tagStyle('#ecfdf5', '#047857')}>social-ready</span>}
       {img.review_status && img.review_status !== 'unreviewed' && <span style={tagStyle('#f5f3ff', '#6d28d9')}>{img.review_status}</span>}
     </div>
