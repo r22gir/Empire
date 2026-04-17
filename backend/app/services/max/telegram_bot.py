@@ -1312,23 +1312,14 @@ class TelegramBot:
         self._running = True
         logger.info("🤖 MAX Telegram Bot starting...")
 
-        # Clear any stale webhook/polling before starting
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(
-                    f"{self.api_base}/deleteWebhook",
-                    json={"drop_pending_updates": False},
-                )
-        except Exception:
-            pass
-
-        # Retry startup up to 3 times (previous instance may still hold connection)
+        # Retry startup up to 3 times
         for attempt in range(3):
             try:
                 await app.initialize()
                 await app.start()
                 await app.updater.start_polling(
-                    drop_pending_updates=False,
+                    drop_pending_updates=True,
+                    bootstrap_retries=3,
                     allowed_updates=["message", "callback_query"],
                 )
                 logger.info("🤖 MAX Telegram Bot is running!")
