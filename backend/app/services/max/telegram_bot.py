@@ -1354,8 +1354,13 @@ class TelegramBot:
         self._app = app
 
         # Initialize and start the app (creates update_queue + starts consumer task)
+        print("Telegram webhook: initializing Application...")
         await app.initialize()
+        print("Telegram webhook: Application initialized, calling app.start()...")
         await app.start()
+        print("Telegram webhook: app.start() complete, setting _webhook_ready...")
+        print(f"Telegram webhook: _app._running={self._app.running}, update_queue size when set: {self._app.update_queue.qsize() if hasattr(self._app, 'update_queue') else 'N/A'}")
+        print("Telegram webhook: _webhook_ready is now SET — consumer task should be running")
 
         self._running = True
         self._webhook_ready.set()
