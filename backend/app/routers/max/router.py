@@ -2,7 +2,7 @@
 MAX API Router - Endpoints for AI Assistant Manager.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -20,6 +20,7 @@ from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_m
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
@@ -286,6 +287,7 @@ class ChatResponse(BaseModel):
     fallback_used: bool = False
     tool_results: Optional[List[Dict[str, Any]]] = None
     quality: Optional[Dict[str, Any]] = None
+    response_id: Optional[str] = None  # for feedback linkage
 
 
 class TaskCreateRequest(BaseModel):
@@ -311,6 +313,7 @@ class PresentRequest(BaseModel):
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
     import time as _time_mod
     _chat_start = _time_mod.time()
+    _response_id = str(uuid.uuid4())[:12]  # unique per request for feedback linkage
 
     msg_ctx = {"channel": request.channel or "", "chat_id": request.chat_id or ""}
     founder = is_founder_message(msg_ctx)
@@ -647,6 +650,23 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             fallback_used=response.fallback_used,
             tool_results=tool_results_list if tool_results_list else None,
             quality=quality_badge,
+            response_id=_response_id,
+        )
+
+        # Log response for evaluation loop (non-blocking)
+        _final_latency_ms = int((_time_mod.time() - _chat_start) * 1000)
+        background_tasks.add_task(
+            evaluation_service.log_response,
+            response_id=_response_id,
+            channel=request.channel or "web",
+            conversation_id=conv_id,
+            message=request.message,
+            model_used=response.model_used,
+            tools_used=[r.get("tool") for r in tool_results_list] if tool_results_list else [],
+            tool_results=tool_results_list if tool_results_list else [],
+            latency_ms=_final_latency_ms,
+            response_length=len(final_content),
+            fallback_used=response.fallback_used,
         )
         # Prevent phone/browser caching stale responses
         http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -658,6 +678,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             response="Request timed out after 45 seconds. The AI provider may be slow or unreachable. Please try again.",
             model_used="timeout",
             fallback_used=True,
+            response_id=_response_id,
         )
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -2397,3 +2418,70 @@ async def max_self_heal_status():
         result["self_heal"] = {"error": str(e)}
     result["auto_heal_enabled"] = True
     return result
+
+
+# ── MAX Evaluation Loop — Feedback + Stats ─────────────────────────────
+
+class FeedbackRequest(BaseModel):
+    response_id: str
+    thumbs_up: Optional[int] = None   # 1 = up, 0 = down, null = skip
+    rating: Optional[int] = None        # 1–5, null = skip
+    tag_helpful: Optional[bool] = False
+    tag_wrong: Optional[bool] = False
+    tag_incomplete: Optional[bool] = False
+    tag_too_slow: Optional[bool] = False
+    tag_wrong_tool: Optional[bool] = False
+    tag_stale: Optional[bool] = False
+    tag_should_have_searched: Optional[bool] = False
+    tag_should_have_used_image: Optional[bool] = False
+    comment: Optional[str] = None
+
+
+@router.post("/evaluation/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """Submit explicit feedback for a MAX response.
+
+    Use the response_id from the original chat response.
+    At least one of thumbs_up or rating should be provided.
+    """
+    if request.thumbs_up is None and request.rating is None and not any([
+        request.tag_helpful, request.tag_wrong, request.tag_incomplete,
+        request.tag_too_slow, request.tag_wrong_tool, request.tag_stale,
+        request.tag_should_have_searched, request.tag_should_have_used_image
+    ]):
+        return {"ok": False, "error": "Provide at least thumbs_up, rating, or a tag"}
+
+    ok = evaluation_service.submit_feedback(
+        response_id=request.response_id,
+        thumbs_up=request.thumbs_up,
+        rating=request.rating,
+        tag_helpful=request.tag_helpful,
+        tag_wrong=request.tag_wrong,
+        tag_incomplete=request.tag_incomplete,
+        tag_too_slow=request.tag_too_slow,
+        tag_wrong_tool=request.tag_wrong_tool,
+        tag_stale=request.tag_stale,
+        tag_should_have_searched=request.tag_should_have_searched,
+        tag_should_have_used_image=request.tag_should_have_used_image,
+        comment=request.comment,
+    )
+    return {"ok": ok}
+
+
+@router.get("/evaluation/stats")
+async def get_evaluation_stats(days: int = Query(default=30, ge=1, le=365)):
+    """Get MAX evaluation stats for routing decisions and founder visibility.
+
+    Returns:
+    - routing_preferences: provider performance by capability (weighted score for routing)
+    - tool_performance: tool success rates by capability
+    - frustration_hotspots: common failure patterns
+    - recent_evaluations: last N evaluations for inspection
+    """
+    return {
+        "routing_preferences": evaluation_service.get_routing_preferences(days=days),
+        "tool_performance": evaluation_service.get_tool_performance(days=days),
+        "frustration_hotspots": evaluation_service.get_frustration_hotspots(days=days),
+        "recent_evaluations": evaluation_service.get_recent_evaluations(limit=20),
+    }
+
