@@ -211,14 +211,14 @@ class UnifiedMessageStore:
         return True
 
     def _normalize_channel(self, channel: str | None) -> str:
-        if channel in {"web", "web_cc", "dashboard"}:
+        if channel in {"web", "web_cc", "dashboard", "command_center", "mobile_browser", "studio_browser"}:
             return "web_chat"
         return channel or "system"
 
     def _channel_aliases(self, channel: str | None) -> list[str]:
         normalized = self._normalize_channel(channel)
         if normalized == "web_chat":
-            return ["web_chat", "web", "web_cc", "dashboard"]
+            return ["web_chat", "web", "web_cc", "dashboard", "command_center", "mobile_browser", "studio_browser"]
         return [normalized]
 
     def _json_or_text(self, value: Any) -> str | None:

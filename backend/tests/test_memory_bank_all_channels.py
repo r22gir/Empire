@@ -19,3 +19,15 @@ def test_memory_bank_all_channels_returns_registry_channel_labels(tmp_path):
     email = next(row for row in rows if row["channel"] == "email")
     assert email["direction"] == "outbound"
     assert email["subject"] == "Email proof"
+
+
+def test_web_aliases_share_web_chat_history(tmp_path):
+    store = UnifiedMessageStore(tmp_path / "unified_messages.db")
+    store.add_message("desktop-1", "web", "user", "desktop web", direction="inbound")
+    store.add_message("mobile-1", "mobile_browser", "user", "mobile web", direction="inbound")
+    store.add_message("cc-1", "command_center", "user", "command center", direction="inbound")
+
+    rows = store.list_memory_bank(channel="web_chat", limit=10)
+
+    assert {row["message_text"] for row in rows} == {"desktop web", "mobile web", "command center"}
+    assert {row["channel"] for row in rows} == {"web_chat"}
