@@ -12,13 +12,13 @@ from typing import Any
 
 DRAWING_KEYWORDS = (
     "drawing",
-    "draw",
     "render",
     "sketch",
     "elevation",
     "plan",
     "isometric",
-    "section",
+    "section view",
+    "section drawing",
     "4-view",
     "four-view",
     "pdf drawing",
@@ -96,7 +96,43 @@ class DrawingHandoff:
 
 
 def is_drawing_intent(text: str) -> bool:
+    """Returns True if text requests a drawing/rendering action.
+
+    Negation patterns (not asking you to draw, etc.) suppress drawing intent.
+    """
     lowered = text.lower()
+
+    # Suppress drawing intent when user explicitly rejects drawing
+    negation_patterns = (
+        "not asking you to draw",
+        "not asking you to render",
+        "don't draw",
+        "do not draw",
+        "not drawing",
+        "didn't draw",
+        "not a drawing",
+        "not render",
+        "don't render",
+        "i didn't ask for a drawing",
+        "not asking for a drawing",
+        "don't need a drawing",
+        "not asking for drawing",
+    )
+    if any(neg in lowered for neg in negation_patterns):
+        return False
+
+    # Strong drawing patterns: "draw a <thing>" or "draw me"
+    # These are unambiguous — user is requesting creation of something
+    strong_draw_patterns = (
+        "draw a ",
+        "draw me ",
+        "draw it ",
+        "draw the ",
+        "draw this ",
+    )
+    if any(pattern in lowered for pattern in strong_draw_patterns):
+        return True
+
     return any(keyword in lowered for keyword in DRAWING_KEYWORDS)
 
 
