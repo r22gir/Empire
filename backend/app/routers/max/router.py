@@ -157,6 +157,16 @@ def _runtime_truth_tool_payload() -> dict:
     return {"tool": "empire_runtime_truth_check", "public": True}
 
 
+def _response_metadata(channel: str | None, skill_used: str | None = None) -> dict:
+    from app.services.max.surface_identity import build_response_metadata
+    return build_response_metadata(channel, skill_used=skill_used)
+
+
+def _ledger_metadata(channel: str | None, extra: dict | None = None) -> dict:
+    from app.services.max.surface_identity import build_ledger_metadata
+    return build_ledger_metadata(channel, extra=extra)
+
+
 def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult, founder: bool) -> str:
     conv_id = request.conversation_id or str(uuid.uuid4())
     try:
@@ -172,7 +182,7 @@ def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult
             request.channel or "web",
             "user",
             request.message,
-            metadata={"source": "runtime_truth_check_intent"},
+            metadata=_ledger_metadata(request.channel, {"source": "runtime_truth_check_intent"}),
             founder_verified=founder,
         )
         unified_store.add_message(
@@ -182,7 +192,7 @@ def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult
             response_text,
             model="empire-runtime-truth-check",
             tool_results=[{"tool": result.tool, "success": result.success}],
-            metadata={"source": "runtime_truth_check_result"},
+            metadata=_ledger_metadata(request.channel, {"source": "runtime_truth_check_result"}),
         )
     except Exception as exc:
         logger.warning(f"Runtime truth unified message store write failed: {exc}")
@@ -331,6 +341,7 @@ class ChatResponse(BaseModel):
     tool_results: Optional[List[Dict[str, Any]]] = None
     quality: Optional[Dict[str, Any]] = None
     response_id: Optional[str] = None  # for feedback linkage
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class TaskCreateRequest(BaseModel):
@@ -396,6 +407,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             model_used="empire-runtime-truth-check",
             fallback_used=False,
             tool_results=[result.to_dict()],
+            metadata=_response_metadata(request.channel, skill_used="empire_runtime_truth_check"),
         )
 
     drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
@@ -412,6 +424,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 model_used="drawing-router",
                 fallback_used=False,
                 tool_results=None,
+                metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
             )
         drawing_result = _execute_drawing_handoff(drawing_handoff)
         response_text = (
@@ -424,6 +437,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             model_used="drawing-router",
             fallback_used=False,
             tool_results=[_drawing_tool_result_dict(drawing_result)],
+            metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
         )
 
     try:
@@ -644,7 +658,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Save to unified cross-channel store
         try:
             from app.services.max.unified_message_store import unified_store
-            user_metadata = {"image_filename": request.image_filename} if request.image_filename else None
+            user_metadata = _ledger_metadata(
+                request.channel,
+                {"image_filename": request.image_filename} if request.image_filename else None,
+            )
             attachment_refs = [{"type": "upload", "ref": request.image_filename}] if request.image_filename else None
             unified_store.add_message(
                 conv_id, request.channel or "web", "user", request.message,
@@ -655,7 +672,8 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             unified_store.add_message(
                 conv_id, request.channel or "web", "assistant", strip_tool_blocks(final_content),
                 model=response.model_used,
-                tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None
+                tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None,
+                metadata=_ledger_metadata(request.channel, {"source": "max_chat_response"}),
             )
         except Exception as _ums_err:
             logger.warning(f"Unified message store write failed: {_ums_err}")
@@ -757,6 +775,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             tool_results=tool_results_list if tool_results_list else None,
             quality=quality_badge,
             response_id=_response_id,
+            metadata=_response_metadata(request.channel),
         )
 
         # Log response for evaluation loop (non-blocking)
@@ -773,6 +792,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             latency_ms=_final_latency_ms,
             response_length=len(final_content),
             fallback_used=response.fallback_used,
+            metadata_envelope=resp.metadata,
         )
         # Prevent phone/browser caching stale responses
         http_response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
@@ -785,6 +805,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             model_used="timeout",
             fallback_used=True,
             response_id=_response_id,
+            metadata=_response_metadata(request.channel),
         )
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -839,7 +860,7 @@ async def chat_stream(request: ChatRequest):
             )
             _save_runtime_truth_exchange(request, response_text, result, founder)
             yield f"data: {json.dumps({'type': 'text', 'content': response_text})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='empire_runtime_truth_check')})}\n\n"
 
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
@@ -922,7 +943,10 @@ async def chat_stream(request: ChatRequest):
     # Save user message to unified cross-channel store
     try:
         from app.services.max.unified_message_store import unified_store
-        user_metadata = {"image_filename": request.image_filename} if request.image_filename else None
+        user_metadata = _ledger_metadata(
+            request.channel,
+            {"image_filename": request.image_filename} if request.image_filename else None,
+        )
         attachment_refs = [{"type": "upload", "ref": request.image_filename}] if request.image_filename else None
         unified_store.add_message(
             conv_id, request.channel or "web", "user", request.message,
@@ -1052,7 +1076,8 @@ async def chat_stream(request: ChatRequest):
                 unified_store.add_message(
                     conv_id, request.channel or "web", "assistant", strip_tool_blocks(full_response),
                     model=model_used,
-                    tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None
+                    tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None,
+                    metadata=_ledger_metadata(request.channel, {"source": "max_stream_response"}),
                 )
             except Exception as _ums_err:
                 logger.warning(f"Unified message store (stream assistant) failed: {_ums_err}")
@@ -1215,7 +1240,12 @@ async def chat_stream(request: ChatRequest):
                 except Exception as _save_err:
                     logger.debug(f"[stream] Chat history save failed: {_save_err}")
 
-            _done_data = {'type': 'done', 'model_used': model_used, 'conversation_id': conv_id}
+            _done_data = {
+                'type': 'done',
+                'model_used': model_used,
+                'conversation_id': conv_id,
+                'metadata': _response_metadata(request.channel),
+            }
             if _quality_badge:
                 _done_data['quality'] = _quality_badge
             yield f"data: {json.dumps(_done_data)}\n\n"
@@ -1633,6 +1663,39 @@ async def cost_per_desk():
 @router.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "MAX AI Assistant Manager", "desks_online": len(desk_manager.get_all_desks()), "telegram_configured": telegram_bot.is_configured}
+
+
+@router.get("/status")
+async def max_status():
+    """Aggregated MAX operating status for runtime/evaluation freshness."""
+    from app.services.max.operating_registry import get_registry_load_info, load_operating_registry
+    from app.services.max.startup_health import read_startup_health_record
+    from app.services.max.runtime_truth_check import _git_commit
+
+    registry = load_operating_registry()
+    skills = registry.get("skills", [])
+    callable_hooks = [
+        item.get("key")
+        for item in skills
+        if item.get("status") == "implemented_callable"
+    ]
+    return {
+        "status": "ok",
+        "current_commit": _git_commit(),
+        "registry": get_registry_load_info(),
+        "surfaces": [
+            {
+                "key": item.get("key"),
+                "name": item.get("name"),
+                "status": item.get("status"),
+                "canonical_channel": item.get("canonical_channel"),
+            }
+            for item in registry.get("surfaces", [])
+        ],
+        "active_skill_hooks": callable_hooks,
+        "startup_health": read_startup_health_record(),
+        "registry_reload_requires_restart": False,
+    }
 
 
 @router.get("/orchestration/status")

@@ -331,6 +331,13 @@ async def start_background_services():
 
     is_primary = _acquire_primary_worker_lock()
 
+    try:
+        from app.services.max.startup_health import write_startup_health_record
+        record = write_startup_health_record()
+        print(f"✓ MAX startup health: commit={record.get('running_commit_hash')} registry={record.get('registry_version')}")
+    except Exception as e:
+        print(f"✗ MAX startup health record: {e}")
+
     if not is_primary:
         print("⏭ Secondary worker — skipping singleton background services")
         return

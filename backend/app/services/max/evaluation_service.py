@@ -76,9 +76,13 @@ def init_evaluation_schema(db_path: Path = None):
                 -- Separate scoring dimensions
                 correctness_score REAL,     -- 0.0–1.0, accuracy of information
                 satisfaction_score REAL,    -- 0.0–1.0, user satisfaction
-                outcome_score REAL          -- 0.0–1.0, task completion quality
+                outcome_score REAL,         -- 0.0–1.0, task completion quality
+                metadata_envelope TEXT      -- JSON: registry_version, surface, response_at, skill_used
             )
         """)
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(max_response_evaluations)").fetchall()}
+        if "metadata_envelope" not in existing_cols:
+            conn.execute("ALTER TABLE max_response_evaluations ADD COLUMN metadata_envelope TEXT")
 
         # Explicit user feedback
         conn.execute("""
@@ -260,6 +264,7 @@ class EvaluationService:
         latency_ms: int,
         response_length: int,
         fallback_used: bool,
+        metadata_envelope: dict | None = None,
     ) -> str:
         """Log a MAX response for evaluation. Returns the response_id."""
         import sqlite3
@@ -284,14 +289,14 @@ class EvaluationService:
                     (response_id, channel, conversation_id, intent, capability, has_image,
                      model_used, provider, fallback_used, tools_used, tool_results,
                      any_tool_failure, latency_ms, response_length, user_corrected, repeated_ask,
-                     implicit_signals)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     implicit_signals, metadata_envelope)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     response_id, channel, conversation_id or None, intent, capability, has_image,
                     model_used, provider, 1 if fallback_used else 0,
                     json.dumps(tools_used), json.dumps(tool_results),
                     any_tool_failure, latency_ms, response_length, user_corrected, repeated_ask,
-                    json.dumps(implicit),
+                    json.dumps(implicit), json.dumps(metadata_envelope or {}),
                 ))
 
                 # Update routing preferences aggregates

@@ -90,3 +90,6 @@ def test_founder_prompt_auto_routes_to_runtime_truth_hook(monkeypatch):
     assert data["model_used"] == "empire-runtime-truth-check"
     assert data["tool_results"][0]["tool"] == "empire_runtime_truth_check"
     assert "Runtime truth check completed" in data["response"]
+    assert data["metadata"]["registry_version"]
+    assert data["metadata"]["surface"] == "Founder/Web MAX"
+    assert data["metadata"]["skill_used"] == "empire_runtime_truth_check"

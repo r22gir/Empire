@@ -6,22 +6,105 @@ source, and this module emits short summaries for MAX prompts.
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+import logging
+import time
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
 REGISTRY_PATH = Path(__file__).with_name("operating_registry.json")
+RELOAD_CHECK_INTERVAL_SECONDS = 30
+REQUIRED_TOP_LEVEL_KEYS = {"schema_version", "surfaces", "ecosystem_products", "skills", "delegation_policy"}
+logger = logging.getLogger("max.operating_registry")
+
+_registry_state: dict[str, Any] = {
+    "data": None,
+    "mtime": None,
+    "loaded_at": None,
+    "last_checked": 0.0,
+    "last_error": None,
+    "source": str(REGISTRY_PATH),
+    "file_sha256": None,
+}
 
 
-@lru_cache(maxsize=1)
+def _validate_registry(data: dict[str, Any]) -> None:
+    missing = sorted(REQUIRED_TOP_LEVEL_KEYS - set(data.keys()))
+    if missing:
+        raise ValueError(f"Registry schema missing keys: {', '.join(missing)}")
+
+
+def _read_registry_file() -> tuple[dict[str, Any], float, str]:
+    raw = REGISTRY_PATH.read_bytes()
+    data = json.loads(raw.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("Registry root must be a JSON object")
+    _validate_registry(data)
+    return data, REGISTRY_PATH.stat().st_mtime, hashlib.sha256(raw).hexdigest()
+
+
 def load_operating_registry() -> dict[str, Any]:
-    with REGISTRY_PATH.open(encoding="utf-8") as f:
-        return json.load(f)
+    """Load registry with request-bounded hot reload and last-known-good fallback.
+
+    Re-checks the file at most once every RELOAD_CHECK_INTERVAL_SECONDS. Missing,
+    invalid JSON, or schema-invalid files never break MAX if a previous good
+    registry has been loaded.
+    """
+    now = time.monotonic()
+    if (
+        _registry_state["data"] is not None
+        and now - float(_registry_state["last_checked"] or 0) < RELOAD_CHECK_INTERVAL_SECONDS
+    ):
+        return _registry_state["data"]
+
+    _registry_state["last_checked"] = now
+    try:
+        current_mtime = REGISTRY_PATH.stat().st_mtime
+        if _registry_state["data"] is not None and current_mtime == _registry_state["mtime"]:
+            return _registry_state["data"]
+
+        data, mtime, file_sha = _read_registry_file()
+        _registry_state.update({
+            "data": data,
+            "mtime": mtime,
+            "loaded_at": datetime.now(timezone.utc).isoformat(),
+            "last_error": None,
+            "file_sha256": file_sha,
+        })
+        return data
+    except Exception as exc:
+        _registry_state["last_error"] = str(exc)
+        if _registry_state["data"] is not None:
+            logger.warning("Using last-known-good MAX operating registry: %s", exc)
+            return _registry_state["data"]
+        raise
 
 
 def clear_operating_registry_cache() -> None:
-    load_operating_registry.cache_clear()
+    _registry_state.update({
+        "data": None,
+        "mtime": None,
+        "loaded_at": None,
+        "last_checked": 0.0,
+        "last_error": None,
+        "file_sha256": None,
+    })
+
+
+def get_registry_load_info() -> dict[str, Any]:
+    registry = load_operating_registry()
+    return {
+        "registry_version": registry.get("registry_version") or str(registry.get("schema_version")),
+        "schema_version": registry.get("schema_version"),
+        "updated_at": registry.get("updated_at"),
+        "loaded_at": _registry_state.get("loaded_at"),
+        "source": _registry_state.get("source"),
+        "file_sha256": _registry_state.get("file_sha256"),
+        "last_error": _registry_state.get("last_error"),
+        "reload_check_interval_seconds": RELOAD_CHECK_INTERVAL_SECONDS,
+    }
 
 
 def _find_by_key(items: list[dict[str, Any]], key: str) -> dict[str, Any] | None:

@@ -101,6 +101,15 @@ def _http_status(url: str, timeout: float = 4.0) -> dict[str, Any]:
 def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     """Return current runtime status without changing services."""
     commit = _git_commit()
+    registry_info = {}
+    startup_health = None
+    try:
+        from app.services.max.operating_registry import get_registry_load_info
+        registry_info = get_registry_load_info()
+        from app.services.max.startup_health import read_startup_health_record
+        startup_health = read_startup_health_record()
+    except Exception as exc:
+        registry_info = {"last_error": str(exc)}
     backend_service = _service_status("empire-backend.service")
     frontend_service = _service_status("empire-portal.service")
 
@@ -144,6 +153,8 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "mode": "inspect_only",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "current_commit": commit,
+        "registry": registry_info,
+        "startup_health": startup_health,
         "backend_status": {
             "service": backend_service,
             "port_8000_open": _port_open("127.0.0.1", 8000),
@@ -194,6 +205,7 @@ def format_runtime_truth_check(result: dict[str, Any]) -> str:
         "Runtime truth check completed.",
         f"- Mode: {result.get('mode')} ({result.get('repair_capability')})",
         f"- Current repo commit: {commit.get('hash')} ({commit.get('message')})",
+        f"- Registry: version={(result.get('registry') or {}).get('registry_version')} loaded_at={(result.get('registry') or {}).get('loaded_at')} last_error={(result.get('registry') or {}).get('last_error')}",
         f"- Backend: service_active={backend.get('service', {}).get('active')} port_8000_open={backend.get('port_8000_open')} local_root={backend.get('local_root', {}).get('status_code')}",
         f"- Frontend: service_active={frontend.get('service', {}).get('active')} port_3005_open={frontend.get('port_3005_open')} local_root={frontend.get('local_root', {}).get('status_code')}",
         f"- Local API commit: {local_hash} matches_current={local.get('api_matches_current_commit')}",

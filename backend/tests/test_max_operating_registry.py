@@ -1,5 +1,9 @@
+import json
+
+import app.services.max.operating_registry as operating_registry
 from app.services.max.operating_registry import (
     generate_operating_context,
+    get_registry_load_info,
     get_product_truth,
     get_surface_truth,
     get_skill_truth,
@@ -12,6 +16,7 @@ def test_operating_registry_loads_required_truth():
     registry = load_operating_registry()
 
     assert registry["schema_version"] == 1
+    assert registry["registry_version"] == "operating-registry-v2"
     assert get_surface_truth("founder_web")["canonical_channel"] == "web_chat"
     assert get_surface_truth("web_browser_other_device")["canonical_channel"] == "web_chat"
     assert get_surface_truth("telegram")["status"] == "active"
@@ -45,3 +50,48 @@ def test_system_prompts_include_operating_truth_without_phone_overclaim():
     assert "Email MAX: partial" in full_prompt
     assert "a dedicated Phone MAX does not exist" in full_prompt
     assert "All channels share the same MAX brain and memory" not in full_prompt
+
+
+def test_operating_registry_hot_reloads_and_keeps_last_known_good(monkeypatch, tmp_path):
+    registry_path = tmp_path / "operating_registry.json"
+    good = {
+        "schema_version": 99,
+        "registry_version": "test-registry-v99",
+        "updated_at": "2026-04-19",
+        "surfaces": [],
+        "ecosystem_products": [],
+        "skills": [],
+        "delegation_policy": {},
+    }
+    registry_path.write_text(json.dumps(good), encoding="utf-8")
+
+    monkeypatch.setattr(operating_registry, "REGISTRY_PATH", registry_path)
+    operating_registry.clear_operating_registry_cache()
+
+    loaded = operating_registry.load_operating_registry()
+    assert loaded["registry_version"] == "test-registry-v99"
+    assert operating_registry.get_registry_load_info()["last_error"] is None
+
+    updated = {**good, "registry_version": "test-registry-v100"}
+    registry_path.write_text(json.dumps(updated), encoding="utf-8")
+    operating_registry._registry_state["last_checked"] = 0
+    reloaded = operating_registry.load_operating_registry()
+    assert reloaded["registry_version"] == "test-registry-v100"
+
+    registry_path.write_text("{not valid json", encoding="utf-8")
+    operating_registry._registry_state["last_checked"] = 0
+    fallback = operating_registry.load_operating_registry()
+
+    assert fallback["registry_version"] == "test-registry-v100"
+    assert operating_registry.get_registry_load_info()["last_error"]
+
+    registry_path.unlink()
+    operating_registry._registry_state["last_checked"] = 0
+    missing_fallback = operating_registry.load_operating_registry()
+    assert missing_fallback["registry_version"] == "test-registry-v100"
+
+    registry_path.write_text(json.dumps({"schema_version": 100}), encoding="utf-8")
+    operating_registry._registry_state["last_checked"] = 0
+    schema_fallback = operating_registry.load_operating_registry()
+    assert schema_fallback["registry_version"] == "test-registry-v100"
+    operating_registry.clear_operating_registry_cache()

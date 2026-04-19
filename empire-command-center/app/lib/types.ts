@@ -28,6 +28,12 @@ export interface Message {
   latency?: string;
   toolResults?: ToolResult[];
   quality?: QualityBadge;
+  metadata?: {
+    registry_version: string;
+    surface: string;
+    response_at: string;
+    skill_used: string | null;
+  };
 }
 
 export interface ToolResult {

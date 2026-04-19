@@ -52,3 +52,15 @@ def test_stripe_webhook_primary_and_legacy_ownership_is_explicit():
     assert legacy_stripe[0].endpoint.__module__ == "app.routers.webhooks"
     assert len(legacy_nested) == 1
     assert legacy_nested[0].endpoint.__module__ == "app.routers.webhooks"
+
+
+def test_max_status_exposes_registry_and_startup_health():
+    res = client.get("/api/v1/max/status")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["registry"]["registry_version"]
+    assert data["registry"]["reload_check_interval_seconds"] == 30
+    assert "empire-runtime-truth-check" in data["active_skill_hooks"]
+    assert data["registry_reload_requires_restart"] is False
