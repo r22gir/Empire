@@ -263,12 +263,12 @@
     {
       "key": "external-memory-mem0-zep",
       "tier": 3,
-      "status": "planned",
-      "purpose": "Potential external memory layer.",
-      "when_to_use": "Only after local unified_messages and MemoryStore seams are clean.",
-      "inputs_required": ["vendor config", "privacy policy", "sync strategy"],
-      "expected_outputs": ["verified integration or explicit not-configured status"],
-      "autonomy_safety_notes": "No mem0/zep integration is currently live."
+      "status": "scaffolded_local_supermemory_recall",
+      "purpose": "Secondary recall layer for verified handoff summaries and product snapshots.",
+      "when_to_use": "After runtime, registry, repo, and live health truth are resolved; never for live state decisions.",
+      "inputs_required": ["resolved surface", "registry version", "commit hash", "bounded recall query"],
+      "expected_outputs": ["ranked secondary recall", "explicit non-authoritative status"],
+      "autonomy_safety_notes": "Local Supermemory scaffold is file-backed and recall-only. It never overrides runtime truth, registry truth, repo truth, OpenClaw health, payments, or deployment freshness."
     },
     {
       "key": "skill-creator",

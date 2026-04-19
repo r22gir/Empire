@@ -1796,6 +1796,48 @@ async def max_evaluation_scores(limit: int = 10):
     return {"scores": get_recent_scores(limit=limit), "limit": limit}
 
 
+@router.get("/self-assessment")
+async def max_self_assessment(channel: str = "web", limit: int = 5):
+    """Session-start quality check. Low recent scores trigger continuity audit."""
+    from app.services.max.continuity_compaction import audit_continuity_state
+    from app.services.max.evaluation_loop_v1 import get_recent_scores
+
+    scores = get_recent_scores(limit=max(1, min(limit, 5)))
+    average = round(sum(float(item.get("overall_score") or 0) for item in scores) / len(scores), 3) if scores else None
+    should_audit = average is not None and average < 0.6
+    audit = audit_continuity_state(channel=channel) if should_audit else None
+    message = None
+    if should_audit:
+        message = (
+            f"My recent responses averaged {average} truthfulness - "
+            "I may be working from stale context. Running a continuity check."
+        )
+    return {
+        "threshold": 0.6,
+        "limit": min(limit, 5),
+        "average_score": average,
+        "should_run_continuity_audit": should_audit,
+        "message": message,
+        "skill_used": "empire_max_continuity_audit" if should_audit else None,
+        "audit": audit,
+        "scores": scores,
+    }
+
+
+@router.get("/supermemory/recall")
+async def max_supermemory_recall(q: str = "max", channel: str = "web", limit: int = 5):
+    """Ranked secondary recall. Never authoritative over runtime or registry truth."""
+    from app.services.max.supermemory_recall import query_supermemory_recall
+    return query_supermemory_recall(q, surface=channel, limit=limit)
+
+
+@router.post("/supermemory/product-snapshots")
+async def max_supermemory_product_snapshots():
+    """Write compact registry-derived product snapshots to the Supermemory scaffold."""
+    from app.services.max.supermemory_recall import write_product_snapshots
+    return write_product_snapshots()
+
+
 @router.get("/orchestration/status")
 async def orchestration_status():
     """Canonical Command Center status for MAX as the orchestration brain."""

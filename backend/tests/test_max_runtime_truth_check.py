@@ -66,7 +66,7 @@ def test_continuity_audit_tool_is_callable():
     assert result.result["callable"] == "empire_max_continuity_audit"
     assert result.result["surface"]["canonical_channel"] == "web_chat"
     assert "registry_version" in result.result
-    assert result.result["supermemory_status"] == "deferred_not_authoritative"
+    assert result.result["supermemory_status"] in {"secondary_recall_scaffold", "unavailable_secondary_recall"}
 
 
 def test_founder_continuity_audit_prompt_routes_to_callable():
@@ -134,6 +134,10 @@ def test_founder_compaction_command_routes_to_handoff_writer(monkeypatch, tmp_pa
         lambda: {"openclaw_tasks": [], "max_tasks": [{"id": "t1"}]},
     )
     monkeypatch.setattr("app.services.max.continuity_compaction._latest_score", lambda: {"overall_score": 0.98})
+    monkeypatch.setattr(
+        "app.services.max.supermemory_recall.write_handoff_memory_from_packet",
+        lambda packet: {"written": True, "memory_id": "test"},
+    )
 
     res = client.post("/api/v1/max/chat", json={"message": "save state", "channel": "web"})
 
@@ -143,3 +147,23 @@ def test_founder_compaction_command_routes_to_handoff_writer(monkeypatch, tmp_pa
     assert "Session handoff refreshed" in data["response"]
     assert "handoff123" in data["response"]
     assert data["metadata"]["skill_used"] == "session_handoff"
+
+
+def test_self_assessment_invokes_continuity_audit_when_scores_low(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.max.evaluation_loop_v1.get_recent_scores",
+        lambda limit=5: [{"overall_score": 0.4} for _ in range(limit)],
+    )
+    monkeypatch.setattr(
+        "app.services.max.continuity_compaction.audit_continuity_state",
+        lambda channel="web": {"callable": "empire_max_continuity_audit", "surface": {"canonical_channel": "web_chat"}},
+    )
+
+    res = client.get("/api/v1/max/self-assessment?channel=web&limit=5")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["average_score"] == 0.4
+    assert data["should_run_continuity_audit"] is True
+    assert data["skill_used"] == "empire_max_continuity_audit"
+    assert "Running a continuity check" in data["message"]

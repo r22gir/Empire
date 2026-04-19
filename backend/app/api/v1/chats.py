@@ -199,7 +199,7 @@ async def search_chats(q: str, user_id: str = "founder"):
 
 @router.get("/cross-channel")
 async def cross_channel_messages(channel: str = None, hours: int = 24, limit: int = 50):
-    """Get messages across all channels from unified store."""
+    """Legacy unified-message API. Founder UI canonical view is /chats/memory-bank."""
     from app.services.max.unified_message_store import unified_store
     if channel:
         msgs = unified_store.get_recent_by_channel(channel, limit=limit, hours=hours)
@@ -209,22 +209,38 @@ async def cross_channel_messages(channel: str = None, hours: int = 24, limit: in
         for ch_msgs in ctx.values():
             msgs.extend(ch_msgs)
         msgs.sort(key=lambda m: m.get("created_at", ""))
-    return {"messages": msgs, "count": len(msgs)}
+    return {
+        "scope": "legacy_unified_messages",
+        "canonical_history_route": "/api/v1/chats/memory-bank?channel=all",
+        "note": "Legacy API surface; use Memory Bank / All Channels for founder-visible unified history.",
+        "messages": msgs,
+        "count": len(msgs),
+    }
 
 
 @router.get("/cross-channel/stats")
 async def cross_channel_stats():
-    """Get message counts by channel from unified store."""
+    """Legacy stats API for unified store; Memory Bank remains canonical history."""
     from app.services.max.unified_message_store import unified_store
-    return unified_store.get_stats()
+    return {
+        "scope": "legacy_unified_messages_stats",
+        "canonical_history_route": "/api/v1/chats/memory-bank?channel=all",
+        "stats": unified_store.get_stats(),
+    }
 
 
 @router.get("/cross-channel/search")
 async def cross_channel_search(q: str, channel: str = None, limit: int = 20):
-    """Search messages across all channels."""
+    """Legacy unified-message search. Founder UI canonical view is Memory Bank."""
     from app.services.max.unified_message_store import unified_store
     results = unified_store.search_messages(q, channel=channel, limit=limit)
-    return {"results": results, "count": len(results), "query": q}
+    return {
+        "scope": "legacy_unified_messages_search",
+        "canonical_history_route": "/api/v1/chats/memory-bank?channel=all",
+        "results": results,
+        "count": len(results),
+        "query": q,
+    }
 
 
 @router.get("/memory-bank")

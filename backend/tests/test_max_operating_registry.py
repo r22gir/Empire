@@ -25,7 +25,7 @@ def test_operating_registry_loads_required_truth():
     assert get_product_truth("relistapp")["status"] == "active_partial"
     assert get_product_truth("finance")["status"] == "active_partial"
     assert get_skill_truth("empire-capability-registry")["status"] == "implemented"
-    assert get_skill_truth("external-memory-mem0-zep")["status"] == "planned"
+    assert get_skill_truth("external-memory-mem0-zep")["status"] == "scaffolded_local_supermemory_recall"
 
 
 def test_operating_context_is_prompt_safe_and_truthful():

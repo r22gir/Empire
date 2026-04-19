@@ -25,6 +25,15 @@ def test_telegram_history_endpoint_is_labeled_telegram_only():
     assert "chats" in data
 
 
+def test_cross_channel_legacy_endpoint_points_to_all_channels():
+    res = client.get("/api/v1/chats/cross-channel?limit=1")
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["scope"] == "legacy_unified_messages"
+    assert data["canonical_history_route"] == "/api/v1/chats/memory-bank?channel=all"
+
+
 def test_finance_legacy_routes_are_not_shadowing_canonical_finance():
     dashboard_routes = _routes_for("/api/v1/finance/dashboard")
     payment_routes = _routes_for("/api/v1/finance/payments")

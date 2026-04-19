@@ -54,6 +54,30 @@ export function useChat() {
     });
   }, []);
 
+  useEffect(() => {
+    fetch(API + '/max/self-assessment?channel=web&limit=5', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.should_run_continuity_audit || !data.message) return;
+        const msg: Message = {
+          id: `self-assessment-${Date.now()}`,
+          role: 'assistant',
+          content: data.message,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          model: 'empire-max-continuity-audit',
+          toolResults: data.audit ? [{ tool: 'empire_max_continuity_audit', success: true, result: data.audit }] : undefined,
+          metadata: {
+            registry_version: data.audit?.registry_version || '',
+            surface: 'Founder/Web MAX',
+            response_at: new Date().toISOString(),
+            skill_used: data.skill_used || null,
+          },
+        };
+        updateMessages(prev => [...prev, msg]);
+      })
+      .catch(() => {});
+  }, [updateMessages]);
+
   const loadMessages = useCallback((msgs: Message[], chatId: string | null) => {
     const next = msgs.length > 0 ? msgs : [WELCOME];
     setMessages(next);

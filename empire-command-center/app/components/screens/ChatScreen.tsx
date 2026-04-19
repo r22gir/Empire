@@ -6,6 +6,7 @@ import { Message } from '../../lib/types';
 import { API } from '../../lib/api';
 import QuoteCard from '../business/quotes/QuoteCard';
 import InlineDrawing from '../InlineDrawing';
+import ContinuityPanel from '../ContinuityPanel';
 
 // Parse tool call blocks from message content: ```tool\n{...}\n``` or ```\n{"tool":...}\n```
 function parseToolBlocks(content: string): { cleanContent: string; toolCalls: any[] } {
@@ -592,6 +593,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           <StatusChip label="Upload image/doc" tone="ok" />
         </div>
       )}
+
+      <ContinuityPanel />
 
       {/* Messages */}
       <div style={{

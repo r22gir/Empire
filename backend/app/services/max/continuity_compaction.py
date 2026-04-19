@@ -11,6 +11,7 @@ from app.services.max.surface_identity import normalize_surface
 
 
 CONTEXT_TOKEN_THRESHOLD = 120_000
+PACKET_SCHEMA_VERSION = 1
 HANDOFF_PATH = Path.home() / "empire-repo" / "backend" / "data" / "max" / "session_handoff.json"
 
 COMPACTION_POLICY = {
@@ -168,6 +169,13 @@ def create_founder_handoff(
         active_skills=["empire_runtime_truth_check", "empire_max_continuity_audit"],
     )
     write_session_handoff_packet(packet, path)
+    try:
+        from app.services.max.supermemory_recall import write_handoff_memory_from_packet
+        packet["supermemory_write"] = write_handoff_memory_from_packet(packet)
+        write_session_handoff_packet(packet, path)
+    except Exception as exc:
+        packet["supermemory_write"] = {"written": False, "reason": f"supermemory scaffold unavailable: {exc}"}
+        write_session_handoff_packet(packet, path)
     return {
         "packet": packet,
         "path": str(path),
@@ -182,6 +190,13 @@ def audit_continuity_state(channel: str = "web") -> dict[str, Any]:
     restored = restore_session_handoff()
     registry = get_registry_load_info()
     surface = normalize_surface(channel)
+    try:
+        from app.services.max.supermemory_recall import query_supermemory_recall
+        supermemory = query_supermemory_recall("max", surface=channel, limit=3)
+        supermemory_status = "secondary_recall_scaffold"
+    except Exception as exc:
+        supermemory = {"error": str(exc), "authority": "secondary_recall_only"}
+        supermemory_status = "unavailable_secondary_recall"
     return {
         "callable": "empire_max_continuity_audit",
         "surface": surface,
@@ -190,7 +205,8 @@ def audit_continuity_state(channel: str = "web") -> dict[str, Any]:
         "handoff": restored,
         "latest_score": _latest_score(),
         "active_task_state": _active_task_state(),
-        "supermemory_status": "deferred_not_authoritative",
+        "supermemory_status": supermemory_status,
+        "supermemory_recall": supermemory,
     }
 
 
@@ -214,6 +230,7 @@ def build_session_handoff_packet(
 
     return {
         "schema": "max-session-handoff-v1",
+        "packet_schema_version": PACKET_SCHEMA_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "trigger_policy": COMPACTION_POLICY["triggers"],
         "tier_1": {
@@ -248,6 +265,8 @@ def write_session_handoff_packet(packet: dict[str, Any], path: Path = HANDOFF_PA
 def read_session_handoff_packet(path: Path = HANDOFF_PATH) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("packet_schema_version") != PACKET_SCHEMA_VERSION:
+            return None
         tier_1 = data.get("tier_1") or {}
         required = {"current_task", "founder_surface_identity", "registry_version", "last_runtime_truth_result"}
         if not required.issubset(tier_1.keys()):

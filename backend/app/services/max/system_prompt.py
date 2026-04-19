@@ -99,6 +99,11 @@ def get_compact_system_prompt(channel: str = "web") -> str:
         handoff_context = render_handoff_for_prompt(limit=900)
     except Exception:
         handoff_context = ""
+    try:
+        from app.services.max.supermemory_recall import render_supermemory_for_prompt
+        supermemory_context = render_supermemory_for_prompt(channel=channel, limit=2)
+    except Exception:
+        supermemory_context = ""
 
     return f"""You are MAX, the primary Command Center brain for the Founder.
 
@@ -113,6 +118,8 @@ Answer ordinary founder chat directly, concisely, and truthfully. Do not describ
 {operating_truth}
 
 {"### Session Handoff Packet\n" + handoff_context if handoff_context else ""}
+
+{"### Supermemory Recall (secondary only)\n" + supermemory_context if supermemory_context else ""}
 
 Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
 """
@@ -163,6 +170,13 @@ def get_system_prompt() -> str:
         handoff_context = render_handoff_for_prompt(limit=1200)
         if handoff_context:
             dynamic_sections += f"\n\n## Session Handoff Packet\n{handoff_context}"
+    except Exception:
+        pass
+    try:
+        from .supermemory_recall import render_supermemory_for_prompt
+        supermemory_context = render_supermemory_for_prompt(channel="web_cc", limit=3)
+        if supermemory_context:
+            dynamic_sections += f"\n\n## Supermemory Recall (secondary only)\n{supermemory_context}"
     except Exception:
         pass
 
