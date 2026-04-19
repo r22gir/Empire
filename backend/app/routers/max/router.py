@@ -33,6 +33,12 @@ from app.services.max.brain.brain_config import (
 )
 from app.services.max.token_tracker import token_tracker
 from app.services.max.desks import AIDeskManager, TaskStatus
+from pathlib import Path as _Path
+
+# ── Chat history persistence ─────────────────────────────────────────────────
+# Must go 4 parents up: router.py → max → routers → app → backend
+_ROUTER_CHATS_DIR = _Path(__file__).parent.parent.parent.parent / "data" / "chats"
+_ROUTER_CHATS_DIR.mkdir(parents=True, exist_ok=True)
 
 try:
     from app.services.max.access_control import access_controller
@@ -596,6 +602,48 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         except Exception as _ums_err:
             logger.warning(f"Unified message store write failed: {_ums_err}")
 
+        # Backend-side chat history save (non-streaming, web/CC only)
+        _nc = request.channel or "web"
+        if _nc not in ("telegram", "phone"):
+            try:
+                import datetime as _dt
+                _nc_user_dir = _ROUTER_CHATS_DIR / "founder"
+                _nc_user_dir.mkdir(exist_ok=True)
+                _nc_chat_id = conv_id[:8]
+                _nc_chat_file = _nc_user_dir / f"{_nc_chat_id}.json"
+                _nc_existing = {}
+                if _nc_chat_file.exists():
+                    try:
+                        _nc_existing = json.loads(_nc_chat_file.read_text())
+                    except Exception:
+                        _nc_existing = {}
+                _nc_msgs = _nc_existing.get("messages", [])
+                _nc_new = [
+                    {"role": "user", "content": request.message,
+                     "timestamp": _dt.datetime.utcnow().isoformat()},
+                    {"role": "assistant", "content": final_content,
+                     "timestamp": _dt.datetime.utcnow().isoformat(),
+                     "model": response.model_used},
+                ]
+                _nc_already = (
+                    _nc_msgs
+                    and _nc_msgs[-1].get("role") == "user"
+                    and _nc_msgs[-1].get("content") == request.message
+                )
+                _nc_all = _nc_msgs if _nc_already else (_nc_msgs + _nc_new)
+                _nc_chat_data = {
+                    "id": _nc_chat_id,
+                    "title": _nc_existing.get("title") or (request.message[:57] + "..." if len(request.message) > 60 else request.message),
+                    "created_at": _nc_existing.get("created_at") or _dt.datetime.utcnow().isoformat(),
+                    "updated_at": _dt.datetime.utcnow().isoformat(),
+                    "pinned": _nc_existing.get("pinned", False),
+                    "preview": (request.message[:120]).strip(),
+                    "messages": _nc_all,
+                }
+                _nc_chat_file.write_text(json.dumps(_nc_chat_data, indent=2, default=str))
+            except Exception as _nc_err:
+                logger.debug(f"[chat] history save failed: {_nc_err}")
+
         # Learning: real-time (every exchange) or batch (every N messages)
         if REALTIME_LEARNING_ENABLED:
             background_tasks.add_task(
@@ -1035,6 +1083,57 @@ async def chat_stream(request: ChatRequest):
                 _log_quality_metric(_qg_result, model_used, request.channel or "web")
             except Exception as _qg_err:
                 logger.debug(f"[stream] Quality gate error: {_qg_err}")
+
+            # ── Backend-side chat history save (web/CC only) ─────────────────────
+            # Write complete user+assistant exchange to JSON file so history is
+            # available even if frontend auto-save is slow or races incorrectly.
+            # Telegram uses its own _append_and_save (separate path).
+            _save_channel = request.channel or "web"
+            if _save_channel not in ("telegram", "phone"):
+                try:
+                    import datetime as _dt
+                    _chat_user_dir = _ROUTER_CHATS_DIR / "founder"
+                    _chat_user_dir.mkdir(exist_ok=True)
+                    _chat_id_short = conv_id[:8]
+                    _chat_file = _chat_user_dir / f"{_chat_id_short}.json"
+                    _existing = {}
+                    if _chat_file.exists():
+                        try:
+                            _existing = json.loads(_chat_file.read_text())
+                        except Exception:
+                            _existing = {}
+                    # Preserve existing messages if this is a multi-turn continuation
+                    _existing_msgs = _existing.get("messages", [])
+                    # Build new messages from this exchange
+                    _new_msgs = [
+                        {"role": "user", "content": request.message,
+                         "timestamp": _dt.datetime.utcnow().isoformat()},
+                        {"role": "assistant", "content": full_response,
+                         "timestamp": _dt.datetime.utcnow().isoformat(),
+                         "model": model_used},
+                    ]
+                    # Deduplicate: if last message in file is same user msg, skip duplicate save
+                    _already_has = (
+                        _existing_msgs
+                        and _existing_msgs[-1].get("role") == "user"
+                        and _existing_msgs[-1].get("content") == request.message
+                    )
+                    if not _already_has:
+                        _all_msgs = _existing_msgs + _new_msgs
+                    else:
+                        _all_msgs = _existing_msgs
+                    _chat_data = {
+                        "id": _chat_id_short,
+                        "title": _existing.get("title") or (request.message[:57] + "..." if len(request.message) > 60 else request.message),
+                        "created_at": _existing.get("created_at") or _dt.datetime.utcnow().isoformat(),
+                        "updated_at": _dt.datetime.utcnow().isoformat(),
+                        "pinned": _existing.get("pinned", False),
+                        "preview": (request.message[:120]).strip(),
+                        "messages": _all_msgs,
+                    }
+                    _chat_file.write_text(json.dumps(_chat_data, indent=2, default=str))
+                except Exception as _save_err:
+                    logger.debug(f"[stream] Chat history save failed: {_save_err}")
 
             _done_data = {'type': 'done', 'model_used': model_used, 'conversation_id': conv_id}
             if _quality_badge:
@@ -1691,11 +1790,19 @@ async def serve_telegram_image(filename: str):
 
 @router.get("/telegram/history")
 async def get_telegram_history(chat_id: Optional[str] = None, limit: int = 50):
-    """Get Telegram conversation history (persisted to disk)."""
+    """Get Telegram conversation history (persisted to disk).
+
+    When chat_id is explicitly provided: returns messages for that chat.
+    When chat_id is omitted (None): returns list of all Telegram chat files.
+    """
     from app.services.max.telegram_bot import _TELEGRAM_CHAT_DIR, _get_history
-    target = chat_id or (telegram_bot.founder_chat_id if telegram_bot.founder_chat_id else None)
-    if not target:
-        # Return list of all chat files
+    from fastapi import Query
+
+    # Explicitly None means "list all chats" — explicit value means "get this chat"
+    # Use default=None for Query param so we can detect explicit vs omitted
+    target = chat_id
+    if target is None:
+        # No chat_id provided — return list of all chat files
         chats = []
         for f in sorted(_TELEGRAM_CHAT_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
             try:
