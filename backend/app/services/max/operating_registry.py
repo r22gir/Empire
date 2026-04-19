@@ -89,7 +89,7 @@ def generate_operating_context(channel: str = "web", compact: bool = False) -> s
             f"- Current prompt channel normalizes to: {prompt_channel}.",
             "- Web/Founder and mobile browser are Web MAX (`web_chat`); Telegram is `telegram`; Email is partial; Phone MAX is not implemented.",
             "- Compact continuity uses recent unified_messages from other channels, but the History UI is still split by surface.",
-            "- Before route/service/payment/email/OpenClaw claims, run a runtime truth check or say it is repo-truth only.",
+            "- Before route/service/payment/email/OpenClaw claims, use callable tool `empire_runtime_truth_check` or say it is repo-truth only.",
             "- Never claim Phone MAX exists, email is fully unified, or a partial/stubbed product is live.",
         ])
 
@@ -115,6 +115,7 @@ def generate_operating_context(channel: str = "web", compact: bool = False) -> s
         "",
         "### Delegation Rules",
         f"- Runtime truth check required for: {', '.join(policy.get('runtime_truth_check_required', []))}",
+        "- Runtime truth callable: `empire_runtime_truth_check` is implemented as inspect-only. It checks backend/frontend status, local/public freshness, current commit, route health, and whether restart looks required. It does not restart services.",
         f"- Regression review required for: {', '.join(policy.get('regression_review_required', []))}",
         f"- Never claim: {', '.join(policy.get('never_claim', []))}",
     ])

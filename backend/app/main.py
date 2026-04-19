@@ -119,8 +119,8 @@ load_router("app.routers.quotes_v2", "/api/v1", ["quotes-v2"])
 load_router("app.routers.pricing", "/api/v1", ["pricing"])
 load_router("app.routers.work_orders", "/api/v1", ["work-orders"])
 load_router("app.routers.lifecycle", "/api/v1", ["lifecycle"])
-# Canonical finance routes must be registered before the older finance-v2
-# compatibility router so dashboard/payments use the invoice ledger source.
+# Canonical finance routes own /api/v1/finance. The older finance-v2
+# compatibility router is isolated under /api/v1/finance-legacy.
 load_router("app.routers.finance", "/api/v1", ["finance"])
 load_router("app.routers.financial", "/api/v1", ["finance-v2"])
 load_router("app.routers.inbox", "/api/v1", ["inbox"])

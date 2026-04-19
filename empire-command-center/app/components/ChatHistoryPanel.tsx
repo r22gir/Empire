@@ -200,7 +200,7 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
     { key: 'all', label: 'ALL', icon: MessageSquare, count: allChannelItems.length },
     { key: 'web', label: 'WEB', icon: MessageSquare, count: webChats.length },
-    { key: 'telegram', label: 'TG', icon: MessageSquare, count: telegramChats.length },
+    { key: 'telegram', label: 'TG ONLY', icon: MessageSquare, count: telegramChats.length },
     { key: 'email', label: 'EMAIL', icon: Mail, count: unreadCount },
   ];
 
@@ -494,6 +494,12 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
             <span style={{ fontSize: 11, color: '#555' }}>{chat.messageCount} messages</span>
           </div>
         ))}
+
+        {tab === 'telegram' && !loading && (
+          <div style={{ padding: '10px 16px', color: '#777', fontSize: 11, borderBottom: '1px solid #1a1a1a' }}>
+            Telegram-only history. Use ALL for unified Web, Telegram, and partial Email ledger history.
+          </div>
+        )}
 
         {tab === 'telegram' && !loading && telegramChats.length === 0 && (
           <div style={{ textAlign: 'center', padding: 40, color: '#555', fontSize: 13 }}>

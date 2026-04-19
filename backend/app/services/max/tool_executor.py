@@ -1553,6 +1553,18 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
     })
 
 
+@tool("empire_runtime_truth_check")
+def _empire_runtime_truth_check(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Inspect local/public runtime freshness for live-state claims."""
+    try:
+        from app.services.max.runtime_truth_check import run_runtime_truth_check
+        public = bool(params.get("public", True))
+        result = run_runtime_truth_check(public=public)
+        return ToolResult(tool="empire_runtime_truth_check", success=True, result=result)
+    except Exception as exc:
+        return ToolResult(tool="empire_runtime_truth_check", success=False, error=str(exc))
+
+
 def _run_async(coro):
     """Run an async coroutine from sync context (works inside running event loop)."""
     import asyncio
@@ -3461,6 +3473,9 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "get_weather", "city": "Los Angeles"}`
 - **get_services_health** — Check which Empire services are running
   `{"tool": "get_services_health"}`
+- **empire_runtime_truth_check** — Inspect-only live runtime freshness check for "is this live?", "website not loading", "why don't I see the fix?", and deployment/restart questions.
+  `{"tool": "empire_runtime_truth_check", "public": true}`
+  Returns backend/frontend status, local/public API commit freshness, route health, restart_required, and stale/broken findings. It does not restart services.
 - **ollama_toggle** — Turn Ollama on or off. When off, MAX is faster. When on, RecoveryForge can classify images.
   To toggle: use shell_execute with `curl -X POST http://localhost:8000/api/v1/system/ollama/toggle`
   To check status: use shell_execute with `curl http://localhost:8000/api/v1/system/ollama/status`

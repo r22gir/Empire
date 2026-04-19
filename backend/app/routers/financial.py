@@ -14,7 +14,9 @@ from app.services.financial_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/finance", tags=["finance-v2"])
+# Legacy financial-service routes are intentionally isolated from the canonical
+# /finance router so dashboard/payments cannot be shadowed by compatibility code.
+router = APIRouter(prefix="/finance-legacy", tags=["finance-v2"])
 
 
 # ── Payments ───────────────────────────────────────────────────

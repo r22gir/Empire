@@ -25,6 +25,7 @@ from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
+from app.services.max.runtime_truth_check import format_runtime_truth_check, should_run_runtime_truth_check
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
     REALTIME_LEARNING_ENABLED,
@@ -150,6 +151,42 @@ def _drawing_missing_response(handoff) -> str:
     if handoff.source_image:
         payload["source_image"] = handoff.source_image
     return f"{handoff.response}\n\nStructured drawing handoff:\n```json\n{json.dumps(payload, indent=2)}\n```"
+
+
+def _runtime_truth_tool_payload() -> dict:
+    return {"tool": "empire_runtime_truth_check", "public": True}
+
+
+def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult, founder: bool) -> str:
+    conv_id = request.conversation_id or str(uuid.uuid4())
+    try:
+        conversation_tracker.add_message(conv_id, "user", request.message)
+        conversation_tracker.add_message(conv_id, "assistant", response_text)
+    except Exception as exc:
+        logger.debug(f"Runtime truth conversation tracking failed: {exc}")
+
+    try:
+        from app.services.max.unified_message_store import unified_store
+        unified_store.add_message(
+            conv_id,
+            request.channel or "web",
+            "user",
+            request.message,
+            metadata={"source": "runtime_truth_check_intent"},
+            founder_verified=founder,
+        )
+        unified_store.add_message(
+            conv_id,
+            request.channel or "web",
+            "assistant",
+            response_text,
+            model="empire-runtime-truth-check",
+            tool_results=[{"tool": result.tool, "success": result.success}],
+            metadata={"source": "runtime_truth_check_result"},
+        )
+    except Exception as exc:
+        logger.warning(f"Runtime truth unified message store write failed: {exc}")
+    return conv_id
 
 
 def _execute_drawing_handoff(handoff):
@@ -345,6 +382,21 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+        result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
+        response_text = (
+            format_runtime_truth_check(result.result or {})
+            if result.success
+            else f"Runtime truth check failed: {result.error}"
+        )
+        _save_runtime_truth_exchange(request, response_text, result, founder)
+        return ChatResponse(
+            response=response_text,
+            model_used="empire-runtime-truth-check",
+            fallback_used=False,
+            tool_results=[result.to_dict()],
+        )
 
     drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
     if drawing_handoff.is_drawing_intent:
@@ -774,6 +826,22 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+        async def runtime_truth_gen():
+            conv_id = request.conversation_id or str(uuid.uuid4())
+            result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
+            yield f"data: {json.dumps({'type': 'tool_result', **result.to_dict()})}\n\n"
+            response_text = (
+                format_runtime_truth_check(result.result or {})
+                if result.success
+                else f"Runtime truth check failed: {result.error}"
+            )
+            _save_runtime_truth_exchange(request, response_text, result, founder)
+            yield f"data: {json.dumps({'type': 'text', 'content': response_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id})}\n\n"
+
+        return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
     if drawing_handoff.is_drawing_intent:
@@ -1829,9 +1897,22 @@ async def get_telegram_history(chat_id: Optional[str] = None, limit: int = 50):
                 })
             except Exception:
                 pass
-        return {"chats": chats}
+        return {
+            "scope": "telegram_only",
+            "canonical_channel": "telegram",
+            "unified_history_route": "/api/v1/chats/memory-bank?channel=all",
+            "note": "This endpoint lists Telegram disk history only. Use the unified history route for All Channels.",
+            "chats": chats,
+        }
     messages = _get_history(str(target))
-    return {"chat_id": str(target), "messages": messages[-limit:], "total": len(messages)}
+    return {
+        "scope": "telegram_only",
+        "canonical_channel": "telegram",
+        "unified_history_route": "/api/v1/chats/memory-bank?channel=all",
+        "chat_id": str(target),
+        "messages": messages[-limit:],
+        "total": len(messages),
+    }
 
 
 class AccessConfirmRequest(BaseModel):

@@ -2,7 +2,7 @@
 Webhook routes for receiving notifications from external services.
 Email (SendGrid inbound), eBay notifications, and Stripe (see payments.py for primary handler).
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 import logging
 import os
 from uuid import uuid4
@@ -186,10 +186,14 @@ async def handle_stripe_webhook(request: Request):
                 headers={"stripe-signature": headers.get("stripe-signature", ""),
                          "content-type": "application/json"},
             )
+            resp.raise_for_status()
             return resp.json()
     except Exception as e:
         logger.warning(f"Stripe webhook forward failed: {e}")
-        return {"status": "received", "message": "Forwarded to main handler"}
+        raise HTTPException(
+            status_code=502,
+            detail="Legacy Stripe webhook forward failed; primary owner is /api/v1/payments/webhook",
+        )
 
 
 @router.post("/telegram-webhook")

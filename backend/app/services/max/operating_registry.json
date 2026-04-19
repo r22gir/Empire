@@ -32,9 +32,9 @@
       "canonical_channel": "telegram",
       "aliases": ["telegram_bot"],
       "routes_services": ["/api/v1/max/chat", "/api/v1/max/telegram/history", "app.services.max.telegram_bot"],
-      "continuity_real_today": "Writes Telegram JSON history and unified_messages. Compact Web prompts can retrieve recent Telegram context; compact Telegram prompts can retrieve recent Web/CC context.",
+      "continuity_real_today": "Writes Telegram JSON history and unified_messages. /api/v1/max/telegram/history is Telegram-only. Use /api/v1/chats/memory-bank?channel=all for unified all-channel history.",
       "cross_device_continuity": "Shares MAX brain and unified_messages with Web. UI history remains separate.",
-      "limitations": ["Telegram history is a separate tab/source.", "Formatting and tool access differ from web."]
+      "limitations": ["Telegram history endpoint is intentionally Telegram-only.", "All Channels is the cross-surface history view.", "Formatting and tool access differ from web."]
     },
     {
       "key": "email",
@@ -86,12 +86,12 @@
       "key": "finance",
       "status": "active_partial",
       "canonical_frontend_path": "Workroom finance/invoices/payment screens",
-      "canonical_backend_routes": ["/api/v1/finance/dashboard", "/api/v1/finance/invoices", "/api/v1/finance/payments", "/api/v1/payments/checkout"],
+      "canonical_backend_routes": ["/api/v1/finance/dashboard", "/api/v1/finance/invoices", "/api/v1/finance/payments", "/api/v1/payments/checkout", "/api/v1/payments/webhook"],
       "max_can_query": true,
       "max_can_act": true,
       "openclaw_delegate": true,
       "founder_visible_ctas_truthful": true,
-      "limitations": ["Duplicate compatibility routes remain for /finance/dashboard and /finance/payments.", "Stripe checkout requires env/provider configuration.", "Do not state payment succeeded without webhook/tool proof."]
+      "limitations": ["Legacy financial-service routes are isolated under /api/v1/finance-legacy.", "Stripe checkout requires env/provider configuration.", "Stripe webhook ownership is /api/v1/payments/webhook; legacy /webhooks/stripe forwards only for compatibility.", "Do not state payment succeeded without webhook/tool proof."]
     },
     {
       "key": "openclaw",
@@ -162,12 +162,12 @@
     {
       "key": "empire-runtime-truth-check",
       "tier": 1,
-      "status": "implemented_policy",
-      "purpose": "Require live route/process checks before current runtime claims.",
+      "status": "implemented_callable",
+      "purpose": "Run live route/process checks before current runtime claims.",
       "when_to_use": "Website down, service health, route availability, deployment freshness, payment/email/OpenClaw status.",
       "inputs_required": ["route or service name", "expected port/path"],
       "expected_outputs": ["HTTP/process status", "freshness proof"],
-      "autonomy_safety_notes": "If not run, label answer repo-truth only."
+      "autonomy_safety_notes": "Callable as `empire_runtime_truth_check`. Inspect-only; does not restart services."
     },
     {
       "key": "empire-max-continuity-audit",
