@@ -532,6 +532,35 @@ class TrackingUpdate(BaseModel):
 
 # ── Source Products ───────────────────────────────────────────────────────────
 
+@router.get("")
+async def relist_manifest():
+    """Return the canonical active RelistApp API surface."""
+    return {
+        "name": "RelistApp",
+        "status": "active_partial",
+        "canonical": True,
+        "scope": "drop_ship_arbitrage",
+        "storage_tables": [
+            "ra_source_products",
+            "ra_listings",
+            "ra_orders",
+            "ra_price_watch",
+            "ra_analytics",
+            "ra_services",
+        ],
+        "active_paths": [
+            "/api/v1/relist/sources",
+            "/api/v1/relist/listings",
+            "/api/v1/relist/orders",
+            "/api/v1/relist/analytics/dashboard",
+            "/api/v1/relist/services",
+            "/api/v1/relist/usage",
+        ],
+        "legacy_path": "/api/v1/relist-legacy",
+        "notes": "Manual/source/listing/order operations are active. Platform account sync and automated marketplace publishing remain partial.",
+    }
+
+
 @router.get("/sources")
 async def list_sources(
     platform: Optional[str] = None,

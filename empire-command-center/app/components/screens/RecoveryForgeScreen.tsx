@@ -53,6 +53,16 @@ const STATUS_FILTERS = [
   { value: 'unreviewed', label: 'Unreviewed' },
 ];
 
+function confidenceLabel(confidence: number | undefined) {
+  if (confidence === undefined || confidence === null) return null;
+  const pct = Math.round(confidence * 100);
+  let level = 'low';
+  let color = '#dc2626';
+  if (confidence >= 0.85) { level = 'high'; color = '#16a34a'; }
+  else if (confidence >= 0.65) { level = 'medium'; color = '#d97706'; }
+  return { pct, level, color };
+}
+
 export default function RecoveryForgeScreen() {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [images, setImages] = useState<RecoveryImage[]>([]);
@@ -193,16 +203,6 @@ export default function RecoveryForgeScreen() {
       return `${model} (Ollama)`;
     }
     return classified_by;
-  };
-
-  const confidenceLabel = (confidence: number | undefined) => {
-    if (confidence === undefined || confidence === null) return null;
-    const pct = Math.round(confidence * 100);
-    let level = 'low';
-    let color = '#dc2626';
-    if (confidence >= 0.85) { level = 'high'; color = '#16a34a'; }
-    else if (confidence >= 0.65) { level = 'medium'; color = '#d97706'; }
-    return { pct, level, color };
   };
 
   return (

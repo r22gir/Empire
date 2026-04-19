@@ -1,4 +1,9 @@
-"""RelistApp API — Simple listing CRUD for cross-platform relisting."""
+"""Legacy RelistApp listing CRUD.
+
+The active RelistApp surface lives in app.routers.relistapp under /relist.
+These endpoints are intentionally namespaced under /relist-legacy so they do
+not masquerade as the canonical drop-ship RelistApp API.
+"""
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -7,7 +12,7 @@ import logging
 
 from app.db.database import get_db, dict_rows, dict_row
 
-router = APIRouter(prefix="/relist", tags=["relist"])
+router = APIRouter(prefix="/relist-legacy", tags=["relist-legacy"])
 log = logging.getLogger("relist")
 
 

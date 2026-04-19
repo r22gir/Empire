@@ -1269,14 +1269,16 @@ function PlansSection() {
                   ))}
                 </div>
                 <button
-                  onClick={() => setTier(t.id)}
+                  disabled
+                  title={t.id === tier ? 'Current plan' : 'Use the upgrade checkout above when available.'}
                   style={{
                     width: '100%', padding: '8px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                    cursor: 'pointer', border: t.id === tier ? 'none' : `1px solid ${t.color}`,
+                    cursor: 'not-allowed', border: t.id === tier ? 'none' : `1px solid ${t.color}`,
                     background: t.id === tier ? t.color : 'transparent', color: t.id === tier ? '#fff' : t.color,
+                    opacity: t.id === tier ? 1 : 0.65,
                   }}
                 >
-                  {t.id === tier ? 'Current Plan' : 'Select Plan'}
+                  {t.id === tier ? 'Current Plan' : 'Checkout required'}
                 </button>
               </div>
             ))}

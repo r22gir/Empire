@@ -47,7 +47,6 @@ import TelegramScreen from './components/screens/TelegramScreen';
 import MemoryBankScreen from './components/screens/MemoryBankScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
-import RelistAppScreen from './components/screens/RelistAppScreen';
 import RelistAppPage from './components/screens/RelistAppPage';
 import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';

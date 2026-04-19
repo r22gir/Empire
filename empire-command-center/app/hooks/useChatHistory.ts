@@ -28,14 +28,15 @@ export function useChatHistory() {
 
   const createConversation = useCallback(async (title?: string) => {
     try {
-      const res = await fetch(API + '/chats', {
+      const res = await fetch(API + '/chats/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title || 'New Chat' }),
+        body: JSON.stringify({ title: title || 'New Chat', messages: [] }),
       });
       if (res.ok) {
+        const data = await res.json();
         await fetchConversations();
-        return (await res.json()).id;
+        return data.chat_id || data.id || null;
       }
     } catch { /* silent */ }
     return null;

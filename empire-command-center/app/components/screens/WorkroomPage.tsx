@@ -1217,33 +1217,11 @@ function StatusBadge({ status }: { status: string }) {
 
 function CreationsSection() {
   const [ideas, setIdeas] = useState<any[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [newIdea, setNewIdea] = useState({ title: '', description: '', category: 'product' });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch(`${API}/ideas/`)
-      .then(r => r.ok ? r.json() : { ideas: [] })
-      .then(data => { setIdeas(data.ideas || data || []); setLoading(false); })
-      .catch(() => setLoading(false));
+    setLoading(false);
   }, []);
-
-  const handleSave = async () => {
-    if (!newIdea.title.trim()) return;
-    try {
-      const res = await fetch(`${API}/ideas/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newIdea),
-      });
-      if (res.ok) {
-        const saved = await res.json();
-        setIdeas(prev => [saved, ...prev]);
-        setNewIdea({ title: '', description: '', category: 'product' });
-        setShowForm(false);
-      }
-    } catch { /* */ }
-  };
 
   const catColors: Record<string, { bg: string; text: string }> = {
     product: { bg: '#fdf4ff', text: '#7c3aed' },
@@ -1266,56 +1244,18 @@ function CreationsSection() {
           </div>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 cursor-pointer hover:brightness-110 transition-all active:scale-[0.97]"
+          disabled
+          title="Ideas storage is not connected yet."
+          className="flex items-center gap-1.5 cursor-not-allowed"
           style={{
             padding: '10px 18px', fontSize: 13, fontWeight: 700, color: '#fff', borderRadius: 12, border: 'none',
-            background: 'linear-gradient(135deg, #7c3aed, #ec4899)',
-            boxShadow: '0 2px 10px rgba(124,58,237,0.3)',
+            background: '#9ca3af',
+            opacity: 0.75,
           }}
         >
-          <Lightbulb size={16} /> New Idea
+          <Lightbulb size={16} /> Storage not connected
         </button>
       </div>
-
-      {/* New Idea Form */}
-      {showForm && (
-        <div className="empire-card mb-5" style={{ borderColor: '#e9d5ff' }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>New Idea</div>
-          <input
-            value={newIdea.title}
-            onChange={e => setNewIdea(f => ({ ...f, title: e.target.value }))}
-            placeholder="Idea title..."
-            className="form-input mb-3"
-            style={{ fontSize: 15, fontWeight: 600 }}
-          />
-          <textarea
-            value={newIdea.description}
-            onChange={e => setNewIdea(f => ({ ...f, description: e.target.value }))}
-            placeholder="Describe your idea..."
-            rows={3}
-            className="form-input mb-3"
-            style={{ resize: 'none' }}
-          />
-          <div className="flex items-center gap-3">
-            <select
-              value={newIdea.category}
-              onChange={e => setNewIdea(f => ({ ...f, category: e.target.value }))}
-              className="form-input"
-              style={{ width: 'auto' }}
-            >
-              <option value="product">Product</option>
-              <option value="feature">Feature</option>
-              <option value="business">Business</option>
-              <option value="design">Design</option>
-              <option value="marketing">Marketing</option>
-            </select>
-            <div className="flex-1" />
-            <button onClick={() => setShowForm(false)} className="cursor-pointer" style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', color: '#777' }}>Cancel</button>
-            <button onClick={handleSave} disabled={!newIdea.title.trim()} className="cursor-pointer disabled:opacity-50" style={{ padding: '8px 16px', fontSize: 12, fontWeight: 700, borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff' }}>Save Idea</button>
-          </div>
-        </div>
-      )}
 
       {/* Ideas list */}
       {!loading && ideas.length > 0 && (
@@ -1337,23 +1277,15 @@ function CreationsSection() {
       )}
 
       {/* Empty */}
-      {!loading && ideas.length === 0 && !showForm && (
+      {!loading && ideas.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16">
           <div className="w-16 h-16 rounded-2xl bg-[#fdf4ff] flex items-center justify-center mb-4">
             <Lightbulb size={32} className="text-[#d8b4fe]" />
           </div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#999', marginBottom: 4 }}>No ideas yet</div>
-          <div style={{ fontSize: 13, color: '#bbb', marginBottom: 16 }}>Capture your innovations and product ideas</div>
-          <button
-            onClick={() => setShowForm(true)}
-            className="cursor-pointer hover:brightness-110 transition-all"
-            style={{
-              padding: '12px 24px', fontSize: 14, fontWeight: 700, color: '#fff', borderRadius: 14, border: 'none',
-              background: 'linear-gradient(135deg, #7c3aed, #ec4899)',
-            }}
-          >
-            Add First Idea
-          </button>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#999', marginBottom: 4 }}>Ideas storage is not connected</div>
+          <div style={{ fontSize: 13, color: '#777', marginBottom: 16, maxWidth: 420, textAlign: 'center' }}>
+            Creations Lab has no active `/ideas` backend route yet. Use MAX or Tasks for idea capture until this module is wired to storage.
+          </div>
         </div>
       )}
 
