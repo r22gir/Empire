@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from app.services.max.openclaw_gate import check_openclaw_gate
 
 logger = logging.getLogger("empire.openclaw_bridge")
 
@@ -79,16 +80,17 @@ Priority: {task.priority}
 @router.get("/health")
 async def openclaw_health():
     """Check if OpenClaw is reachable."""
+    gate = check_openclaw_gate(force=True)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(f"{OPENCLAW_URL}/health")
             if resp.status_code == 200:
-                return {"status": "online", "openclaw_url": OPENCLAW_URL}
-            return {"status": "unhealthy", "code": resp.status_code}
+                return {"status": "online", "openclaw_url": OPENCLAW_URL, "openclaw_gate": gate.to_dict()}
+            return {"status": "unhealthy", "code": resp.status_code, "openclaw_gate": gate.to_dict()}
     except httpx.ConnectError:
-        return {"status": "offline", "openclaw_url": OPENCLAW_URL}
+        return {"status": "offline", "openclaw_url": OPENCLAW_URL, "openclaw_gate": gate.to_dict()}
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        return {"status": "error", "detail": str(e), "openclaw_gate": gate.to_dict()}
 
 
 @router.post("/dispatch", response_model=dict)
@@ -99,6 +101,9 @@ async def dispatch_task(task: TaskRequest):
     """
     task_id = task.task_id or f"oc-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     prompt = _build_prompt(task)
+    gate = check_openclaw_gate()
+    if not gate.allowed:
+        raise HTTPException(status_code=503, detail={"message": gate.founder_message, "openclaw_gate": gate.to_dict()})
 
     # Log the dispatch
     task_record = {
@@ -163,6 +168,9 @@ async def dispatch_task_async(task: TaskRequest):
     Returns immediately with task_id for polling.
     """
     task_id = task.task_id or f"oc-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    gate = check_openclaw_gate()
+    if not gate.allowed:
+        raise HTTPException(status_code=503, detail={"message": gate.founder_message, "openclaw_gate": gate.to_dict()})
 
     task_record = {
         "task_id": task_id,
@@ -292,6 +300,14 @@ async def dispatch_desk_task_to_openclaw(
         {"status": "failed", "error": "..."}
     """
     task_id = f"oc-desk-{desk_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    gate = check_openclaw_gate()
+    if not gate.allowed:
+        return {
+            "status": "blocked",
+            "error": gate.founder_message,
+            "task_id": task_id,
+            "openclaw_gate": gate.to_dict(),
+        }
 
     # Build prompt with desk context
     prompt = f"""Execute the following task for the {desk_id} desk:

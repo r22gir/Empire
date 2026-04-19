@@ -11,6 +11,7 @@ import json
 import logging
 
 from app.db.database import get_db, dict_row, dict_rows
+from app.services.max.openclaw_gate import check_openclaw_gate, openclaw_gate_metadata
 
 router = APIRouter(prefix="/api/v1/openclaw/tasks", tags=["openclaw-tasks"])
 log = logging.getLogger("openclaw_tasks")
@@ -46,17 +47,37 @@ class TaskUpdate(BaseModel):
 @router.post("")
 async def create_task(req: TaskCreate):
     """Create a new task in the queue."""
+    gate = check_openclaw_gate()
+    if gate.state in {"degraded", "unknown"}:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": gate.founder_message,
+                "openclaw_gate": gate.to_dict(),
+            },
+        )
+
+    gate_meta = openclaw_gate_metadata(gate)
     with get_db() as db:
         cursor = db.execute(
-            """INSERT INTO openclaw_tasks (title, description, desk, priority, source, assigned_to, max_retries, parent_task_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO openclaw_tasks (title, description, desk, priority, source, assigned_to, max_retries, parent_task_id, error)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (req.title, req.description, req.desk, req.priority, req.source,
-             req.assigned_to, req.max_retries, req.parent_task_id),
+             req.assigned_to, req.max_retries, req.parent_task_id,
+             None if gate.allowed else gate.founder_message),
         )
         db.commit()
         task_id = cursor.lastrowid
     log.info(f"Task #{task_id} created: {req.title} [desk={req.desk}, priority={req.priority}]")
-    return {"id": task_id, "title": req.title, "status": "queued", "desk": req.desk}
+    status_message = gate.founder_message if not gate.allowed else "OpenClaw healthy - delegating task now."
+    return {
+        "id": task_id,
+        "title": req.title,
+        "status": "queued",
+        "desk": req.desk,
+        "message": status_message,
+        "openclaw_gate": {**gate.to_dict(), **gate_meta},
+    }
 
 
 @router.get("")

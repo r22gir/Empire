@@ -340,8 +340,11 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     # Also queue to OpenClaw for autonomous execution
     openclaw_queued = False
+    openclaw_gate = None
     try:
         import httpx as _oc_httpx
+        from app.services.max.openclaw_gate import check_openclaw_gate
+        openclaw_gate = check_openclaw_gate().to_dict()
         _oc_resp = _oc_httpx.post(
             "http://localhost:8000/api/v1/openclaw/tasks",
             json={
@@ -370,6 +373,7 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
     return ToolResult(tool="create_task", success=True, result={
         "task_id": task_id, "title": title, "priority": priority,
         "desk": task_desk, "status": "todo", "openclaw_queued": openclaw_queued,
+        "openclaw_gate": openclaw_gate,
         "auto_executing": auto_executing,
     })
 
@@ -3229,6 +3233,7 @@ def _shell_execute(params: dict, desk: Optional[str] = None) -> ToolResult:
 def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Send a task to OpenClaw for autonomous execution."""
     import httpx as _httpx
+    from app.services.max.openclaw_gate import check_openclaw_gate
 
     title = params.get("title", "").strip()
     description = params.get("description", "").strip()
@@ -3239,6 +3244,14 @@ def _dispatch_to_openclaw(params: dict, desk: Optional[str] = None) -> ToolResul
     skills = params.get("skills_needed", [])
     wait = params.get("wait_for_result", True)
     endpoint = "dispatch" if wait else "dispatch-async"
+    gate = check_openclaw_gate()
+    if not gate.allowed:
+        return ToolResult(
+            tool="dispatch_to_openclaw",
+            success=False,
+            error=gate.founder_message,
+            result={"openclaw_gate": gate.to_dict()},
+        )
 
     try:
         resp = _httpx.post(
@@ -3275,6 +3288,7 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
     it up automatically.
     """
     import httpx as _httpx
+    from app.services.max.openclaw_gate import check_openclaw_gate
 
     title = params.get("title", "").strip()
     description = params.get("description", "").strip()
@@ -3287,6 +3301,14 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
     priority = params.get("priority", 5)
     if isinstance(priority, str):
         priority = {"critical": 1, "high": 3, "normal": 5, "low": 7}.get(priority, 5)
+    gate = check_openclaw_gate()
+    if gate.state in {"degraded", "unknown"}:
+        return ToolResult(
+            tool="queue_openclaw_task",
+            success=False,
+            error=gate.founder_message,
+            result={"openclaw_gate": gate.to_dict()},
+        )
 
     try:
         resp = _httpx.post(
@@ -3307,7 +3329,8 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
                 "title": title,
                 "desk": task_desk,
                 "status": "queued",
-                "message": f"Task #{data.get('id')} queued for OpenClaw. Worker will pick it up within 30 seconds.",
+                "message": data.get("message") or f"Task #{data.get('id')} queued for OpenClaw. Worker will pick it up within 30 seconds.",
+                "openclaw_gate": data.get("openclaw_gate") or gate.to_dict(),
             })
         return ToolResult(tool="queue_openclaw_task", success=False,
                          error=f"Queue API returned {resp.status_code}: {resp.text[:200]}")

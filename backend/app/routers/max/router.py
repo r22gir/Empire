@@ -1671,6 +1671,7 @@ async def max_status():
     from app.services.max.operating_registry import get_registry_load_info, load_operating_registry
     from app.services.max.startup_health import read_startup_health_record
     from app.services.max.runtime_truth_check import _git_commit
+    from app.services.max.openclaw_gate import check_openclaw_gate
 
     registry = load_operating_registry()
     skills = registry.get("skills", [])
@@ -1694,8 +1695,16 @@ async def max_status():
         ],
         "active_skill_hooks": callable_hooks,
         "startup_health": read_startup_health_record(),
+        "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
     }
+
+
+@router.get("/evaluation/scores")
+async def max_evaluation_scores(limit: int = 10):
+    """Recent Evaluation Loop v1 scores for MAX self-reporting."""
+    from app.services.max.evaluation_loop_v1 import get_recent_scores
+    return {"scores": get_recent_scores(limit=limit), "limit": limit}
 
 
 @router.get("/orchestration/status")

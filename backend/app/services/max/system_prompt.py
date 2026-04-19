@@ -94,6 +94,11 @@ def get_compact_system_prompt(channel: str = "web") -> str:
         operating_truth = generate_operating_context(channel=channel, compact=True)
     except Exception:
         operating_truth = ""
+    try:
+        from app.services.max.continuity_compaction import render_handoff_for_prompt
+        handoff_context = render_handoff_for_prompt(limit=900)
+    except Exception:
+        handoff_context = ""
 
     return f"""You are MAX, the primary Command Center brain for the Founder.
 
@@ -106,6 +111,8 @@ Answer ordinary founder chat directly, concisely, and truthfully. Do not describ
 {cross_section}
 
 {operating_truth}
+
+{"### Session Handoff Packet\n" + handoff_context if handoff_context else ""}
 
 Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
 """
@@ -151,6 +158,13 @@ def get_system_prompt() -> str:
         dynamic_sections += f"\n\n## Persistent Memory\n{memory}"
     if session:
         dynamic_sections += f"\n\n## Today's Session Context\n{session}"
+    try:
+        from .continuity_compaction import render_handoff_for_prompt
+        handoff_context = render_handoff_for_prompt(limit=1200)
+        if handoff_context:
+            dynamic_sections += f"\n\n## Session Handoff Packet\n{handoff_context}"
+    except Exception:
+        pass
 
     founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
     workroom_email = os.getenv("WORKROOM_EMAIL", "workroom@empirebox.store")

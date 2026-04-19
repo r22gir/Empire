@@ -14,6 +14,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 import httpx
+from app.services.max.openclaw_gate import check_openclaw_gate
 
 log = logging.getLogger("openclaw_worker")
 
@@ -163,6 +164,12 @@ async def _process_task(task: dict):
     """Process a single task: dispatch to OpenClaw, store result, notify."""
     task_id = task["id"]
     log.info(f"Processing task #{task_id}: {task['title']} [desk={task['desk']}, priority={task['priority']}]")
+
+    gate = check_openclaw_gate()
+    if not gate.allowed:
+        _update_task(task_id, error=gate.founder_message)
+        log.warning("OpenClaw gate blocked task #%s: %s", task_id, gate.founder_message)
+        return
 
     # Mark as running
     _update_task(task_id, status="running", started_at=datetime.now().isoformat())

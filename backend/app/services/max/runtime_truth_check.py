@@ -110,6 +110,12 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         startup_health = read_startup_health_record()
     except Exception as exc:
         registry_info = {"last_error": str(exc)}
+    try:
+        from app.services.max.openclaw_gate import check_openclaw_gate
+        openclaw_gate_result = check_openclaw_gate()
+        openclaw_gate = openclaw_gate_result.to_dict()
+    except Exception as exc:
+        openclaw_gate = {"state": "unknown", "allowed": False, "reason": str(exc)}
     backend_service = _service_status("empire-backend.service")
     frontend_service = _service_status("empire-portal.service")
 
@@ -155,6 +161,7 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "current_commit": commit,
         "registry": registry_info,
         "startup_health": startup_health,
+        "openclaw_gate": openclaw_gate,
         "backend_status": {
             "service": backend_service,
             "port_8000_open": _port_open("127.0.0.1", 8000),
@@ -189,6 +196,7 @@ def format_runtime_truth_check(result: dict[str, Any]) -> str:
     frontend = result.get("frontend_status", {})
     local = result.get("local_freshness", {})
     public = result.get("public_freshness", {})
+    openclaw_gate = result.get("openclaw_gate") or {}
     stale = result.get("stale_or_broken") or []
 
     public_hash = None
@@ -206,6 +214,7 @@ def format_runtime_truth_check(result: dict[str, Any]) -> str:
         f"- Mode: {result.get('mode')} ({result.get('repair_capability')})",
         f"- Current repo commit: {commit.get('hash')} ({commit.get('message')})",
         f"- Registry: version={(result.get('registry') or {}).get('registry_version')} loaded_at={(result.get('registry') or {}).get('loaded_at')} last_error={(result.get('registry') or {}).get('last_error')}",
+        f"- OpenClaw gate: state={openclaw_gate.get('state')} allowed={openclaw_gate.get('allowed')} reason={openclaw_gate.get('reason')}",
         f"- Backend: service_active={backend.get('service', {}).get('active')} port_8000_open={backend.get('port_8000_open')} local_root={backend.get('local_root', {}).get('status_code')}",
         f"- Frontend: service_active={frontend.get('service', {}).get('active')} port_3005_open={frontend.get('port_3005_open')} local_root={frontend.get('local_root', {}).get('status_code')}",
         f"- Local API commit: {local_hash} matches_current={local.get('api_matches_current_commit')}",
