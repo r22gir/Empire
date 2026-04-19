@@ -16,6 +16,7 @@
     {"capability_key": "stripe_payments", "display_name": "Process Stripe payments and send reminders", "enabled": true, "channel_scope": ["web_cc"], "notes": "PaymentIntent, payment links, webhook handling, auto-reminders."},
     {"capability_key": "financial_dashboard", "display_name": "Answer financial queries and show dashboards", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Revenue, P&L, AR aging, category drill-down, job profitability."},
     {"capability_key": "production_board", "display_name": "Show and manage production board", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Kanban with urgency colors, advance stages, overdue alerts."},
-    {"capability_key": "daily_ops", "display_name": "Show daily action items and quick stats", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Prioritized action list, pipeline stats, production overview."}
+    {"capability_key": "daily_ops", "display_name": "Show daily action items and quick stats", "enabled": true, "channel_scope": ["web_cc", "telegram"], "notes": "Prioritized action list, pipeline stats, production overview."},
+    {"capability_key": "presentation", "display_name": "Generate structured topic reports and presentations", "enabled": true, "channel_scope": ["web_cc", "web"], "notes": "Topic-based research report via web search + AI. Produces structured JSON: title, sections, charts (ONLY when real data exists), sources, images. Renders to PDF. NOT slides, avatar narration, TTS, email/Telegram delivery. Empire topics and general topics both supported. Charts only from verified web data — no fabricated numbers."}
   ]
 }

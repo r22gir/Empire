@@ -281,6 +281,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "image_analysis": "understand_image",
             "look_at_image": "understand_image",
             "what_is_in_image": "understand_image",
+            "create_presentation": "present",
+            "generate_presentation": "present",
+            "make_presentation": "present",
+            "presentation": "present",
         }
         if tool_name not in TOOL_REGISTRY and tool_name in TOOL_CORRECTIONS:
             corrected = TOOL_CORRECTIONS[tool_name]
@@ -3043,7 +3047,19 @@ def _render_presentation_pdf(data: dict) -> str:
 
 @tool("present")
 def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Generate a presentation on a topic, render as PDF, and send via Telegram."""
+    """Generate a presentation on a topic and render as PDF.
+
+    Returns a ToolResult with:
+    - title, sections, charts, sources, model_used
+    - pdf_path (saved PDF file path)
+    - caption (for Telegram delivery)
+
+    Note: Telegram and email delivery are NOT automatic from this tool.
+    MAX should inform the user of the PDF path or use /present/telegram endpoint separately.
+    """
+    import time as _time_mod
+    _start = _time_mod.time()
+
     topic = params.get("topic", "").strip()
     if not topic:
         return ToolResult(tool="present", success=False, error="Topic is required")
@@ -3063,8 +3079,24 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
     except Exception as e:
         return ToolResult(tool="present", success=False, error=f"PDF rendering failed: {e}")
 
-    # Return pdf_path — the Telegram handler detects it and sends via send_document.
-    # We do NOT send directly here to avoid sync/async issues and duplicate delivery.
+    # Log to evaluation service
+    try:
+        from app.services.max.evaluation_service import evaluation_service
+        evaluation_service.log_response(
+            response_id=f"present-{str(uuid.uuid4())[:8]}",
+            channel="chat",
+            conversation_id=None,
+            message=topic,
+            model_used=data.get("model_used", "unknown"),
+            tools_used=["present"],
+            tool_results=[{"tool": "present", "success": True}],
+            latency_ms=int((_time_mod.time() - _start) * 1000),
+            response_length=len(data.get("title", "")),
+            fallback_used=False,
+        )
+    except Exception:
+        pass  # Non-critical — evaluation logging must never break the tool
+
     section_count = len(data.get("sections", []))
     caption = (
         f"\U0001f4ca <b>{data.get('title', topic)}</b>\n"
@@ -3077,10 +3109,12 @@ def _present(params: dict, desk: Optional[str] = None) -> ToolResult:
         "subtitle": data.get("subtitle", ""),
         "sections": section_count,
         "charts": len(data.get("charts", [])),
+        "images": len(data.get("images", [])),
         "sources": len(data.get("sources", [])),
         "model_used": data.get("model_used", "unknown"),
         "pdf_path": pdf_path,
         "caption": caption,
+        "_note": "Telegram/email delivery requires separate API call to /present/telegram",
     })
 
 

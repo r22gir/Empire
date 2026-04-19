@@ -200,6 +200,7 @@ class EvaluationService:
         "drawing": ["draw", "drawing", "render", "blueprint", "window", "bench"],
         "telegram": ["telegram", "send to", "message on telegram"],
         "web": ["web", "website", "url", "link"],
+        "presentation": ["presentation", "present", "generate a presentation", "create a presentation", "make a presentation", "briefing", "research document", "report on", "topic report"],
         "chat": [],  # default
     }
 
