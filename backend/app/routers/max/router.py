@@ -392,8 +392,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Build brain-enriched system prompt (non-desk requests only)
         enriched_prompt = None
         if not request.desk:
+            # Normalize channel for cross-channel context injection
+            _ch = request.channel
+            if _ch in {"web", "web_cc", "dashboard"}:
+                _ch_normalized = "web_chat"
+            else:
+                _ch_normalized = _ch or "web"
             if not request.image_filename and is_ordinary_text_request(request.message):
-                enriched_prompt = get_compact_system_prompt()
+                enriched_prompt = get_compact_system_prompt(channel=_ch_normalized)
             else:
                 try:
                     enriched_prompt = await get_system_prompt_with_brain(
@@ -820,8 +826,14 @@ async def chat_stream(request: ChatRequest):
     # Build brain-enriched system prompt before streaming (non-desk only)
     enriched_prompt = None
     if not request.desk:
+        # Normalize channel for cross-channel context injection
+        _stream_ch = request.channel
+        if _stream_ch in {"web", "web_cc", "dashboard"}:
+            _stream_ch_normalized = "web_chat"
+        else:
+            _stream_ch_normalized = _stream_ch or "web"
         if not request.image_filename and is_ordinary_text_request(request.message):
-            enriched_prompt = get_compact_system_prompt()
+            enriched_prompt = get_compact_system_prompt(channel=_stream_ch_normalized)
         else:
             try:
                 enriched_prompt = await get_system_prompt_with_brain(

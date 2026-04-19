@@ -61,16 +61,44 @@ def is_ordinary_text_request(message: str) -> bool:
     return not any(pattern in msg for pattern in full_prompt_patterns)
 
 
-def get_compact_system_prompt() -> str:
-    """Small MAX prompt for ordinary text chat when provider token budget is tight."""
+def get_compact_system_prompt(channel: str = "web") -> str:
+    """Small MAX prompt for ordinary text chat when provider token budget is tight.
+
+    channel: current surface name (web, telegram, email) for cross-channel injection.
+    """
     founder_email = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
     openclaw_url = os.getenv("OPENCLAW_URL", "http://localhost:7878")
     today = datetime.now().strftime("%B %d, %Y")
+
+    # Cross-channel context: what was said on other surfaces recently
+    cross_ctx_lines = []
+    try:
+        from app.services.max.unified_message_store import unified_store
+        ctx = unified_store.get_cross_channel_context(exclude_channel=channel, limit_per_channel=3, hours=4)
+        if ctx:
+            cross_ctx_lines.append("\n### Other Surface Activity (carry forward)")
+            _ch_labels = {"telegram": "Telegram", "web_chat": "Web/CC", "web": "Web", "email": "Email"}
+            for ch, msgs in ctx.items():
+                ch_label = _ch_labels.get(ch, ch.title())
+                cross_ctx_lines.append(f"**{ch_label}** — recent messages:")
+                for m in msgs[-3:]:
+                    role = m.get("role", "?")
+                    content = (m.get("content", "") or "")[:120]
+                    cross_ctx_lines.append(f"  {role}: {content}")
+    except Exception:
+        pass
+
+    cross_section = "\n".join(cross_ctx_lines) if cross_ctx_lines else ""
+
     return f"""You are MAX, the primary Command Center brain for the Founder.
 
 Hierarchy: Founder is above everything. MAX is the primary brain/orchestrator. Code Mode and AI Desks are subordinate to MAX. OpenClaw is the execution/delegation layer beneath MAX and the desks.
 
+One brain, multiple channels: Telegram MAX (mobile), Web MAX (browser), Email MAX (max@empirebox.store) — all share the same memory and context. A task or context from one surface is known on all others.
+
 Answer ordinary founder chat directly, concisely, and truthfully. Do not describe yourself as Codex, Claude, Atlas, or OpenClaw. Do not claim an action was performed unless a tool result proves it. If the request requires a tool, database lookup, code change, desk delegation, OpenClaw execution, quote/invoice/job/customer lookup, or current external fact, say that you need to check it rather than guessing.
+
+{cross_section}
 
 Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
 """
