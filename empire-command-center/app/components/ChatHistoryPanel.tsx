@@ -22,6 +22,18 @@ interface EmailEntry {
   unread: boolean;
 }
 
+interface AllChannelEntry {
+  id: string;
+  channel: string;
+  direction: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  summary: string;
+  timestamp: string;
+  threadId?: string;
+}
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -29,10 +41,11 @@ interface Props {
   onNewChat: () => void;
 }
 
-type Tab = 'web' | 'telegram' | 'email';
+type Tab = 'all' | 'web' | 'telegram' | 'email';
 
 export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat }: Props) {
-  const [tab, setTab] = useState<Tab>('web');
+  const [tab, setTab] = useState<Tab>('all');
+  const [allChannelItems, setAllChannelItems] = useState<AllChannelEntry[]>([]);
   const [webChats, setWebChats] = useState<ChatEntry[]>([]);
   const [telegramChats, setTelegramChats] = useState<ChatEntry[]>([]);
   const [emails, setEmails] = useState<EmailEntry[]>([]);
@@ -54,6 +67,26 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
           pinned: c.pinned || false,
           channel: 'web',
         })).sort((a: ChatEntry, b: ChatEntry) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const fetchAllChannels = useCallback(async () => {
+    try {
+      const res = await fetch(API + '/chats/memory-bank?channel=all&limit=60');
+      if (res.ok) {
+        const data = await res.json();
+        setAllChannelItems((data.messages || []).map((m: any) => ({
+          id: m.id,
+          channel: m.channel || 'system',
+          direction: m.direction || '',
+          sender: m.sender || '',
+          recipient: m.recipient || '',
+          subject: m.subject || '',
+          summary: m.summary || m.message_text || m.body || '',
+          timestamp: m.created_at || '',
+          threadId: m.thread_id,
+        })));
       }
     } catch { /* silent */ }
   }, []);
@@ -108,10 +141,11 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
     if (!open) return;
     setLoading(true);
     // Load each tab independently — don't let one hang block others
-    fetchWebChats().finally(() => setLoading(false));
+    fetchAllChannels().finally(() => setLoading(false));
+    fetchWebChats();
     fetchTelegramChats();
     fetchEmails();
-  }, [open, fetchWebChats, fetchTelegramChats, fetchEmails]);
+  }, [open, fetchAllChannels, fetchWebChats, fetchTelegramChats, fetchEmails]);
 
   const handleSearch = useCallback(async () => {
     if (!search.trim()) { fetchWebChats(); return; }
@@ -164,10 +198,18 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
   if (!open) return null;
 
   const TABS: { key: Tab; label: string; icon: any; count?: number }[] = [
+    { key: 'all', label: 'ALL', icon: MessageSquare, count: allChannelItems.length },
     { key: 'web', label: 'WEB', icon: MessageSquare, count: webChats.length },
     { key: 'telegram', label: 'TG', icon: MessageSquare, count: telegramChats.length },
     { key: 'email', label: 'EMAIL', icon: Mail, count: unreadCount },
   ];
+
+  const channelColor = (channel: string) => {
+    if (channel === 'web_chat') return '#60a5fa';
+    if (channel === 'telegram') return '#38bdf8';
+    if (channel === 'email') return '#f59e0b';
+    return '#999';
+  };
 
   return (
     <div style={{
@@ -283,6 +325,86 @@ export default function ChatHistoryPanel({ open, onClose, onLoadChat, onNewChat 
         {loading && (
           <div style={{ textAlign: 'center', padding: 20, color: '#666', fontSize: 13 }}>
             Loading...
+          </div>
+        )}
+
+        {/* All channels */}
+        {tab === 'all' && !loading && allChannelItems.map(item => (
+          <div
+            key={item.id}
+            style={{
+              padding: '12px 16px',
+              borderBottom: '1px solid #1a1a1a',
+              minHeight: 44,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5, gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  color: channelColor(item.channel),
+                  border: `1px solid ${channelColor(item.channel)}`,
+                  borderRadius: 6,
+                  padding: '2px 6px',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {item.channel}
+                </span>
+                {item.channel === 'email' && (
+                  <span style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    color: '#111',
+                    background: '#f59e0b',
+                    borderRadius: 6,
+                    padding: '2px 5px',
+                    textTransform: 'uppercase',
+                  }}>
+                    partial
+                  </span>
+                )}
+                <span style={{
+                  fontSize: 11,
+                  color: '#777',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {item.direction}
+                </span>
+              </div>
+              <span style={{ fontSize: 11, color: '#666', flexShrink: 0 }}>{formatDate(item.timestamp)}</span>
+            </div>
+            <div style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#eee',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              marginBottom: 3,
+            }}>
+              {item.subject || item.summary || 'Untitled message'}
+            </div>
+            <div style={{
+              fontSize: 12,
+              color: '#888',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {item.summary}
+            </div>
+            <div style={{ fontSize: 10, color: '#555', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {item.sender} {' -> '} {item.recipient}
+            </div>
+          </div>
+        ))}
+
+        {tab === 'all' && !loading && allChannelItems.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 40, color: '#555', fontSize: 13 }}>
+            No unified history yet
           </div>
         )}
 

@@ -43,9 +43,9 @@
       "canonical_channel": "email",
       "aliases": ["gmail", "sendgrid_inbound"],
       "routes_services": ["/api/v1/max/gmail/inbox", "/api/v1/emails/send", "/webhooks/email/inbound"],
-      "continuity_real_today": "Gmail inbox read and inbound webhook paths exist. SendGrid inbound webhook stores posted emails to unified_messages.",
+      "continuity_real_today": "Gmail inbox read, inbound webhook writes, and confirmed outbound sends can write to unified_messages.",
       "cross_device_continuity": "Partial only.",
-      "limitations": ["Outbound email is not consistently written to unified_messages.", "Reply threading is not independently proven end-to-end.", "Email is not a full chat-history surface."]
+      "limitations": ["Reply threading is not independently proven end-to-end.", "Email is still partial and not a full chat-history surface."]
     },
     {
       "key": "phone",
@@ -113,7 +113,7 @@
       "max_can_act": true,
       "openclaw_delegate": false,
       "founder_visible_ctas_truthful": false,
-      "limitations": ["Outbound email ledger write is not fully unified.", "Thread continuity is partial."]
+      "limitations": ["Successful outbound sends write audit rows to unified_messages.", "Thread continuity is partial."]
     },
     {
       "key": "workroom_creations",
@@ -232,12 +232,12 @@
     {
       "key": "empire-email-ledger-write",
       "tier": 2,
-      "status": "planned",
+      "status": "implemented",
       "purpose": "Unify successful outbound email into unified_messages.",
       "when_to_use": "Next email continuity implementation block.",
       "inputs_required": ["send_email result", "recipient", "subject", "body"],
       "expected_outputs": ["outbound ledger row"],
-      "autonomy_safety_notes": "Not live yet; do not claim outbound email is fully unified."
+      "autonomy_safety_notes": "Successful sends are ledgered, but do not claim email is a fully unified first-class MAX surface."
     },
     {
       "key": "unified-surface-identity",

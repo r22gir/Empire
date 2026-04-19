@@ -6,6 +6,7 @@ import sqlite3
 import os
 import json
 import logging
+import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -108,6 +109,106 @@ class UnifiedMessageStore:
         )
         conn.commit()
         conn.close()
+
+    def source_message_exists(self, channel: str, source_message_id: str) -> bool:
+        if not source_message_id:
+            return False
+        normalized_channel = self._normalize_channel(channel)
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT 1 FROM unified_messages WHERE channel = ? AND source_message_id = ? LIMIT 1",
+            (normalized_channel, source_message_id),
+        ).fetchone()
+        conn.close()
+        return row is not None
+
+    def get_registry_channel(self, surface_key: str, fallback: str) -> str:
+        """Best-effort registry channel lookup that never blocks writes."""
+        try:
+            from app.services.max.operating_registry import get_surface_truth
+            surface = get_surface_truth(surface_key)
+            channel = (surface or {}).get("canonical_channel")
+            return channel or fallback
+        except Exception:
+            return fallback
+
+    def build_outbound_email_source_id(
+        self,
+        recipient: str,
+        subject: str,
+        body_html: str,
+        cc: str | None = None,
+        attachments: list[str] | None = None,
+    ) -> str:
+        """Stable idempotency key for retry-safe outbound email ledger writes."""
+        payload = {
+            "recipient": recipient or "",
+            "cc": cc or "",
+            "subject": subject or "",
+            "body_sha256": hashlib.sha256((body_html or "").encode("utf-8")).hexdigest(),
+            "attachments": sorted([str(a) for a in (attachments or [])]),
+        }
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+        return f"outbound-email:{digest}"
+
+    def add_outbound_email(
+        self,
+        recipient: str,
+        subject: str,
+        body_html: str,
+        sender: str = "MAX",
+        cc: str | None = None,
+        attachments: list[str] | None = None,
+        conversation_id: str | None = None,
+        thread_id: str | None = None,
+        source_message_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        """Write a successful outbound email to the unified ledger once.
+
+        Returns True when a row was inserted and False when the message already
+        existed. Raises only for actual DB write failures; callers should catch
+        and log so email sending remains unaffected.
+        """
+        channel = self.get_registry_channel("email", "email")
+        source_id = source_message_id or self.build_outbound_email_source_id(
+            recipient=recipient,
+            subject=subject,
+            body_html=body_html,
+            cc=cc,
+            attachments=attachments,
+        )
+        if self.source_message_exists(channel, source_id):
+            return False
+
+        conv_id = conversation_id or thread_id or f"email-outbound-{source_id.rsplit(':', 1)[-1][:12]}"
+        meta = {
+            "source": "outbound_email_send",
+            "idempotency_key": source_id,
+            "cc": cc,
+            "identifier_fallback": None if conversation_id or thread_id else "conversation_id_from_outbound_email_hash",
+        }
+        if metadata:
+            meta.update(metadata)
+
+        self.add_message(
+            conversation_id=conv_id,
+            channel=channel,
+            role="assistant",
+            content=body_html or subject,
+            direction="outbound",
+            sender=sender,
+            recipient=recipient,
+            thread_id=thread_id or conv_id,
+            source_message_id=source_id,
+            subject=subject,
+            attachment_refs=attachments or [],
+            summary=subject,
+            founder_verified=True,
+            linked_refs=[{"type": "email_outbound", "id": source_id}],
+            metadata=meta,
+        )
+        return True
 
     def _normalize_channel(self, channel: str | None) -> str:
         if channel in {"web", "web_cc", "dashboard"}:

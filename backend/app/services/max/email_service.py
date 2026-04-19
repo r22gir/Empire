@@ -67,10 +67,35 @@ class EmailService:
                 "Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD env vars"
             )
 
-        if self.sendgrid_key:
-            return self._send_sendgrid(to, subject, body_html, attachments, cc)
+        sent = self._send_sendgrid(to, subject, body_html, attachments, cc) if self.sendgrid_key else self._send_smtp(to, subject, body_html, attachments, cc)
+        if sent:
+            self._write_outbound_ledger(to, subject, body_html, attachments, cc)
+        return sent
 
-        return self._send_smtp(to, subject, body_html, attachments, cc)
+    def _write_outbound_ledger(
+        self,
+        to: str,
+        subject: str,
+        body_html: str,
+        attachments: list[str] | None = None,
+        cc: str | None = None,
+    ) -> None:
+        """Best-effort continuity ledger write after confirmed successful send."""
+        try:
+            from app.services.max.unified_message_store import unified_store
+            inserted = unified_store.add_outbound_email(
+                recipient=to,
+                subject=subject,
+                body_html=body_html,
+                sender=self.sendgrid_from if self.sendgrid_key else (self.user or self.sendgrid_from),
+                cc=cc,
+                attachments=attachments or [],
+                metadata={"service": "app.services.max.email_service.EmailService"},
+            )
+            if not inserted:
+                logger.info("Outbound email ledger entry already exists for %s: %s", to, subject)
+        except Exception as exc:
+            logger.warning("Outbound email sent but unified ledger write failed: %s", exc)
 
     def _send_sendgrid(
         self,

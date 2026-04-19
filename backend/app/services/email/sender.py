@@ -24,6 +24,25 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 
 
+def _write_outbound_ledger(to: str, subject: str, html_body: str, service: str) -> None:
+    """Best-effort continuity ledger write after confirmed successful send."""
+    try:
+        from app.services.max.unified_message_store import unified_store
+        sender = os.getenv("SENDGRID_FROM_EMAIL", "") or SENDGRID_FROM_EMAIL or SMTP_FROM or "MAX"
+        inserted = unified_store.add_outbound_email(
+            recipient=to,
+            subject=subject,
+            body_html=html_body,
+            sender=sender,
+            attachments=[],
+            metadata={"service": service},
+        )
+        if not inserted:
+            logger.info("Outbound email ledger entry already exists for %s: %s", to, subject)
+    except Exception as exc:
+        logger.warning("Outbound email sent but unified ledger write failed: %s", exc)
+
+
 def _sendgrid_configured() -> bool:
     return bool(os.getenv("SENDGRID_API_KEY", "") or SENDGRID_API_KEY)
 
@@ -126,10 +145,16 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
     """
     # Re-check env vars at call time (modules may load before .env is sourced)
     if _sendgrid_configured():
-        return await _send_via_sendgrid(to, subject, html_body)
+        sent = await _send_via_sendgrid(to, subject, html_body)
+        if sent:
+            _write_outbound_ledger(to, subject, html_body, "app.services.email.sender.send_email/sendgrid")
+        return sent
 
     if _smtp_configured():
-        return await _send_via_smtp(to, subject, html_body)
+        sent = await _send_via_smtp(to, subject, html_body)
+        if sent:
+            _write_outbound_ledger(to, subject, html_body, "app.services.email.sender.send_email/smtp")
+        return sent
 
     logger.warning(
         "Email not configured — SENDGRID_API_KEY=%s, SMTP_HOST=%s. "

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.services.max.capability_loader import generate_capability_prompt
 from app.services.max.email_service import EmailService
+from app.services.max.unified_message_store import UnifiedMessageStore
 
 
 class FakeResponse:
@@ -10,6 +11,8 @@ class FakeResponse:
 
 
 def test_max_email_service_uses_sendgrid_http_without_sdk(monkeypatch, tmp_path):
+    store = UnifiedMessageStore(tmp_path / "unified_messages.db")
+    monkeypatch.setattr("app.services.max.unified_message_store.unified_store", store)
     sent = {}
 
     def fake_post(url, headers, json, timeout):
