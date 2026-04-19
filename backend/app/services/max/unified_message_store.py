@@ -245,7 +245,11 @@ class UnifiedMessageStore:
         aliases = self._channel_aliases(channel)
         conn = self._get_conn()
         rows = conn.execute(
-            f"SELECT * FROM unified_messages WHERE channel IN ({','.join('?' for _ in aliases)}) AND created_at > ? ORDER BY created_at DESC LIMIT ?",
+            f"""SELECT * FROM unified_messages
+                WHERE channel IN ({','.join('?' for _ in aliases)})
+                  AND datetime(created_at) > datetime(?)
+                ORDER BY datetime(created_at) DESC, id DESC
+                LIMIT ?""",
             (*aliases, cutoff, limit)
         ).fetchall()
         conn.close()
@@ -254,9 +258,12 @@ class UnifiedMessageStore:
     def get_cross_channel_context(self, exclude_channel: str = None, limit_per_channel: int = 4, hours: int = 2) -> dict[str, list[dict]]:
         """Get recent messages from ALL channels for cross-channel context injection."""
         cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        excluded_channels = set(self._channel_aliases(exclude_channel)) if exclude_channel else set()
         conn = self._get_conn()
         rows = conn.execute(
-            "SELECT * FROM unified_messages WHERE created_at > ? ORDER BY created_at DESC",
+            """SELECT * FROM unified_messages
+               WHERE datetime(created_at) > datetime(?)
+               ORDER BY datetime(created_at) DESC, id DESC""",
             (cutoff,)
         ).fetchall()
         conn.close()
@@ -264,7 +271,7 @@ class UnifiedMessageStore:
         by_channel = {}
         for r in rows:
             ch = r["channel"]
-            if ch == exclude_channel:
+            if ch in excluded_channels:
                 continue
             if ch not in by_channel:
                 by_channel[ch] = []
