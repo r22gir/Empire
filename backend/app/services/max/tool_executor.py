@@ -1569,6 +1569,21 @@ def _empire_runtime_truth_check(params: dict, desk: Optional[str] = None) -> Too
         return ToolResult(tool="empire_runtime_truth_check", success=False, error=str(exc))
 
 
+@tool("empire_max_continuity_audit")
+def _empire_max_continuity_audit(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Inspect current MAX continuity handoff, surface identity, and task state."""
+    try:
+        from app.services.max.continuity_compaction import audit_continuity_state
+        channel = params.get("channel") or params.get("surface") or "web"
+        return ToolResult(
+            tool="empire_max_continuity_audit",
+            success=True,
+            result=audit_continuity_state(channel=channel),
+        )
+    except Exception as exc:
+        return ToolResult(tool="empire_max_continuity_audit", success=False, error=str(exc))
+
+
 def _run_async(coro):
     """Run an async coroutine from sync context (works inside running event loop)."""
     import asyncio
@@ -3499,6 +3514,9 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **empire_runtime_truth_check** — Inspect-only live runtime freshness check for "is this live?", "website not loading", "why don't I see the fix?", and deployment/restart questions.
   `{"tool": "empire_runtime_truth_check", "public": true}`
   Returns backend/frontend status, local/public API commit freshness, route health, restart_required, and stale/broken findings. It does not restart services.
+- **empire_max_continuity_audit** — Inspect current MAX continuity handoff, surface identity, latest score, and active delegated task state.
+  `{"tool": "empire_max_continuity_audit", "channel": "web"}`
+  Use for "is MAX current on this device?", "what is the latest handoff state?", and "what task was active last?"
 - **ollama_toggle** — Turn Ollama on or off. When off, MAX is faster. When on, RecoveryForge can classify images.
   To toggle: use shell_execute with `curl -X POST http://localhost:8000/api/v1/system/ollama/toggle`
   To check status: use shell_execute with `curl http://localhost:8000/api/v1/system/ollama/status`

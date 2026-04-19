@@ -13,8 +13,10 @@ import httpx
 
 
 GATE_TTL_SECONDS = 20
+WORKER_HEARTBEAT_FRESH_SECONDS = 90
 OPENCLAW_URL = os.getenv("OPENCLAW_URL", "http://localhost:7878").rstrip("/")
 DB_PATH = Path.home() / "empire-repo" / "backend" / "data" / "empire.db"
+HEARTBEAT_PATH = Path.home() / "empire-repo" / "backend" / "data" / "max" / "openclaw_worker_heartbeat.json"
 
 GATE_MESSAGES = {
     "healthy": "OpenClaw healthy - delegating task now.",
@@ -39,6 +41,7 @@ class OpenClawGateResult:
     queue_ready: bool | None = None
     queue_stats: dict[str, Any] | None = None
     recent_task_viability: dict[str, Any] | None = None
+    worker_heartbeat: dict[str, Any] | None = None
     founder_message: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -69,6 +72,51 @@ def _queue_snapshot(db_path: Path = DB_PATH) -> tuple[bool, dict[str, Any], dict
         return False, {"error": str(exc)}, {"error": str(exc)}
 
 
+def write_openclaw_worker_heartbeat(
+    *,
+    status: str = "polling",
+    current_task_id: int | None = None,
+    path: Path = HEARTBEAT_PATH,
+) -> dict[str, Any]:
+    heartbeat = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "freshness_window_seconds": WORKER_HEARTBEAT_FRESH_SECONDS,
+        "status": status,
+        "current_task_id": current_task_id,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(__import__("json").dumps(heartbeat, indent=2, sort_keys=True), encoding="utf-8")
+    return heartbeat
+
+
+def read_openclaw_worker_heartbeat(path: Path = HEARTBEAT_PATH) -> dict[str, Any]:
+    try:
+        import json
+        heartbeat = json.loads(path.read_text(encoding="utf-8"))
+        checked = datetime.fromisoformat(str(heartbeat["checked_at"]).replace("Z", "+00:00"))
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - checked).total_seconds()
+        heartbeat["age_seconds"] = round(age, 3)
+        heartbeat["fresh"] = age <= WORKER_HEARTBEAT_FRESH_SECONDS
+        heartbeat["state"] = "fresh" if heartbeat["fresh"] else "stale"
+        return heartbeat
+    except FileNotFoundError:
+        return {
+            "state": "unknown",
+            "fresh": False,
+            "reason": "worker heartbeat missing",
+            "freshness_window_seconds": WORKER_HEARTBEAT_FRESH_SECONDS,
+        }
+    except Exception as exc:
+        return {
+            "state": "unknown",
+            "fresh": False,
+            "reason": str(exc),
+            "freshness_window_seconds": WORKER_HEARTBEAT_FRESH_SECONDS,
+        }
+
+
 def _build_result(
     state: str,
     reason: str,
@@ -76,6 +124,7 @@ def _build_result(
     queue_ready: bool | None,
     queue_stats: dict[str, Any] | None,
     recent_task_viability: dict[str, Any] | None,
+    worker_heartbeat: dict[str, Any] | None,
     health_endpoint: str,
     cache_age_seconds: float = 0.0,
 ) -> OpenClawGateResult:
@@ -91,6 +140,7 @@ def _build_result(
         queue_ready=queue_ready,
         queue_stats=queue_stats,
         recent_task_viability=recent_task_viability,
+        worker_heartbeat=worker_heartbeat,
         founder_message=_message_for(state, reason),
     )
 
@@ -111,6 +161,7 @@ def check_openclaw_gate(force: bool = False, timeout: float = 2.0) -> OpenClawGa
 
     health_endpoint = f"{OPENCLAW_URL}/health"
     queue_ready, queue_stats, recent_viability = _queue_snapshot()
+    worker_heartbeat = read_openclaw_worker_heartbeat()
     state = "unknown"
     reason = "health check not completed"
     status_code = None
@@ -124,9 +175,15 @@ def check_openclaw_gate(force: bool = False, timeout: float = 2.0) -> OpenClawGa
         elif not queue_ready:
             state = "degraded"
             reason = f"queue not ready: {queue_stats.get('error', 'unknown')}"
+        elif worker_heartbeat.get("state") == "stale":
+            state = "degraded"
+            reason = f"worker heartbeat stale ({worker_heartbeat.get('age_seconds')}s old)"
+        elif worker_heartbeat.get("state") == "unknown":
+            state = "unknown"
+            reason = worker_heartbeat.get("reason") or "worker heartbeat unknown"
         else:
             state = "healthy"
-            reason = "health endpoint and local queue ready"
+            reason = "health endpoint, local queue, and worker heartbeat ready"
     except httpx.ConnectError:
         state = "unavailable"
         reason = "connection refused"
@@ -144,6 +201,7 @@ def check_openclaw_gate(force: bool = False, timeout: float = 2.0) -> OpenClawGa
         queue_ready=queue_ready,
         queue_stats=queue_stats,
         recent_task_viability=recent_viability,
+        worker_heartbeat=worker_heartbeat,
         health_endpoint=health_endpoint,
     )
     _cache.update({"checked_at_monotonic": now, "result": result})

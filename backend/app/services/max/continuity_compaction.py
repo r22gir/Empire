@@ -49,6 +49,151 @@ def _summarize(value: Any, limit: int = 700) -> Any:
     return text[:limit]
 
 
+def should_handle_continuity_command(message: str) -> bool:
+    msg = (message or "").strip().lower()
+    return any(
+        phrase in msg
+        for phrase in {
+            "compact now",
+            "save state",
+            "handoff this session",
+            "what were we doing",
+            "what were we doing?",
+        }
+    )
+
+
+def should_run_continuity_audit(message: str) -> bool:
+    msg = (message or "").strip().lower()
+    return any(
+        phrase in msg
+        for phrase in {
+            "is max current on this device",
+            "is max updated on this device",
+            "latest handoff state",
+            "what task was active last",
+            "what continuity packet is loaded",
+            "continuity audit",
+        }
+    )
+
+
+def _git_commit() -> str:
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    except Exception:
+        return ""
+
+
+def _active_task_state() -> dict[str, Any]:
+    db_path = Path.home() / "empire-repo" / "backend" / "data" / "empire.db"
+    try:
+        import sqlite3
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            openclaw = conn.execute(
+                """SELECT id, title, desk, status, priority, created_at, error
+                   FROM openclaw_tasks
+                   WHERE status IN ('queued', 'running', 'paused', 'failed')
+                   ORDER BY created_at DESC
+                   LIMIT 5"""
+            ).fetchall()
+            tasks = conn.execute(
+                """SELECT id, title, desk, status, priority, created_at
+                   FROM tasks
+                   WHERE status IN ('todo', 'in_progress')
+                   ORDER BY created_at DESC
+                   LIMIT 5"""
+            ).fetchall()
+        return {
+            "openclaw_tasks": [dict(row) for row in openclaw],
+            "max_tasks": [dict(row) for row in tasks],
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def _latest_score() -> dict[str, Any] | None:
+    try:
+        from app.services.max.evaluation_loop_v1 import get_recent_scores
+        scores = get_recent_scores(limit=1)
+        return scores[0] if scores else None
+    except Exception:
+        return None
+
+
+def _runtime_truth() -> dict[str, Any]:
+    try:
+        from app.services.max.runtime_truth_check import run_runtime_truth_check
+        return run_runtime_truth_check(public=True)
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+def create_founder_handoff(
+    *,
+    message: str,
+    channel: str = "web",
+    history: Any = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Refresh a founder-visible session handoff packet from current runtime truth."""
+    path = path or HANDOFF_PATH
+    runtime_truth = _runtime_truth()
+
+    active_state = _active_task_state()
+    latest_score = _latest_score()
+    packet = build_session_handoff_packet(
+        current_task="Founder-requested MAX session continuity handoff",
+        channel=channel,
+        last_runtime_truth_result={
+            "commit": (runtime_truth.get("current_commit") or {}).get("hash") or _git_commit(),
+            "restart_required": runtime_truth.get("restart_required"),
+            "openclaw_gate": runtime_truth.get("openclaw_gate"),
+            "runtime_error": runtime_truth.get("error"),
+        },
+        product_statuses={
+            "max": "continuity handoff refreshed by founder command",
+            "openclaw": (runtime_truth.get("openclaw_gate") or {}).get("state"),
+        },
+        known_limitations=[
+            "External Supermemory is not wired; this packet is local repo/runtime continuity.",
+            "Legacy history endpoints still coexist beside All Channels.",
+        ],
+        delegated_task_state=active_state,
+        last_founder_intent=message,
+        recent_session_history=history or [],
+        last_evaluation_score=latest_score,
+        active_skills=["empire_runtime_truth_check", "empire_max_continuity_audit"],
+    )
+    write_session_handoff_packet(packet, path)
+    return {
+        "packet": packet,
+        "path": str(path),
+        "runtime_truth": runtime_truth,
+        "latest_score": latest_score,
+        "active_task_state": active_state,
+    }
+
+
+def audit_continuity_state(channel: str = "web") -> dict[str, Any]:
+    packet = read_session_handoff_packet()
+    restored = restore_session_handoff()
+    registry = get_registry_load_info()
+    surface = normalize_surface(channel)
+    return {
+        "callable": "empire_max_continuity_audit",
+        "surface": surface,
+        "registry_version": registry.get("registry_version"),
+        "handoff_loaded": bool(packet),
+        "handoff": restored,
+        "latest_score": _latest_score(),
+        "active_task_state": _active_task_state(),
+        "supermemory_status": "deferred_not_authoritative",
+    }
+
+
 def build_session_handoff_packet(
     *,
     current_task: str,

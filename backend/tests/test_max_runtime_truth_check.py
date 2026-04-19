@@ -59,6 +59,30 @@ def test_runtime_truth_tool_is_callable(monkeypatch):
     assert "Runtime truth check completed" in format_runtime_truth_check(result.result)
 
 
+def test_continuity_audit_tool_is_callable():
+    result = execute_tool({"tool": "empire_max_continuity_audit", "channel": "mobile_browser"}, founder=True)
+
+    assert result.success is True
+    assert result.result["callable"] == "empire_max_continuity_audit"
+    assert result.result["surface"]["canonical_channel"] == "web_chat"
+    assert "registry_version" in result.result
+    assert result.result["supermemory_status"] == "deferred_not_authoritative"
+
+
+def test_founder_continuity_audit_prompt_routes_to_callable():
+    res = client.post(
+        "/api/v1/max/chat",
+        json={"message": "is MAX current on this device?", "channel": "mobile_browser"},
+    )
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["model_used"] == "empire-max-continuity-audit"
+    assert data["metadata"]["skill_used"] == "empire_max_continuity_audit"
+    assert "Continuity audit completed" in data["response"]
+    assert "web_chat" in data["response"]
+
+
 def test_founder_prompt_auto_routes_to_runtime_truth_hook(monkeypatch):
     def fake_execute_tool(tool_call, desk=None, access_context=None, founder=False):
         assert tool_call == {"tool": "empire_runtime_truth_check", "public": True}
@@ -93,3 +117,29 @@ def test_founder_prompt_auto_routes_to_runtime_truth_hook(monkeypatch):
     assert data["metadata"]["registry_version"]
     assert data["metadata"]["surface"] == "Founder/Web MAX"
     assert data["metadata"]["skill_used"] == "empire_runtime_truth_check"
+
+
+def test_founder_compaction_command_routes_to_handoff_writer(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.services.max.continuity_compaction.HANDOFF_PATH", tmp_path / "handoff.json")
+    monkeypatch.setattr(
+        "app.services.max.continuity_compaction._runtime_truth",
+        lambda: {
+            "current_commit": {"hash": "handoff123"},
+            "restart_required": False,
+            "openclaw_gate": {"state": "healthy"},
+        },
+    )
+    monkeypatch.setattr(
+        "app.services.max.continuity_compaction._active_task_state",
+        lambda: {"openclaw_tasks": [], "max_tasks": [{"id": "t1"}]},
+    )
+    monkeypatch.setattr("app.services.max.continuity_compaction._latest_score", lambda: {"overall_score": 0.98})
+
+    res = client.post("/api/v1/max/chat", json={"message": "save state", "channel": "web"})
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["model_used"] == "session-handoff"
+    assert "Session handoff refreshed" in data["response"]
+    assert "handoff123" in data["response"]
+    assert data["metadata"]["skill_used"] == "session_handoff"

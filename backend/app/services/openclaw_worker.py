@@ -14,7 +14,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 import httpx
-from app.services.max.openclaw_gate import check_openclaw_gate
+from app.services.max.openclaw_gate import check_openclaw_gate, write_openclaw_worker_heartbeat
 
 log = logging.getLogger("openclaw_worker")
 
@@ -164,6 +164,7 @@ async def _process_task(task: dict):
     """Process a single task: dispatch to OpenClaw, store result, notify."""
     task_id = task["id"]
     log.info(f"Processing task #{task_id}: {task['title']} [desk={task['desk']}, priority={task['priority']}]")
+    write_openclaw_worker_heartbeat(status="processing", current_task_id=task_id)
 
     gate = check_openclaw_gate()
     if not gate.allowed:
@@ -464,6 +465,7 @@ async def openclaw_worker_loop():
     """Main worker loop — polls queue every 30 seconds, processes one task at a time."""
     global _tasks_completed_since_summary
     log.info("OpenClaw worker loop started — polling every %ds", POLL_INTERVAL)
+    write_openclaw_worker_heartbeat(status="starting")
 
     # Brief startup delay
     await asyncio.sleep(10)
@@ -472,6 +474,7 @@ async def openclaw_worker_loop():
 
     while True:
         try:
+            write_openclaw_worker_heartbeat(status="polling")
             # Clean up zombies
             _cleanup_zombies()
 

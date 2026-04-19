@@ -394,6 +394,80 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
+    try:
+        from app.services.max.continuity_compaction import (
+            audit_continuity_state,
+            create_founder_handoff,
+            should_run_continuity_audit,
+            should_handle_continuity_command,
+        )
+        if not request.desk and not request.image_filename and should_handle_continuity_command(request.message):
+            handoff = await asyncio.to_thread(
+                create_founder_handoff,
+                message=request.message,
+                channel=request.channel or "web",
+                history=request.history,
+            )
+            packet = handoff["packet"]
+            tier_1 = packet.get("tier_1", {})
+            runtime = tier_1.get("last_runtime_truth_result") or {}
+            score = handoff.get("latest_score") or {}
+            active = handoff.get("active_task_state") or {}
+            openclaw_count = len(active.get("openclaw_tasks") or [])
+            max_task_count = len(active.get("max_tasks") or [])
+            response_text = (
+                "Session handoff refreshed.\n"
+                f"- Packet: {handoff['path']}\n"
+                f"- Registry: {tier_1.get('registry_version')}\n"
+                f"- Surface: {(tier_1.get('founder_surface_identity') or {}).get('canonical_channel')}\n"
+                f"- Runtime commit: {runtime.get('commit')}\n"
+                f"- OpenClaw gate: {((runtime.get('openclaw_gate') or {}).get('state'))}\n"
+                f"- Latest evaluation score: {score.get('overall_score')}\n"
+                f"- Active task state: {openclaw_count} OpenClaw / {max_task_count} MAX tasks tracked."
+            )
+            metadata = _response_metadata(request.channel, skill_used="session_handoff")
+            return ChatResponse(
+                response=response_text,
+                model_used="session-handoff",
+                fallback_used=False,
+                tool_results=[{"tool": "session_handoff", "success": True, "result": {"path": handoff["path"]}}],
+                metadata=metadata,
+            )
+        if not request.desk and not request.image_filename and should_run_continuity_audit(request.message):
+            audit = await asyncio.to_thread(audit_continuity_state, channel=request.channel or "web")
+            handoff = audit.get("handoff") or {}
+            tier_1 = handoff.get("tier_1") or {}
+            score = audit.get("latest_score") or {}
+            active = audit.get("active_task_state") or {}
+            response_text = (
+                "Continuity audit completed.\n"
+                f"- Surface: {(audit.get('surface') or {}).get('canonical_channel')}\n"
+                f"- Registry: {audit.get('registry_version')}\n"
+                f"- Handoff loaded: {audit.get('handoff_loaded')}\n"
+                f"- Current task: {tier_1.get('current_task')}\n"
+                f"- Last runtime commit: {((tier_1.get('last_runtime_truth_result') or {}).get('commit'))}\n"
+                f"- Latest evaluation score: {score.get('overall_score')}\n"
+                f"- Active OpenClaw tasks tracked: {len(active.get('openclaw_tasks') or [])}\n"
+                f"- Supermemory: {audit.get('supermemory_status')}."
+            )
+            metadata = _response_metadata(request.channel, skill_used="empire_max_continuity_audit")
+            return ChatResponse(
+                response=response_text,
+                model_used="empire-max-continuity-audit",
+                fallback_used=False,
+                tool_results=[{"tool": "empire_max_continuity_audit", "success": True, "result": audit}],
+                metadata=metadata,
+            )
+    except Exception as exc:
+        metadata = _response_metadata(request.channel, skill_used="session_handoff")
+        return ChatResponse(
+            response=f"Session handoff refresh failed: {exc}",
+            model_used="session-handoff",
+            fallback_used=False,
+            tool_results=[{"tool": "session_handoff", "success": False, "error": str(exc)}],
+            metadata=metadata,
+        )
+
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
         response_text = (

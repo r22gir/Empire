@@ -4,6 +4,9 @@ from app.services.max.continuity_compaction import (
     read_session_handoff_packet,
     restore_session_handoff,
     write_session_handoff_packet,
+    should_handle_continuity_command,
+    create_founder_handoff,
+    audit_continuity_state,
 )
 
 
@@ -33,3 +36,38 @@ def test_session_handoff_round_trip_preserves_tier_1(tmp_path):
     assert restored["tier_1"]["registry_version"]
     assert restored["tier_1"]["last_runtime_truth_result"]["commit"] == "abc1234"
     assert restored["last_evaluation_score"]["overall_score"] == 0.8
+
+
+def test_founder_compaction_command_refreshes_packet(monkeypatch, tmp_path):
+    path = tmp_path / "session_handoff.json"
+    monkeypatch.setattr(
+        "app.services.max.continuity_compaction._runtime_truth",
+        lambda public=True: {
+            "current_commit": {"hash": "fresh123"},
+            "restart_required": False,
+            "openclaw_gate": {"state": "healthy"},
+        },
+    )
+    monkeypatch.setattr(
+        "app.services.max.continuity_compaction._active_task_state",
+        lambda: {"openclaw_tasks": [{"id": 1}], "max_tasks": []},
+    )
+    monkeypatch.setattr(
+        "app.services.max.continuity_compaction._latest_score",
+        lambda: {"overall_score": 0.98},
+    )
+
+    assert should_handle_continuity_command("compact now")
+    result = create_founder_handoff(
+        message="compact now",
+        channel="mobile_browser",
+        history=["prior step"],
+        path=path,
+    )
+    restored = audit_continuity_state(channel="mobile_browser")
+
+    assert result["packet"]["tier_1"]["last_runtime_truth_result"]["commit"] == "fresh123"
+    assert result["packet"]["tier_1"]["founder_surface_identity"]["canonical_channel"] == "web_chat"
+    assert result["packet"]["last_evaluation_score"]["overall_score"] == 0.98
+    assert path.exists()
+    assert restored["surface"]["canonical_channel"] == "web_chat"

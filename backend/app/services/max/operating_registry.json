@@ -173,12 +173,12 @@
     {
       "key": "empire-max-continuity-audit",
       "tier": 1,
-      "status": "implemented_policy",
+      "status": "implemented_callable",
       "purpose": "Audit MAX continuity across Web, Telegram, email, and reserved phone references.",
       "when_to_use": "Founder says MAX is stale, not updated, or different across devices.",
       "inputs_required": ["current channel", "claimed stale surface"],
       "expected_outputs": ["what shares context", "what remains split", "next smallest fix"],
-      "autonomy_safety_notes": "Mobile browser is Web MAX unless code proves a dedicated phone surface."
+      "autonomy_safety_notes": "Callable as `empire_max_continuity_audit`. Mobile browser is Web MAX unless code proves a dedicated phone surface."
     },
     {
       "key": "empire-regression-review",

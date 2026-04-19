@@ -24,6 +24,7 @@ def test_openclaw_gate_healthy_and_cached(monkeypatch):
 
     monkeypatch.setattr(openclaw_gate.httpx, "get", fake_get)
     monkeypatch.setattr(openclaw_gate, "_queue_snapshot", lambda: (True, {"queued": 1, "total": 1}, {"total": 1}))
+    monkeypatch.setattr(openclaw_gate, "read_openclaw_worker_heartbeat", lambda: {"state": "fresh", "fresh": True})
 
     first = check_openclaw_gate(force=True)
     second = check_openclaw_gate()
@@ -38,6 +39,7 @@ def test_openclaw_gate_healthy_and_cached(monkeypatch):
 def test_openclaw_gate_degraded_on_503(monkeypatch):
     monkeypatch.setattr(openclaw_gate.httpx, "get", lambda *args, **kwargs: _Resp(503, "down"))
     monkeypatch.setattr(openclaw_gate, "_queue_snapshot", lambda: (True, {"total": 0}, {"total": 0}))
+    monkeypatch.setattr(openclaw_gate, "read_openclaw_worker_heartbeat", lambda: {"state": "fresh", "fresh": True})
 
     result = check_openclaw_gate(force=True)
 
@@ -52,6 +54,7 @@ def test_openclaw_gate_unknown_on_timeout(monkeypatch):
 
     monkeypatch.setattr(openclaw_gate.httpx, "get", timeout)
     monkeypatch.setattr(openclaw_gate, "_queue_snapshot", lambda: (True, {"total": 0}, {"total": 0}))
+    monkeypatch.setattr(openclaw_gate, "read_openclaw_worker_heartbeat", lambda: {"state": "fresh", "fresh": True})
 
     result = check_openclaw_gate(force=True)
 
@@ -66,12 +69,46 @@ def test_openclaw_gate_unavailable_on_connect_error(monkeypatch):
 
     monkeypatch.setattr(openclaw_gate.httpx, "get", connect_error)
     monkeypatch.setattr(openclaw_gate, "_queue_snapshot", lambda: (True, {"total": 0}, {"total": 0}))
+    monkeypatch.setattr(openclaw_gate, "read_openclaw_worker_heartbeat", lambda: {"state": "fresh", "fresh": True})
 
     result = check_openclaw_gate(force=True)
 
     assert result.state == "unavailable"
     assert result.allowed is False
     assert "task queued locally" in result.founder_message
+
+
+def test_openclaw_gate_degraded_when_worker_stale(monkeypatch):
+    monkeypatch.setattr(openclaw_gate.httpx, "get", lambda *args, **kwargs: _Resp(200))
+    monkeypatch.setattr(openclaw_gate, "_queue_snapshot", lambda: (True, {"total": 0}, {"total": 0}))
+    monkeypatch.setattr(
+        openclaw_gate,
+        "read_openclaw_worker_heartbeat",
+        lambda: {"state": "stale", "fresh": False, "age_seconds": 999},
+    )
+
+    result = check_openclaw_gate(force=True)
+
+    assert result.state == "degraded"
+    assert result.allowed is False
+    assert "worker heartbeat stale" in result.reason
+    assert "delegation blocked" in result.founder_message
+
+
+def test_openclaw_gate_unknown_when_worker_heartbeat_missing(monkeypatch):
+    monkeypatch.setattr(openclaw_gate.httpx, "get", lambda *args, **kwargs: _Resp(200))
+    monkeypatch.setattr(openclaw_gate, "_queue_snapshot", lambda: (True, {"total": 0}, {"total": 0}))
+    monkeypatch.setattr(
+        openclaw_gate,
+        "read_openclaw_worker_heartbeat",
+        lambda: {"state": "unknown", "fresh": False, "reason": "worker heartbeat missing"},
+    )
+
+    result = check_openclaw_gate(force=True)
+
+    assert result.state == "unknown"
+    assert result.allowed is False
+    assert "worker heartbeat missing" in result.reason
 
 
 def test_dispatch_tool_does_not_silently_delegate_when_gate_fails(monkeypatch):
