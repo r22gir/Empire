@@ -401,13 +401,28 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             if result.success
             else f"Runtime truth check failed: {result.error}"
         )
-        _save_runtime_truth_exchange(request, response_text, result, founder)
+        conv_id = _save_runtime_truth_exchange(request, response_text, result, founder)
+        metadata = _response_metadata(request.channel, skill_used="empire_runtime_truth_check")
+        await asyncio.to_thread(
+            evaluation_service.log_response,
+            response_id=_response_id,
+            channel=request.channel or "web",
+            conversation_id=conv_id,
+            message=request.message,
+            model_used="empire-runtime-truth-check",
+            tools_used=["empire_runtime_truth_check"],
+            tool_results=[{"tool": result.tool, "success": result.success}],
+            latency_ms=int((_time_mod.time() - _chat_start) * 1000),
+            response_length=len(response_text),
+            fallback_used=False,
+            metadata_envelope=metadata,
+        )
         return ChatResponse(
             response=response_text,
             model_used="empire-runtime-truth-check",
             fallback_used=False,
             tool_results=[result.to_dict()],
-            metadata=_response_metadata(request.channel, skill_used="empire_runtime_truth_check"),
+            metadata=metadata,
         )
 
     drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
