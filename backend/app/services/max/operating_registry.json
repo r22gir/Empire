@@ -1,0 +1,333 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-04-19",
+  "source_of_truth": "repo_and_runtime_verified",
+  "surfaces": [
+    {
+      "key": "founder_web",
+      "name": "Founder/Web MAX",
+      "status": "active",
+      "canonical_channel": "web_chat",
+      "aliases": ["web", "web_cc", "dashboard", "command_center"],
+      "routes_services": ["/api/v1/max/chat", "/api/v1/max/chat/stream", "/api/v1/chats/list", "/api/v1/chats/save", "/api/v1/chats/memory-bank"],
+      "continuity_real_today": "Writes JSON web chat history plus unified_messages. Compact prompts retrieve recent other-channel context. Memory bank can show unified messages.",
+      "cross_device_continuity": "Mobile browser access is Web MAX and uses the same web_chat channel identity. Browser sessions still have separate frontend state until saved/loaded through backend history.",
+      "limitations": ["History UI remains split by surface tabs.", "Not a single merged conversation thread.", "Must not call mobile browser Phone MAX."]
+    },
+    {
+      "key": "web_browser_other_device",
+      "name": "Web MAX from another browser/device",
+      "status": "active",
+      "canonical_channel": "web_chat",
+      "aliases": ["mobile_browser", "studio_browser"],
+      "routes_services": ["/api/v1/max/chat", "/api/v1/max/chat/stream"],
+      "continuity_real_today": "Shares backend MAX brain, memories, web_chat identity, and saved web history once the backend persists messages.",
+      "cross_device_continuity": "Supported as Web MAX, not as Phone MAX.",
+      "limitations": ["Unsaved local browser state is not automatically shared.", "History is backend-backed only after messages are saved."]
+    },
+    {
+      "key": "telegram",
+      "name": "Telegram MAX",
+      "status": "active",
+      "canonical_channel": "telegram",
+      "aliases": ["telegram_bot"],
+      "routes_services": ["/api/v1/max/chat", "/api/v1/max/telegram/history", "app.services.max.telegram_bot"],
+      "continuity_real_today": "Writes Telegram JSON history and unified_messages. Compact Web prompts can retrieve recent Telegram context; compact Telegram prompts can retrieve recent Web/CC context.",
+      "cross_device_continuity": "Shares MAX brain and unified_messages with Web. UI history remains separate.",
+      "limitations": ["Telegram history is a separate tab/source.", "Formatting and tool access differ from web."]
+    },
+    {
+      "key": "email",
+      "name": "Email MAX",
+      "status": "partial",
+      "canonical_channel": "email",
+      "aliases": ["gmail", "sendgrid_inbound"],
+      "routes_services": ["/api/v1/max/gmail/inbox", "/api/v1/emails/send", "/webhooks/email/inbound"],
+      "continuity_real_today": "Gmail inbox read and inbound webhook paths exist. SendGrid inbound webhook stores posted emails to unified_messages.",
+      "cross_device_continuity": "Partial only.",
+      "limitations": ["Outbound email is not consistently written to unified_messages.", "Reply threading is not independently proven end-to-end.", "Email is not a full chat-history surface."]
+    },
+    {
+      "key": "phone",
+      "name": "Phone MAX",
+      "status": "dead",
+      "canonical_channel": null,
+      "aliases": ["phone"],
+      "routes_services": [],
+      "continuity_real_today": "No dedicated Phone MAX implementation exists.",
+      "cross_device_continuity": "Use Telegram MAX or mobile browser Web MAX instead.",
+      "limitations": ["Never claim Phone MAX exists.", "The string phone may appear as a reserved/exclusion value only."]
+    }
+  ],
+  "ecosystem_products": [
+    {
+      "key": "max",
+      "status": "active_partial",
+      "canonical_frontend_path": "Command Center chat screen",
+      "canonical_backend_routes": ["/api/v1/max/chat", "/api/v1/max/chat/stream", "/api/v1/chats/memory-bank"],
+      "max_can_query": true,
+      "max_can_act": true,
+      "openclaw_delegate": true,
+      "founder_visible_ctas_truthful": true,
+      "limitations": ["Cross-channel continuity is prompt/context based, not a single merged UI thread.", "Email continuity remains partial."]
+    },
+    {
+      "key": "relistapp",
+      "status": "active_partial",
+      "canonical_frontend_path": "RelistAppPage",
+      "canonical_backend_routes": ["/api/v1/relist", "/api/v1/relist/sources", "/api/v1/relist/listings", "/api/v1/relist/orders", "/api/v1/relist/services", "/api/v1/relist/usage"],
+      "max_can_query": true,
+      "max_can_act": true,
+      "openclaw_delegate": true,
+      "founder_visible_ctas_truthful": true,
+      "limitations": ["Marketplace account sync and automated publishing are partial.", "Legacy CRUD is quarantined under /api/v1/relist-legacy."]
+    },
+    {
+      "key": "finance",
+      "status": "active_partial",
+      "canonical_frontend_path": "Workroom finance/invoices/payment screens",
+      "canonical_backend_routes": ["/api/v1/finance/dashboard", "/api/v1/finance/invoices", "/api/v1/finance/payments", "/api/v1/payments/checkout"],
+      "max_can_query": true,
+      "max_can_act": true,
+      "openclaw_delegate": true,
+      "founder_visible_ctas_truthful": true,
+      "limitations": ["Duplicate compatibility routes remain for /finance/dashboard and /finance/payments.", "Stripe checkout requires env/provider configuration.", "Do not state payment succeeded without webhook/tool proof."]
+    },
+    {
+      "key": "openclaw",
+      "status": "active_partial",
+      "canonical_frontend_path": "OpenClaw Command Center screen",
+      "canonical_backend_routes": ["/api/v1/openclaw/tasks", "/api/v1/openclaw/tasks/stats", "/openclaw/health"],
+      "max_can_query": true,
+      "max_can_act": true,
+      "openclaw_delegate": true,
+      "founder_visible_ctas_truthful": true,
+      "limitations": ["Persistent queue exists, but execution depends on external OpenClaw service at port 7878.", "Run health check before promising delegation succeeded."]
+    },
+    {
+      "key": "email",
+      "status": "partial",
+      "canonical_frontend_path": "Chat history Email tab / Gmail inbox surfaces",
+      "canonical_backend_routes": ["/api/v1/max/gmail/inbox", "/api/v1/emails/send", "/webhooks/email/inbound"],
+      "max_can_query": true,
+      "max_can_act": true,
+      "openclaw_delegate": false,
+      "founder_visible_ctas_truthful": false,
+      "limitations": ["Outbound email ledger write is not fully unified.", "Thread continuity is partial."]
+    },
+    {
+      "key": "workroom_creations",
+      "status": "broken_quarantined",
+      "canonical_frontend_path": "Workroom Creations Lab",
+      "canonical_backend_routes": [],
+      "max_can_query": false,
+      "max_can_act": false,
+      "openclaw_delegate": false,
+      "founder_visible_ctas_truthful": true,
+      "limitations": ["No /api/v1/ideas backend route. UI truthfully says storage is not connected."]
+    },
+    {
+      "key": "supportforge",
+      "status": "partial",
+      "canonical_frontend_path": "SupportForge screens/widgets",
+      "canonical_backend_routes": ["/api/v1/tickets", "/api/v1/customers", "/api/v1/kb"],
+      "max_can_query": true,
+      "max_can_act": true,
+      "openclaw_delegate": true,
+      "founder_visible_ctas_truthful": false,
+      "limitations": ["Runtime logs showed missing sf_tickets table causing /api/v1/tickets errors in this environment."]
+    }
+  ],
+  "skills": [
+    {
+      "key": "empire-capability-registry",
+      "tier": 1,
+      "status": "implemented",
+      "purpose": "Read verified active/partial/dead capabilities before making capability claims.",
+      "when_to_use": "Any capability, product, surface, or delegation claim.",
+      "inputs_required": ["user request", "channel", "target product or surface"],
+      "expected_outputs": ["truthful status", "routes/services", "limitations"],
+      "autonomy_safety_notes": "Never upgrade partial/dead to active without repo or runtime proof."
+    },
+    {
+      "key": "empire-delegation-policy",
+      "tier": 1,
+      "status": "implemented",
+      "purpose": "Choose answer directly, use tool, use skill, delegate to OpenClaw, refuse, or ask confirmation.",
+      "when_to_use": "Any request involving action, code, deployment, external service, or partial product.",
+      "inputs_required": ["request intent", "risk level", "runtime dependency"],
+      "expected_outputs": ["delegation decision", "verification requirement"],
+      "autonomy_safety_notes": "Founder-visible action results require tool/runtime proof."
+    },
+    {
+      "key": "empire-runtime-truth-check",
+      "tier": 1,
+      "status": "implemented_policy",
+      "purpose": "Require live route/process checks before current runtime claims.",
+      "when_to_use": "Website down, service health, route availability, deployment freshness, payment/email/OpenClaw status.",
+      "inputs_required": ["route or service name", "expected port/path"],
+      "expected_outputs": ["HTTP/process status", "freshness proof"],
+      "autonomy_safety_notes": "If not run, label answer repo-truth only."
+    },
+    {
+      "key": "empire-max-continuity-audit",
+      "tier": 1,
+      "status": "implemented_policy",
+      "purpose": "Audit MAX continuity across Web, Telegram, email, and reserved phone references.",
+      "when_to_use": "Founder says MAX is stale, not updated, or different across devices.",
+      "inputs_required": ["current channel", "claimed stale surface"],
+      "expected_outputs": ["what shares context", "what remains split", "next smallest fix"],
+      "autonomy_safety_notes": "Mobile browser is Web MAX unless code proves a dedicated phone surface."
+    },
+    {
+      "key": "empire-regression-review",
+      "tier": 1,
+      "status": "implemented_policy",
+      "purpose": "Investigate complaints that behavior regressed or got worse.",
+      "when_to_use": "Founder says we are going backward, broke it, used to work, or not loading.",
+      "inputs_required": ["symptom", "recent commits", "runtime status"],
+      "expected_outputs": ["regression cause", "fix or rollback recommendation"],
+      "autonomy_safety_notes": "Check code, logs, routes, and runtime before blaming a model or user."
+    },
+    {
+      "key": "empire-dead-path-sweep",
+      "tier": 2,
+      "status": "implemented_policy",
+      "purpose": "Find stale frontend calls, dead CTAs, and missing backend routes.",
+      "when_to_use": "Command Center trust sweeps and product UI audits.",
+      "inputs_required": ["frontend path or product"],
+      "expected_outputs": ["verified working/broken/misleading/stale matrix"],
+      "autonomy_safety_notes": "Fix only small proven trust issues."
+    },
+    {
+      "key": "empire-relist-truth-pass",
+      "tier": 2,
+      "status": "implemented_policy",
+      "purpose": "Keep RelistApp active vs legacy paths truthful.",
+      "when_to_use": "RelistApp status, route, publishing, or subscription questions.",
+      "inputs_required": ["Relist route/action"],
+      "expected_outputs": ["active path", "legacy path", "partial limitations"],
+      "autonomy_safety_notes": "Do not claim marketplace publishing/account sync is fully live."
+    },
+    {
+      "key": "empire-finance-route-audit",
+      "tier": 2,
+      "status": "implemented_policy",
+      "purpose": "Verify finance route ownership, duplicate paths, invoices, payments, and Stripe state.",
+      "when_to_use": "Finance/payment/invoice route claims.",
+      "inputs_required": ["finance route or transaction"],
+      "expected_outputs": ["canonical route", "duplicate risk", "runtime proof if needed"],
+      "autonomy_safety_notes": "Do not claim payment success without provider/webhook/tool proof."
+    },
+    {
+      "key": "empire-openclaw-health-check",
+      "tier": 2,
+      "status": "implemented_policy",
+      "purpose": "Check OpenClaw queue/worker/service health before delegation claims.",
+      "when_to_use": "Any OpenClaw delegation or worker status request.",
+      "inputs_required": ["task intent", "OpenClaw endpoint"],
+      "expected_outputs": ["service health", "queue status", "task id if dispatched"],
+      "autonomy_safety_notes": "Queue accepted is not the same as task completed."
+    },
+    {
+      "key": "empire-email-ledger-write",
+      "tier": 2,
+      "status": "planned",
+      "purpose": "Unify successful outbound email into unified_messages.",
+      "when_to_use": "Next email continuity implementation block.",
+      "inputs_required": ["send_email result", "recipient", "subject", "body"],
+      "expected_outputs": ["outbound ledger row"],
+      "autonomy_safety_notes": "Not live yet; do not claim outbound email is fully unified."
+    },
+    {
+      "key": "unified-surface-identity",
+      "tier": 3,
+      "status": "scaffolded_policy",
+      "purpose": "Map all browser/device sessions to truthful canonical surface identities.",
+      "when_to_use": "Device identity and phone/mobile continuity design.",
+      "inputs_required": ["browser/device/session identifiers"],
+      "expected_outputs": ["canonical channel", "session mapping"],
+      "autonomy_safety_notes": "No dedicated Phone MAX unless code is implemented and verified."
+    },
+    {
+      "key": "session-continuity",
+      "tier": 3,
+      "status": "scaffolded_policy",
+      "purpose": "Design unified cross-surface thread continuity beyond prompt snippets.",
+      "when_to_use": "All-channel history or one-thread UX work.",
+      "inputs_required": ["conversation id", "channel", "thread id"],
+      "expected_outputs": ["handoff summary or unified thread plan"],
+      "autonomy_safety_notes": "Current UI remains split; do not claim full unification."
+    },
+    {
+      "key": "external-memory-mem0-zep",
+      "tier": 3,
+      "status": "planned",
+      "purpose": "Potential external memory layer.",
+      "when_to_use": "Only after local unified_messages and MemoryStore seams are clean.",
+      "inputs_required": ["vendor config", "privacy policy", "sync strategy"],
+      "expected_outputs": ["verified integration or explicit not-configured status"],
+      "autonomy_safety_notes": "No mem0/zep integration is currently live."
+    },
+    {
+      "key": "skill-creator",
+      "tier": "existing",
+      "status": "available_to_codex_not_wired_to_max",
+      "purpose": "Create reusable Codex skills for recurring workflows.",
+      "when_to_use": "Recurring empire-* audit/build workflows that justify skill packaging.",
+      "inputs_required": ["workflow name", "instructions", "acceptance criteria"],
+      "expected_outputs": ["SKILL.md and supporting files"],
+      "autonomy_safety_notes": "Do not claim MAX can invoke this directly."
+    },
+    {
+      "key": "skill-installer",
+      "tier": "existing",
+      "status": "available_to_codex_not_wired_to_max",
+      "purpose": "Install curated Codex skills.",
+      "when_to_use": "Selective standard workflow installation.",
+      "inputs_required": ["skill source"],
+      "expected_outputs": ["installed skill"],
+      "autonomy_safety_notes": "Use selectively; not a MAX runtime hook."
+    },
+    {
+      "key": "openai-docs",
+      "tier": "existing",
+      "status": "available_to_codex_not_wired_to_max",
+      "purpose": "Official OpenAI API/model/SDK documentation research.",
+      "when_to_use": "OpenAI/API/model-routing/skill-packaging questions.",
+      "inputs_required": ["OpenAI product question"],
+      "expected_outputs": ["official-doc-backed guidance"],
+      "autonomy_safety_notes": "Do not use for Empire route/runtime debugging."
+    },
+    {
+      "key": "imagegen",
+      "tier": "existing",
+      "status": "available_to_codex_not_wired_to_max",
+      "purpose": "Founder-facing bitmap visual creation.",
+      "when_to_use": "Visual assets, mockups, images.",
+      "inputs_required": ["visual brief"],
+      "expected_outputs": ["generated image asset"],
+      "autonomy_safety_notes": "Never route backend/debug/continuity work here."
+    },
+    {
+      "key": "plugin-creator",
+      "tier": "existing",
+      "status": "available_to_codex_deprioritized",
+      "purpose": "Create Codex plugins.",
+      "when_to_use": "After workflows are stable enough to package.",
+      "inputs_required": ["plugin scope"],
+      "expected_outputs": ["plugin scaffold"],
+      "autonomy_safety_notes": "Deprioritized until Empire workflows are stable."
+    }
+  ],
+  "delegation_policy": {
+    "answer_directly": ["general explanation", "repo-truth summary already in operating context", "no action required"],
+    "use_skill_or_policy": ["capability claim", "surface/device continuity complaint", "dead path suspicion", "regression complaint", "product status question"],
+    "delegate_to_openclaw": ["bounded execution task", "external/browser-assisted check", "queueable product operation"],
+    "refuse_truthfully": ["requested capability is dead", "requested action is illegal/unsafe", "requested product route is not implemented"],
+    "ask_founder_confirmation": ["destructive data changes", "external spend", "client-facing send when not explicitly requested"],
+    "runtime_truth_check_required": ["website not loading", "service health", "route-dependent claim", "OpenClaw status", "payment success", "email delivery"],
+    "regression_review_required": ["going backward", "used to work", "broke it", "not updated", "not loading"],
+    "never_claim": ["Phone MAX exists", "partial email is fully unified", "stubbed routes are live", "OpenClaw completed a task when only queued", "payment/email succeeded without tool proof"]
+  }
+}

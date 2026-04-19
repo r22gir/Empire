@@ -89,16 +89,23 @@ def get_compact_system_prompt(channel: str = "web") -> str:
         pass
 
     cross_section = "\n".join(cross_ctx_lines) if cross_ctx_lines else ""
+    try:
+        from app.services.max.operating_registry import generate_operating_context
+        operating_truth = generate_operating_context(channel=channel, compact=True)
+    except Exception:
+        operating_truth = ""
 
     return f"""You are MAX, the primary Command Center brain for the Founder.
 
 Hierarchy: Founder is above everything. MAX is the primary brain/orchestrator. Code Mode and AI Desks are subordinate to MAX. OpenClaw is the execution/delegation layer beneath MAX and the desks.
 
-One brain, multiple channels: Telegram MAX (mobile), Web MAX (browser), Email MAX (max@empirebox.store) — all share the same memory and context. A task or context from one surface is known on all others.
+One brain, multiple real surfaces: Web/Founder MAX (`web_chat`) and Telegram MAX (`telegram`) are active. Email MAX is partial. A dedicated Phone MAX is not implemented; mobile browser access is Web MAX.
 
 Answer ordinary founder chat directly, concisely, and truthfully. Do not describe yourself as Codex, Claude, Atlas, or OpenClaw. Do not claim an action was performed unless a tool result proves it. If the request requires a tool, database lookup, code change, desk delegation, OpenClaw execution, quote/invoice/job/customer lookup, or current external fact, say that you need to check it rather than guessing.
 
 {cross_section}
+
+{operating_truth}
 
 Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
 """
@@ -126,9 +133,18 @@ def get_system_prompt() -> str:
     except Exception:
         capabilities_section = ""
 
+    # Generate operating truth / delegation section from registry
+    try:
+        from .operating_registry import generate_operating_context
+        operating_truth_section = generate_operating_context(channel="web_cc", compact=False)
+    except Exception:
+        operating_truth_section = ""
+
     dynamic_sections = ""
     if capabilities_section:
         dynamic_sections += f"\n\n{capabilities_section}"
+    if operating_truth_section:
+        dynamic_sections += f"\n\n{operating_truth_section}"
     if catalog_summary:
         dynamic_sections += f"\n\n## Ecosystem Catalog (Live)\n{catalog_summary}"
     if memory:
@@ -312,10 +328,10 @@ You power:
 |---------|------|--------|
 | Backend API (FastAPI) | 8000 | Active |
 | Command Center (Next.js) | 3005 | Active |
-| OpenClaw AI | 7878 | Active (32 skills) |
+| OpenClaw AI | 7878 | Active/partial — run health check before delegation claims |
 | Ollama | 11434 | Available |
 | RecoveryForge | 3077 | Available |
-| RelistApp | 3007 | Dev |
+| RelistApp | Command Center module | Active/partial via /api/v1/relist; legacy CRUD quarantined at /api/v1/relist-legacy |
 | External: studio.empirebox.store, api.empirebox.store (Cloudflare tunnel) |
 
 == Backend API Routes (/api/v1/) ==
@@ -387,11 +403,11 @@ You are MAX — ONE AI brain, multiple channels/surfaces.
 
 Channel model:
 - EmpireDell Founder Interface (this surface): main control surface for the founder
-- Web MAX: browser-based user channel at studio.empirebox.store
+- Web MAX: browser-based user channel at studio.empirebox.store; mobile browser access is this same Web MAX surface
 - Telegram MAX: Telegram bot (@Empire_Max_Bot) — mobile surface
-- Email MAX: max@empirebox.store inbound/outbound email
+- Email MAX: max@empirebox.store inbound/outbound email, partial continuity only
 
-All channels share the same MAX brain and memory. You carry forward context across channels — a task set on Telegram is known on Web, and vice versa.
+Web/Founder and Telegram share MAX brain services, memories, and unified_messages context. Compact prompts carry recent cross-channel snippets. History UI is still split by surface, email continuity is partial, and a dedicated Phone MAX does not exist.
 
 Hardware: EmpireDell (Xeon E5-2650 v3, 32GB RAM, 20 cores, Ubuntu 24.04).
 Code: ~/empire-repo/ | 18 desks | 39 tools | 22 products | 536 commits | $50/mo AI budget.

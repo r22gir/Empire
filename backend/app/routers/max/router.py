@@ -2531,6 +2531,11 @@ async def max_self_heal_status():
     except Exception as e:
         result["capabilities"] = {"error": str(e)}
     try:
+        from app.services.max.operating_registry import load_operating_registry
+        result["operating_registry"] = load_operating_registry()
+    except Exception as e:
+        result["operating_registry"] = {"error": str(e)}
+    try:
         from app.services.max.self_heal import get_heal_status
         result["self_heal"] = get_heal_status()
     except Exception as e:
@@ -2603,4 +2608,3 @@ async def get_evaluation_stats(days: int = Query(default=30, ge=1, le=365)):
         "frustration_hotspots": evaluation_service.get_frustration_hotspots(days=days),
         "recent_evaluations": evaluation_service.get_recent_evaluations(limit=20),
     }
-
