@@ -120,6 +120,51 @@ def test_max_chat_routes_dimensioned_bench_to_drawing_tool(monkeypatch):
     assert calls[0]["dimensions"]["width"] == '96"'
 
 
+def test_do_not_use_drawing_router_blocks_drawing_intercept(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    from app.services.max.ai_router import AIResponse
+
+    async def fake_ai_router(*args, **kwargs):
+        return AIResponse(content="IMAGE_NOT_AVAILABLE", model_used="test-vision")
+
+    def fail_execute_tool(*args, **kwargs):
+        raise AssertionError("drawing-router must not execute")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fake_ai_router)
+    monkeypatch.setattr(max_router, "execute_tool", fail_execute_tool)
+
+    request = max_router.ChatRequest(
+        message="Analyze this image. Do not use drawing-router. Return five sections.",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "test-vision"
+    assert response.model_used != "drawing-router"
+
+
+def test_unavailable_image_returns_exact_contract(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("unavailable image must not reach AI router")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    request = max_router.ChatRequest(
+        message="Extract text from this image. Do not use drawing-router.",
+        image_filename="missing-proof.jpg",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.response == "IMAGE_NOT_AVAILABLE"
+    assert response.model_used == "image-availability-check"
+    assert response.tool_results == []
+
+
 def test_drawing_quality_gate_blocks_placeholder_svg():
     import importlib
     from app.services.max.drawing_intent import build_drawing_handoff

@@ -117,6 +117,9 @@ def is_drawing_intent(text: str) -> bool:
         "not asking for a drawing",
         "don't need a drawing",
         "not asking for drawing",
+        "do not use drawing-router",
+        "don't use drawing-router",
+        "no drawing-router",
     )
     if any(neg in lowered for neg in negation_patterns):
         return False

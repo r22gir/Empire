@@ -36,6 +36,7 @@ export default function ContinuityPanel() {
   const [scores, setScores] = useState<any[]>([]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const load = async (runAudit = true) => {
     const [statusRes, scoresRes] = await Promise.all([
@@ -96,25 +97,26 @@ export default function ContinuityPanel() {
   };
 
   return (
-    <section data-testid="max-continuity-panel" style={{ flexShrink: 0, borderBottom: '1px solid var(--border)', background: '#fff', padding: '10px 12px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div>
+    <section data-testid="max-continuity-panel" className="continuity-panel" style={{ flexShrink: 0, borderBottom: '1px solid var(--border)', background: '#fff', padding: '10px 12px' }}>
+      <div className="continuity-head" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 11, fontWeight: 900, color: 'var(--muted)', textTransform: 'uppercase' }}>MAX Continuity</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
+          <div className="continuity-chips" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 5 }}>
             <Pill label={`Registry ${status?.registry?.registry_version || 'unknown'}`} tone={registryTone} />
             <Pill label={`Eval ${latestScore ?? 'none'}`} tone={scoreTone} />
             <Pill label={`OpenClaw ${gate.state || 'unknown'}`} tone={gateTone} />
             <Pill label={`Worker ${heartbeat.state || 'unknown'}${Number.isFinite(heartbeat.age_seconds) ? ` ${heartbeat.age_seconds}s` : ''}`} tone={heartbeatTone} />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="continuity-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button data-testid="continuity-toggle-details" onClick={() => setExpanded(v => !v)} style={buttonStyle}>{expanded ? 'Hide' : 'Details'}</button>
           <button data-testid="continuity-save-state" disabled={loading} onClick={() => runCommand('save state', 'State saved')} style={buttonStyle}>Save State</button>
           <button data-testid="continuity-run-audit" disabled={loading} onClick={() => runCommand('what continuity packet is loaded', 'Audit complete')} style={buttonStyle}>Run Continuity Audit</button>
           <button data-testid="continuity-check-openclaw" disabled={loading} onClick={() => load(false)} style={buttonStyle}>Check OpenClaw</button>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 10 }}>
+      <div className={expanded ? 'continuity-details expanded' : 'continuity-details'} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 10 }}>
         {field('current task', tier1.current_task)}
         {field('surface', tier1.founder_surface_identity?.canonical_channel || auditResult.surface?.canonical_channel)}
         {field('runtime commit', runtime.commit || status?.current_commit?.hash)}
@@ -123,7 +125,7 @@ export default function ContinuityPanel() {
         {field('active skills', (status?.active_skill_hooks || []).join(', ') || 'none')}
       </div>
 
-      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 360px)', gap: 12 }}>
+      <div className={expanded ? 'continuity-extra expanded' : 'continuity-extra'} style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 360px)', gap: 12 }}>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>
           {message || 'Use this panel to refresh handoff state, audit continuity, and check OpenClaw gate truth.'}
         </div>
@@ -137,6 +139,42 @@ export default function ContinuityPanel() {
           ))}
         </div>
       </div>
+      <style jsx>{`
+        @media (max-width: 700px) {
+          .continuity-panel {
+            padding: 8px 10px !important;
+            max-height: 190px;
+            overflow-y: auto;
+          }
+          .continuity-head {
+            align-items: flex-start !important;
+            gap: 8px !important;
+          }
+          .continuity-chips {
+            max-width: 100%;
+          }
+          .continuity-actions {
+            width: 100%;
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px !important;
+          }
+          .continuity-actions button {
+            width: 100%;
+            min-height: 34px;
+            padding: 5px 7px !important;
+          }
+          .continuity-details,
+          .continuity-extra {
+            display: none !important;
+          }
+          .continuity-details.expanded,
+          .continuity-extra.expanded {
+            display: grid !important;
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
     </section>
   );
 }

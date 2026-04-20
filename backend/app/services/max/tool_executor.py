@@ -78,6 +78,15 @@ def strip_tool_blocks(text: str) -> str:
     return TOOL_BLOCK_RE.sub("", text).strip()
 
 
+def _fetch_openclaw_task(task_id: int | str) -> dict | None:
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT * FROM openclaw_tasks WHERE id = ?", (task_id,)).fetchone()
+            return dict(row) if row else None
+    except Exception:
+        return None
+
+
 def parse_xai_function_calls(response_data: dict) -> list[dict]:
     """Parse xAI /v1/responses output into Empire tool call dicts.
 
@@ -337,27 +346,61 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         )
 
     logger.info(f"Task created: {task_id} - {title} (desk={task_desk})")
+    with get_db() as conn:
+        created = conn.execute("SELECT id, title, status, desk FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if not created or created["title"] != title:
+        return ToolResult(
+            tool="create_task",
+            success=False,
+            error="Task identity verification failed after insert; delegation not reported as successful.",
+            result={"created_task_id": task_id, "expected_title": title, "actual": dict(created) if created else None},
+        )
 
     # Also queue to OpenClaw for autonomous execution
     openclaw_queued = False
     openclaw_gate = None
+    openclaw_task_id = None
+    openclaw_task_verified = False
     try:
         import httpx as _oc_httpx
         from app.services.max.openclaw_gate import check_openclaw_gate
         openclaw_gate = check_openclaw_gate().to_dict()
-        _oc_resp = _oc_httpx.post(
-            "http://localhost:8000/api/v1/openclaw/tasks",
-            json={
-                "title": title,
-                "description": description or title,
-                "desk": task_desk,
-                "priority": {"urgent": 1, "high": 3, "normal": 5, "low": 7}.get(priority, 5),
-                "source": "create_task",
-                "parent_task_id": task_id,
-            },
-            timeout=5,
-        )
-        openclaw_queued = _oc_resp.status_code == 200
+        if openclaw_gate.get("allowed"):
+            _oc_resp = _oc_httpx.post(
+                "http://localhost:8000/api/v1/openclaw/tasks",
+                json={
+                    "title": title,
+                    "description": description or title,
+                    "desk": task_desk,
+                    "priority": {"urgent": 1, "high": 3, "normal": 5, "low": 7}.get(priority, 5),
+                    "source": "create_task",
+                    "parent_task_id": task_id,
+                },
+                timeout=5,
+            )
+            openclaw_queued = _oc_resp.status_code == 200
+            if openclaw_queued:
+                oc_data = _oc_resp.json()
+                openclaw_task_id = oc_data.get("id")
+                oc_row = _fetch_openclaw_task(openclaw_task_id) if openclaw_task_id is not None else None
+                openclaw_task_verified = bool(
+                    oc_row
+                    and oc_row.get("title") == title
+                    and oc_row.get("parent_task_id") == task_id
+                )
+                if not openclaw_task_verified:
+                    return ToolResult(
+                        tool="create_task",
+                        success=False,
+                        error="OpenClaw task identity verification failed; delegation not reported as successful.",
+                        result={
+                            "created_task_id": task_id,
+                            "expected_title": title,
+                            "openclaw_task_id": openclaw_task_id,
+                            "actual_openclaw_task": oc_row,
+                            "openclaw_gate": openclaw_gate,
+                        },
+                    )
     except Exception:
         pass
 
@@ -371,8 +414,11 @@ def _create_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         pass  # No event loop — background worker will pick it up in ≤30s
 
     return ToolResult(tool="create_task", success=True, result={
-        "task_id": task_id, "title": title, "priority": priority,
+        "task_id": task_id, "created_task_id": task_id, "title": title, "priority": priority,
         "desk": task_desk, "status": "todo", "openclaw_queued": openclaw_queued,
+        "openclaw_task_id": openclaw_task_id,
+        "openclaw_task_verified": openclaw_task_verified,
+        "identity_verified": True,
         "openclaw_gate": openclaw_gate,
         "auto_executing": auto_executing,
     })
@@ -3339,11 +3385,27 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
         )
         if resp.status_code == 200:
             data = resp.json()
+            task_id = data.get("id")
+            oc_row = _fetch_openclaw_task(task_id) if task_id is not None else None
+            identity_verified = bool(oc_row and oc_row.get("title") == title)
+            if not identity_verified:
+                return ToolResult(
+                    tool="queue_openclaw_task",
+                    success=False,
+                    error="OpenClaw queue identity verification failed; delegation status is unknown.",
+                    result={
+                        "task_id": task_id,
+                        "expected_title": title,
+                        "actual_openclaw_task": oc_row,
+                        "openclaw_gate": data.get("openclaw_gate") or gate.to_dict(),
+                    },
+                )
             return ToolResult(tool="queue_openclaw_task", success=True, result={
-                "task_id": data.get("id"),
+                "task_id": task_id,
                 "title": title,
                 "desk": task_desk,
                 "status": "queued",
+                "identity_verified": True,
                 "message": data.get("message") or f"Task #{data.get('id')} queued for OpenClaw. Worker will pick it up within 30 seconds.",
                 "openclaw_gate": data.get("openclaw_gate") or gate.to_dict(),
             })

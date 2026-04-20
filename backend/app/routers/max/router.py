@@ -363,6 +363,64 @@ class PresentRequest(BaseModel):
     image_count: int = 3
 
 
+ACTION_TOOLS = {
+    "create_task",
+    "queue_openclaw_task",
+    "dispatch_to_openclaw",
+    "run_desk_task",
+    "delegate_to_atlas",
+}
+
+
+def _is_decision_only_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    decision_markers = (
+        "should this be",
+        "should i",
+        "whether this should",
+        "tell me whether",
+        "logged only or delegated",
+        "log only or delegate",
+        "logged or delegated",
+        "recommend whether",
+    )
+    return any(marker in text for marker in decision_markers)
+
+
+def _is_action_tool(tool_call: dict[str, Any]) -> bool:
+    return str(tool_call.get("tool") or "").strip() in ACTION_TOOLS
+
+
+def _decision_only_response(request: ChatRequest) -> ChatResponse:
+    return ChatResponse(
+        response=(
+            "Decision-only request detected. I did not create, queue, or delegate anything.\n"
+            "Recommendation: log this first unless you explicitly say to delegate it."
+        ),
+        model_used="decision-boundary",
+        fallback_used=False,
+        tool_results=[],
+        metadata=_response_metadata(request.channel, skill_used="decision_boundary"),
+    )
+
+
+def _image_upload_path(image_filename: str | None) -> Path | None:
+    if not image_filename:
+        return None
+    safe = Path(image_filename).name
+    candidates = [
+        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "images" / safe,
+        Path.home() / "empire-repo" / "uploads" / "images" / safe,
+        Path.home() / "empire-repo" / "backend" / "data" / "uploads" / safe,
+    ]
+    return next((path for path in candidates if path.exists()), None)
+
+
+def _explicit_no_drawing_router(message: str | None) -> bool:
+    text = (message or "").lower()
+    return "do not use drawing-router" in text or "don't use drawing-router" in text or "no drawing-router" in text
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks, http_response: Response):
     import time as _time_mod
@@ -499,7 +557,20 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=metadata,
         )
 
-    drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
+    if request.image_filename and _image_upload_path(request.image_filename) is None:
+        return ChatResponse(
+            response="IMAGE_NOT_AVAILABLE",
+            model_used="image-availability-check",
+            fallback_used=False,
+            tool_results=[],
+            metadata=_response_metadata(request.channel, skill_used="image_availability_check"),
+        )
+
+    drawing_handoff = (
+        build_drawing_handoff(request.message, image_filename=request.image_filename)
+        if not _explicit_no_drawing_router(request.message)
+        else type("NoDrawingHandoff", (), {"is_drawing_intent": False})()
+    )
     if drawing_handoff.is_drawing_intent:
         logger.info(
             "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s message=%r",
@@ -619,6 +690,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             if not tool_calls:
                 break
 
+            if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
+                return _decision_only_response(request)
+
             # File/git tool calls from main chat get re-routed to CodeForge desk
             # because Atlas (Opus) handles path expansion, validation, and smart truncation
             _CODEFORGE_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
@@ -677,6 +751,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 else:
                     tool_summary_parts.append(f"[{r['tool']}] Error: {r.get('error', 'Unknown')}")
             tool_summary = "\n\n".join(tool_summary_parts)
+            if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results):
+                tool_summary += (
+                    "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
+                    "use only task_id/openclaw_task_id from the current tool result above. "
+                    "Never use IDs from session handoff, active task state, or prior history.]"
+                )
 
             is_last_round = _tool_round >= 2
             followup_instruction = (
@@ -953,7 +1033,17 @@ async def chat_stream(request: ChatRequest):
 
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    drawing_handoff = build_drawing_handoff(request.message, image_filename=request.image_filename)
+    if request.image_filename and _image_upload_path(request.image_filename) is None:
+        async def image_unavailable_gen():
+            yield f"data: {json.dumps({'type': 'text', 'content': 'IMAGE_NOT_AVAILABLE'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'image-availability-check', 'metadata': _response_metadata(request.channel, skill_used='image_availability_check')})}\n\n"
+        return StreamingResponse(image_unavailable_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    drawing_handoff = (
+        build_drawing_handoff(request.message, image_filename=request.image_filename)
+        if not _explicit_no_drawing_router(request.message)
+        else type("NoDrawingHandoff", (), {"is_drawing_intent": False})()
+    )
     if drawing_handoff.is_drawing_intent:
         logger.info(
             "[MAX] Drawing intent intercepted before stream model: ready=%s missing=%s message=%r",
@@ -1076,6 +1166,11 @@ async def chat_stream(request: ChatRequest):
                 if not tool_calls:
                     break
 
+                if _is_decision_only_request(request.message) and any(_is_action_tool(tc) for tc in tool_calls):
+                    full_response = _decision_only_response(request).response
+                    yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
+                    break
+
                 # File/git tool calls from main chat get re-routed to CodeForge desk
                 _CODEFORGE_TOOLS_STREAM = {"file_read", "file_write", "file_edit", "file_append", "git_ops"}
 
@@ -1129,6 +1224,12 @@ async def chat_stream(request: ChatRequest):
                     else:
                         tool_summary_parts.append(f"[{r.tool}] Error: {r.error}")
                 tool_summary = "\n\n".join(tool_summary_parts)
+                if any(r.tool in ACTION_TOOLS and r.success for r in round_results):
+                    tool_summary += (
+                        "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
+                        "use only task_id/openclaw_task_id from the current tool result above. "
+                        "Never use IDs from session handoff, active task state, or prior history.]"
+                    )
 
                 is_last_round = _tool_round >= 2
                 followup_instruction = (
