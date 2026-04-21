@@ -48,6 +48,7 @@ import MemoryBankScreen from './components/screens/MemoryBankScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppPage from './components/screens/RelistAppPage';
+import VendorOpsPage from './components/screens/VendorOpsPage';
 import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
@@ -78,6 +79,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   social: 'social',
   platform: 'platform',
   openclaw: 'max',
+  vendorops: 'max',
   recovery: 'max',
   dev: 'max',
   luxe: 'max',
@@ -307,6 +309,8 @@ export default function CommandCenter() {
           return <DevPanel />;
         case 'openclaw':
           return <OpenClawTasksPage />;
+        case 'vendorops':
+          return <VendorOpsPage />;
         case 'hardware':
           return <EcosystemProductPage productId={activeProduct} productName="" productColor="#b8960c" productIcon={null} />;
         case 'vetforge':

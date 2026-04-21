@@ -131,6 +131,8 @@ def test_vendorops_renewal_alerts_and_cancellation_monitoring(monkeypatch, tmp_p
             "tier": "starter",
             "vendor_name": "Renewal Vendor",
             "plan_name": "Starter",
+            "monthly_cost_usd": 12.5,
+            "renewal_cadence": "monthly",
             "renewal_date": renewal_date,
             "license_ref": "lic-renewal-secret",
             "explicit_founder_confirmation": True,
@@ -143,6 +145,10 @@ def test_vendorops_renewal_alerts_and_cancellation_monitoring(monkeypatch, tmp_p
     alerts = client.get("/api/v1/vendorops/renewal-alerts?days=14")
     assert alerts.status_code == 200
     assert any(item["id"] == subscription["id"] for item in alerts.json()["alerts"])
+    dashboard = client.get("/api/v1/vendorops/dashboard?tier=starter")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["kpis"]["active_subscriptions"] == 1
+    assert dashboard.json()["kpis"]["monthly_cost_total_usd"] == 12.5
 
     canceled = client.post(
         f"/api/v1/vendorops/subscriptions/{subscription['id']}/cancel",
@@ -150,6 +156,26 @@ def test_vendorops_renewal_alerts_and_cancellation_monitoring(monkeypatch, tmp_p
     )
     assert canceled.status_code == 200
     assert canceled.json()["subscription"]["cancellation_state"] == "founder_confirmed_monitoring"
+
+
+def test_vendorops_approval_listing_and_reject_round_trip(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+
+    approval = client.post(
+        "/api/v1/vendorops/approvals",
+        json={"tier": "starter", "vendor_name": "Rejectable Vendor", "requested_action": "assisted signup"},
+    ).json()["approval"]
+
+    listed = client.get("/api/v1/vendorops/approvals?status=pending")
+    assert listed.status_code == 200
+    assert any(item["id"] == approval["id"] for item in listed.json()["approvals"])
+
+    rejected = client.post(
+        f"/api/v1/vendorops/approvals/{approval['id']}/reject",
+        json={"explicit_founder_confirmation": True},
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["approval"]["status"] == "rejected"
 
 
 def test_vendorops_max_query_only_write_gate(monkeypatch, tmp_path):
