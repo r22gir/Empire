@@ -55,6 +55,11 @@ interface ArchiveItem {
   listing_description: string;
   item_specifics: Record<string, string>;
   batch_tag: string;
+  listing_status: string;
+  marketforge_listing_id: string;
+  marketforge_push_status: string;
+  marketforge_pushed_at: string;
+  marketforge_error_message: string;
   created_at: string;
   updated_at: string;
 }
@@ -92,6 +97,20 @@ const TIER_LABELS: Record<string, string> = {
   C: 'Tier C — common issues / duplicates / bulk',
 };
 const BOX_SUGGESTIONS = ["A-RARE-01","B-1960s-01","B-WWII-01","C-BULK-01","HOLD-01","SOLD-STAGING-01"];
+const PUSH_STATUS_COLORS: Record<string, string> = {
+  not_pushed: '#9ca3af',
+  draft_saved: '#f59e0b',
+  pushing: '#8b5cf6',
+  pushed: '#16a34a',
+  failed: '#ef4444',
+};
+const LISTING_STATUS_LABELS: Record<string, string> = {
+  none: 'No Listing',
+  draft: 'Draft Saved',
+  ready: 'Ready to Publish',
+  pushed: 'Published',
+  failed: 'Publish Failed',
+};
 
 // ── Utility ─────────────────────────────────────────────────────────────────────
 
@@ -682,16 +701,22 @@ function ConditionSection({ data, onChange }: { data: Partial<ArchiveItem>; onCh
 
 // ── Section 6: Listing Builder ─────────────────────────────────────────────────
 
-function ListingBuilderSection({ data, refIssue, onGenerated }: {
+function ListingBuilderSection({ data, refIssue, archiveId, onSaved }: {
   data: Partial<ArchiveItem>;
   refIssue: LifeReferenceIssue | null;
-  onGenerated: (draft: DraftOutput) => void;
+  archiveId: number | null;
+  onSaved: () => void;
 }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [batchTag, setBatchTag] = useState('');
-  const [generating, setGenerating] = useState(false);
+  const [title, setTitle] = useState(data.listing_title || '');
+  const [description, setDescription] = useState(data.listing_description || '');
+  const [batchTag, setBatchTag] = useState(data.batch_tag || '');
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // Sync when data changes (e.g., navigating back)
+  useEffect(() => { setTitle(data.listing_title || ''); }, [data.listing_title]);
+  useEffect(() => { setDescription(data.listing_description || ''); }, [data.listing_description]);
+  useEffect(() => { setBatchTag(data.batch_tag || ''); }, [data.batch_tag]);
 
   const generateFromData = useCallback(() => {
     const issueDate = data.issue_date || refIssue?.date || '';
@@ -720,55 +745,20 @@ function ListingBuilderSection({ data, refIssue, onGenerated }: {
 
   const handleSave = async () => {
     if (!title.trim()) return;
-    setGenerating(true);
+    if (!archiveId) return;
+    setSaving(true);
     try {
-      // In V1: generate draft locally and store via API if archive_id exists
-      const draft: DraftOutput = {
-        draft_id: Date.now(),
-        listing_title: title,
-        description,
-        item_specifics: {
-          Format: 'Magazine',
-          Publication: 'LIFE',
-          'Year': (data.issue_date || refIssue?.date || '').split('-')[0],
-          'Issue Date': data.issue_date || refIssue?.date || '',
-          'Volume': String(data.volume || refIssue?.volume || ''),
-          'Issue Number': String(data.issue_number || refIssue?.issue_number || ''),
-          'Cover Subject': data.cover_subject || refIssue?.cover_subject || '',
-          'Condition': condLabels[data.condition_score || 3] || 'Good',
-          'Tier': data.tier || refIssue?.tier_guidance || 'C',
-          'Has Address Label': data.has_address_label ? 'Yes' : 'No',
-          'Complete': data.is_complete !== false ? 'Yes' : 'No',
-          'Defects': data.defects || '',
-          'Comp Range': data.rough_comp_min && data.rough_comp_max ? `$${data.rough_comp_min}–$${data.rough_comp_max}` : '',
-          'Sale Plan': data.sale_plan || '',
-        },
-        marketforge_payload: {
-          source: 'archiveforge',
-          item: {
-            title, description,
-            category: 'Collectibles > Magazines > LIFE',
-            images: data.actual_listing_images || [],
-            tier: data.tier || refIssue?.tier_guidance || 'C',
-            comp_range: [data.rough_comp_min || 0, data.rough_comp_max || 0],
-            batchTag,
-            source_box: data.source_box_code || '',
-            processed_box: data.processed_box_code || '',
-            archive_status: data.processed_status || 'RAW',
-            sale_plan: data.sale_plan || '',
-          },
-          reference_issue_id: refIssue?.id || '',
-          reference_cover_url: refIssue?.reference_cover_url || '',
-          generated_at: new Date().toISOString(),
-        },
-        batch_tag: batchTag,
-        status: 'draft',
-      };
-      onGenerated(draft);
-      setSaved(true);
-    } finally {
-      setGenerating(false);
-    }
+      const res = await fetch(`${AG_API}/archives/${archiveId}/save-draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listing_title: title, listing_description: description, batch_tag: batchTag }),
+      });
+      if (res.ok) {
+        setSaved(true);
+        onSaved();
+      }
+    } catch { /* silent */ }
+    setSaving(false);
   };
 
   const condLabels = ['','Poor','Fair','Good','Excellent','Near Mint'];
@@ -839,15 +829,293 @@ function ListingBuilderSection({ data, refIssue, onGenerated }: {
         </div>
       )}
 
-      <button onClick={handleSave} disabled={generating || !title.trim()}
-        style={{ padding: '12px 24px', background: saved ? '#16a34a' : generating ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: generating || !title.trim() ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start' }}>
-        {saved ? <><Check size={16} /> Draft Saved</> : generating ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <><List size={14} /> Save Listing Draft</>}
+      <button onClick={handleSave} disabled={saving || !title.trim() || !archiveId}
+        style={{ padding: '12px 24px', background: saved ? '#16a34a' : saving ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: saving || !title.trim() || !archiveId ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start' }}>
+        {saved ? <><Check size={16} /> Draft Saved</> : saving ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <><List size={14} /> Save Draft & Continue</>}
       </button>
     </div>
   );
 }
 
-// ── Section 7: Inventory View ─────────────────────────────────────────────────
+// ── Section 7: Review & Publish ─────────────────────────────────────────────────
+
+function ReviewPublishSection({ archiveId, refIssue }: {
+  archiveId: number | null;
+  refIssue: LifeReferenceIssue | null;
+}) {
+  const [item, setItem] = useState<Partial<ArchiveItem>>({});
+  const [photos, setPhotos] = useState<PhotoRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pushState, setPushState] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
+  const [pushResult, setPushResult] = useState<any>(null);
+  const [pushError, setPushError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!archiveId) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const [archRes, photoRes] = await Promise.all([
+        fetch(`${AG_API}/archives/${archiveId}`),
+        fetch(`${AG_API}/uploads/${archiveId}`),
+      ]);
+      if (archRes.ok) setItem(await archRes.json());
+      if (photoRes.ok) setPhotos((await photoRes.json()).photos || []);
+    } catch { /* */ }
+    setLoading(false);
+  }, [archiveId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const validStatuses = ['READY_TO_LIST', 'LISTED'];
+  const canPublish = item.processed_status && validStatuses.includes(item.processed_status);
+  const hasTitle = !!(item.listing_title);
+  const hasDescription = !!(item.listing_description);
+  const hasPhotos = photos.length > 0;
+
+  const validationErrors: string[] = [];
+  if (!canPublish) validationErrors.push(`Status must be ${validStatuses.join(' or ')} (currently ${item.processed_status || 'unset'})`);
+  if (!hasTitle) validationErrors.push('Listing title is blank — go back to Step 6 and save a draft');
+  if (!hasDescription) validationErrors.push('Listing description is blank — go back to Step 6 and save a draft');
+  if (!hasPhotos) validationErrors.push('No actual listing photos uploaded — go back to Step 3');
+
+  const handlePublish = async () => {
+    if (!archiveId) return;
+    setPushState('pushing');
+    setPushError('');
+    setPushResult(null);
+    try {
+      const res = await fetch(`${AG_API}/push/${archiveId}`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setPushState('success');
+        setPushResult(data);
+        await load();
+      } else {
+        setPushState('error');
+        setPushError(data.detail || `HTTP ${res.status}: Push failed`);
+      }
+    } catch (e: any) {
+      setPushState('error');
+      setPushError(e.message || 'Network error');
+    }
+  };
+
+  if (!archiveId) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Step 7 — Review & Publish</h2>
+        <div style={{ padding: 24, background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 10, fontSize: 13, color: '#92400e' }}>
+          No archive record saved yet. Complete Steps 1–6 first.
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Step 7 — Review & Publish</h2>
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}><Loader2 size={20} className="animate-spin" style={{ color: '#06b6d4' }} /></div>
+      </div>
+    );
+  }
+
+  const item_specifics = item.item_specifics || {};
+  const condLabels = ['','Poor','Fair','Good','Excellent','Near Mint'];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Step 7 — Review & Publish</h2>
+        <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+          Review the final listing before pushing to MarketForge. Explicit action required — no auto-publish.
+        </p>
+      </div>
+
+      {/* Validation errors */}
+      {validationErrors.length > 0 && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', marginBottom: 6 }}>Cannot publish — fix these issues first:</div>
+          {validationErrors.map((err, i) => (
+            <div key={i} style={{ fontSize: 12, color: '#991b1b', display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 3 }}>
+              <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
+              {err}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Publish status banner */}
+      {(item.marketforge_push_status === 'pushed' || item.listing_status === 'pushed') && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <CheckCircle size={15} /> Published to MarketForge
+          </div>
+          {item.marketforge_listing_id && (
+            <div style={{ fontSize: 12, color: '#166534', marginTop: 4 }}>
+              MarketForge listing ID: <span style={{ fontFamily: 'monospace' }}>{item.marketforge_listing_id}</span>
+            </div>
+          )}
+          {item.marketforge_pushed_at && (
+            <div style={{ fontSize: 11, color: '#166534', marginTop: 2 }}>
+              Pushed at: {fmt(item.marketforge_pushed_at)}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(item.marketforge_push_status === 'failed' || item.listing_status === 'failed') && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 14px' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={15} /> Last publish attempt failed
+          </div>
+          {item.marketforge_error_message && (
+            <div style={{ fontSize: 11, color: '#991b1b', marginTop: 4, fontFamily: 'monospace' }}>
+              {item.marketforge_error_message}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Two-column layout */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+        {/* Left: listing details */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>LISTING DETAILS</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#888' }}>Title</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a' }}>{item.listing_title || '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#888' }}>Description</div>
+                <div style={{ fontSize: 12, color: '#374151', maxHeight: 120, overflowY: 'auto' }}>{item.listing_description || '—'}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                {[
+                  ['Tier', item.tier || '—'],
+                  ['Condition', condLabels[item.condition_score || 3] || '—'],
+                  ['Status', item.processed_status || '—'],
+                ].map(([k, v]) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 11, color: '#888' }}>{k}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[
+                  ['Comp Range', item.rough_comp_min && item.rough_comp_max ? `$${item.rough_comp_min}–$${item.rough_comp_max}` : '—'],
+                  ['Sale Plan', item.sale_plan || '—'],
+                  ['Batch Tag', item.batch_tag || '—'],
+                  ['Source Box', item.source_box_code || '—'],
+                  ['Dest Box', item.processed_box_code || '—'],
+                  ['Archive Location', item.archive_location || '—'],
+                ].map(([k, v]) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 11, color: '#888' }}>{k}</div>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: '#374151' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Item specifics */}
+          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 8 }}>ITEM SPECIFICS</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 11 }}>
+              {Object.entries({
+                Format: 'Magazine',
+                Publication: 'LIFE',
+                Year: item.issue_date ? item.issue_date.split('-')[0] : '',
+                'Issue Date': item.issue_date || '',
+                Volume: item.volume || '',
+                'Issue Number': item.issue_number || '',
+                'Cover Subject': item.cover_subject || '',
+                ...item_specifics,
+              }).filter(([, v]) => v).map(([k, v]) => (
+                <div key={k}><span style={{ color: '#888' }}>{k}: </span><span style={{ fontWeight: 500 }}>{String(v)}</span></div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: photos preview */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>ACTUAL LISTING PHOTOS ({photos.length})</div>
+            {photos.length === 0 ? (
+              <div style={{ height: 100, background: '#f9f8f6', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: 12, border: '1.5px dashed #e5e2dc' }}>
+                No photos uploaded
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                {photos.map(p => (
+                  <img key={p.id} src={`${AG_API}/photo/${p.id}`} alt={p.role}
+                    style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc' }} />
+                ))}
+              </div>
+            )}
+            <div style={{ marginTop: 8, fontSize: 10, color: '#aaa' }}>
+              These are the photos that will be pushed to MarketForge. Reference cover images are not included.
+            </div>
+          </div>
+
+          {/* Publish actions */}
+          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>PUBLISH TO MARKETFORGE</div>
+            <button
+              onClick={handlePublish}
+              disabled={pushState === 'pushing' || validationErrors.length > 0}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 10, fontSize: 14, fontWeight: 700,
+                background: validationErrors.length > 0 ? '#e5e7eb' : '#16a34a',
+                color: validationErrors.length > 0 ? '#9ca3af' : '#fff',
+                border: 'none', cursor: validationErrors.length > 0 || pushState === 'pushing' ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              {pushState === 'pushing' ? (
+                <><Loader2 size={16} className="animate-spin" /> Pushing to MarketForge...</>
+              ) : pushState === 'success' ? (
+                <><CheckCircle size={16} /> Published Successfully</>
+              ) : pushState === 'error' ? (
+                <><AlertTriangle size={16} /> Try Again</>
+              ) : (
+                <><Upload size={16} /> Publish to MarketForge</>
+              )}
+            </button>
+            {pushState === 'error' && pushError && (
+              <div style={{ marginTop: 8, fontSize: 11, color: '#dc2626', background: '#fef2f2', padding: '8px 10px', borderRadius: 6 }}>
+                <AlertTriangle size={11} style={{ display: 'inline', marginRight: 4 }} />
+                {pushError}
+              </div>
+            )}
+            {pushState === 'success' && pushResult?.marketforge_listing_id && (
+              <div style={{ marginTop: 8, fontSize: 11, color: '#16a34a', background: '#f0fdf4', padding: '8px 10px', borderRadius: 6 }}>
+                <CheckCircle size={11} style={{ display: 'inline', marginRight: 4 }} />
+                Listing ID: <span style={{ fontFamily: 'monospace' }}>{pushResult.marketforge_listing_id}</span>
+              </div>
+            )}
+            {pushState === 'success' && !pushResult?.marketforge_listing_id && (
+              <div style={{ marginTop: 8, fontSize: 11, color: '#16a34a', background: '#f0fdf4', padding: '8px 10px', borderRadius: 6 }}>
+                <CheckCircle size={11} style={{ display: 'inline', marginRight: 4 }} />
+                Push succeeded — listing ID will appear after MarketForge processes the request.
+              </div>
+            )}
+            <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>
+              Publishing is explicit — this button will not auto-publish.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Section 8: Inventory View ─────────────────────────────────────────────────
 
 type SortKey = 'created_at' | 'processed_status' | 'source_box_code' | 'processed_box_code' | 'tier';
 
@@ -859,6 +1127,7 @@ function InventorySection() {
   const [filterTier, setFilterTier] = useState('all');
   const [filterSourceBox, setFilterSourceBox] = useState('all');
   const [filterProcessedBox, setFilterProcessedBox] = useState('all');
+  const [filterListingStatus, setFilterListingStatus] = useState('all');
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortAsc, setSortAsc] = useState(false);
@@ -894,8 +1163,9 @@ function InventorySection() {
     if (filterTier !== 'all' && item.tier !== filterTier) return false;
     if (filterSourceBox !== 'all' && item.source_box_code !== filterSourceBox) return false;
     if (filterProcessedBox !== 'all' && item.processed_box_code !== filterProcessedBox) return false;
+    if (filterListingStatus !== 'all' && (item.listing_status || 'none') !== filterListingStatus) return false;
     const q = search.toLowerCase();
-    if (q && !item.cover_subject?.toLowerCase().includes(q) && !item.issue_date?.includes(q) && !item.source_box_code?.toLowerCase().includes(q) && !item.processed_box_code?.toLowerCase().includes(q)) return false;
+    if (q && !item.cover_subject?.toLowerCase().includes(q) && !item.issue_date?.includes(q) && !item.source_box_code?.toLowerCase().includes(q) && !item.processed_box_code?.toLowerCase().includes(q) && !(item.listing_status || '').includes(q)) return false;
     return true;
   });
 
@@ -948,6 +1218,7 @@ function InventorySection() {
     { key: 'source_box_code', label: 'Source Box', width: 92, sortable: true },
     { key: 'processed_box_code', label: 'Dest Box', width: 92, sortable: true },
     { key: 'archive_location', label: 'Location', width: 100 },
+    { key: 'listing_status', label: 'Listing', width: 88 },
     { key: 'condition_score', label: 'Cond.', width: 50 },
     { key: 'rough_comp_min', label: 'Comp Min', width: 72 },
     { key: 'rough_comp_max', label: 'Comp Max', width: 72 },
@@ -1010,6 +1281,15 @@ function InventorySection() {
             {processedBoxes.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
         )}
+        <select value={filterListingStatus} onChange={e => setFilterListingStatus(e.target.value)}
+          style={{ padding: '7px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}>
+          <option value="all">All Listing States</option>
+          <option value="none">No Listing</option>
+          <option value="draft">Draft Saved</option>
+          <option value="ready">Ready to Publish</option>
+          <option value="pushed">Published</option>
+          <option value="failed">Publish Failed</option>
+        </select>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888' }}>
           {sorted.length} of {items.length} items
         </span>
@@ -1073,6 +1353,16 @@ function InventorySection() {
                       if (col.key === 'processed_box_code' && val) {
                         display = <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#ecfeff', padding: '2px 5px', borderRadius: 4, color: '#155e75' }}>{val}</span>;
                       }
+                      if (col.key === 'listing_status') {
+                        const ls = (val || 'none') as string;
+                        const lsColor = PUSH_STATUS_COLORS[ls] || '#9ca3af';
+                        const lsLabel = LISTING_STATUS_LABELS[ls] || ls;
+                        display = (
+                          <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: lsColor + '20', color: lsColor }}>
+                            {lsLabel}
+                          </span>
+                        );
+                      }
                       return <td key={col.key} style={{ padding: '7px 10px', color: '#1a1a1a' }}>{display}</td>;
                     })}
                     <td style={{ padding: '7px 10px' }}>
@@ -1131,9 +1421,9 @@ function InventorySection() {
 
 // ── Main ArchiveForgePage ─────────────────────────────────────────────────────
 
-type WizardStep = 'intake' | 'reference' | 'photos' | 'archive' | 'condition' | 'listing' | 'inventory';
+type WizardStep = 'intake' | 'reference' | 'photos' | 'archive' | 'condition' | 'listing' | 'review' | 'inventory';
 
-const STEP_ORDER: WizardStep[] = ['intake','reference','photos','archive','condition','listing','inventory'];
+const STEP_ORDER: WizardStep[] = ['intake','reference','photos','archive','condition','listing','review','inventory'];
 const STEP_LABELS: Record<WizardStep, string> = {
   intake: '1. Identify',
   reference: '2. Reference',
@@ -1141,6 +1431,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
   archive: '4. Archive',
   condition: '5. Condition',
   listing: '6. Listing',
+  review: '7. Review',
   inventory: 'Inventory',
 };
 
@@ -1154,7 +1445,6 @@ export default function ArchiveForgePage() {
     is_complete: true,
     actual_listing_images: [],
   });
-  const [draft, setDraft] = useState<DraftOutput | null>(null);
   const [savedArchiveId, setSavedArchiveId] = useState<number | null>(null);
 
   const currentStepIdx = STEP_ORDER.indexOf(step);
@@ -1233,6 +1523,8 @@ export default function ArchiveForgePage() {
       if (step === 'condition') handleArchiveUpdate();
       setStep(STEP_ORDER[idx + 1]);
     } else if (direction === 'prev' && idx > 0) {
+      // Persist condition/box data before going back
+      if (step === 'listing') handleArchiveUpdate();
       setStep(STEP_ORDER[idx - 1]);
     }
   };
@@ -1240,7 +1532,6 @@ export default function ArchiveForgePage() {
   const canGoNext = () => {
     if (step === 'intake') return !!refIssue;
     if (step === 'reference') return !!refIssue;
-    if (step === 'listing') return !!draft;
     return true;
   };
 
@@ -1277,7 +1568,15 @@ export default function ArchiveForgePage() {
         {step === 'photos' && <PhotoSection archiveId={savedArchiveId} refIssue={refIssue} />}
         {step === 'archive' && <ArchiveSection data={archiveData} archiveId={savedArchiveId} onChange={setArchiveData} />}
         {step === 'condition' && <ConditionSection data={archiveData} onChange={setArchiveData} />}
-        {step === 'listing' && <ListingBuilderSection data={archiveData} refIssue={refIssue} onGenerated={setDraft} />}
+        {step === 'listing' && (
+          <ListingBuilderSection
+            data={archiveData}
+            refIssue={refIssue}
+            archiveId={savedArchiveId}
+            onSaved={() => {}}
+          />
+        )}
+        {step === 'review' && <ReviewPublishSection archiveId={savedArchiveId} refIssue={refIssue} />}
         {step === 'inventory' && <InventorySection />}
       </div>
 

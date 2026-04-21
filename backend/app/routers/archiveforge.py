@@ -22,6 +22,7 @@ import logging
 import re
 import shutil
 import uuid
+import httpx
 from datetime import datetime
 from pathlib import Path
 
@@ -29,6 +30,13 @@ from app.db.database import get_db, dict_rows, dict_row, DB_PATH
 
 UPLOADS_DIR = Path("/home/rg/empire-repo/backend/data/archiveforge_uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
+
+# MarketForge product creation endpoint — requires MarketForge router to be mounted
+# at http://localhost:8000/marketplace/products in main.py
+MARKETFORGE_PRODUCTS_URL = "http://localhost:8000/marketplace/products"
+
+PUSH_STATUSES = ["not_pushed", "draft_saved", "pushing", "pushed", "failed"]
+LISTING_STATUSES = ["none", "draft", "ready", "pushed", "failed"]
 
 router = APIRouter(prefix="/archiveforge", tags=["archiveforge"])
 log = logging.getLogger("archiveforge")
@@ -290,6 +298,12 @@ def _init_tables():
             item_specifics TEXT DEFAULT '{}',
             batch_tag TEXT DEFAULT '',
             listing_draft_status TEXT DEFAULT 'draft',
+            -- MarketForge publish tracking
+            listing_status TEXT DEFAULT 'none',
+            marketforge_listing_id TEXT DEFAULT '',
+            marketforge_push_status TEXT DEFAULT 'not_pushed',
+            marketforge_pushed_at TEXT DEFAULT '',
+            marketforge_error_message TEXT DEFAULT '',
             -- Metadata
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
@@ -394,6 +408,9 @@ class ArchiveUpdate(BaseModel):
     item_specifics: Optional[dict] = None
     batch_tag: Optional[str] = None
     reboxed_by: Optional[str] = None
+    listing_status: Optional[str] = None
+    marketforge_push_status: Optional[str] = None
+    marketforge_error_message: Optional[str] = None
 
 
 class StatusTransition(BaseModel):
@@ -453,6 +470,7 @@ async def list_archives(
     tier: Optional[str] = None,
     source_box: Optional[str] = None,
     processed_box: Optional[str] = None,
+    listing_status: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ):
@@ -471,6 +489,9 @@ async def list_archives(
         if processed_box:
             where.append("processed_box_code = ?")
             params.append(processed_box)
+        if listing_status:
+            where.append("listing_status = ?")
+            params.append(listing_status)
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         params += [limit, offset]
         rows = dict_rows(db.execute(
@@ -504,8 +525,9 @@ async def create_archive(req: ArchiveCreate):
                 reference_cover_url, actual_listing_images, source_box_code,
                 source_slot_position, processed_box_code, processed_status,
                 archive_location, condition_score, has_address_label, is_complete,
-                defects, notes, tier, rough_comp_min, rough_comp_max, sale_plan)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                defects, notes, tier, rough_comp_min, rough_comp_max, sale_plan,
+                listing_status, marketforge_push_status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 req.reference_issue_id, req.issue_date, req.volume, req.issue_number,
                 req.cover_subject, req.reference_cover_url,
@@ -516,6 +538,7 @@ async def create_archive(req: ArchiveCreate):
                 int(req.has_address_label), int(req.is_complete),
                 req.defects, req.notes, req.tier,
                 req.rough_comp_min, req.rough_comp_max, req.sale_plan,
+                'none', 'not_pushed',
             ),
         )
         db.commit()
@@ -640,6 +663,216 @@ async def rebox_archive(archive_id: int, req: ReboxRequest):
         "archive_location": req.archive_location,
         "processed_status": "REBOXED",
         "reboxed_at": datetime.now().isoformat(),
+    }
+
+
+# ── MarketForge Push ────────────────────────────────────────────────────────────
+
+def _condition_to_marketforge(score: int) -> str:
+    """Map ArchiveForge 1-5 condition score to MarketForge condition values."""
+    mapping = {5: "new", 4: "like_new", 3: "good", 2: "fair", 1: "poor"}
+    return mapping.get(score, "good")
+
+
+def _build_marketforge_payload(archive: dict, photo_urls: list[str]) -> dict:
+    """Build a MarketForge ProductCreate payload from an archive record."""
+    price = archive.get("rough_comp_min", 0) or 10.0
+    if archive.get("rough_comp_max", 0):
+        price = (archive.get("rough_comp_min", 0) + archive.get("rough_comp_max", 0)) / 2
+
+    # Item specifics for the description
+    specifics = archive.get("item_specifics", {})
+    if isinstance(specifics, str):
+        try:
+            specifics = json.loads(specifics)
+        except Exception:
+            specifics = {}
+
+    item_desc = archive.get("listing_description", "") or (
+        f"LIFE Magazine — {archive.get('cover_subject', 'Vintage Issue')}. "
+        f"Original issue date: {archive.get('issue_date', 'Unknown')}. "
+        f"Condition: {_condition_to_marketforge(archive.get('condition_score', 3))}."
+    )
+
+    return {
+        "title": archive.get("listing_title") or f"LIFE Magazine {archive.get('issue_date', '')} — {archive.get('cover_subject', 'Vintage')}",
+        "description": item_desc,
+        "category_id": "00000000-0000-0000-0000-000000000001",  # placeholder — must be real UUID
+        "condition": _condition_to_marketforge(archive.get("condition_score", 3)),
+        "price": round(price, 2),
+        "shipping_price": 0.0,
+        "offers_enabled": True,
+        "minimum_offer": round(price * 0.8, 2) if price > 5 else None,
+        "images": photo_urls,
+        "package_weight_oz": 12,
+        "package_length_in": 12,
+        "package_width_in": 10,
+        "package_height_in": 1,
+        "ships_from_zip": "98101",  # placeholder — must be real ZIP
+        "quantity": 1,
+    }
+
+
+@router.post("/push/{archive_id}")
+async def push_to_marketforge(archive_id: int):
+    """
+    Attempt to push an archive listing draft to MarketForge.
+
+    Validates archive state, builds product payload from actual listing photos,
+    POSTs to MarketForge /marketplace/products endpoint, and stores the result.
+
+    MarketForge dependency: app.routers.marketplace.products must be mounted
+    at /marketplace/products in main.py. If not mounted, this returns 502
+    with a clear dependency message.
+    """
+    # 1. Load archive
+    with get_db() as db:
+        row = db.execute("SELECT * FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Archive item not found")
+    archive = dict_row(row)
+
+    # 2. Validate processed_status
+    valid_publish_statuses = ["READY_TO_LIST", "LISTED"]
+    if archive.get("processed_status") not in valid_publish_statuses:
+        raise HTTPException(
+            409,
+            f"Cannot publish — processed_status must be {valid_publish_statuses[0]} or {valid_publish_statuses[1]}, "
+            f"but is '{archive.get('processed_status')}'"
+        )
+
+    # 3. Validate listing fields
+    if not archive.get("listing_title"):
+        raise HTTPException(400, "Cannot publish — listing_title is blank. Fill in the listing title in Step 6.")
+    if not archive.get("listing_description"):
+        raise HTTPException(400, "Cannot publish — listing_description is blank. Fill in the listing description in Step 6.")
+
+    # 4. Get actual listing photos
+    with get_db() as db:
+        photo_rows = dict_rows(db.execute(
+            "SELECT * FROM ag_archive_photos WHERE archive_id = ? ORDER BY created_at ASC",
+            (archive_id,),
+        ).fetchall())
+    photo_urls = [f"http://localhost:8000/api/v1/archiveforge/photo/{p['id']}" for p in photo_rows]
+
+    if not photo_urls:
+        raise HTTPException(400, "Cannot publish — no actual listing photos uploaded. Upload at least a front cover photo in Step 3.")
+
+    # 5. Build payload
+    payload = _build_marketforge_payload(archive, photo_urls)
+
+    # 6. Attempt MarketForge push
+    # Set status to pushing
+    with get_db() as db:
+        db.execute(
+            "UPDATE ag_archives SET marketforge_push_status = 'pushing', listing_status = 'ready', updated_at = datetime('now') WHERE id = ?",
+            (archive_id,),
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(MARKETFORGE_PRODUCTS_URL, json=payload)
+
+        if resp.status_code in (200, 201):
+            result = resp.json()
+            mf_listing_id = str(result.get("id", ""))
+            with get_db() as db:
+                db.execute(
+                    """UPDATE ag_archives
+                       SET marketforge_push_status = 'pushed',
+                           marketforge_listing_id = ?,
+                           marketforge_pushed_at = datetime('now'),
+                           marketforge_error_message = '',
+                           listing_status = 'pushed',
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (mf_listing_id, archive_id),
+                )
+            log.info(f"Archive #{archive_id} pushed to MarketForge — listing_id={mf_listing_id}")
+            return {
+                "archive_id": archive_id,
+                "marketforge_listing_id": mf_listing_id,
+                "push_status": "pushed",
+                "message": "Successfully pushed to MarketForge",
+                "marketforge_response": result,
+            }
+        else:
+            error_detail = resp.text[:500]
+            with get_db() as db:
+                db.execute(
+                    """UPDATE ag_archives
+                       SET marketforge_push_status = 'failed',
+                           marketforge_error_message = ?,
+                           listing_status = 'failed',
+                           updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (f"HTTP {resp.status_code}: {error_detail}", archive_id),
+                )
+            log.warning(f"Archive #{archive_id} MarketForge push failed: HTTP {resp.status_code}")
+            raise HTTPException(502, f"MarketForge rejected the push (HTTP {resp.status_code}): {error_detail}")
+
+    except httpx.ConnectError as e:
+        with get_db() as db:
+            db.execute(
+                """UPDATE ag_archives
+                   SET marketforge_push_status = 'failed',
+                       marketforge_error_message = ?,
+                       listing_status = 'failed',
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (f"Connection failed — MarketForge products endpoint not mounted at {MARKETFORGE_PRODUCTS_URL}. "
+                 "This endpoint requires app.routers.marketplace.products to be loaded in main.py. "
+                 "Until then, listings can be saved as drafts only.", archive_id),
+            )
+        raise HTTPException(
+            502,
+            f"MarketForge products endpoint not available at {MARKETFORGE_PRODUCTS_URL}. "
+            "The marketplace/products router is not mounted in the running application. "
+            "Save as draft for now — publishing requires MarketForge to be wired up."
+        )
+    except Exception as e:
+        with get_db() as db:
+            db.execute(
+                """UPDATE ag_archives
+                   SET marketforge_push_status = 'failed',
+                       marketforge_error_message = ?,
+                       listing_status = 'failed',
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (str(e)[:500], archive_id),
+            )
+        log.error(f"Archive #{archive_id} push error: {e}")
+        raise HTTPException(500, f"Push failed: {str(e)[:200]}")
+
+
+class SaveDraftRequest(BaseModel):
+    listing_title: str = ""
+    listing_description: str = ""
+    batch_tag: str = ""
+
+
+@router.post("/archives/{archive_id}/save-draft")
+async def save_listing_draft(archive_id: int, req: SaveDraftRequest):
+    """Save listing title/description as draft without publishing to MarketForge."""
+    with get_db() as db:
+        row = db.execute("SELECT id FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Archive item not found")
+
+    with get_db() as db:
+        db.execute(
+            """UPDATE ag_archives
+               SET listing_title = ?, listing_description = ?, batch_tag = ?,
+                   listing_status = 'draft', marketforge_push_status = 'draft_saved',
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (req.listing_title, req.listing_description, req.batch_tag, archive_id),
+        )
+    return {
+        "archive_id": archive_id,
+        "listing_status": "draft",
+        "marketforge_push_status": "draft_saved",
+        "saved": True,
     }
 
 
