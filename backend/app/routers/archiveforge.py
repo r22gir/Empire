@@ -27,7 +27,7 @@ from pathlib import Path
 
 from app.db.database import get_db, dict_rows, dict_row, DB_PATH
 
-UPLOADS_DIR = Path(DB_PATH).parent / "archiveforge_uploads"
+UPLOADS_DIR = Path("/home/rg/empire-repo/backend/data/archiveforge_uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 router = APIRouter(prefix="/archiveforge", tags=["archiveforge"])
