@@ -388,6 +388,36 @@ export default function VendorOpsPage() {
     }
   };
 
+  const startCheckout = async (requestedTier: Tier) => {
+    setError(null);
+    try {
+      const result = await postJson<{ checkout_available: boolean; checkout_url?: string; message?: string; activation: ActivationState }>(
+        '/vendorops/activation/checkout',
+        { requested_tier: requestedTier }
+      );
+      setActivation(result.activation);
+      if (result.checkout_available && result.checkout_url) {
+        window.location.href = result.checkout_url;
+        return;
+      }
+      setActionMessage(result.message || 'Checkout is not available yet; state recorded without paid activation.');
+      await load();
+    } catch (exc: any) {
+      setError(exc?.message || 'Checkout creation failed');
+    }
+  };
+
+  const deliverAlerts = async () => {
+    setError(null);
+    try {
+      const result = await postJson<{ processed: number }>('/vendorops/renewal-alerts/deliver', {});
+      setActionMessage(`Renewal alert delivery processed ${result.processed} alert(s).`);
+      await load();
+    } catch (exc: any) {
+      setError(exc?.message || 'Alert delivery failed');
+    }
+  };
+
   const reviewAlert = async (alert: RenewalAlertRow) => {
     setError(null);
     try {
@@ -458,12 +488,20 @@ export default function VendorOpsPage() {
                   <div className="rounded-md bg-slate-50 p-2"><b>{plan.approval_limit}</b><br />approvals</div>
                 </div>
                 {!isCurrent && planTier !== 'free' && (
-                  <button
-                    onClick={() => requestUpgrade(planTier)}
-                    className="mt-3 w-full rounded-md border border-teal-600 px-3 py-2 text-xs font-bold text-teal-700"
-                  >
-                    Request {planTier} upgrade
-                  </button>
+                  <div className="mt-3 grid gap-2">
+                    <button
+                      onClick={() => startCheckout(planTier)}
+                      className="w-full rounded-md bg-teal-600 px-3 py-2 text-xs font-bold text-white"
+                    >
+                      Start checkout
+                    </button>
+                    <button
+                      onClick={() => requestUpgrade(planTier)}
+                      className="w-full rounded-md border border-teal-600 px-3 py-2 text-xs font-bold text-teal-700"
+                    >
+                      Record upgrade intent
+                    </button>
+                  </div>
                 )}
               </div>
             );
@@ -506,6 +544,11 @@ export default function VendorOpsPage() {
                   MAX can query VendorOps status, renewals, approvals, subscriptions, and monthly cost. MAX cannot approve, provision, cancel, or mutate VendorOps state from chat in this MVP.
                 </div>
                 <Panel title="Renewal alerts">
+                  <div className="mb-3 flex justify-end">
+                    <button onClick={deliverAlerts} className="rounded-md border border-teal-600 px-3 py-2 text-xs font-bold text-teal-700">
+                      Deliver queued alerts
+                    </button>
+                  </div>
                   {renewalAlerts.length === 0 ? <Empty text="No active renewal alerts in the next 30 days." /> : renewalAlerts.map(alert => (
                     <div key={alert.id} className="flex flex-col gap-2 border-b border-slate-100 py-3 last:border-b-0 md:flex-row md:items-center md:justify-between">
                       <div>
