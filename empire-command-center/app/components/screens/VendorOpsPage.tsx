@@ -5,7 +5,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { API } from '../../lib/api';
 
 type Tier = 'free' | 'starter' | 'pro';
-type Tab = 'dashboard' | 'accounts' | 'approvals' | 'subscriptions' | 'audit';
+type Tab = 'dashboard' | 'accounts' | 'approvals' | 'subscriptions' | 'preferences' | 'audit';
 type ModalMode = 'account-create' | 'account-edit' | 'subscription-create' | 'subscription-edit' | null;
 
 interface Plan {
@@ -48,6 +48,8 @@ interface ActivationState {
   checkout_status: string;
   requested_tier?: Tier | null;
   requested_at?: string | null;
+  completed_at?: string | null;
+  activation_transition_source?: string | null;
 }
 
 interface AccountRow {
@@ -112,6 +114,15 @@ interface RenewalAlertRow {
   reviewed_at?: string | null;
 }
 
+interface AlertPreferences {
+  telegram_enabled: boolean;
+  email_enabled: boolean;
+  preferred_email_recipient?: string | null;
+  telegram_available: boolean;
+  email_available: boolean;
+  updated_at?: string | null;
+}
+
 const emptyAccountForm = {
   vendor_name: '',
   category: 'software',
@@ -141,6 +152,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'accounts', label: 'Accounts' },
   { id: 'approvals', label: 'Approvals' },
   { id: 'subscriptions', label: 'Subscriptions' },
+  { id: 'preferences', label: 'Preferences' },
   { id: 'audit', label: 'Audit' },
 ];
 
@@ -195,6 +207,8 @@ export default function VendorOpsPage() {
   const [approvals, setApprovals] = useState<ApprovalRow[]>([]);
   const [subscriptions, setSubscriptions] = useState<SubscriptionRow[]>([]);
   const [renewalAlerts, setRenewalAlerts] = useState<RenewalAlertRow[]>([]);
+  const [preferences, setPreferences] = useState<AlertPreferences | null>(null);
+  const [preferenceForm, setPreferenceForm] = useState({ telegram_enabled: true, email_enabled: true, preferred_email_recipient: '' });
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [editingAccount, setEditingAccount] = useState<AccountRow | null>(null);
@@ -209,7 +223,7 @@ export default function VendorOpsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [plansRes, activationRes, statusRes, dashboardRes, accountsRes, approvalsRes, subscriptionsRes, alertsRes, auditRes] = await Promise.all([
+      const [plansRes, activationRes, statusRes, dashboardRes, accountsRes, approvalsRes, subscriptionsRes, alertsRes, preferencesRes, auditRes] = await Promise.all([
         fetchJson<{ tiers: Record<Tier, Plan> }>('/vendorops/plans'),
         fetchJson<{ activation: ActivationState }>('/vendorops/activation'),
         fetchJson<VendorStatus>(`/vendorops/status?tier=${tier}`),
@@ -218,6 +232,7 @@ export default function VendorOpsPage() {
         fetchJson<{ approvals: ApprovalRow[] }>('/vendorops/approvals'),
         fetchJson<{ subscriptions: SubscriptionRow[] }>('/vendorops/subscriptions'),
         fetchJson<{ alerts: RenewalAlertRow[] }>('/vendorops/renewal-alerts?days=30'),
+        fetchJson<{ preferences: AlertPreferences }>('/vendorops/alert-preferences'),
         fetchJson<{ events: AuditRow[] }>('/vendorops/audit?limit=50'),
       ]);
       setPlans(plansRes.tiers);
@@ -228,6 +243,12 @@ export default function VendorOpsPage() {
       setApprovals(approvalsRes.approvals || []);
       setSubscriptions(subscriptionsRes.subscriptions || []);
       setRenewalAlerts(alertsRes.alerts || []);
+      setPreferences(preferencesRes.preferences);
+      setPreferenceForm({
+        telegram_enabled: preferencesRes.preferences.telegram_enabled,
+        email_enabled: preferencesRes.preferences.email_enabled,
+        preferred_email_recipient: preferencesRes.preferences.preferred_email_recipient || '',
+      });
       setAudit(auditRes.events || []);
     } catch (exc: any) {
       setError(exc?.message || 'VendorOps unavailable');
@@ -429,6 +450,18 @@ export default function VendorOpsPage() {
     }
   };
 
+  const savePreferences = async () => {
+    setError(null);
+    try {
+      const result = await patchJson<{ preferences: AlertPreferences }>('/vendorops/alert-preferences', preferenceForm);
+      setPreferences(result.preferences);
+      setActionMessage('VendorOps alert preferences updated.');
+      await load();
+    } catch (exc: any) {
+      setError(exc?.message || 'Preference update failed');
+    }
+  };
+
   return (
     <div className="min-h-full p-4 md:p-6" style={{ background: '#f8fafc', color: '#111827' }}>
       <div className="mx-auto flex max-w-7xl flex-col gap-5">
@@ -444,6 +477,7 @@ export default function VendorOpsPage() {
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">DB prefix: vo_</span>
               <span className="rounded-md bg-amber-100 px-2.5 py-1 text-amber-800">MAX query-only</span>
               <span className="rounded-md bg-teal-100 px-2.5 py-1 text-teal-800">Activation: {activation?.activation_state || 'loading'}</span>
+              <span className="rounded-md bg-slate-100 px-2.5 py-1 text-slate-700">Checkout: {activation?.checkout_status || 'loading'}</span>
             </div>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -461,6 +495,7 @@ export default function VendorOpsPage() {
             <div className="mt-2 text-xs font-semibold text-slate-700">
               Billing: {activation?.billing_status || 'loading'} · Checkout: {activation?.checkout_status || 'loading'}
             </div>
+            {activation?.completed_at && <div className="mt-1 text-xs text-emerald-700">Completed: {shortDate(activation.completed_at)}</div>}
           </div>
         </header>
 
@@ -554,7 +589,7 @@ export default function VendorOpsPage() {
                       <div>
                         <div className="font-bold text-slate-950">{alert.vendor_name} · {alert.alert_type}</div>
                         <div className="text-sm text-slate-600">Renews {shortDate(alert.renewal_date)} at {currency(alert.estimated_cost_usd)}. {alert.suggested_action}</div>
-                        <div className="text-xs text-slate-500">Telegram: {alert.telegram_status} · Email: {alert.email_status}</div>
+                        <div className="text-xs text-slate-500">Delivery: {alert.delivery_status} · Telegram: {alert.telegram_status} · Email: {alert.email_status}</div>
                       </div>
                       <button onClick={() => reviewAlert(alert)} className="rounded-md bg-slate-900 px-3 py-2 text-xs font-bold text-white">Mark reviewed</button>
                     </div>
@@ -648,6 +683,55 @@ export default function VendorOpsPage() {
                       <b>{item.vendor_name}</b> renews {shortDate(item.renewal_date)} at {currency(item.estimated_cost_usd)}. {item.delivery_status}
                     </div>
                   ))}
+                </Panel>
+              </section>
+            )}
+
+            {tab === 'preferences' && (
+              <section className="grid gap-4">
+                <Panel title="Renewal alert preferences">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <label className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-800">
+                      Telegram alerts
+                      <input
+                        type="checkbox"
+                        checked={preferenceForm.telegram_enabled}
+                        onChange={event => setPreferenceForm({ ...preferenceForm, telegram_enabled: event.target.checked })}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-800">
+                      Email alerts
+                      <input
+                        type="checkbox"
+                        checked={preferenceForm.email_enabled}
+                        onChange={event => setPreferenceForm({ ...preferenceForm, email_enabled: event.target.checked })}
+                      />
+                    </label>
+                    <label className="md:col-span-2 text-sm font-semibold text-slate-700">
+                      Preferred email recipient
+                      <input
+                        type="email"
+                        value={preferenceForm.preferred_email_recipient}
+                        onChange={event => setPreferenceForm({ ...preferenceForm, preferred_email_recipient: event.target.value })}
+                        placeholder="founder@example.com"
+                        className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-4 grid gap-2 text-sm md:grid-cols-2">
+                    <div className={`rounded-md px-3 py-2 ${preferences?.telegram_available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                      Telegram channel: {preferences?.telegram_available ? 'available' : 'not configured'}
+                    </div>
+                    <div className={`rounded-md px-3 py-2 ${preferences?.email_available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                      Email channel: {preferences?.email_available ? 'available' : 'recipient/config missing'}
+                    </div>
+                  </div>
+                  <button onClick={savePreferences} className="mt-4 rounded-md bg-teal-600 px-4 py-2 text-sm font-bold text-white">Save preferences</button>
+                </Panel>
+                <Panel title="Delivery truth">
+                  <div className="text-sm leading-6 text-slate-600">
+                    Disabled channels are recorded as <b>skipped_preference_disabled</b>. Missing Telegram/email configuration is recorded as <b>skipped_channel_unavailable</b>. VendorOps does not mark an alert sent unless a delivery path reports success.
+                  </div>
                 </Panel>
               </section>
             )}

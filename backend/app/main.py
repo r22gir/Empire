@@ -402,6 +402,14 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ OpenClaw Worker: {e}")
 
+    # VendorOps Renewal Alert Runner — sends durable renewal alerts when channels are available
+    try:
+        from app.services.vendorops_alert_runner import vendorops_alert_runner
+        asyncio.create_task(vendorops_alert_runner.start())
+        print(f"✓ VendorOps Alert Runner: polling every {vendorops_alert_runner.interval_seconds}s")
+    except Exception as e:
+        print(f"✗ VendorOps Alert Runner: {e}")
+
     # Task Auto-Execution Worker — polls todo tasks every 30s, routes to desks
     try:
         asyncio.create_task(_task_auto_worker())
