@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.db import database
 from app.main import app
+import app.routers.vendorops as vendorops_router
 
 
 client = TestClient(app)
@@ -298,6 +299,87 @@ def test_vendorops_renewal_alert_buckets(monkeypatch, tmp_path):
     by_vendor = {alert["vendor_name"]: alert["alert_type"] for alert in alerts}
     for vendor, _renewal, bucket in cases:
         assert by_vendor[vendor] == bucket
+
+
+def test_vendorops_checkout_session_scaffold_and_completion(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+
+    unavailable = client.post("/api/v1/vendorops/activation/checkout", json={"requested_tier": "starter"})
+    assert unavailable.status_code == 200
+    assert unavailable.json()["checkout_available"] is False
+
+    class FakeSessionApi:
+        @staticmethod
+        def create(**_kwargs):
+            return {
+                "id": "cs_vendorops_test",
+                "url": "https://checkout.stripe.test/vendorops",
+            }
+
+        @staticmethod
+        def retrieve(_session_id):
+            return {
+                "id": "cs_vendorops_test",
+                "payment_status": "paid",
+                "subscription": "sub_vendorops_test",
+                "customer": "cus_vendorops_test",
+                "metadata": {"flow": "vendorops_addon", "vendorops_tier": "starter"},
+            }
+
+    class FakeStripe:
+        checkout = type("Checkout", (), {"Session": FakeSessionApi})
+
+    monkeypatch.setattr(vendorops_router, "_stripe_client", lambda: FakeStripe)
+    monkeypatch.setattr(vendorops_router, "_vendorops_price_id", lambda tier: f"price_{tier}")
+
+    checkout = client.post("/api/v1/vendorops/activation/checkout", json={"requested_tier": "starter", "customer_email": "founder@example.com"})
+    assert checkout.status_code == 200
+    assert checkout.json()["checkout_available"] is True
+    assert checkout.json()["checkout_url"] == "https://checkout.stripe.test/vendorops"
+    assert checkout.json()["activation"]["activation_state"] == "active_free"
+
+    completed = client.post("/api/v1/vendorops/activation/checkout-complete", json={"session_id": "cs_vendorops_test"})
+    assert completed.status_code == 200
+    assert completed.json()["activation"]["activation_state"] == "active_starter"
+    assert completed.json()["activation"]["stripe_subscription_id"] == "sub_vendorops_test"
+
+
+def test_vendorops_alert_delivery_status_transitions(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    renewal = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    created = client.post(
+        "/api/v1/vendorops/subscriptions",
+        json={
+            "tier": "pro",
+            "vendor_name": "Delivery Vendor",
+            "plan_name": "Pro",
+            "monthly_cost_usd": 33,
+            "renewal_cadence": "monthly",
+            "renewal_date": renewal,
+            "explicit_founder_confirmation": True,
+        },
+    )
+    assert created.status_code == 200
+
+    async def fake_telegram(_alert):
+        return "sent"
+
+    async def fake_email(_alert):
+        return "failed"
+
+    monkeypatch.setattr(vendorops_router, "_deliver_alert_telegram", fake_telegram)
+    monkeypatch.setattr(vendorops_router, "_deliver_alert_email", fake_email)
+
+    delivered = client.post("/api/v1/vendorops/renewal-alerts/deliver")
+    assert delivered.status_code == 200
+    alert = delivered.json()["alerts"][0]
+    assert alert["telegram_status"] == "sent"
+    assert alert["email_status"] == "failed"
+    assert alert["delivery_status"] == "sent"
+
+    delivered_again = client.post("/api/v1/vendorops/renewal-alerts/deliver")
+    assert delivered_again.status_code == 200
+    assert delivered_again.json()["processed"] == 0
 
 
 def test_vendorops_approval_listing_and_reject_round_trip(monkeypatch, tmp_path):

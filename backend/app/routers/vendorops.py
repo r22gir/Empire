@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -138,6 +139,17 @@ class ActivationRequest(BaseModel):
     explicit_founder_confirmation: bool
 
 
+class CheckoutRequest(BaseModel):
+    requested_tier: TierName
+    customer_email: str | None = None
+    success_url: str = "https://studio.empirebox.store/?vendorops=checkout-success&session_id={CHECKOUT_SESSION_ID}"
+    cancel_url: str = "https://studio.empirebox.store/?vendorops=checkout-cancelled"
+
+
+class CheckoutCompleteRequest(BaseModel):
+    session_id: str
+
+
 class MaxActionRequest(BaseModel):
     action: str
     target_type: str | None = None
@@ -265,6 +277,10 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
             billing_status TEXT NOT NULL,
             checkout_status TEXT NOT NULL,
             requested_tier TEXT,
+            stripe_session_id TEXT,
+            stripe_customer_id TEXT,
+            stripe_subscription_id TEXT,
+            checkout_url TEXT,
             requested_at TEXT,
             updated_at TEXT NOT NULL
         );
@@ -296,6 +312,10 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
     _ensure_column(conn, "vo_accounts", "renewal_cadence", "TEXT NOT NULL DEFAULT 'monthly'")
     _ensure_column(conn, "vo_subscriptions", "monthly_cost_usd", "REAL NOT NULL DEFAULT 0")
     _ensure_column(conn, "vo_subscriptions", "renewal_cadence", "TEXT NOT NULL DEFAULT 'monthly'")
+    _ensure_column(conn, "vo_activation", "stripe_session_id", "TEXT")
+    _ensure_column(conn, "vo_activation", "stripe_customer_id", "TEXT")
+    _ensure_column(conn, "vo_activation", "stripe_subscription_id", "TEXT")
+    _ensure_column(conn, "vo_activation", "checkout_url", "TEXT")
     if conn.execute("SELECT COUNT(*) AS count FROM vo_activation WHERE id = 'default'").fetchone()["count"] == 0:
         conn.execute(
             """
@@ -419,6 +439,59 @@ def _generate_alerts(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return _list_rows(conn, "SELECT * FROM vo_renewal_alerts ORDER BY datetime(renewal_date) ASC, created_at DESC")
 
 
+def _vendorops_price_id(tier: str) -> str | None:
+    env_map = {
+        "starter": "VENDOROPS_STRIPE_PRICE_STARTER",
+        "pro": "VENDOROPS_STRIPE_PRICE_PRO",
+    }
+    key = env_map.get(tier)
+    return os.getenv(key or "", "") or None
+
+
+def _stripe_client():
+    secret = os.getenv("STRIPE_SECRET_KEY", "")
+    if not secret:
+        return None
+    try:
+        import stripe
+        stripe.api_key = secret
+        return stripe
+    except Exception:
+        return None
+
+
+def _apply_paid_activation(conn: sqlite3.Connection, tier: str, session: Any) -> dict[str, Any]:
+    activation_state = f"active_{tier}"
+    now = _now()
+    customer = getattr(session, "customer", None) or (session.get("customer") if isinstance(session, dict) else None)
+    subscription = getattr(session, "subscription", None) or (session.get("subscription") if isinstance(session, dict) else None)
+    session_id = getattr(session, "id", None) or (session.get("id") if isinstance(session, dict) else None)
+    conn.execute(
+        """
+        UPDATE vo_activation
+        SET activation_state = ?,
+            tier = ?,
+            billing_status = 'paid_active',
+            checkout_status = 'completed',
+            stripe_session_id = ?,
+            stripe_customer_id = ?,
+            stripe_subscription_id = ?,
+            updated_at = ?
+        WHERE id = 'default'
+        """,
+        (activation_state, tier, session_id, customer, subscription, now),
+    )
+    _audit(
+        conn,
+        "paid_activation_completed",
+        "activation",
+        "default",
+        actor="stripe",
+        metadata={"tier": tier, "stripe_session_id": session_id, "stripe_customer_id": customer, "stripe_subscription_id": subscription},
+    )
+    return _activation(conn)
+
+
 @router.get("/plans")
 def get_vendorops_plans():
     return {
@@ -506,6 +579,133 @@ def request_vendorops_upgrade(payload: ActivationRequest):
             "checkout_available": False,
             "message": "VendorOps upgrade recorded. Billing checkout hookup is pending; no paid activation was faked.",
         }
+
+
+@router.post("/activation/checkout")
+def create_vendorops_checkout(payload: CheckoutRequest):
+    _require_tier(payload.requested_tier)
+    if payload.requested_tier == "free":
+        raise HTTPException(status_code=400, detail="Free tier does not require checkout.")
+    price_id = _vendorops_price_id(payload.requested_tier)
+    stripe = _stripe_client()
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        now = _now()
+        if stripe is None:
+            conn.execute(
+                """
+                UPDATE vo_activation
+                SET billing_status = 'stripe_unavailable',
+                    checkout_status = 'failed_stripe_unconfigured',
+                    requested_tier = ?,
+                    requested_at = ?,
+                    updated_at = ?
+                WHERE id = 'default'
+                """,
+                (payload.requested_tier, now, now),
+            )
+            _audit(conn, "checkout_session_failed", "activation", "default", actor="system", metadata={"reason": "stripe_unconfigured", "requested_tier": payload.requested_tier})
+            return {
+                "checkout_available": False,
+                "checkout_status": "failed_stripe_unconfigured",
+                "activation": _activation(conn),
+                "message": "Stripe is not configured; no checkout URL was created.",
+            }
+        if not price_id:
+            conn.execute(
+                """
+                UPDATE vo_activation
+                SET billing_status = 'price_missing',
+                    checkout_status = 'failed_price_not_configured',
+                    requested_tier = ?,
+                    requested_at = ?,
+                    updated_at = ?
+                WHERE id = 'default'
+                """,
+                (payload.requested_tier, now, now),
+            )
+            _audit(conn, "checkout_session_failed", "activation", "default", actor="system", metadata={"reason": "price_not_configured", "requested_tier": payload.requested_tier})
+            return {
+                "checkout_available": False,
+                "checkout_status": "failed_price_not_configured",
+                "activation": _activation(conn),
+                "message": f"VendorOps Stripe price is not configured for {payload.requested_tier}.",
+            }
+    try:
+        params: dict[str, Any] = {
+            "mode": "subscription",
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "success_url": payload.success_url,
+            "cancel_url": payload.cancel_url,
+            "metadata": {
+                "flow": "vendorops_addon",
+                "vendorops_tier": payload.requested_tier,
+                "product": "VendorOps",
+            },
+        }
+        if payload.customer_email:
+            params["customer_email"] = payload.customer_email
+        session = stripe.checkout.Session.create(**params)
+        session_id = getattr(session, "id", None) or session.get("id")
+        checkout_url = getattr(session, "url", None) or session.get("url")
+    except Exception as exc:
+        with get_db() as conn:
+            _init_vendorops_schema(conn)
+            conn.execute(
+                "UPDATE vo_activation SET billing_status = 'checkout_error', checkout_status = 'failed', requested_tier = ?, updated_at = ? WHERE id = 'default'",
+                (payload.requested_tier, _now()),
+            )
+            _audit(conn, "checkout_session_failed", "activation", "default", actor="stripe", metadata={"requested_tier": payload.requested_tier, "error": str(exc)})
+            return {"checkout_available": False, "checkout_status": "failed", "activation": _activation(conn), "message": str(exc)}
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        now = _now()
+        conn.execute(
+            """
+            UPDATE vo_activation
+            SET billing_status = 'checkout_created',
+                checkout_status = 'session_created',
+                requested_tier = ?,
+                stripe_session_id = ?,
+                checkout_url = ?,
+                requested_at = ?,
+                updated_at = ?
+            WHERE id = 'default'
+            """,
+            (payload.requested_tier, session_id, checkout_url, now, now),
+        )
+        _audit(conn, "checkout_session_created", "activation", "default", actor="stripe", metadata={"requested_tier": payload.requested_tier, "stripe_session_id": session_id})
+        return {
+            "checkout_available": True,
+            "checkout_url": checkout_url,
+            "session_id": session_id,
+            "requested_tier": payload.requested_tier,
+            "checkout_status": "session_created",
+            "activation": _activation(conn),
+        }
+
+
+@router.post("/activation/checkout-complete")
+def complete_vendorops_checkout(payload: CheckoutCompleteRequest):
+    stripe = _stripe_client()
+    if stripe is None:
+        raise HTTPException(status_code=503, detail="Stripe not configured; cannot verify checkout completion.")
+    try:
+        session = stripe.checkout.Session.retrieve(payload.session_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Stripe session lookup failed: {exc}")
+    status = getattr(session, "payment_status", None) or session.get("payment_status")
+    subscription = getattr(session, "subscription", None) or session.get("subscription")
+    metadata = getattr(session, "metadata", None) or session.get("metadata") or {}
+    tier = metadata.get("vendorops_tier")
+    flow = metadata.get("flow")
+    if flow != "vendorops_addon" or tier not in {"starter", "pro"}:
+        raise HTTPException(status_code=400, detail="Stripe session is not a VendorOps add-on checkout.")
+    if status != "paid" and not subscription:
+        raise HTTPException(status_code=409, detail="Stripe session is not completed/paid; activation unchanged.")
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        return {"activation": _apply_paid_activation(conn, tier, session), "checkout_status": "completed"}
 
 
 @router.get("/dashboard")
@@ -854,6 +1054,98 @@ def generate_renewal_alerts():
             "alerts": alerts,
             "delivery_truth": "Dashboard alerts are durable. Telegram/email delivery is queued_not_sent until dedicated delivery is wired.",
         }
+
+
+def _alert_message(alert: dict[str, Any]) -> str:
+    return (
+        f"VendorOps renewal alert: {alert['vendor_name']} ({alert['alert_type']})\n"
+        f"Renewal date: {alert['renewal_date']}\n"
+        f"Estimated cost: ${float(alert.get('estimated_cost_usd') or 0):.2f}\n"
+        f"Suggested action: {alert['suggested_action']}"
+    )
+
+
+async def _deliver_alert_telegram(alert: dict[str, Any]) -> str:
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if not telegram_bot.is_configured:
+            return "skipped_channel_unavailable"
+        sent = await telegram_bot.send_message(_alert_message(alert))
+        return "sent" if sent else "failed"
+    except Exception:
+        return "failed"
+
+
+async def _deliver_alert_email(alert: dict[str, Any]) -> str:
+    recipient = os.getenv("VENDOROPS_ALERT_EMAIL") or os.getenv("FOUNDER_EMAIL")
+    if not recipient:
+        return "skipped_channel_unavailable"
+    try:
+        from app.services.email.sender import send_email
+        html = "<br>".join(_alert_message(alert).splitlines())
+        sent = await send_email(recipient, f"VendorOps renewal: {alert['vendor_name']}", html)
+        return "sent" if sent else "failed"
+    except Exception:
+        return "failed"
+
+
+def _combined_delivery_status(telegram_status: str, email_status: str) -> str:
+    statuses = {telegram_status, email_status}
+    if "sent" in statuses:
+        return "sent"
+    if statuses == {"skipped_channel_unavailable"}:
+        return "skipped_channel_unavailable"
+    if "failed" in statuses:
+        return "failed"
+    return "queued"
+
+
+@router.post("/renewal-alerts/deliver")
+async def deliver_renewal_alerts(limit: int = Query(20, ge=1, le=100)):
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        _generate_alerts(conn)
+        alerts = _list_rows(
+            conn,
+            """
+            SELECT * FROM vo_renewal_alerts
+            WHERE reviewed_at IS NULL
+              AND (telegram_status = 'queued_not_sent' OR email_status = 'queued_not_sent')
+            ORDER BY datetime(renewal_date) ASC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    delivered = []
+    for alert in alerts:
+        telegram_status = alert["telegram_status"]
+        email_status = alert["email_status"]
+        if telegram_status == "queued_not_sent":
+            telegram_status = await _deliver_alert_telegram(alert)
+        if email_status == "queued_not_sent":
+            email_status = await _deliver_alert_email(alert)
+        combined = _combined_delivery_status(telegram_status, email_status)
+        with get_db() as conn:
+            _init_vendorops_schema(conn)
+            now = _now()
+            conn.execute(
+                """
+                UPDATE vo_renewal_alerts
+                SET telegram_status = ?, email_status = ?, delivery_status = ?, updated_at = ?
+                WHERE id = ? AND reviewed_at IS NULL
+                """,
+                (telegram_status, email_status, combined, now, alert["id"]),
+            )
+            _audit(
+                conn,
+                "renewal_alert_delivery_attempted",
+                "alert",
+                alert["id"],
+                actor="vendorops_worker",
+                metadata={"telegram_status": telegram_status, "email_status": email_status, "delivery_status": combined},
+            )
+            delivered.append(_serialize_row(conn.execute("SELECT * FROM vo_renewal_alerts WHERE id = ?", (alert["id"],)).fetchone()))
+    return {"processed": len(delivered), "alerts": delivered}
 
 
 @router.patch("/renewal-alerts/{alert_id}/review")
