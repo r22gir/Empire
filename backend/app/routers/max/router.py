@@ -26,6 +26,7 @@ from app.services.max.grounding_verifier import verify_web_response, log_to_audi
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
 from app.services.max.runtime_truth_check import format_runtime_truth_check, should_run_runtime_truth_check
+from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
     REALTIME_LEARNING_ENABLED,
@@ -557,6 +558,15 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=metadata,
         )
 
+    if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
+        return ChatResponse(
+            response=build_inventory_clarification(request.message),
+            model_used="clarification-gate",
+            fallback_used=False,
+            tool_results=[],
+            metadata=_response_metadata(request.channel, skill_used="inventory_ambiguity_gate"),
+        )
+
     if request.image_filename and _image_upload_path(request.image_filename) is None:
         return ChatResponse(
             response="IMAGE_NOT_AVAILABLE",
@@ -1032,6 +1042,13 @@ async def chat_stream(request: ChatRequest):
             yield f"data: {json.dumps({'type': 'done', 'model_used': 'empire-runtime-truth-check', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='empire_runtime_truth_check')})}\n\n"
 
         return StreamingResponse(runtime_truth_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    if not request.desk and not request.image_filename and should_clarify_inventory_request(request.message):
+        async def clarification_gen():
+            yield f"data: {json.dumps({'type': 'text', 'content': build_inventory_clarification(request.message)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'clarification-gate', 'metadata': _response_metadata(request.channel, skill_used='inventory_ambiguity_gate')})}\n\n"
+
+        return StreamingResponse(clarification_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     if request.image_filename and _image_upload_path(request.image_filename) is None:
         async def image_unavailable_gen():
