@@ -144,11 +144,29 @@ def test_vendorops_renewal_alerts_and_cancellation_monitoring(monkeypatch, tmp_p
 
     alerts = client.get("/api/v1/vendorops/renewal-alerts?days=14")
     assert alerts.status_code == 200
-    assert any(item["id"] == subscription["id"] for item in alerts.json()["alerts"])
+    alert_rows = alerts.json()["alerts"]
+    assert any(item["subscription_id"] == subscription["id"] for item in alert_rows)
+    alert = next(item for item in alert_rows if item["subscription_id"] == subscription["id"])
+    assert alert["alert_type"] == "7_day"
+    assert alert["delivery_status"] == "queued"
+    assert alert["telegram_status"] == "queued_not_sent"
+    assert alert["email_status"] == "queued_not_sent"
     dashboard = client.get("/api/v1/vendorops/dashboard?tier=starter")
     assert dashboard.status_code == 200
     assert dashboard.json()["kpis"]["active_subscriptions"] == 1
     assert dashboard.json()["kpis"]["monthly_cost_total_usd"] == 12.5
+
+    regenerated = client.post("/api/v1/vendorops/renewal-alerts/generate")
+    assert regenerated.status_code == 200
+    assert len([item for item in regenerated.json()["alerts"] if item["subscription_id"] == subscription["id"]]) == 1
+
+    reviewed = client.patch(
+        f"/api/v1/vendorops/renewal-alerts/{alert['id']}/review",
+        json={"explicit_founder_confirmation": True},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["alert"]["delivery_status"] == "reviewed"
+    assert client.get("/api/v1/vendorops/renewal-alerts?days=14").json()["alerts"] == []
 
     canceled = client.post(
         f"/api/v1/vendorops/subscriptions/{subscription['id']}/cancel",
@@ -156,6 +174,130 @@ def test_vendorops_renewal_alerts_and_cancellation_monitoring(monkeypatch, tmp_p
     )
     assert canceled.status_code == 200
     assert canceled.json()["subscription"]["cancellation_state"] == "founder_confirmed_monitoring"
+
+
+def test_vendorops_activation_and_crud_flows(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+
+    activation = client.get("/api/v1/vendorops/activation")
+    assert activation.status_code == 200
+    assert activation.json()["activation"]["activation_state"] == "active_free"
+    assert activation.json()["checkout_available"] is False
+
+    upgrade = client.post(
+        "/api/v1/vendorops/activation/request-upgrade",
+        json={"requested_tier": "starter", "explicit_founder_confirmation": True},
+    )
+    assert upgrade.status_code == 200
+    assert upgrade.json()["checkout_available"] is False
+    assert upgrade.json()["activation"]["requested_tier"] == "starter"
+
+    account_created = client.post(
+        "/api/v1/vendorops/accounts",
+        json={
+            "tier": "free",
+            "vendor_name": "Editable Vendor",
+            "category": "software",
+            "purpose": "testing",
+            "vendor_url": "https://vendor.example",
+            "notes": "initial",
+            "monthly_cost_usd": 9,
+            "renewal_date": "2026-05-01T00:00:00+00:00",
+            "credential_ref": "vault://vendorops/editable",
+            "credential_owner": "founder",
+            "explicit_founder_confirmation": True,
+        },
+    )
+    assert account_created.status_code == 200
+    account = account_created.json()["account"]
+    assert account["vendor_name"] == "Editable Vendor"
+    assert account["credential_ref_masked"] != "vault://vendorops/editable"
+
+    account_updated = client.patch(
+        f"/api/v1/vendorops/accounts/{account['id']}",
+        json={
+            "vendor_name": "Edited Vendor",
+            "category": "infra",
+            "purpose": "production",
+            "vendor_url": "https://edited.example",
+            "notes": "edited",
+            "monthly_cost_usd": 11,
+            "renewal_cadence": "annual",
+            "status": "active",
+            "credential_owner": "ops",
+            "explicit_founder_confirmation": True,
+        },
+    )
+    assert account_updated.status_code == 200
+    edited = account_updated.json()["account"]
+    assert edited["vendor_name"] == "Edited Vendor"
+    assert edited["purpose"] == "production"
+    assert edited["credential_owner"] == "ops"
+
+    sub_created = client.post(
+        "/api/v1/vendorops/subscriptions",
+        json={
+            "tier": "free",
+            "vendor_name": "Edited Vendor",
+            "plan_name": "Free",
+            "monthly_cost_usd": 0,
+            "renewal_cadence": "monthly",
+            "renewal_date": "2026-05-01T00:00:00+00:00",
+            "explicit_founder_confirmation": True,
+        },
+    )
+    assert sub_created.status_code == 200
+    sub = sub_created.json()["subscription"]
+
+    sub_updated = client.patch(
+        f"/api/v1/vendorops/subscriptions/{sub['id']}",
+        json={
+            "plan_name": "Starter",
+            "monthly_cost_usd": 19,
+            "renewal_cadence": "monthly",
+            "renewal_date": "2026-05-08T00:00:00+00:00",
+            "status": "active",
+            "explicit_founder_confirmation": True,
+        },
+    )
+    assert sub_updated.status_code == 200
+    assert sub_updated.json()["subscription"]["plan_name"] == "Starter"
+
+    audit_events = client.get("/api/v1/vendorops/audit").json()["events"]
+    event_types = {event["event_type"] for event in audit_events}
+    assert "activation_upgrade_requested" in event_types
+    assert "account_updated" in event_types
+    assert "subscription_updated" in event_types
+
+
+def test_vendorops_renewal_alert_buckets(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    now = datetime.now(timezone.utc)
+    cases = [
+        ("Thirty Vendor", now + timedelta(days=25), "30_day"),
+        ("Seven Vendor", now + timedelta(days=5), "7_day"),
+        ("One Vendor", now + timedelta(days=1), "1_day"),
+        ("Overdue Vendor", now - timedelta(days=2), "overdue"),
+    ]
+    for vendor, renewal, _bucket in cases:
+        response = client.post(
+            "/api/v1/vendorops/subscriptions",
+            json={
+                "tier": "pro",
+                "vendor_name": vendor,
+                "plan_name": "Pro",
+                "monthly_cost_usd": 20,
+                "renewal_cadence": "monthly",
+                "renewal_date": renewal.isoformat(),
+                "explicit_founder_confirmation": True,
+            },
+        )
+        assert response.status_code == 200
+
+    alerts = client.get("/api/v1/vendorops/renewal-alerts?days=30").json()["alerts"]
+    by_vendor = {alert["vendor_name"]: alert["alert_type"] for alert in alerts}
+    for vendor, _renewal, bucket in cases:
+        assert by_vendor[vendor] == bucket
 
 
 def test_vendorops_approval_listing_and_reject_round_trip(monkeypatch, tmp_path):
