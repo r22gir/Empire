@@ -42,6 +42,8 @@ interface ArchiveItem {
   processed_box_code: string;
   processed_status: string;
   archive_location: string;
+  reboxed_at: string | null;
+  reboxed_by: string | null;
   condition_score: number;
   has_address_label: boolean;
   is_complete: boolean;
