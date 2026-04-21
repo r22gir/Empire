@@ -415,3 +415,57 @@ def test_vendorops_max_query_only_write_gate(monkeypatch, tmp_path):
     )
     assert write_attempt.status_code == 403
     assert "query-only" in write_attempt.json()["detail"]
+
+
+def test_max_chat_answers_vendorops_queries_from_summary_route(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    renewal = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    client.post(
+        "/api/v1/vendorops/subscriptions",
+        json={
+            "tier": "pro",
+            "vendor_name": "MAX Query Vendor",
+            "plan_name": "Pro Plan",
+            "monthly_cost_usd": 49,
+            "renewal_cadence": "monthly",
+            "renewal_date": renewal,
+            "explicit_founder_confirmation": True,
+        },
+    )
+
+    response = client.post(
+        "/api/v1/max/chat",
+        json={
+            "message": "VendorOps query only: what tier is active, what renewals are queued, and what is monthly external-services cost?",
+            "channel": "web_chat",
+            "conversation_id": "test-vendorops-query",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_used"] == "vendorops-query"
+    assert body["metadata"]["skill_used"] == "vendorops_summary"
+    assert body["tool_results"][0]["success"] is True
+    assert "VendorOps query result (read-only)" in body["response"]
+    assert "Monthly external-services cost: $49.00" in body["response"]
+    assert "MAX Query Vendor" in body["response"]
+
+
+def test_max_chat_blocks_vendorops_write_requests(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/v1/max/chat",
+        json={
+            "message": "VendorOps approve this pending vendor now",
+            "channel": "web_chat",
+            "conversation_id": "test-vendorops-write-block",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["model_used"] == "vendorops-query"
+    assert body["tool_results"][0]["error"] == "write_gate_blocked"
+    assert "write request blocked" in body["response"].lower()

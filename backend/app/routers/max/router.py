@@ -405,6 +405,89 @@ def _decision_only_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+def _is_vendorops_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    return "vendorops" in text or "vendor ops" in text
+
+
+def _is_vendorops_write_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    write_markers = (
+        "approve",
+        "reject",
+        "provision",
+        "create vendor",
+        "create account",
+        "edit vendor",
+        "edit account",
+        "cancel subscription",
+        "activate",
+        "upgrade",
+        "start checkout",
+    )
+    return _is_vendorops_request(text) and any(marker in text for marker in write_markers)
+
+
+def _format_vendorops_summary(summary: dict[str, Any]) -> str:
+    activation = ((summary.get("vendorops") or {}).get("activation") or {})
+    dashboard = summary.get("dashboard") or {}
+    kpis = dashboard.get("kpis") or {}
+    alerts = (summary.get("renewal_alerts") or {}).get("alerts") or []
+    sent = sum(1 for alert in alerts if alert.get("delivery_status") == "sent")
+    failed = sum(1 for alert in alerts if alert.get("delivery_status") == "failed")
+    queued = sum(1 for alert in alerts if alert.get("delivery_status") in {"queued", "queued_not_sent"})
+    active_subscriptions = summary.get("active_subscriptions") or []
+    upcoming = [
+        f"{sub.get('vendor_name')} / {sub.get('plan_name')} renews {sub.get('renewal_date')} (${float(sub.get('monthly_cost_usd') or 0):.2f})"
+        for sub in active_subscriptions[:5]
+    ]
+    lines = [
+        "VendorOps query result (read-only).",
+        f"- Active tier: {activation.get('tier')} ({activation.get('activation_state')})",
+        f"- Checkout status: {activation.get('checkout_status')}",
+        f"- Monthly external-services cost: ${float(kpis.get('monthly_cost_total_usd') or 0):.2f}",
+        f"- Active subscriptions: {kpis.get('active_subscriptions', 0)}",
+        f"- Pending approvals: {kpis.get('pending_approvals', 0)}",
+        f"- Renewal alerts: {len(alerts)} active ({queued} queued, {sent} sent, {failed} failed).",
+        "- Write gate: MAX can query VendorOps, but approvals/provisioning/cancellations require explicit founder-confirmed routes.",
+    ]
+    if upcoming:
+        lines.append("- Upcoming renewals: " + "; ".join(upcoming))
+    return "\n".join(lines)
+
+
+def _vendorops_query_response(request: ChatRequest) -> ChatResponse:
+    if _is_vendorops_write_request(request.message):
+        return ChatResponse(
+            response=(
+                "VendorOps write request blocked. I can query VendorOps status, renewals, costs, and alerts, "
+                "but I cannot approve, provision, activate, edit, or cancel VendorOps records without an explicit founder-confirmed route."
+            ),
+            model_used="vendorops-query",
+            fallback_used=False,
+            tool_results=[{"tool": "vendorops_summary", "success": False, "error": "write_gate_blocked"}],
+            metadata=_response_metadata(request.channel, skill_used="vendorops_summary"),
+        )
+    try:
+        from app.routers.vendorops import get_vendorops_max_summary
+        summary = get_vendorops_max_summary()
+        return ChatResponse(
+            response=_format_vendorops_summary(summary),
+            model_used="vendorops-query",
+            fallback_used=False,
+            tool_results=[{"tool": "vendorops_summary", "success": True, "result": summary}],
+            metadata=_response_metadata(request.channel, skill_used="vendorops_summary"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"VendorOps query failed: {exc}",
+            model_used="vendorops-query",
+            fallback_used=False,
+            tool_results=[{"tool": "vendorops_summary", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="vendorops_summary"),
+        )
+
+
 def _image_upload_path(image_filename: str | None) -> Path | None:
     if not image_filename:
         return None
@@ -452,6 +535,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    if not request.desk and not request.image_filename and _is_vendorops_request(request.message):
+        return _vendorops_query_response(request)
 
     try:
         from app.services.max.continuity_compaction import (
