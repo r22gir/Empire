@@ -433,6 +433,7 @@ def _format_vendorops_summary(summary: dict[str, Any]) -> str:
     dashboard = summary.get("dashboard") or {}
     kpis = dashboard.get("kpis") or {}
     alerts = (summary.get("renewal_alerts") or {}).get("alerts") or []
+    preferences = summary.get("alert_preferences") or {}
     sent = sum(1 for alert in alerts if alert.get("delivery_status") == "sent")
     failed = sum(1 for alert in alerts if alert.get("delivery_status") == "failed")
     queued = sum(1 for alert in alerts if alert.get("delivery_status") in {"queued", "queued_not_sent"})
@@ -445,10 +446,12 @@ def _format_vendorops_summary(summary: dict[str, Any]) -> str:
         "VendorOps query result (read-only).",
         f"- Active tier: {activation.get('tier')} ({activation.get('activation_state')})",
         f"- Checkout status: {activation.get('checkout_status')}",
+        f"- Checkout completed at: {activation.get('completed_at') or 'not completed'}",
         f"- Monthly external-services cost: ${float(kpis.get('monthly_cost_total_usd') or 0):.2f}",
         f"- Active subscriptions: {kpis.get('active_subscriptions', 0)}",
         f"- Pending approvals: {kpis.get('pending_approvals', 0)}",
         f"- Renewal alerts: {len(alerts)} active ({queued} queued, {sent} sent, {failed} failed).",
+        f"- Alert preferences: Telegram {'enabled' if preferences.get('telegram_enabled') else 'disabled'} / Email {'enabled' if preferences.get('email_enabled') else 'disabled'}.",
         "- Write gate: MAX can query VendorOps, but approvals/provisioning/cancellations require explicit founder-confirmed routes.",
     ]
     if upcoming:

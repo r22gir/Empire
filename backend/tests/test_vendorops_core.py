@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -361,10 +362,10 @@ def test_vendorops_alert_delivery_status_transitions(monkeypatch, tmp_path):
     )
     assert created.status_code == 200
 
-    async def fake_telegram(_alert):
+    async def fake_telegram(_alert, _preferences=None):
         return "sent"
 
-    async def fake_email(_alert):
+    async def fake_email(_alert, _preferences=None):
         return "failed"
 
     monkeypatch.setattr(vendorops_router, "_deliver_alert_telegram", fake_telegram)
@@ -380,6 +381,139 @@ def test_vendorops_alert_delivery_status_transitions(monkeypatch, tmp_path):
     delivered_again = client.post("/api/v1/vendorops/renewal-alerts/deliver")
     assert delivered_again.status_code == 200
     assert delivered_again.json()["processed"] == 0
+
+
+def test_vendorops_stripe_webhook_completion_is_idempotent(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    monkeypatch.delenv("VENDOROPS_STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+
+    event = {
+        "id": "evt_vendorops_completed",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_vendorops_webhook",
+                "payment_status": "paid",
+                "subscription": "sub_vendorops_webhook",
+                "customer": "cus_vendorops_webhook",
+                "metadata": {"flow": "vendorops_addon", "vendorops_tier": "pro"},
+            }
+        },
+    }
+
+    completed = client.post("/api/v1/vendorops/activation/stripe-webhook", json=event)
+    assert completed.status_code == 200
+    assert completed.json()["result"] == "activated"
+    assert completed.json()["activation"]["activation_state"] == "active_pro"
+    assert completed.json()["activation"]["activation_transition_source"] == "stripe_webhook_checkout.session.completed"
+
+    duplicate = client.post("/api/v1/vendorops/activation/stripe-webhook", json=event)
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
+    assert duplicate.json()["activation"]["activation_state"] == "active_pro"
+
+
+def test_vendorops_stripe_webhook_ignores_irrelevant_events(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    monkeypatch.delenv("VENDOROPS_STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+
+    ignored = client.post(
+        "/api/v1/vendorops/activation/stripe-webhook",
+        json={
+            "id": "evt_unrelated",
+            "type": "checkout.session.completed",
+            "data": {"object": {"id": "cs_other", "metadata": {"flow": "saas_subscription", "tier": "pro"}, "payment_status": "paid"}},
+        },
+    )
+    assert ignored.status_code == 200
+    assert ignored.json()["result"] == "ignored_non_vendorops"
+    assert ignored.json()["activation"]["activation_state"] == "active_free"
+
+
+def test_vendorops_alert_preferences_control_delivery(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    renewal = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    client.post(
+        "/api/v1/vendorops/subscriptions",
+        json={
+            "tier": "pro",
+            "vendor_name": "Preference Vendor",
+            "plan_name": "Pro",
+            "monthly_cost_usd": 20,
+            "renewal_cadence": "monthly",
+            "renewal_date": renewal,
+            "explicit_founder_confirmation": True,
+        },
+    )
+
+    client.patch(
+        "/api/v1/vendorops/alert-preferences",
+        json={"telegram_enabled": False, "email_enabled": False, "preferred_email_recipient": ""},
+    )
+    skipped = client.post("/api/v1/vendorops/renewal-alerts/deliver")
+    assert skipped.status_code == 200
+    alert = skipped.json()["alerts"][0]
+    assert alert["telegram_status"] == "skipped_preference_disabled"
+    assert alert["email_status"] == "skipped_preference_disabled"
+    assert alert["delivery_status"] == "skipped_preference_disabled"
+
+    async def unavailable_telegram(_alert, _preferences=None):
+        return "skipped_channel_unavailable"
+
+    async def unavailable_email(_alert, _preferences=None):
+        return "skipped_channel_unavailable"
+
+    monkeypatch.setattr(vendorops_router, "_deliver_alert_telegram", unavailable_telegram)
+    monkeypatch.setattr(vendorops_router, "_deliver_alert_email", unavailable_email)
+
+    client.patch("/api/v1/vendorops/alert-preferences", json={"telegram_enabled": True, "email_enabled": True})
+    missing = client.post("/api/v1/vendorops/renewal-alerts/deliver")
+    assert missing.status_code == 200
+    alert = missing.json()["alerts"][0]
+    assert alert["telegram_status"] == "skipped_channel_unavailable"
+    assert alert["email_status"] == "skipped_channel_unavailable"
+    assert alert["delivery_status"] == "skipped_channel_unavailable"
+
+
+def test_vendorops_scheduled_runner_is_idempotent(monkeypatch, tmp_path):
+    _use_temp_db(monkeypatch, tmp_path)
+    renewal = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    client.post(
+        "/api/v1/vendorops/subscriptions",
+        json={
+            "tier": "pro",
+            "vendor_name": "Runner Vendor",
+            "plan_name": "Pro",
+            "monthly_cost_usd": 44,
+            "renewal_cadence": "monthly",
+            "renewal_date": renewal,
+            "explicit_founder_confirmation": True,
+        },
+    )
+
+    async def fake_telegram(_alert, _preferences=None):
+        return "sent"
+
+    async def fake_email(_alert, _preferences=None):
+        return "sent"
+
+    monkeypatch.setattr(vendorops_router, "_deliver_alert_telegram", fake_telegram)
+    monkeypatch.setattr(vendorops_router, "_deliver_alert_email", fake_email)
+
+    from app.services.vendorops_alert_runner import run_vendorops_alert_delivery_once
+
+    first = asyncio.run(run_vendorops_alert_delivery_once(limit=10))
+    assert first["processed"] == 1
+    second = asyncio.run(run_vendorops_alert_delivery_once(limit=10))
+    assert second["processed"] == 0
+
+    alert = client.get("/api/v1/vendorops/renewal-alerts?include_reviewed=true").json()["alerts"][0]
+    reviewed = client.patch(f"/api/v1/vendorops/renewal-alerts/{alert['id']}/review", json={"explicit_founder_confirmation": True})
+    assert reviewed.status_code == 200
+    third = asyncio.run(run_vendorops_alert_delivery_once(limit=10))
+    assert third["processed"] == 0
 
 
 def test_vendorops_approval_listing_and_reject_round_trip(monkeypatch, tmp_path):

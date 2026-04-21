@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.database import get_db
@@ -148,6 +148,12 @@ class CheckoutRequest(BaseModel):
 
 class CheckoutCompleteRequest(BaseModel):
     session_id: str
+
+
+class AlertPreferencesUpdate(BaseModel):
+    telegram_enabled: bool | None = None
+    email_enabled: bool | None = None
+    preferred_email_recipient: str | None = None
 
 
 class MaxActionRequest(BaseModel):
@@ -301,6 +307,23 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
             updated_at TEXT NOT NULL,
             UNIQUE(subscription_id, alert_type)
         );
+
+        CREATE TABLE IF NOT EXISTS vo_alert_preferences (
+            id TEXT PRIMARY KEY,
+            telegram_enabled INTEGER NOT NULL DEFAULT 1,
+            email_enabled INTEGER NOT NULL DEFAULT 1,
+            preferred_email_recipient TEXT,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS vo_stripe_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            stripe_session_id TEXT,
+            processed_at TEXT NOT NULL,
+            result TEXT NOT NULL,
+            metadata TEXT NOT NULL
+        );
         """
     )
     _ensure_column(conn, "vo_accounts", "category", "TEXT NOT NULL DEFAULT 'vendor'")
@@ -316,6 +339,10 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
     _ensure_column(conn, "vo_activation", "stripe_customer_id", "TEXT")
     _ensure_column(conn, "vo_activation", "stripe_subscription_id", "TEXT")
     _ensure_column(conn, "vo_activation", "checkout_url", "TEXT")
+    _ensure_column(conn, "vo_activation", "completed_at", "TEXT")
+    _ensure_column(conn, "vo_activation", "activation_transition_source", "TEXT")
+    _ensure_column(conn, "vo_renewal_alerts", "telegram_status", "TEXT NOT NULL DEFAULT 'queued_not_sent'")
+    _ensure_column(conn, "vo_renewal_alerts", "email_status", "TEXT NOT NULL DEFAULT 'queued_not_sent'")
     if conn.execute("SELECT COUNT(*) AS count FROM vo_activation WHERE id = 'default'").fetchone()["count"] == 0:
         conn.execute(
             """
@@ -323,6 +350,14 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
             VALUES ('default', 'active_free', 'free', 'free_no_billing_required', 'not_started', ?)
             """,
             (_now(),),
+        )
+    if conn.execute("SELECT COUNT(*) AS count FROM vo_alert_preferences WHERE id = 'default'").fetchone()["count"] == 0:
+        conn.execute(
+            """
+            INSERT INTO vo_alert_preferences (id, telegram_enabled, email_enabled, preferred_email_recipient, updated_at)
+            VALUES ('default', 1, 1, ?, ?)
+            """,
+            (os.getenv("VENDOROPS_ALERT_EMAIL") or os.getenv("FOUNDER_EMAIL"), _now()),
         )
 
 
@@ -460,12 +495,19 @@ def _stripe_client():
         return None
 
 
-def _apply_paid_activation(conn: sqlite3.Connection, tier: str, session: Any) -> dict[str, Any]:
+def _apply_paid_activation(conn: sqlite3.Connection, tier: str, session: Any, source: str = "manual_session_verify") -> dict[str, Any]:
     activation_state = f"active_{tier}"
     now = _now()
     customer = getattr(session, "customer", None) or (session.get("customer") if isinstance(session, dict) else None)
     subscription = getattr(session, "subscription", None) or (session.get("subscription") if isinstance(session, dict) else None)
     session_id = getattr(session, "id", None) or (session.get("id") if isinstance(session, dict) else None)
+    existing = _activation(conn)
+    if (
+        existing.get("activation_state") == activation_state
+        and existing.get("checkout_status") == "completed"
+        and existing.get("stripe_session_id") == session_id
+    ):
+        return existing
     conn.execute(
         """
         UPDATE vo_activation
@@ -476,10 +518,12 @@ def _apply_paid_activation(conn: sqlite3.Connection, tier: str, session: Any) ->
             stripe_session_id = ?,
             stripe_customer_id = ?,
             stripe_subscription_id = ?,
+            completed_at = ?,
+            activation_transition_source = ?,
             updated_at = ?
         WHERE id = 'default'
         """,
-        (activation_state, tier, session_id, customer, subscription, now),
+        (activation_state, tier, session_id, customer, subscription, now, source, now),
     )
     _audit(
         conn,
@@ -487,9 +531,101 @@ def _apply_paid_activation(conn: sqlite3.Connection, tier: str, session: Any) ->
         "activation",
         "default",
         actor="stripe",
-        metadata={"tier": tier, "stripe_session_id": session_id, "stripe_customer_id": customer, "stripe_subscription_id": subscription},
+        metadata={"tier": tier, "stripe_session_id": session_id, "stripe_customer_id": customer, "stripe_subscription_id": subscription, "source": source},
     )
     return _activation(conn)
+
+
+def _channel_availability() -> dict[str, bool]:
+    telegram_available = False
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        telegram_available = bool(telegram_bot.is_configured)
+    except Exception:
+        telegram_available = False
+    email_available = bool(os.getenv("VENDOROPS_ALERT_EMAIL") or os.getenv("FOUNDER_EMAIL"))
+    return {"telegram": telegram_available, "email": email_available}
+
+
+def _alert_preferences(conn: sqlite3.Connection) -> dict[str, Any]:
+    row = conn.execute("SELECT * FROM vo_alert_preferences WHERE id = 'default'").fetchone()
+    data = _serialize_row(row) or {
+        "id": "default",
+        "telegram_enabled": 1,
+        "email_enabled": 1,
+        "preferred_email_recipient": os.getenv("VENDOROPS_ALERT_EMAIL") or os.getenv("FOUNDER_EMAIL"),
+        "updated_at": _now(),
+    }
+    availability = _channel_availability()
+    return {
+        "telegram_enabled": bool(data.get("telegram_enabled")),
+        "email_enabled": bool(data.get("email_enabled")),
+        "preferred_email_recipient": data.get("preferred_email_recipient"),
+        "telegram_available": availability["telegram"],
+        "email_available": bool(data.get("preferred_email_recipient")) or availability["email"],
+        "updated_at": data.get("updated_at"),
+    }
+
+
+def _stripe_session_metadata(session: Any) -> dict[str, Any]:
+    metadata = getattr(session, "metadata", None) or (session.get("metadata") if isinstance(session, dict) else None) or {}
+    return dict(metadata)
+
+
+def _event_object(event: dict[str, Any]) -> dict[str, Any]:
+    return (event.get("data") or {}).get("object") or {}
+
+
+def _construct_vendorops_stripe_event(payload: bytes, signature: str | None) -> dict[str, Any]:
+    secret = os.getenv("VENDOROPS_STRIPE_WEBHOOK_SECRET") or os.getenv("STRIPE_WEBHOOK_SECRET")
+    if secret:
+        stripe = _stripe_client()
+        if stripe is None:
+            raise HTTPException(status_code=503, detail="Stripe webhook secret is configured but Stripe client is unavailable.")
+        try:
+            return stripe.Webhook.construct_event(payload, signature or "", secret)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid Stripe webhook signature or payload: {exc}")
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+
+def _process_vendorops_stripe_event(event: dict[str, Any]) -> dict[str, Any]:
+    event_id = event.get("id") or _new_id("vostr_evt")
+    event_type = event.get("type") or "unknown"
+    data = _event_object(event)
+    session_id = data.get("id")
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        existing = conn.execute("SELECT * FROM vo_stripe_events WHERE event_id = ?", (event_id,)).fetchone()
+        if existing:
+            return {"processed": False, "duplicate": True, "result": existing["result"], "activation": _activation(conn)}
+        result = "ignored"
+        activation = _activation(conn)
+        if event_type == "checkout.session.completed":
+            metadata = data.get("metadata") or {}
+            flow = metadata.get("flow")
+            tier = metadata.get("vendorops_tier")
+            payment_status = data.get("payment_status")
+            subscription = data.get("subscription")
+            if flow == "vendorops_addon" and tier in {"starter", "pro"} and (payment_status == "paid" or subscription):
+                activation = _apply_paid_activation(conn, tier, data, source="stripe_webhook_checkout.session.completed")
+                result = "activated"
+            elif flow == "vendorops_addon":
+                result = "vendorops_checkout_not_completed"
+            else:
+                result = "ignored_non_vendorops"
+        conn.execute(
+            """
+            INSERT INTO vo_stripe_events (event_id, event_type, stripe_session_id, processed_at, result, metadata)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (event_id, event_type, session_id, _now(), result, _json({"event_type": event_type, "session_id": session_id})),
+        )
+        _audit(conn, "stripe_webhook_processed", "stripe_event", event_id, actor="stripe", metadata={"event_type": event_type, "result": result, "stripe_session_id": session_id})
+        return {"processed": True, "duplicate": False, "result": result, "activation": activation}
 
 
 @router.get("/plans")
@@ -535,12 +671,13 @@ def get_vendorops_activation():
     with get_db() as conn:
         _init_vendorops_schema(conn)
         activation = _activation(conn)
+        checkout_possible = bool(_stripe_client() and (_vendorops_price_id("starter") or _vendorops_price_id("pro")))
         return {
             "activation": activation,
             "available_states": ["inactive", "active_free", "active_starter", "active_pro"],
-            "billing_hookup": "pending",
-            "checkout_available": False,
-            "upgrade_path": "request_upgrade_records_intent_billing_checkout_pending",
+            "billing_hookup": "checkout_session_available" if checkout_possible else "pending",
+            "checkout_available": checkout_possible,
+            "upgrade_path": "stripe_checkout_session" if checkout_possible else "request_upgrade_records_intent_billing_checkout_pending",
             "tiers": TIERS,
         }
 
@@ -705,7 +842,49 @@ def complete_vendorops_checkout(payload: CheckoutCompleteRequest):
         raise HTTPException(status_code=409, detail="Stripe session is not completed/paid; activation unchanged.")
     with get_db() as conn:
         _init_vendorops_schema(conn)
-        return {"activation": _apply_paid_activation(conn, tier, session), "checkout_status": "completed"}
+        return {"activation": _apply_paid_activation(conn, tier, session, source="manual_session_verify"), "checkout_status": "completed"}
+
+
+@router.post("/activation/stripe-webhook")
+async def handle_vendorops_stripe_webhook(request: Request):
+    payload = await request.body()
+    event = _construct_vendorops_stripe_event(payload, request.headers.get("stripe-signature"))
+    return _process_vendorops_stripe_event(event)
+
+
+@router.get("/alert-preferences")
+def get_alert_preferences():
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        return {"preferences": _alert_preferences(conn)}
+
+
+@router.patch("/alert-preferences")
+def update_alert_preferences(payload: AlertPreferencesUpdate):
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        current = _alert_preferences(conn)
+        telegram_enabled = current["telegram_enabled"] if payload.telegram_enabled is None else payload.telegram_enabled
+        email_enabled = current["email_enabled"] if payload.email_enabled is None else payload.email_enabled
+        preferred_email = current.get("preferred_email_recipient") if payload.preferred_email_recipient is None else payload.preferred_email_recipient.strip() or None
+        now = _now()
+        conn.execute(
+            """
+            UPDATE vo_alert_preferences
+            SET telegram_enabled = ?, email_enabled = ?, preferred_email_recipient = ?, updated_at = ?
+            WHERE id = 'default'
+            """,
+            (1 if telegram_enabled else 0, 1 if email_enabled else 0, preferred_email, now),
+        )
+        _audit(
+            conn,
+            "alert_preferences_updated",
+            "alert_preferences",
+            "default",
+            actor="founder",
+            metadata={"telegram_enabled": telegram_enabled, "email_enabled": email_enabled, "preferred_email_recipient_set": bool(preferred_email)},
+        )
+        return {"preferences": _alert_preferences(conn)}
 
 
 @router.get("/dashboard")
@@ -752,12 +931,14 @@ def get_vendorops_max_summary(tier: TierName = Query("free")):
         _init_vendorops_schema(conn)
         pending = _list_rows(conn, "SELECT * FROM vo_approvals WHERE status = 'pending' ORDER BY created_at DESC")
         active_subscriptions = _list_rows(conn, "SELECT * FROM vo_subscriptions WHERE status = 'active' ORDER BY datetime(renewal_date) ASC")
+        preferences = _alert_preferences(conn)
     return {
         "vendorops": status,
         "dashboard": dashboard,
         "pending_approvals": pending,
         "active_subscriptions": active_subscriptions,
         "renewal_alerts": alerts,
+        "alert_preferences": preferences,
         "source_of_truth": "/api/v1/vendorops/status",
         "write_gate": "MAX query-only. Founder confirmation is required for approvals/provisioning/cancellations.",
     }
@@ -1065,7 +1246,9 @@ def _alert_message(alert: dict[str, Any]) -> str:
     )
 
 
-async def _deliver_alert_telegram(alert: dict[str, Any]) -> str:
+async def _deliver_alert_telegram(alert: dict[str, Any], preferences: dict[str, Any] | None = None) -> str:
+    if preferences and not preferences.get("telegram_enabled", True):
+        return "skipped_preference_disabled"
     try:
         from app.services.max.telegram_bot import telegram_bot
         if not telegram_bot.is_configured:
@@ -1076,8 +1259,10 @@ async def _deliver_alert_telegram(alert: dict[str, Any]) -> str:
         return "failed"
 
 
-async def _deliver_alert_email(alert: dict[str, Any]) -> str:
-    recipient = os.getenv("VENDOROPS_ALERT_EMAIL") or os.getenv("FOUNDER_EMAIL")
+async def _deliver_alert_email(alert: dict[str, Any], preferences: dict[str, Any] | None = None) -> str:
+    if preferences and not preferences.get("email_enabled", True):
+        return "skipped_preference_disabled"
+    recipient = (preferences or {}).get("preferred_email_recipient") or os.getenv("VENDOROPS_ALERT_EMAIL") or os.getenv("FOUNDER_EMAIL")
     if not recipient:
         return "skipped_channel_unavailable"
     try:
@@ -1095,6 +1280,10 @@ def _combined_delivery_status(telegram_status: str, email_status: str) -> str:
         return "sent"
     if statuses == {"skipped_channel_unavailable"}:
         return "skipped_channel_unavailable"
+    if statuses == {"skipped_preference_disabled"}:
+        return "skipped_preference_disabled"
+    if statuses <= {"skipped_channel_unavailable", "skipped_preference_disabled"}:
+        return "skipped_channel_unavailable" if "skipped_channel_unavailable" in statuses else "skipped_preference_disabled"
     if "failed" in statuses:
         return "failed"
     return "queued"
@@ -1105,12 +1294,16 @@ async def deliver_renewal_alerts(limit: int = Query(20, ge=1, le=100)):
     with get_db() as conn:
         _init_vendorops_schema(conn)
         _generate_alerts(conn)
+        preferences = _alert_preferences(conn)
         alerts = _list_rows(
             conn,
             """
             SELECT * FROM vo_renewal_alerts
             WHERE reviewed_at IS NULL
-              AND (telegram_status = 'queued_not_sent' OR email_status = 'queued_not_sent')
+              AND (
+                telegram_status IN ('queued_not_sent', 'skipped_preference_disabled', 'skipped_channel_unavailable')
+                OR email_status IN ('queued_not_sent', 'skipped_preference_disabled', 'skipped_channel_unavailable')
+              )
             ORDER BY datetime(renewal_date) ASC
             LIMIT ?
             """,
@@ -1120,10 +1313,10 @@ async def deliver_renewal_alerts(limit: int = Query(20, ge=1, le=100)):
     for alert in alerts:
         telegram_status = alert["telegram_status"]
         email_status = alert["email_status"]
-        if telegram_status == "queued_not_sent":
-            telegram_status = await _deliver_alert_telegram(alert)
-        if email_status == "queued_not_sent":
-            email_status = await _deliver_alert_email(alert)
+        if telegram_status in {"queued_not_sent", "skipped_preference_disabled", "skipped_channel_unavailable"}:
+            telegram_status = await _deliver_alert_telegram(alert, preferences)
+        if email_status in {"queued_not_sent", "skipped_preference_disabled", "skipped_channel_unavailable"}:
+            email_status = await _deliver_alert_email(alert, preferences)
         combined = _combined_delivery_status(telegram_status, email_status)
         with get_db() as conn:
             _init_vendorops_schema(conn)
@@ -1146,6 +1339,15 @@ async def deliver_renewal_alerts(limit: int = Query(20, ge=1, le=100)):
             )
             delivered.append(_serialize_row(conn.execute("SELECT * FROM vo_renewal_alerts WHERE id = ?", (alert["id"],)).fetchone()))
     return {"processed": len(delivered), "alerts": delivered}
+
+
+@router.get("/renewal-alerts/runner-status")
+def get_renewal_alert_runner_status():
+    try:
+        from app.services.vendorops_alert_runner import vendorops_alert_runner
+        return {"runner": vendorops_alert_runner.status()}
+    except Exception as exc:
+        return {"runner": {"running": False, "last_error": str(exc)}}
 
 
 @router.patch("/renewal-alerts/{alert_id}/review")
