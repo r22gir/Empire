@@ -83,6 +83,9 @@ class AccountCreate(BaseModel):
     tier: TierName = "free"
     approval_id: str = Field(min_length=1)
     vendor_name: str = Field(min_length=1)
+    category: str = "vendor"
+    monthly_cost_usd: float = Field(default=0, ge=0)
+    renewal_date: str | None = None
     credential_ref: str = Field(min_length=4)
     credential_owner: str = "founder"
     assisted_signup_state: str = "take_me_to_last_page_ready"
@@ -93,6 +96,8 @@ class SubscriptionCreate(BaseModel):
     tier: TierName = "free"
     vendor_name: str = Field(min_length=1)
     plan_name: str = Field(min_length=1)
+    monthly_cost_usd: float = Field(default=0, ge=0)
+    renewal_cadence: str = "monthly"
     renewal_date: str = Field(description="ISO date/datetime")
     license_ref: str | None = None
     explicit_founder_confirmation: bool
@@ -175,8 +180,11 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
             id TEXT PRIMARY KEY,
             approval_id TEXT NOT NULL,
             vendor_name TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'vendor',
             tier TEXT NOT NULL,
             account_status TEXT NOT NULL,
+            monthly_cost_usd REAL NOT NULL DEFAULT 0,
+            renewal_date TEXT,
             credential_ref_hash TEXT NOT NULL,
             credential_ref_masked TEXT NOT NULL,
             credential_owner TEXT NOT NULL,
@@ -192,6 +200,8 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
             plan_name TEXT NOT NULL,
             tier TEXT NOT NULL,
             status TEXT NOT NULL,
+            monthly_cost_usd REAL NOT NULL DEFAULT 0,
+            renewal_cadence TEXT NOT NULL DEFAULT 'monthly',
             license_ref_masked TEXT,
             renewal_date TEXT NOT NULL,
             cancellation_state TEXT NOT NULL DEFAULT 'active_monitoring',
@@ -210,6 +220,17 @@ def _init_vendorops_schema(conn: sqlite3.Connection):
         );
         """
     )
+    _ensure_column(conn, "vo_accounts", "category", "TEXT NOT NULL DEFAULT 'vendor'")
+    _ensure_column(conn, "vo_accounts", "monthly_cost_usd", "REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "vo_accounts", "renewal_date", "TEXT")
+    _ensure_column(conn, "vo_subscriptions", "monthly_cost_usd", "REAL NOT NULL DEFAULT 0")
+    _ensure_column(conn, "vo_subscriptions", "renewal_cadence", "TEXT NOT NULL DEFAULT 'monthly'")
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str):
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _audit(conn: sqlite3.Connection, event_type: str, entity_type: str, entity_id: str, actor: str = "system", metadata: dict[str, Any] | None = None):
@@ -282,11 +303,44 @@ def get_vendorops_status(tier: TierName = Query("free")):
         }
 
 
+@router.get("/dashboard")
+def get_vendorops_dashboard(tier: TierName = Query("free")):
+    _require_tier(tier)
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        total_accounts = conn.execute("SELECT COUNT(*) AS count FROM vo_accounts").fetchone()["count"]
+        active_subscriptions = conn.execute("SELECT COUNT(*) AS count FROM vo_subscriptions WHERE status = 'active'").fetchone()["count"]
+        monthly_cost = conn.execute(
+            "SELECT COALESCE(SUM(monthly_cost_usd), 0) AS total FROM vo_subscriptions WHERE status = 'active'"
+        ).fetchone()["total"]
+        upcoming_renewals = conn.execute(
+            """
+            SELECT COUNT(*) AS count FROM vo_subscriptions
+            WHERE status = 'active' AND datetime(renewal_date) <= datetime(?)
+            """,
+            ((datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),),
+        ).fetchone()["count"]
+        pending_approvals = conn.execute("SELECT COUNT(*) AS count FROM vo_approvals WHERE status = 'pending'").fetchone()["count"]
+        return {
+            "tier": tier,
+            "kpis": {
+                "total_accounts": total_accounts,
+                "active_subscriptions": active_subscriptions,
+                "monthly_cost_total_usd": float(monthly_cost or 0),
+                "upcoming_renewals_30d": upcoming_renewals,
+                "pending_approvals": pending_approvals,
+            },
+            "max_policy": "query_only_initially_write_gate_enforced",
+        }
+
+
 @router.get("/max-summary")
 def get_vendorops_max_summary(tier: TierName = Query("free")):
     status = get_vendorops_status(tier=tier)
+    dashboard = get_vendorops_dashboard(tier=tier)
     return {
         "vendorops": status,
+        "dashboard": dashboard,
         "source_of_truth": "/api/v1/vendorops/status",
         "write_gate": "MAX query-only. Founder confirmation is required for approvals/provisioning/cancellations.",
     }
@@ -340,6 +394,33 @@ def approve_request(approval_id: str, payload: FounderConfirmation):
         return {"approval": _serialize_row(conn.execute("SELECT * FROM vo_approvals WHERE id = ?", (approval_id,)).fetchone())}
 
 
+@router.post("/approvals/{approval_id}/reject")
+def reject_request(approval_id: str, payload: FounderConfirmation):
+    _require_confirmation(payload.explicit_founder_confirmation)
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        row = conn.execute("SELECT * FROM vo_approvals WHERE id = ?", (approval_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="VendorOps approval not found")
+        conn.execute(
+            "UPDATE vo_approvals SET status = 'rejected', founder_confirmed = 1, approved_at = ? WHERE id = ?",
+            (_now(), approval_id),
+        )
+        _audit(conn, "approval_rejected", "approval", approval_id, actor=payload.actor, metadata={"explicit_founder_confirmation": True})
+        return {"approval": _serialize_row(conn.execute("SELECT * FROM vo_approvals WHERE id = ?", (approval_id,)).fetchone())}
+
+
+@router.get("/approvals")
+def list_approvals(status: str | None = None, limit: int = Query(100, ge=1, le=250)):
+    with get_db() as conn:
+        _init_vendorops_schema(conn)
+        if status:
+            rows = _list_rows(conn, "SELECT * FROM vo_approvals WHERE status = ? ORDER BY created_at DESC LIMIT ?", (status, limit))
+        else:
+            rows = _list_rows(conn, "SELECT * FROM vo_approvals ORDER BY created_at DESC LIMIT ?", (limit,))
+        return {"approvals": rows}
+
+
 @router.post("/accounts")
 def create_account(payload: AccountCreate):
     _require_confirmation(payload.explicit_founder_confirmation)
@@ -363,15 +444,18 @@ def create_account(payload: AccountCreate):
         conn.execute(
             """
             INSERT INTO vo_accounts
-            (id, approval_id, vendor_name, tier, account_status, credential_ref_hash, credential_ref_masked,
+            (id, approval_id, vendor_name, category, tier, account_status, monthly_cost_usd, renewal_date, credential_ref_hash, credential_ref_masked,
              credential_owner, assisted_signup_state, provisioning_trail, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'provisioning_ready', ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 'provisioning_ready', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 account_id,
                 payload.approval_id,
                 payload.vendor_name,
+                payload.category,
                 payload.tier,
+                payload.monthly_cost_usd,
+                payload.renewal_date,
                 _hash_ref(payload.credential_ref),
                 _mask_ref(payload.credential_ref),
                 payload.credential_owner,
@@ -415,10 +499,21 @@ def create_subscription(payload: SubscriptionCreate):
         conn.execute(
             """
             INSERT INTO vo_subscriptions
-            (id, vendor_name, plan_name, tier, status, license_ref_masked, renewal_date, cancellation_state, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'active', ?, ?, 'active_monitoring', ?, ?)
+            (id, vendor_name, plan_name, tier, status, monthly_cost_usd, renewal_cadence, license_ref_masked, renewal_date, cancellation_state, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, 'active_monitoring', ?, ?)
             """,
-            (sub_id, payload.vendor_name, payload.plan_name, payload.tier, _mask_ref(payload.license_ref), payload.renewal_date, now, now),
+            (
+                sub_id,
+                payload.vendor_name,
+                payload.plan_name,
+                payload.tier,
+                payload.monthly_cost_usd,
+                payload.renewal_cadence,
+                _mask_ref(payload.license_ref),
+                payload.renewal_date,
+                now,
+                now,
+            ),
         )
         _audit(conn, "subscription_tracked", "subscription", sub_id, actor="founder", metadata={"vendor_name": payload.vendor_name, "renewal_date": payload.renewal_date})
         return {"subscription": _serialize_row(conn.execute("SELECT * FROM vo_subscriptions WHERE id = ?", (sub_id,)).fetchone())}

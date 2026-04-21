@@ -7,7 +7,7 @@ import {
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
-  Building2, ShoppingCart, LayoutDashboard, Archive,
+  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck,
 } from 'lucide-react';
 
 interface NavItem {
@@ -48,6 +48,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { id: 'social', name: 'SocialForge', icon: <Share2 size={16} />, status: 'active', color: '#ec4899' },
       { id: 'openclaw', name: 'OpenClaw', icon: <Bot size={16} />, status: 'active', color: '#f59e0b' },
+      { id: 'vendorops', name: 'VendorOps', icon: <BadgeCheck size={16} />, status: 'active', color: '#0d9488' },
       { id: 'recovery', name: 'RecoveryForge', icon: <ShieldCheck size={16} />, status: 'active', color: '#06b6d4' },
       { id: 'market', name: 'MarketForge', icon: <Store size={16} />, status: 'active', color: '#2563eb' },
       { id: 'contractor', name: 'ContractorForge', icon: <Wrench size={16} />, status: 'active', color: '#d97706' },
