@@ -393,10 +393,16 @@ class ArchiveUpdate(BaseModel):
     listing_description: Optional[str] = None
     item_specifics: Optional[dict] = None
     batch_tag: Optional[str] = None
+    reboxed_by: Optional[str] = None
 
 
 class StatusTransition(BaseModel):
     status: str
+
+
+class ReboxRequest(BaseModel):
+    processed_box_code: str = ""
+    archive_location: str = ""
 
 
 class ListingDraftCreate(BaseModel):
@@ -597,6 +603,46 @@ async def transition_status(archive_id: int, req: StatusTransition):
     return {"id": archive_id, "processed_status": new_status, "previous_status": current}
 
 
+@router.post("/archives/{archive_id}/rebox")
+async def rebox_archive(archive_id: int, req: ReboxRequest):
+    """Dedicated rebox action: set processed_box_code, archive_location, status=REBOXED, record reboxed_at."""
+    if not req.processed_box_code:
+        raise HTTPException(400, "processed_box_code is required for reboxing")
+
+    with get_db() as db:
+        row = db.execute("SELECT processed_status, reboxed_at FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Archive item not found")
+
+    d = dict_row(row)
+    current = d["processed_status"]
+
+    # Validate transition
+    allowed = VALID_STATUS_TRANSITIONS.get(current, [])
+    if "REBOXED" not in allowed:
+        raise HTTPException(
+            409,
+            f"Cannot rebox from '{current}'. REBOXED is only allowed from: {', '.join(allowed) or 'none'}"
+        )
+
+    with get_db() as db:
+        db.execute(
+            """UPDATE ag_archives
+               SET processed_box_code = ?, archive_location = ?, processed_status = 'REBOXED',
+                   reboxed_at = datetime('now'), updated_at = datetime('now')
+               WHERE id = ?""",
+            (req.processed_box_code, req.archive_location, archive_id),
+        )
+    log.info(f"Archive #{archive_id} reboxed to '{req.processed_box_code}', location='{req.archive_location}'")
+    return {
+        "id": archive_id,
+        "processed_box_code": req.processed_box_code,
+        "archive_location": req.archive_location,
+        "processed_status": "REBOXED",
+        "reboxed_at": datetime.now().isoformat(),
+    }
+
+
 @router.delete("/archives/{archive_id}")
 async def delete_archive(archive_id: int):
     """Delete an archive item."""
@@ -740,6 +786,7 @@ async def get_inventory_summary():
         rows = dict_rows(db.execute(
             """SELECT id, issue_date, volume, issue_number, cover_subject, tier,
                       condition_score, processed_status, source_box_code, processed_box_code,
+                      archive_location, reboxed_at, reboxed_by,
                       rough_comp_min, rough_comp_max, sale_plan, created_at, updated_at
                FROM ag_archives ORDER BY created_at DESC""",
         ).fetchall())

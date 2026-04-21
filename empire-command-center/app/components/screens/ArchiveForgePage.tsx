@@ -429,13 +429,40 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
   REBOXED: ["RAW","IDENTIFIED","PHOTOGRAPHED","VALUED","READY_TO_LIST"],
 };
 
-function ArchiveSection({ data, onChange }: {
+function ArchiveSection({ data, archiveId, onChange }: {
   data: Partial<ArchiveItem>;
+  archiveId: number | null;
   onChange: (d: Partial<ArchiveItem>) => void;
 }) {
-  const [newBox, setNewBox] = useState('');
+  const [transitioning, setTransitioning] = useState(false);
+  const [transitionError, setTransitionError] = useState('');
 
   const update = (field: keyof ArchiveItem, value: any) => onChange({ ...data, [field]: value });
+
+  const handleStatusTransition = async (newStatus: string) => {
+    if (!archiveId) return;
+    setTransitionError('');
+    setTransitioning(true);
+    try {
+      const res = await fetch(`${AG_API}/archives/${archiveId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        update('processed_status', d.processed_status);
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Transition failed' }));
+        setTransitionError(err.detail || `Cannot transition to ${newStatus}`);
+      }
+    } catch {
+      setTransitionError('Network error — try again');
+    }
+    setTransitioning(false);
+  };
+
+  const allowed = STATUS_TRANSITIONS[data.processed_status as string] || [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -448,9 +475,9 @@ function ArchiveSection({ data, onChange }: {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         {/* Source Box */}
-        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Box size={14} style={{ color: '#6b7280' }} />
+        <div style={{ background: '#fff', border: '2px solid #e5e2dc', borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, color: '#6b7280' }}>
+            <Box size={14} />
             Source Box — where you found it
           </div>
           <div style={{ marginBottom: 8 }}>
@@ -466,14 +493,14 @@ function ArchiveSection({ data, onChange }: {
               style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
           </div>
           <div style={{ marginTop: 6, fontSize: 10, color: '#aaa' }}>
-            Box suggestions: {BOX_SUGGESTIONS.slice(0,3).join(', ')}
+            Examples: A-RARE-01, B-WWII-01, C-BULK-01
           </div>
         </div>
 
         {/* Processed Box */}
-        <div style={{ background: '#fff', border: '1px solid #06b6d4', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Package size={14} style={{ color: '#06b6d4' }} />
+        <div style={{ background: '#fff', border: '2px solid #06b6d4', borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, color: '#06b6d4' }}>
+            <Package size={14} />
             Processed Box — destination after this step
           </div>
           <div style={{ marginBottom: 8 }}>
@@ -489,26 +516,44 @@ function ArchiveSection({ data, onChange }: {
               style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
           </div>
           <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Current Status</label>
+            <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>
+              Current Status
+              {transitioning && <span style={{ marginLeft: 6, color: '#06b6d4' }}><Loader2 size={10} className="animate-spin" /></span>}
+            </label>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {STATUSES.map(s => {
-                const allowed = STATUS_TRANSITIONS[data.processed_status as string] || [];
-                const canTransition = allowed.includes(s) || s === data.processed_status;
                 const isActive = data.processed_status === s;
+                const canTransition = allowed.includes(s);
                 return (
-                  <button key={s} onClick={() => canTransition && update('processed_status', s)}
+                  <button key={s}
+                    onClick={() => canTransition && !transitioning && handleStatusTransition(s)}
+                    disabled={!canTransition || transitioning}
                     style={{
-                      padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: canTransition ? 'pointer' : 'not-allowed',
+                      padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                      cursor: canTransition && !transitioning ? 'pointer' : 'not-allowed',
                       background: isActive ? STATUS_COLORS[s] : canTransition ? '#f5f3ef' : '#f9f9f9',
                       color: isActive ? '#fff' : canTransition ? '#666' : '#ccc',
-                      border: 'none', opacity: canTransition ? 1 : 0.5,
+                      border: 'none', opacity: (canTransition || isActive) ? 1 : 0.5,
                     }}>
                     {s}
                   </button>
                 );
               })}
             </div>
+            {transitionError && (
+              <div style={{ marginTop: 6, fontSize: 11, color: '#dc2626', background: '#fef2f2', padding: '6px 8px', borderRadius: 6 }}>
+                <AlertTriangle size={11} style={{ display: 'inline', marginRight: 4 }} />
+                {transitionError}
+              </div>
+            )}
           </div>
+          {/* Reboxed metadata */}
+          {data.processed_status === 'REBOXED' && (
+            <div style={{ marginTop: 10, padding: '8px 10px', background: '#f9f9f9', borderRadius: 8, fontSize: 11, color: '#666' }}>
+              <div><span style={{ color: '#888' }}>Reboxed at:</span> {data.reboxed_at ? fmt(data.reboxed_at) : 'just now'}</div>
+              {data.reboxed_by && <div><span style={{ color: '#888' }}>By:</span> {data.reboxed_by}</div>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -804,13 +849,24 @@ function ListingBuilderSection({ data, refIssue, onGenerated }: {
 
 // ── Section 7: Inventory View ─────────────────────────────────────────────────
 
+type SortKey = 'created_at' | 'processed_status' | 'source_box_code' | 'processed_box_code' | 'tier';
+
 function InventorySection() {
   const [items, setItems] = useState<ArchiveItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterTier, setFilterTier] = useState('all');
+  const [filterSourceBox, setFilterSourceBox] = useState('all');
+  const [filterProcessedBox, setFilterProcessedBox] = useState('all');
   const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('created_at');
+  const [sortAsc, setSortAsc] = useState(false);
+  const [reboxItemId, setReboxItemId] = useState<number | null>(null);
+  const [reboxBox, setReboxBox] = useState('');
+  const [reboxLocation, setReboxLocation] = useState('');
+  const [reboxing, setReboxing] = useState(false);
+  const [reboxError, setReboxError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -829,28 +885,73 @@ function InventorySection() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Unique box codes for filter dropdowns
+  const sourceBoxes = [...new Set(items.map(i => i.source_box_code).filter(Boolean))].sort();
+  const processedBoxes = [...new Set(items.map(i => i.processed_box_code).filter(Boolean))].sort();
+
   const filtered = items.filter(item => {
-    const matchStatus = filterStatus === 'all' || item.processed_status === filterStatus;
-    const matchTier = filterTier === 'all' || item.tier === filterTier;
+    if (filterStatus !== 'all' && item.processed_status !== filterStatus) return false;
+    if (filterTier !== 'all' && item.tier !== filterTier) return false;
+    if (filterSourceBox !== 'all' && item.source_box_code !== filterSourceBox) return false;
+    if (filterProcessedBox !== 'all' && item.processed_box_code !== filterProcessedBox) return false;
     const q = search.toLowerCase();
-    const matchSearch = !q || item.cover_subject?.toLowerCase().includes(q) || item.issue_date?.includes(q) || item.source_box_code?.toLowerCase().includes(q);
-    return matchStatus && matchTier && matchSearch;
+    if (q && !item.cover_subject?.toLowerCase().includes(q) && !item.issue_date?.includes(q) && !item.source_box_code?.toLowerCase().includes(q) && !item.processed_box_code?.toLowerCase().includes(q)) return false;
+    return true;
   });
 
-  const COLS = [
-    { key: 'id', label: 'ID', width: 50 },
-    { key: 'issue_date', label: 'Date', width: 90 },
-    { key: 'cover_subject', label: 'Cover', width: 180 },
-    { key: 'tier', label: 'Tier', width: 50 },
-    { key: 'processed_status', label: 'Status', width: 100 },
-    { key: 'photo_count', label: 'Photos', width: 60 },
+  const sorted = [...filtered].sort((a, b) => {
+    const aVal = (a as any)[sortKey] ?? '';
+    const bVal = (b as any)[sortKey] ?? '';
+    const cmp = String(aVal).localeCompare(String(bVal), undefined, { numeric: true });
+    return sortAsc ? cmp : -cmp;
+  });
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) setSortAsc(a => !a);
+    else { setSortKey(key); setSortAsc(false); }
+  };
+
+  const SortIcon = ({ k }: { k: SortKey }) => sortKey === k ? (sortAsc ? ' ↑' : ' ↓') : '';
+
+  const handleRebox = async (itemId: number) => {
+    if (!reboxBox.trim()) { setReboxError('Box code required'); return; }
+    setReboxing(true);
+    setReboxError('');
+    try {
+      const res = await fetch(`${AG_API}/archives/${itemId}/rebox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ processed_box_code: reboxBox.trim(), archive_location: reboxLocation.trim() }),
+      });
+      if (res.ok) {
+        setReboxItemId(null);
+        setReboxBox('');
+        setReboxLocation('');
+        await load();
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Rebox failed' }));
+        setReboxError(err.detail || 'Rebox failed');
+      }
+    } catch {
+      setReboxError('Network error');
+    }
+    setReboxing(false);
+  };
+
+  const COLS: { key: keyof ArchiveItem | 'photo_count' | 'archive_location'; label: string; width: number; sortable?: boolean }[] = [
+    { key: 'id', label: 'ID', width: 45 },
+    { key: 'issue_date', label: 'Date', width: 88 },
+    { key: 'cover_subject', label: 'Cover', width: 170 },
+    { key: 'tier', label: 'Tier', width: 48, sortable: true },
+    { key: 'processed_status', label: 'Status', width: 105, sortable: true },
+    { key: 'photo_count', label: 'Photos', width: 62 },
+    { key: 'source_box_code', label: 'Source Box', width: 92, sortable: true },
+    { key: 'processed_box_code', label: 'Dest Box', width: 92, sortable: true },
+    { key: 'archive_location', label: 'Location', width: 100 },
     { key: 'condition_score', label: 'Cond.', width: 50 },
-    { key: 'source_box_code', label: 'Source Box', width: 90 },
-    { key: 'processed_box_code', label: 'Dest Box', width: 90 },
-    { key: 'rough_comp_min', label: 'Comp Min', width: 70 },
-    { key: 'rough_comp_max', label: 'Comp Max', width: 70 },
-    { key: 'sale_plan', label: 'Sale Plan', width: 140 },
-    { key: 'created_at', label: 'Added', width: 90 },
+    { key: 'rough_comp_min', label: 'Comp Min', width: 72 },
+    { key: 'rough_comp_max', label: 'Comp Max', width: 72 },
+    { key: 'created_at', label: 'Added', width: 86, sortable: true },
   ];
 
   return (
@@ -858,20 +959,18 @@ function InventorySection() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Archive Inventory</h2>
-          <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Spreadsheet view of all archived LIFE issues</p>
+          <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Physical archive view — source box tracking, status, and reboxing</p>
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button onClick={load} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <RefreshCw size={12} /> Refresh
-          </button>
-        </div>
+        <button onClick={load} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <RefreshCw size={12} /> Refresh
+        </button>
       </div>
 
       {/* Stats row */}
       {stats && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            { label: 'Total Items', value: stats.total_items, color: '#1a1a1a' },
+            { label: 'Total', value: stats.total_items, color: '#1a1a1a' },
             { label: 'Valued', value: stats.valued_items, color: '#16a34a' },
             ...Object.entries(stats.by_status || {}).map(([s, c]) => ({ label: s, value: c as number, color: STATUS_COLORS[s] || '#666' })),
           ].map(s => (
@@ -885,7 +984,7 @@ function InventorySection() {
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..."
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search subject, date, box..."
           style={{ padding: '7px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, maxWidth: 200 }} />
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
           style={{ padding: '7px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}>
@@ -897,60 +996,130 @@ function InventorySection() {
           <option value="all">All Tiers</option>
           <option value="A">Tier A</option><option value="B">Tier B</option><option value="C">Tier C</option>
         </select>
+        {sourceBoxes.length > 0 && (
+          <select value={filterSourceBox} onChange={e => setFilterSourceBox(e.target.value)}
+            style={{ padding: '7px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}>
+            <option value="all">All Source Boxes</option>
+            {sourceBoxes.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+        )}
+        {processedBoxes.length > 0 && (
+          <select value={filterProcessedBox} onChange={e => setFilterProcessedBox(e.target.value)}
+            style={{ padding: '7px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}>
+            <option value="all">All Dest Boxes</option>
+            {processedBoxes.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+        )}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888' }}>
-          {filtered.length} of {items.length} items
+          {sorted.length} of {items.length} items
         </span>
       </div>
 
       {/* Table */}
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#999' }}><Loader2 size={20} className="animate-spin" style={{ color: '#06b6d4' }} /></div>
-      ) : filtered.length === 0 ? (
+      ) : sorted.length === 0 ? (
         <div style={{ textAlign: 'center', padding: 40, color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
           No items found. Complete the intake wizard to add your first archive item.
         </div>
       ) : (
         <div style={{ overflowX: 'auto', background: '#fff', borderRadius: 12, border: '1px solid #e5e2dc' }}>
-          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', minWidth: 900 }}>
+          <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', minWidth: 1050 }}>
             <thead>
               <tr style={{ background: '#f5f3ef', borderBottom: '2px solid #e5e2dc' }}>
                 {COLS.map(col => (
-                  <th key={col.key} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#888', whiteSpace: 'nowrap' }}>{col.label}</th>
+                  <th key={col.key}
+                    style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#888', whiteSpace: 'nowrap', cursor: col.sortable ? 'pointer' : 'default' }}
+                    onClick={() => col.sortable && handleSort(col.key as SortKey)}
+                  >
+                    {col.label}{col.sortable ? <SortIcon k={col.key as SortKey} /> : ''}
+                  </th>
                 ))}
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#888', whiteSpace: 'nowrap' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(item => (
-                <tr key={item.id} style={{ borderBottom: '1px solid #f0ede6' }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#faf9f7'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  {COLS.map(col => {
-                    const val = (item as any)[col.key];
-                    let display: React.ReactNode = val ?? '—';
-                    let style: React.CSSProperties = {};
-                    if (col.key === 'tier' && val) {
-                      display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 700, fontSize: 10, background: (TIER_COLORS[val] || '#666') + '20', color: TIER_COLORS[val] || '#666' }}>{val}</span>;
-                    }
-                    if (col.key === 'processed_status' && val) {
-                      display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: (STATUS_COLORS[val] || '#666') + '20', color: STATUS_COLORS[val] || '#666' }}>{val}</span>;
-                    }
-                    if (col.key === 'photo_count') {
-                      const count = Number(val) || 0;
-                      display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: count > 0 ? '#d1fae5' : '#f3f4f6', color: count > 0 ? '#065f46' : '#9ca3af' }}>{count > 0 ? `📷 ${count}` : '—'}</span>;
-                    }
-                    if (col.key === 'condition_score') {
-                      display = val ? `${val}/5` : '—';
-                    }
-                    if (col.key === 'rough_comp_min' || col.key === 'rough_comp_max') {
-                      display = val ? `$${Number(val).toFixed(0)}` : '—';
-                    }
-                    if (col.key === 'created_at') {
-                      display = fmt(val);
-                    }
-                    return <td key={col.key} style={{ padding: '7px 10px', color: '#1a1a1a', ...style }}>{display}</td>;
-                  })}
-                </tr>
+              {sorted.map(item => (
+                <React.Fragment key={item.id}>
+                  <tr style={{ borderBottom: '1px solid #f0ede6' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#faf9f7'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    {COLS.map(col => {
+                      const val = (item as any)[col.key];
+                      let display: React.ReactNode = (val == null || val === '') ? '—' : val;
+                      if (col.key === 'tier' && val) {
+                        display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 700, fontSize: 10, background: (TIER_COLORS[val] || '#666') + '20', color: TIER_COLORS[val] || '#666' }}>{val}</span>;
+                      }
+                      if (col.key === 'processed_status' && val) {
+                        display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: (STATUS_COLORS[val] || '#666') + '20', color: STATUS_COLORS[val] || '#666' }}>{val}</span>;
+                      }
+                      if (col.key === 'photo_count') {
+                        const count = Number(val) || 0;
+                        display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: count > 0 ? '#d1fae5' : '#f3f4f6', color: count > 0 ? '#065f46' : '#9ca3af' }}>{count > 0 ? `📷 ${count}` : '—'}</span>;
+                      }
+                      if (col.key === 'condition_score') {
+                        display = val ? `${val}/5` : '—';
+                      }
+                      if (col.key === 'rough_comp_min' || col.key === 'rough_comp_max') {
+                        display = val ? `$${Number(val).toFixed(0)}` : '—';
+                      }
+                      if (col.key === 'created_at') {
+                        display = fmt(val);
+                      }
+                      if (col.key === 'source_box_code' && val) {
+                        display = <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#f5f3ef', padding: '2px 5px', borderRadius: 4 }}>{val}</span>;
+                      }
+                      if (col.key === 'processed_box_code' && val) {
+                        display = <span style={{ fontFamily: 'monospace', fontSize: 10, background: '#ecfeff', padding: '2px 5px', borderRadius: 4, color: '#155e75' }}>{val}</span>;
+                      }
+                      return <td key={col.key} style={{ padding: '7px 10px', color: '#1a1a1a' }}>{display}</td>;
+                    })}
+                    <td style={{ padding: '7px 10px' }}>
+                      {reboxItemId === item.id ? (
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <input
+                            value={reboxBox}
+                            onChange={e => setReboxBox(e.target.value)}
+                            placeholder="Dest box code"
+                            style={{ padding: '3px 6px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 11, width: 110 }}
+                          />
+                          <input
+                            value={reboxLocation}
+                            onChange={e => setReboxLocation(e.target.value)}
+                            placeholder="Location"
+                            style={{ padding: '3px 6px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 11, width: 90 }}
+                          />
+                          <button
+                            onClick={() => handleRebox(item.id)}
+                            disabled={reboxing}
+                            style={{ padding: '3px 7px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: reboxing ? 'wait' : 'pointer' }}
+                          >
+                            {reboxing ? '…' : 'Save'}
+                          </button>
+                          <button
+                            onClick={() => { setReboxItemId(null); setReboxError(''); }}
+                            style={{ padding: '3px 7px', background: '#fff', color: '#888', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 10, cursor: 'pointer' }}
+                          >
+                            Cancel
+                          </button>
+                          {reboxError && <div style={{ width: '100%', fontSize: 10, color: '#dc2626' }}>{reboxError}</div>}
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {['PHOTOGRAPHED','VALUED','READY_TO_LIST','LISTED','HOLD'].includes(item.processed_status) && (
+                            <button
+                              onClick={() => { setReboxItemId(item.id); setReboxBox(item.processed_box_code || ''); setReboxLocation(item.archive_location || ''); setReboxError(''); }}
+                              style={{ padding: '3px 8px', background: '#f5f3ef', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 10, fontWeight: 600, cursor: 'pointer', color: '#6b7280' }}
+                            >
+                              Rebox
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -1106,7 +1275,7 @@ export default function ArchiveForgePage() {
         {step === 'intake' && <IntakeSection onIdentified={handleIdentified} />}
         {step === 'reference' && refIssue && <ReferenceSection ref_issue={refIssue} />}
         {step === 'photos' && <PhotoSection archiveId={savedArchiveId} refIssue={refIssue} />}
-        {step === 'archive' && <ArchiveSection data={archiveData} onChange={setArchiveData} />}
+        {step === 'archive' && <ArchiveSection data={archiveData} archiveId={savedArchiveId} onChange={setArchiveData} />}
         {step === 'condition' && <ConditionSection data={archiveData} onChange={setArchiveData} />}
         {step === 'listing' && <ListingBuilderSection data={archiveData} refIssue={refIssue} onGenerated={setDraft} />}
         {step === 'inventory' && <InventorySection />}
