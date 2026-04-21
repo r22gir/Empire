@@ -293,6 +293,7 @@ function PhotoSection({
 }) {
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
   const [uploadingRole, setUploadingRole] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const loadPhotos = useCallback(async () => {
     if (!archiveId) return;
@@ -310,13 +311,17 @@ function PhotoSection({
     if (!files || files.length === 0) return;
     if (!archiveId) return;
     setUploadingRole(role);
+    setPhotoError(null);
     for (let i = 0; i < files.length; i++) {
       const formData = new FormData();
       formData.append('file', files[i]);
       formData.append('role', role);
       try {
-        await fetch(`${AG_API}/uploads/${archiveId}`, { method: 'POST', body: formData });
-      } catch { /* silent */ }
+        const response = await fetch(`${AG_API}/uploads/${archiveId}`, { method: 'POST', body: formData });
+        if (!response.ok) throw new Error(`Upload failed with ${response.status}`);
+      } catch (exc: any) {
+        setPhotoError(exc?.message || 'Photo upload failed.');
+      }
     }
     await loadPhotos();
     setUploadingRole(null);
@@ -347,6 +352,12 @@ function PhotoSection({
         <div style={{ padding: 12, background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 10, fontSize: 12, color: '#92400e' }}>
           <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
           Archive record not yet created. Complete Steps 1–2 and proceed from the Reference step to enable photo uploads.
+        </div>
+      )}
+      {photoError && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          {photoError}
         </div>
       )}
 
@@ -389,15 +400,26 @@ function PhotoSection({
                     {role.required && <span style={{ fontSize: 9, background: '#fee2e2', color: '#dc2626', padding: '1px 5px', borderRadius: 3 }}>REQ</span>}
                     {rolePhotos.length > 0 && <CheckCircle size={12} color="#10b981" />}
                   </div>
-                  <label style={{
-                    padding: '3px 8px', background: archiveId ? '#06b6d4' : '#d1d5db', color: '#fff',
-                    borderRadius: 5, fontSize: 10, fontWeight: 600,
-                    cursor: archiveId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 4,
-                  }}>
-                    {isUploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />} Add
-                    <input type="file" accept="image/*" multiple style={{ display: 'none' }} disabled={!archiveId}
-                      onChange={e => handleUpload(e, role.key)} />
-                  </label>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <label style={{
+                      padding: '3px 8px', background: archiveId ? '#06b6d4' : '#d1d5db', color: '#fff',
+                      borderRadius: 5, fontSize: 10, fontWeight: 600,
+                      cursor: archiveId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                      {isUploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />} Upload
+                      <input type="file" accept="image/*" multiple style={{ display: 'none' }} disabled={!archiveId}
+                        onChange={e => handleUpload(e, role.key)} />
+                    </label>
+                    <label style={{
+                      padding: '3px 8px', background: archiveId ? '#0f766e' : '#d1d5db', color: '#fff',
+                      borderRadius: 5, fontSize: 10, fontWeight: 600,
+                      cursor: archiveId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                      <Camera size={10} /> Camera
+                      <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} disabled={!archiveId}
+                        onChange={e => handleUpload(e, role.key)} />
+                    </label>
+                  </div>
                 </div>
                 <div style={{ fontSize: 10, color: '#888', marginBottom: 6 }}>{role.desc}</div>
                 {rolePhotos.length === 0 ? (

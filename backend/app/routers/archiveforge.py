@@ -262,10 +262,16 @@ def _init_tables():
     conn.execute("PRAGMA journal_mode=WAL")
     cur = conn.cursor()
 
+    def ensure_column(table: str, column: str, definition: str) -> None:
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS ag_archives (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             reference_issue_id TEXT,
+            reference_issue_key TEXT DEFAULT '',
             issue_date TEXT,
             volume INTEGER,
             issue_number INTEGER,
@@ -306,8 +312,7 @@ def _init_tables():
             marketforge_error_message TEXT DEFAULT '',
             -- Metadata
             created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now')),
-            FOREIGN KEY (reference_issue_id) REFERENCES ag_archives(id)
+            updated_at TEXT DEFAULT (datetime('now'))
         )
     """)
 
@@ -346,6 +351,58 @@ def _init_tables():
             created_at TEXT DEFAULT (datetime('now'))
         )
     """)
+
+    archive_columns = {
+        "reference_issue_id": "TEXT",
+        "reference_issue_key": "TEXT DEFAULT ''",
+        "issue_date": "TEXT",
+        "volume": "INTEGER",
+        "issue_number": "INTEGER",
+        "cover_subject": "TEXT DEFAULT ''",
+        "reference_cover_url": "TEXT DEFAULT ''",
+        "actual_listing_images": "TEXT DEFAULT '[]'",
+        "source_box_code": "TEXT DEFAULT ''",
+        "source_slot_position": "TEXT DEFAULT ''",
+        "processed_box_code": "TEXT DEFAULT ''",
+        "processed_status": "TEXT DEFAULT 'RAW'",
+        "archive_location": "TEXT DEFAULT ''",
+        "reboxed_at": "TEXT",
+        "reboxed_by": "TEXT DEFAULT ''",
+        "condition_score": "INTEGER DEFAULT 0",
+        "has_address_label": "INTEGER DEFAULT 0",
+        "is_complete": "INTEGER DEFAULT 1",
+        "defects": "TEXT DEFAULT ''",
+        "notes": "TEXT DEFAULT ''",
+        "tier": "TEXT DEFAULT 'C'",
+        "rough_comp_min": "REAL DEFAULT 0",
+        "rough_comp_max": "REAL DEFAULT 0",
+        "sale_plan": "TEXT DEFAULT ''",
+        "listing_title": "TEXT DEFAULT ''",
+        "listing_description": "TEXT DEFAULT ''",
+        "item_specifics": "TEXT DEFAULT '{}'",
+        "batch_tag": "TEXT DEFAULT ''",
+        "listing_draft_status": "TEXT DEFAULT 'draft'",
+        "listing_status": "TEXT DEFAULT 'none'",
+        "marketforge_listing_id": "TEXT DEFAULT ''",
+        "marketforge_push_status": "TEXT DEFAULT 'not_pushed'",
+        "marketforge_pushed_at": "TEXT DEFAULT ''",
+        "marketforge_error_message": "TEXT DEFAULT ''",
+        "created_at": "TEXT DEFAULT ''",
+        "updated_at": "TEXT DEFAULT ''",
+    }
+    for column, definition in archive_columns.items():
+        ensure_column("ag_archives", column, definition)
+
+    photo_columns = {
+        "archive_id": "INTEGER NOT NULL DEFAULT 0",
+        "role": "TEXT NOT NULL DEFAULT 'front'",
+        "filename": "TEXT NOT NULL DEFAULT ''",
+        "original_name": "TEXT DEFAULT ''",
+        "file_path": "TEXT NOT NULL DEFAULT ''",
+        "created_at": "TEXT DEFAULT ''",
+    }
+    for column, definition in photo_columns.items():
+        ensure_column("ag_archive_photos", column, definition)
 
     conn.commit()
     conn.close()
@@ -505,6 +562,8 @@ async def list_archives(
         ).fetchone()[0]
 
     for d in rows:
+        if d.get("reference_issue_key") and not d.get("reference_issue_id"):
+            d["reference_issue_id"] = d["reference_issue_key"]
         for fld in ("actual_listing_images", "item_specifics"):
             if fld in d and isinstance(d[fld], str):
                 try:
@@ -518,10 +577,12 @@ async def list_archives(
 @router.post("/archives", status_code=201)
 async def create_archive(req: ArchiveCreate):
     """Create a new archive intake record."""
+    reference_issue_db_id = req.reference_issue_id if str(req.reference_issue_id or "").isdigit() else None
+    reference_issue_key = req.reference_issue_id or ""
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO ag_archives
-               (reference_issue_id, issue_date, volume, issue_number, cover_subject,
+               (reference_issue_id, reference_issue_key, issue_date, volume, issue_number, cover_subject,
                 reference_cover_url, actual_listing_images, source_box_code,
                 source_slot_position, processed_box_code, processed_status,
                 archive_location, condition_score, has_address_label, is_complete,
@@ -529,7 +590,7 @@ async def create_archive(req: ArchiveCreate):
                 listing_status, marketforge_push_status)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                req.reference_issue_id, req.issue_date, req.volume, req.issue_number,
+                reference_issue_db_id, reference_issue_key, req.issue_date, req.volume, req.issue_number,
                 req.cover_subject, req.reference_cover_url,
                 json.dumps(req.actual_listing_images),
                 req.source_box_code, req.source_slot_position,
@@ -556,6 +617,8 @@ async def get_archive(archive_id: int):
     if not row:
         raise HTTPException(404, "Archive item not found")
     d = dict_row(row)
+    if d.get("reference_issue_key") and not d.get("reference_issue_id"):
+        d["reference_issue_id"] = d["reference_issue_key"]
     for fld in ("actual_listing_images", "item_specifics"):
         if fld in d and isinstance(d[fld], str):
             try:
