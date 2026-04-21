@@ -7,7 +7,7 @@ import {
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
-  Building2, ShoppingCart, LayoutDashboard,
+  Building2, ShoppingCart, LayoutDashboard, Archive,
 } from 'lucide-react';
 
 interface NavItem {
@@ -61,6 +61,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { id: 'assist', name: 'EmpireAssist', icon: <Sparkles size={16} />, status: 'active', color: '#b8960c' },
       { id: 'pay', name: 'EmpirePay', icon: <Wallet size={16} />, status: 'active', color: '#16a34a' },
       { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b' },
+      { id: 'archive', name: 'ArchiveForge', icon: <Archive size={16} />, status: 'active', color: '#06b6d4' },
       { id: 'vetforge', name: 'VetForge', icon: <Heart size={16} />, status: 'planned', color: '#ef4444' },
       { id: 'petforge', name: 'PetForge', icon: <PawPrint size={16} />, status: 'planned', color: '#ef4444' },
     ],

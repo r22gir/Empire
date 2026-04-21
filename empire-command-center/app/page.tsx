@@ -48,6 +48,7 @@ import MemoryBankScreen from './components/screens/MemoryBankScreen';
 import EcosystemProductPage from './components/screens/EcosystemProductPage';
 import RecoveryForgeScreen from './components/screens/RecoveryForgeScreen';
 import RelistAppPage from './components/screens/RelistAppPage';
+import ArchiveForgePage from './components/screens/ArchiveForgePage';
 import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
@@ -303,6 +304,8 @@ export default function CommandCenter() {
           return <RecoveryForgeScreen />;
         case 'relist':
           return <RelistAppPage initialSection={activeSection || undefined} />;
+        case 'archive':
+          return <ArchiveForgePage />;
         case 'dev':
           return <DevPanel />;
         case 'openclaw':
