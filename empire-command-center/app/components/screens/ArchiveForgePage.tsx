@@ -69,6 +69,16 @@ interface DraftOutput {
   status: string;
 }
 
+interface PhotoRecord {
+  id: number;
+  archive_id: number;
+  role: string;
+  filename: string;
+  original_name: string;
+  file_path: string;
+  created_at: string;
+}
+
 const STATUSES = ["RAW","IDENTIFIED","PHOTOGRAPHED","VALUED","READY_TO_LIST","LISTED","SOLD","HOLD","REBOXED"];
 const STATUS_COLORS: Record<string, string> = {
   RAW: '#9ca3af', IDENTIFIED: '#3b82f6', PHOTOGRAPHED: '#8b5cf6',
@@ -245,97 +255,164 @@ function ReferenceSection({ ref_issue }: { ref_issue: LifeReferenceIssue }) {
 
 // ── Section 3: Photo Capture ───────────────────────────────────────────────────
 
-function PhotoSection({ images, onChange }: { images: string[]; onChange: (imgs: string[]) => void }) {
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+const PHOTO_ROLES = [
+  { key: 'front', label: 'Front Cover', required: true, desc: 'Clear flat scan of front cover' },
+  { key: 'spine', label: 'Spine', required: false, desc: 'Spine condition — critical for grading' },
+  { key: 'back', label: 'Back Cover', required: false, desc: 'Back cover scan' },
+  { key: 'defects', label: 'Defect Photos', required: false, desc: 'Any tears, foxing, missing pages, writing' },
+  { key: 'label', label: 'Mailing Label', required: false, desc: 'Address label close-up (if present)' },
+];
 
-  const ROLES = [
-    { key: 'front', label: 'Front Cover', required: true, desc: 'Clear flat scan of front cover' },
-    { key: 'spine', label: 'Spine', required: false, desc: 'Spine condition — critical for grading' },
-    { key: 'back', label: 'Back Cover', required: false, desc: 'Back cover scan' },
-    { key: 'defects', label: 'Defect Photos', required: false, desc: 'Any tears, foxing, missing pages, writing' },
-    { key: 'label', label: 'Mailing Label', required: false, desc: 'Address label close-up (if present)' },
-  ];
+function PhotoSection({
+  archiveId,
+  refIssue,
+}: {
+  archiveId: number | null;
+  refIssue: LifeReferenceIssue | null;
+}) {
+  const [photos, setPhotos] = useState<PhotoRecord[]>([]);
+  const [uploadingRole, setUploadingRole] = useState<string | null>(null);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, role: string) => {
+  const loadPhotos = useCallback(async () => {
+    if (!archiveId) return;
+    try {
+      const r = await fetch(`${AG_API}/uploads/${archiveId}`);
+      const d = await r.json();
+      setPhotos(d.photos || []);
+    } catch { /* silent */ }
+  }, [archiveId]);
+
+  useEffect(() => { loadPhotos(); }, [loadPhotos]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, role: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    setUploading(true);
-    const newUrls: string[] = [];
+    if (!archiveId) return;
+    setUploadingRole(role);
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      // In V1: store as data URIs for local use. No server upload yet.
-      await new Promise<void>((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          if (ev.target?.result) {
-            newUrls.push(`${role}:${ev.target.result}`);
-          }
-          resolve();
-        };
-        reader.readAsDataURL(file);
-      });
+      const formData = new FormData();
+      formData.append('file', files[i]);
+      formData.append('role', role);
+      try {
+        await fetch(`${AG_API}/uploads/${archiveId}`, { method: 'POST', body: formData });
+      } catch { /* silent */ }
     }
-    onChange([...images, ...newUrls]);
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = '';
+    await loadPhotos();
+    setUploadingRole(null);
+    if (e.target) e.target.value = '';
   };
 
-  const byRole = (role: string) => images.filter(img => img.startsWith(role + ':'));
+  const handleDelete = async (photoId: number) => {
+    try {
+      await fetch(`${AG_API}/photo/${photoId}`, { method: 'DELETE' });
+      setPhotos(prev => prev.filter(p => p.id !== photoId));
+    } catch { /* silent */ }
+  };
+
+  const byRole = (role: string) => photos.filter(p => p.role === role);
+  const photoUrl = (photo: PhotoRecord) => `${AG_API}/photo/${photo.id}`;
+  const totalCount = photos.length;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Step 3 — Actual Listing Photos</h2>
         <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-          Upload photos of <strong>your actual item</strong>. Keep reference images and actual listing images separate.
+          Upload photos of <strong>your actual item</strong>. Photos are saved to the server — they persist across page refreshes.
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        {ROLES.map(role => {
-          const roleImgs = byRole(role.key);
-          return (
-            <div key={role.key} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{role.label}</span>
-                  {role.required && <span style={{ marginLeft: 6, fontSize: 10, background: '#fee2e2', color: '#dc2626', padding: '1px 6px', borderRadius: 4 }}>Required</span>}
-                </div>
-                <label style={{ padding: '4px 10px', background: '#06b6d4', color: '#fff', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
-                  {uploading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />} Upload
-                  <input ref={role.key === 'front' ? fileRef : undefined} type="file" accept="image/*" multiple style={{ display: 'none' }}
-                    onChange={e => handleFileUpload(e, role.key)} />
-                </label>
-              </div>
-              <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>{role.desc}</div>
-              {roleImgs.length === 0 ? (
-                <div style={{ height: 64, background: '#f9f8f6', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: 11, border: '1.5px dashed #e5e2dc' }}>
-                  No photo yet
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                  {roleImgs.map((img, i) => (
-                    <div key={i} style={{ position: 'relative' }}>
-                      <img src={img.split(':').slice(1).join(':')} alt={role.label}
-                        style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc' }} />
-                      <button onClick={() => onChange(images.filter((_, j) => j !== images.indexOf(img)))}
-                        style={{ position: 'absolute', top: -6, right: -6, width: 18, height: 18, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+      {!archiveId && (
+        <div style={{ padding: 12, background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 10, fontSize: 12, color: '#92400e' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          Archive record not yet created. Complete Steps 1–2 and proceed from the Reference step to enable photo uploads.
+        </div>
+      )}
+
+      {/* Side-by-side: Reference cover | Upload slots */}
+      <div style={{ display: 'grid', gridTemplateColumns: '200px 1fr', gap: 20, alignItems: 'start' }}>
+        {/* Left: reference cover */}
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Reference Cover</div>
+          {refIssue?.reference_cover_url ? (
+            <img src={refIssue.reference_cover_url} alt="Reference cover"
+              style={{ width: '100%', aspectRatio: '4/5', objectFit: 'contain', borderRadius: 8, border: '1px solid #e5e2dc', background: '#f9f9f9', display: 'block' }}
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            />
+          ) : (
+            <div style={{ width: '100%', aspectRatio: '4/5', background: '#f5f3ef', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: 11 }}>
+              No reference image
             </div>
-          );
-        })}
+          )}
+          {refIssue && (
+            <div style={{ marginTop: 8, fontSize: 10, color: '#888', lineHeight: 1.4 }}>
+              <div style={{ fontWeight: 600 }}>{refIssue.date}</div>
+              <div>{refIssue.cover_subject}</div>
+            </div>
+          )}
+          <div style={{ marginTop: 8, padding: '6px 8px', background: '#ecfeff', borderRadius: 6, fontSize: 10, color: '#155e75' }}>
+            Compare your item against this reference when photographing.
+          </div>
+        </div>
+
+        {/* Right: upload slots grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {PHOTO_ROLES.map(role => {
+            const rolePhotos = byRole(role.key);
+            const isUploading = uploadingRole === role.key;
+            return (
+              <div key={role.key} style={{ background: '#fff', border: `1.5px solid ${rolePhotos.length > 0 ? '#10b981' : '#e5e2dc'}`, borderRadius: 10, padding: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600 }}>{role.label}</span>
+                    {role.required && <span style={{ fontSize: 9, background: '#fee2e2', color: '#dc2626', padding: '1px 5px', borderRadius: 3 }}>REQ</span>}
+                    {rolePhotos.length > 0 && <CheckCircle size={12} color="#10b981" />}
+                  </div>
+                  <label style={{
+                    padding: '3px 8px', background: archiveId ? '#06b6d4' : '#d1d5db', color: '#fff',
+                    borderRadius: 5, fontSize: 10, fontWeight: 600,
+                    cursor: archiveId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 4,
+                  }}>
+                    {isUploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />} Add
+                    <input type="file" accept="image/*" multiple style={{ display: 'none' }} disabled={!archiveId}
+                      onChange={e => handleUpload(e, role.key)} />
+                  </label>
+                </div>
+                <div style={{ fontSize: 10, color: '#888', marginBottom: 6 }}>{role.desc}</div>
+                {rolePhotos.length === 0 ? (
+                  <div style={{ height: 52, background: '#f9f8f6', borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: 10, border: '1.5px dashed #e5e2dc' }}>
+                    {isUploading ? 'Uploading…' : 'No photo yet'}
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {rolePhotos.map(photo => (
+                      <div key={photo.id} style={{ position: 'relative' }}>
+                        <img src={photoUrl(photo)} alt={role.label}
+                          style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc' }} />
+                        <button onClick={() => handleDelete(photo.id)}
+                          style={{ position: 'absolute', top: -5, right: -5, width: 16, height: 16, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          ×
+                        </button>
+                        <div style={{ position: 'absolute', bottom: 2, left: 2, background: 'rgba(16,185,129,0.85)', borderRadius: 3, padding: '1px 3px', fontSize: 7, color: '#fff', fontWeight: 700 }}>
+                          SAVED
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {images.length > 0 && (
-        <div style={{ padding: 10, background: '#f0fdf4', borderRadius: 8, fontSize: 12, color: '#166534' }}>
-          <Check size={12} style={{ display: 'inline', marginRight: 4 }} />
-          {images.length} photo(s) added — keep reference cover and actual listing photos separate
+      {totalCount > 0 && (
+        <div style={{ padding: 10, background: '#f0fdf4', borderRadius: 8, fontSize: 12, color: '#166534', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <CheckCircle size={13} />
+          {totalCount} photo(s) saved to server — will persist across page refreshes.
+          <button onClick={loadPhotos} style={{ marginLeft: 'auto', padding: '2px 8px', background: 'transparent', border: '1px solid #16a34a', borderRadius: 5, fontSize: 11, cursor: 'pointer', color: '#16a34a' }}>
+            Refresh
+          </button>
         </div>
       )}
     </div>
@@ -766,6 +843,7 @@ function InventorySection() {
     { key: 'cover_subject', label: 'Cover', width: 180 },
     { key: 'tier', label: 'Tier', width: 50 },
     { key: 'processed_status', label: 'Status', width: 100 },
+    { key: 'photo_count', label: 'Photos', width: 60 },
     { key: 'condition_score', label: 'Cond.', width: 50 },
     { key: 'source_box_code', label: 'Source Box', width: 90 },
     { key: 'processed_box_code', label: 'Dest Box', width: 90 },
@@ -857,6 +935,10 @@ function InventorySection() {
                     if (col.key === 'processed_status' && val) {
                       display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: (STATUS_COLORS[val] || '#666') + '20', color: STATUS_COLORS[val] || '#666' }}>{val}</span>;
                     }
+                    if (col.key === 'photo_count') {
+                      const count = Number(val) || 0;
+                      display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: count > 0 ? '#d1fae5' : '#f3f4f6', color: count > 0 ? '#065f46' : '#9ca3af' }}>{count > 0 ? `📷 ${count}` : '—'}</span>;
+                    }
                     if (col.key === 'condition_score') {
                       display = val ? `${val}/5` : '—';
                     }
@@ -925,14 +1007,16 @@ export default function ArchiveForgePage() {
     setStep('reference');
   };
 
+  // Create archive record (POST) — called when moving from reference → photos
   const handleArchiveSave = async () => {
+    if (savedArchiveId) return; // already created
     try {
       const res = await fetch(`${AG_API}/archives`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...archiveData,
-          actual_listing_images: archiveData.actual_listing_images || [],
+          actual_listing_images: [],
           has_address_label: archiveData.has_address_label || false,
           is_complete: archiveData.is_complete !== false,
         }),
@@ -944,10 +1028,40 @@ export default function ArchiveForgePage() {
     } catch { /* silent */ }
   };
 
+  // Update archive record (PATCH) — called when moving from condition → listing
+  const handleArchiveUpdate = async () => {
+    if (!savedArchiveId) { await handleArchiveSave(); return; }
+    try {
+      await fetch(`${AG_API}/archives/${savedArchiveId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          condition_score: archiveData.condition_score,
+          has_address_label: archiveData.has_address_label || false,
+          is_complete: archiveData.is_complete !== false,
+          defects: archiveData.defects || '',
+          notes: archiveData.notes || '',
+          tier: archiveData.tier,
+          rough_comp_min: archiveData.rough_comp_min || 0,
+          rough_comp_max: archiveData.rough_comp_max || 0,
+          sale_plan: archiveData.sale_plan || '',
+          source_box_code: archiveData.source_box_code || '',
+          source_slot_position: archiveData.source_slot_position || '',
+          processed_box_code: archiveData.processed_box_code || '',
+          processed_status: archiveData.processed_status || 'RAW',
+          archive_location: archiveData.archive_location || '',
+        }),
+      });
+    } catch { /* silent */ }
+  };
+
   const navigate = (direction: 'next' | 'prev') => {
     const idx = currentStepIdx;
     if (direction === 'next' && idx < STEP_ORDER.length - 1) {
-      if (step === 'condition') handleArchiveSave();
+      // Create archive record when entering photos step (needed for uploads)
+      if (step === 'reference') handleArchiveSave();
+      // Persist condition/box data when leaving condition step
+      if (step === 'condition') handleArchiveUpdate();
       setStep(STEP_ORDER[idx + 1]);
     } else if (direction === 'prev' && idx > 0) {
       setStep(STEP_ORDER[idx - 1]);
@@ -991,7 +1105,7 @@ export default function ArchiveForgePage() {
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
         {step === 'intake' && <IntakeSection onIdentified={handleIdentified} />}
         {step === 'reference' && refIssue && <ReferenceSection ref_issue={refIssue} />}
-        {step === 'photos' && <PhotoSection images={archiveData.actual_listing_images || []} onChange={imgs => setArchiveData(d => ({ ...d, actual_listing_images: imgs }))} />}
+        {step === 'photos' && <PhotoSection archiveId={savedArchiveId} refIssue={refIssue} />}
         {step === 'archive' && <ArchiveSection data={archiveData} onChange={setArchiveData} />}
         {step === 'condition' && <ConditionSection data={archiveData} onChange={setArchiveData} />}
         {step === 'listing' && <ListingBuilderSection data={archiveData} refIssue={refIssue} onGenerated={setDraft} />}

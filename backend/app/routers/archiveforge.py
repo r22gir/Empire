@@ -12,16 +12,23 @@ Scope:
 This router uses its own prefixed tables (ag_*) in the shared SQLite DB.
 All sample/reference data is local fixture — no live external dependencies.
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import json
 import sqlite3
 import logging
 import re
+import shutil
+import uuid
 from datetime import datetime
+from pathlib import Path
 
 from app.db.database import get_db, dict_rows, dict_row, DB_PATH
+
+UPLOADS_DIR = Path(DB_PATH).parent / "archiveforge_uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 
 router = APIRouter(prefix="/archiveforge", tags=["archiveforge"])
 log = logging.getLogger("archiveforge")
@@ -314,6 +321,18 @@ def _init_tables():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS ag_archive_photos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            archive_id INTEGER NOT NULL REFERENCES ag_archives(id),
+            role TEXT NOT NULL DEFAULT 'front',
+            filename TEXT NOT NULL,
+            original_name TEXT DEFAULT '',
+            file_path TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
     conn.commit()
     conn.close()
     log.info("ArchiveForge tables initialized")
@@ -449,7 +468,9 @@ async def list_archives(
         clause = f"WHERE {' AND '.join(where)}" if where else ""
         params += [limit, offset]
         rows = dict_rows(db.execute(
-            f"SELECT * FROM ag_archives {clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            f"""SELECT a.*,
+                       (SELECT COUNT(*) FROM ag_archive_photos p WHERE p.archive_id = a.id) AS photo_count
+                FROM ag_archives a {clause} ORDER BY a.created_at DESC LIMIT ? OFFSET ?""",
             params,
         ).fetchall())
         total = db.execute(
@@ -816,3 +837,82 @@ async def list_drafts(archive_id: Optional[int] = None):
                 except (json.JSONDecodeError, TypeError):
                     d[fld] = {}
     return {"drafts": rows, "total": len(rows)}
+
+
+# ── Photo Storage ──────────────────────────────────────────────────────────────
+
+@router.post("/uploads/{archive_id}", status_code=201)
+async def upload_photo(archive_id: int, role: str = Form("front"), file: UploadFile = File(...)):
+    """Upload a photo for an archive item and persist to disk."""
+    with get_db() as db:
+        row = db.execute("SELECT id FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Archive item not found")
+
+    ext = Path(file.filename or "photo.jpg").suffix.lower()
+    if ext not in ('.jpg', '.jpeg', '.png', '.webp', '.gif'):
+        ext = '.jpg'
+
+    item_dir = UPLOADS_DIR / str(archive_id)
+    item_dir.mkdir(exist_ok=True)
+
+    unique_name = f"{role}_{uuid.uuid4().hex[:8]}{ext}"
+    file_path = item_dir / unique_name
+
+    with open(file_path, 'wb') as f:
+        shutil.copyfileobj(file.file, f)
+
+    with get_db() as db:
+        cur = db.execute(
+            "INSERT INTO ag_archive_photos (archive_id, role, filename, original_name, file_path) VALUES (?,?,?,?,?)",
+            (archive_id, role, unique_name, file.filename or '', str(file_path)),
+        )
+        db.commit()
+        photo_id = cur.lastrowid
+
+    log.info(f"Photo #{photo_id} uploaded for archive #{archive_id} (role={role})")
+    return {"id": photo_id, "archive_id": archive_id, "role": role, "filename": unique_name}
+
+
+@router.get("/uploads/{archive_id}")
+async def list_photos(archive_id: int):
+    """List all persisted photos for an archive item."""
+    with get_db() as db:
+        rows = dict_rows(db.execute(
+            "SELECT * FROM ag_archive_photos WHERE archive_id = ? ORDER BY created_at ASC",
+            (archive_id,),
+        ).fetchall())
+    return {"photos": rows, "total": len(rows)}
+
+
+@router.get("/photo/{photo_id}")
+async def serve_photo(photo_id: int):
+    """Serve a persisted archive photo file."""
+    with get_db() as db:
+        row = db.execute("SELECT * FROM ag_archive_photos WHERE id = ?", (photo_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Photo not found")
+    d = dict_row(row)
+    file_path = Path(d["file_path"])
+    if not file_path.exists():
+        raise HTTPException(404, "Photo file not found on disk")
+    return FileResponse(str(file_path))
+
+
+@router.delete("/photo/{photo_id}")
+async def delete_photo(photo_id: int):
+    """Delete a persisted photo from DB and disk."""
+    with get_db() as db:
+        row = db.execute("SELECT * FROM ag_archive_photos WHERE id = ?", (photo_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "Photo not found")
+    d = dict_row(row)
+    file_path = Path(d["file_path"])
+    if file_path.exists():
+        try:
+            file_path.unlink()
+        except OSError:
+            pass
+    with get_db() as db:
+        db.execute("DELETE FROM ag_archive_photos WHERE id = ?", (photo_id,))
+    return {"id": photo_id, "deleted": True}
