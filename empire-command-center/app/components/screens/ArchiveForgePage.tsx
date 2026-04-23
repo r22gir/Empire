@@ -148,12 +148,21 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [sourceStatus, setSourceStatus] = useState('');
+  const [activeSearchTerm, setActiveSearchTerm] = useState('');
+  const searchSeq = useRef(0);
 
   const doSearch = useCallback(async () => {
     const legacyQuery = q.trim();
     const dateQuery = issueDate.trim();
     const keywordQuery = keyword.trim();
     if (!legacyQuery && !dateQuery && !keywordQuery) return;
+    const requestId = searchSeq.current + 1;
+    searchSeq.current = requestId;
+    const submittedTerm = [dateQuery, keywordQuery || legacyQuery].filter(Boolean).join(' · ');
+    setResults([]);
+    setSourceStatus('');
+    setActiveSearchTerm(submittedTerm);
+    setSearched(true);
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -161,11 +170,15 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
       if (keywordQuery || legacyQuery) params.set('keyword', keywordQuery || legacyQuery);
       const r = await fetch(`${AG_API}/reference/search?${params.toString()}`);
       const d = await r.json();
+      if (requestId !== searchSeq.current) return;
       setResults(d.results || []);
       setSourceStatus(d.source_status || '');
-    } catch { setResults([]); }
-    setLoading(false);
-    setSearched(true);
+      setActiveSearchTerm(d.query?.query_used || submittedTerm);
+    } catch {
+      if (requestId === searchSeq.current) setResults([]);
+    } finally {
+      if (requestId === searchSeq.current) setLoading(false);
+    }
   }, [q, issueDate, keyword]);
 
   return (
@@ -219,12 +232,17 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
 
       {searched && results.length === 0 && (
         <div style={{ padding: 24, textAlign: 'center', color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
-          No reference issues matched. Try a different date, event, person, or keyword.
+          No reference issues matched {activeSearchTerm ? `"${activeSearchTerm}"` : 'this search'}. Try a different date, event, person, or keyword.
         </div>
       )}
 
       {results.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {activeSearchTerm && (
+            <div style={{ padding: '8px 10px', background: '#eef8fb', border: '1px solid #bae6fd', borderRadius: 8, color: '#155e75', fontSize: 11 }}>
+              Showing results for: <strong>{activeSearchTerm}</strong>
+            </div>
+          )}
           {sourceStatus && sourceStatus !== 'google_books_api' && (
             <div style={{ padding: '8px 10px', background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 8, color: '#92400e', fontSize: 11 }}>
               Google Books API status: {sourceStatus}. Showing known Google Books issue pages and local references where available.

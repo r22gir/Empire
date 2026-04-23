@@ -326,6 +326,19 @@ def _reference_search_text(issue: dict) -> str:
     )).lower()
 
 
+REFERENCE_STOPWORDS = {
+    "life", "magazine", "issue", "issues", "vol", "volume", "no", "number",
+    "the", "and", "for", "with", "not", "this", "that", "cover",
+}
+
+
+def _search_tokens(value: str) -> set[str]:
+    return {
+        token for token in re.split(r"[^a-z0-9]+", value.lower())
+        if len(token) > 1 and token not in REFERENCE_STOPWORDS
+    }
+
+
 def _rank_reference_issue(issue: dict, query_date: Optional[datetime], keyword: str) -> tuple[float, str]:
     score = 0.0
     reasons: list[str] = []
@@ -337,21 +350,25 @@ def _rank_reference_issue(issue: dict, query_date: Optional[datetime], keyword: 
         score += max(0.0, 0.5 - (distance / 30))
         reasons.append(f"published within {distance} days of requested date")
 
-    words = [w for w in re.split(r"[^a-z0-9]+", keyword.lower()) if len(w) > 1]
+    words = _search_tokens(keyword)
     if words:
-        text = _reference_search_text(issue)
-        matches = [w for w in words if w in text]
+        text_tokens = _search_tokens(_reference_search_text(issue))
+        matches = sorted(words & text_tokens)
+        alpha_matches = [w for w in matches if not w.isdigit()]
+        if matches and not alpha_matches:
+            matches = []
         if matches:
             score += min(0.8, 0.25 * len(matches))
             reasons.append("keyword match: " + ", ".join(matches[:4]))
 
-    if issue.get("cover_thumbnail_url") or issue.get("reference_cover_url"):
+    # Cover availability is only a tie-breaker after a real date/keyword
+    # match. It must never make Apollo/moon fallback issues appear for
+    # unrelated searches such as "Queen Elizabeth".
+    if score > 0 and (issue.get("cover_thumbnail_url") or issue.get("reference_cover_url")):
         score += 0.15
         reasons.append("real cover thumbnail available")
 
-    if not reasons and issue.get("match_reason"):
-        reasons.append(issue["match_reason"])
-    return score, "; ".join(reasons) or "metadata match"
+    return score, "; ".join(reasons) or "no date or keyword match"
 
 
 def _normalize_known_google_issue(issue: dict, query_used: str, query_date: Optional[datetime], keyword: str) -> dict:
@@ -781,6 +798,8 @@ async def search_life_cover_reference(
     results: list[dict] = []
     seen: set[str] = set()
     for issue in api_results:
+        if issue.get("match_score", 0) <= 0.05:
+            continue
         key = issue.get("google_books_volume_id") or issue.get("id")
         if key and key not in seen:
             results.append(issue)
