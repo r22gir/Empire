@@ -17,11 +17,19 @@ const AG_API = `${API}/archiveforge`;
 
 interface LifeReferenceIssue {
   id: string;
+  source?: string;
+  google_books_volume_id?: string;
   date: string;
-  volume: number;
-  issue_number: number;
+  volume: number | null;
+  issue_number: number | null;
   cover_subject: string;
+  issue_title?: string;
+  volume_label?: string;
   reference_cover_url: string;
+  cover_thumbnail_url?: string;
+  cover_preview_url?: string;
+  search_query_used?: string;
+  match_reason?: string;
   rarity_notes: string;
   tier_guidance: string;
   keywords: string;
@@ -31,6 +39,14 @@ interface LifeReferenceIssue {
 interface ArchiveItem {
   id: number;
   reference_issue_id: string;
+  reference_source: string;
+  google_books_volume_id: string;
+  issue_title: string;
+  volume_label: string;
+  cover_thumbnail_url: string;
+  cover_preview_url: string;
+  search_query_used: string;
+  match_reason: string;
   issue_date: string;
   volume: number;
   issue_number: number;
@@ -126,21 +142,31 @@ function fmt(date: string) {
 
 function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssue) => void }) {
   const [q, setQ] = useState('');
+  const [issueDate, setIssueDate] = useState('');
+  const [keyword, setKeyword] = useState('');
   const [results, setResults] = useState<LifeReferenceIssue[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [sourceStatus, setSourceStatus] = useState('');
 
   const doSearch = useCallback(async () => {
-    if (!q.trim()) return;
+    const legacyQuery = q.trim();
+    const dateQuery = issueDate.trim();
+    const keywordQuery = keyword.trim();
+    if (!legacyQuery && !dateQuery && !keywordQuery) return;
     setLoading(true);
     try {
-      const r = await fetch(`${AG_API}/reference?q=${encodeURIComponent(q)}`);
+      const params = new URLSearchParams();
+      if (dateQuery) params.set('date', dateQuery);
+      if (keywordQuery || legacyQuery) params.set('keyword', keywordQuery || legacyQuery);
+      const r = await fetch(`${AG_API}/reference/search?${params.toString()}`);
       const d = await r.json();
       setResults(d.results || []);
+      setSourceStatus(d.source_status || '');
     } catch { setResults([]); }
     setLoading(false);
     setSearched(true);
-  }, [q]);
+  }, [q, issueDate, keyword]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -151,73 +177,118 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
         </p>
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ background: '#fff', border: '1.5px solid #e5e2dc', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>Find matching LIFE cover</div>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+            Uses Google Books LIFE issue metadata when available. Cover images are reference-only and never replace uploaded item photos.
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr auto', gap: 8, alignItems: 'end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: '#666', fontWeight: 600 }}>
+            Date
+            <input
+              value={issueDate} onChange={e => setIssueDate(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && doSearch()}
+              placeholder="1936-11-23"
+              type="date"
+              style={{ padding: '10px 12px', border: '1.5px solid #e5e2dc', borderRadius: 8, fontSize: 13, outline: 'none' }}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: '#666', fontWeight: 600 }}>
+            Event / Person / Keyword
+            <input
+              value={keyword} onChange={e => { setKeyword(e.target.value); setQ(e.target.value); }}
+              onKeyDown={e => e.key === 'Enter' && doSearch()}
+              placeholder="Apollo 11, moon, Kennedy, Pearl Harbor..."
+              style={{ padding: '10px 12px', border: '1.5px solid #e5e2dc', borderRadius: 8, fontSize: 13, outline: 'none' }}
+            />
+          </label>
+          <button onClick={doSearch} disabled={loading}
+            style={{ padding: '10px 18px', background: loading ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 600, fontSize: 13, cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Search Covers
+          </button>
+        </div>
         <input
-          value={q} onChange={e => setQ(e.target.value)}
+          value={q} onChange={e => { setQ(e.target.value); setKeyword(e.target.value); }}
           onKeyDown={e => e.key === 'Enter' && doSearch()}
-          placeholder="e.g. 1969 moon landing, Nov 1963, vol 11 issue 25..."
-          style={{ flex: 1, padding: '10px 14px', border: '1.5px solid #e5e2dc', borderRadius: 10, fontSize: 13, outline: 'none' }}
+          placeholder="Optional quick search: 1969 moon landing, Nov 1963, vol 11 issue 25..."
+          style={{ padding: '9px 12px', border: '1px solid #eee8df', borderRadius: 8, fontSize: 12, outline: 'none' }}
         />
-        <button onClick={doSearch} disabled={loading}
-          style={{ padding: '10px 18px', background: loading ? '#9ca3af' : '#06b6d4', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: loading ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Search
-        </button>
       </div>
 
       {searched && results.length === 0 && (
         <div style={{ padding: 24, textAlign: 'center', color: '#999', background: '#fff', borderRadius: 10, border: '1px solid #e5e2dc' }}>
-          No reference issues matched "{q}". Try a different date, volume, or keyword.
+          No reference issues matched. Try a different date, event, person, or keyword.
         </div>
       )}
 
       {results.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {sourceStatus && sourceStatus !== 'google_books_api' && (
+            <div style={{ padding: '8px 10px', background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 8, color: '#92400e', fontSize: 11 }}>
+              Google Books API status: {sourceStatus}. Showing known Google Books issue pages and local references where available.
+            </div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
           {results.map(ref => (
             <div key={ref.id} style={{
               background: '#fff', border: `1.5px solid ${ref.match_score && ref.match_score > 0.5 ? '#06b6d4' : '#e5e2dc'}`,
-              borderRadius: 12, padding: 14, cursor: 'pointer',
+              borderRadius: 12, padding: 12, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10,
               transition: 'all 0.15s',
             }}
               onMouseEnter={e => (e.currentTarget.style.borderColor = '#06b6d4')}
               onMouseLeave={e => (e.currentTarget.style.borderColor = ref.match_score && ref.match_score > 0.5 ? '#06b6d4' : '#e5e2dc')}
               onClick={() => onIdentified(ref)}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{ref.cover_subject}</span>
-                    <span style={{ fontSize: 11, padding: '2px 8px', background: '#f5f3ef', borderRadius: 6, color: '#888' }}>
-                      Vol {ref.volume}, No. {ref.issue_number}
-                    </span>
-                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, fontWeight: 700,
-                      background: TIER_COLORS[ref.tier_guidance] + '20',
-                      color: TIER_COLORS[ref.tier_guidance] }}>
-                      {ref.tier_guidance}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#888' }}>
-                    {ref.date} — {ref.rarity_notes}
-                  </div>
-                  {ref.match_score !== undefined && (
-                    <div style={{ marginTop: 4, fontSize: 11, color: ref.match_score > 0.5 ? '#16a34a' : '#888' }}>
-                      Match confidence: {Math.round(ref.match_score * 100)}%
-                    </div>
-                  )}
+              {ref.cover_thumbnail_url || ref.reference_cover_url ? (
+                <img
+                  src={ref.cover_thumbnail_url || ref.reference_cover_url}
+                  alt={`LIFE cover ${ref.date}`}
+                  style={{ width: '100%', height: 190, objectFit: 'contain', background: '#f9f8f6', border: '1px solid #eee8df', borderRadius: 8 }}
+                />
+              ) : (
+                <div style={{ width: '100%', height: 190, background: '#f5f3ef', border: '1px dashed #d6d3cc', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af', fontSize: 12 }}>
+                  no cover image available
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <button style={{ padding: '6px 14px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                    Use This Issue
-                  </button>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#1a1a1a' }}>{ref.cover_subject}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <span style={{ fontSize: 11, padding: '2px 7px', background: '#f5f3ef', borderRadius: 6, color: '#666' }}>{ref.date || 'date unknown'}</span>
+                  <span style={{ fontSize: 11, padding: '2px 7px', background: '#f5f3ef', borderRadius: 6, color: '#666' }}>
+                    {ref.volume_label || `Vol ${ref.volume || '—'}, No. ${ref.issue_number || '—'}`}
+                  </span>
+                  <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 6, fontWeight: 700,
+                    background: (TIER_COLORS[ref.tier_guidance] || '#6b7280') + '20',
+                    color: TIER_COLORS[ref.tier_guidance] || '#6b7280' }}>
+                    {ref.tier_guidance || 'C'}
+                  </span>
                 </div>
+                <div style={{ fontSize: 11, color: '#666', minHeight: 30 }}>
+                  {ref.match_reason || ref.rarity_notes}
+                </div>
+                <div style={{ fontSize: 10, color: '#888' }}>
+                  Source: {ref.source === 'google_books' ? 'Google Books' : 'local reference'} {ref.google_books_volume_id ? `· ${ref.google_books_volume_id}` : ''}
+                </div>
+                {ref.match_score !== undefined && (
+                  <div style={{ fontSize: 11, color: ref.match_score > 0.5 ? '#16a34a' : '#888' }}>
+                    Match confidence: {Math.round(ref.match_score * 100)}%
+                  </div>
+                )}
+                <button style={{ marginTop: 2, padding: '8px 12px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                  Select this issue
+                </button>
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
 
       <div style={{ padding: 12, background: '#fef9ec', borderRadius: 10, border: '1px solid #fde68a', fontSize: 12, color: '#92400e' }}>
-        <strong>Sample data only</strong> — Reference issues above are canonical historical examples with researched values.
-        Upload your actual item photos in Step 3 before listing.
+        <strong>Reference-only covers</strong> — Google Books or local reference covers help identify the issue.
+        They are not listing photos. Upload your actual item photos in Step 3 before listing.
       </div>
     </div>
   );
@@ -252,18 +323,25 @@ function ReferenceSection({ ref_issue }: { ref_issue: LifeReferenceIssue }) {
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{ref_issue.cover_subject}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px', fontSize: 12 }}>
             {[
-              ["Date", ref_issue.date],
-              ["Volume", String(ref_issue.volume)],
-              ["Issue #", String(ref_issue.issue_number)],
-              ["Tier", ref_issue.tier_guidance],
-              ["Match confidence", ref_issue.match_score ? `${Math.round(ref_issue.match_score * 100)}%` : 'N/A'],
-            ].map(([label, value]) => (
+	              ["Date", ref_issue.date],
+	              ["Volume", ref_issue.volume ? String(ref_issue.volume) : '—'],
+	              ["Issue #", ref_issue.issue_number ? String(ref_issue.issue_number) : '—'],
+	              ["Source", ref_issue.source === 'google_books' ? 'Google Books' : 'Local reference'],
+	              ["Google Books ID", ref_issue.google_books_volume_id || '—'],
+	              ["Tier", ref_issue.tier_guidance],
+	              ["Match confidence", ref_issue.match_score ? `${Math.round(ref_issue.match_score * 100)}%` : 'N/A'],
+	            ].map(([label, value]) => (
               <div key={label}><span style={{ color: '#888' }}>{label}: </span><span style={{ fontWeight: 600 }}>{value}</span></div>
             ))}
           </div>
-          <div style={{ marginTop: 10, fontSize: 12, color: '#666', fontStyle: 'italic' }}>
-            "{ref_issue.rarity_notes}"
-          </div>
+	          <div style={{ marginTop: 10, fontSize: 12, color: '#666', fontStyle: 'italic' }}>
+	            "{ref_issue.rarity_notes}"
+	          </div>
+	          {ref_issue.match_reason && (
+	            <div style={{ marginTop: 8, fontSize: 12, color: '#155e75' }}>
+	              Match reason: {ref_issue.match_reason}
+	            </div>
+	          )}
         </div>
       </div>
 
@@ -870,21 +948,24 @@ function ReviewPublishSection({ archiveId, refIssue }: {
   const [item, setItem] = useState<Partial<ArchiveItem>>({});
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [pushState, setPushState] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
-  const [pushResult, setPushResult] = useState<any>(null);
-  const [pushError, setPushError] = useState('');
+	  const [pushState, setPushState] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
+	  const [pushResult, setPushResult] = useState<any>(null);
+	  const [pushError, setPushError] = useState('');
+	  const [publishStatus, setPublishStatus] = useState<{ publish_available: boolean; reason: string; action_label: string; target: string } | null>(null);
 
   const load = useCallback(async () => {
     if (!archiveId) { setLoading(false); return; }
     setLoading(true);
     try {
-      const [archRes, photoRes] = await Promise.all([
-        fetch(`${AG_API}/archives/${archiveId}`),
-        fetch(`${AG_API}/uploads/${archiveId}`),
-      ]);
-      if (archRes.ok) setItem(await archRes.json());
-      if (photoRes.ok) setPhotos((await photoRes.json()).photos || []);
-    } catch { /* */ }
+	      const [archRes, photoRes, publishRes] = await Promise.all([
+	        fetch(`${AG_API}/archives/${archiveId}`),
+	        fetch(`${AG_API}/uploads/${archiveId}`),
+	        fetch(`${AG_API}/publish-status`),
+	      ]);
+	      if (archRes.ok) setItem(await archRes.json());
+	      if (photoRes.ok) setPhotos((await photoRes.json()).photos || []);
+	      if (publishRes.ok) setPublishStatus(await publishRes.json());
+	    } catch { /* */ }
     setLoading(false);
   }, [archiveId]);
 
@@ -894,10 +975,12 @@ function ReviewPublishSection({ archiveId, refIssue }: {
   const canPublish = item.processed_status && validStatuses.includes(item.processed_status);
   const hasTitle = !!(item.listing_title);
   const hasDescription = !!(item.listing_description);
-  const hasPhotos = photos.length > 0;
+	  const hasPhotos = photos.length > 0;
+	  const publishUnavailable = publishStatus && publishStatus.publish_available === false;
 
-  const validationErrors: string[] = [];
-  if (!canPublish) validationErrors.push(`Status must be ${validStatuses.join(' or ')} (currently ${item.processed_status || 'unset'})`);
+	  const validationErrors: string[] = [];
+	  if (publishUnavailable) validationErrors.push(publishStatus.reason || 'MarketForge publish is unavailable');
+	  if (!canPublish) validationErrors.push(`Status must be ${validStatuses.join(' or ')} (currently ${item.processed_status || 'unset'})`);
   if (!hasTitle) validationErrors.push('Listing title is blank — go back to Step 6 and save a draft');
   if (!hasDescription) validationErrors.push('Listing description is blank — go back to Step 6 and save a draft');
   if (!hasPhotos) validationErrors.push('No actual listing photos uploaded — go back to Step 3');
@@ -1066,9 +1149,26 @@ function ReviewPublishSection({ archiveId, refIssue }: {
           </div>
         </div>
 
-        {/* Right: photos preview */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+	        {/* Right: photos preview */}
+	        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+	          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+	            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>REFERENCE COVER</div>
+	            {item.reference_cover_url || refIssue?.reference_cover_url ? (
+	              <img
+	                src={item.reference_cover_url || refIssue?.reference_cover_url}
+	                alt="Selected LIFE reference cover"
+	                style={{ width: '100%', maxHeight: 220, objectFit: 'contain', borderRadius: 8, border: '1px solid #e5e2dc', background: '#f9f8f6' }}
+	              />
+	            ) : (
+	              <div style={{ height: 120, background: '#f5f3ef', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999', fontSize: 12 }}>
+	                no cover image available
+	              </div>
+	            )}
+	            <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>
+	              Reference-only. MarketForge uses the actual listing photos below.
+	            </div>
+	          </div>
+	          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>ACTUAL LISTING PHOTOS ({photos.length})</div>
             {photos.length === 0 ? (
               <div style={{ height: 100, background: '#f9f8f6', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ccc', fontSize: 12, border: '1.5px dashed #e5e2dc' }}>
@@ -1089,10 +1189,22 @@ function ReviewPublishSection({ archiveId, refIssue }: {
 
           {/* Publish actions */}
           <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>PUBLISH TO MARKETFORGE</div>
-            <button
-              onClick={handlePublish}
-              disabled={pushState === 'pushing' || validationErrors.length > 0}
+	            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>MARKETFORGE PUBLISH STATUS</div>
+	            {publishStatus && (
+	              <div style={{
+	                marginBottom: 10, padding: '9px 10px', borderRadius: 8, fontSize: 11,
+	                background: publishStatus.publish_available ? '#f0fdf4' : '#fef9ec',
+	                border: `1px solid ${publishStatus.publish_available ? '#86efac' : '#fde68a'}`,
+	                color: publishStatus.publish_available ? '#166534' : '#92400e',
+	              }}>
+	                {publishStatus.publish_available
+	                  ? `Live target: ${publishStatus.target}`
+	                  : `Publish unavailable: ${publishStatus.reason}`}
+	              </div>
+	            )}
+	            <button
+	              onClick={handlePublish}
+	              disabled={pushState === 'pushing' || validationErrors.length > 0}
               style={{
                 width: '100%', padding: '12px', borderRadius: 10, fontSize: 14, fontWeight: 700,
                 background: validationErrors.length > 0 ? '#e5e7eb' : '#16a34a',
@@ -1108,9 +1220,9 @@ function ReviewPublishSection({ archiveId, refIssue }: {
               ) : pushState === 'error' ? (
                 <><AlertTriangle size={16} /> Try Again</>
               ) : (
-                <><Upload size={16} /> Publish to MarketForge</>
-              )}
-            </button>
+	                <><Upload size={16} /> {publishStatus?.action_label || 'Publish to MarketForge'}</>
+	              )}
+	            </button>
             {pushState === 'error' && pushError && (
               <div style={{ marginTop: 8, fontSize: 11, color: '#dc2626', background: '#fef2f2', padding: '8px 10px', borderRadius: 6 }}>
                 <AlertTriangle size={11} style={{ display: 'inline', marginRight: 4 }} />
@@ -1476,13 +1588,21 @@ export default function ArchiveForgePage() {
   const handleIdentified = (ref: LifeReferenceIssue) => {
     setRefIssue(ref);
     setArchiveData(prev => ({
-      ...prev,
-      reference_issue_id: ref.id,
-      issue_date: ref.date,
-      volume: ref.volume,
-      issue_number: ref.issue_number,
-      cover_subject: ref.cover_subject,
-      reference_cover_url: ref.reference_cover_url,
+	      ...prev,
+	      reference_issue_id: ref.id,
+	      reference_source: ref.source || '',
+	      google_books_volume_id: ref.google_books_volume_id || '',
+	      issue_title: ref.issue_title || 'LIFE',
+	      volume_label: ref.volume_label || '',
+	      cover_thumbnail_url: ref.cover_thumbnail_url || '',
+	      cover_preview_url: ref.cover_preview_url || '',
+	      search_query_used: ref.search_query_used || '',
+	      match_reason: ref.match_reason || '',
+	      issue_date: ref.date,
+	      volume: ref.volume || undefined,
+	      issue_number: ref.issue_number || undefined,
+	      cover_subject: ref.cover_subject,
+	      reference_cover_url: ref.reference_cover_url,
       tier: ref.tier_guidance,
       rough_comp_min: parseFloat(ref.rarity_notes.match(/\$([\d,]+)/)?.[1]?.replace(',','') || '0') || 0,
       rough_comp_max: parseFloat(ref.rarity_notes.match(/\$([\d,]+)–?\$?([\d,]+)/)?.[2]?.replace(',','') || '0') || 0,

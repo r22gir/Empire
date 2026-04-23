@@ -31,9 +31,10 @@ from app.db.database import get_db, dict_rows, dict_row, DB_PATH
 UPLOADS_DIR = Path("/home/rg/empire-repo/backend/data/archiveforge_uploads")
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-# MarketForge product creation endpoint — requires MarketForge router to be mounted
-# at http://localhost:8000/marketplace/products in main.py
+# MarketForge product creation endpoint. ArchiveForge must not claim publish
+# success unless this real endpoint accepts the product payload.
 MARKETFORGE_PRODUCTS_URL = "http://localhost:8000/marketplace/products"
+GOOGLE_BOOKS_API_URL = "https://www.googleapis.com/books/v1/volumes"
 
 PUSH_STATUSES = ["not_pushed", "draft_saved", "pushing", "pushed", "failed"]
 LISTING_STATUSES = ["none", "draft", "ready", "pushed", "failed"]
@@ -213,6 +214,63 @@ LIFE_REFERENCE_ISSUES = [
     },
 ]
 
+LIFE_GOOGLE_BOOKS_KNOWN_ISSUES = [
+    {
+        "source": "google_books",
+        "google_books_volume_id": "N0EEAAAAMBAJ",
+        "id": "google-books-N0EEAAAAMBAJ",
+        "date": "1936-11-23",
+        "volume": 1,
+        "issue_number": 4,
+        "cover_subject": "LIFE — Nov 23, 1936",
+        "issue_title": "LIFE",
+        "volume_label": "Vol. 1, No. 4",
+        "reference_cover_url": "https://books.google.com/books/content?id=N0EEAAAAMBAJ&printsec=frontcover&img=1&zoom=1&edge=curl",
+        "cover_thumbnail_url": "https://books.google.com/books/content?id=N0EEAAAAMBAJ&printsec=frontcover&img=1&zoom=1&edge=curl",
+        "cover_preview_url": "https://books.google.com/books/about/LIFE.html?id=N0EEAAAAMBAJ",
+        "rarity_notes": "Google Books reference issue. Cover image is reference-only; use actual uploaded photos for listing.",
+        "tier_guidance": "C",
+        "keywords": "life, 1936, november, nov 23, google books",
+        "match_reason": "Known Google Books LIFE issue page for Nov 23, 1936.",
+    },
+    {
+        "source": "google_books",
+        "google_books_volume_id": "IE8EAAAAMBAJ",
+        "id": "google-books-IE8EAAAAMBAJ",
+        "date": "1969-07-25",
+        "volume": 67,
+        "issue_number": 4,
+        "cover_subject": "The Moon Landing — Apollo 11",
+        "issue_title": "LIFE",
+        "volume_label": "Vol. 67, No. 4",
+        "reference_cover_url": "https://books.google.com/books/content?id=IE8EAAAAMBAJ&printsec=frontcover&img=1&zoom=1&edge=curl",
+        "cover_thumbnail_url": "https://books.google.com/books/content?id=IE8EAAAAMBAJ&printsec=frontcover&img=1&zoom=1&edge=curl",
+        "cover_preview_url": "https://books.google.com/books/about/LIFE.html?id=IE8EAAAAMBAJ",
+        "rarity_notes": "Google Books reference issue with Apollo 11 coverage. Cover image is reference-only.",
+        "tier_guidance": "A",
+        "keywords": "moon, apollo 11, apollo, 1969, landing, space, nasa, armstrong",
+        "match_reason": "Known Google Books LIFE issue for Jul 25, 1969 with Apollo 11 coverage.",
+    },
+    {
+        "source": "google_books",
+        "google_books_volume_id": "oEwEAAAAMBAJ",
+        "id": "google-books-oEwEAAAAMBAJ",
+        "date": "1969-08-11",
+        "volume": 67,
+        "issue_number": 7,
+        "cover_subject": "LIFE — Moon Story / Apollo 11 Follow-up",
+        "issue_title": "LIFE",
+        "volume_label": "Aug 11, 1969",
+        "reference_cover_url": "https://books.google.com/books/content?id=oEwEAAAAMBAJ&printsec=frontcover&img=1&zoom=1&edge=curl",
+        "cover_thumbnail_url": "https://books.google.com/books/content?id=oEwEAAAAMBAJ&printsec=frontcover&img=1&zoom=1&edge=curl",
+        "cover_preview_url": "https://books.google.com/books/about/LIFE.html?id=oEwEAAAAMBAJ",
+        "rarity_notes": "Google Books reference issue with moon/Apollo 11 content. Cover image is reference-only.",
+        "tier_guidance": "B",
+        "keywords": "moon, apollo 11, apollo, 1969, nasa, astronauts, armstrong, aldrin, collins",
+        "match_reason": "Known Google Books LIFE issue with strong moon/Apollo metadata.",
+    },
+]
+
 
 def _score_match(query_str: str, ref: dict) -> float:
     """Simple keyword match score 0.0–1.0 between a query string and reference issue."""
@@ -235,6 +293,168 @@ def _score_match(query_str: str, ref: dict) -> float:
     if iss_match and str(ref["issue_number"]) == iss_match.group(1):
         score += 0.1
     return min(1.0, score)
+
+
+def _parse_reference_date(value: str | None) -> Optional[datetime]:
+    if not value:
+        return None
+    cleaned = value.strip()
+    for fmt in ("%Y-%m-%d", "%b %d, %Y", "%B %d, %Y", "%m/%d/%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(cleaned, fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def _date_distance_days(candidate: str, target: Optional[datetime]) -> int:
+    if not target or not candidate:
+        return 99999
+    parsed = _parse_reference_date(candidate)
+    if not parsed:
+        return 99999
+    return abs((parsed.date() - target.date()).days)
+
+
+def _google_books_cover_url(volume_id: str) -> str:
+    return f"https://books.google.com/books/content?id={volume_id}&printsec=frontcover&img=1&zoom=1&edge=curl"
+
+
+def _reference_search_text(issue: dict) -> str:
+    return " ".join(str(issue.get(k, "")) for k in (
+        "cover_subject", "issue_title", "keywords", "rarity_notes", "volume_label", "date"
+    )).lower()
+
+
+def _rank_reference_issue(issue: dict, query_date: Optional[datetime], keyword: str) -> tuple[float, str]:
+    score = 0.0
+    reasons: list[str] = []
+    distance = _date_distance_days(issue.get("date", ""), query_date)
+    if query_date and distance == 0:
+        score += 1.0
+        reasons.append("exact issue-date match")
+    elif query_date and distance <= 14:
+        score += max(0.0, 0.5 - (distance / 30))
+        reasons.append(f"published within {distance} days of requested date")
+
+    words = [w for w in re.split(r"[^a-z0-9]+", keyword.lower()) if len(w) > 1]
+    if words:
+        text = _reference_search_text(issue)
+        matches = [w for w in words if w in text]
+        if matches:
+            score += min(0.8, 0.25 * len(matches))
+            reasons.append("keyword match: " + ", ".join(matches[:4]))
+
+    if issue.get("cover_thumbnail_url") or issue.get("reference_cover_url"):
+        score += 0.15
+        reasons.append("real cover thumbnail available")
+
+    if not reasons and issue.get("match_reason"):
+        reasons.append(issue["match_reason"])
+    return score, "; ".join(reasons) or "metadata match"
+
+
+def _normalize_known_google_issue(issue: dict, query_used: str, query_date: Optional[datetime], keyword: str) -> dict:
+    score, reason = _rank_reference_issue(issue, query_date, keyword)
+    normalized = dict(issue)
+    normalized["match_score"] = round(score, 3)
+    normalized["match_reason"] = reason
+    normalized["search_query_used"] = query_used
+    return normalized
+
+
+def _normalize_google_api_item(item: dict, query_used: str, query_date: Optional[datetime], keyword: str) -> Optional[dict]:
+    volume_id = item.get("id")
+    info = item.get("volumeInfo") or {}
+    if not volume_id:
+        return None
+    title = info.get("title") or "LIFE"
+    published = info.get("publishedDate") or ""
+    if len(published) == 4:
+        date_value = f"{published}-01-01"
+    elif len(published) == 7:
+        date_value = f"{published}-01"
+    else:
+        date_value = published[:10]
+    description = info.get("description") or ""
+    label = description[:120] if description else title
+    volume_match = re.search(r"Vol\\.\\s*(\\d+)", description, re.I)
+    issue_match = re.search(r"No\\.\\s*(\\d+)", description, re.I)
+    images = info.get("imageLinks") or {}
+    thumbnail = images.get("thumbnail") or images.get("smallThumbnail") or _google_books_cover_url(volume_id)
+    issue = {
+        "source": "google_books",
+        "google_books_volume_id": volume_id,
+        "id": f"google-books-{volume_id}",
+        "date": date_value,
+        "volume": int(volume_match.group(1)) if volume_match else None,
+        "issue_number": int(issue_match.group(1)) if issue_match else None,
+        "cover_subject": label,
+        "issue_title": title,
+        "volume_label": ", ".join(x for x in [f"Vol. {volume_match.group(1)}" if volume_match else "", f"No. {issue_match.group(1)}" if issue_match else ""] if x) or date_value,
+        "reference_cover_url": thumbnail.replace("http://", "https://"),
+        "cover_thumbnail_url": thumbnail.replace("http://", "https://"),
+        "cover_preview_url": info.get("previewLink") or f"https://books.google.com/books/about/LIFE.html?id={volume_id}",
+        "rarity_notes": "Google Books metadata result. Cover image is reference-only; use actual uploaded photos for listing.",
+        "tier_guidance": "C",
+        "keywords": " ".join([title, description]).lower(),
+        "search_query_used": query_used,
+    }
+    score, reason = _rank_reference_issue(issue, query_date, keyword)
+    issue["match_score"] = round(score, 3)
+    issue["match_reason"] = reason
+    return issue
+
+
+async def _search_google_books_api(query_used: str, query_date: Optional[datetime], keyword: str) -> tuple[list[dict], str]:
+    params = {"q": query_used, "printType": "magazines", "maxResults": 10}
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(GOOGLE_BOOKS_API_URL, params=params)
+        if res.status_code != 200:
+            return [], f"google_books_api_http_{res.status_code}"
+        data = res.json()
+        items = []
+        for item in data.get("items", []):
+            normalized = _normalize_google_api_item(item, query_used, query_date, keyword)
+            if normalized and "life" in _reference_search_text(normalized):
+                items.append(normalized)
+        return items, "google_books_api"
+    except Exception as exc:
+        return [], f"google_books_api_error:{type(exc).__name__}"
+
+
+async def _marketforge_publish_status() -> dict:
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            res = await client.get(MARKETFORGE_PRODUCTS_URL)
+        if res.status_code == 404:
+            return {
+                "publish_available": False,
+                "target": MARKETFORGE_PRODUCTS_URL,
+                "reason": "MarketForge products endpoint is not mounted at /marketplace/products.",
+                "action_label": "Save draft only — MarketForge publish unavailable",
+            }
+        if res.status_code >= 500:
+            return {
+                "publish_available": False,
+                "target": MARKETFORGE_PRODUCTS_URL,
+                "reason": f"MarketForge products endpoint returned HTTP {res.status_code}.",
+                "action_label": "Save draft only — MarketForge publish unavailable",
+            }
+        return {
+            "publish_available": True,
+            "target": MARKETFORGE_PRODUCTS_URL,
+            "reason": "MarketForge products endpoint responded.",
+            "action_label": "Publish to MarketForge",
+        }
+    except Exception as exc:
+        return {
+            "publish_available": False,
+            "target": MARKETFORGE_PRODUCTS_URL,
+            "reason": f"MarketForge products endpoint unreachable: {type(exc).__name__}",
+            "action_label": "Save draft only — MarketForge publish unavailable",
+        }
 
 
 # ── Database ───────────────────────────────────────────────────────────────────
@@ -272,6 +492,14 @@ def _init_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             reference_issue_id TEXT,
             reference_issue_key TEXT DEFAULT '',
+            reference_source TEXT DEFAULT '',
+            google_books_volume_id TEXT DEFAULT '',
+            issue_title TEXT DEFAULT '',
+            volume_label TEXT DEFAULT '',
+            cover_thumbnail_url TEXT DEFAULT '',
+            cover_preview_url TEXT DEFAULT '',
+            search_query_used TEXT DEFAULT '',
+            match_reason TEXT DEFAULT '',
             issue_date TEXT,
             volume INTEGER,
             issue_number INTEGER,
@@ -355,6 +583,14 @@ def _init_tables():
     archive_columns = {
         "reference_issue_id": "TEXT",
         "reference_issue_key": "TEXT DEFAULT ''",
+        "reference_source": "TEXT DEFAULT ''",
+        "google_books_volume_id": "TEXT DEFAULT ''",
+        "issue_title": "TEXT DEFAULT ''",
+        "volume_label": "TEXT DEFAULT ''",
+        "cover_thumbnail_url": "TEXT DEFAULT ''",
+        "cover_preview_url": "TEXT DEFAULT ''",
+        "search_query_used": "TEXT DEFAULT ''",
+        "match_reason": "TEXT DEFAULT ''",
         "issue_date": "TEXT",
         "volume": "INTEGER",
         "issue_number": "INTEGER",
@@ -416,6 +652,14 @@ _init_tables()
 
 class ArchiveCreate(BaseModel):
     reference_issue_id: Optional[str] = None
+    reference_source: str = ""
+    google_books_volume_id: str = ""
+    issue_title: str = ""
+    volume_label: str = ""
+    cover_thumbnail_url: str = ""
+    cover_preview_url: str = ""
+    search_query_used: str = ""
+    match_reason: str = ""
     issue_date: Optional[str] = None
     volume: Optional[int] = None
     issue_number: Optional[int] = None
@@ -440,6 +684,14 @@ class ArchiveCreate(BaseModel):
 
 class ArchiveUpdate(BaseModel):
     reference_issue_id: Optional[str] = None
+    reference_source: Optional[str] = None
+    google_books_volume_id: Optional[str] = None
+    issue_title: Optional[str] = None
+    volume_label: Optional[str] = None
+    cover_thumbnail_url: Optional[str] = None
+    cover_preview_url: Optional[str] = None
+    search_query_used: Optional[str] = None
+    match_reason: Optional[str] = None
     issue_date: Optional[str] = None
     volume: Optional[int] = None
     issue_number: Optional[int] = None
@@ -502,6 +754,85 @@ async def search_reference(q: str = Query("", description="Search by date, volum
 
     scored.sort(key=lambda x: x["match_score"], reverse=True)
     return {"results": scored[:8], "query": q}
+
+
+@router.get("/reference/search")
+async def search_life_cover_reference(
+    date: str = Query("", description="Exact issue date or approximate date"),
+    keyword: str = Query("", description="Event, person, or issue keyword"),
+    limit: int = Query(12, ge=1, le=20),
+):
+    """Search Google Books LIFE issue metadata, with known issue fallback.
+
+    Google Books API is the preferred path. If it is quota-limited or misses a
+    known issue, we add a small curated fallback of Google Books issue pages.
+    Returned cover URLs are reference-only and never replace uploaded item
+    photos.
+    """
+    query_date = _parse_reference_date(date)
+    query_parts = ["LIFE magazine"]
+    if keyword.strip():
+        query_parts.append(keyword.strip())
+    if date.strip():
+        query_parts.append(date.strip())
+    query_used = " ".join(query_parts)
+
+    api_results, api_status = await _search_google_books_api(query_used, query_date, keyword)
+    results: list[dict] = []
+    seen: set[str] = set()
+    for issue in api_results:
+        key = issue.get("google_books_volume_id") or issue.get("id")
+        if key and key not in seen:
+            results.append(issue)
+            seen.add(key)
+
+    for known in LIFE_GOOGLE_BOOKS_KNOWN_ISSUES:
+        normalized = _normalize_known_google_issue(known, query_used, query_date, keyword)
+        if normalized["match_score"] <= 0.05:
+            continue
+        key = normalized.get("google_books_volume_id") or normalized["id"]
+        if key not in seen:
+            results.append(normalized)
+            seen.add(key)
+
+    # Keep legacy curated references in the same result shape as a final local
+    # fallback, but label their source truthfully.
+    legacy_query = " ".join([date, keyword]).strip()
+    if legacy_query:
+        for ref in LIFE_REFERENCE_ISSUES:
+            score = _score_match(legacy_query, ref)
+            if score <= 0.05:
+                continue
+            issue = {
+                **ref,
+                "source": "local_reference_fixture",
+                "google_books_volume_id": "",
+                "issue_title": "LIFE",
+                "volume_label": f"Vol. {ref.get('volume')}, No. {ref.get('issue_number')}",
+                "cover_thumbnail_url": ref.get("reference_cover_url", ""),
+                "cover_preview_url": "",
+                "search_query_used": query_used,
+                "match_score": score,
+                "match_reason": "local curated reference match",
+            }
+            key = issue["id"]
+            if key not in seen:
+                results.append(issue)
+                seen.add(key)
+
+    results.sort(key=lambda item: item.get("match_score", 0), reverse=True)
+    return {
+        "results": results[:limit],
+        "query": {"date": date, "keyword": keyword, "query_used": query_used},
+        "source_status": api_status,
+        "truth_note": "Google Books covers are reference-only. Upload actual item photos before listing.",
+    }
+
+
+@router.get("/publish-status")
+async def archiveforge_publish_status():
+    """Truthful status for ArchiveForge → MarketForge publishing."""
+    return await _marketforge_publish_status()
 
 
 @router.get("/reference/{ref_id}")
@@ -582,15 +913,22 @@ async def create_archive(req: ArchiveCreate):
     with get_db() as db:
         cur = db.execute(
             """INSERT INTO ag_archives
-               (reference_issue_id, reference_issue_key, issue_date, volume, issue_number, cover_subject,
+               (reference_issue_id, reference_issue_key, reference_source, google_books_volume_id,
+                issue_title, volume_label, cover_thumbnail_url, cover_preview_url,
+                search_query_used, match_reason,
+                issue_date, volume, issue_number, cover_subject,
                 reference_cover_url, actual_listing_images, source_box_code,
                 source_slot_position, processed_box_code, processed_status,
                 archive_location, condition_score, has_address_label, is_complete,
                 defects, notes, tier, rough_comp_min, rough_comp_max, sale_plan,
                 listing_status, marketforge_push_status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                reference_issue_db_id, reference_issue_key, req.issue_date, req.volume, req.issue_number,
+                reference_issue_db_id, reference_issue_key, req.reference_source,
+                req.google_books_volume_id, req.issue_title, req.volume_label,
+                req.cover_thumbnail_url, req.cover_preview_url,
+                req.search_query_used, req.match_reason,
+                req.issue_date, req.volume, req.issue_number,
                 req.cover_subject, req.reference_cover_url,
                 json.dumps(req.actual_listing_images),
                 req.source_box_code, req.source_slot_position,
@@ -788,6 +1126,13 @@ async def push_to_marketforge(archive_id: int):
     at /marketplace/products in main.py. If not mounted, this returns 502
     with a clear dependency message.
     """
+    publish_status = await _marketforge_publish_status()
+    if not publish_status["publish_available"]:
+        raise HTTPException(
+            503,
+            f"MarketForge publish unavailable: {publish_status['reason']} Save the listing as a draft until MarketForge product creation is wired.",
+        )
+
     # 1. Load archive
     with get_db() as db:
         row = db.execute("SELECT * FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
