@@ -581,7 +581,7 @@ def render_phase2_summary_for_prompt(*, compact: bool = False) -> str:
     latest_result = status.get("latest_scheduled_result") or {}
     workflows = ", ".join(item["label"] for item in status["supported_workflows"])
     if compact:
-        return "Phase 2: confirmation-only drafts/results; no browser actions or submissions."
+        return "Phase 2: confirmation-only drafts."
     lines = [
         "### Phase 2 Assist (supporting only)",
         f"- Prefill workflows: {workflows}.",

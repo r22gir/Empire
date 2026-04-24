@@ -106,11 +106,19 @@ def ensure_hermes_memory_scaffold() -> dict[str, Any]:
         phase2 = ensure_hermes_phase2_scaffold()
     except Exception as exc:
         phase2 = {"error": str(exc)}
+    phase3 = {}
+    try:
+        from app.services.max.hermes_phase3 import ensure_hermes_phase3_scaffold
+
+        phase3 = ensure_hermes_phase3_scaffold()
+    except Exception as exc:
+        phase3 = {"error": str(exc)}
     return {
         "root": str(root),
         "skills_dir": str(skills_path()),
         "created": created,
         "phase2": phase2,
+        "phase3": phase3,
     }
 
 
@@ -198,6 +206,12 @@ def get_hermes_memory_status() -> dict[str, Any]:
         status["phase2"] = get_phase2_status()
     except Exception as exc:
         status["phase2"] = {"error": str(exc)}
+    try:
+        from app.services.max.hermes_phase3 import get_phase3_status
+
+        status["phase3"] = get_phase3_status()
+    except Exception as exc:
+        status["phase3"] = {"error": str(exc)}
     return status
 
 
@@ -217,6 +231,12 @@ def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
         phase2_summary = render_phase2_summary_for_prompt(compact=compact)
     except Exception:
         phase2_summary = ""
+    try:
+        from app.services.max.hermes_phase3 import render_phase3_summary_for_prompt
+
+        phase3_summary = render_phase3_summary_for_prompt(compact=compact)
+    except Exception:
+        phase3_summary = ""
 
     if compact:
         context_excerpt = _compact_excerpt(context_text, 60) or "awaiting a verified refresh."
@@ -230,6 +250,8 @@ def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
         ]
         if phase2_summary:
             lines.append(f"- {phase2_summary}")
+        if phase3_summary:
+            lines.append(f"- {phase3_summary}")
         return "\n".join(lines)
 
     lines = [
@@ -252,6 +274,8 @@ def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
     ]
     if phase2_summary:
         lines.extend(["", phase2_summary])
+    if phase3_summary:
+        lines.extend(["", phase3_summary])
     return "\n".join(lines)
 
 

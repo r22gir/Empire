@@ -565,6 +565,161 @@ def _hermes_scheduled_response(request: ChatRequest) -> ChatResponse:
         )
 
 
+def _is_hermes_browser_plan_request(message: str | None) -> bool:
+    try:
+        from app.services.max.hermes_phase3 import is_browser_plan_request
+
+        return is_browser_plan_request(message)
+    except Exception:
+        return False
+
+
+def _hermes_browser_plan_response(request: ChatRequest) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase3 import create_browser_action_plan, format_browser_plan_response
+
+        record = create_browser_action_plan(request.message, channel=request.channel or "web")
+        return ChatResponse(
+            response=format_browser_plan_response(record),
+            model_used="hermes-browser-plan",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_plan", "success": True, "result": record}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_plan"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes browser plan failed: {exc}",
+            model_used="hermes-browser-plan",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_plan", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_plan"),
+        )
+
+
+def _extract_hermes_browser_approval_id(message: str | None) -> str | None:
+    try:
+        from app.services.max.hermes_phase3 import parse_approval_request
+
+        return parse_approval_request(message)
+    except Exception:
+        return None
+
+
+def _hermes_browser_approval_response(request: ChatRequest, action_id: str) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase3 import approve_browser_action, format_browser_approval_response
+
+        record = approve_browser_action(action_id, actor="founder")
+        return ChatResponse(
+            response=format_browser_approval_response(record),
+            model_used="hermes-browser-approval",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_approval", "success": True, "result": record}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_approval"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes browser approval failed: {exc}",
+            model_used="hermes-browser-approval",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_approval", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_approval"),
+        )
+
+
+def _extract_hermes_browser_execute_id(message: str | None) -> str | None:
+    try:
+        from app.services.max.hermes_phase3 import parse_execution_request
+
+        return parse_execution_request(message)
+    except Exception:
+        return None
+
+
+def _hermes_browser_execute_response(request: ChatRequest, action_id: str) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase3 import execute_browser_action, format_browser_execution_response
+
+        result = execute_browser_action(action_id, actor="founder")
+        return ChatResponse(
+            response=format_browser_execution_response(result),
+            model_used="hermes-browser-execute",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_execute", "success": not result.get("error"), "result": result}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_execute"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes browser execution failed: {exc}",
+            model_used="hermes-browser-execute",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_execute", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_execute"),
+        )
+
+
+def _is_hermes_browser_log_request(message: str | None) -> bool:
+    try:
+        from app.services.max.hermes_phase3 import is_browser_log_request
+
+        return is_browser_log_request(message)
+    except Exception:
+        return False
+
+
+def _hermes_browser_log_response(request: ChatRequest) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase3 import format_browser_audit_response, read_browser_action_audit
+
+        entries = read_browser_action_audit(limit=25)
+        return ChatResponse(
+            response=format_browser_audit_response(entries),
+            model_used="hermes-browser-logs",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_logs", "success": True, "result": {"entries": entries}}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_logs"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes browser log read failed: {exc}",
+            model_used="hermes-browser-logs",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_browser_logs", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_browser_logs"),
+        )
+
+
+def _is_hermes_channel_status_request(message: str | None) -> bool:
+    try:
+        from app.services.max.hermes_phase3 import is_channel_status_request
+
+        return is_channel_status_request(message)
+    except Exception:
+        return False
+
+
+def _hermes_channel_status_response(request: ChatRequest) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase3 import format_channel_status_response, get_channel_interfaces
+
+        channels = get_channel_interfaces()
+        return ChatResponse(
+            response=format_channel_status_response(channels),
+            model_used="hermes-channel-status",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_channel_status", "success": True, "result": channels}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_channel_status"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes channel status failed: {exc}",
+            model_used="hermes-channel-status",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_channel_status", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_channel_status"),
+        )
+
+
 def _image_upload_path(image_filename: str | None) -> Path | None:
     if not image_filename:
         return None
@@ -612,6 +767,23 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    browser_approval_id = _extract_hermes_browser_approval_id(request.message)
+    if not request.desk and not request.image_filename and browser_approval_id:
+        return _hermes_browser_approval_response(request, browser_approval_id)
+
+    browser_execute_id = _extract_hermes_browser_execute_id(request.message)
+    if not request.desk and not request.image_filename and browser_execute_id:
+        return _hermes_browser_execute_response(request, browser_execute_id)
+
+    if not request.desk and not request.image_filename and _is_hermes_browser_log_request(request.message):
+        return _hermes_browser_log_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_channel_status_request(request.message):
+        return _hermes_channel_status_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_browser_plan_request(request.message):
+        return _hermes_browser_plan_response(request)
 
     if not request.desk and not request.image_filename and _is_hermes_prefill_request(request.message):
         return _hermes_prefill_response(request)
