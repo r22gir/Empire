@@ -115,3 +115,63 @@ def test_email_reply_read_request_labels_partial_threading(monkeypatch):
     assert "I have not fetched the exact email thread/message" in response.response
     assert "Reply threading continuity is partial" in response.response
     assert response.tool_results[0]["result"]["thread_continuity"] == "partial"
+
+
+def test_check_openclaw_routes_to_gate_specific_response(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    openclaw_gate = importlib.import_module("app.services.max.openclaw_gate")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("OpenClaw gate check should not reach generic AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+    monkeypatch.setattr(
+        openclaw_gate,
+        "check_openclaw_gate",
+        lambda force=False, timeout=2.0: openclaw_gate.OpenClawGateResult(
+            state="healthy",
+            allowed=True,
+            reason="health endpoint, local queue, and worker heartbeat ready",
+            checked_at="2026-04-24T14:40:00+00:00",
+            cache_ttl_seconds=20,
+            cache_age_seconds=0.0,
+            health_endpoint="http://localhost:7878/health",
+            founder_message="OpenClaw healthy - delegating task now.",
+        ),
+    )
+
+    request = max_router.ChatRequest(message="check OpenClaw", history=[], channel="web")
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "openclaw-gate-check"
+    assert "State: healthy" in response.response
+    assert "Reason: health endpoint, local queue, and worker heartbeat ready" in response.response
+    assert response.tool_results[0]["tool"] == "openclaw_gate_check"
+    assert response.tool_results[0]["result"]["state"] == "healthy"
+
+
+def test_gmail_inbox_invalid_grant_returns_reauth_boundary(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("Gmail inbox guardrail should not reach generic AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+    monkeypatch.setattr(
+        max_router,
+        "execute_tool",
+        lambda *args, **kwargs: max_router.ToolResult(
+            tool="check_email",
+            success=False,
+            error="('invalid_grant: Token has been expired or revoked.', {'error': 'invalid_grant'})",
+        ),
+    )
+
+    request = max_router.ChatRequest(message="check my Gmail inbox", history=[], channel="web")
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "gmail-inbox-boundary"
+    assert "reauth required" in response.response.lower()
+    assert "I did not read any inbox messages." in response.response
+    assert response.tool_results[0]["tool"] == "check_email"
+    assert response.tool_results[0]["success"] is False

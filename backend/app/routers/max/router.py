@@ -752,6 +752,14 @@ BROWSER_ASSIST_MARKERS = (
     "browser lookup",
     "browser plan",
 )
+OPENCLAW_GATE_MARKERS = (
+    "check openclaw",
+    "check open claw",
+    "is openclaw healthy",
+    "is open claw healthy",
+    "openclaw health",
+    "open claw health",
+)
 EMAIL_SEND_TRUTH_PATTERNS = (
     r"^\s*send to my email\s*$",
     r"^\s*send this to my email\s*$",
@@ -765,6 +773,13 @@ EMAIL_REPLY_READ_PATTERNS = (
     r"\bwhat did (?:they|he|she) reply\b",
     r"\bshow me (?:the )?reply\b",
     r"\bquote (?:my|the) reply\b",
+)
+GMAIL_INBOX_PATTERNS = (
+    r"\bgmail inbox\b",
+    r"\bcheck (?:my )?(?:gmail )?inbox\b",
+    r"\bread (?:my )?(?:gmail )?inbox\b",
+    r"\bshow (?:me )?(?:my )?(?:gmail )?inbox\b",
+    r"\bcheck email\b",
 )
 FAKE_BROWSER_ID_PATTERN = re.compile(r"\bhermes_browser(?:_id)?_[A-Za-z0-9_:-]+\b", re.IGNORECASE)
 
@@ -790,6 +805,41 @@ def _has_explicit_drawing_override(message: str | None) -> bool:
 
 def _prefer_archiveforge_over_drawing(message: str | None) -> bool:
     return _is_archiveforge_request(message) and not _has_explicit_drawing_override(message)
+
+
+def _is_openclaw_gate_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    return any(marker in text for marker in OPENCLAW_GATE_MARKERS)
+
+
+def _openclaw_gate_response(request: ChatRequest) -> ChatResponse:
+    try:
+        from app.services.max.openclaw_gate import check_openclaw_gate
+
+        gate = check_openclaw_gate(force=True).to_dict()
+        response_text = (
+            "OpenClaw gate check completed.\n"
+            f"- State: {gate.get('state')}\n"
+            f"- Allowed: {gate.get('allowed')}\n"
+            f"- Reason: {gate.get('reason')}\n"
+            f"- Checked at: {gate.get('checked_at')}\n"
+            f"- Founder message: {gate.get('founder_message')}"
+        )
+        return ChatResponse(
+            response=response_text,
+            model_used="openclaw-gate-check",
+            fallback_used=False,
+            tool_results=[{"tool": "openclaw_gate_check", "success": True, "result": gate}],
+            metadata=_response_metadata(request.channel, skill_used="openclaw_gate_check"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"OpenClaw gate check failed: {exc}",
+            model_used="openclaw-gate-check",
+            fallback_used=False,
+            tool_results=[{"tool": "openclaw_gate_check", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="openclaw_gate_check"),
+        )
 
 
 def _archiveforge_no_draft_response(request: ChatRequest) -> ChatResponse:
@@ -830,6 +880,11 @@ def _is_email_reply_read_request(message: str | None) -> bool:
     return any(re.search(pattern, text) for pattern in EMAIL_REPLY_READ_PATTERNS)
 
 
+def _is_gmail_inbox_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    return any(re.search(pattern, text) for pattern in GMAIL_INBOX_PATTERNS)
+
+
 def _email_send_boundary_response(request: ChatRequest) -> ChatResponse:
     return ChatResponse(
         response=(
@@ -857,6 +912,78 @@ def _email_reply_boundary_response(request: ChatRequest) -> ChatResponse:
         fallback_used=False,
         tool_results=[{"tool": "email_truth_guardrail", "success": True, "result": {"reply_body_verified": False, "thread_continuity": "partial"}}],
         metadata=_response_metadata(request.channel),
+    )
+
+
+def _gmail_reauth_required(error: str | None) -> bool:
+    text = (error or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "invalid_grant",
+            "expired or revoked",
+            "token has been expired or revoked",
+            "gmail token not found",
+        )
+    )
+
+
+def _format_gmail_inbox_success(result: dict[str, Any]) -> str:
+    emails = result.get("emails") or []
+    lines = [
+        "Gmail inbox read completed.",
+        f"- Returned messages: {result.get('count', len(emails))}",
+        f"- Unread total: {result.get('unread_total', 'unknown')}",
+        f"- Filter: {result.get('filter') or 'none'}",
+    ]
+    if emails:
+        latest = emails[0]
+        lines.append(
+            "- Latest message: "
+            f"{latest.get('subject') or '(no subject)'} from {latest.get('from') or 'unknown sender'}"
+        )
+    else:
+        lines.append("- No messages matched this inbox check.")
+    return "\n".join(lines)
+
+
+def _gmail_inbox_response(request: ChatRequest) -> ChatResponse:
+    result = execute_tool({"tool": "check_email", "limit": 10, "unread_only": True})
+    if result.success:
+        payload = result.result or {}
+        return ChatResponse(
+            response=_format_gmail_inbox_success(payload),
+            model_used="gmail-inbox-check",
+            fallback_used=False,
+            tool_results=[result.to_dict()],
+            metadata=_response_metadata(request.channel, skill_used="check_email"),
+        )
+
+    if _gmail_reauth_required(result.error):
+        return ChatResponse(
+            response=(
+                "Email MAX is partial.\n"
+                "- Gmail inbox reauth required.\n"
+                "- The stored Gmail OAuth token is expired, revoked, or invalid.\n"
+                "- I did not read any inbox messages.\n"
+                "- Re-run Gmail auth before I can truthfully read the inbox again."
+            ),
+            model_used="gmail-inbox-boundary",
+            fallback_used=False,
+            tool_results=[result.to_dict()],
+            metadata=_response_metadata(request.channel, skill_used="check_email"),
+        )
+
+    return ChatResponse(
+        response=(
+            "Email MAX is partial.\n"
+            f"- Gmail inbox read failed: {result.error or 'unknown error'}\n"
+            "- I did not read any inbox messages."
+        ),
+        model_used="gmail-inbox-boundary",
+        fallback_used=False,
+        tool_results=[result.to_dict()],
+        metadata=_response_metadata(request.channel, skill_used="check_email"),
     )
 
 
@@ -920,6 +1047,9 @@ def _apply_truth_guardrails(message: str | None, response_text: str, tool_result
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    if not request.desk and not request.image_filename and _is_openclaw_gate_request(request.message):
+        return _openclaw_gate_response(request)
+
     browser_approval_id = _extract_hermes_browser_approval_id(request.message)
     if not request.desk and not request.image_filename and browser_approval_id:
         return _hermes_browser_approval_response(request, browser_approval_id)
@@ -951,6 +1081,9 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
 
     if not request.desk and not request.image_filename and _is_vendorops_request(request.message):
         return _vendorops_query_response(request)
+
+    if not request.desk and not request.image_filename and _is_gmail_inbox_request(request.message):
+        return _gmail_inbox_response(request)
 
     if not request.desk and not request.image_filename and _is_unverified_email_send_request(request.message):
         return _email_send_boundary_response(request)
