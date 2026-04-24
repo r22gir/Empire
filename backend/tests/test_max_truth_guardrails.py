@@ -38,6 +38,51 @@ def test_queen_elizabeth_life_prompt_routes_to_hermes_prefill_not_drawing(monkey
     assert "drawing-router" not in data["response"]
 
 
+def test_queen_elizabeth_life_prompt_honors_plain_key_output_shape(monkeypatch, tmp_path):
+    max_router = importlib.import_module("app.routers.max.router")
+    root = tmp_path / "empire-box-memory"
+    monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(root))
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("LIFE intake should not reach generic AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    response = client.post(
+        "/api/v1/max/chat",
+        json={
+            "message": (
+                "Prepare a LIFE magazine intake draft for Queen Elizabeth.\n"
+                "Use Hermes form-prep only.\n"
+                "Do not submit anything.\n\n"
+                "Return only these exact keys as plain lines:\n"
+                "draft_id:\n"
+                "publication_title:\n"
+                "cover_subject:\n"
+                "real_cover_candidate_found:\n"
+                "missing_required_fields:\n"
+                "planned_browser_action_ids:"
+            ),
+            "channel": "web",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["model_used"] == "hermes-form-prep"
+    assert data["tool_results"][0]["result"]["fields"]["cover_subject"] == "Queen Elizabeth"
+    assert data["tool_results"][0]["result"]["real_cover_candidate_found"] is True
+    assert data["tool_results"][0]["result"]["planned_browser_action_ids"] == []
+    assert data["response"].splitlines() == [
+        f"draft_id: {data['tool_results'][0]['result']['id']}",
+        "publication_title: LIFE",
+        "cover_subject: Queen Elizabeth",
+        "real_cover_candidate_found: yes",
+        "missing_required_fields: issue_date, condition, source_box",
+        "planned_browser_action_ids: none",
+    ]
+
+
 def test_archiveforge_lookup_returns_truthful_no_draft(monkeypatch):
     max_router = importlib.import_module("app.routers.max.router")
 

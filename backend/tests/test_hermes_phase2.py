@@ -35,6 +35,8 @@ def test_phase2_prefill_supports_life_and_vendorops(monkeypatch, tmp_path):
     assert life["fields"]["cover_subject"] == "Apollo 11"
     assert life["fields"]["source_box"] == "Box 12"
     assert life["fields"]["condition"] == "VG"
+    assert life["real_cover_candidate_found"] is True
+    assert life["planned_browser_action_ids"] == []
     assert life["confirmation_required"] is True
     assert life["submission_allowed"] is False
     assert life["browser_actions_enabled"] is False

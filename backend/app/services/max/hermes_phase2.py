@@ -112,6 +112,8 @@ SCHEDULED_MARKERS = (
     "show hermes scheduled",
 )
 
+PLAIN_KEY_OUTPUT_MARKER = "return only these exact keys as plain lines:"
+
 CONDITION_TOKENS = ("sealed", "new", "like new", "vg+", "vg", "good", "fair", "poor")
 KNOWN_MARKETPLACES = ("ebay", "facebook marketplace", "facebook", "mercari", "etsy", "poshmark", "amazon")
 KNOWN_VENDOR_CATEGORIES = ("software", "marketplace", "shipping", "saas", "payments", "automation", "research", "inventory")
@@ -311,11 +313,40 @@ def _extract_subject(text: str, fallback_tokens: tuple[str, ...] = ()) -> str | 
     if quoted:
         return quoted
     for token in fallback_tokens:
-        pattern = rf"{re.escape(token)}[:\s]+([A-Za-z0-9 '&()/.-]+)"
+        pattern = rf"(?<![A-Za-z0-9_]){re.escape(token)}[:\s]+([A-Za-z0-9 '&()/.-]+)"
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             return match.group(1).strip()
     return None
+
+
+def _strip_response_shaping_block(message: str) -> str:
+    text = (message or "").strip()
+    lower = text.lower()
+    marker_index = lower.find(PLAIN_KEY_OUTPUT_MARKER)
+    if marker_index == -1:
+        return text
+    return text[:marker_index].rstrip()
+
+
+def _requested_plain_output_keys(message: str | None) -> list[str]:
+    text = (message or "").strip()
+    lower = text.lower()
+    marker_index = lower.find(PLAIN_KEY_OUTPUT_MARKER)
+    if marker_index == -1:
+        return []
+    tail = text[marker_index + len(PLAIN_KEY_OUTPUT_MARKER):]
+    keys: list[str] = []
+    for raw_line in tail.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not re.fullmatch(r"[a-z_]+:", line):
+            if keys:
+                break
+            continue
+        keys.append(line[:-1])
+    return keys
 
 
 def detect_prefill_workflow(message: str | None) -> str | None:
@@ -447,10 +478,12 @@ def prepare_prefill_draft(
 ) -> dict[str, Any]:
     if workflow_key not in WORKFLOW_SPECS:
         raise ValueError(f"Unknown Hermes workflow: {workflow_key}")
-    fields = WORKFLOW_PARSERS[workflow_key](message)
+    parse_message = _strip_response_shaping_block(message)
+    fields = WORKFLOW_PARSERS[workflow_key](parse_message)
     fields = _ordered_fields(workflow_key, fields)
     spec = WORKFLOW_SPECS[workflow_key]
     missing = [item for item in spec["required_fields"] if not fields.get(item)]
+    real_cover_candidate_found = workflow_key == "life_magazine_intake" and bool(fields.get("cover_subject"))
     draft = {
         "id": _new_id("hermes_draft"),
         "type": "form_prefill_draft",
@@ -465,12 +498,15 @@ def prepare_prefill_draft(
         "fields": fields,
         "required_fields": list(spec["required_fields"]),
         "missing_required_fields": missing,
+        "real_cover_candidate_found": real_cover_candidate_found,
+        "planned_browser_action_ids": [],
         "review_state": "pending_founder_confirmation",
         "confirmation_required": True,
         "browser_actions_enabled": False,
         "submission_allowed": False,
         "execution_allowed": False,
         "founder_message": message.strip(),
+        "normalized_prefill_message": parse_message.strip(),
     }
     return save_prefill_draft(draft)
 
@@ -613,6 +649,19 @@ def render_phase2_summary_for_prompt(*, compact: bool = False) -> str:
 
 
 def format_prefill_response(draft: dict[str, Any]) -> str:
+    requested_keys = _requested_plain_output_keys(draft.get("founder_message"))
+    if requested_keys:
+        fields = draft.get("fields") or {}
+        plain_values = {
+            "draft_id": draft.get("id") or "",
+            "publication_title": fields.get("publication_title") or "",
+            "cover_subject": fields.get("cover_subject") or "",
+            "real_cover_candidate_found": "yes" if draft.get("real_cover_candidate_found") else "no",
+            "missing_required_fields": ", ".join(draft.get("missing_required_fields") or []) or "none",
+            "planned_browser_action_ids": ", ".join(draft.get("planned_browser_action_ids") or []) or "none",
+        }
+        return "\n".join(f"{key}: {plain_values.get(key, '')}" for key in requested_keys)
+
     ready_fields = draft.get("fields") or {}
     field_lines = [
         f"- {key}: {value}"
