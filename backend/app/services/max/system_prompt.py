@@ -17,20 +17,6 @@ _prompt_cache: dict = {"prompt": None, "expires": 0}
 _CACHE_TTL = 60  # 1 minute — fast refresh for brain context accuracy
 
 
-def _load_memory() -> str:
-    """Load persistent memory if it exists."""
-    # Check both possible locations for memory file
-    memory_file = Path.home() / "empire-repo" / "max" / "memory.md"
-    if not memory_file.exists():
-        memory_file = Path.home() / "empire-repo" / "backend" / "data" / "max" / "memory.md"
-    if memory_file.exists():
-        try:
-            return memory_file.read_text(encoding="utf-8")[:4000]
-        except Exception:
-            return ""
-    return ""
-
-
 def _load_session_context() -> str:
     """Load today's session context from logs if available."""
     today = datetime.now().strftime("%Y-%m-%d")
@@ -90,24 +76,15 @@ def get_compact_system_prompt(channel: str = "web") -> str:
 
     cross_section = "\n".join(cross_ctx_lines) if cross_ctx_lines else ""
     try:
-        from app.services.max.operating_registry import generate_operating_context
-        operating_truth = generate_operating_context(channel=channel, compact=True)
+        from app.services.max.hermes_memory import render_hermes_bridge_for_prompt
+        hermes_context = render_hermes_bridge_for_prompt(compact=True)
     except Exception:
-        operating_truth = ""
-    try:
-        from app.services.max.continuity_compaction import render_handoff_for_prompt
-        handoff_context = render_handoff_for_prompt(limit=900)
-    except Exception:
-        handoff_context = ""
-    try:
-        from app.services.max.supermemory_recall import render_supermemory_for_prompt
-        supermemory_context = render_supermemory_for_prompt(channel=channel, limit=2)
-    except Exception:
-        supermemory_context = ""
+        hermes_context = ""
 
     return f"""You are MAX, the primary Command Center brain for the Founder.
 
 Hierarchy: Founder is above everything. MAX is the primary brain/orchestrator. Code Mode and AI Desks are subordinate to MAX. OpenClaw is the execution/delegation layer beneath MAX and the desks.
+Truth hierarchy for claims: runtime > registry > repo truth > Hermes memory > skills.
 
 One brain, multiple real surfaces: Web/Founder MAX (`web_chat`) and Telegram MAX (`telegram`) are active. Email MAX is partial. A dedicated Phone MAX is not implemented; mobile browser access is Web MAX.
 
@@ -115,11 +92,7 @@ Answer ordinary founder chat directly, concisely, and truthfully. Do not describ
 
 {cross_section}
 
-{operating_truth}
-
-{"### Session Handoff Packet\n" + handoff_context if handoff_context else ""}
-
-{"### Supermemory Recall (secondary only)\n" + supermemory_context if supermemory_context else ""}
+{hermes_context}
 
 Founder email: {founder_email}. OpenClaw URL: {openclaw_url}. Today's date: {today}.
 """
@@ -131,7 +104,6 @@ def get_system_prompt() -> str:
     if _prompt_cache["prompt"] and now < _prompt_cache["expires"]:
         return _prompt_cache["prompt"]
 
-    memory = _load_memory()
     session = _load_session_context()
 
     # Build ecosystem catalog summary
@@ -153,6 +125,11 @@ def get_system_prompt() -> str:
         operating_truth_section = generate_operating_context(channel="web_cc", compact=False)
     except Exception:
         operating_truth_section = ""
+    try:
+        from .hermes_memory import render_hermes_bridge_for_prompt
+        hermes_bridge_section = render_hermes_bridge_for_prompt(compact=False)
+    except Exception:
+        hermes_bridge_section = ""
 
     dynamic_sections = ""
     if capabilities_section:
@@ -161,8 +138,8 @@ def get_system_prompt() -> str:
         dynamic_sections += f"\n\n{operating_truth_section}"
     if catalog_summary:
         dynamic_sections += f"\n\n## Ecosystem Catalog (Live)\n{catalog_summary}"
-    if memory:
-        dynamic_sections += f"\n\n## Persistent Memory\n{memory}"
+    if hermes_bridge_section:
+        dynamic_sections += f"\n\n{hermes_bridge_section}"
     if session:
         dynamic_sections += f"\n\n## Today's Session Context\n{session}"
     try:
@@ -189,6 +166,7 @@ def get_system_prompt() -> str:
     result = f"""You are {biz.ai_assistant_name} — the 18-desk AI Orchestration Engine and autonomous operating system of the Empire Ecosystem Platform (github.com/r22gir/Empire, version 7.0).
 
 You are NOT a chatbot. You are a production-grade AI workforce that executes real business operations through verified tool calls only. Every action (quotes, invoices, drawings, emails, git ops, inventory, etc.) must go through the 40-tool registry with the 3-tier safety system (L1 Auto / L2 Confirm / L3 PIN).
+Truth hierarchy for every claim: runtime > operating registry > verified repo/config truth > Hermes memory bridge > skills/secondary recall.
 
 === PRIME DIRECTIVE: ACCURACY OVER SPEED ===
 

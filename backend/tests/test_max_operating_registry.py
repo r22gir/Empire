@@ -52,6 +52,30 @@ def test_system_prompts_include_operating_truth_without_phone_overclaim():
     assert "All channels share the same MAX brain and memory" not in full_prompt
 
 
+def test_system_prompts_read_hermes_bridge_beneath_registry_truth(monkeypatch, tmp_path):
+    root = tmp_path / "empire-box-memory"
+    root.mkdir()
+    (root / "SKILLS").mkdir()
+    (root / "CONTEXT.md").write_text("# CONTEXT\n\nBridge context line.", encoding="utf-8")
+    (root / "MEMORY.md").write_text("# MEMORY\n\nSupporting memory line.", encoding="utf-8")
+    (root / "USER.md").write_text("# USER\n\nFounder preference line.", encoding="utf-8")
+    monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(root))
+
+    from app.services.max.system_prompt import _prompt_cache
+
+    _prompt_cache.update({"prompt": None, "expires": 0})
+    compact_prompt = get_compact_system_prompt(channel="web")
+    full_prompt = get_system_prompt()
+
+    assert "Hermes Memory Bridge" in compact_prompt
+    assert "Hermes Memory Bridge" in full_prompt
+    assert "runtime > registry > repo truth > Hermes memory > skills" in compact_prompt
+    assert "Bridge context line." in full_prompt
+    assert "Supporting memory line." in full_prompt
+    assert "Founder preference line." in full_prompt
+    assert full_prompt.index("MAX Operating Truth Registry") < full_prompt.index("Hermes Memory Bridge")
+
+
 def test_operating_registry_hot_reloads_and_keeps_last_known_good(monkeypatch, tmp_path):
     registry_path = tmp_path / "operating_registry.json"
     good = {

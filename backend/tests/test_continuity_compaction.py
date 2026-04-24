@@ -56,6 +56,8 @@ def test_session_handoff_rejects_schema_mismatch(tmp_path):
 
 def test_founder_compaction_command_refreshes_packet(monkeypatch, tmp_path):
     path = tmp_path / "session_handoff.json"
+    memory_root = tmp_path / "empire-box-memory"
+    monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(memory_root))
     monkeypatch.setattr(
         "app.services.max.continuity_compaction._runtime_truth",
         lambda public=True: {
@@ -89,5 +91,9 @@ def test_founder_compaction_command_refreshes_packet(monkeypatch, tmp_path):
     assert result["packet"]["tier_1"]["last_runtime_truth_result"]["commit"] == "fresh123"
     assert result["packet"]["tier_1"]["founder_surface_identity"]["canonical_channel"] == "web_chat"
     assert result["packet"]["last_evaluation_score"]["overall_score"] == 0.98
+    assert result["packet"]["hermes_context_write"]["written"] is True
     assert path.exists()
+    assert (memory_root / "CONTEXT.md").exists()
+    assert "fresh123" in (memory_root / "CONTEXT.md").read_text(encoding="utf-8")
     assert restored["surface"]["canonical_channel"] == "web_chat"
+    assert restored["hermes_memory"]["exists"] is True

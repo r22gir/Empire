@@ -170,6 +170,24 @@ def create_founder_handoff(
     )
     write_session_handoff_packet(packet, path)
     try:
+        from app.services.max.hermes_memory import write_context_from_verified_session
+
+        packet["hermes_context_write"] = write_context_from_verified_session(
+            runtime_truth=runtime_truth,
+            packet=packet,
+            channel=channel,
+        )
+        write_session_handoff_packet(packet, path)
+        try:
+            from app.services.max.system_prompt import _prompt_cache
+
+            _prompt_cache.update({"prompt": None, "expires": 0})
+        except Exception:
+            pass
+    except Exception as exc:
+        packet["hermes_context_write"] = {"written": False, "reason": f"hermes context write failed: {exc}"}
+        write_session_handoff_packet(packet, path)
+    try:
         from app.services.max.supermemory_recall import write_handoff_memory_from_packet
         packet["supermemory_write"] = write_handoff_memory_from_packet(packet)
         write_session_handoff_packet(packet, path)
@@ -191,6 +209,12 @@ def audit_continuity_state(channel: str = "web") -> dict[str, Any]:
     registry = get_registry_load_info()
     surface = normalize_surface(channel)
     try:
+        from app.services.max.hermes_memory import get_hermes_memory_status
+
+        hermes_memory = get_hermes_memory_status()
+    except Exception as exc:
+        hermes_memory = {"exists": False, "error": str(exc)}
+    try:
         from app.services.max.supermemory_recall import query_supermemory_recall
         supermemory = query_supermemory_recall("max", surface=channel, limit=3)
         supermemory_status = "secondary_recall_scaffold"
@@ -205,6 +229,7 @@ def audit_continuity_state(channel: str = "web") -> dict[str, Any]:
         "handoff": restored,
         "latest_score": _latest_score(),
         "active_task_state": _active_task_state(),
+        "hermes_memory": hermes_memory,
         "supermemory_status": supermemory_status,
         "supermemory_recall": supermemory,
     }
