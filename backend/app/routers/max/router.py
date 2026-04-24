@@ -491,6 +491,80 @@ def _vendorops_query_response(request: ChatRequest) -> ChatResponse:
         )
 
 
+def _is_hermes_prefill_request(message: str | None) -> bool:
+    try:
+        from app.services.max.hermes_phase2 import is_prefill_request
+
+        return is_prefill_request(message)
+    except Exception:
+        return False
+
+
+def _hermes_prefill_response(request: ChatRequest) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase2 import (
+            format_prefill_response,
+            mark_draft_presented,
+            prepare_prefill_draft_from_message,
+        )
+
+        draft = prepare_prefill_draft_from_message(request.message, channel=request.channel or "web")
+        mark_draft_presented(draft["id"])
+        return ChatResponse(
+            response=format_prefill_response(draft),
+            model_used="hermes-form-prep",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_form_prep", "success": True, "result": draft}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_form_prep"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes form-prep draft failed: {exc}",
+            model_used="hermes-form-prep",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_form_prep", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_form_prep"),
+        )
+
+
+def _is_hermes_scheduled_request(message: str | None) -> bool:
+    try:
+        from app.services.max.hermes_phase2 import is_scheduled_result_request
+
+        return is_scheduled_result_request(message)
+    except Exception:
+        return False
+
+
+def _hermes_scheduled_response(request: ChatRequest) -> ChatResponse:
+    try:
+        from app.services.max.hermes_phase2 import (
+            format_scheduled_results_response,
+            list_scheduled_results,
+            mark_scheduled_result_presented,
+        )
+
+        results = list_scheduled_results(limit=5)
+        for item in results:
+            if item.get("id"):
+                mark_scheduled_result_presented(item["id"])
+        return ChatResponse(
+            response=format_scheduled_results_response(results),
+            model_used="hermes-scheduled-intake",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_scheduled_intake", "success": True, "result": {"results": results}}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_scheduled_intake"),
+        )
+    except Exception as exc:
+        return ChatResponse(
+            response=f"Hermes scheduled-result intake failed: {exc}",
+            model_used="hermes-scheduled-intake",
+            fallback_used=False,
+            tool_results=[{"tool": "hermes_scheduled_intake", "success": False, "error": str(exc)}],
+            metadata=_response_metadata(request.channel, skill_used="hermes_scheduled_intake"),
+        )
+
+
 def _image_upload_path(image_filename: str | None) -> Path | None:
     if not image_filename:
         return None
@@ -538,6 +612,12 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    if not request.desk and not request.image_filename and _is_hermes_prefill_request(request.message):
+        return _hermes_prefill_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_scheduled_request(request.message):
+        return _hermes_scheduled_response(request)
 
     if not request.desk and not request.image_filename and _is_vendorops_request(request.message):
         return _vendorops_query_response(request)

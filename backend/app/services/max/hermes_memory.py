@@ -99,10 +99,18 @@ def ensure_hermes_memory_scaffold() -> dict[str, Any]:
         if not path.exists():
             path.write_text(content, encoding="utf-8")
             created.append(str(path))
+    phase2 = {}
+    try:
+        from app.services.max.hermes_phase2 import ensure_hermes_phase2_scaffold
+
+        phase2 = ensure_hermes_phase2_scaffold()
+    except Exception as exc:
+        phase2 = {"error": str(exc)}
     return {
         "root": str(root),
         "skills_dir": str(skills_path()),
         "created": created,
+        "phase2": phase2,
     }
 
 
@@ -172,7 +180,7 @@ def get_hermes_memory_status() -> dict[str, Any]:
             "size_bytes": stat.st_size if stat else 0,
         }
 
-    return {
+    status = {
         "root": scaffold["root"],
         "exists": memory_root().exists(),
         "truth_hierarchy": list(TRUTH_HIERARCHY),
@@ -184,6 +192,13 @@ def get_hermes_memory_status() -> dict[str, Any]:
             "exists": skills_path().exists(),
         },
     }
+    try:
+        from app.services.max.hermes_phase2 import get_phase2_status
+
+        status["phase2"] = get_phase2_status()
+    except Exception as exc:
+        status["phase2"] = {"error": str(exc)}
+    return status
 
 
 def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
@@ -196,19 +211,28 @@ def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
     context_text = bundle["context"]["text"]
     memory_text = bundle["memory"]["text"]
     user_text = bundle["user"]["text"]
+    try:
+        from app.services.max.hermes_phase2 import render_phase2_summary_for_prompt
+
+        phase2_summary = render_phase2_summary_for_prompt(compact=compact)
+    except Exception:
+        phase2_summary = ""
 
     if compact:
-        context_excerpt = _compact_excerpt(context_text, 90) or "awaiting a verified refresh."
-        return "\n".join([
+        context_excerpt = _compact_excerpt(context_text, 60) or "awaiting a verified refresh."
+        lines = [
             "### Hermes Memory Bridge (supporting only)",
             f"- Truth hierarchy: {hierarchy}.",
             "- Read order: CONTEXT.md -> MEMORY.md -> USER.md.",
             "- CONTEXT.md is MAX-written after verified sessions.",
             f"- CONTEXT: {context_excerpt}",
             "- MEMORY.md and USER.md are supporting only.",
-        ])
+        ]
+        if phase2_summary:
+            lines.append(f"- {phase2_summary}")
+        return "\n".join(lines)
 
-    return "\n".join([
+    lines = [
         "## Hermes Memory Bridge (beneath registry truth)",
         f"Truth hierarchy: {hierarchy}.",
         "Read order:",
@@ -225,7 +249,10 @@ def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
         "",
         "### USER.md (supporting preferences only)",
         user_text or "_No founder preference context available._",
-    ])
+    ]
+    if phase2_summary:
+        lines.extend(["", phase2_summary])
+    return "\n".join(lines)
 
 
 def write_context_from_verified_session(
