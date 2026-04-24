@@ -343,10 +343,19 @@ def is_scheduled_result_request(message: str | None) -> bool:
 
 
 def _parse_life_magazine_fields(message: str) -> dict[str, Any]:
+    cover_subject = _extract_subject(message, fallback_tokens=("cover", "subject", "for"))
+    if cover_subject:
+        cover_subject = re.split(
+            r"\s+(?:use|with|from|box|condition|tier|comp|browser|form-prep|intake|draft)\b",
+            cover_subject,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip(" .")
+        cover_subject = re.sub(r"^(?:19|20)\d{2}-\d{2}-\d{2}\s+", "", cover_subject).strip()
     return {
         "publication_title": "LIFE",
         "issue_date": _extract_date(message),
-        "cover_subject": _extract_subject(message, fallback_tokens=("cover", "subject")) or ("Apollo 11" if "apollo 11" in message.lower() else None),
+        "cover_subject": cover_subject or ("Apollo 11" if "apollo 11" in message.lower() else None),
         "condition": _extract_condition(message),
         "source_box": _extract_box(message),
         "tier": _extract_tier(message),

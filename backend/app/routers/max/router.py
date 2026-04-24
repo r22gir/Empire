@@ -510,8 +510,14 @@ def _hermes_prefill_response(request: ChatRequest) -> ChatResponse:
 
         draft = prepare_prefill_draft_from_message(request.message, channel=request.channel or "web")
         mark_draft_presented(draft["id"])
+        response_text = format_prefill_response(draft)
+        if _mentions_browser_assist(request.message):
+            response_text += (
+                "\n- No Hermes browser action was created from this request.\n"
+                "- Phase 3 browser assist only reports real planned records; none exist for this request yet."
+            )
         return ChatResponse(
-            response=format_prefill_response(draft),
+            response=response_text,
             model_used="hermes-form-prep",
             fallback_used=False,
             tool_results=[{"tool": "hermes_form_prep", "success": True, "result": draft}],
@@ -720,6 +726,259 @@ def _hermes_channel_status_response(request: ChatRequest) -> ChatResponse:
         )
 
 
+ARCHIVEFORGE_ROUTE_MARKERS = (
+    "life magazine",
+    "archiveforge",
+    "cover search",
+    "cover lookup",
+    "issue lookup",
+    "intake draft",
+    "life intake",
+)
+EXPLICIT_DRAWING_OVERRIDE_PATTERNS = (
+    r"\bdrawing\b",
+    r"\bdraw\b",
+    r"\brender\b",
+    r"\bsketch\b",
+    r"\bcad\b",
+    r"\bspec drawing\b",
+    r"\btechnical drawing\b",
+    r"\bpdf drawing\b",
+)
+BROWSER_ASSIST_MARKERS = (
+    "browser assist",
+    "browser assistance",
+    "browser action",
+    "browser lookup",
+    "browser plan",
+)
+EMAIL_SEND_TRUTH_PATTERNS = (
+    r"^\s*send to my email\s*$",
+    r"^\s*send this to my email\s*$",
+    r"^\s*email this to me\s*$",
+    r"^\s*send me an email\s*$",
+    r"^\s*email me\s*$",
+)
+EMAIL_REPLY_READ_PATTERNS = (
+    r"\bread my reply\b",
+    r"\bcan you read my reply\b",
+    r"\bwhat did (?:they|he|she) reply\b",
+    r"\bshow me (?:the )?reply\b",
+    r"\bquote (?:my|the) reply\b",
+)
+FAKE_BROWSER_ID_PATTERN = re.compile(r"\bhermes_browser(?:_id)?_[A-Za-z0-9_:-]+\b", re.IGNORECASE)
+
+
+def _mentions_browser_assist(message: str | None) -> bool:
+    text = (message or "").lower()
+    return any(marker in text for marker in BROWSER_ASSIST_MARKERS)
+
+
+def _is_archiveforge_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    return any(marker in text for marker in ARCHIVEFORGE_ROUTE_MARKERS)
+
+
+def _has_explicit_drawing_override(message: str | None) -> bool:
+    text = (message or "").lower()
+    if _explicit_no_drawing_router(message):
+        return False
+    if any(neg in text for neg in ("don't draw", "do not draw", "not asking for a drawing", "not asking you to draw")):
+        return False
+    return any(re.search(pattern, text) for pattern in EXPLICIT_DRAWING_OVERRIDE_PATTERNS)
+
+
+def _prefer_archiveforge_over_drawing(message: str | None) -> bool:
+    return _is_archiveforge_request(message) and not _has_explicit_drawing_override(message)
+
+
+def _archiveforge_no_draft_response(request: ChatRequest) -> ChatResponse:
+    response_lines = [
+        "ArchiveForge/LIFE request routed to Hermes/ArchiveForge first.",
+        "- No Hermes intake draft was created from this message.",
+        "- This request reads like lookup/search work, not a complete intake draft yet.",
+        "- If you want a draft, ask for `prepare LIFE magazine intake draft ...` with whatever fields you know.",
+    ]
+    if _mentions_browser_assist(request.message):
+        response_lines.append("- No Hermes browser action was created from this request.")
+        response_lines.append("- Phase 3 browser assist only returns real planned records; none exist yet.")
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="hermes-form-prep",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "hermes_form_prep",
+            "success": False,
+            "error": "no_draft_created_from_request",
+            "result": {
+                "workflow_key": "life_magazine_intake",
+                "draft_created": False,
+                "archiveforge_route": True,
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="hermes_form_prep"),
+    )
+
+
+def _is_unverified_email_send_request(message: str | None) -> bool:
+    text = (message or "").strip().lower()
+    return any(re.search(pattern, text) for pattern in EMAIL_SEND_TRUTH_PATTERNS)
+
+
+def _is_email_reply_read_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    return any(re.search(pattern, text) for pattern in EMAIL_REPLY_READ_PATTERNS)
+
+
+def _email_send_boundary_response(request: ChatRequest) -> ChatResponse:
+    return ChatResponse(
+        response=(
+            "Email MAX is partial.\n"
+            "- I have not sent anything because there is no verified send result for this request.\n"
+            "- I cannot claim an email or attachment was delivered without a real `send_email` or `send_quote_email` success result.\n"
+            "- Tell me exactly what to send, and I will only confirm delivery after the send tool returns proof."
+        ),
+        model_used="email-truth-guardrail",
+        fallback_used=False,
+        tool_results=[{"tool": "email_truth_guardrail", "success": True, "result": {"sent": False, "verified_send_result": False}}],
+        metadata=_response_metadata(request.channel),
+    )
+
+
+def _email_reply_boundary_response(request: ChatRequest) -> ChatResponse:
+    return ChatResponse(
+        response=(
+            "Email MAX is partial.\n"
+            "- I have not fetched the exact email thread/message for this request.\n"
+            "- Reply threading continuity is partial, so I cannot quote or confirm a reply body from memory.\n"
+            "- I can only present a reply body after the exact thread/message is actually fetched."
+        ),
+        model_used="email-truth-guardrail",
+        fallback_used=False,
+        tool_results=[{"tool": "email_truth_guardrail", "success": True, "result": {"reply_body_verified": False, "thread_continuity": "partial"}}],
+        metadata=_response_metadata(request.channel),
+    )
+
+
+def _normalize_tool_result_entry(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        return {
+            "tool": item.get("tool"),
+            "success": bool(item.get("success")),
+            "result": item.get("result"),
+            "error": item.get("error"),
+        }
+    return {
+        "tool": getattr(item, "tool", None),
+        "success": bool(getattr(item, "success", False)),
+        "result": getattr(item, "result", None),
+        "error": getattr(item, "error", None),
+    }
+
+
+def _has_verified_email_send_result(tool_results: list[Any] | None) -> bool:
+    for item in tool_results or []:
+        entry = _normalize_tool_result_entry(item)
+        if entry.get("success") and entry.get("tool") in {"send_email", "send_quote_email"}:
+            return True
+    return False
+
+
+def _real_browser_action_ids(tool_results: list[Any] | None) -> set[str]:
+    valid_ids: set[str] = set()
+    for item in tool_results or []:
+        entry = _normalize_tool_result_entry(item)
+        result = entry.get("result") or {}
+        tool = entry.get("tool")
+        if tool == "hermes_browser_plan" and isinstance(result, dict) and result.get("id"):
+            valid_ids.add(str(result["id"]))
+        if tool in {"hermes_browser_approval", "hermes_browser_execute"} and isinstance(result, dict):
+            record = result.get("record") if tool == "hermes_browser_execute" else result
+            if isinstance(record, dict) and record.get("id"):
+                valid_ids.add(str(record["id"]))
+    return valid_ids
+
+
+def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
+    if _is_unverified_email_send_request(message) and not _has_verified_email_send_result(tool_results):
+        return _email_send_boundary_response(ChatRequest(message=message or "", history=[])).response
+
+    if _is_email_reply_read_request(message):
+        return _email_reply_boundary_response(ChatRequest(message=message or "", history=[])).response
+
+    if _mentions_browser_assist(message):
+        valid_ids = _real_browser_action_ids(tool_results)
+        fake_ids = [match.group(0) for match in FAKE_BROWSER_ID_PATTERN.finditer(response_text) if match.group(0) not in valid_ids]
+        if "simulated" in response_text.lower() or fake_ids:
+            return (
+                "No Hermes browser action was created from this request.\n"
+                "- Phase 3 browser assist only reports real planned/approved/executed records from storage.\n"
+                "- Valid flow: planned -> approved -> executed."
+            )
+
+    return response_text
+
+
+def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    browser_approval_id = _extract_hermes_browser_approval_id(request.message)
+    if not request.desk and not request.image_filename and browser_approval_id:
+        return _hermes_browser_approval_response(request, browser_approval_id)
+
+    browser_execute_id = _extract_hermes_browser_execute_id(request.message)
+    if not request.desk and not request.image_filename and browser_execute_id:
+        return _hermes_browser_execute_response(request, browser_execute_id)
+
+    if not request.desk and not request.image_filename and _is_hermes_browser_log_request(request.message):
+        return _hermes_browser_log_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_channel_status_request(request.message):
+        return _hermes_channel_status_response(request)
+
+    if not request.desk and not request.image_filename and _prefer_archiveforge_over_drawing(request.message) and _is_hermes_prefill_request(request.message):
+        return _hermes_prefill_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_browser_plan_request(request.message):
+        return _hermes_browser_plan_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_prefill_request(request.message):
+        return _hermes_prefill_response(request)
+
+    if not request.desk and not request.image_filename and _prefer_archiveforge_over_drawing(request.message):
+        return _archiveforge_no_draft_response(request)
+
+    if not request.desk and not request.image_filename and _is_hermes_scheduled_request(request.message):
+        return _hermes_scheduled_response(request)
+
+    if not request.desk and not request.image_filename and _is_vendorops_request(request.message):
+        return _vendorops_query_response(request)
+
+    if not request.desk and not request.image_filename and _is_unverified_email_send_request(request.message):
+        return _email_send_boundary_response(request)
+
+    if not request.desk and not request.image_filename and _is_email_reply_read_request(request.message):
+        return _email_reply_boundary_response(request)
+
+    return None
+
+
+def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
+    async def gen():
+        for tool_result in response.tool_results or []:
+            yield f"data: {json.dumps({'type': 'tool_result', **tool_result})}\n\n"
+        yield f"data: {json.dumps({'type': 'text', 'content': response.response})}\n\n"
+        done = {
+            "type": "done",
+            "model_used": response.model_used,
+            "conversation_id": conversation_id or str(uuid.uuid4()),
+            "metadata": response.metadata,
+        }
+        if response.quality:
+            done["quality"] = response.quality
+        yield f"data: {json.dumps(done)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
 def _image_upload_path(image_filename: str | None) -> Path | None:
     if not image_filename:
         return None
@@ -768,31 +1027,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
-    browser_approval_id = _extract_hermes_browser_approval_id(request.message)
-    if not request.desk and not request.image_filename and browser_approval_id:
-        return _hermes_browser_approval_response(request, browser_approval_id)
-
-    browser_execute_id = _extract_hermes_browser_execute_id(request.message)
-    if not request.desk and not request.image_filename and browser_execute_id:
-        return _hermes_browser_execute_response(request, browser_execute_id)
-
-    if not request.desk and not request.image_filename and _is_hermes_browser_log_request(request.message):
-        return _hermes_browser_log_response(request)
-
-    if not request.desk and not request.image_filename and _is_hermes_channel_status_request(request.message):
-        return _hermes_channel_status_response(request)
-
-    if not request.desk and not request.image_filename and _is_hermes_browser_plan_request(request.message):
-        return _hermes_browser_plan_response(request)
-
-    if not request.desk and not request.image_filename and _is_hermes_prefill_request(request.message):
-        return _hermes_prefill_response(request)
-
-    if not request.desk and not request.image_filename and _is_hermes_scheduled_request(request.message):
-        return _hermes_scheduled_response(request)
-
-    if not request.desk and not request.image_filename and _is_vendorops_request(request.message):
-        return _vendorops_query_response(request)
+    direct_route = _maybe_handle_direct_route_request(request)
+    if direct_route is not None:
+        return direct_route
 
     try:
         from app.services.max.continuity_compaction import (
@@ -919,7 +1156,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
     drawing_handoff = (
         build_drawing_handoff(request.message, image_filename=request.image_filename)
-        if not _explicit_no_drawing_router(request.message)
+        if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
         else type("NoDrawingHandoff", (), {"is_drawing_intent": False})()
     )
     if drawing_handoff.is_drawing_intent:
@@ -1147,6 +1384,8 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             logger.info(f"Quality engine fixed {qr.fixed_count} issues in {chat_channel.value} response")
             final_content = qr.cleaned
 
+        final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
+
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:
             try:
@@ -1368,6 +1607,10 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
+    direct_route = _maybe_handle_direct_route_request(request)
+    if direct_route is not None:
+        return _stream_immediate_response(direct_route, request.conversation_id)
+
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         async def runtime_truth_gen():
             conv_id = request.conversation_id or str(uuid.uuid4())
@@ -1399,7 +1642,7 @@ async def chat_stream(request: ChatRequest):
 
     drawing_handoff = (
         build_drawing_handoff(request.message, image_filename=request.image_filename)
-        if not _explicit_no_drawing_router(request.message)
+        if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
         else type("NoDrawingHandoff", (), {"is_drawing_intent": False})()
     )
     if drawing_handoff.is_drawing_intent:
