@@ -23,6 +23,9 @@ interface ChunkInfo {
   review_status: string;
   reviewer: string | null;
   reviewer_timestamp: string | null;
+  processing_status?: string;
+  raw_transcript_path?: string | null;
+  verified_transcript_path?: string | null;
 }
 
 interface QCSummary {
@@ -54,9 +57,12 @@ interface TranscriptJob {
   verified_transcript_path: string | null;
   approved_transcript_path: string | null;
   critical_field_flags: string[];
+  boundary_coherence_flags?: Array<Record<string, unknown>>;
   qc_summary: QCSummary | null;
   chunks: ChunkInfo[];
   audit_trail: AuditEntry[];
+  display_state?: string;
+  truth_summary?: string;
 }
 
 interface AuditEntry {
@@ -91,7 +97,8 @@ const STATE_COLORS: Record<string, { bg: string; color: string; label: string }>
   uploaded: { bg: '#e0e7ff', color: '#3730a3', label: 'Uploaded' },
   chunking: { bg: '#fef3c7', color: '#92400e', label: 'Chunking' },
   first_chunk_processing: { bg: '#fef3c7', color: '#92400e', label: 'Processing Chunk 1' },
-  first_chunk_ready: { bg: '#dbeafe', color: '#1e40af', label: 'Chunk 1 Ready — Review' },
+  first_chunk_ready: { bg: '#dbeafe', color: '#1e40af', label: 'Paused awaiting review of first chunk' },
+  paused_awaiting_review: { bg: '#dbeafe', color: '#1e40af', label: 'Paused awaiting review of first chunk' },
   processing_remaining_chunks: { bg: '#dbeafe', color: '#1e40af', label: 'Processing' },
   verification_running: { bg: '#f3e8ff', color: '#6b21a8', label: 'Verifying' },
   needs_review: { bg: '#fef9c3', color: '#854d0e', label: 'Needs Review' },
@@ -183,7 +190,7 @@ export default function TranscriptForgePage() {
       if (!uploadRes.ok) throw new Error(`Failed to upload audio: ${uploadRes.status}`);
       const uploadData = await uploadRes.json();
 
-      setUploadProgress(`Uploaded. ${uploadData.chunks_total} chunks created. Chunk 1 processing started...`);
+      setUploadProgress(`Uploaded. ${uploadData.chunks_total} chunks discovered. Chunk 1 processing started...`);
 
       // 3. Poll for chunk 1 completion
       let attempts = 0;
@@ -200,7 +207,7 @@ export default function TranscriptForgePage() {
           return;
         }
         attempts++;
-        setUploadProgress(`Processing... (chunk 1 ${status.chunks_complete || 0}/1, state: ${status.state})`);
+        setUploadProgress(`Processing chunk 1... (${status.chunks_complete || 0}/1, state: ${status.display_state || status.state})`);
       }
 
       setUploadProgress('Processing started. Check job list for updates.');
@@ -228,6 +235,41 @@ export default function TranscriptForgePage() {
       }
     } catch (e) {
       console.error('Review failed:', e);
+    }
+  };
+
+  const continueRemainingChunks = async (jobId: string) => {
+    try {
+      const res = await fetch(`${API}/transcriptforge/jobs/${jobId}/continue?reviewer=${encodeURIComponent(reviewerName)}`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.detail || 'Continue failed');
+        return;
+      }
+      await loadJob(jobId);
+      await loadJobs();
+    } catch (e) {
+      console.error('Continue failed:', e);
+    }
+  };
+
+  const readTranscriptText = (text: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      alert('Transcript readback is not available in this browser.');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.95;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const stopTranscriptReadback = () => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
   };
 
@@ -439,12 +481,12 @@ export default function TranscriptForgePage() {
                   <td style={{ padding: '12px 16px', fontSize: 13 }}>
                     {SOURCE_MODE_LABELS[job.source_mode as SourceMode] || job.source_mode}
                   </td>
-                  <td style={{ padding: '12px 16px' }}><StateBadge state={job.state} /></td>
+                  <td style={{ padding: '12px 16px' }}><StateBadge state={job.display_state || job.state} /></td>
                   <td style={{ padding: '12px 16px', fontSize: 12, color: '#6b7280' }}>{job.file_name || '—'}</td>
                   <td style={{ padding: '12px 16px', fontSize: 12 }}>
-                    {job.chunks_complete > 0 || job.chunks_total > 0 ? (
+                    {job.chunks_total > 0 ? (
                       <span>{job.chunks_complete}/{job.chunks_total} chunks</span>
-                    ) : '—'}
+                    ) : job.file_name ? 'Preparing / detecting chunks' : 'No file uploaded'}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <button
@@ -488,8 +530,10 @@ export default function TranscriptForgePage() {
     if (!selectedJob) return null;
 
     const state = selectedJob.state as keyof typeof STATE_COLORS;
+    const displayState = selectedJob.display_state || selectedJob.state;
     const isApprovable = ['verification_running', 'needs_review'].includes(state);
     const isStoppable = ['first_chunk_processing', 'first_chunk_ready', 'processing_remaining_chunks'].includes(state);
+    const firstChunkReviewed = selectedJob.chunks[0]?.raw_transcript && selectedJob.chunks[0]?.review_status !== 'pending';
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -506,7 +550,7 @@ export default function TranscriptForgePage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700 }}>Transcript Job</h2>
               <span style={{ fontFamily: 'monospace', fontSize: 13, color: '#6b7280' }}>{selectedJob.job_id}</span>
-              <StateBadge state={state} />
+              <StateBadge state={displayState} />
             </div>
             <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', gap: 16 }}>
               <span>{SOURCE_MODE_LABELS[selectedJob.source_mode as SourceMode] || selectedJob.source_mode}</span>
@@ -528,6 +572,16 @@ export default function TranscriptForgePage() {
                 <Pause size={14} /> Stop / Pause
               </button>
             )}
+            {selectedJob.state === 'first_chunk_ready' && (
+              <button
+                onClick={() => continueRemainingChunks(selectedJob.job_id)}
+                disabled={!firstChunkReviewed}
+                title={firstChunkReviewed ? 'Queue remaining chunks' : 'Review chunk_000 before continuing'}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: firstChunkReviewed ? '#2563eb' : '#e5e7eb', border: 'none', borderRadius: 6, fontSize: 13, cursor: firstChunkReviewed ? 'pointer' : 'not-allowed', color: firstChunkReviewed ? 'white' : '#6b7280' }}
+              >
+                <Play size={14} /> Continue Remaining Chunks
+              </button>
+            )}
           </div>
         </div>
 
@@ -535,6 +589,12 @@ export default function TranscriptForgePage() {
         {error && (
           <div style={{ padding: '12px 16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
             <AlertTriangle size={14} /> {error}
+          </div>
+        )}
+
+        {selectedJob.state === 'first_chunk_ready' && (
+          <div style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, color: '#1e40af', fontSize: 13 }}>
+            <strong>Paused awaiting review of first chunk.</strong> Remaining chunks are intentionally pending. Verify the original audio against the transcript, mark chunk 1 Good or Needs Review, then continue only when ready.
           </div>
         )}
 
@@ -567,6 +627,17 @@ export default function TranscriptForgePage() {
           </div>
         )}
 
+        {selectedJob.boundary_coherence_flags && selectedJob.boundary_coherence_flags.length > 0 && (
+          <div style={{ padding: '12px 16px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#9a3412', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <AlertTriangle size={14} /> Boundary Coherence Warnings
+            </div>
+            <ul style={{ fontSize: 12, color: '#9a3412', margin: 0, paddingLeft: 20 }}>
+              {selectedJob.boundary_coherence_flags.map((f, i) => <li key={i}>{String(f.message || f.type || 'Verify chunk boundary')}</li>)}
+            </ul>
+          </div>
+        )}
+
         {/* Chunk Review Section */}
         {['first_chunk_ready', 'processing_remaining_chunks', 'verification_running', 'needs_review'].includes(state) && (
           <div className="empire-card" style={{ padding: 20 }}>
@@ -581,14 +652,17 @@ export default function TranscriptForgePage() {
             {selectedJob.chunks.map(chunk => {
               const isExpanded = expandedChunks.has(chunk.chunk_id);
               const hasIssues = chunk.mismatch_flags.length > 0;
-              const confidence = chunk.confidence || 0;
+              const confidence = chunk.confidence;
+              const hasConfidence = confidence !== null && confidence !== undefined;
+              const confidenceValue = confidence ?? 0;
+              const lowConfidence = hasConfidence && confidenceValue < 0.7;
 
               return (
                 <div key={chunk.chunk_id} style={{ marginBottom: 12, border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
                   {/* Chunk Header */}
                   <div
                     onClick={() => toggleChunk(chunk.chunk_id)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', background: hasIssues ? '#fef9c3' : confidence < 0.7 ? '#fef3c7' : '#f9fafb' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', background: hasIssues ? '#fef9c3' : lowConfidence ? '#fef3c7' : '#f9fafb' }}
                   >
                     {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
 
@@ -600,13 +674,13 @@ export default function TranscriptForgePage() {
                       {fmtTime(chunk.start_time)} — {fmtTime(chunk.end_time)}
                     </span>
 
-                    {confidence > 0 && (
+                    {hasConfidence && (
                       <span style={{
                         fontSize: 11, padding: '2px 8px', borderRadius: 999,
-                        background: confidence >= 0.8 ? '#dcfce7' : confidence >= 0.5 ? '#fef3c7' : '#fee2e2',
-                        color: confidence >= 0.8 ? '#166534' : confidence >= 0.5 ? '#92400e' : '#991b1b',
+                        background: confidenceValue >= 0.8 ? '#dcfce7' : confidenceValue >= 0.5 ? '#fef3c7' : '#fee2e2',
+                        color: confidenceValue >= 0.8 ? '#166534' : confidenceValue >= 0.5 ? '#92400e' : '#991b1b',
                       }}>
-                        {(confidence * 100).toFixed(0)}% conf.
+                        {(confidenceValue * 100).toFixed(0)}% conf.
                       </span>
                     )}
 
@@ -624,7 +698,15 @@ export default function TranscriptForgePage() {
                       {chunk.review_status}
                     </span>
 
-                    {!chunk.raw_transcript && ['first_chunk_processing', 'chunking'].includes(state) && (
+                    <span style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 999,
+                      background: chunk.processing_status === 'transcribing' ? '#fef3c7' : chunk.processing_status === 'transcribed' ? '#dcfce7' : chunk.processing_status === 'failed' ? '#fee2e2' : '#f3f4f6',
+                      color: chunk.processing_status === 'transcribing' ? '#92400e' : chunk.processing_status === 'transcribed' ? '#166534' : chunk.processing_status === 'failed' ? '#991b1b' : '#6b7280',
+                    }}>
+                      {chunk.processing_status || 'pending'}
+                    </span>
+
+                    {!chunk.raw_transcript && chunk.processing_status === 'transcribing' && (
                       <Loader2 size={12} className="animate-spin" style={{ color: '#92400e' }} />
                     )}
                   </div>
@@ -632,6 +714,21 @@ export default function TranscriptForgePage() {
                   {/* Chunk Content */}
                   {isExpanded && (
                     <div style={{ padding: 16, borderTop: '1px solid #e5e7eb', background: 'white' }}>
+                      <div style={{ marginBottom: 12, padding: '10px 12px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                          Original chunk audio — source of truth
+                        </div>
+                        <audio
+                          controls
+                          preload="none"
+                          src={`${API}/transcriptforge/jobs/${selectedJob.job_id}/chunks/${chunk.chunk_id}/audio#t=${Math.max(0, chunk.start_time)},${chunk.end_time}`}
+                          style={{ width: '100%' }}
+                        />
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 6 }}>
+                          Verify original audio against the transcript. TTS readback, if used, is only a reviewer aid.
+                        </div>
+                      </div>
+
                       {chunk.mismatch_flags.length > 0 && (
                         <div style={{ marginBottom: 12, padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6 }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: '#dc2626', marginBottom: 4 }}>Flags / Issues:</div>
@@ -656,7 +753,7 @@ export default function TranscriptForgePage() {
 
                       {/* Review Actions */}
                       {chunk.raw_transcript && ['first_chunk_ready', 'needs_review', 'verification_running', 'processing_remaining_chunks'].includes(state) && (
-                        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                           <button
                             onClick={() => reviewChunk(selectedJob.job_id, chunk.chunk_id, 'good')}
                             style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', background: '#dcfce7', border: 'none', borderRadius: 6, fontSize: 12, color: '#166534', cursor: 'pointer' }}
@@ -668,6 +765,19 @@ export default function TranscriptForgePage() {
                             style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', background: '#fef3c7', border: 'none', borderRadius: 6, fontSize: 12, color: '#92400e', cursor: 'pointer' }}
                           >
                             <AlertTriangle size={12} /> Needs Review
+                          </button>
+                          <button
+                            onClick={() => readTranscriptText(chunk.raw_transcript || '')}
+                            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', background: '#eff6ff', border: 'none', borderRadius: 6, fontSize: 12, color: '#1e40af', cursor: 'pointer' }}
+                            title="Transcript readback uses current displayed transcript text. Reviewer aid only."
+                          >
+                            <Play size={12} /> Transcript Readback
+                          </button>
+                          <button
+                            onClick={stopTranscriptReadback}
+                            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', background: '#f3f4f6', border: 'none', borderRadius: 6, fontSize: 12, color: '#374151', cursor: 'pointer' }}
+                          >
+                            <Pause size={12} /> Stop Readback
                           </button>
                         </div>
                       )}

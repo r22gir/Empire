@@ -190,6 +190,9 @@ class ChunkInfo(BaseModel):
     reviewer: Optional[str] = None
     reviewer_timestamp: Optional[datetime] = None
     raw_provider_result: Optional[Dict[str, Any]] = None
+    processing_status: str = "pending"  # pending | transcribing | transcribed | failed
+    raw_transcript_path: Optional[str] = None
+    verified_transcript_path: Optional[str] = None
 
 
 class TranscriptJobCreate(BaseModel):
@@ -219,6 +222,7 @@ class TranscriptJob(BaseModel):
     verified_transcript_path: Optional[str] = None
     approved_transcript_path: Optional[str] = None
     critical_field_flags: List[str] = Field(default_factory=list)
+    boundary_coherence_flags: List[Dict[str, Any]] = Field(default_factory=list)
     qc_summary: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
     chunks: List[ChunkInfo] = Field(default_factory=list)
@@ -232,7 +236,7 @@ class ApprovalAction(BaseModel):
 
 
 class TranscriptModeResponse(BaseModel):
-    modes: List[Dict[str, str]]
+    modes: List[Dict[str, Any]]
     web_chat_note: str = "Web Chat integration is future-ready and not yet fully active in this pass."
 
 
@@ -267,6 +271,7 @@ def _load_chunk(job_id: str, chunk_id: str) -> Dict[str, Any]:
 
 
 def _save_chunk(chunk: Dict[str, Any]) -> None:
+    _persist_chunk_transcript_files(chunk)
     p = _chunk_path(chunk["job_id"], chunk["chunk_id"])
     p.write_text(json.dumps(chunk, indent=2, default=str))
 
@@ -287,6 +292,26 @@ def _replace_job_chunk(job: Dict[str, Any], chunk: Dict[str, Any]) -> None:
 def _transcript_path(job_id: str, kind: str) -> Path:
     # kind: raw | verified | approved
     return TRANSCRIPTS_DIR / f"{job_id}_{kind}.txt"
+
+
+def _chunk_transcript_path(job_id: str, chunk_id: str, kind: str) -> Path:
+    chunk_dir = TRANSCRIPTS_DIR / job_id
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    return chunk_dir / f"{chunk_id}_{kind}.txt"
+
+
+def _persist_chunk_transcript_files(chunk: Dict[str, Any]) -> None:
+    raw = chunk.get("raw_transcript")
+    if raw:
+        raw_path = _chunk_transcript_path(chunk["job_id"], chunk["chunk_id"], "raw")
+        raw_path.write_text(raw, encoding="utf-8")
+        chunk["raw_transcript_path"] = str(raw_path)
+
+    verified = chunk.get("verified_transcript")
+    if verified:
+        verified_path = _chunk_transcript_path(chunk["job_id"], chunk["chunk_id"], "verified")
+        verified_path.write_text(verified, encoding="utf-8")
+        chunk["verified_transcript_path"] = str(verified_path)
 
 
 def _estimate_duration(file_size: int) -> float:
@@ -319,6 +344,9 @@ def _chunk_job(job: Dict[str, Any]) -> List[Dict[str, Any]]:
             "reviewer": None,
             "reviewer_timestamp": None,
             "raw_provider_result": None,
+            "processing_status": "pending",
+            "raw_transcript_path": None,
+            "verified_transcript_path": None,
         })
         if end >= duration:
             break
@@ -379,10 +407,9 @@ async def _extract_audio_segment(input_path: str, start: float, end: float, outp
 
 async def _transcribe_chunk(chunk_info: Dict, audio_path: str, stt_service) -> Dict[str, Any]:
     """Transcribe a single chunk using Groq Whisper."""
-    job_id = chunk_info["job_id"]
-    chunk_id = chunk_info["chunk_id"]
     start = chunk_info["start_time"]
     end = chunk_info["end_time"]
+    chunk_info["processing_status"] = "transcribing"
 
     # Create temporary segment file
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -393,6 +420,7 @@ async def _transcribe_chunk(chunk_info: Dict, audio_path: str, stt_service) -> D
         success = await _extract_audio_segment(audio_path, start, end, tmp_path)
         if not success:
             chunk_info["mismatch_flags"].append("audio_extraction_failed")
+            chunk_info["processing_status"] = "failed"
             return chunk_info
 
         # Transcribe via Groq
@@ -402,6 +430,7 @@ async def _transcribe_chunk(chunk_info: Dict, audio_path: str, stt_service) -> D
             # Error result
             chunk_info["mismatch_flags"].append(f"transcription_failed: {result[:100]}")
             chunk_info["confidence"] = 0.0
+            chunk_info["processing_status"] = "failed"
         else:
             chunk_info["raw_transcript"] = result
             chunk_info["raw_provider_result"] = {"provider": "groq-whisper-large-v3-turbo", "model": "whisper-large-v3-turbo"}
@@ -409,6 +438,7 @@ async def _transcribe_chunk(chunk_info: Dict, audio_path: str, stt_service) -> D
             # Real implementation would need a provider that returns confidence scores
             chunk_info["confidence"] = 0.85  # placeholder until real confidence available
             chunk_info["review_status"] = "pending"
+            chunk_info["processing_status"] = "transcribed"
 
         return chunk_info
     finally:
@@ -470,10 +500,74 @@ async def _stitch_transcript(job: Dict[str, Any]) -> Dict[str, str]:
     raw_path = _transcript_path(job_id, "raw")
     verified_path = _transcript_path(job_id, "verified")
 
-    raw_path.write_text(raw_full)
-    verified_path.write_text(verified_full)
+    raw_path.write_text(raw_full, encoding="utf-8")
+    verified_path.write_text(verified_full, encoding="utf-8")
 
     return {"raw": str(raw_path), "verified": str(verified_path)}
+
+
+def _boundary_coherence_audit(job: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Flag chunk-edge risks in stitched multi-chunk transcripts."""
+    import re
+
+    chunks = sorted(
+        [c for c in job.get("chunks", []) if c.get("raw_transcript")],
+        key=lambda c: c["sequence"],
+    )
+    if len(chunks) < 2:
+        return []
+
+    high_risk_pattern = re.compile(
+        r"\b(?:mr\.|mrs\.|ms\.|dr\.|judge|counsel|exhibit|case|hearing|oath|sworn|"
+        r"\d{1,2}[/.-]\d{1,2}[/.-](?:19|20)\d{2}|[A-Z][a-z]+ [A-Z][a-z]+)\b"
+    )
+    speaker_pattern = re.compile(r"\b(?:Q\.|A\.|THE COURT|MR\.|MS\.|MRS\.|DR\.)\b")
+    flags: List[Dict[str, Any]] = []
+
+    for prev, cur in zip(chunks, chunks[1:]):
+        gap_seconds = float(cur.get("start_time", 0)) - float(prev.get("end_time", 0))
+        prev_words = str(prev.get("raw_transcript") or "").split()
+        cur_words = str(cur.get("raw_transcript") or "").split()
+        edge_words = prev_words[-8:] + cur_words[:8]
+        edge_text = " ".join(edge_words)
+        phrase_break = bool(prev_words and cur_words and not str(prev.get("raw_transcript", "")).rstrip().endswith((".", "?", "!", ":", ";")))
+        markers = sorted(set(m.group(0) for m in high_risk_pattern.finditer(edge_text)))
+        speakers = sorted(set(m.group(0) for m in speaker_pattern.finditer(edge_text)))
+
+        if gap_seconds > CHUNK_OVERLAP_SEC:
+            flags.append({
+                "type": "chunk_boundary_time_gap",
+                "severity": "warning",
+                "left_chunk": prev["chunk_id"],
+                "right_chunk": cur["chunk_id"],
+                "gap_seconds": round(gap_seconds, 3),
+                "message": "Boundary discontinuity exceeds 3 seconds; verify against original audio.",
+            })
+
+        if phrase_break and len(edge_words) > 8:
+            flags.append({
+                "type": "possible_phrase_break_spanning_boundary",
+                "severity": "warning",
+                "left_chunk": prev["chunk_id"],
+                "right_chunk": cur["chunk_id"],
+                "tokens_to_review": len(edge_words),
+                "markers": markers,
+                "speaker_markers": speakers,
+                "message": "Phrase may span chunk edge; verify names, dates, legal terms, exhibit numbers, and speaker changes against audio.",
+            })
+
+        if markers or speakers:
+            flags.append({
+                "type": "high_risk_terms_at_boundary",
+                "severity": "review_aid",
+                "left_chunk": prev["chunk_id"],
+                "right_chunk": cur["chunk_id"],
+                "markers": markers,
+                "speaker_markers": speakers,
+                "message": "High-risk transcript content appears at a chunk edge; primary verification is original audio versus transcript.",
+            })
+
+    return flags
 
 
 async def _critical_field_verification(transcript_text: str) -> List[str]:
@@ -525,6 +619,13 @@ async def _process_chunk_background(job_id: str, chunk_id: str):
     try:
         job = _load_job(job_id)
         chunk = _load_chunk(job_id, chunk_id)
+        job.setdefault("audit_trail", []).append({
+            "event": "chunk_transcription_started",
+            "timestamp": datetime.utcnow().isoformat(),
+            "chunk_id": chunk_id,
+            "actor": "system",
+        })
+        _save_job(job)
 
         audio_path = job["file_path"]
 
@@ -552,17 +653,68 @@ async def _process_chunk_background(job_id: str, chunk_id: str):
         )
         job["chunks_complete"] = completed
         job["chunks_failed"] = failed
+        job.setdefault("audit_trail", []).append({
+            "event": "chunk_transcription_completed" if chunk.get("raw_transcript") else "chunk_transcription_failed",
+            "timestamp": datetime.utcnow().isoformat(),
+            "chunk_id": chunk_id,
+            "actor": "system",
+            "processing_status": chunk.get("processing_status"),
+            "confidence": chunk.get("confidence"),
+        })
 
         # Update state if first chunk ready
         if chunk["sequence"] == 0 and chunk.get("raw_transcript"):
             if job["state"] == "first_chunk_processing":
                 job["state"] = "first_chunk_ready"
+                job["display_state"] = "paused_awaiting_review"
+                job["audit_trail"].append({
+                    "event": "first_chunk_ready",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "actor": "system",
+                    "chunk_id": chunk_id,
+                    "message": "Paused awaiting review of first chunk.",
+                })
                 _save_job(job)
+
+        if job.get("state") == "processing_remaining_chunks" and job.get("chunks_total") and completed >= job["chunks_total"]:
+            paths = await _stitch_transcript(job)
+            job["raw_transcript_path"] = paths["raw"]
+            job["verified_transcript_path"] = paths["verified"]
+            job["boundary_coherence_flags"] = _boundary_coherence_audit(job)
+            raw_text = Path(paths["raw"]).read_text(encoding="utf-8") if Path(paths["raw"]).exists() else ""
+            job["critical_field_flags"] = await _critical_field_verification(raw_text)
+            job["state"] = "needs_review"
+            job["display_state"] = "needs_review"
+            job["audit_trail"].append({
+                "event": "all_chunks_transcribed",
+                "timestamp": datetime.utcnow().isoformat(),
+                "actor": "system",
+                "raw_transcript_path": paths["raw"],
+                "verified_transcript_path": paths["verified"],
+                "boundary_flags": len(job["boundary_coherence_flags"]),
+            })
 
         _save_job(job)
 
     except Exception as e:
         logger.error(f"Chunk processing error {job_id}/{chunk_id}: {e}")
+        try:
+            chunk = _load_chunk(job_id, chunk_id)
+            chunk["processing_status"] = "failed"
+            chunk.setdefault("mismatch_flags", []).append(f"background_processing_error: {str(e)[:100]}")
+            _save_chunk(chunk)
+            job = _load_job(job_id)
+            job.setdefault("audit_trail", []).append({
+                "event": "chunk_processing_exception",
+                "timestamp": datetime.utcnow().isoformat(),
+                "actor": "system",
+                "chunk_id": chunk_id,
+                "error": str(e)[:300],
+            })
+            job["chunks_failed"] = sum(1 for c in job.get("chunks", []) if c.get("processing_status") == "failed")
+            _save_job(job)
+        except Exception:
+            pass
 
 
 # ── Routes ────────────────────────────────────────────────────────────
@@ -575,7 +727,8 @@ async def get_modes():
         {"id": "court_hearing", "label": "Court Hearing", "active": True},
         {"id": "conference", "label": "Conference", "active": True},
         {"id": "general_intake", "label": "General Transcript Intake", "active": True},
-        {"id": "web_chat", "label": "Web Chat", "active": False, "note": "Future-ready — not fully active in this pass"}],
+        {"id": "web_chat", "label": "Web Chat", "active": False, "note": "Future-ready — not fully active in this pass"},
+    ]
     return TranscriptModeResponse(modes=modes, web_chat_note="Web Chat integration is future-ready and not yet fully active in this pass.")
 
 
@@ -591,6 +744,7 @@ async def create_job(background_tasks: BackgroundTasks, source_mode: str = "gene
     job = {
         "job_id": job_id,
         "state": "uploaded",
+        "display_state": "uploaded",
         "source_mode": source_mode,
         "uploader": uploader,
         "created_at": datetime.utcnow().isoformat(),
@@ -609,6 +763,7 @@ async def create_job(background_tasks: BackgroundTasks, source_mode: str = "gene
         "verified_transcript_path": None,
         "approved_transcript_path": None,
         "critical_field_flags": [],
+        "boundary_coherence_flags": [],
         "qc_summary": None,
         "notes": None,
         "chunks": [],
@@ -645,6 +800,7 @@ async def upload_audio(background_tasks: BackgroundTasks, job_id: str, file: Upl
     job["file_name"] = file.filename or "audio.mp3"
     job["duration_sec"] = duration
     job["state"] = "chunking"
+    job["display_state"] = "chunking"
     job["audit_trail"].append({
         "event": "file_uploaded",
         "timestamp": datetime.utcnow().isoformat(),
@@ -659,6 +815,21 @@ async def upload_audio(background_tasks: BackgroundTasks, job_id: str, file: Upl
     job["chunks"] = chunks
     job["chunks_total"] = len(chunks)
     job["state"] = "first_chunk_processing"
+    job["display_state"] = "first_chunk_processing"
+    job["audit_trail"].append({
+        "event": "chunks_created",
+        "timestamp": datetime.utcnow().isoformat(),
+        "actor": "system",
+        "chunks_total": len(chunks),
+        "chunk_duration_sec": CHUNK_DURATION_SEC,
+        "chunk_overlap_sec": CHUNK_OVERLAP_SEC,
+    })
+    job["audit_trail"].append({
+        "event": "first_chunk_queued",
+        "timestamp": datetime.utcnow().isoformat(),
+        "actor": "system",
+        "chunk_id": "chunk_000",
+    })
     _save_job(job)
 
     # Save individual chunk files
@@ -696,11 +867,25 @@ async def get_job(job_id: str):
         "chunks_complete": job.get("chunks_complete", 0),
         "chunks_failed": job.get("chunks_failed", 0),
         "low_confidence_segments": low_conf_count,
-        "unreviewed_low_confidence": low_conf_count,  # all unreviewed in this pass
+        "unreviewed_low_confidence": sum(
+            1
+            for c in chunks
+            if c.get("confidence") is not None
+            and c.get("confidence") < QC_THRESHOLDS["min_segment_confidence"]
+            and c.get("review_status") != "good"
+        ),
         "mismatch_count": sum(len(c.get("mismatch_flags", [])) for c in chunks),
         "reviewer_corrections_count": job.get("reviewer_corrections_count", 0),
         "overall_confidence": job.get("overall_confidence"),
     }
+    if job.get("state") == "first_chunk_ready":
+        job["display_state"] = "paused_awaiting_review"
+        job["truth_summary"] = "Paused awaiting review of first chunk. Remaining chunks are intentionally pending."
+    elif job.get("chunks_total", 0) == 0 and job.get("state") in {"uploaded", "chunking"}:
+        job["display_state"] = "preparing_chunk_count"
+        job["truth_summary"] = "Preparing audio and detecting chunks."
+    else:
+        job["display_state"] = job.get("display_state") or job.get("state")
 
     return job
 
@@ -742,6 +927,7 @@ async def review_chunk(job_id: str, chunk_id: str, status: str = Query(...), rev
     chunk["reviewer"] = reviewer
     chunk["reviewer_timestamp"] = datetime.utcnow().isoformat()
     _save_chunk(chunk)
+    _replace_job_chunk(job, chunk)
 
     job["audit_trail"].append({
         "event": "chunk_reviewed",
@@ -758,6 +944,43 @@ async def review_chunk(job_id: str, chunk_id: str, status: str = Query(...), rev
 
     _save_job(job)
     return {"chunk_id": chunk_id, "review_status": status, "reviewer": reviewer}
+
+
+@router.post("/jobs/{job_id}/continue")
+async def continue_remaining_chunks(background_tasks: BackgroundTasks, job_id: str, reviewer: str = Query("founder")):
+    """Queue remaining chunks after first chunk review."""
+    job = _load_job(job_id)
+    if job["state"] != "first_chunk_ready":
+        raise HTTPException(status_code=409, detail=f"Cannot continue — job is in state '{job['state']}'")
+
+    chunks = sorted(job.get("chunks", []), key=lambda c: c.get("sequence", 0))
+    if not chunks or not chunks[0].get("raw_transcript"):
+        raise HTTPException(status_code=409, detail="Cannot continue — first chunk transcript is not ready")
+    if chunks[0].get("review_status") == "pending":
+        raise HTTPException(status_code=409, detail="Review chunk_000 as Good or Needs Review before continuing")
+
+    queued = []
+    for chunk in chunks[1:]:
+        if not chunk.get("raw_transcript") and chunk.get("processing_status") != "transcribing":
+            chunk["processing_status"] = "pending"
+            _save_chunk(chunk)
+            _replace_job_chunk(job, chunk)
+            background_tasks.add_task(_process_chunk_background, job_id, chunk["chunk_id"])
+            queued.append(chunk["chunk_id"])
+
+    if not queued:
+        raise HTTPException(status_code=409, detail="No remaining chunks are available to queue")
+
+    job["state"] = "processing_remaining_chunks"
+    job["display_state"] = "processing_remaining_chunks"
+    job.setdefault("audit_trail", []).append({
+        "event": "remaining_chunks_queued",
+        "timestamp": datetime.utcnow().isoformat(),
+        "actor": reviewer,
+        "queued_chunks": queued,
+    })
+    _save_job(job)
+    return {"job_id": job_id, "state": job["state"], "queued_chunks": queued}
 
 
 @router.post("/jobs/{job_id}/approve")
@@ -796,17 +1019,23 @@ async def approve_transcript(job_id: str, action: ApprovalAction):
             chunk["reviewer"] = action.reviewer
             chunk["reviewer_timestamp"] = datetime.utcnow().isoformat()
             _save_chunk(chunk)
+            _replace_job_chunk(job, chunk)
             corrections_applied += 1
 
         # Re-stitch with corrections
         paths = await _stitch_transcript(job)
         job["verified_transcript_path"] = paths["verified"]
+        job["boundary_coherence_flags"] = _boundary_coherence_audit(job)
 
     # Run full-document critical field verification before approval
     if action.action in ["approve", "correct_and_approve"]:
+        paths = await _stitch_transcript(job)
+        job["raw_transcript_path"] = paths["raw"]
+        job["verified_transcript_path"] = paths["verified"]
+        job["boundary_coherence_flags"] = _boundary_coherence_audit(job)
         raw_path = _transcript_path(job_id, "raw")
         if raw_path.exists():
-            text = raw_path.read_text()
+            text = raw_path.read_text(encoding="utf-8")
             flags = await _critical_field_verification(text)
             job["critical_field_flags"] = flags
             if flags:
@@ -834,6 +1063,7 @@ async def approve_transcript(job_id: str, action: ApprovalAction):
     paths = await _stitch_transcript(job)
     job["raw_transcript_path"] = paths["raw"]
     job["verified_transcript_path"] = paths["verified"]
+    job["boundary_coherence_flags"] = _boundary_coherence_audit(job)
 
     # Copy to approved path
     approved_path = _transcript_path(job_id, "approved")
@@ -896,6 +1126,7 @@ async def list_jobs(state: Optional[str] = None, uploader: Optional[str] = None)
             jobs.append({
                 "job_id": job["job_id"],
                 "state": job["state"],
+                "display_state": "paused_awaiting_review" if job.get("state") == "first_chunk_ready" else job.get("display_state", job.get("state")),
                 "source_mode": job.get("source_mode"),
                 "uploader": job.get("uploader"),
                 "created_at": job.get("created_at"),
@@ -936,6 +1167,34 @@ async def get_audit_trail(job_id: str):
     """Return full audit trail for a job."""
     job = _load_job(job_id)
     return {"job_id": job_id, "audit_trail": job.get("audit_trail", [])}
+
+
+@router.get("/incidents/diagnose")
+async def diagnose_incident(job_id: Optional[str] = None, include_logs: bool = Query(True)):
+    """MAX/Hermes/OpenClaw timeline diagnosis for TranscriptForge incidents."""
+    from app.services.max.transcriptforge_incidents import build_transcriptforge_incident_diagnosis
+    return build_transcriptforge_incident_diagnosis(job_id=job_id, include_logs=include_logs)
+
+
+@router.post("/incidents/repair")
+async def queue_incident_repair(job_id: str = Query(...), description: Optional[str] = None):
+    """Queue a bounded OpenClaw repair only after the OpenClaw gate is healthy."""
+    from app.services.max.transcriptforge_incidents import queue_bounded_transcriptforge_repair
+    return queue_bounded_transcriptforge_repair(job_id=job_id, description=description)
+
+
+@router.post("/incidents/learning")
+async def record_incident_learning(payload: Dict[str, Any]):
+    """Record validated or inconclusive TranscriptForge incident learning into Hermes memory."""
+    from app.services.max.transcriptforge_incidents import record_incident_learning
+    return record_incident_learning(
+        subject=str(payload.get("subject") or "TranscriptForge incident learning"),
+        status=str(payload.get("status") or "PENDING"),
+        learning_type=str(payload.get("learning_type") or "inconclusive"),
+        evidence=dict(payload.get("evidence") or {}),
+        fix_summary=str(payload.get("fix_summary") or "No fix summary supplied."),
+        commit_hash=payload.get("commit_hash"),
+    )
 
 
 # ── Direct transcription (no job flow) for quick intake ──────────────
