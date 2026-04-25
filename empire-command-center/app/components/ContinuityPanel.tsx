@@ -30,20 +30,28 @@ function field(label: string, value: any) {
   );
 }
 
+function checkedAtLabel(date = new Date()) {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export default function ContinuityPanel() {
   const [status, setStatus] = useState<any>(null);
   const [audit, setAudit] = useState<any>(null);
+  const [openclawHealth, setOpenclawHealth] = useState<any>(null);
   const [scores, setScores] = useState<any[]>([]);
   const [message, setMessage] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const loading = pendingAction !== null;
 
   const load = async (runAudit = true) => {
     const [statusRes, scoresRes] = await Promise.all([
       fetch(API + '/max/status', { cache: 'no-store' }),
       fetch(API + '/max/evaluation/scores?limit=5', { cache: 'no-store' }),
     ]);
-    if (statusRes.ok) setStatus(await statusRes.json());
+    if (!statusRes.ok) throw new Error('MAX status refresh failed.');
+    setStatus(await statusRes.json());
     if (scoresRes.ok) setScores((await scoresRes.json()).scores || []);
     if (runAudit) {
       const auditRes = await fetch(API + '/max/chat', {
@@ -53,6 +61,7 @@ export default function ContinuityPanel() {
       });
       if (auditRes.ok) setAudit(await auditRes.json());
     }
+    setLastCheckedAt(checkedAtLabel());
   };
 
   useEffect(() => {
@@ -63,8 +72,14 @@ export default function ContinuityPanel() {
   const handoff = auditResult?.handoff || {};
   const tier1 = handoff?.tier_1 || {};
   const runtime = tier1?.last_runtime_truth_result || {};
-  const gate = status?.openclaw_gate || runtime?.openclaw_gate || {};
+  const gate = openclawHealth?.openclaw_gate || status?.openclaw_gate || runtime?.openclaw_gate || {};
   const heartbeat = gate?.worker_heartbeat || {};
+  const currentCommit = status?.current_commit?.hash;
+  const handoffCommit = runtime?.commit;
+  const startupCommit = status?.startup_health?.running_commit_hash;
+  const handoffCommitDiffers = Boolean(currentCommit && handoffCommit && handoffCommit !== currentCommit);
+  const startupCommitDiffers = Boolean(currentCommit && startupCommit && startupCommit !== currentCommit);
+  const staleCommitWarning = Boolean(handoffCommitDiffers || startupCommitDiffers);
   const latestScore = scores[0]?.overall_score ?? auditResult?.latest_score?.overall_score;
   const avgScore = useMemo(() => {
     if (!scores.length) return null;
@@ -73,11 +88,12 @@ export default function ContinuityPanel() {
   const skillInvocations = scores.filter(s => s.skill_used).slice(0, 5);
   const gateTone: Tone = gate.state === 'healthy' ? 'ok' : gate.state === 'degraded' ? 'warn' : gate.state === 'unavailable' ? 'bad' : 'warn';
   const heartbeatTone: Tone = heartbeat.state === 'fresh' ? 'ok' : heartbeat.state === 'stale' ? 'bad' : 'warn';
-  const registryTone: Tone = status?.startup_health?.running_commit_hash === status?.current_commit?.hash ? 'ok' : 'bad';
+  const registryTone: Tone = !status?.registry?.registry_version || status?.registry?.last_error || status?.registry_reload_requires_restart ? 'bad' : 'ok';
   const scoreTone: Tone = Number(latestScore ?? 1) < 0.6 ? 'warn' : 'ok';
 
   const runCommand = async (command: string, successLabel: string) => {
-    setLoading(true);
+    const checkedAt = checkedAtLabel();
+    setPendingAction(command === 'what continuity packet is loaded' ? 'audit' : 'save');
     setMessage('');
     try {
       const res = await fetch(API + '/max/chat', {
@@ -85,14 +101,43 @@ export default function ContinuityPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: command, model: 'auto', history: [], channel: 'web' }),
       });
+      if (!res.ok) throw new Error(`${successLabel} failed.`);
       const data = await res.json();
-      setMessage(data.response || successLabel);
+      setMessage(`${data.response || successLabel}\nChecked at ${checkedAt}.`);
       if (command === 'what continuity packet is loaded') setAudit(data);
       await load(command !== 'what continuity packet is loaded');
+      setLastCheckedAt(checkedAt);
     } catch (exc: any) {
-      setMessage(exc?.message || 'Continuity action failed.');
+      setMessage(`${exc?.message || 'Continuity action failed.'}\nChecked at ${checkedAt}.`);
     } finally {
-      setLoading(false);
+      setPendingAction(null);
+    }
+  };
+
+  const refreshOpenclawStatus = async () => {
+    const checkedAt = checkedAtLabel();
+    setPendingAction('openclaw');
+    setMessage('');
+    try {
+      const [statusRes, scoresRes, healthRes] = await Promise.all([
+        fetch(API + '/max/status', { cache: 'no-store' }),
+        fetch(API + '/max/evaluation/scores?limit=5', { cache: 'no-store' }),
+        fetch(API + '/openclaw/health', { cache: 'no-store' }),
+      ]);
+      if (!statusRes.ok) throw new Error('MAX status refresh failed.');
+      if (!healthRes.ok) throw new Error('OpenClaw health check failed.');
+      const statusData = await statusRes.json();
+      const healthData = await healthRes.json();
+      setStatus(statusData);
+      setOpenclawHealth(healthData);
+      if (scoresRes.ok) setScores((await scoresRes.json()).scores || []);
+      const gateState = healthData?.openclaw_gate?.state || statusData?.openclaw_gate?.state || healthData?.status || 'unknown';
+      setMessage(`OpenClaw status refreshed at ${checkedAt}: ${gateState}.`);
+      setLastCheckedAt(checkedAt);
+    } catch (exc: any) {
+      setMessage(`${exc?.message || 'OpenClaw status refresh failed.'}\nChecked at ${checkedAt}.`);
+    } finally {
+      setPendingAction(null);
     }
   };
 
@@ -106,28 +151,36 @@ export default function ContinuityPanel() {
             <Pill label={`Eval ${latestScore ?? 'none'}`} tone={scoreTone} />
             <Pill label={`OpenClaw ${gate.state || 'unknown'}`} tone={gateTone} />
             <Pill label={`Worker ${heartbeat.state || 'unknown'}${Number.isFinite(heartbeat.age_seconds) ? ` ${heartbeat.age_seconds}s` : ''}`} tone={heartbeatTone} />
+            {lastCheckedAt && <Pill label={`Checked ${lastCheckedAt}`} tone="neutral" />}
           </div>
         </div>
         <div className="continuity-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button data-testid="continuity-toggle-details" onClick={() => setExpanded(v => !v)} style={buttonStyle}>{expanded ? 'Hide' : 'Details'}</button>
           <button data-testid="continuity-save-state" disabled={loading} onClick={() => runCommand('save state', 'State saved')} style={buttonStyle}>Save State</button>
-          <button data-testid="continuity-run-audit" disabled={loading} onClick={() => runCommand('what continuity packet is loaded', 'Audit complete')} style={buttonStyle}>Run Continuity Audit</button>
-          <button data-testid="continuity-check-openclaw" disabled={loading} onClick={() => load(false)} style={buttonStyle}>Check OpenClaw</button>
+          <button data-testid="continuity-run-audit" disabled={loading} onClick={() => runCommand('what continuity packet is loaded', 'Audit complete')} style={buttonStyle}>{pendingAction === 'audit' ? 'Running...' : 'Run Continuity Audit'}</button>
+          <button data-testid="continuity-check-openclaw" disabled={loading} onClick={refreshOpenclawStatus} style={buttonStyle}>{pendingAction === 'openclaw' ? 'Refreshing...' : 'Refresh OpenClaw Status'}</button>
         </div>
       </div>
 
       <div className={expanded ? 'continuity-details expanded' : 'continuity-details'} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginTop: 10 }}>
         {field('current task', tier1.current_task)}
         {field('surface', tier1.founder_surface_identity?.canonical_channel || auditResult.surface?.canonical_channel)}
-        {field('runtime commit', runtime.commit || status?.current_commit?.hash)}
-        {field('last truth', runtime.restart_required === undefined ? 'unknown' : runtime.restart_required ? 'restart needed' : 'fresh')}
+        {field('current commit', currentCommit)}
+        {handoffCommit && handoffCommitDiffers && field('handoff commit', `${handoffCommit} (stale)`)}
+        {startupCommit && startupCommitDiffers && field('startup commit', `${startupCommit} (differs from current)`)}
+        {field('handoff truth', runtime.restart_required === undefined ? 'unknown' : runtime.restart_required ? 'restart needed' : 'fresh')}
         {field('5-score trend', avgScore === null ? 'none' : `${avgScore.toFixed(2)} ${avgScore < 0.6 ? 'down' : 'stable'}`)}
         {field('active skills', (status?.active_skill_hooks || []).join(', ') || 'none')}
       </div>
 
       <div className={expanded ? 'continuity-extra expanded' : 'continuity-extra'} style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(220px, 360px)', gap: 12 }}>
         <div style={{ fontSize: 12, color: 'var(--muted)' }}>
-          {message || 'Use this panel to refresh handoff state, audit continuity, and check OpenClaw gate truth.'}
+          {staleCommitWarning && currentCommit && (
+            <div style={{ color: '#92400e', fontWeight: 700, marginBottom: 6 }}>
+              Continuity packet/startup truth is stale; live backend reports current commit {currentCommit}.
+            </div>
+          )}
+          <div style={{ whiteSpace: 'pre-wrap' }}>{message || 'Use this panel to refresh handoff state, audit continuity, and check OpenClaw gate truth.'}</div>
         </div>
         <div data-testid="continuity-skill-invocations" style={{ fontSize: 11, color: 'var(--muted)' }}>
           <strong style={{ color: 'var(--text)' }}>Recent skill invocations</strong>
