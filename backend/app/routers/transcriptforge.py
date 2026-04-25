@@ -61,6 +61,91 @@ QC_THRESHOLDS = {
     "max_mismatch_count": 5,
 }
 
+_GSTREAMER_EXTRACT_SCRIPT = r"""
+import sys
+from pathlib import Path
+
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
+Gst.init(None)
+input_path = Path(sys.argv[1])
+output_path = Path(sys.argv[2])
+start_s = float(sys.argv[3])
+end_s = float(sys.argv[4])
+
+pipeline = Gst.Pipeline.new("transcriptforge-extract")
+src = Gst.ElementFactory.make("uridecodebin", "src")
+convert = Gst.ElementFactory.make("audioconvert", "convert")
+resample = Gst.ElementFactory.make("audioresample", "resample")
+capsfilter = Gst.ElementFactory.make("capsfilter", "caps")
+wavenc = Gst.ElementFactory.make("wavenc", "wavenc")
+sink = Gst.ElementFactory.make("filesink", "sink")
+
+if not all([pipeline, src, convert, resample, capsfilter, wavenc, sink]):
+    raise SystemExit("missing required GStreamer element")
+
+src.set_property("uri", input_path.resolve().as_uri())
+capsfilter.set_property(
+    "caps",
+    Gst.Caps.from_string("audio/x-raw,format=S16LE,channels=1,rate=16000"),
+)
+sink.set_property("location", str(output_path))
+
+for element in (src, convert, resample, capsfilter, wavenc, sink):
+    pipeline.add(element)
+
+if not convert.link(resample) or not resample.link(capsfilter) or not capsfilter.link(wavenc) or not wavenc.link(sink):
+    raise SystemExit("failed to link GStreamer audio pipeline")
+
+def on_pad_added(_element, pad):
+    caps = pad.get_current_caps() or pad.query_caps(None)
+    if caps and caps.to_string().startswith("audio/"):
+        target = convert.get_static_pad("sink")
+        if not target.is_linked():
+            pad.link(target)
+
+src.connect("pad-added", on_pad_added)
+bus = pipeline.get_bus()
+pipeline.set_state(Gst.State.PAUSED)
+
+while True:
+    msg = bus.timed_pop_filtered(15 * Gst.SECOND, Gst.MessageType.ERROR | Gst.MessageType.ASYNC_DONE)
+    if msg is None:
+        raise SystemExit("GStreamer preroll timed out")
+    if msg.type == Gst.MessageType.ERROR:
+        err, debug = msg.parse_error()
+        raise SystemExit(f"GStreamer preroll error: {err}; {debug}")
+    if msg.type == Gst.MessageType.ASYNC_DONE:
+        break
+
+ok = pipeline.seek(
+    1.0,
+    Gst.Format.TIME,
+    Gst.SeekFlags.FLUSH | Gst.SeekFlags.ACCURATE,
+    Gst.SeekType.SET,
+    int(start_s * Gst.SECOND),
+    Gst.SeekType.SET,
+    int(end_s * Gst.SECOND),
+)
+if not ok:
+    raise SystemExit("GStreamer seek failed")
+
+pipeline.set_state(Gst.State.PLAYING)
+while True:
+    msg = bus.timed_pop_filtered(180 * Gst.SECOND, Gst.MessageType.ERROR | Gst.MessageType.EOS)
+    if msg is None:
+        raise SystemExit("GStreamer extraction timed out")
+    if msg.type == Gst.MessageType.ERROR:
+        err, debug = msg.parse_error()
+        raise SystemExit(f"GStreamer extraction error: {err}; {debug}")
+    if msg.type == Gst.MessageType.EOS:
+        break
+
+pipeline.set_state(Gst.State.NULL)
+"""
+
 
 # ── State Machine ─────────────────────────────────────────────────────
 VALID_STATES = [
@@ -186,6 +271,19 @@ def _save_chunk(chunk: Dict[str, Any]) -> None:
     p.write_text(json.dumps(chunk, indent=2, default=str))
 
 
+def _replace_job_chunk(job: Dict[str, Any], chunk: Dict[str, Any]) -> None:
+    chunks = job.get("chunks", [])
+    replaced = False
+    for idx, existing in enumerate(chunks):
+        if existing.get("chunk_id") == chunk.get("chunk_id"):
+            chunks[idx] = chunk
+            replaced = True
+            break
+    if not replaced:
+        chunks.append(chunk)
+    job["chunks"] = chunks
+
+
 def _transcript_path(job_id: str, kind: str) -> Path:
     # kind: raw | verified | approved
     return TRANSCRIPTS_DIR / f"{job_id}_{kind}.txt"
@@ -228,7 +326,7 @@ def _chunk_job(job: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 async def _extract_audio_segment(input_path: str, start: float, end: float, output_path: str) -> bool:
-    """Extract a time-segment from audio file using Python wave module."""
+    """Extract a time-segment from audio file."""
     try:
         import wave
         import struct
@@ -254,8 +352,27 @@ async def _extract_audio_segment(input_path: str, start: float, end: float, outp
                 out.writeframes(frames)
         return True
     except Exception as e:
-        logger.error(f"Audio segment extraction failed: {e}")
+        logger.info(f"Wave extraction unavailable for {Path(input_path).suffix or 'audio'}: {e}")
+
+    proc = await asyncio.create_subprocess_exec(
+        "/usr/bin/python3",
+        "-c",
+        _GSTREAMER_EXTRACT_SCRIPT,
+        input_path,
+        output_path,
+        str(start),
+        str(end),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        detail = (stderr or stdout).decode(errors="replace").strip()
+        logger.error(f"GStreamer audio segment extraction failed: {detail}")
         return False
+
+    p = Path(output_path)
+    return p.exists() and p.stat().st_size > 44
 
 
 async def _transcribe_chunk(chunk_info: Dict, audio_path: str, stt_service) -> Dict[str, Any]:
@@ -416,12 +533,6 @@ async def _process_chunk_background(job_id: str, chunk_id: str):
         chunk = await _transcribe_chunk(chunk, audio_path, stt_service)
         _save_chunk(chunk)
 
-        # Update job chunk count
-        job = _load_job(job_id)
-        completed = sum(1 for c in job.get("chunks", []) if c.get("raw_transcript"))
-        job["chunks_complete"] = completed
-        _save_job(job)
-
         # Verify
         chunk = _load_chunk(job_id, chunk_id)
         chunk = await _verify_chunk(chunk, audio_path, stt_service)
@@ -429,16 +540,21 @@ async def _process_chunk_background(job_id: str, chunk_id: str):
 
         # Update job
         job = _load_job(job_id)
-        failed = sum(1 for c in job.get("chunks", []) if "audio_extraction_failed" in c.get("mismatch_flags", []) or "transcription_failed" in str(c.get("mismatch_flags", [])))
+        _replace_job_chunk(job, chunk)
+        completed = sum(1 for c in job.get("chunks", []) if c.get("raw_transcript"))
+        failed = sum(
+            1
+            for c in job.get("chunks", [])
+            if "audio_extraction_failed" in c.get("mismatch_flags", [])
+            or "transcription_failed" in str(c.get("mismatch_flags", []))
+        )
+        job["chunks_complete"] = completed
         job["chunks_failed"] = failed
 
         # Update state if first chunk ready
         if chunk["sequence"] == 0 and chunk.get("raw_transcript"):
             if job["state"] == "first_chunk_processing":
                 job["state"] = "first_chunk_ready"
-                # Auto-advance to processing_remaining_chunks if chunk 1 is good
-                if not any(f for f in chunk.get("mismatch_flags", []) if "low_confidence" in f or "failed" in f):
-                    job["state"] = "processing_remaining_chunks"
                 _save_job(job)
 
         _save_job(job)
@@ -547,12 +663,8 @@ async def upload_audio(background_tasks: BackgroundTasks, job_id: str, file: Upl
     for chunk in chunks:
         _save_chunk(chunk)
 
-    # Queue background processing for chunk 0 first
+    # Queue only chunk 0 for the first review gate.
     background_tasks.add_task(_process_chunk_background, job_id, "chunk_000")
-
-    # Queue remaining chunks
-    for chunk in chunks[1:]:
-        background_tasks.add_task(_process_chunk_background, job_id, chunk["chunk_id"])
 
     return {
         "job_id": job_id,
