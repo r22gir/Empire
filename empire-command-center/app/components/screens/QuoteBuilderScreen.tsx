@@ -722,7 +722,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               ...(w.fabric_id ? { fabric: { id: w.fabric_id, code: w.fabric_code || '', name: w.fabric_name || '', color_pattern: null, material_type: null, supplier: null, cost_per_yard: w.fabric_cost_at_quote || 0, margin_percent: w.fabric_margin_at_quote || 0, width_inches: 54, pattern_repeat_v: 0, pattern_repeat_h: 0, backing_fabric_id: null, swatch_photo_path: null, notes: null } as Fabric } : {}),
               ...(w.fabric_yards_needed ? { fabricYards: w.fabric_yards_needed } : {}),
               ...(w.fabric_yards_override ? { fabricYardsOverride: w.fabric_yards_override } : {}),
-              ...(w.backing_fabric_id ? { backingFabric: { id: w.backing_fabric_id, code: w.backing_fabric_code || '', name: w.backing_fabric_name || '', color_pattern: null, material_type: 'Backing', supplier: null, cost_per_yard: 0, margin_percent: 0, width_inches: 54, pattern_repeat_v: 0, pattern_repeat_h: 0, backing_fabric_id: null, swatch_photo_path: null, notes: null } as Fabric } : {}),
+              ...(w.backing_fabric_id ? { backingFabric: { id: w.backing_fabric_id, code: w.backing_fabric_code || '', name: w.backing_fabric_name || '', color_pattern: null, material_type: 'Backing', supplier: null, cost_per_yard: w.backing_fabric_cost_at_quote || 0, margin_percent: w.backing_fabric_margin_at_quote || 0, width_inches: 54, pattern_repeat_v: 0, pattern_repeat_h: 0, backing_fabric_id: null, swatch_photo_path: null, notes: null } as Fabric } : {}),
               ...(w.backing_yards_needed ? { backingYards: w.backing_yards_needed } : {}),
             })),
           })));
@@ -1219,6 +1219,8 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
               backing_fabric_code: it.backingFabric.code,
               backing_fabric_name: `${it.backingFabric.name}${it.backingFabric.color_pattern ? ' — ' + it.backingFabric.color_pattern : ''}`,
               backing_yards_needed: it.backingYardsOverride || it.backingYards || 0,
+              backing_fabric_cost_at_quote: it.backingFabric.cost_per_yard,
+              backing_fabric_margin_at_quote: it.backingFabric.margin_percent,
             } : {}),
           })),
         })),

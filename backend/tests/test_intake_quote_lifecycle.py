@@ -28,9 +28,15 @@ def _json_request(payload: dict) -> Request:
 
 
 def test_intake_to_quote_carries_project_fields(monkeypatch, tmp_path):
+    monkeypatch.setenv("EMPIRE_TASK_DB", str(tmp_path / "empire.db"))
+
+    from app.db import database, init_db
     from app.routers import intake_auth, quotes
     from app.services.max.response_quality_engine import QualityResult
 
+    importlib.reload(database)
+    importlib.reload(init_db)
+    init_db.init_database()
     importlib.reload(intake_auth)
     importlib.reload(quotes)
 
@@ -183,3 +189,14 @@ def test_intake_to_quote_carries_project_fields(monkeypatch, tmp_path):
     assert quote["scan_3d_files"][0]["original_name"] == "Room Scan.glb"
     assert quote["scan_3d_files"][0]["source"] == "intake"
     assert quote["scan_3d_files"][0]["intake_project_id"] == project_id
+
+    with database.get_db() as crm_conn:
+        customer = crm_conn.execute(
+            "SELECT * FROM customers WHERE lower(email) = lower(?)",
+            ("ada@example.com",),
+        ).fetchone()
+
+    assert customer is not None
+    assert customer["name"] == "Ada Draper"
+    assert customer["business"] == "workroom"
+    assert customer["lifetime_quotes"] == 1

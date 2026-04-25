@@ -104,6 +104,7 @@ class DesignCreate(BaseModel):
     stl_file: Optional[str] = None
     preview_image: Optional[str] = None
     photos: list = Field(default_factory=list)  # list of dicts {serverUrl, name, includeInPdf} or strings
+    ai_results: list[dict] = Field(default_factory=list)
 
     # Financials
     material_cost: float = 0.0
@@ -151,6 +152,7 @@ class DesignUpdate(BaseModel):
     stl_file: Optional[str] = None
     preview_image: Optional[str] = None
     photos: Optional[list] = None
+    ai_results: Optional[list[dict]] = None
     material_cost: Optional[float] = None
     cnc_time_cost: Optional[float] = None
     labor_cost: Optional[float] = None
@@ -238,6 +240,54 @@ def _delete(directory: str, id: str):
         os.remove(path)
 
 
+def _refresh_woodcraft_customer_metrics(customer_id: str, customer_name: str, customer_email: str):
+    from app.db.database import get_db
+
+    name_key = (customer_name or "").strip().lower()
+    email_key = (customer_email or "").strip().lower()
+    lifetime_quotes = 0
+    total_revenue = 0.0
+
+    for design in _list_all(DESIGNS_DIR):
+        d_name = (design.get("customer_name") or "").strip().lower()
+        d_email = (design.get("customer_email") or "").strip().lower()
+        if not ((name_key and d_name == name_key) or (email_key and d_email == email_key)):
+            continue
+        lifetime_quotes += 1
+        total_revenue += float(design.get("total") or 0)
+
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE customers
+               SET total_revenue = ?,
+                   lifetime_quotes = ?,
+                   business = 'woodcraft',
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (round(total_revenue, 2), lifetime_quotes, customer_id),
+        )
+
+
+def _sync_woodcraft_customer(design: dict):
+    if not (design.get("customer_name") or "").strip():
+        return None
+
+    customer_id = None
+    try:
+        from app.db.database import get_db
+        with get_db() as conn:
+            customer_id = _find_or_create_woodcraft_customer(conn, design)
+        if customer_id:
+            _refresh_woodcraft_customer_metrics(
+                customer_id,
+                design.get("customer_name", ""),
+                design.get("customer_email", ""),
+            )
+    except Exception as e:
+        logger.warning(f"WoodCraft CRM sync failed: {e}")
+    return customer_id
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  DESIGNS — CNC/3D print design CRUD
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -256,6 +306,7 @@ async def create_design(design: DesignCreate):
     }
     # Store EXACTLY what the frontend sends — no auto-calculation
     _save(DESIGNS_DIR, design_id, data)
+    _sync_woodcraft_customer(data)
     return data
 
 
@@ -291,6 +342,7 @@ async def update_design(design_id: str, update: DesignUpdate):
             data[key] = val
     data["updated_at"] = datetime.utcnow().isoformat()
     _save(DESIGNS_DIR, design_id, data)
+    _sync_woodcraft_customer(data)
     return data
 
 

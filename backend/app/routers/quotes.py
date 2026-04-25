@@ -18,6 +18,7 @@ import logging
 
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.business_routing import route_to_for_item_type
+from app.db.database import get_db, dict_row
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,8 @@ class QuoteUpdate(BaseModel):
     ai_mockups: Optional[list] = None
     max_analysis: Optional[str] = None
     scan_3d_files: Optional[list] = None
+    selected_proposal: Optional[int] = None
+    selected_tier: Optional[str] = None
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -151,7 +154,23 @@ def _next_quote_number() -> str:
             counter = json.load(f)
         if counter.get("year") != year:
             counter = {"year": year, "seq": 0}
-    counter["seq"] += 1
+
+    max_existing_seq = 0
+    if os.path.isdir(QUOTES_DIR):
+        prefix = f"EST-{year}-"
+        for fname in os.listdir(QUOTES_DIR):
+            if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
+                continue
+            try:
+                with open(os.path.join(QUOTES_DIR, fname)) as f:
+                    quote = json.load(f)
+                quote_number = quote.get("quote_number", "")
+                if quote_number.startswith(prefix):
+                    max_existing_seq = max(max_existing_seq, int(quote_number.split("-")[-1]))
+            except Exception:
+                continue
+
+    counter["seq"] = max(counter.get("seq", 0), max_existing_seq) + 1
     with open(COUNTER_FILE, "w") as f:
         json.dump(counter, f)
     return f"EST-{year}-{counter['seq']:03d}"
@@ -324,6 +343,219 @@ def _quote_business_key(quote: dict) -> str:
     )
 
 
+def _quote_display_total(quote: dict) -> float:
+    total = quote.get("total")
+    if total not in (None, "", 0):
+        return float(total)
+
+    selected_idx = quote.get("selected_proposal")
+    proposals = quote.get("design_proposals") or []
+    if isinstance(selected_idx, int) and 0 <= selected_idx < len(proposals):
+        return float(proposals[selected_idx].get("total") or 0)
+
+    tiers = quote.get("tiers") or {}
+    if isinstance(tiers, dict):
+        for key in ("B", "A", "C"):
+            tier = tiers.get(key) or {}
+            tier_total = tier.get("total")
+            if tier_total not in (None, "", 0):
+                return float(tier_total)
+    elif isinstance(tiers, list):
+        for tier in tiers:
+            tier_total = (tier or {}).get("total")
+            if tier_total not in (None, "", 0):
+                return float(tier_total)
+
+    subtotal = quote.get("subtotal")
+    return float(subtotal or 0)
+
+
+def _get_fabric_snapshot(fabric_id) -> Optional[dict]:
+    if not fabric_id:
+        return None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """SELECT id, code, name, color_pattern, material_type,
+                          cost_per_yard, margin_percent
+                   FROM fabrics
+                   WHERE id = ? AND is_active = 1""",
+                (fabric_id,),
+            ).fetchone()
+            return dict_row(row)
+    except Exception:
+        return None
+
+
+def _reconcile_quote_customer_stats(customer_id: str, customer_name: str, customer_email: str):
+    total_revenue = 0.0
+    lifetime_quotes = 0
+
+    name_key = (customer_name or "").strip().lower()
+    email_key = (customer_email or "").strip().lower()
+
+    for fname in os.listdir(QUOTES_DIR):
+        if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
+            continue
+        try:
+            with open(os.path.join(QUOTES_DIR, fname)) as f:
+                quote = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        q_name = (quote.get("customer_name") or "").strip().lower()
+        q_email = (quote.get("customer_email") or "").strip().lower()
+        if not ((name_key and q_name == name_key) or (email_key and q_email == email_key)):
+            continue
+
+        lifetime_quotes += 1
+        total_revenue += _quote_display_total(quote)
+
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE customers
+               SET total_revenue = ?,
+                   lifetime_quotes = ?,
+                   updated_at = datetime('now')
+               WHERE id = ?""",
+            (round(total_revenue, 2), lifetime_quotes, customer_id),
+        )
+
+
+def _sync_quote_customer_to_crm(quote: dict) -> Optional[str]:
+    customer_name = (quote.get("customer_name") or "").strip()
+    if not customer_name or customer_name.lower() in {
+        "customer", "unknown", "unnamed customer", "new customer",
+        "new client", "default customer", "sample customer", "test client",
+    }:
+        return None
+
+    customer_email = (quote.get("customer_email") or "").strip()
+    customer_phone = (quote.get("customer_phone") or "").strip()
+    customer_address = (quote.get("customer_address") or "").strip()
+    business = _quote_business_key(quote)
+
+    with get_db() as conn:
+        customer_id = None
+        if customer_email:
+            row = conn.execute(
+                "SELECT id FROM customers WHERE lower(email) = lower(?) ORDER BY updated_at DESC LIMIT 1",
+                (customer_email,),
+            ).fetchone()
+            if row:
+                customer_id = dict_row(row)["id"]
+        if not customer_id:
+            row = conn.execute(
+                "SELECT id FROM customers WHERE lower(name) = lower(?) ORDER BY updated_at DESC LIMIT 1",
+                (customer_name,),
+            ).fetchone()
+            if row:
+                customer_id = dict_row(row)["id"]
+
+        if customer_id:
+            conn.execute(
+                """UPDATE customers
+                   SET email = CASE WHEN COALESCE(email, '') = '' THEN ? ELSE email END,
+                       phone = CASE WHEN COALESCE(phone, '') = '' THEN ? ELSE phone END,
+                       address = CASE WHEN COALESCE(address, '') = '' THEN ? ELSE address END,
+                       business = CASE
+                           WHEN COALESCE(business, '') IN ('', 'workroom') THEN ?
+                           ELSE business
+                       END,
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (
+                    customer_email or None,
+                    customer_phone or None,
+                    customer_address or None,
+                    business,
+                    customer_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO customers
+                   (id, name, email, phone, address, type, total_revenue,
+                    lifetime_quotes, source, business)
+                   VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'residential', 0, 0, 'quote', ?)""",
+                (
+                    customer_name,
+                    customer_email or None,
+                    customer_phone or None,
+                    customer_address or None,
+                    business,
+                ),
+            )
+            row = conn.execute(
+                """SELECT id FROM customers
+                   WHERE lower(name) = lower(?) AND COALESCE(lower(email), '') = COALESCE(lower(?), '')
+                   ORDER BY created_at DESC LIMIT 1""",
+                (customer_name, customer_email or None),
+            ).fetchone()
+            customer_id = dict_row(row)["id"] if row else None
+
+    if customer_id:
+        _reconcile_quote_customer_stats(customer_id, customer_name, customer_email)
+    return customer_id
+
+
+def _apply_selected_proposal_or_tier(quote: dict, selection) -> bool:
+    tier_key = None
+    proposal_idx = None
+
+    if isinstance(selection, int):
+        proposal_idx = selection
+        tier_keys = ("A", "B", "C")
+        if 0 <= selection < len(tier_keys):
+            tier_key = tier_keys[selection]
+    elif isinstance(selection, str):
+        normalized = selection.strip().upper()
+        if normalized in {"A", "B", "C"}:
+            tier_key = normalized
+            proposal_idx = ord(normalized) - 65
+        else:
+            return False
+    else:
+        return False
+
+    proposals = quote.get("design_proposals") or []
+    selected = None
+    if proposal_idx is not None and 0 <= proposal_idx < len(proposals):
+        selected = proposals[proposal_idx]
+        quote["selected_proposal"] = proposal_idx
+        quote["selected_tier"] = tier_key or chr(65 + proposal_idx)
+        quote["line_items"] = selected.get("line_items", [])
+        quote["subtotal"] = round(selected.get("subtotal") or 0, 2)
+        quote["tax_rate"] = selected.get("tax_rate", quote.get("tax_rate", 0) or 0)
+        quote["tax_amount"] = round(selected.get("tax_amount") or 0, 2)
+        quote["total"] = round(selected.get("total") or 0, 2)
+    else:
+        tiers = quote.get("tiers") or {}
+        if not isinstance(tiers, dict) or not tier_key or tier_key not in tiers:
+            return False
+        tier = tiers[tier_key] or {}
+        quote["selected_proposal"] = proposal_idx
+        quote["selected_tier"] = tier_key
+        flattened = []
+        for item in tier.get("items", []):
+            flattened.extend(item.get("line_items") or [])
+        quote["line_items"] = flattened
+        quote["subtotal"] = round(tier.get("subtotal") or 0, 2)
+        quote["tax_rate"] = tier.get("tax_rate", quote.get("tax_rate", 0) or 0)
+        quote["tax_amount"] = round(tier.get("tax") or 0, 2)
+        quote["total"] = round(tier.get("total") or 0, 2)
+
+    deposit = quote.get("deposit") or {}
+    deposit_percent = float(deposit.get("deposit_percent") or 0)
+    if not deposit and not deposit_percent:
+        deposit_percent = 50.0
+    deposit["deposit_percent"] = deposit_percent
+    deposit["deposit_amount"] = round((quote.get("total") or 0) * (deposit_percent / 100), 2)
+    quote["deposit"] = deposit
+    quote["updated_at"] = datetime.utcnow().isoformat()
+    return True
+
+
 # ── CRUD Endpoints ────────────────────────────────────────────
 
 @router.post("")
@@ -411,6 +643,7 @@ async def create_quote(payload: QuoteCreate):
             pass
 
     _save_quote(quote)
+    _sync_quote_customer_to_crm(quote)
     return {"status": "created", "quote": quote}
 
 
@@ -559,6 +792,7 @@ async def create_quote_from_rooms(body: dict):
                 # Recompute flat financials from line_items
                 old_quote = _compute_financials(old_quote)
                 _save_quote(old_quote)
+                _sync_quote_customer_to_crm(old_quote)
                 return {"status": "success", "quote": old_quote}
 
     from app.services.quote_engine.quote_assembler import assemble_quote
@@ -607,6 +841,13 @@ async def create_quote_from_rooms(body: dict):
             elif "2cushion" in item_type: cushion_count = 2
             elif "cushion" in item_type.lower() or "seat" in item_type.lower(): cushion_count = 1
 
+            fabric_snapshot = _get_fabric_snapshot(item.get("fabric_id"))
+            backing_snapshot = _get_fabric_snapshot(item.get("backing_fabric_id"))
+            fabric_cost = item.get("fabric_cost_at_quote")
+            fabric_margin = item.get("fabric_margin_at_quote")
+            backing_cost = item.get("backing_fabric_cost_at_quote")
+            backing_margin = item.get("backing_fabric_margin_at_quote")
+
             analyzed_items.append({
                 "name": f"{room_name} - {item_type.replace('_', ' ').title()}",
                 "type": item_type,
@@ -616,6 +857,16 @@ async def create_quote_from_rooms(body: dict):
                 "condition": "",
                 "special_features": special_features,
                 "cushion_count": cushion_count,
+                "fabric_name": item.get("fabric_name"),
+                "fabric_code": item.get("fabric_code"),
+                "fabric_yards_needed": item.get("fabric_yards_override") or item.get("fabric_yards_needed"),
+                "fabric_cost_at_quote": fabric_cost if fabric_cost is not None else (fabric_snapshot or {}).get("cost_per_yard"),
+                "fabric_margin_at_quote": fabric_margin if fabric_margin is not None else (fabric_snapshot or {}).get("margin_percent"),
+                "backing_fabric_name": item.get("backing_fabric_name"),
+                "backing_fabric_code": item.get("backing_fabric_code"),
+                "backing_yards_needed": item.get("backing_yards_needed"),
+                "backing_fabric_cost_at_quote": backing_cost if backing_cost is not None else (backing_snapshot or {}).get("cost_per_yard"),
+                "backing_fabric_margin_at_quote": backing_margin if backing_margin is not None else (backing_snapshot or {}).get("margin_percent"),
             })
 
     if not analyzed_items:
@@ -674,6 +925,7 @@ async def create_quote_from_rooms(body: dict):
     os.makedirs(QUOTES_DIR, exist_ok=True)
     with open(os.path.join(QUOTES_DIR, f"{quote['id']}.json"), "w") as f:
         json.dump(quote, f, indent=2, default=str)
+    _sync_quote_customer_to_crm(quote)
 
     return {"status": "success", "quote": quote}
 
@@ -1035,6 +1287,12 @@ async def update_quote(quote_id: str, payload: QuoteUpdate):
     quote.update(updates)
     quote["updated_at"] = datetime.utcnow().isoformat()
 
+    selection_applied = False
+    if "selected_tier" in updates and updates["selected_tier"] is not None:
+        selection_applied = _apply_selected_proposal_or_tier(quote, updates["selected_tier"])
+    if not selection_applied and "selected_proposal" in updates and updates["selected_proposal"] is not None:
+        selection_applied = _apply_selected_proposal_or_tier(quote, updates["selected_proposal"])
+
     # Recalculate if line items or tax changed
     if any(k in updates for k in ("line_items", "tax_rate", "discount_amount")):
         quote = _compute_financials(quote)
@@ -1045,6 +1303,7 @@ async def update_quote(quote_id: str, payload: QuoteUpdate):
         quote["expires_at"] = (created + timedelta(days=updates["valid_days"])).isoformat()
 
     _save_quote(quote)
+    _sync_quote_customer_to_crm(quote)
     return {"status": "updated", "quote": quote}
 
 

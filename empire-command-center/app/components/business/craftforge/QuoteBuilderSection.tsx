@@ -145,6 +145,7 @@ export default function QuoteBuilderSection() {
   const [photos, setPhotos] = useState<{ file?: File; url?: string; name: string; serverUrl?: string; includeInPdf?: boolean }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [aiResults, setAiResults] = useState<any[]>([]);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const fetchDesigns = useCallback(() => {
     setLoading(true);
@@ -298,6 +299,8 @@ export default function QuoteBuilderSection() {
     } else {
       setPhotos([]);
     }
+    setAiResults(Array.isArray(design.ai_results) ? design.ai_results : []);
+    setAiError(null);
 
     setSectionsOpen({ customer: true, lineItems: true, cncMaterials: hasCNC, review: true });
     setView('edit');
@@ -344,6 +347,7 @@ export default function QuoteBuilderSection() {
     discount_type: discountType === '%' ? 'percent' : 'dollar',
     notes: notes || undefined,
     photos: photos.filter(p => p.serverUrl).map(p => ({ serverUrl: p.serverUrl, name: p.name, includeInPdf: p.includeInPdf !== false })),
+    ai_results: aiResults,
     pdf_show: pdfShow,
   });
 
@@ -548,22 +552,77 @@ export default function QuoteBuilderSection() {
 
   const removePhoto = (idx: number) => {
     setPhotos(prev => prev.filter((_, i) => i !== idx));
+    setAiResults(prev => prev.filter(result => result.photoIdx !== idx).map(result => ({
+      ...result,
+      photoIdx: result.photoIdx > idx ? result.photoIdx - 1 : result.photoIdx,
+    })));
+  };
+
+  const photoToDataUrl = async (photo: { file?: File; url?: string; name: string; serverUrl?: string }) => {
+    if (photo.file) {
+      return await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(photo.file!);
+      });
+    }
+
+    const fetchUrl = photo.url || photo.serverUrl;
+    if (!fetchUrl) throw new Error('No photo source available');
+
+    const resp = await fetch(fetchUrl);
+    if (!resp.ok) {
+      throw new Error(`Could not read uploaded photo (${resp.status})`);
+    }
+
+    const blob = await resp.blob();
+    return await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
   };
 
   const analyzePhoto = async (photoIdx: number) => {
     const photo = photos[photoIdx];
-    if (!photo.file) return;
+    if (!photo) return;
     setUploading(true);
+    setAiError(null);
     try {
-      const formData = new FormData();
-      formData.append('file', photo.file);
-      const resp = await fetch(`${API}/vision/measure`, { method: 'POST', body: formData });
-      if (resp.ok) {
-        const result = await resp.json();
-        setAiResults(prev => [...prev, { photoIdx, ...result }]);
+      const image = await photoToDataUrl(photo);
+      const resp = await fetch(`${API}/drawings/analyze-furniture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image,
+          generate_drawings: false,
+          generate_fabrication: false,
+        }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(result.detail || `AI analysis failed (${resp.status})`);
       }
+
+      const entry = {
+        photoIdx,
+        photoName: photo.name,
+        photoServerUrl: photo.serverUrl || null,
+        analyzedAt: new Date().toISOString(),
+        analysisType: 'furniture',
+        ...result,
+      };
+      setAiResults(prev => {
+        const next = prev.filter(existing =>
+          !(existing.photoIdx === photoIdx)
+          && !(existing.photoServerUrl && photo.serverUrl && existing.photoServerUrl === photo.serverUrl)
+          && !(existing.photoName === photo.name && existing.photoIdx === photoIdx)
+        );
+        return [...next, entry];
+      });
     } catch (e) {
       console.error('AI analysis failed:', e);
+      setAiError(e instanceof Error ? e.message : 'AI analysis failed');
     } finally {
       setUploading(false);
     }
@@ -1080,10 +1139,10 @@ export default function QuoteBuilderSection() {
                     />
                     PDF
                   </label>
-                  {p.file && (
+                  {(p.file || p.serverUrl || p.url) && (
                     <button
                       onClick={(e) => { e.stopPropagation(); analyzePhoto(i); }}
-                      title="AI Measure"
+                      title="AI Analyze"
                       style={{ position: 'absolute', bottom: 2, right: 2, background: '#b8960c', color: '#fff', borderRadius: 4, padding: '2px 4px', border: 'none', cursor: 'pointer', fontSize: 9 }}
                     >
                       AI
@@ -1099,17 +1158,23 @@ export default function QuoteBuilderSection() {
             <div className="text-[#999]">
               <Upload size={24} className="mx-auto mb-2 text-[#ccc]" />
               <p className="text-[12px] font-semibold">Drop photos here or click to upload</p>
-              <p className="text-[10px] mt-1">AI measurement available after upload</p>
+              <p className="text-[10px] mt-1">AI photo analysis available after upload</p>
             </div>
           )}
         </div>
         <input id="cf-photo-input" type="file" accept="image/*" multiple hidden onChange={e => handlePhotoUpload(e.target.files)} />
+        {aiError && (
+          <div className="mt-3 p-3 bg-[#fff4f4] rounded-lg border border-[#f2c4c4] text-[11px] text-[#9f1239]">
+            {aiError}
+          </div>
+        )}
         {aiResults.length > 0 && (
           <div className="mt-3 p-3 bg-[#fffcf0] rounded-lg border border-[#f0e6c0]">
-            <p className="text-[11px] font-bold text-[#b8960c] mb-2">AI Measurement Results</p>
+            <p className="text-[11px] font-bold text-[#b8960c] mb-2">AI Photo Analysis</p>
             {aiResults.map((r, i) => (
               <div key={i} className="text-[11px] text-[#555] mb-1">
-                {JSON.stringify(r.measurements || r.items || r, null, 0).slice(0, 200)}
+                <span className="font-semibold text-[#3d2e1a]">{r.photoName || `Photo ${i + 1}`}: </span>
+                {JSON.stringify(r.items || r.fabric_matches || r, null, 0).slice(0, 220)}
               </div>
             ))}
           </div>

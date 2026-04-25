@@ -118,3 +118,68 @@ def test_woodcraft_design_to_invoice_and_job_carries_fields(monkeypatch, tmp_pat
         assert customer["phone"] == "555-0333"
         assert customer["address"] == "33 CNC Road"
         assert customer["business"] == "woodcraft"
+
+
+def test_woodcraft_design_persists_ai_results_and_syncs_crm(monkeypatch, tmp_path):
+    craftforge, database, designs_dir = _load_woodcraft_modules(monkeypatch, tmp_path)
+
+    created = asyncio.run(craftforge.create_design(craftforge.DesignCreate(
+        customer_name="Millwork Client",
+        customer_email="millwork@example.com",
+        customer_phone="555-0444",
+        customer_address="44 Joinery Ave",
+        name="Built-In Cabinet Study",
+        description="Study wall cabinet",
+        category="cabinet-door",
+        style="modern",
+        width=72,
+        height=96,
+        depth=18,
+        photos=[{"serverUrl": "/api/v1/photos/serve/craftforge/design-1/cabinet.jpg", "name": "cabinet.jpg"}],
+        ai_results=[{
+            "photoIdx": 0,
+            "photoName": "cabinet.jpg",
+            "analysisType": "furniture",
+            "items": [{"item_type": "millwork", "dimensions": {"width": "72\"", "height": "96\""}}],
+        }],
+        subtotal=1200,
+        total=1320,
+    )))
+
+    saved_design = json.loads((designs_dir / f"{created['id']}.json").read_text())
+    assert saved_design["photos"][0]["name"] == "cabinet.jpg"
+    assert saved_design["ai_results"][0]["analysisType"] == "furniture"
+    assert saved_design["ai_results"][0]["items"][0]["item_type"] == "millwork"
+
+    updated = asyncio.run(craftforge.update_design(
+        created["id"],
+        craftforge.DesignUpdate(ai_results=[{
+            "photoIdx": 0,
+            "photoName": "cabinet.jpg",
+            "analysisType": "furniture",
+            "items": [{"item_type": "millwork", "dimensions": {"width": "74\"", "height": "96\""}}],
+        }]),
+    ))
+    assert updated["ai_results"][0]["items"][0]["dimensions"]["width"] == "74\""
+
+    with database.get_db() as conn:
+        customer = conn.execute(
+            "SELECT * FROM customers WHERE lower(email) = lower(?)",
+            ("millwork@example.com",),
+        ).fetchone()
+
+    assert customer is not None
+    assert customer["name"] == "Millwork Client"
+    assert customer["business"] == "woodcraft"
+    assert customer["lifetime_quotes"] == 1
+
+
+def test_craftforge_photo_storage_accepts_craftforge_entity(monkeypatch, tmp_path):
+    from app.routers import photos
+
+    monkeypatch.setattr(photos, "PHOTOS_BASE", tmp_path / "photos")
+    target = photos._entity_dir("craftforge", "design-123")
+
+    assert target.exists()
+    assert target.name == "design-123"
+    assert target.parent.name == "craftforge"

@@ -251,6 +251,51 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     }
   };
 
+  const proposals = quote?.design_proposals || [];
+  const tiers = [
+    { label: 'Essential', key: 'A', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
+    { label: 'Designer', key: 'B', color: '#b8960c', bg: '#fdf8eb', border: '#f5ecd0' },
+    { label: 'Premium', key: 'C', color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
+  ];
+  const derivedTierProposals = proposals.length > 0 ? proposals : tiers
+    .map((tierMeta, index) => {
+      const tierMap = (quote as any)?.tiers || {};
+      const tier = Array.isArray(tierMap)
+        ? tierMap.find((entry: any) => entry?.fabric_grade === tierMeta.key || entry?.key === tierMeta.key)
+        : tierMap[tierMeta.key];
+      if (!tier) return null;
+      return {
+        label: tierMeta.label,
+        tier: tierMeta.label,
+        fabric_grade: tierMeta.key,
+        lining_type: (quote as any)?.options?.lining_type || (quote as any)?.lining_preference || 'Standard',
+        subtotal: tier.subtotal || 0,
+        tax_amount: tier.tax || 0,
+        tax_rate: tier.tax_rate || 0,
+        total: tier.total || 0,
+        line_items: (tier.items || []).flatMap((item: any) => item.line_items || []),
+        source: 'tiers',
+        index,
+      };
+    })
+    .filter(Boolean);
+  const showProposalSelector = derivedTierProposals.length > 0
+    && editItems.length === 0
+    && ((quote as any)?.selected_proposal === null || (quote as any)?.selected_proposal === undefined);
+  const activeProposal = derivedTierProposals[selected] || derivedTierProposals[(quote as any)?.selected_proposal ?? 0] || null;
+  const activeQuoteTotal = quote?.total ?? activeProposal?.total ?? 0;
+
+  useEffect(() => {
+    if (!quote) return;
+    if ((quote as any).selected_proposal !== null && (quote as any).selected_proposal !== undefined) {
+      setSelected((quote as any).selected_proposal);
+    } else if (derivedTierProposals.length > 1) {
+      setSelected(1);
+    } else {
+      setSelected(0);
+    }
+  }, [quote?.id, (quote as any)?.selected_proposal, derivedTierProposals.length]);
+
   if (loading) return (
     <div className="flex-1 flex items-center justify-center">
       <div className="w-8 h-8 border-3 border-[#e5e0d8] border-t-[#b8960c] rounded-full animate-spin" />
@@ -264,13 +309,6 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       <p className="text-sm text-[#aaa]">Create a quote via chat to review here</p>
     </div>
   );
-
-  const proposals = quote.design_proposals || [];
-  const tiers = [
-    { label: 'Essential', key: 'A', color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0' },
-    { label: 'Designer', key: 'B', color: '#b8960c', bg: '#fdf8eb', border: '#f5ecd0' },
-    { label: 'Premium', key: 'C', color: '#7c3aed', bg: '#faf5ff', border: '#e9d5ff' },
-  ];
 
   const showFeedback = (msg: string) => {
     setActionFeedback(msg);
@@ -306,13 +344,13 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         await fetch(API + '/max/chat/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: `Send quote ${quote.quote_number} for ${quote.customer_name} ($${quote.total}) to Telegram`, model: 'auto', history: [] }),
+          body: JSON.stringify({ message: `Send quote ${quote.quote_number} for ${quote.customer_name} ($${activeQuoteTotal}) to Telegram`, model: 'auto', history: [] }),
         });
         showFeedback('Sent to Telegram!');
       } catch { showFeedback('Failed to send'); }
     } else if (action === 'email') {
       const subject = encodeURIComponent(`Quote ${quote.quote_number} - ${quote.customer_name}`);
-      const body = encodeURIComponent(`Hi ${quote.customer_name},\n\nPlease find your quote ${quote.quote_number} attached.\n\nTotal: $${(quote.total || 0).toLocaleString()}\n\nThank you,\nEmpire Workroom`);
+      const body = encodeURIComponent(`Hi ${quote.customer_name},\n\nPlease find your quote ${quote.quote_number} attached.\n\nTotal: $${Number(activeQuoteTotal || 0).toLocaleString()}\n\nThank you,\nEmpire Workroom`);
       window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
       showFeedback('Opening email client...');
     } else if (action === 'print') {
@@ -320,12 +358,18 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     } else if (action === 'confirm') {
       showFeedback('Confirming selection...');
       try {
-        await fetch(API + `/quotes/${quote.id}`, {
+        const res = await fetch(API + `/quotes/${quote.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'accepted', selected_tier: selected }),
+          body: JSON.stringify({
+            status: 'accepted',
+            selected_proposal: selected,
+            selected_tier: tiers[selected]?.key,
+          }),
         });
-        setQuote({ ...quote, status: 'accepted' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        setQuote(data.quote || data);
         showFeedback('Quote accepted!');
       } catch { showFeedback('Failed to update'); }
     } else if (action === 'video') {
@@ -511,7 +555,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       </div>
 
       {/* Editable line items */}
-      {true ? (
+      {!showProposalSelector ? (
         <div className="mb-5">
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm font-bold text-[#1a1a1a]">Line Items</div>
@@ -692,7 +736,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       <div className="text-sm font-bold mb-3 text-[#1a1a1a]">Select a Proposal</div>
       <div className="flex gap-3 mb-5">
         {tiers.map((t, i) => {
-          const p = proposals[i];
+          const p = derivedTierProposals[i];
           const total = p?.total || 0;
           const isSelected = selected === i;
           return (

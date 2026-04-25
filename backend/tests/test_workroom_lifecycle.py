@@ -135,3 +135,176 @@ def test_workroom_quote_invoice_payment_crm_lifecycle(monkeypatch, tmp_path):
     assert customer["invoices"][0]["quote_id"] == "workroom-quote"
     assert len(customer["payments"]) == 1
     assert customer["payments"][0]["amount"] == 155
+
+
+def test_from_rooms_uses_selected_catalog_pricing_and_syncs_crm(monkeypatch, tmp_path):
+    quotes, _, _, quotes_dir = _load_lifecycle_modules(monkeypatch, tmp_path)
+
+    with quotes.get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS fabrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                color_pattern TEXT,
+                material_type TEXT,
+                supplier TEXT,
+                supplier_link TEXT,
+                cost_per_yard REAL DEFAULT 0,
+                margin_percent REAL DEFAULT 0,
+                durability TEXT,
+                pattern_repeat_h REAL DEFAULT 0,
+                pattern_repeat_v REAL DEFAULT 0,
+                width_inches REAL DEFAULT 54,
+                backing_fabric_id INTEGER,
+                swatch_photo_path TEXT,
+                notes TEXT,
+                is_active INTEGER DEFAULT 1,
+                source TEXT DEFAULT 'owner',
+                submitted_by_customer_id TEXT,
+                client_description TEXT,
+                client_swatch_photo_path TEXT,
+                needs_review INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now'))
+            );
+            """
+        )
+        backing_id = conn.execute(
+            """INSERT INTO fabrics
+               (code, name, material_type, cost_per_yard, margin_percent)
+               VALUES (?, ?, ?, ?, ?)""",
+            ("NCOP-04", "Founder Backing", "Backing", 42.95, 10),
+        ).lastrowid
+        fabric_id = conn.execute(
+            """INSERT INTO fabrics
+               (code, name, material_type, cost_per_yard, margin_percent, backing_fabric_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("V639", "Founder Spruce", "Upholstery", 39.95, 25, backing_id),
+        ).lastrowid
+
+    base_body = {
+        "customer_name": "Catalog Client",
+        "customer_email": "catalog@example.com",
+        "customer_phone": "555-0200",
+        "customer_address": "24 Fabric Way",
+        "rooms": [{
+            "name": "Breakfast Nook",
+            "items": [{
+                "type": "cornice",
+                "quantity": 1,
+                "dimensions": {"width": 120, "height": 18, "depth": 8},
+                "fabric_yards_needed": 6,
+                "backing_yards_needed": 6,
+            }],
+        }],
+        "options": {"lining_type": "none"},
+    }
+
+    without_selected = asyncio.run(quotes.create_quote_from_rooms(base_body))
+    with_selected = asyncio.run(quotes.create_quote_from_rooms({
+        **base_body,
+        "rooms": [{
+            "name": "Breakfast Nook",
+            "items": [{
+                "type": "cornice",
+                "quantity": 1,
+                "dimensions": {"width": 120, "height": 18, "depth": 8},
+                "fabric_id": fabric_id,
+                "fabric_name": "Founder Spruce",
+                "fabric_code": "V639",
+                "fabric_yards_needed": 6,
+                "backing_fabric_id": backing_id,
+                "backing_fabric_name": "Founder Backing",
+                "backing_fabric_code": "NCOP-04",
+                "backing_yards_needed": 6,
+            }],
+        }],
+    }))
+
+    without_quote = without_selected["quote"]
+    with_quote = with_selected["quote"]
+
+    assert without_quote["tiers"]["A"]["total"] != with_quote["tiers"]["A"]["total"]
+
+    tier_a_items = with_quote["tiers"]["A"]["items"][0]["line_items"]
+    fabric_line = next(li for li in tier_a_items if li["category"] == "fabric")
+    backing_line = next(li for li in tier_a_items if li["category"] == "backing")
+
+    assert fabric_line["description"] == "Founder Spruce (6.0 yd)"
+    assert fabric_line["rate"] == 49.94
+    assert backing_line["description"] == "Founder Backing (6.0 yd)"
+    assert backing_line["rate"] == 47.25
+
+    saved_quote = json.loads((quotes_dir / f"{with_quote['id']}.json").read_text())
+    assert saved_quote["customer_email"] == "catalog@example.com"
+
+    with quotes.get_db() as conn:
+        customer = conn.execute(
+            "SELECT * FROM customers WHERE lower(email) = lower(?)",
+            ("catalog@example.com",),
+        ).fetchone()
+
+    assert customer is not None
+    assert customer["name"] == "Catalog Client"
+    assert customer["business"] == "workroom"
+    assert customer["lifetime_quotes"] == 2
+
+
+def test_selected_tier_materializes_totals_and_line_items(monkeypatch, tmp_path):
+    quotes, _, _, quotes_dir = _load_lifecycle_modules(monkeypatch, tmp_path)
+
+    response = asyncio.run(quotes.create_quote_from_rooms({
+        "customer_name": "Tier Client",
+        "customer_email": "tier@example.com",
+        "rooms": [{
+            "name": "Dining Room",
+            "items": [{
+                "type": "cornice",
+                "quantity": 1,
+                "dimensions": {"width": 96, "height": 18, "depth": 8},
+            }],
+        }],
+        "options": {"lining_type": "none"},
+    }))
+
+    quote = response["quote"]
+    assert quote.get("total") in (None, 0)
+
+    updated = asyncio.run(quotes.update_quote(
+        quote["id"],
+        quotes.QuoteUpdate(status="accepted", selected_tier="B"),
+    ))
+    selected_quote = updated["quote"]
+
+    assert selected_quote["selected_tier"] == "B"
+    assert selected_quote["status"] == "accepted"
+    assert selected_quote["total"] == selected_quote["tiers"]["B"]["total"]
+    assert selected_quote["subtotal"] == selected_quote["tiers"]["B"]["subtotal"]
+    assert selected_quote["line_items"]
+    assert selected_quote["deposit"]["deposit_amount"] == round(selected_quote["total"] * 0.5, 2)
+
+    saved_quote = json.loads((quotes_dir / f"{quote['id']}.json").read_text())
+    assert saved_quote["selected_tier"] == "B"
+    assert saved_quote["total"] == saved_quote["tiers"]["B"]["total"]
+
+
+def test_create_quote_number_advances_past_existing_files(monkeypatch, tmp_path):
+    quotes, _, _, quotes_dir = _load_lifecycle_modules(monkeypatch, tmp_path)
+
+    _write_quote(quotes_dir, {
+        "id": "older-high",
+        "quote_number": "EST-2026-117",
+        "customer_name": "Existing Customer",
+        "status": "draft",
+    })
+    (quotes_dir / "_counter.json").write_text(json.dumps({"year": 2026, "seq": 5}))
+
+    created = asyncio.run(quotes.create_quote(quotes.QuoteCreate(
+        customer_name="New Customer",
+        customer_email="new-customer@example.com",
+        line_items=[],
+    )))
+
+    assert created["quote"]["quote_number"] == "EST-2026-118"

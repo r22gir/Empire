@@ -3,7 +3,7 @@ Unified Photo Storage API.
 All photos from all sources (intake, quote builder, telegram, web) go through here.
 
 Storage layout: backend/data/photos/{entity_type}/{entity_id}/
-Entity types: quote, intake, telegram, general
+Entity types: quote, intake, telegram, craftforge, general
 """
 import json
 import os
@@ -30,7 +30,7 @@ PHOTOS_BASE.mkdir(parents=True, exist_ok=True)
 INTAKE_UPLOADS = Path(os.path.expanduser("~/empire-repo/backend/data/intake_uploads"))
 TELEGRAM_UPLOADS = Path(os.path.expanduser("~/empire-repo/uploads/images"))
 
-VALID_ENTITY_TYPES = {"quote", "intake", "telegram", "general"}
+VALID_ENTITY_TYPES = {"quote", "intake", "telegram", "craftforge", "general"}
 
 
 def _entity_dir(entity_type: str, entity_id: str) -> Path:
@@ -149,7 +149,7 @@ async def upload_photos(
 ):
     """
     Upload photos from any source.
-    entity_type: quote | intake | telegram | general
+    entity_type: quote | intake | telegram | craftforge | general
     entity_id: quote UUID, intake project ID, etc.
     source: web | telegram | intake | cc (for display badge)
     """

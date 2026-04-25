@@ -101,22 +101,52 @@ def build_line_items(
         yardage_opts["pattern_repeat"] = 24  # default repeat
 
     yardage_result = calculate_yardage(item_type, dims, yardage_opts)
-    yards = yardage_result["yards"]
+    yards = item.get("fabric_yards_needed")
+    if yards in (None, ""):
+        yards = yardage_result["yards"]
+    yards = round(float(yards or 0), 2)
 
-    # Apply tier fabric multiplier to price per yard
-    fabric_rate = round(fabric_info["price_per_yard"] * tier_info["fabric"], 2)
+    custom_fabric_cost = item.get("fabric_cost_at_quote")
+    custom_fabric_margin = item.get("fabric_margin_at_quote") or 0
+    custom_fabric_name = item.get("fabric_name") or item.get("fabric_code")
+
+    if custom_fabric_cost not in (None, ""):
+        base_cost = float(custom_fabric_cost)
+        margin_multiplier = 1 + (float(custom_fabric_margin) / 100)
+        fabric_rate = round(base_cost * margin_multiplier, 2)
+        fabric_label = custom_fabric_name or f"Selected fabric ({yards} yd)"
+        fabric_desc = f"{fabric_label} ({yards} yd)"
+    else:
+        # Apply tier fabric multiplier to price per yard
+        fabric_rate = round(fabric_info["price_per_yard"] * tier_info["fabric"], 2)
+        fabric_desc = f"Grade {fabric_grade} fabric — {fabric_info['name']} ({yards} yd)"
+
     fabric_total = round(fabric_rate * yards, 2)
 
     line_items.append({
         "category": "fabric",
-        "description": (
-            f"Grade {fabric_grade} fabric — {fabric_info['name']} ({yards} yd)"
-        ),
+        "description": fabric_desc,
         "quantity": yards,
         "unit": "yd",
         "rate": fabric_rate,
         "amount": fabric_total,
     })
+
+    backing_yards = item.get("backing_yards_needed")
+    backing_cost = item.get("backing_fabric_cost_at_quote")
+    if backing_yards not in (None, "", 0) and backing_cost not in (None, ""):
+        backing_margin = item.get("backing_fabric_margin_at_quote") or 0
+        backing_rate = round(float(backing_cost) * (1 + (float(backing_margin) / 100)), 2)
+        backing_name = item.get("backing_fabric_name") or item.get("backing_fabric_code") or "Backing fabric"
+        backing_yards = round(float(backing_yards), 2)
+        line_items.append({
+            "category": "backing",
+            "description": f"{backing_name} ({backing_yards} yd)",
+            "quantity": backing_yards,
+            "unit": "yd",
+            "rate": backing_rate,
+            "amount": round(backing_rate * backing_yards, 2),
+        })
 
     # ---- 2. Lining (drapery only) OR sq ft pricing (upholstery) ----
     if _is_drapery(item_type):
