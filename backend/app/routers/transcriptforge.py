@@ -320,6 +320,8 @@ def _chunk_job(job: Dict[str, Any]) -> List[Dict[str, Any]]:
             "reviewer_timestamp": None,
             "raw_provider_result": None,
         })
+        if end >= duration:
+            break
         start = end - CHUNK_OVERLAP_SEC
         seq += 1
     return chunks
