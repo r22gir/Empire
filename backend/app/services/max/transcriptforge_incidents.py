@@ -102,17 +102,23 @@ def _current_commit() -> str | None:
 
 
 def _infer_memory_status(memory: dict[str, Any]) -> str:
+    tags = [str(tag).upper() for tag in (memory.get("tags") or [])]
+    if "PENDING" in tags:
+        return "PENDING"
+    if "ACTIVE" in tags:
+        return "ACTIVE"
+
     haystack = " ".join(
         [
             str(memory.get("subject") or ""),
             str(memory.get("content") or ""),
-            " ".join(memory.get("tags") or []),
+            " ".join(tags),
         ]
     ).upper()
-    if "ACTIVE" in haystack:
-        return "ACTIVE"
-    if "PENDING" in haystack:
+    if re.search(r'"STATUS"\s*:\s*"PENDING"|STATUS\s*:\s*PENDING|\bPENDING\b', haystack):
         return "PENDING"
+    if re.search(r'"STATUS"\s*:\s*"ACTIVE"|STATUS\s*:\s*ACTIVE|\bACTIVE\b', haystack):
+        return "ACTIVE"
     return "memory-only"
 
 
