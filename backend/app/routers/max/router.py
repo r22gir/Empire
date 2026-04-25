@@ -1047,6 +1047,9 @@ def _apply_truth_guardrails(message: str | None, response_text: str, tool_result
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
+        return None
+
     if not request.desk and not request.image_filename and _is_openclaw_gate_request(request.message):
         return _openclaw_gate_response(request)
 
@@ -1241,7 +1244,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
         response_text = (
-            format_runtime_truth_check(result.result or {})
+            format_runtime_truth_check(result.result or {}, request.message)
             if result.success
             else f"Runtime truth check failed: {result.error}"
         )
@@ -1750,7 +1753,7 @@ async def chat_stream(request: ChatRequest):
             result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
             yield f"data: {json.dumps({'type': 'tool_result', **result.to_dict()})}\n\n"
             response_text = (
-                format_runtime_truth_check(result.result or {})
+                format_runtime_truth_check(result.result or {}, request.message)
                 if result.success
                 else f"Runtime truth check failed: {result.error}"
             )

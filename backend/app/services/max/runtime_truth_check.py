@@ -10,6 +10,20 @@ import httpx
 
 
 INTENT_SIGNALS = [
+    "runtime truth",
+    "runtime status",
+    "status only",
+    "product status",
+    "product-status",
+    "current_commit",
+    "current commit",
+    "commit is running",
+    "what commit",
+    "live commit",
+    "local commit",
+    "public commit",
+    "is archiveforge live",
+    "is transcriptforge live",
     "is this live",
     "why don't i see the fix",
     "website not loading",
@@ -20,6 +34,12 @@ INTENT_SIGNALS = [
     "is studio/api current",
     "did it restart",
     "did the update go live",
+    "what's new today",
+    "whats new today",
+    "what changed today",
+    "what is new today",
+    "today's status",
+    "todays status",
 ]
 
 
@@ -190,7 +210,17 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     }
 
 
-def format_runtime_truth_check(result: dict[str, Any]) -> str:
+def _wants_key_only(message: str | None) -> bool:
+    text = (message or "").lower()
+    return (
+        "key-only" in text
+        or "key only" in text
+        or "current_commit only" in text
+        or "current commit only" in text
+    )
+
+
+def format_runtime_truth_check(result: dict[str, Any], message: str | None = None) -> str:
     commit = result.get("current_commit", {})
     backend = result.get("backend_status", {})
     frontend = result.get("frontend_status", {})
@@ -208,6 +238,19 @@ def format_runtime_truth_check(result: dict[str, Any]) -> str:
     local_git = local.get("api_git") or {}
     if isinstance(local_git.get("data"), dict):
         local_hash = local_git["data"].get("last_commit_hash")
+
+    if _wants_key_only(message):
+        return "\n".join(
+            [
+                f"current_commit: {commit.get('hash')}",
+                f"local_api_commit: {local_hash}",
+                f"public_api_commit: {public_hash}",
+                f"backend_active: {backend.get('service', {}).get('active')}",
+                f"portal_active: {frontend.get('service', {}).get('active')}",
+                f"openclaw_gate: {openclaw_gate.get('state')}",
+                f"stale_or_broken: {', '.join(stale) if stale else 'none'}",
+            ]
+        )
 
     lines = [
         "Runtime truth check completed.",

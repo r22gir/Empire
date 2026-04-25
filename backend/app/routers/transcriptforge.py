@@ -23,8 +23,8 @@ MAX responsibilities (NOT delegated to Hermes):
   - runtime truth about what ran/failed
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks, Query, Header, Cookie, Response, Request
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -32,6 +32,7 @@ import uuid, os, json, logging, asyncio, tempfile
 from pathlib import Path
 
 from app.services.max.token_tracker import token_tracker
+from app.services import transcriptforge_review_auth as review_auth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/transcriptforge", tags=["transcriptforge"])
@@ -235,6 +236,27 @@ class ApprovalAction(BaseModel):
     chunk_corrections: Optional[Dict[str, str]] = None  # chunk_id -> corrected text
 
 
+class ReviewerLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ReviewerAccountRequest(BaseModel):
+    email: str
+    password: str
+    role: str = "reviewer"
+    display_name: str = ""
+
+
+class ReviewerAssignmentRequest(BaseModel):
+    job_id: str
+    email: str
+
+
+class ReviewerChunkReviewRequest(BaseModel):
+    status: str
+
+
 class TranscriptModeResponse(BaseModel):
     modes: List[Dict[str, Any]]
     web_chat_note: str = "Web Chat integration is future-ready and not yet fully active in this pass."
@@ -257,6 +279,39 @@ def _save_job(job: Dict[str, Any]) -> None:
     p = _job_path(job["job_id"])
     job["updated_at"] = datetime.utcnow().isoformat()
     p.write_text(json.dumps(job, indent=2, default=str))
+
+
+def _reviewer_token(authorization: str | None, tf_review_session: str | None) -> str | None:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    return tf_review_session
+
+
+def _set_review_cookie(response: Response, token: str, expires_at: str) -> None:
+    response.set_cookie(
+        "tf_review_session",
+        token,
+        httponly=True,
+        samesite="lax",
+        max_age=8 * 60 * 60,
+    )
+
+
+def _require_review_user(authorization: str | None, tf_review_session: str | None) -> dict:
+    user = review_auth.get_session_user(_reviewer_token(authorization, tf_review_session))
+    if not user:
+        raise HTTPException(status_code=401, detail="Reviewer login required")
+    return user
+
+
+def _require_reviewer_job_access(user: dict, job_id: str) -> None:
+    if not review_auth.reviewer_can_access_job(user, job_id):
+        raise HTTPException(status_code=403, detail="Reviewer is not assigned to this TranscriptForge job")
+
+
+def _require_role(user: dict, roles: set[str]) -> None:
+    if user.get("role") not in roles:
+        raise HTTPException(status_code=403, detail=f"Requires one of: {', '.join(sorted(roles))}")
 
 
 def _chunk_path(job_id: str, chunk_id: str) -> Path:
@@ -735,6 +790,180 @@ async def get_modes():
     return TranscriptModeResponse(modes=modes, web_chat_note="Web Chat integration is future-ready and not yet fully active in this pass.")
 
 
+@router.get("/reviewer/status")
+async def reviewer_portal_status():
+    """Public-safe status for the external TranscriptForge reviewer portal."""
+    return {
+        "implemented": True,
+        "login_required": True,
+        "anonymous_transcript_access": False,
+        "roles": ["viewer", "reviewer", "admin"],
+        "accounts_configured": review_auth.accounts_configured(),
+        "session_timeout_hours": review_auth.SESSION_HOURS,
+        "external_surface": "/transcriptforge-review",
+        "truth_note": "Protected reviewer endpoints enforce login and per-job assignment. Core internal founder routes remain unchanged.",
+    }
+
+
+@router.post("/reviewer/bootstrap")
+async def reviewer_bootstrap(request: Request, payload: ReviewerAccountRequest, response: Response):
+    """Create the first admin account. Allowed only from localhost and only once."""
+    host = request.client.host if request.client else ""
+    if host not in {"127.0.0.1", "::1", "localhost"}:
+        raise HTTPException(status_code=403, detail="Bootstrap is localhost-only")
+    if review_auth.accounts_configured():
+        raise HTTPException(status_code=409, detail="Reviewer accounts already configured")
+    user = review_auth.create_account(payload.email, payload.password, role="admin", display_name=payload.display_name)
+    session = review_auth.create_session(user["email"])
+    _set_review_cookie(response, session["token"], session["expires_at"])
+    return {"user": user, "token": session["token"], "expires_at": session["expires_at"]}
+
+
+@router.post("/reviewer/login")
+async def reviewer_login(payload: ReviewerLoginRequest, response: Response):
+    account = review_auth.authenticate(payload.email, payload.password)
+    if not account:
+        raise HTTPException(status_code=401, detail="Invalid reviewer credentials")
+    user = review_auth.public_user(account)
+    session = review_auth.create_session(user["email"])
+    _set_review_cookie(response, session["token"], session["expires_at"])
+    return {"user": user, "token": session["token"], "expires_at": session["expires_at"]}
+
+
+@router.post("/reviewer/logout")
+async def reviewer_logout(
+    response: Response,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    review_auth.logout(_reviewer_token(authorization, tf_review_session))
+    response.delete_cookie("tf_review_session")
+    return {"logged_out": True}
+
+
+@router.get("/reviewer/me")
+async def reviewer_me(
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    return {"user": _require_review_user(authorization, tf_review_session)}
+
+
+@router.post("/reviewer/admin/accounts")
+async def reviewer_admin_create_account(
+    payload: ReviewerAccountRequest,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_role(user, {"admin"})
+    created = review_auth.create_account(payload.email, payload.password, role=payload.role, display_name=payload.display_name)
+    return {"created": created}
+
+
+@router.post("/reviewer/admin/assign")
+async def reviewer_admin_assign_job(
+    payload: ReviewerAssignmentRequest,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_role(user, {"admin"})
+    _load_job(payload.job_id)
+    return review_auth.assign_job(payload.job_id, payload.email)
+
+
+@router.get("/reviewer/jobs")
+async def reviewer_jobs(
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    job_ids = [p.stem for p in JOBS_DIR.glob("*.json")]
+    allowed = set(review_auth.assigned_job_ids(user, job_ids))
+    jobs = []
+    for p in JOBS_DIR.glob("*.json"):
+        if p.stem not in allowed:
+            continue
+        job = json.loads(p.read_text())
+        jobs.append({
+            "job_id": job["job_id"],
+            "state": job.get("state"),
+            "display_state": "paused_awaiting_review" if job.get("state") == "first_chunk_ready" else job.get("display_state", job.get("state")),
+            "file_name": job.get("file_name"),
+            "chunks_total": job.get("chunks_total", 0),
+            "chunks_complete": job.get("chunks_complete", 0),
+            "updated_at": job.get("updated_at"),
+        })
+    jobs.sort(key=lambda item: item.get("updated_at") or "", reverse=True)
+    return {"jobs": jobs, "user": user}
+
+
+@router.get("/reviewer/jobs/{job_id}")
+async def reviewer_get_job(
+    job_id: str,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_reviewer_job_access(user, job_id)
+    return await get_job(job_id)
+
+
+@router.get("/reviewer/jobs/{job_id}/chunks/{chunk_id}/audio")
+async def reviewer_get_chunk_audio(
+    job_id: str,
+    chunk_id: str,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_reviewer_job_access(user, job_id)
+    return await get_chunk_audio_segment(job_id, chunk_id)
+
+
+@router.post("/reviewer/jobs/{job_id}/chunks/{chunk_id}/review")
+async def reviewer_review_chunk(
+    job_id: str,
+    chunk_id: str,
+    payload: ReviewerChunkReviewRequest,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_role(user, {"reviewer", "admin"})
+    _require_reviewer_job_access(user, job_id)
+    actor = user.get("display_name") or user.get("email") or "reviewer"
+    return await review_chunk(job_id, chunk_id, payload.status, actor)
+
+
+@router.get("/reviewer/jobs/{job_id}/transcript/{kind}")
+async def reviewer_get_transcript(
+    job_id: str,
+    kind: str,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_reviewer_job_access(user, job_id)
+    return await get_transcript(job_id, kind)
+
+
+@router.post("/reviewer/jobs/{job_id}/approve")
+async def reviewer_approve_transcript(
+    job_id: str,
+    payload: ApprovalAction,
+    authorization: Optional[str] = Header(None),
+    tf_review_session: Optional[str] = Cookie(None),
+):
+    user = _require_review_user(authorization, tf_review_session)
+    _require_role(user, {"reviewer", "admin"})
+    _require_reviewer_job_access(user, job_id)
+    actor = user.get("display_name") or user.get("email") or "reviewer"
+    payload.reviewer = actor
+    return await approve_transcript(job_id, payload)
+
+
 @router.post("/jobs", response_class=JSONResponse)
 async def create_job(background_tasks: BackgroundTasks, source_mode: str = "general_intake", uploader: str = "founder"):
     """Create a transcription job from uploaded audio file. Chunking starts immediately."""
@@ -881,7 +1110,10 @@ async def get_job(job_id: str):
         "reviewer_corrections_count": job.get("reviewer_corrections_count", 0),
         "overall_confidence": job.get("overall_confidence"),
     }
-    if job.get("state") == "first_chunk_ready":
+    if job.get("state") in {"approved", "corrected_and_approved", "rejected"}:
+        job["display_state"] = job["state"]
+        job["truth_summary"] = f"Transcript job is {job['state']}."
+    elif job.get("state") == "first_chunk_ready":
         job["display_state"] = "paused_awaiting_review"
         job["truth_summary"] = "Paused awaiting review of first chunk. Remaining chunks are intentionally pending."
     elif job.get("chunks_total", 0) == 0 and job.get("state") in {"uploaded", "chunking"}:
@@ -1060,6 +1292,7 @@ async def approve_transcript(job_id: str, action: ApprovalAction):
     }
     new_state = state_map[action.action]
     job["state"] = new_state
+    job["display_state"] = new_state
     job["reviewer_corrections_count"] = corrections_applied
 
     # Final stitch
@@ -1129,7 +1362,13 @@ async def list_jobs(state: Optional[str] = None, uploader: Optional[str] = None)
             jobs.append({
                 "job_id": job["job_id"],
                 "state": job["state"],
-                "display_state": "paused_awaiting_review" if job.get("state") == "first_chunk_ready" else job.get("display_state", job.get("state")),
+                "display_state": (
+                    "paused_awaiting_review"
+                    if job.get("state") == "first_chunk_ready"
+                    else job.get("state")
+                    if job.get("state") in {"approved", "corrected_and_approved", "rejected"}
+                    else job.get("display_state", job.get("state"))
+                ),
                 "source_mode": job.get("source_mode"),
                 "uploader": job.get("uploader"),
                 "created_at": job.get("created_at"),

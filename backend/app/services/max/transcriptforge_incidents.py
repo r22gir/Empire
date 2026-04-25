@@ -399,6 +399,12 @@ def _max_decision(classification: dict[str, Any] | None, gate: dict[str, Any]) -
             "reason": "job was created before the validated fixes and should not contaminate post-fix diagnosis",
             "founder_recommendation": "Use a fresh post-fix job for proof; do not resume the dead job.",
         }
+    if classification["classification"] == "completed":
+        return {
+            "action": "do_not_repair",
+            "reason": "job is already completed; repair is not applicable",
+            "founder_recommendation": "No repair needed for a completed TranscriptForge job.",
+        }
     if not gate.get("allowed"):
         return {
             "action": "repair_blocked",
