@@ -5,7 +5,8 @@ import {
   FileText, Globe, Package, Users, DollarSign, Clock, CheckCircle,
   Truck, Search, Plus, Building, Shield, ChevronRight, ChevronDown,
   ChevronUp, Mail, Phone, User, Loader2, AlertTriangle, ExternalLink,
-  Hash, X, Zap, MapPin, ArrowRight, Star, Calendar, Eye, BookOpen
+  Hash, X, Zap, MapPin, ArrowRight, Star, Calendar, Eye, BookOpen,
+  FileAudio
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
 import { PaymentModule } from '../business/payments';
@@ -198,6 +199,7 @@ const NAV_SECTIONS = [
   { id: 'couriers', label: 'Couriers', icon: Truck },
   { id: 'payments', label: 'Payments', icon: DollarSign },
   { id: 'docs', label: 'Docs', icon: BookOpen },
+  { id: 'transcript', label: 'TranscriptForge', icon: <FileAudio size={16} /> },
 ] as const;
 
 type Section = typeof NAV_SECTIONS[number]['id'];
@@ -262,7 +264,7 @@ const TRACKING_STEPS = [
 
 // ============ COMPONENT ============
 
-export default function ApostAppPage() {
+export default function ApostAppPage({ onNavigate }: { onNavigate?: (product: string, screen?: string, section?: string) => void }) {
   const [activeSection, setActiveSection] = useState<Section>('overview');
   const [orders, setOrders] = useState<ApostOrder[]>([]);
   const [customers, setCustomers] = useState<ApostCustomer[]>([]);
@@ -2256,6 +2258,9 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
       case 'couriers': return renderCouriers();
       case 'payments': return <div style={{ padding: 24 }}><PaymentModule product="apost" amount={0} /></div>;
       case 'docs': return <div style={{ padding: 24 }}><ProductDocs product="apost" /></div>;
+      case 'transcript':
+        if (onNavigate) { onNavigate('transcript', 'dashboard'); }
+        return <div style={{ padding: 24, textAlign: 'center', color: '#6b7280' }}>Opening TranscriptForge...</div>;
       default: return renderOverview();
     }
   };
@@ -2276,8 +2281,10 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
           </div>
         </div>
         {NAV_SECTIONS.map(s => {
-          const Icon = s.icon;
           const isActive = activeSection === s.id;
+          const iconEl = typeof s.icon === 'function'
+            ? React.createElement(s.icon as any, { size: 15, style: { color: isActive ? '#b8960c' : '#6b7280' } })
+            : s.icon;
           return (
             <button key={s.id} onClick={() => setActiveSection(s.id)}
               style={{
@@ -2286,7 +2293,7 @@ ${selectedForm.fields.map(f => `${f.replace(/_/g, ' ').toUpperCase()}: ${aiFillF
                 borderRight: isActive ? '3px solid #b8960c' : '3px solid transparent',
                 transition: 'all 0.15s',
               }}>
-              <Icon size={15} style={{ color: isActive ? '#b8960c' : '#6b7280' }} />
+              <span style={{ color: isActive ? '#b8960c' : '#6b7280', display: 'flex', alignItems: 'center' }}>{iconEl}</span>
               <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 400, color: isActive ? '#b8960c' : '#374151' }}>{s.label}</span>
             </button>
           );

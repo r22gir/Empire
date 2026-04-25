@@ -650,3 +650,6 @@ try:
     print("✓ Loaded: /api/v1/smart-analyze")
 except Exception as e:
     print(f"✗ smart_analyzer: {e}")
+
+# TranscriptForge — Legal/High-Risk Transcription Pipeline
+load_router("app.routers.transcriptforge", "/api/v1", ["transcriptforge"])

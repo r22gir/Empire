@@ -57,6 +57,7 @@ import JobsScreen from './components/screens/JobsScreen';
 import InvoiceScreen from './components/screens/InvoiceScreen';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
+import TranscriptForgePage from './components/screens/TranscriptForgePage';
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
@@ -301,7 +302,11 @@ export default function CommandCenter() {
         case 'crm':
           return <ForgeCRMPage />;
         case 'apost':
-          return <ApostAppPage />;
+          return <ApostAppPage onNavigate={(product, screen, section) => {
+            setActiveProduct(product as EcosystemProduct);
+            if (screen) setActiveScreen(screen as ScreenMode);
+            if (section) setActiveSection(section);
+          }} />;
         case 'recovery':
           return <RecoveryForgeScreen />;
         case 'relist':
@@ -324,6 +329,8 @@ export default function CommandCenter() {
           return <ConstructionForgePage initialSection={activeSection || undefined} />;
         case 'storefront':
           return <StoreFrontForgePage initialSection={activeSection || undefined} />;
+        case 'transcript':
+          return <TranscriptForgePage />;
         case 'vision':
           return <VisionAnalysisPage />;
         case 'drawings':

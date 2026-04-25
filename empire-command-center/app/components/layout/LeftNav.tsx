@@ -7,7 +7,7 @@ import {
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
-  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck,
+  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio,
 } from 'lucide-react';
 
 interface NavItem {
@@ -59,6 +59,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { id: 'relist', name: 'RelistApp', icon: <Repeat size={16} />, status: 'active', color: '#06b6d4' },
       { id: 'llc', name: 'LLCFactory', icon: <Globe size={16} />, status: 'active', color: '#16a34a' },
       { id: 'apost', name: 'ApostApp', icon: <FileText size={16} />, status: 'active', color: '#b8960c' },
+      { id: 'transcript', name: 'TranscriptForge', icon: <FileAudio size={16} />, status: 'active', color: '#7c3aed' },
       { id: 'assist', name: 'EmpireAssist', icon: <Sparkles size={16} />, status: 'active', color: '#b8960c' },
       { id: 'pay', name: 'EmpirePay', icon: <Wallet size={16} />, status: 'active', color: '#16a34a' },
       { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b' },
