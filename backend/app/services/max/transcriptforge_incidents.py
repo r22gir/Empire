@@ -128,7 +128,19 @@ def _extract_last_fix(content: str) -> dict[str, str | None]:
 def hermes_first_consult(query: str, limit: int = 10) -> dict[str, Any]:
     """First required step for TranscriptForge incident analysis."""
     store = MemoryStore()
-    memories = store.search_memories(query=query, limit=limit)
+    queries = [
+        query,
+        "TranscriptForge stuck job",
+        "TranscriptForge first-chunk pause",
+        "transcriptforge timeline review",
+        "transcriptforge incident",
+    ]
+    memories_by_id: dict[str, dict[str, Any]] = {}
+    for item in queries:
+        for memory in store.search_memories(query=item, limit=limit):
+            if memory.get("id"):
+                memories_by_id[memory["id"]] = memory
+    memories = list(memories_by_id.values())[:limit]
     matches = []
     for memory in memories:
         content = str(memory.get("content") or "")
@@ -147,6 +159,7 @@ def hermes_first_consult(query: str, limit: int = 10) -> dict[str, Any]:
     return {
         "queried_at": _now(),
         "query": query,
+        "query_aliases": queries[1:],
         "matches": matches,
         "count": len(matches),
         "first_consult_rule": "satisfied",
