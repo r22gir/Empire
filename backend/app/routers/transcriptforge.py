@@ -503,7 +503,7 @@ async def create_job(background_tasks: BackgroundTasks, source_mode: str = "gene
 
 
 @router.put("/jobs/{job_id}/upload")
-async def upload_audio(job_id: str, file: UploadFile = File(...)):
+async def upload_audio(background_tasks: BackgroundTasks, job_id: str, file: UploadFile = File(...)):
     """Upload audio file and initialize chunking. Starts background chunk processing."""
     job = _load_job(job_id)
 
@@ -571,7 +571,11 @@ async def get_job(job_id: str):
 
     # Build QC summary
     chunks = job.get("chunks", [])
-    low_conf_count = sum(1 for c in chunks if (c.get("confidence") or 0) < QC_THRESHOLDS["min_segment_confidence"])
+    low_conf_count = sum(
+        1
+        for c in chunks
+        if c.get("confidence") is not None and c.get("confidence") < QC_THRESHOLDS["min_segment_confidence"]
+    )
 
     job["qc_summary"] = {
         "chunks_total": job.get("chunks_total", 0),
