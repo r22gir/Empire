@@ -625,6 +625,9 @@ async def _process_chunk_background(job_id: str, chunk_id: str):
             "chunk_id": chunk_id,
             "actor": "system",
         })
+        chunk["processing_status"] = "transcribing"
+        _save_chunk(chunk)
+        _replace_job_chunk(job, chunk)
         _save_job(job)
 
         audio_path = job["file_path"]
