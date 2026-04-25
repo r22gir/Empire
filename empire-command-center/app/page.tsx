@@ -53,6 +53,7 @@ import VendorOpsPage from './components/screens/VendorOpsPage';
 import LeadForgePageNew from './components/screens/LeadForgePageNew';
 import DevPanel from './components/screens/DevPanel';
 import OpenClawTasksPage from './components/screens/OpenClawTasksPage';
+import MaxContinuityScreen from './components/screens/MaxContinuityScreen';
 import JobsScreen from './components/screens/JobsScreen';
 import InvoiceScreen from './components/screens/InvoiceScreen';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
@@ -88,6 +89,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   hardware: 'max',
   system: 'max',
   tokens: 'max',
+  'max-continuity': 'max',
   vision: 'max',
   drawings: 'workroom',
   construction: 'max',
@@ -317,6 +319,8 @@ export default function CommandCenter() {
           return <DevPanel />;
         case 'openclaw':
           return <OpenClawTasksPage />;
+        case 'max-continuity':
+          return <MaxContinuityScreen />;
         case 'vendorops':
           return <VendorOpsPage />;
         case 'hardware':

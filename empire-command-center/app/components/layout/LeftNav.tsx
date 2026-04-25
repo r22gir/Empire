@@ -69,9 +69,10 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
-    label: 'Infrastructure',
+    label: 'Infrastructure / Utilities',
     items: [
       { id: 'platform', name: 'PlatformForge', icon: <Server size={16} />, status: 'active', color: '#2563eb' },
+      { id: 'max-continuity', name: 'MAX Continuity', icon: <ShieldCheck size={16} />, status: 'active', color: '#0d9488' },
       { id: 'hardware', name: 'Hardware', icon: <Cpu size={16} />, status: 'dev', color: '#d97706' },
       { id: 'system', name: 'System', icon: <Activity size={16} />, status: 'active', color: '#16a34a' },
       { id: 'tokens', name: 'Tokens & Costs', icon: <Coins size={16} />, status: 'active', color: '#b8960c' },

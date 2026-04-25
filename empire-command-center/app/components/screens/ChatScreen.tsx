@@ -594,7 +594,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
         </div>
       )}
 
-      <ContinuityPanel />
+      <ContinuityPanel mode="compact" onOpenContinuity={() => onProductNavigate?.('max-continuity', 'dashboard')} />
 
       {/* Messages */}
       <div style={{

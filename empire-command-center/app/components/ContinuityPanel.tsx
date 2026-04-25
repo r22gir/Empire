@@ -34,7 +34,12 @@ function checkedAtLabel(date = new Date()) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-export default function ContinuityPanel() {
+interface ContinuityPanelProps {
+  mode?: 'compact' | 'full';
+  onOpenContinuity?: () => void;
+}
+
+export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: ContinuityPanelProps) {
   const [status, setStatus] = useState<any>(null);
   const [audit, setAudit] = useState<any>(null);
   const [openclawHealth, setOpenclawHealth] = useState<any>(null);
@@ -42,7 +47,7 @@ export default function ContinuityPanel() {
   const [message, setMessage] = useState('');
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [lastCheckedAt, setLastCheckedAt] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(mode === 'full');
   const loading = pendingAction !== null;
 
   const load = async (runAudit = true) => {
@@ -90,6 +95,15 @@ export default function ContinuityPanel() {
   const heartbeatTone: Tone = heartbeat.state === 'fresh' ? 'ok' : heartbeat.state === 'stale' ? 'bad' : 'warn';
   const registryTone: Tone = !status?.registry?.registry_version || status?.registry?.last_error || status?.registry_reload_requires_restart ? 'bad' : 'ok';
   const scoreTone: Tone = Number(latestScore ?? 1) < 0.6 ? 'warn' : 'ok';
+  const registryLabel = registryTone === 'ok' ? 'Registry OK' : `Registry ${status?.registry?.registry_version || 'unknown'}`;
+  const handoffLabel = runtime.restart_required === undefined
+    ? 'Handoff unknown'
+    : runtime.restart_required
+      ? 'Handoff restart needed'
+      : 'Handoff fresh';
+  const compactHandoffLabel = handoffCommitDiffers
+    ? `Handoff stale ${handoffCommit}`
+    : handoffLabel;
 
   const runCommand = async (command: string, successLabel: string) => {
     const checkedAt = checkedAtLabel();
@@ -141,6 +155,60 @@ export default function ContinuityPanel() {
     }
   };
 
+  if (mode === 'compact') {
+    return (
+      <section
+        data-testid="max-continuity-strip"
+        className="continuity-strip"
+        style={{
+          flexShrink: 0,
+          borderBottom: '1px solid var(--border)',
+          background: staleCommitWarning ? '#fffbeb' : '#fff',
+          padding: '6px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          overflowX: 'auto',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span style={{ fontSize: 11, fontWeight: 900, color: staleCommitWarning ? '#92400e' : 'var(--text)' }}>
+          MAX Truth:
+        </span>
+        <Pill label={registryLabel} tone={registryTone} />
+        <Pill label={`Commit ${currentCommit || 'unknown'}`} tone={currentCommit ? 'ok' : 'warn'} />
+        <Pill label={`OpenClaw ${gate.state || 'unknown'}`} tone={gateTone} />
+        <Pill label={compactHandoffLabel} tone={staleCommitWarning || runtime.restart_required ? 'warn' : runtime.restart_required === undefined ? 'neutral' : 'ok'} />
+        <Pill label={`Worker ${heartbeat.state || 'unknown'}${Number.isFinite(heartbeat.age_seconds) ? ` ${heartbeat.age_seconds}s` : ''}`} tone={heartbeatTone} />
+        {lastCheckedAt && <Pill label={`Checked ${lastCheckedAt}`} tone="neutral" />}
+        {startupCommitDiffers && <Pill label={`Startup ${startupCommit} differs`} tone="warn" />}
+        {staleCommitWarning && currentCommit && (
+          <span style={{ color: '#92400e', fontSize: 11, fontWeight: 800 }}>
+            Live truth wins.
+          </span>
+        )}
+        <button
+          data-testid="continuity-open-full"
+          onClick={onOpenContinuity}
+          style={{
+            marginLeft: 'auto',
+            border: '1px solid #d8d3cb',
+            background: '#fff',
+            borderRadius: 8,
+            padding: '4px 8px',
+            fontSize: 11,
+            fontWeight: 800,
+            color: 'var(--text)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          Open Continuity
+        </button>
+      </section>
+    );
+  }
+
   return (
     <section data-testid="max-continuity-panel" className="continuity-panel" style={{ flexShrink: 0, borderBottom: '1px solid var(--border)', background: '#fff', padding: '10px 12px' }}>
       <div className="continuity-head" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -166,8 +234,8 @@ export default function ContinuityPanel() {
         {field('current task', tier1.current_task)}
         {field('surface', tier1.founder_surface_identity?.canonical_channel || auditResult.surface?.canonical_channel)}
         {field('current commit', currentCommit)}
-        {handoffCommit && handoffCommitDiffers && field('handoff commit', `${handoffCommit} (stale)`)}
-        {startupCommit && startupCommitDiffers && field('startup commit', `${startupCommit} (differs from current)`)}
+        {handoffCommit && field('handoff commit', handoffCommitDiffers ? `${handoffCommit} (stale)` : handoffCommit)}
+        {startupCommit && field('startup commit', startupCommitDiffers ? `${startupCommit} (differs from current)` : startupCommit)}
         {field('handoff truth', runtime.restart_required === undefined ? 'unknown' : runtime.restart_required ? 'restart needed' : 'fresh')}
         {field('5-score trend', avgScore === null ? 'none' : `${avgScore.toFixed(2)} ${avgScore < 0.6 ? 'down' : 'stable'}`)}
         {field('active skills', (status?.active_skill_hooks || []).join(', ') || 'none')}
