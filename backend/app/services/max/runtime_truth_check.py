@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,9 @@ INTENT_SIGNALS = [
     "product-status",
     "current_commit",
     "current commit",
+    "current status",
+    "current runtime",
+    "max status",
     "commit is running",
     "what commit",
     "live commit",
@@ -28,12 +32,29 @@ INTENT_SIGNALS = [
     "why don't i see the fix",
     "website not loading",
     "did the new build deploy",
+    "did that push",
+    "did it push",
+    "was it pushed",
     "is the latest code running",
+    "latest status",
+    "latest commit",
+    "latest code",
+    "latest build",
+    "latest runtime",
     "nothing changed",
     "still seeing old version",
     "is studio/api current",
     "did it restart",
     "did the update go live",
+    "is it live",
+    "is it broken",
+    "is it fixed",
+    "is max broken",
+    "is max fixed",
+    "what's new",
+    "whats new",
+    "what is new",
+    "what changed",
     "what's new today",
     "whats new today",
     "what changed today",
@@ -43,8 +64,15 @@ INTENT_SIGNALS = [
 ]
 
 
-def should_run_runtime_truth_check(message: str | None) -> bool:
+def _normalize_intent_text(message: str | None) -> str:
     text = (message or "").lower().strip()
+    text = text.replace("’", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def should_run_runtime_truth_check(message: str | None) -> bool:
+    text = _normalize_intent_text(message)
     return any(signal in text for signal in INTENT_SIGNALS)
 
 
@@ -228,6 +256,7 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     public = result.get("public_freshness", {})
     openclaw_gate = result.get("openclaw_gate") or {}
     stale = result.get("stale_or_broken") or []
+    startup = result.get("startup_health") or {}
 
     public_hash = None
     public_git = public.get("api_git") or {}
@@ -265,6 +294,11 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         f"- Public API root: {(public.get('api_root') or {}).get('status_code')} | Public Studio root: {(public.get('studio_root') or {}).get('status_code')}",
         f"- Restart required by this check: {result.get('restart_required')}",
     ]
+    startup_hash = startup.get("running_commit_hash") if isinstance(startup, dict) else None
+    if startup_hash and commit.get("hash") and startup_hash != commit.get("hash"):
+        lines.append(
+            f"- Memory/startup truth was stale: prior startup commit {startup_hash} differs from live commit {commit.get('hash')}; live runtime truth wins."
+        )
     if stale:
         lines.append(f"- Stale/broken findings: {', '.join(stale)}")
     else:

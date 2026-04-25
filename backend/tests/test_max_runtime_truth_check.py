@@ -26,6 +26,13 @@ def test_runtime_truth_intent_signals_are_detected():
         "is studio/api current?",
         "did it restart?",
         "did the update go live?",
+        "what's new Max",
+        "what’s new Max",
+        "whats new Max",
+        "current status",
+        "is it broken?",
+        "is it fixed?",
+        "did that push?",
     ]
     for prompt in prompts:
         assert should_run_runtime_truth_check(prompt)
@@ -57,6 +64,28 @@ def test_runtime_truth_tool_is_callable(monkeypatch):
     assert result.result["mode"] == "inspect_only"
     assert result.result["restart_required"] is False
     assert "Runtime truth check completed" in format_runtime_truth_check(result.result)
+
+
+def test_runtime_truth_format_labels_stale_startup_memory():
+    response = format_runtime_truth_check(
+        {
+            "mode": "inspect_only",
+            "current_commit": {"hash": "new1234", "message": "new1234 current"},
+            "startup_health": {"running_commit_hash": "old9999"},
+            "registry": {"registry_version": "operating-registry-v2", "loaded_at": "now", "last_error": None},
+            "openclaw_gate": {"state": "healthy", "allowed": True, "reason": "ok"},
+            "backend_status": {"service": {"active": True}, "port_8000_open": True, "local_root": {"status_code": 200}},
+            "frontend_status": {"service": {"active": True}, "port_3005_open": True, "local_root": {"status_code": 200}},
+            "local_freshness": {"api_git": {"data": {"last_commit_hash": "new1234"}}, "api_matches_current_commit": True},
+            "public_freshness": {"api_git": {"data": {"last_commit_hash": "new1234"}}, "api_matches_current_commit": True, "api_root": {"status_code": 200}, "studio_root": {"status_code": 200}},
+            "restart_required": False,
+            "stale_or_broken": [],
+            "repair_capability": "inspect_only_no_restart",
+        }
+    )
+
+    assert "prior startup commit old9999 differs from live commit new1234" in response
+    assert "live runtime truth wins" in response
 
 
 def test_continuity_audit_tool_is_callable():
@@ -116,6 +145,43 @@ def test_founder_prompt_auto_routes_to_runtime_truth_hook(monkeypatch):
     assert "Runtime truth check completed" in data["response"]
     assert data["metadata"]["registry_version"]
     assert data["metadata"]["surface"] == "Founder/Web MAX"
+    assert data["metadata"]["skill_used"] == "empire_runtime_truth_check"
+
+
+def test_whats_new_max_auto_routes_to_runtime_truth_hook(monkeypatch):
+    def fake_execute_tool(tool_call, desk=None, access_context=None, founder=False):
+        assert tool_call == {"tool": "empire_runtime_truth_check", "public": True}
+        return ToolResult(
+            tool="empire_runtime_truth_check",
+            success=True,
+            result={
+                "skill": "empire-runtime-truth-check",
+                "callable": "empire_runtime_truth_check",
+                "mode": "inspect_only",
+                "current_commit": {"hash": "new1234", "message": "new1234 current"},
+                "startup_health": {"running_commit_hash": "old9999"},
+                "registry": {"registry_version": "operating-registry-v2", "loaded_at": "now", "last_error": None},
+                "backend_status": {"service": {"active": True}, "port_8000_open": True, "local_root": {"status_code": 200}},
+                "frontend_status": {"service": {"active": True}, "port_3005_open": True, "local_root": {"status_code": 200}},
+                "local_freshness": {"api_git": {"data": {"last_commit_hash": "new1234"}}, "api_matches_current_commit": True},
+                "public_freshness": {"api_git": {"data": {"last_commit_hash": "new1234"}}, "api_matches_current_commit": True, "api_root": {"status_code": 200}, "studio_root": {"status_code": 200}},
+                "restart_required": False,
+                "stale_or_broken": [],
+                "repair_capability": "inspect_only_no_restart",
+            },
+        )
+
+    monkeypatch.setattr(max_router_module, "execute_tool", fake_execute_tool)
+    monkeypatch.setattr(max_router_module, "_save_runtime_truth_exchange", lambda *args, **kwargs: "runtime-test")
+
+    res = client.post("/api/v1/max/chat", json={"message": "what's new Max", "channel": "web"})
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["model_used"] == "empire-runtime-truth-check"
+    assert data["tool_results"][0]["tool"] == "empire_runtime_truth_check"
+    assert "Current repo commit: new1234" in data["response"]
+    assert "prior startup commit old9999 differs from live commit new1234" in data["response"]
     assert data["metadata"]["skill_used"] == "empire_runtime_truth_check"
 
 
