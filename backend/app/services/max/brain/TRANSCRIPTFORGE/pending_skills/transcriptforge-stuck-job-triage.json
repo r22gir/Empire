@@ -1,0 +1,16 @@
+{
+  "created_or_updated_at": "2026-04-25T16:35:00+00:00",
+  "promotion_rule": "Promote to ACTIVE only after one verified fresh incident application, explicit MAX/founder approval, and a promotion log with commit hash and date.",
+  "purpose": "Timeline-aware triage for TranscriptForge jobs that appear stuck, stale, paused, or dead.",
+  "required_order": [
+    "Hermes first-consult",
+    "timeline reconstruction",
+    "current runtime and OpenClaw gate check",
+    "bounded repair decision",
+    "fresh verification run",
+    "Hermes memory write"
+  ],
+  "secret_policy": "Never store API keys, tokens, passwords, or provider secrets.",
+  "skill": "transcriptforge-stuck-job-triage",
+  "status": "PENDING"
+}
