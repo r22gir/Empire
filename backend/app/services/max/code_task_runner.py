@@ -22,6 +22,7 @@ logger = logging.getLogger("max.code_task")
 # Tools Atlas is allowed to use in Code Mode
 ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "shell_execute", "package_manager", "service_manager", "project_scaffold"}
 MAX_ITERATIONS = 8  # Safety cap on tool-call loops (reduced from 15 for performance)
+MAX_NO_TOOL_RETRIES = 2
 MUTATE_HINTS = (
     "fix ", "change ", "update ", "modify ", "harden ", "implement ",
     "patch ", "refactor ", "write ", "create ", "edit ", "replace ",
@@ -301,6 +302,8 @@ class CodeTaskRunner:
             executed_tool_calls: list[dict] = []
             verified_test_runs: list[dict] = []
             consecutive_blocked = 0  # Track repeated blocked-tool loops
+            no_tool_retries = 0
+            force_one_tool_call = task.execution_mode != "read_only"
 
             for iteration in range(MAX_ITERATIONS):
                 # Call Atlas
@@ -321,6 +324,14 @@ class CodeTaskRunner:
                 if not tool_calls:
                     if clean_text:
                         task.add_log("summary", clean_text[:120])
+                    if force_one_tool_call and not executed_tool_calls and no_tool_retries < MAX_NO_TOOL_RETRIES:
+                        no_tool_retries += 1
+                        task.add_log("retry", "Atlas returned prose without tool calls; requesting executable tool call")
+                        prompt = (
+                            "This is an edit task. You must use file_read/file_edit/file_write/test_runner/git_ops. "
+                            "Provide exactly one tool call."
+                        )
+                        continue
                     task.add_log("completed", "Atlas finished — no more tool calls")
                     break
 
@@ -432,6 +443,14 @@ class CodeTaskRunner:
             task.files_changed = sorted(actual_files_changed)[:20]
             task.files_inspected = sorted(actual_files_inspected)[:20]
             task.verified_test_runs = verified_test_runs
+
+            if force_one_tool_call and no_tool_retries >= MAX_NO_TOOL_RETRIES and not executed_tool_calls:
+                task.state = CodeTaskState.ERROR
+                task.error = "model did not provide executable tool calls."
+                task.completed_at = datetime.utcnow().isoformat()
+                task.add_log("error", task.error)
+                logger.error(f"Code task {task.id} did not provide executable tool calls after retries")
+                return
 
             if not executed_tool_calls:
                 task.state = CodeTaskState.ERROR
