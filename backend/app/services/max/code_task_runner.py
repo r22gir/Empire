@@ -8,7 +8,9 @@ Provides real-time progress logging via an activity log.
 """
 import asyncio
 import logging
+import os
 import re
+import subprocess
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -20,6 +22,16 @@ logger = logging.getLogger("max.code_task")
 # Tools Atlas is allowed to use in Code Mode
 ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "shell_execute", "package_manager", "service_manager", "project_scaffold"}
 MAX_ITERATIONS = 8  # Safety cap on tool-call loops (reduced from 15 for performance)
+MUTATE_HINTS = (
+    "fix ", "change ", "update ", "modify ", "harden ", "implement ",
+    "patch ", "refactor ", "write ", "create ", "edit ", "replace ",
+    "add ", "remove ", "repair ", "ground ", "prevent ",
+)
+READ_ONLY_HINTS = (
+    "do not edit", "read-only", "inspect", "summarize", "report whether",
+    "file exists", "do not commit", "do not generate drawings",
+)
+TEST_HINTS = ("test", "pytest", "verify", "build", "validation", "check")
 
 
 class CodeTaskState(str, Enum):
@@ -37,11 +49,143 @@ class CodeTaskLog:
     detail: str
 
 
+def _infer_execution_mode(prompt: str) -> str:
+    lowered = (prompt or "").lower()
+    if "execution mode: read_only" in lowered:
+        return "read_only"
+    if "execution mode: mutate" in lowered:
+        return "mutate"
+
+    read_only_hits = any(hint in lowered for hint in READ_ONLY_HINTS)
+    mutate_hits = any(hint in lowered for hint in MUTATE_HINTS)
+    if read_only_hits and not mutate_hits:
+        return "read_only"
+    if mutate_hits:
+        return "mutate"
+    return "mutate"
+
+
+def _is_test_command(command: str | None) -> bool:
+    if not command:
+        return False
+    lowered = command.lower()
+    return any(hint in lowered for hint in TEST_HINTS)
+
+
+def _sanitize_value(value, limit: int = 1200):
+    if isinstance(value, dict):
+        return {k: _sanitize_value(v, limit=limit) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_value(v, limit=limit) for v in value]
+    if isinstance(value, str) and len(value) > limit:
+        return value[:limit] + "...(truncated)"
+    return value
+
+
+def _repo_head_exists(commit_hash: str) -> bool:
+    if not commit_hash:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_hash}^{{commit}}"],
+            cwd=os.path.expanduser("~/empire-repo"),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _repo_head_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.expanduser("~/empire-repo"),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            commit = result.stdout.strip()
+            return commit if _repo_head_exists(commit) else None
+    except Exception:
+        pass
+    return None
+
+
+def _tool_record(tool_call: dict, result, *, success: bool, error: str | None = None) -> dict:
+    record = {
+        "tool": tool_call.get("tool", "unknown"),
+        "params": _sanitize_value({k: v for k, v in tool_call.items() if not str(k).startswith("_")}),
+        "success": success,
+    }
+    if success:
+        record["result"] = _sanitize_value(result.result)
+    else:
+        record["error"] = error or getattr(result, "error", None)
+    return record
+
+
+def _compose_verified_summary(task: "CodeTask") -> str:
+    lines = [
+        f"Execution mode: {task.execution_mode}",
+        f"Task ID: {task.id}",
+        f"Prompt: {task.prompt[:200]}",
+        "",
+        "Actual tool calls executed:",
+    ]
+    if task.executed_tool_calls:
+        for idx, call in enumerate(task.executed_tool_calls, start=1):
+            status = "ok" if call.get("success") else "failed"
+            lines.append(
+                f"{idx}. {call.get('tool')} ({status}) params={call.get('params')} result={call.get('result') or call.get('error')}"
+            )
+    else:
+        lines.append("- none")
+
+    if task.files_inspected:
+        lines.append("")
+        lines.append("Files inspected:")
+        for path in task.files_inspected:
+            lines.append(f"- {path}")
+
+    if task.files_changed:
+        lines.append("")
+        lines.append("Files changed:")
+        for path in task.files_changed:
+            lines.append(f"- {path}")
+    else:
+        lines.append("")
+        lines.append("Files changed: none")
+
+    if task.verified_test_runs:
+        lines.append("")
+        lines.append("Verified tests:")
+        for entry in task.verified_test_runs:
+            lines.append(f"- {entry.get('tool')}: {entry.get('result')}")
+    else:
+        lines.append("")
+        lines.append("Verified tests: none")
+
+    lines.append("")
+    lines.append(f"Verified commit hash: {task.verified_commit_hash or 'none'}")
+    if task.verification_notes:
+        lines.append("")
+        lines.append("Verification notes:")
+        for note in task.verification_notes:
+            lines.append(f"- {note}")
+
+    return "\n".join(lines).strip()
+
+
 @dataclass
 class CodeTask:
     """An async code task."""
     id: str
     prompt: str
+    execution_mode: str = "auto"
     state: CodeTaskState = CodeTaskState.QUEUED
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     started_at: Optional[str] = None
@@ -49,6 +193,11 @@ class CodeTask:
     result: Optional[str] = None
     error: Optional[str] = None
     files_changed: list[str] = field(default_factory=list)
+    files_inspected: list[str] = field(default_factory=list)
+    executed_tool_calls: list[dict] = field(default_factory=list)
+    verified_test_runs: list[dict] = field(default_factory=list)
+    verified_commit_hash: Optional[str] = None
+    verification_notes: list[str] = field(default_factory=list)
     log: list[CodeTaskLog] = field(default_factory=list)
 
     def add_log(self, action: str, detail: str):
@@ -62,6 +211,7 @@ class CodeTask:
         return {
             "id": self.id,
             "prompt": self.prompt[:200],
+            "execution_mode": self.execution_mode,
             "state": self.state.value,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -69,6 +219,11 @@ class CodeTask:
             "result": self.result,
             "error": self.error,
             "files_changed": self.files_changed,
+            "files_inspected": self.files_inspected,
+            "executed_tool_calls": self.executed_tool_calls,
+            "verified_test_runs": self.verified_test_runs,
+            "verified_commit_hash": self.verified_commit_hash,
+            "verification_notes": self.verification_notes,
             "log": [
                 {"timestamp": l.timestamp, "action": l.action, "detail": l.detail}
                 for l in self.log
@@ -91,6 +246,7 @@ class CodeTaskRunner:
         task = CodeTask(
             id=str(uuid.uuid4())[:12],
             prompt=prompt,
+            execution_mode=_infer_execution_mode(prompt),
         )
         self._tasks[task.id] = task
         # Start execution in background
@@ -140,8 +296,10 @@ class CodeTaskRunner:
                 f"Task: {task.prompt}"
             )
 
-            all_files_changed: set[str] = set()
-            final_text_parts: list[str] = []
+            actual_files_changed: set[str] = set()
+            actual_files_inspected: set[str] = set()
+            executed_tool_calls: list[dict] = []
+            verified_test_runs: list[dict] = []
             consecutive_blocked = 0  # Track repeated blocked-tool loops
 
             for iteration in range(MAX_ITERATIONS):
@@ -159,11 +317,10 @@ class CodeTaskRunner:
                 tool_calls = parse_tool_blocks(response)
                 clean_text = strip_tool_blocks(response)
 
-                if clean_text:
-                    final_text_parts.append(clean_text)
-
                 # No tool calls = Atlas is done
                 if not tool_calls:
+                    if clean_text:
+                        task.add_log("summary", clean_text[:120])
                     task.add_log("completed", "Atlas finished — no more tool calls")
                     break
 
@@ -201,6 +358,7 @@ class CodeTaskRunner:
                         result = await asyncio.get_event_loop().run_in_executor(
                             None, lambda t=tc: execute_tool(t, desk="codeforge")
                         )
+                        executed_tool_calls.append(_tool_record(tc, result, success=result.success, error=result.error))
 
                         if result.success:
                             result_str = str(result.result) if result.result else "(no output)"
@@ -212,9 +370,35 @@ class CodeTaskRunner:
                             )
                             # Track file changes
                             if tool_name in ("file_write", "file_edit", "file_append"):
-                                path = tc.get("path", "")
+                                path = (
+                                    (result.result or {}).get("path")
+                                    if isinstance(result.result, dict)
+                                    else tc.get("path", "")
+                                )
                                 if path:
-                                    all_files_changed.add(path)
+                                    actual_files_changed.add(str(path))
+                            if tool_name == "file_read":
+                                path = (
+                                    (result.result or {}).get("path")
+                                    if isinstance(result.result, dict)
+                                    else tc.get("path", "")
+                                )
+                                if path:
+                                    actual_files_inspected.add(str(path))
+                            if tool_name == "git_ops":
+                                command = str(tc.get("command", "")).strip()
+                                if command == "commit":
+                                    verified = _repo_head_commit()
+                                    if verified:
+                                        task.verified_commit_hash = verified
+                                    else:
+                                        task.verification_notes.append("git commit reported success but HEAD could not be verified")
+                            if tool_name == "test_runner" or (tool_name == "shell_execute" and _is_test_command(str(tc.get("command", "")))):
+                                verified_test_runs.append({
+                                    "tool": tool_name,
+                                    "command": tc.get("command"),
+                                    "result": _sanitize_value(result.result),
+                                })
                         else:
                             tool_results_text.append(
                                 f"✗ {tool_name} failed: {result.error}"
@@ -244,23 +428,64 @@ class CodeTaskRunner:
                 # Hit MAX_ITERATIONS
                 task.add_log("warning", f"Reached {MAX_ITERATIONS} iteration limit")
 
-            # Assemble final result
-            full_result = "\n\n".join(final_text_parts)
-            if not full_result.strip():
-                full_result = "(Atlas completed the task but produced no text output)"
+            task.executed_tool_calls = executed_tool_calls
+            task.files_changed = sorted(actual_files_changed)[:20]
+            task.files_inspected = sorted(actual_files_inspected)[:20]
+            task.verified_test_runs = verified_test_runs
 
-            # Also extract file refs from text
-            file_refs = re.findall(
-                r'(?:~/[\w/.\-]+|/home/\w+/[\w/.\-]+|(?:backend|frontend|empire-command-center)/[\w/.\-]+)',
-                full_result,
+            if not executed_tool_calls:
+                task.state = CodeTaskState.ERROR
+                task.error = "Code task completed without actual tool execution; refusing prose-only summary."
+                task.completed_at = datetime.utcnow().isoformat()
+                task.add_log("error", task.error)
+                logger.error(f"Code task {task.id} had no executed tool calls")
+                return
+
+            if task.execution_mode == "read_only":
+                if any(call.get("tool") in {"file_write", "file_edit", "file_append"} and call.get("success") for call in executed_tool_calls):
+                    task.state = CodeTaskState.ERROR
+                    task.error = "Read-only code task executed a mutating tool call."
+                    task.completed_at = datetime.utcnow().isoformat()
+                    task.add_log("error", task.error)
+                    logger.error(f"Code task {task.id} violated read-only mode")
+                    return
+            else:
+                if not task.files_changed:
+                    task.state = CodeTaskState.ERROR
+                    task.error = "Code task completed without actual file changes; refusing to accept prose-only summary."
+                    task.completed_at = datetime.utcnow().isoformat()
+                    task.add_log("error", task.error)
+                    logger.error(f"Code task {task.id} had no actual file changes")
+                    return
+
+            commit_attempted = any(
+                call.get("tool") == "git_ops"
+                and call.get("success")
+                and (call.get("params") or {}).get("command") == "commit"
+                for call in executed_tool_calls
             )
-            all_files_changed.update(file_refs)
+            if commit_attempted and not task.verified_commit_hash:
+                task.state = CodeTaskState.ERROR
+                task.error = "git commit succeeded but could not be verified in repository history."
+                task.completed_at = datetime.utcnow().isoformat()
+                task.add_log("error", task.error)
+                logger.error(f"Code task {task.id} could not verify commit")
+                return
 
-            task.files_changed = sorted(all_files_changed)[:20]
-            task.result = full_result
+            if task.verified_commit_hash and not _repo_head_exists(task.verified_commit_hash):
+                task.state = CodeTaskState.ERROR
+                task.error = f"Verified commit hash is not present in git history: {task.verified_commit_hash}"
+                task.completed_at = datetime.utcnow().isoformat()
+                task.add_log("error", task.error)
+                logger.error(f"Code task {task.id} invalid commit hash")
+                return
+
+            task.result = _compose_verified_summary(task)
             task.state = CodeTaskState.COMPLETED
             task.completed_at = datetime.utcnow().isoformat()
-            logger.info(f"Code task {task.id} completed: {len(task.files_changed)} files changed/referenced")
+            logger.info(
+                f"Code task {task.id} completed: {len(task.files_changed)} files changed, {len(task.executed_tool_calls)} tool calls"
+            )
 
         except asyncio.TimeoutError:
             task.state = CodeTaskState.ERROR

@@ -401,9 +401,22 @@ def test_code_task_description_is_passed_to_code_task_runner(monkeypatch):
     class FakeCodeTask:
         id = "ct-1"
         state = CodeTaskState.COMPLETED
+        execution_mode = "read_only"
         result = "Read the worker file."
         error = None
         files_changed = []
+        files_inspected = ["backend/app/services/openclaw_worker.py"]
+        executed_tool_calls = [
+            {
+                "tool": "file_read",
+                "params": {"path": "backend/app/services/openclaw_worker.py"},
+                "success": True,
+                "result": {"path": "backend/app/services/openclaw_worker.py"},
+            }
+        ]
+        verified_test_runs = []
+        verified_commit_hash = None
+        verification_notes = []
         log = [FakeLog()]
 
     def fake_submit(prompt):
@@ -428,6 +441,66 @@ def test_code_task_description_is_passed_to_code_task_runner(monkeypatch):
     assert task["title"] in captured["prompt"]
     assert task["description"] in captured["prompt"]
     assert "Do not commit" in captured["prompt"]
+
+
+def test_code_task_fake_prose_claims_are_rejected(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title="Fix drawing intent false positives",
+        description="Harden the code path. No drawings, no commit.",
+        desk="codeforge",
+        source="manual-code-task",
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+
+    async def fake_execute(_task):
+        return openclaw_worker.ExecutionResult(
+            success=True,
+            executor="code_task_runner",
+            result="I edited files, ran pytest, and committed a1b2c3d4e5f6.",
+        )
+
+    monkeypatch.setattr(openclaw_worker, "_execute_task", fake_execute)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert row["status"] == "failed"
+    assert "verifiable evidence" in row["error"]
+
+
+def test_code_task_fake_commit_hash_without_git_verification_is_rejected(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title="Fix drawing intent false positives",
+        description="Update the code and do not commit.",
+        desk="codeforge",
+        source="manual-code-task",
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+
+    async def fake_execute(_task):
+        return openclaw_worker.ExecutionResult(
+            success=True,
+            executor="code_task_runner",
+            result="Actual changes were made.",
+            files_modified=["backend/app/services/openclaw_worker.py"],
+            tools_run=["file_edit: backend/app/services/openclaw_worker.py"],
+            commit_hash="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        )
+
+    monkeypatch.setattr(openclaw_worker, "_execute_task", fake_execute)
+    monkeypatch.setattr(openclaw_worker, "_git_commit_exists", lambda commit_hash: False)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert row["status"] == "failed"
+    assert "unverified commit hash" in row["error"]
 
 
 def test_gate_degraded_for_stale_running_task_without_active_worker(monkeypatch):

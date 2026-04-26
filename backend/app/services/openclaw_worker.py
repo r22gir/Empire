@@ -193,6 +193,40 @@ def _is_code_task(task: dict) -> bool:
     return "codeforge" in text or any(term in text for term in code_terms)
 
 
+def _code_execution_mode(task: dict) -> str:
+    text = _task_text(task)
+    read_only_hints = (
+        "do not edit",
+        "read-only",
+        "inspect ",
+        "inspect backend",
+        "report whether",
+        "file exists",
+        "do not commit",
+        "do not generate drawings",
+        "do not edit files",
+        "do not change files",
+    )
+    mutate_hints = (
+        "fix ",
+        "change ",
+        "update ",
+        "modify ",
+        "harden ",
+        "implement ",
+        "patch ",
+        "refactor ",
+        "write ",
+        "create ",
+        "edit ",
+        "ground ",
+        "prevent ",
+    )
+    if any(hint in text for hint in read_only_hints) and not any(hint in text for hint in mutate_hints):
+        return "read_only"
+    return "mutate"
+
+
 def _is_explicit_drawing_task(task: dict) -> bool:
     """Return True only for actual drawing generation requests."""
     if _is_code_task(task):
@@ -278,6 +312,22 @@ def _git_head() -> str | None:
     return None
 
 
+def _git_commit_exists(commit_hash: str | None) -> bool:
+    if not commit_hash:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "cat-file", "-e", f"{commit_hash}^{{commit}}"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _git_changed_files() -> set[str]:
     try:
         result = subprocess.run(
@@ -342,6 +392,24 @@ def _compose_task_result(task: dict, execution: ExecutionResult) -> str:
         lines.append(f"Commit hash: {execution.commit_hash}")
     else:
         lines.append("Commit hash: none")
+    tool_calls = execution.metadata.get("tool_calls") if isinstance(execution.metadata, dict) else None
+    if tool_calls:
+        lines.append("Actual tool calls executed:")
+        for call in tool_calls[:12]:
+            params = call.get("params", {})
+            lines.append(
+                f"- {call.get('tool')} success={call.get('success')} params={params} result={call.get('result') or call.get('error')}"
+            )
+    verified_tests = execution.metadata.get("verified_test_runs") if isinstance(execution.metadata, dict) else None
+    if verified_tests:
+        lines.append("Verified tests:")
+        for entry in verified_tests[:12]:
+            lines.append(f"- {entry.get('tool')}: {entry.get('command')} -> {entry.get('result')}")
+    notes = execution.metadata.get("verification_notes") if isinstance(execution.metadata, dict) else None
+    if notes:
+        lines.append("Verification notes:")
+        for note in notes[:12]:
+            lines.append(f"- {note}")
     lines.append("")
     lines.append((execution.result or "").strip())
     return "\n".join(lines).strip()
@@ -427,6 +495,7 @@ RULES:
 
 def _build_code_task_prompt(task: dict) -> str:
     """Build the prompt sent to the local CodeTaskRunner executor."""
+    execution_mode = _code_execution_mode(task)
     return f"""DB-backed OpenClaw CodeForge execution task.
 
 Title: {task.get('title')}
@@ -435,6 +504,7 @@ Description:
 Desk: {task.get('desk', 'general')}
 Priority: {task.get('priority')}
 Source: {task.get('source', 'unknown')}
+Execution Mode: {execution_mode}
 
 Safety rules:
 - Actually execute the requested task description through available CodeTaskRunner tools.
@@ -727,29 +797,29 @@ async def _execute_code_task(task: dict) -> ExecutionResult:
         write_openclaw_worker_heartbeat(status="processing", current_task_id=task["id"])
         await asyncio.sleep(1)
 
-    logs = list(getattr(code_task, "log", []) or [])
-    tools_run = [f"{entry.action}: {entry.detail}" for entry in logs]
-    evidence_actions = {"reading", "writing", "editing", "appending", "git", "testing", "executing"}
+    execution_mode = str(getattr(code_task, "execution_mode", "mutate") or "mutate")
+    executed_tool_calls = list(getattr(code_task, "executed_tool_calls", []) or [])
+    files_changed = list(getattr(code_task, "files_changed", []) or [])
+    files_inspected = list(getattr(code_task, "files_inspected", []) or [])
+    verified_test_runs = list(getattr(code_task, "verified_test_runs", []) or [])
+    verification_notes = list(getattr(code_task, "verification_notes", []) or [])
+    verified_commit_hash = getattr(code_task, "verified_commit_hash", None)
     result_text = code_task.result or ""
-    result_lower = result_text.lower()
-    has_tool_evidence = (
-        any(entry.action in evidence_actions for entry in logs)
-        or bool(getattr(code_task, "files_changed", []) or [])
-        or any(
-            marker in result_lower
-            for marker in (
-                "tool run:",
-                "tools run:",
-                "files inspected:",
-                "files changed:",
-                "commands run:",
-                "output path:",
-                "no files edited",
-                "validated json parse",
-                "inspected file path:",
-            )
-        )
-    )
+    mutating_tools = {"file_write", "file_edit", "file_append"}
+    commands = []
+    tools_run = []
+    for call in executed_tool_calls:
+        tool_name = call.get("tool", "unknown")
+        status = "ok" if call.get("success") else "failed"
+        params = call.get("params", {})
+        tools_run.append(f"{tool_name} ({status}): {params}")
+        if tool_name in {"git_ops", "test_runner", "shell_execute"}:
+            command = params.get("command") if isinstance(params, dict) else None
+            if command:
+                commands.append(f"{tool_name}: {command}")
+
+    has_tool_evidence = bool(executed_tool_calls or files_changed or files_inspected or verified_test_runs or verified_commit_hash)
+    has_mutating_evidence = any(call.get("tool") in mutating_tools and call.get("success") for call in executed_tool_calls)
 
     if _state_value(code_task.state) == CodeTaskState.ERROR.value:
         return ExecutionResult(
@@ -760,21 +830,67 @@ async def _execute_code_task(task: dict) -> ExecutionResult:
             metadata={"code_task_id": code_task.id},
         )
 
-    if not has_tool_evidence:
+    if not executed_tool_calls:
         return ExecutionResult(
             success=False,
             executor="code_task_runner",
-            error="CodeTaskRunner completed without tool/action evidence; refusing to mark DB task done.",
+            error="CodeTaskRunner completed without actual tool execution; refusing to mark DB task done.",
             result=result_text,
             tools_run=tools_run,
             metadata={"code_task_id": code_task.id},
         )
 
-    if _is_generic_port_health_result(result_text):
+    if execution_mode == "read_only" and has_mutating_evidence:
         return ExecutionResult(
             success=False,
             executor="code_task_runner",
-            error="CodeTaskRunner returned a generic port health summary for a non-health task.",
+            error="Read-only code task executed a mutating tool call.",
+            result=result_text,
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    if execution_mode != "read_only" and not files_changed:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error="Code task completed without actual file changes; refusing to accept prose-only summary.",
+            result=result_text,
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    commit_attempted = any(
+        call.get("tool") == "git_ops"
+        and call.get("success")
+        and (call.get("params") or {}).get("command") == "commit"
+        for call in executed_tool_calls
+    )
+    if commit_attempted and not verified_commit_hash:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error="git commit succeeded but could not be verified in repository history.",
+            result=result_text,
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    if verified_commit_hash and not _git_commit_exists(verified_commit_hash):
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error=f"Verified commit hash is not present in git history: {verified_commit_hash}",
+            result=result_text,
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    if not has_tool_evidence:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error="CodeTaskRunner completed without verifiable evidence; refusing to mark DB task done.",
             result=result_text,
             tools_run=tools_run,
             metadata={"code_task_id": code_task.id},
@@ -785,8 +901,17 @@ async def _execute_code_task(task: dict) -> ExecutionResult:
         executor="code_task_runner",
         result=result_text,
         tools_run=tools_run,
-        files_modified=list(getattr(code_task, "files_changed", []) or []),
-        metadata={"code_task_id": code_task.id},
+        files_modified=files_changed,
+        files_inspected=files_inspected,
+        commands=commands,
+        commit_hash=verified_commit_hash,
+        metadata={
+            "code_task_id": code_task.id,
+            "execution_mode": execution_mode,
+            "tool_calls": executed_tool_calls,
+            "verified_test_runs": verified_test_runs,
+            "verification_notes": verification_notes,
+        },
     )
 
 
@@ -908,6 +1033,31 @@ async def _process_task(task: dict):
                 )
                 log.error("Task #%s refused drawing generation completion", task_id)
                 return
+
+            if execution.executor == "code_task_runner":
+                has_verified_evidence = any(
+                    [
+                        bool(execution.tools_run),
+                        bool(execution.files_modified),
+                        bool(execution.files_inspected),
+                        bool(execution.commands),
+                        bool(execution.commit_hash),
+                    ]
+                )
+                if not has_verified_evidence:
+                    _fail_running_task(
+                        task_id,
+                        "CodeTaskRunner returned success without verifiable evidence; refusing to mark done.",
+                    )
+                    log.error("Task #%s refused code task fake success", task_id)
+                    return
+                if execution.commit_hash and not _git_commit_exists(execution.commit_hash):
+                    _fail_running_task(
+                        task_id,
+                        f"CodeTaskRunner reported an unverified commit hash: {execution.commit_hash}",
+                    )
+                    log.error("Task #%s refused unverified commit hash", task_id)
+                    return
 
             response_text = _compose_task_result(
                 task,
