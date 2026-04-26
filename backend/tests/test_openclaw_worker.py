@@ -525,3 +525,16 @@ def test_gate_degraded_for_stale_running_task_without_active_worker(monkeypatch)
 
     assert result.state == "degraded"
     assert "stale running OpenClaw task" in result.reason
+
+
+def test_git_changed_files_filters_backup_artifacts(monkeypatch):
+    class Resp:
+        returncode = 0
+        stdout = " M backend/app/services/max/tool_executor.py.bak-123\n M backend/app/services/max/code_task_runner.py\n"
+
+    monkeypatch.setattr(openclaw_worker.subprocess, "run", lambda *args, **kwargs: Resp())
+
+    changed = openclaw_worker._git_changed_files()
+
+    assert "backend/app/services/max/code_task_runner.py" in changed
+    assert not any(".bak-" in path for path in changed)

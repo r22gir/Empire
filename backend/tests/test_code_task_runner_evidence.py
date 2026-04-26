@@ -1,7 +1,9 @@
 import json
 import asyncio
+import sqlite3
 
 from app.services.max import code_task_runner as runner_module
+from app.services import openclaw_worker
 from app.services.max.code_task_runner import CodeTask, CodeTaskState
 from app.services.max.tool_executor import ToolResult
 from app.services.max import tool_executor as tool_executor_module
@@ -391,3 +393,112 @@ def test_path_escape_is_rejected_by_tool_safety():
 
     ok_tmp, reason_tmp = validate_path("/data/empire/self_heal_tests/code_task_evidence_test.json")
     assert ok_tmp, reason_tmp
+
+
+def test_git_ops_supports_diff_check_command_forms(monkeypatch):
+    calls = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(cmd_parts, **kwargs):
+        calls.append(cmd_parts)
+        return FakeResult()
+
+    monkeypatch.setattr(tool_executor_module.subprocess, "run", fake_run)
+
+    result_a = tool_executor_module._git_ops({"command": "diff --check"})
+    result_b = tool_executor_module._git_ops({"command": "diff", "args": ["--check"]})
+
+    assert result_a.success
+    assert result_b.success
+    assert calls[0][:3] == ["git", "diff", "--check"]
+    assert calls[1][:3] == ["git", "diff", "--check"]
+
+
+def test_noop_file_write_does_not_create_backup(monkeypatch, tmp_path):
+    target = tmp_path / "noop-write.txt"
+    target.write_text("same content", encoding="utf-8")
+
+    result = tool_executor_module._file_write({"path": str(target), "content": "same content"})
+
+    assert result.success
+    assert result.result["unchanged"] is True
+    assert not list(tmp_path.glob("noop-write.txt.bak-*"))
+
+
+def test_commit_required_task_fails_without_verified_commit(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE openclaw_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            desk TEXT DEFAULT 'general',
+            priority INTEGER DEFAULT 5,
+            source TEXT DEFAULT 'manual',
+            assigned_to TEXT DEFAULT 'openclaw',
+            status TEXT DEFAULT 'queued',
+            result TEXT,
+            error TEXT,
+            files_modified TEXT,
+            commit_hash TEXT,
+            retry_count INTEGER DEFAULT 0,
+            max_retries INTEGER DEFAULT 2,
+            parent_task_id TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
+    cur = conn.execute(
+        """INSERT INTO openclaw_tasks
+           (title, description, desk, priority, source, status, started_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "Fix the code and commit the changes",
+            "Update backend/app/services/max/drawing_intent.py and commit the changes.",
+            "codeforge",
+            5,
+            "test",
+            "queued",
+            None,
+        ),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM openclaw_tasks WHERE id = ?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    task = dict(row)
+    monkeypatch.setattr(openclaw_worker, "DB_PATH", str(db_path))
+    monkeypatch.setattr(openclaw_worker, "_notify_telegram", lambda message: asyncio.sleep(0))
+    monkeypatch.setattr(openclaw_worker, "_git_changed_files", lambda: set())
+    monkeypatch.setattr(openclaw_worker, "_git_head", lambda: "b6b40f9")
+    monkeypatch.setattr(openclaw_worker, "_is_drawing_task", lambda task: False)
+
+    async def fake_execute(_task):
+        return openclaw_worker.ExecutionResult(
+            success=True,
+            executor="code_task_runner",
+            result="Actual changes were made.",
+            files_modified=["backend/app/services/max/drawing_intent.py"],
+            tools_run=["file_edit: backend/app/services/max/drawing_intent.py"],
+            commit_hash=None,
+        )
+
+    monkeypatch.setattr(openclaw_worker, "_execute_task", fake_execute)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM openclaw_tasks WHERE id = ?", (task["id"],)).fetchone()
+    conn.close()
+    assert row["status"] == "failed"
+    assert "no verified commit_hash" in row["error"]

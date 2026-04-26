@@ -9,6 +9,7 @@ import os
 import uuid
 import logging
 import asyncio
+import shlex
 import psutil
 import httpx
 from dataclasses import dataclass, asdict
@@ -3827,6 +3828,17 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
     # Safety: prevent accidental truncation of existing files
     if os.path.exists(path):
         import shutil
+        with open(path, "r", encoding="utf-8", errors="replace") as existing_file:
+            existing_content = existing_file.read()
+        if existing_content == content:
+            lines = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
+            nbytes = len(content.encode("utf-8"))
+            duration = int((_time.time() - start) * 1000)
+            log_execution("file_write", params, {"lines": lines, "bytes": nbytes, "unchanged": True}, access_level=2, desk=desk, success=True, duration_ms=duration)
+            return ToolResult(tool="file_write", success=True, result={
+                "path": path, "lines": lines, "bytes": nbytes, "unchanged": True,
+            })
+
         old_size = os.path.getsize(path)
         new_size = len(content.encode('utf-8'))
 
@@ -4143,8 +4155,23 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
 def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Run git operations in ~/empire-repo."""
     start = _time.time()
-    command = params.get("command", "")
+    raw_command = params.get("command", "")
     args = params.get("args", "")
+
+    if isinstance(args, (list, tuple)):
+        args = " ".join(str(item) for item in args)
+    elif args is None:
+        args = ""
+    else:
+        args = str(args)
+
+    command_parts = shlex.split(str(raw_command).strip()) if str(raw_command).strip() else []
+    if not command_parts:
+        command = ""
+        command_args = args
+    else:
+        command = command_parts[0]
+        command_args = " ".join(command_parts[1:] + ([args] if args else []))
 
     allowed_commands = {"status", "diff", "add", "commit", "push", "log", "branch"}
     if command not in allowed_commands:
@@ -4160,8 +4187,8 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
 
     repo = os.path.expanduser("~/empire-repo")
     cmd_parts = ["git", command]
-    if args:
-        cmd_parts.extend(args.split())
+    if command_args:
+        cmd_parts.extend(shlex.split(command_args))
 
     full_cmd = " ".join(cmd_parts)
     ok, reason = validate_command(full_cmd)

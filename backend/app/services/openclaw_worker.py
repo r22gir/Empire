@@ -276,6 +276,21 @@ def _is_explicit_drawing_task(task: dict) -> bool:
     return True
 
 
+def _task_requires_commit(task: dict) -> bool:
+    text = _task_text(task)
+    if any(term in text for term in ("do not commit", "don't commit", "without committing", "no commit")):
+        return False
+    commit_terms = (
+        "git commit",
+        "create a commit",
+        "make a commit",
+        "commit the changes",
+        "commit changes",
+        "commit the code",
+    )
+    return any(term in text for term in commit_terms) or text.startswith("commit ")
+
+
 def _is_generic_port_health_result(text: str, skill_used: str | None = None) -> bool:
     """Detect the OpenClaw services_health fallback result."""
     if skill_used == "services_health":
@@ -349,7 +364,7 @@ def _git_changed_files() -> set[str]:
         path = line[3:].strip()
         if " -> " in path:
             path = path.split(" -> ", 1)[1].strip()
-        if path:
+        if path and not Path(path).name.endswith(".bak") and ".bak-" not in path:
             changed.add(path)
     return changed
 
@@ -367,7 +382,11 @@ def _git_files_changed_between(before: str, after: str) -> list[str]:
         return []
     if result.returncode != 0:
         return []
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip() and not Path(line.strip()).name.endswith(".bak") and ".bak-" not in line.strip()
+    ]
 
 
 def _compose_task_result(task: dict, execution: ExecutionResult) -> str:
@@ -1058,6 +1077,14 @@ async def _process_task(task: dict):
                     )
                     log.error("Task #%s refused unverified commit hash", task_id)
                     return
+
+            if _task_requires_commit(task) and not commit_hash:
+                _fail_running_task(
+                    task_id,
+                    "Task requested a commit but no verified commit_hash was produced.",
+                )
+                log.error("Task #%s required a commit but none was verified", task_id)
+                return
 
             response_text = _compose_task_result(
                 task,
