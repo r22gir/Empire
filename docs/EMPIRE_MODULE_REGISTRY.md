@@ -1,6 +1,7 @@
 # EmpireBox Module Registry
 > Generated: 2026-04-26 | Commit: da3fdf4 (813 commits verified via `git rev-list --count HEAD`)
 > Purpose: Per-module detail registry — companion to EMPIRE_MASTER_DOCUMENT_CURRENT.md
+> Schematic: EMPIRE_SCHEMATIC_MASTER.md has flow maps, homogeneity matrix, and SaaS blueprint
 
 ---
 

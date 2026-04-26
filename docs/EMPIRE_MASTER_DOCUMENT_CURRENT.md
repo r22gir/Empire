@@ -385,14 +385,17 @@ The **empire-ecosystem-report.md** (March 18, 2026) documented:
 
 ---
 
-## G. Architecture Schematic Requirements
+## G. Architecture / Feature Schematic
 
-**Needed** (documentation task):
-1. Master ecosystem schematic — full system flow diagram
-2. Per-module flow diagrams — Workroom, CraftForge, Finance, ArchiveForge, etc.
-3. Current vs target flows — identify standardization gaps
-4. Homogeneity/standardization matrix — which modules follow patterns, which don't
-5. SaaS replication blueprint — how each module becomes a multi-tenant SaaS product
+**Created**: `docs/EMPIRE_SCHEMATIC_MASTER.md` — master ecosystem schematic, per-module flow maps, current vs target, homogeneity matrix, SaaS blueprint.
+
+Key contents:
+- Master ecosystem schematic (Mermaid diagram)
+- Canonical module flow template
+- Per-module current flow maps (MAX, OpenClaw, Hermes, AI Hub, CRM, Photo→Quote→Invoice→Payment, Finance, Drawing Studio, Workroom, CraftForge, ArchiveForge, RecoveryForge, RelistApp, VendorOps, ApostApp, SocialForge, Public surfaces)
+- Current vs target notes with gaps and standardization actions
+- Homogeneity matrix (nav pattern, API, persistence, upload, AI, job/task, audit, docs, SaaS)
+- SaaS replication blueprint (module home, list, detail, create/edit, AI assist, activity log, metrics, docs, permissions, tests)
 
 ---
 
