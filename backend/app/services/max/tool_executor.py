@@ -43,7 +43,7 @@ logger = logging.getLogger("max.tool_executor")
 DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
 FOUNDER_PIN = os.getenv("FOUNDER_PIN", "7777")
 
-TOOL_BLOCK_RE = re.compile(r"```tool\s*\n(.*?)\n```", re.DOTALL)
+TOOL_BLOCK_RE = re.compile(r"```(?:tool|json|action|actions)?\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
 
 QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
 
@@ -60,16 +60,85 @@ class ToolResult:
         return {k: v for k, v in d.items() if v is not None}
 
 
-def parse_tool_blocks(text: str) -> list[dict]:
-    """Extract tool call JSON objects from ```tool ... ``` blocks."""
+def _normalize_tool_action(obj: dict) -> dict | None:
+    if not isinstance(obj, dict):
+        return None
+
+    if "actions" in obj and isinstance(obj["actions"], list):
+        flattened = []
+        for item in obj["actions"]:
+            normalized = _normalize_tool_action(item)
+            if normalized:
+                flattened.append(normalized)
+        return {"_batch": flattened} if flattened else None
+
+    if "tool" not in obj:
+        return None
+
+    normalized = {k: v for k, v in obj.items() if k not in {"args", "params"}}
+    args = obj.get("args") if isinstance(obj.get("args"), dict) else None
+    params = obj.get("params") if isinstance(obj.get("params"), dict) else None
+    merged = {}
+    if isinstance(params, dict):
+        merged.update(params)
+    if isinstance(args, dict):
+        merged.update(args)
+    merged.update({k: v for k, v in obj.items() if k not in {"tool", "args", "params", "actions"}})
+    if merged:
+        normalized.update(merged)
+
+    # Common aliases for edit actions.
+    if "old" in normalized and "old_str" not in normalized:
+        normalized["old_str"] = normalized.pop("old")
+    if "new" in normalized and "new_str" not in normalized:
+        normalized["new_str"] = normalized.pop("new")
+    if "text" in normalized and "content" not in normalized:
+        normalized["content"] = normalized["text"]
+
+    return normalized
+
+
+def _parse_action_payload(payload) -> list[dict]:
     results = []
+    if isinstance(payload, list):
+        for item in payload:
+            results.extend(_parse_action_payload(item))
+        return results
+
+    normalized = _normalize_tool_action(payload)
+    if not normalized:
+        return results
+    if "_batch" in normalized:
+        return list(normalized["_batch"])
+    results.append(normalized)
+    return results
+
+
+def parse_tool_blocks(text: str) -> list[dict]:
+    """Extract executable tool-action JSON objects from fenced blocks or raw JSON."""
+    results = []
+    seen_payloads: set[str] = set()
+
     for match in TOOL_BLOCK_RE.finditer(text):
+        candidate = match.group(1).strip()
+        if candidate in seen_payloads:
+            continue
+        seen_payloads.add(candidate)
         try:
-            obj = json.loads(match.group(1).strip())
-            if isinstance(obj, dict) and "tool" in obj:
-                results.append(obj)
+            obj = json.loads(candidate)
         except json.JSONDecodeError as e:
             logger.warning(f"Malformed tool JSON: {e}")
+            continue
+        results.extend(_parse_action_payload(obj))
+
+    stripped = text.strip()
+    if not results and stripped and stripped[0] in "{[":
+        try:
+            obj = json.loads(stripped)
+            results.extend(_parse_action_payload(obj))
+        except json.JSONDecodeError as e:
+            logger.warning(f"Malformed raw tool JSON: {e}")
+
     return results
 
 

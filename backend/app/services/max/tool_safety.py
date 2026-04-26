@@ -14,6 +14,7 @@ logger = logging.getLogger("max.tool_safety")
 ALLOWED_ROOTS = [
     os.path.expanduser("~/empire-repo"),
     "/tmp",
+    "/data/empire/self_heal_tests",
 ]
 
 BLOCKED_PATHS = [

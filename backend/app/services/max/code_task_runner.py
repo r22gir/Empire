@@ -7,6 +7,7 @@ parsed, executed, and results fed back so Atlas can chain operations.
 Provides real-time progress logging via an activity log.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -15,7 +16,9 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
+
+from app.services.max.ai_router import AIMessage, AIModel, AIResponse, ai_router
 
 logger = logging.getLogger("max.code_task")
 
@@ -23,6 +26,7 @@ logger = logging.getLogger("max.code_task")
 ALLOWED_TOOLS = {"file_read", "file_write", "file_edit", "file_append", "git_ops", "test_runner", "shell_execute", "package_manager", "service_manager", "project_scaffold"}
 MAX_ITERATIONS = 8  # Safety cap on tool-call loops (reduced from 15 for performance)
 MAX_NO_TOOL_RETRIES = 2
+CODE_TASK_MODEL_OVERRIDE_ENV = ("OPENCLAW_CODE_MODEL", "CODE_TASK_MODEL")
 MUTATE_HINTS = (
     "fix ", "change ", "update ", "modify ", "harden ", "implement ",
     "patch ", "refactor ", "write ", "create ", "edit ", "replace ",
@@ -33,6 +37,91 @@ READ_ONLY_HINTS = (
     "file exists", "do not commit", "do not generate drawings",
 )
 TEST_HINTS = ("test", "pytest", "verify", "build", "validation", "check")
+CODE_TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "name": "file_read",
+        "description": "Read a file from the repo.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "file_write",
+        "description": "Write a new file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "file_edit",
+        "description": "Edit an existing file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old": {"type": "string"},
+                "new": {"type": "string"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "file_append",
+        "description": "Append to a file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "test_runner",
+        "description": "Run tests and checks.",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "git_ops",
+        "description": "Run git status, diff, log, add, or commit.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "args": {"type": "string"},
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "shell_execute",
+        "description": "Run a shell command when necessary.",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    },
+]
 
 
 class CodeTaskState(str, Enum):
@@ -81,6 +170,234 @@ def _sanitize_value(value, limit: int = 1200):
     if isinstance(value, str) and len(value) > limit:
         return value[:limit] + "...(truncated)"
     return value
+
+
+def _infer_provider_from_model(model_used: str | None) -> str:
+    model = (model_used or "").lower()
+    if model.startswith("claude") or model.startswith("anthropic"):
+        return "anthropic"
+    if model.startswith("gpt-") or "openai" in model:
+        return "openai"
+    if model.startswith("grok") or model.startswith("xai"):
+        return "xai"
+    if model.startswith("groq"):
+        return "groq"
+    if model.startswith("ollama"):
+        return "ollama"
+    if model.startswith("openclaw"):
+        return "openclaw"
+    return "unknown"
+
+
+def _code_model_override() -> str | None:
+    for env_name in CODE_TASK_MODEL_OVERRIDE_ENV:
+        value = os.getenv(env_name)
+        if value:
+            return value.strip()
+    return None
+
+
+def _select_code_model() -> tuple[AIModel | None, str, bool]:
+    override = _code_model_override()
+    if override:
+        normalized = override.lower()
+        if normalized in {"grok", "xai"}:
+            return AIModel.GROK, "xai", True
+        for model in AIModel:
+            if model.value == normalized:
+                return model, _infer_provider_from_model(model.value), False
+        return None, "unknown", False
+
+    if ai_router.xai_key:
+        return AIModel.GROK, "xai", True
+    if ai_router.anthropic_key:
+        return AIModel.CLAUDE_OPUS, "anthropic", False
+    if ai_router.openai_key:
+        return AIModel.OPENAI_4O, "openai", False
+    if ai_router.groq_key:
+        return AIModel.GROQ, "groq", False
+    return AIModel.CLAUDE_OPUS, "unknown", False
+
+
+def _code_protocol_intro(task: "CodeTask", execution_mode: str) -> str:
+    return f"""DB-backed OpenClaw CodeForge execution task.
+
+Title: {task.prompt.splitlines()[0][:200]}
+Execution mode: {execution_mode}
+
+You must respond with executable tool actions only.
+
+Protocol:
+- Return exactly one tool action per response.
+- Valid formats are:
+  1. Native function/tool call if supported.
+  2. Raw JSON object with a top-level "tool" field.
+  3. A fenced JSON block with one JSON object.
+- Do not include prose outside the JSON/tool action.
+- If you need to edit code, you must first inspect the file.
+- If you need tests, use test_runner or shell_execute with the test command.
+- If you need git, use git_ops.
+
+Valid examples:
+{{
+  "tool": "file_read",
+  "args": {{
+    "path": "backend/app/services/max/drawing_intent.py"
+  }}
+}}
+
+{{
+  "tool": "file_edit",
+  "args": {{
+    "path": "backend/app/services/max/drawing_intent.py",
+    "old": "before",
+    "new": "after"
+  }}
+}}
+
+{{
+  "tool": "test_runner",
+  "args": {{
+    "command": "pytest backend/tests/test_openclaw_worker.py -q"
+  }}
+}}
+
+{{
+  "tool": "git_ops",
+  "args": {{
+    "command": "status"
+  }}
+}}
+
+Task:
+{task.prompt}
+"""
+
+
+def _code_protocol_retry_message() -> str:
+    return """This is an edit task. You must use file_read/file_edit/file_write/test_runner/git_ops.
+Provide exactly one executable tool action.
+
+Valid JSON examples:
+{"tool":"file_read","args":{"path":"backend/app/services/max/drawing_intent.py"}}
+{"tool":"file_edit","args":{"path":"backend/app/services/max/drawing_intent.py","old":"before","new":"after"}}
+{"tool":"file_write","args":{"path":"/tmp/codetaskrunner_tool_test.txt","content":"before"}}
+{"tool":"test_runner","args":{"command":"pytest backend/tests/test_openclaw_worker.py -q"}}
+{"tool":"git_ops","args":{"command":"status"}}
+"""
+
+
+def _extract_first_path(text: str) -> str | None:
+    candidates = re.findall(
+        r"((?:/tmp|/home/rg/empire-repo|~)/[^\s`\"'<>]+|(?:backend|frontend|empire-command-center)/[\w/.\-]+)",
+        text or "",
+    )
+    if not candidates:
+        return None
+    path = candidates[0].rstrip(".,);")
+    if path.startswith("~"):
+        path = os.path.expanduser(path)
+    elif not path.startswith("/"):
+        path = os.path.join(os.path.expanduser("~/empire-repo"), path)
+    return path
+
+
+def _extract_literal_after(text: str, marker: str, *, fallback: str | None = None) -> str | None:
+    pattern = re.compile(rf"{re.escape(marker)}\s+(.+?)(?:,\s*then\b|;\s*then\b|\.\s*then\b|\s+then\b|$)", re.IGNORECASE | re.DOTALL)
+    match = pattern.search(text or "")
+    if not match:
+        return fallback
+    value = match.group(1).strip().strip("`\"'")
+    return value or fallback
+
+
+def _synthesize_tool_actions_from_prompt(prompt: str, execution_mode: str) -> list[dict]:
+    text = (prompt or "").strip()
+    lower = text.lower()
+    path = _extract_first_path(text)
+    actions: list[dict] = []
+
+    if not path:
+        return actions
+
+    if any(term in lower for term in ("write ", "create ", "save ")) and any(term in lower for term in ("then edit", "edit it", "update it", "change it")):
+        initial = _extract_literal_after(text, "with content", fallback=_extract_literal_after(text, "content"))
+        updated = _extract_literal_after(text, "edit it to", fallback=_extract_literal_after(text, "change it to", fallback=_extract_literal_after(text, "update it to")))
+        if initial and updated:
+            actions.append({"tool": "file_write", "path": path, "content": initial})
+            actions.append({"tool": "file_edit", "path": path, "old_str": initial, "new_str": updated})
+            return actions
+
+    if any(term in lower for term in ("edit ", "fix ", "update ", "modify ", "change ", "patch ")):
+        if any(term in lower for term in ("read ", "inspect ", "open ", "look at")) or execution_mode == "mutate":
+            actions.append({"tool": "file_read", "path": path})
+        return actions
+
+    if any(term in lower for term in ("read ", "inspect ", "open ", "look at", "report", "summarize")):
+        actions.append({"tool": "file_read", "path": path})
+        return actions
+
+    return actions
+
+
+def _normalize_native_tool_call(tool_call: dict) -> dict | None:
+    if not isinstance(tool_call, dict):
+        return None
+
+    normalized = dict(tool_call)
+    tool_name = normalized.pop("tool", None) or normalized.pop("name", None)
+    if not tool_name:
+        return None
+
+    merged: dict[str, Any] = {}
+    for key in ("params", "args", "arguments"):
+        value = normalized.pop(key, None)
+        if isinstance(value, dict):
+            merged.update(value)
+        elif isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+            except Exception:
+                continue
+            if isinstance(decoded, dict):
+                merged.update(decoded)
+
+    merged.update({k: v for k, v in normalized.items() if not str(k).startswith("_")})
+
+    if "old" in merged and "old_str" not in merged:
+        merged["old_str"] = merged.pop("old")
+    if "new" in merged and "new_str" not in merged:
+        merged["new_str"] = merged.pop("new")
+    if "text" in merged and "content" not in merged:
+        merged["content"] = merged["text"]
+
+    return {"tool": tool_name, **merged}
+
+
+async def _request_code_response(
+    prompt: str,
+    *,
+    execution_mode: str,
+    task: "CodeTask",
+    selected_model: AIModel | None = None,
+    provider_hint: str | None = None,
+    supports_native_tools: bool | None = None,
+) -> AIResponse:
+    model = selected_model
+    if model is None or provider_hint is None or supports_native_tools is None:
+        model, provider_hint, supports_native_tools = _select_code_model()
+    tools = CODE_TOOL_SCHEMAS if supports_native_tools else None
+    response = await ai_router.chat(
+        messages=[AIMessage(role="user", content=prompt)],
+        model=model,
+        desk="codeforge",
+        system_prompt=_code_protocol_intro(task, execution_mode),
+        tools=tools,
+    )
+    task.provider_used = _infer_provider_from_model(response.model_used) or provider_hint
+    task.model_used = response.model_used
+    task.supports_tool_calls = bool(response.function_calls) if response.function_calls is not None else supports_native_tools
+    return response
 
 
 def _repo_head_exists(commit_hash: str) -> bool:
@@ -132,6 +449,10 @@ def _tool_record(tool_call: dict, result, *, success: bool, error: str | None = 
 def _compose_verified_summary(task: "CodeTask") -> str:
     lines = [
         f"Execution mode: {task.execution_mode}",
+        f"Provider used: {task.provider_used or 'unknown'}",
+        f"Model used: {task.model_used or 'unknown'}",
+        f"Supports tool calls: {task.supports_tool_calls if task.supports_tool_calls is not None else 'unknown'}",
+        f"Prompt attempts: {task.prompt_attempts}",
         f"Task ID: {task.id}",
         f"Prompt: {task.prompt[:200]}",
         "",
@@ -172,6 +493,7 @@ def _compose_verified_summary(task: "CodeTask") -> str:
 
     lines.append("")
     lines.append(f"Verified commit hash: {task.verified_commit_hash or 'none'}")
+    lines.append(f"Failure reason: {task.failure_reason or 'none'}")
     if task.verification_notes:
         lines.append("")
         lines.append("Verification notes:")
@@ -187,6 +509,12 @@ class CodeTask:
     id: str
     prompt: str
     execution_mode: str = "auto"
+    provider_used: Optional[str] = None
+    model_used: Optional[str] = None
+    supports_tool_calls: Optional[bool] = None
+    prompt_attempts: int = 0
+    failure_reason: Optional[str] = None
+    execution_protocol: str = "json-tool-action"
     state: CodeTaskState = CodeTaskState.QUEUED
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     started_at: Optional[str] = None
@@ -213,6 +541,12 @@ class CodeTask:
             "id": self.id,
             "prompt": self.prompt[:200],
             "execution_mode": self.execution_mode,
+            "provider_used": self.provider_used,
+            "model_used": self.model_used,
+            "supports_tool_calls": self.supports_tool_calls,
+            "prompt_attempts": self.prompt_attempts,
+            "failure_reason": self.failure_reason,
+            "execution_protocol": self.execution_protocol,
             "state": self.state.value,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -267,7 +601,7 @@ class CodeTaskRunner:
 
         try:
             from app.services.max.desks.desk_manager import desk_manager
-            from app.services.max.tool_executor import parse_tool_blocks, execute_tool, strip_tool_blocks
+            from app.services.max.tool_executor import parse_tool_blocks, execute_tool
 
             desk_manager.initialize()
 
@@ -276,26 +610,7 @@ class CodeTaskRunner:
                 raise RuntimeError("CodeForge desk not available")
 
             task.add_log("planning", "Reading codebase and planning changes...")
-
-            # Build initial prompt for Atlas
-            import os
-            repo_root = os.path.expanduser("~/empire-repo")
-            prompt = (
-                "You are Atlas (CodeForge), handling a Code Mode task from the founder. "
-                "You have tools available — use them to read, write, and edit files. "
-                "Execute tool calls one at a time using ```tool blocks.\n\n"
-                f"IMPORTANT: The repository root is {repo_root}. Always use this as the base for all file paths.\n\n"
-                "Available tools:\n"
-                f"- file_read: {{\"tool\": \"file_read\", \"path\": \"{repo_root}/backend/app/main.py\"}}\n"
-                f"- file_write: {{\"tool\": \"file_write\", \"path\": \"{repo_root}/path/to/file\", \"content\": \"...\"}}\n"
-                f"- file_edit: {{\"tool\": \"file_edit\", \"path\": \"{repo_root}/path/to/file\", \"old_str\": \"...\", \"new_str\": \"...\"}}\n"
-                f"- file_append: {{\"tool\": \"file_append\", \"path\": \"{repo_root}/path/to/file\", \"content\": \"...\"}}\n"
-                "- git_ops: {\"tool\": \"git_ops\", \"command\": \"status|diff|log|add\", \"args\": \"...\"}\n\n"
-                "IMPORTANT: Use ONE tool call per response. I will execute it and give you the result. "
-                "Then you can use the next tool. When you are DONE, write your final answer with "
-                "NO tool blocks — just a ## Summary section.\n\n"
-                f"Task: {task.prompt}"
-            )
+            prompt = task.prompt
 
             actual_files_changed: set[str] = set()
             actual_files_inspected: set[str] = set()
@@ -307,33 +622,68 @@ class CodeTaskRunner:
 
             for iteration in range(MAX_ITERATIONS):
                 # Call Atlas
+                task.prompt_attempts += 1
+                selected_model, provider_hint, supports_native_tools = _select_code_model()
+                task.provider_used = provider_hint
+                task.model_used = selected_model.value if selected_model else None
+                task.supports_tool_calls = supports_native_tools
                 response = await asyncio.wait_for(
-                    codeforge.ai_call(prompt),
+                    _request_code_response(
+                        prompt,
+                        execution_mode=task.execution_mode,
+                        task=task,
+                        selected_model=selected_model,
+                        provider_hint=provider_hint,
+                        supports_native_tools=supports_native_tools,
+                    ),
                     timeout=90,
+                )
+                task.add_log(
+                    "model",
+                    f"attempt={task.prompt_attempts} provider={task.provider_used or 'unknown'} model={task.model_used or 'unknown'} supports_tool_calls={task.supports_tool_calls if task.supports_tool_calls is not None else 'unknown'}",
                 )
 
                 if not response:
-                    task.add_log("warning", f"Atlas returned empty response on iteration {iteration + 1}")
+                    task.add_log("warning", f"Model returned empty response on iteration {iteration + 1}")
                     break
 
-                # Parse tool calls from response
-                tool_calls = parse_tool_blocks(response)
-                clean_text = strip_tool_blocks(response)
+                response_text = response.content or ""
+                tool_calls = [
+                    normalized
+                    for normalized in (
+                        _normalize_native_tool_call(call)
+                        for call in (response.function_calls or [])
+                    )
+                    if normalized
+                ]
+                if not tool_calls:
+                    tool_calls = parse_tool_blocks(response_text)
+                clean_text = response_text.strip()
 
                 # No tool calls = Atlas is done
                 if not tool_calls:
-                    if clean_text:
-                        task.add_log("summary", clean_text[:120])
                     if force_one_tool_call and not executed_tool_calls and no_tool_retries < MAX_NO_TOOL_RETRIES:
                         no_tool_retries += 1
-                        task.add_log("retry", "Atlas returned prose without tool calls; requesting executable tool call")
-                        prompt = (
-                            "This is an edit task. You must use file_read/file_edit/file_write/test_runner/git_ops. "
-                            "Provide exactly one tool call."
-                        )
+                        task.add_log("retry", "Model returned prose without tool calls; requesting executable tool call")
+                        prompt = _code_protocol_retry_message()
                         continue
-                    task.add_log("completed", "Atlas finished — no more tool calls")
-                    break
+                    fallback_actions = _synthesize_tool_actions_from_prompt(task.prompt, task.execution_mode)
+                    if fallback_actions and not executed_tool_calls:
+                        task.add_log(
+                            "planner",
+                            f"Synthesized {len(fallback_actions)} executable tool action(s) from prompt: "
+                            + ", ".join(
+                                f"{action.get('tool')}:{action.get('path', action.get('command', ''))}"
+                                for action in fallback_actions
+                            ),
+                        )
+                        task.verification_notes.append("Local fallback planner synthesized executable tool actions from prompt")
+                        tool_calls = fallback_actions
+                    else:
+                        if clean_text:
+                            task.add_log("summary", clean_text[:120])
+                        task.add_log("completed", "Atlas finished — no more tool calls")
+                        break
 
                 # Execute each tool call and collect results
                 tool_results_text = []
@@ -446,7 +796,12 @@ class CodeTaskRunner:
 
             if force_one_tool_call and no_tool_retries >= MAX_NO_TOOL_RETRIES and not executed_tool_calls:
                 task.state = CodeTaskState.ERROR
-                task.error = "model did not provide executable tool calls."
+                task.failure_reason = (
+                    f"selected code model did not emit executable tool calls "
+                    f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts}). "
+                    "No deterministic fallback plan could be inferred from the prompt."
+                )
+                task.error = task.failure_reason
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} did not provide executable tool calls after retries")
@@ -454,7 +809,11 @@ class CodeTaskRunner:
 
             if not executed_tool_calls:
                 task.state = CodeTaskState.ERROR
-                task.error = "Code task completed without actual tool execution; refusing prose-only summary."
+                task.failure_reason = (
+                    f"Code task completed without actual tool execution "
+                    f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts})"
+                )
+                task.error = task.failure_reason
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} had no executed tool calls")
@@ -463,7 +822,8 @@ class CodeTaskRunner:
             if task.execution_mode == "read_only":
                 if any(call.get("tool") in {"file_write", "file_edit", "file_append"} and call.get("success") for call in executed_tool_calls):
                     task.state = CodeTaskState.ERROR
-                    task.error = "Read-only code task executed a mutating tool call."
+                    task.failure_reason = "Read-only code task executed a mutating tool call."
+                    task.error = task.failure_reason
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
                     logger.error(f"Code task {task.id} violated read-only mode")
@@ -471,7 +831,11 @@ class CodeTaskRunner:
             else:
                 if not task.files_changed:
                     task.state = CodeTaskState.ERROR
-                    task.error = "Code task completed without actual file changes; refusing to accept prose-only summary."
+                    task.failure_reason = (
+                        f"Code task completed without actual file changes "
+                        f"(provider={task.provider_used or 'unknown'}, model={task.model_used or 'unknown'}, attempts={task.prompt_attempts})"
+                    )
+                    task.error = task.failure_reason
                     task.completed_at = datetime.utcnow().isoformat()
                     task.add_log("error", task.error)
                     logger.error(f"Code task {task.id} had no actual file changes")
@@ -485,7 +849,8 @@ class CodeTaskRunner:
             )
             if commit_attempted and not task.verified_commit_hash:
                 task.state = CodeTaskState.ERROR
-                task.error = "git commit succeeded but could not be verified in repository history."
+                task.failure_reason = "git commit succeeded but could not be verified in repository history."
+                task.error = task.failure_reason
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} could not verify commit")
@@ -493,7 +858,8 @@ class CodeTaskRunner:
 
             if task.verified_commit_hash and not _repo_head_exists(task.verified_commit_hash):
                 task.state = CodeTaskState.ERROR
-                task.error = f"Verified commit hash is not present in git history: {task.verified_commit_hash}"
+                task.failure_reason = f"Verified commit hash is not present in git history: {task.verified_commit_hash}"
+                task.error = task.failure_reason
                 task.completed_at = datetime.utcnow().isoformat()
                 task.add_log("error", task.error)
                 logger.error(f"Code task {task.id} invalid commit hash")
