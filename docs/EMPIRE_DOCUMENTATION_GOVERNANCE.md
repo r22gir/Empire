@@ -50,7 +50,7 @@ Features that cross multiple modules must have:
 | **Architecture** | `EMPIRE_ARCHITECTURE_CURRENT.md` | System design | On architectural changes |
 | **Governance** | `EMPIRE_DOCUMENTATION_GOVERNANCE.md` | This file | Only when governance changes |
 | **Module-specific** | `docs/MODULE_SPECIFIC.md` | Per-module deep dives | As needed |
-| **Historical** | `EMPIRE_MASTER_DOCUMENT_2026.pdf` | Old baseline (April 1–2, 2026) | Never — archive only |
+| **Historical** | empire-ecosystem-report.md (2026-03-18) or pre-baseline docs/PDFs | Historical record only — always verify | Archive — do not modify |
 
 ---
 
@@ -103,6 +103,21 @@ When documenting version state:
 - Always cite commit hash, not date, for precision
 - For multi-commit features, cite the most recent relevant commit
 - For "needs verification" items, do NOT guess — mark explicitly
+
+---
+
+## Historical Baseline Rule
+
+**Old PDF reports and pre-March-2026 docs must be treated as historical baselines only.**
+
+When comparing current state to old baselines:
+1. Always cite the specific doc name and date as the source of old claims
+2. Never silently convert an old doc's numbers into a "current" claim
+3. If the old doc's claim cannot be verified against current repo state, mark it "needs verification" rather than asserting it as fact
+4. The March 18 baseline (`empire-ecosystem-report.md`) is the authoritative reference for April 2026 comparisons — its 396 commits, 22 products, 44 screens are source-cited, not repeated as current truth
+
+Bad: "The old PDF said 396 commits" (vague sourcing)
+Good: "empire-ecosystem-report.md (2026-03-18) documented 396 commits" (specific, citable)
 
 ---
 

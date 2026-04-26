@@ -1,5 +1,5 @@
 # EmpireBox Recent Changelog
-> Post-March 18, 2026 baseline — commits through 8662bb3
+> Post-March 18, 2026 baseline (empire-ecosystem-report.md, 396 commits) — commits through da3fdf4
 > Baseline: empire-ecosystem-report.md (generated 2026-03-18)
 
 ---
@@ -7,7 +7,7 @@
 ## Summary
 
 **555 commits** added since March 18, 2026 baseline.
-**Total: 812 commits** on main branch.
+**Total: 813 commits** on main branch (verified `git rev-list --count HEAD`).
 
 ---
 
@@ -30,7 +30,7 @@
 
 | Commit | Description |
 |--------|-------------|
-| `8662bb3` | Fix CodeTaskRunner git ops and commit validation |
+| `da3fdf4` | Fix CodeTaskRunner git ops and commit validation |
 | `7b385b8` | Improve CodeTaskRunner executable tool calls |
 | `0c5c255` | Require executable tool calls for CodeTaskRunner edit tasks |
 | `49f817d` | Harden CodeTaskRunner evidence verification |
@@ -78,7 +78,7 @@
 
 | Commit | Description |
 |--------|-------------|
-| `8662bb3` | Fix CodeTaskRunner git ops and commit validation |
+| `da3fdf4` | Fix CodeTaskRunner git ops and commit validation |
 | `7b385b8` | Improve CodeTaskRunner executable tool calls |
 | `0c5c255` | Require executable tool calls for CodeTaskRunner edit tasks |
 | `49f817d` | Harden CodeTaskRunner evidence verification |
@@ -183,7 +183,7 @@
 |--------|-------------|
 | `18312be` | feat(empire): update construction forge products |
 
-**Note**: Most recent commit before current HEAD `8662bb3`
+**Note**: da3fdf4 is the most recent commit on main branch.
 
 ---
 

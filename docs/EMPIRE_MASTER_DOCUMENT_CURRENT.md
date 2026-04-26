@@ -1,7 +1,9 @@
 # EmpireBox Master Document — Current
 > Generated: 2026-04-26
-> Repo truth: `main`, commit `8662bb3`, 812 total commits
-> Replaces: EMPIRE_MASTER_DOCUMENT_2026.pdf (April 1–2 baseline — historical only)
+> Repo truth: `main`, commit `da3fdf4`, 813 total commits (verified via `git rev-list --count HEAD`)
+> Supersedes: empire-ecosystem-report.md (March 18 baseline, 396 commits) and any PDF master documents
+> Note: "Old PDF" baselines in this document refer to empire-ecosystem-report.md which was generated 2026-03-18.
+  PDFs named EMPIRE_MASTER_DOCUMENT_2026*.pdf are historical only — their claims must be verified against current repo state.
 > Author: Claude Code (repo-backed audit, not guesswork)
 
 ---
@@ -16,18 +18,22 @@
 
 The system is anchored by **MAX** (Multi-Agent eXecutive) — an AI orchestrator with 18 specialized desks, 35+ tools, and persistent memory. MAX routes through a multi-provider AI chain (Grok → Claude → Groq → OpenClaw → Ollama) and communicates via a web-based Command Center and Telegram bot.
 
-**Current state**: 93 backend routers, 50+ frontend screens, 812 commits, ~1,049 AI calls logged. Largest gaps: CraftForge frontend, full SocialForge/SupportForge backend wiring.
+**Current state**: 80 Python router files in `backend/app/routers/`, 70 loaded via `load_router()` in `main.py` (see distinction below), 50+ frontend screens, 813 commits, ~1,049 AI calls logged. Largest gaps: CraftForge frontend, full SocialForge/SupportForge backend wiring.
 
 ---
 
 ## B. Historical Baseline
 
-The **EMPIRE_MASTER_DOCUMENT_2026.pdf** (April 1–2, 2026) documented:
+The **empire-ecosystem-report.md** (March 18, 2026) documented:
 - 396 commits, 22 products, 18 desks, 35 tools, 7 databases
-- Development period: Feb 22 – Apr 1, 2026
+- Development period: Feb 22 – Mar 18, 2026
+- Source: Full codebase scan (396 commits, 44 screens, 35 tools, 18 desks, 7 databases)
 
-**Changes since April 1 baseline:**
-- 416 new commits (396 → 812)
+*Note: Any PDF named EMPIRE_MASTER_DOCUMENT_2026*.pdf is an older/alternative historical record.
+ Its claims are not authoritative — always verify against current repo state.*
+
+**Changes since March 18 baseline (empire-ecosystem-report.md):**
+- 417 new commits (396 → 813)
 - TranscriptForge added (legal transcription pipeline, Hermes phases 1–3)
 - MAX supermemory/continuity panel added
 - VendorOps fully wired (checkout, webhook alert runner, preferences, renewal alerts)
@@ -43,9 +49,9 @@ The **EMPIRE_MASTER_DOCUMENT_2026.pdf** (April 1–2, 2026) documented:
 ## C. Current Architecture
 
 ### Backend (FastAPI, port 8000)
-- **Entry**: `backend/app/main.py` — loads ~93 routers via `load_router()` helper
+- **Entry**: `backend/app/main.py` — loads 70 routers via `load_router()` helper (see router count distinction below)
 - **Startup**: File-lock at `/tmp/empire_primary_worker.lock` — singleton background services only on primary worker
-- **Router count**: 93 Python files in `backend/app/routers/`
+- **Router count**: 80 Python files present in `backend/app/routers/`; 70 loaded via `load_router()` in `main.py`; the difference (10 files) includes `__init__.py`, `marketplace/` package, and routers not yet loaded (e.g., some stubs)
 - **Background services** (primary worker only):
   - Telegram Bot (webhook mode)
   - Desk Scheduler
@@ -493,10 +499,10 @@ The **EMPIRE_MASTER_DOCUMENT_2026.pdf** (April 1–2, 2026) documented:
 
 ## K. April 1 Baseline vs Current Repo Truth
 
-| Old Claim (April 1 PDF) | Current Status | Classification |
+| Old Claim (empire-ecosystem-report.md, 2026-03-18) | Current Status | Classification |
 |---|---|---|
-| 396 commits | 812 commits | **Changed** |
-| 22 products | 30+ module/product entries | **Changed** (more discovered in audit) |
+| 396 commits (empire-ecosystem-report.md, 2026-03-18) | 813 commits | **Changed** |
+| 22 products (empire-ecosystem-report.md) | 30+ modules/products identified in repo/docs | **Changed** (more discovered in audit) |
 | 18 AI desks | 18 AI desks (unchanged) | **Still true** |
 | 35 tools | 35+ tools (unchanged) | **Still true** |
 | 7 databases | 7 logical DBs (empire, intake, brain×2, tool_audit, amp, empirebox) | **Still true** |
@@ -525,13 +531,13 @@ The **EMPIRE_MASTER_DOCUMENT_2026.pdf** (April 1–2, 2026) documented:
 
 ```
 git branch: main
-git commit: 8662bb3
-total commits: 812
-backend routers: 93 Python files
+git commit: da3fdf4
+total commits: 813 (verified: git rev-list --count HEAD)
+backend routers: 80 Python files in routers/, 70 loaded via load_router() in main.py
 frontend screens: 50+ components
 docs/: ~100+ .md files across multiple subdirs
 PORT_REGISTRY.md: current (last updated 2026-03-09)
-empire-ecosystem-report.md: baseline (2026-03-18)
+empire-ecosystem-report.md: March 18 baseline (396 commits)
 ```
 
 ---

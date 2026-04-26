@@ -1,5 +1,5 @@
 # EmpireBox Module Registry
-> Generated: 2026-04-26 | Commit: 8662bb3
+> Generated: 2026-04-26 | Commit: da3fdf4 (813 commits verified via `git rev-list --count HEAD`)
 > Purpose: Per-module detail registry — companion to EMPIRE_MASTER_DOCUMENT_CURRENT.md
 
 ---
@@ -22,7 +22,7 @@ Each entry documents one product/module. Fields:
 
 **Status**: live
 **Purpose**: Unified Next.js dashboard — primary MAX interaction surface
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `empire-command-center/app/page.tsx` — main entry, CommandCenter component
@@ -57,7 +57,7 @@ Each entry documents one product/module. Fields:
 
 **Status**: live
 **Purpose**: AI orchestrator with 18 specialized desks, autonomous scheduling, Telegram notifications
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend Core
 - `backend/app/services/max/system_prompt.py` — MAX brain (identity + rules)
@@ -143,7 +143,7 @@ Fallback chain: Grok (15s) → Claude Sonnet (30s) → Groq (10s) → OpenClaw (
 
 **Status**: live
 **Purpose**: Local AI gateway for autonomous code tasks
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Location
 - Code: `~/Empire/openclaw/` (separate from empire-repo)
@@ -171,7 +171,7 @@ create_task → queued → running → done/failed/paused/cancelled
 ### Recent Fixes
 - `4f4c127` — OpenClaw code task routing priority
 - `ee268c9` — OpenClaw DB task executor truth
-- `8662bb3` — Fix CodeTaskRunner git ops and commit validation
+- `da3fdf4` — Fix CodeTaskRunner git ops and commit validation
 
 ### Docs
 - `docs/openclaw_build_plan.md`
@@ -183,7 +183,7 @@ create_task → queued → running → done/failed/paused/cancelled
 
 **Status**: live (bounded beneath MAX)
 **Purpose**: MAX's long-running workflow assistant
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Files
 - `backend/app/services/max/hermes_phase1.py` — memory bridge
@@ -221,7 +221,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: QB replacement — quotes, invoices, payments, expenses, CRM, inventory
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `empire-command-center/app/workroom/` — workroom-specific components
@@ -274,7 +274,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial (backend ready, frontend absent)
 **Purpose**: Woodwork & CNC business module
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `empire-command-center/app/components/screens/CraftForgePage.tsx` — stub only, no real implementation
@@ -307,7 +307,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: High-end service business intake portal (drapery/upholstery)
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `empire-command-center/app/intake/` — intake auth + project submission
@@ -344,7 +344,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: Full financial pipeline — 3-option proposals, PDF generation, payment tracking
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend Routers
 - `backend/app/routers/finance.py` — canonical finance
@@ -378,7 +378,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Customer relationship management
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/ForgeCRMPage.tsx`
@@ -405,7 +405,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: Subscription renewals, add-on management, Stripe webhook alerts
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend
 - `backend/app/routers/vendorops.py` — core router
@@ -440,7 +440,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: Photo-first intake for collectible print/media (LIFE Magazine focus)
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/ArchiveForgePage.tsx`
@@ -473,7 +473,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial (Layer 3 classifier active)
 **Purpose**: File recovery with AI image classification
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/RecoveryForgeScreen.tsx`
@@ -501,7 +501,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Cross-platform relisting tool
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/RelistAppPage.tsx`
@@ -529,7 +529,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: Legal/high-risk transcription pipeline with Hermes-assisted QC
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend
 - `backend/app/routers/transcriptforge.py` — main router
@@ -580,7 +580,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: AI-powered lead generation and nurturing
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/LeadForgePage.tsx`
@@ -603,7 +603,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Social media management and automation
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/SocialForgePage.tsx`
@@ -635,7 +635,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: AI-powered customer support and ticketing
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/SupportForgePage.tsx`
@@ -672,7 +672,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Multi-marketplace listing creation, photo enhancement, AI descriptions
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/MarketForgePage.tsx`
@@ -705,7 +705,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Document apostille & authentication (DC/MD/VA)
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/ApostAppPage.tsx`
@@ -726,7 +726,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: LLC formation & compliance (hybrid partner + DIY approach)
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/LLCFactoryPage.tsx`
@@ -750,7 +750,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Colombian real estate land development
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/ConstructionForgePage.tsx`
@@ -767,7 +767,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Retail store management / POS
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/StoreFrontForgePage.tsx`
@@ -781,7 +781,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Shipping solutions, rate comparison, label generation
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/ShipForgePage.tsx`
@@ -806,7 +806,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Universal SaaS for service businesses (contractors)
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/ContractorForgePage.tsx`
@@ -824,7 +824,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial (needs rebuild)
 **Purpose**: Spanish-language personal development platform
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `empire-command-center/app/amp/` — AMP pages
@@ -844,7 +844,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial (untested)
 **Purpose**: 3D avatar (TalkingHead) via iframe
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/PresentationScreen.tsx`
@@ -862,7 +862,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Architectural bench drawings (SVG + PDF), sewing pattern math + PDF export
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Frontend
 - `app/components/screens/DrawingStudioPage.tsx`
@@ -883,7 +883,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: AI-powered image analysis and measurements
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend
 - `backend/app/routers/vision.py` — main vision router
@@ -909,7 +909,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Multi-method analysis, business intelligence
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend
 - `backend/app/api/v1/smart_analyzer.py` — smart analyzer router
@@ -926,7 +926,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial (planned)
 **Purpose**: P2P marketplace with escrow, Stripe Connect payments
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend
 - `backend/app/routers/marketplace/` — marketplace subpackage
@@ -942,7 +942,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: partial
 **Purpose**: Voice notes → structured quotes, document extraction
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Backend
 - `backend/app/routers/notes_extraction.py` — notes to quote
@@ -960,7 +960,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live (adopted)
 **Purpose**: Agent framework config (build agent, instruction chain)
-**Last verified**: 8662bb3
+**Last verified**: da3fdf4
 
 ### Config File
 - `~/empire-repo/opencode.json`
