@@ -115,6 +115,178 @@ def test_non_health_task_cannot_complete_with_generic_port_health(monkeypatch, t
     assert row["completed_at"]
 
 
+def test_codeforge_task_with_drawing_word_routes_to_code_path(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title="Fix drawing intent false positive",
+        description="Harden backend logic so drawing intent articles do not become SVGs.",
+        desk="codeforge",
+        source="manual-code-task",
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+    called = {"drawing": False, "code": False}
+
+    async def fake_execute_code(_task):
+        called["code"] = True
+        return openclaw_worker.ExecutionResult(
+            success=True,
+            executor="code_task_runner",
+            result="Inspected backend/app/services/max/drawing_intent.py",
+            tools_run=["reading: backend/app/services/max/drawing_intent.py"],
+            files_inspected=["backend/app/services/max/drawing_intent.py"],
+        )
+
+    async def fake_draw(_task):
+        called["drawing"] = True
+        raise AssertionError("drawing generator must not run for codeforge tasks")
+
+    monkeypatch.setattr(openclaw_worker, "_execute_code_task", fake_execute_code)
+    monkeypatch.setattr(openclaw_worker, "_handle_drawing_task", fake_draw)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert called["code"] is True
+    assert called["drawing"] is False
+    assert row["status"] == "done"
+    assert "Executor path used: code_task_runner" in row["result"]
+
+
+def test_manual_code_task_with_drawing_intent_routes_to_code_path(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title="Ground MAX current-source replies and harden drawing intent",
+        description="Inspect backend/app/services/max/drawing_intent.py and report file exists. Do not edit. Do not generate drawings. Do not commit.",
+        desk="codeforge",
+        source="manual-code-task",
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+    called = {"drawing": False}
+
+    async def fake_execute_code(_task):
+        return openclaw_worker.ExecutionResult(
+            success=True,
+            executor="code_task_runner",
+            result="Inspected backend/app/services/max/drawing_intent.py",
+            tools_run=["reading: backend/app/services/max/drawing_intent.py"],
+            files_inspected=["backend/app/services/max/drawing_intent.py"],
+        )
+
+    async def fake_draw(_task):
+        called["drawing"] = True
+        raise AssertionError("drawing generator must not run for manual-code-task")
+
+    monkeypatch.setattr(openclaw_worker, "_execute_code_task", fake_execute_code)
+    monkeypatch.setattr(openclaw_worker, "_handle_drawing_task", fake_draw)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert called["drawing"] is False
+    assert row["status"] == "done"
+    assert "Executor path used: code_task_runner" in row["result"]
+    assert "backend/app/services/max/drawing_intent.py" in row["result"]
+
+
+def test_explicit_bench_drawing_can_use_drawing_generator(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title='Generate a 120 inch bench drawing',
+        description='Create a bench drawing with 120 inch width and 22 inch depth.',
+        desk='ForgeDesk',
+        source='manual',
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+
+    async def fake_draw(_task):
+        return "Drawing generated: ~/empire-repo/uploads/openclaw_drawings/task_1_straight.svg"
+
+    async def fake_execute_code(_task):
+        raise AssertionError("code executor should not run for explicit drawing generation")
+
+    monkeypatch.setattr(openclaw_worker, "_handle_drawing_task", fake_draw)
+    monkeypatch.setattr(openclaw_worker, "_execute_code_task", fake_execute_code)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert row["status"] == "done"
+    assert "Executor path used: openclaw_worker.local_drawing_generator" in row["result"]
+    assert "Drawing generated:" in row["result"]
+
+
+def test_code_task_drawing_result_is_rejected(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title="Ground MAX current-source replies and harden drawing intent",
+        description="Fix MAX source grounding and prevent drawing false positives.",
+        desk="codeforge",
+        source="manual-code-task",
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+
+    async def fake_execute(_task):
+        return openclaw_worker.ExecutionResult(
+            success=True,
+            executor="openclaw_worker.local_drawing_generator",
+            result="Drawing generated: /home/rg/empire-repo/uploads/openclaw_drawings/task_46_straight.svg",
+        )
+
+    monkeypatch.setattr(openclaw_worker, "_execute_task", fake_execute)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert row["status"] == "failed"
+    assert "drawing generation output" in row["error"]
+    assert row["completed_at"]
+
+
+def test_code_executor_unavailable_does_not_fall_back_to_drawing(monkeypatch, tmp_path):
+    db_path = tmp_path / "empire.db"
+    _init_openclaw_db(db_path)
+    task = _insert_task(
+        db_path,
+        title="Ground MAX current-source replies and harden drawing intent",
+        description="Fix source grounding and drawing false positives.",
+        desk="codeforge",
+        source="manual-code-task",
+    )
+    _patch_worker_basics(monkeypatch, db_path)
+
+    called = {"drawing": False}
+
+    async def fake_execute_code(_task):
+        return openclaw_worker.ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error="code executor unavailable",
+        )
+
+    async def fake_draw(_task):
+        called["drawing"] = True
+        raise AssertionError("drawing generator must not run when code executor is unavailable")
+
+    monkeypatch.setattr(openclaw_worker, "_execute_code_task", fake_execute_code)
+    monkeypatch.setattr(openclaw_worker, "_handle_drawing_task", fake_draw)
+
+    asyncio.run(openclaw_worker._process_task(task))
+
+    row = _get_task(db_path, task["id"])
+    assert row["status"] == "failed"
+    assert "code executor unavailable" in row["error"]
+    assert called["drawing"] is False
+    assert row["completed_at"]
+
+
 def test_explicit_health_task_may_complete_with_health_summary(monkeypatch, tmp_path):
     db_path = tmp_path / "empire.db"
     _init_openclaw_db(db_path)

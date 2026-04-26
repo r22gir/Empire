@@ -162,6 +162,9 @@ def _is_code_task(task: dict) -> bool:
     desk = _normalize_desk(task.get("desk"))
     if desk in {"codeforge", "code", "dev", "development", "atlas"}:
         return True
+    source = str(task.get("source") or "").strip().lower()
+    if source in {"manual-code-task", "code-task", "code"}:
+        return True
     text = _task_text(task)
     code_terms = (
         "backend/",
@@ -173,13 +176,70 @@ def _is_code_task(task: dict) -> bool:
         "pytest",
         "code task",
         "fix ",
+        "fixing ",
         "implement ",
         "refactor ",
+        "harden ",
+        "audit ",
+        "test ",
         "worker",
         "router",
         "repo",
+        "drawing intent",
+        "drawing_intent",
+        "source grounding",
+        "current-source",
     )
     return "codeforge" in text or any(term in text for term in code_terms)
+
+
+def _is_explicit_drawing_task(task: dict) -> bool:
+    """Return True only for actual drawing generation requests."""
+    if _is_code_task(task):
+        return False
+
+    desk = _normalize_desk(task.get("desk"))
+    text = _task_text(task)
+    drawing_verbs = (
+        "generate ",
+        "create ",
+        "render ",
+        "produce ",
+        "make ",
+        "draw ",
+        "sketch ",
+        "draft ",
+        "build ",
+    )
+    drawing_nouns = (
+        "drawing",
+        "bench",
+        "shop drawing",
+        "technical drawing",
+        "cad",
+        "rendering",
+        "sketch",
+        "pdf drawing",
+    )
+    code_blocks = (
+        "fix ",
+        "audit ",
+        "harden ",
+        "test ",
+        "inspect ",
+        "review ",
+        "debug ",
+        "source grounding",
+        "drawing intent",
+        "drawing_intent",
+    )
+    if any(term in text for term in code_blocks):
+        return False
+    if not any(term in text for term in drawing_verbs):
+        return False
+    if not any(noun in text for noun in drawing_nouns):
+        return False
+    return True
 
 
 def _is_generic_port_health_result(text: str, skill_used: str | None = None) -> bool:
@@ -191,6 +251,15 @@ def _is_generic_port_health_result(text: str, skill_used: str | None = None) -> 
         return False
     port_line = re.compile(r"^\d{2,5}:\s+(ONLINE|OFFLINE)$", re.IGNORECASE)
     return all(port_line.match(line) for line in lines)
+
+
+def _is_drawing_generation_result(execution: ExecutionResult) -> bool:
+    text = (execution.result or "").lower()
+    if execution.executor == "openclaw_worker.local_drawing_generator":
+        return True
+    if "openclaw_drawings" in text or "drawing generated:" in text or text.endswith(".svg"):
+        return True
+    return False
 
 
 def _git_head() -> str | None:
@@ -661,8 +730,26 @@ async def _execute_code_task(task: dict) -> ExecutionResult:
     logs = list(getattr(code_task, "log", []) or [])
     tools_run = [f"{entry.action}: {entry.detail}" for entry in logs]
     evidence_actions = {"reading", "writing", "editing", "appending", "git", "testing", "executing"}
-    has_tool_evidence = any(entry.action in evidence_actions for entry in logs)
     result_text = code_task.result or ""
+    result_lower = result_text.lower()
+    has_tool_evidence = (
+        any(entry.action in evidence_actions for entry in logs)
+        or bool(getattr(code_task, "files_changed", []) or [])
+        or any(
+            marker in result_lower
+            for marker in (
+                "tool run:",
+                "tools run:",
+                "files inspected:",
+                "files changed:",
+                "commands run:",
+                "output path:",
+                "no files edited",
+                "validated json parse",
+                "inspected file path:",
+            )
+        )
+    )
 
     if _state_value(code_task.state) == CodeTaskState.ERROR.value:
         return ExecutionResult(
@@ -744,12 +831,29 @@ async def _execute_task(task: dict) -> ExecutionResult:
     if _is_explicit_health_task(task):
         return await _execute_health_check(task)
 
+    if _is_code_task(task):
+        return await _execute_code_task(task)
+
+    if _is_explicit_drawing_task(task):
+        try:
+            drawing_result = await _handle_drawing_task(task)
+            return ExecutionResult(
+                success=True,
+                executor="openclaw_worker.local_drawing_generator",
+                result=drawing_result,
+                tools_run=["drawing_api", "svg_write"],
+                output_path=f"~/empire-repo/uploads/openclaw_drawings/task_{task['id']}.svg",
+            )
+        except Exception as exc:
+            return ExecutionResult(
+                success=False,
+                executor="openclaw_worker.local_drawing_generator",
+                error=f"Drawing generation failed: {exc}",
+            )
+
     local_result = await _try_safe_local_execution(task)
     if local_result is not None:
         return local_result
-
-    if _is_code_task(task):
-        return await _execute_code_task(task)
 
     return await _execute_openclaw_chat_task(task)
 
@@ -776,19 +880,6 @@ async def _process_task(task: dict):
     _update_task(task_id, status="running", started_at=datetime.now().isoformat())
 
     try:
-        # Check for drawing tasks — handle directly without OpenClaw
-        if _is_drawing_task(task):
-            try:
-                drawing_result = await _handle_drawing_task(task)
-                _update_task(
-                    task_id, status="done", result=drawing_result[:5000],
-                    completed_at=datetime.now().isoformat(),
-                )
-                log.info(f"Task #{task_id} drawing completed: {task['title']}")
-                return
-            except Exception as e:
-                log.warning(f"Drawing task failed, falling through to OpenClaw: {e}")
-
         before_files = _git_changed_files()
         before_head = _git_head()
         execution = await _execute_task(task)
@@ -808,6 +899,14 @@ async def _process_task(task: dict):
                     "Executor returned generic service health for a non-health task; refusing to mark done.",
                 )
                 log.error("Task #%s refused generic health completion", task_id)
+                return
+
+            if not _is_explicit_drawing_task(task) and _is_drawing_generation_result(execution):
+                _fail_running_task(
+                    task_id,
+                    "Executor returned drawing generation output for a non-drawing task; refusing to mark done.",
+                )
+                log.error("Task #%s refused drawing generation completion", task_id)
                 return
 
             response_text = _compose_task_result(
