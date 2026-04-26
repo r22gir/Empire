@@ -9,9 +9,14 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sqlite3
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 import httpx
 from app.services.max.openclaw_gate import check_openclaw_gate, write_openclaw_worker_heartbeat
@@ -21,8 +26,26 @@ log = logging.getLogger("openclaw_worker")
 DB_PATH = os.path.expanduser("~/empire-repo/backend/data/empire.db")
 OPENCLAW_URL = "http://localhost:7878"
 OPENCLAW_TIMEOUT = 300  # 5 min per task
+CODE_TASK_TIMEOUT = int(os.getenv("OPENCLAW_CODE_TASK_TIMEOUT", str(OPENCLAW_TIMEOUT)))
 POLL_INTERVAL = 30  # seconds between queue checks
 ZOMBIE_TIMEOUT_MINUTES = 10  # mark running tasks as failed after this
+ORPHAN_RUNNING_TIMEOUT_MINUTES = int(os.getenv("OPENCLAW_ORPHAN_TIMEOUT_MINUTES", "2"))
+GENERIC_HEALTH_PORTS = (8000, 3005, 7878, 11434, 3077)
+
+
+@dataclass
+class ExecutionResult:
+    success: bool
+    executor: str
+    result: str = ""
+    error: str | None = None
+    files_modified: list[str] = field(default_factory=list)
+    commit_hash: str | None = None
+    commands: list[str] = field(default_factory=list)
+    tools_run: list[str] = field(default_factory=list)
+    files_inspected: list[str] = field(default_factory=list)
+    output_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Desk context for prompting ──────────────────────────────────────
@@ -69,6 +92,8 @@ def _get_next_task() -> dict | None:
 
 def _update_task(task_id: int, **kwargs):
     """Update task fields in the database."""
+    if not kwargs:
+        return
     conn = _get_db()
     try:
         sets = []
@@ -83,6 +108,212 @@ def _update_task(task_id: int, **kwargs):
         conn.close()
 
 
+def _normalize_desk(desk: str | None) -> str:
+    return str(desk or "general").strip().lower().replace(" ", "").replace("_", "")
+
+
+def _task_text(task: dict) -> str:
+    return " ".join(
+        str(task.get(key) or "")
+        for key in ("title", "description", "desk", "source")
+    ).lower()
+
+
+def _is_explicit_health_task(task: dict) -> bool:
+    """Health summaries are allowed only when health/status/ports are the task."""
+    text = _task_text(task)
+    health_terms = (
+        "health check",
+        "status check",
+        "service health",
+        "services health",
+        "check services",
+        "check ports",
+        "port status",
+        "ports",
+        "which services are running",
+        "openclaw health",
+        "backend health",
+        "frontend health",
+    )
+    action_terms = (
+        "write ",
+        "create ",
+        "edit ",
+        "fix ",
+        "change ",
+        "update ",
+        "modify ",
+        "inspect ",
+        "read ",
+        "repo",
+        "file",
+        "code",
+        "commit",
+        "diagnostic",
+        "handoff",
+        "router",
+        "worker",
+    )
+    return any(term in text for term in health_terms) and not any(term in text for term in action_terms)
+
+
+def _is_code_task(task: dict) -> bool:
+    desk = _normalize_desk(task.get("desk"))
+    if desk in {"codeforge", "code", "dev", "development", "atlas"}:
+        return True
+    text = _task_text(task)
+    code_terms = (
+        "backend/",
+        "frontend/",
+        ".py",
+        ".ts",
+        ".tsx",
+        "git ",
+        "pytest",
+        "code task",
+        "fix ",
+        "implement ",
+        "refactor ",
+        "worker",
+        "router",
+        "repo",
+    )
+    return "codeforge" in text or any(term in text for term in code_terms)
+
+
+def _is_generic_port_health_result(text: str, skill_used: str | None = None) -> bool:
+    """Detect the OpenClaw services_health fallback result."""
+    if skill_used == "services_health":
+        return True
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    port_line = re.compile(r"^\d{2,5}:\s+(ONLINE|OFFLINE)$", re.IGNORECASE)
+    return all(port_line.match(line) for line in lines)
+
+
+def _git_head() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _git_changed_files() -> set[str]:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return set()
+    if result.returncode != 0:
+        return set()
+
+    changed: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        if path:
+            changed.add(path)
+    return changed
+
+
+def _git_files_changed_between(before: str, after: str) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{before}..{after}"],
+            cwd=REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _compose_task_result(task: dict, execution: ExecutionResult) -> str:
+    lines = [
+        f"Executor path used: {execution.executor}",
+        "Task attempted: yes",
+        f"Task ID: {task.get('id')}",
+        f"Desk: {task.get('desk')}",
+        f"Priority: {task.get('priority')}",
+    ]
+    if execution.commands:
+        lines.append("Commands run: " + "; ".join(execution.commands))
+    if execution.tools_run:
+        lines.append("Tools/actions run: " + "; ".join(execution.tools_run[:12]))
+    if execution.files_inspected:
+        lines.append("Files inspected: " + ", ".join(execution.files_inspected[:12]))
+    if execution.files_modified:
+        lines.append("Repo files modified: " + ", ".join(execution.files_modified))
+    if execution.output_path:
+        lines.append(f"Output path: {execution.output_path}")
+    if execution.commit_hash:
+        lines.append(f"Commit hash: {execution.commit_hash}")
+    else:
+        lines.append("Commit hash: none")
+    lines.append("")
+    lines.append((execution.result or "").strip())
+    return "\n".join(lines).strip()
+
+
+def _fail_running_task(task_id: int, error: str):
+    _update_task(
+        task_id,
+        status="failed",
+        error=error[:2000],
+        completed_at=datetime.now().isoformat(),
+    )
+
+
+def _recover_orphaned_running_tasks(active_task_id: int | None = None) -> int:
+    """Fail stale running rows when this worker is not actively processing them."""
+    conn = _get_db()
+    try:
+        cutoff = (datetime.now() - timedelta(minutes=ORPHAN_RUNNING_TIMEOUT_MINUTES)).isoformat()
+        params: list[Any] = [cutoff]
+        active_filter = ""
+        if active_task_id is not None:
+            active_filter = " AND id != ?"
+            params.append(active_task_id)
+        result = conn.execute(
+            f"""UPDATE openclaw_tasks
+                SET status = 'failed',
+                    error = 'Recovered orphaned running task after worker restart.',
+                    completed_at = ?
+                WHERE status = 'running'
+                  AND (started_at IS NULL OR started_at < ?){active_filter}""",
+            [datetime.now().isoformat(), *params],
+        )
+        if result.rowcount > 0:
+            log.warning("Recovered %s orphaned running OpenClaw task(s)", result.rowcount)
+        conn.commit()
+        return int(result.rowcount or 0)
+    finally:
+        conn.close()
+
+
 def _cleanup_zombies():
     """Mark tasks that have been 'running' for too long as failed."""
     conn = _get_db()
@@ -90,7 +321,7 @@ def _cleanup_zombies():
         cutoff = (datetime.now() - timedelta(minutes=ZOMBIE_TIMEOUT_MINUTES)).isoformat()
         result = conn.execute(
             """UPDATE openclaw_tasks SET status = 'failed',
-               error = 'Zombie protection: task exceeded 10 minute timeout',
+               error = 'Zombie protection: running task exceeded worker timeout without completion',
                completed_at = datetime('now')
                WHERE status = 'running' AND started_at < ?""",
             (cutoff,),
@@ -105,19 +336,46 @@ def _cleanup_zombies():
 def _build_task_prompt(task: dict) -> str:
     """Build a context-rich prompt for OpenClaw based on task + desk."""
     desk = task.get("desk", "general")
-    desk_context = DESK_CONTEXTS.get(desk, "You are a general Empire AI agent.")
+    desk_context = DESK_CONTEXTS.get(desk) or DESK_CONTEXTS.get(str(desk).strip()) or "You are a general Empire AI agent."
 
     return f"""{desk_context}
 
 TASK: {task['title']}
 DESCRIPTION: {task['description']}
+DESK: {task.get('desk', 'general')}
 PRIORITY: {task['priority']}
+SOURCE: {task.get('source', 'unknown')}
 
 RULES:
 - Execute the task. Do not just describe what you would do.
+- Do not substitute a generic health/status/ports summary unless this task explicitly asks for health/status/ports.
 - If you need to modify files, use the filesystem MCP.
-- Report exactly what you did, what files you changed, and what needs review.
+- Report execution evidence: commands/tools run, files inspected, files changed, tests/builds run, output paths, and commit hash if any.
+- Do not push unless the task explicitly asks for push.
 - If you're unsure about something, say "NEEDS_APPROVAL: [question]" and stop.
+"""
+
+
+def _build_code_task_prompt(task: dict) -> str:
+    """Build the prompt sent to the local CodeTaskRunner executor."""
+    return f"""DB-backed OpenClaw CodeForge execution task.
+
+Title: {task.get('title')}
+Description:
+{task.get('description') or ''}
+Desk: {task.get('desk', 'general')}
+Priority: {task.get('priority')}
+Source: {task.get('source', 'unknown')}
+
+Safety rules:
+- Actually execute the requested task description through available CodeTaskRunner tools.
+- Use tool calls to inspect or change state; do not answer from memory.
+- Do not call or delegate to OpenClaw from this task.
+- Do not replace the requested work with a generic health/status/ports summary.
+- Do not edit repo files when the task says not to edit repo files.
+- Do not commit unless the task explicitly asks for a commit.
+- Do not push.
+- In the final answer include evidence: tools run, files inspected, files changed, tests/builds run, output paths, and commit hash or no commit.
 """
 
 
@@ -148,6 +406,354 @@ async def _dispatch_to_openclaw(prompt: str) -> dict:
         }
 
 
+def _port_online(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+async def _http_status(url: str) -> dict[str, Any]:
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url)
+        return {
+            "url": url,
+            "online": 200 <= resp.status_code < 500,
+            "status_code": resp.status_code,
+        }
+    except Exception as exc:
+        return {"url": url, "online": False, "error": str(exc)}
+
+
+async def _execute_health_check(task: dict) -> ExecutionResult:
+    statuses = {port: "ONLINE" if _port_online(port) else "OFFLINE" for port in GENERIC_HEALTH_PORTS}
+    result = "\n".join(
+        [
+            "OpenClaw DB task explicit health check.",
+            "This generic port summary is allowed because the task explicitly asked for health/status/ports.",
+            "",
+            *[f"{port}: {state}" for port, state in statuses.items()],
+        ]
+    )
+    return ExecutionResult(
+        success=True,
+        executor="openclaw_worker.local_health_check",
+        result=result,
+        commands=[f"socket.create_connection(127.0.0.1:{port})" for port in GENERIC_HEALTH_PORTS],
+        metadata={"port_status": statuses},
+    )
+
+
+def _extract_self_heal_json_path(task: dict) -> Path | None:
+    text = f"{task.get('title') or ''}\n{task.get('description') or ''}"
+    if "write" not in text.lower() or ".json" not in text.lower():
+        return None
+    match = re.search(r"(/data/empire/self_heal_tests/[A-Za-z0-9_.-]+\.json)", text)
+    if not match:
+        return None
+    path = Path(match.group(1)).resolve()
+    allowed_root = Path("/data/empire/self_heal_tests").resolve()
+    try:
+        path.relative_to(allowed_root)
+    except ValueError:
+        return None
+    return path
+
+
+async def _execute_local_diagnostic_writer(task: dict) -> ExecutionResult | None:
+    output_path = _extract_self_heal_json_path(task)
+    if not output_path:
+        return None
+
+    health = {
+        "backend": await _http_status("http://localhost:8000/health"),
+        "frontend": await _http_status("http://localhost:3005"),
+        "openclaw": await _http_status("http://localhost:7878/health"),
+    }
+    payload = {
+        "created_at": datetime.now().isoformat(),
+        "git_commit": _git_head(),
+        "health": health,
+        "executor": "openclaw_worker.local_diagnostic_writer",
+        "task_id": task.get("id"),
+        "title": task.get("title"),
+    }
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        parsed = json.loads(output_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return ExecutionResult(
+            success=False,
+            executor="openclaw_worker.local_diagnostic_writer",
+            error=f"Diagnostic writer failed for {output_path}: {exc}",
+            output_path=str(output_path),
+        )
+
+    if parsed.get("git_commit") != payload["git_commit"]:
+        return ExecutionResult(
+            success=False,
+            executor="openclaw_worker.local_diagnostic_writer",
+            error=f"Diagnostic writer validation failed for {output_path}",
+            output_path=str(output_path),
+        )
+
+    evidence_lines = [
+        f"Wrote diagnostic JSON: {output_path}",
+        f"Validated JSON parse: yes",
+        f"Current git commit: {payload['git_commit']}",
+    ]
+    for name, status in health.items():
+        if "status_code" in status:
+            evidence_lines.append(f"{name} health status: {status['status_code']} ({'online' if status['online'] else 'offline'})")
+        else:
+            evidence_lines.append(f"{name} health status: offline ({status.get('error')})")
+
+    return ExecutionResult(
+        success=True,
+        executor="openclaw_worker.local_diagnostic_writer",
+        result="\n".join(evidence_lines),
+        commands=[
+            "git rev-parse HEAD",
+            "GET http://localhost:8000/health",
+            "GET http://localhost:3005",
+            "GET http://localhost:7878/health",
+        ],
+        output_path=str(output_path),
+        metadata={"external_data_file": str(output_path), "health": health},
+    )
+
+
+def _extract_readonly_inspection_path(task: dict) -> Path | None:
+    text = f"{task.get('title') or ''}\n{task.get('description') or ''}"
+    lower = text.lower()
+    if not any(term in lower for term in ("inspect", "read", "summarize")):
+        return None
+    if not any(term in lower for term in ("do not edit", "read-only", "do not commit")):
+        return None
+
+    candidates = re.findall(
+        r"((?:backend|frontend|empire-command-center)/[\w/.\-]+\.py)",
+        text,
+    )
+    repo_root = Path(REPO_DIR).resolve()
+    for candidate in candidates:
+        path = (repo_root / candidate).resolve()
+        try:
+            path.relative_to(repo_root)
+        except ValueError:
+            continue
+        if path.exists():
+            return path
+
+    if "drawing" in lower and ("intent" in lower or "router" in lower):
+        fallback_candidates = [
+            repo_root / "backend/app/services/max/drawing_intent.py",
+            repo_root / "backend/app/routers/drawings.py",
+            repo_root / "backend/app/services/drawing/parametric_renderer.py",
+        ]
+        for path in fallback_candidates:
+            if path.exists():
+                return path.resolve()
+    return None
+
+
+def _summarize_python_functions(path: Path) -> list[str]:
+    try:
+        import ast
+
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return [f"Could not parse Python functions: {exc}"]
+
+    items: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            kind = "class" if isinstance(node, ast.ClassDef) else "function"
+            doc = ast.get_docstring(node)
+            summary = f"{kind} {node.name} (line {getattr(node, 'lineno', '?')})"
+            if doc:
+                summary += f": {doc.splitlines()[0][:120]}"
+            items.append((getattr(node, "lineno", 0), summary))
+    return [summary for _, summary in sorted(items)[:30]]
+
+
+async def _execute_local_readonly_inspector(task: dict) -> ExecutionResult | None:
+    path = _extract_readonly_inspection_path(task)
+    if not path:
+        return None
+
+    repo_root = Path(REPO_DIR).resolve()
+    rel_path = str(path.relative_to(repo_root))
+    try:
+        content = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return ExecutionResult(
+            success=False,
+            executor="openclaw_worker.local_readonly_inspector",
+            error=f"Could not inspect {rel_path}: {exc}",
+            files_inspected=[rel_path],
+        )
+
+    functions = _summarize_python_functions(path)
+    result_lines = [
+        f"Inspected file path: {rel_path}",
+        f"File exists: yes",
+        f"Line count: {len(content.splitlines())}",
+        "Relevant functions/classes:",
+        *[f"- {item}" for item in functions],
+        "No files edited. No commit created.",
+    ]
+    return ExecutionResult(
+        success=True,
+        executor="openclaw_worker.local_readonly_inspector",
+        result="\n".join(result_lines),
+        tools_run=["read_text", "ast.parse"],
+        files_inspected=[rel_path],
+    )
+
+
+async def _try_safe_local_execution(task: dict) -> ExecutionResult | None:
+    for executor in (_execute_local_diagnostic_writer, _execute_local_readonly_inspector):
+        result = await executor(task)
+        if result is not None:
+            return result
+    return None
+
+
+async def _execute_code_task(task: dict) -> ExecutionResult:
+    try:
+        from app.services.max.code_task_runner import CodeTaskState, code_task_runner
+    except Exception as exc:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error=f"CodeTaskRunner unavailable: {exc}",
+        )
+
+    prompt = _build_code_task_prompt(task)
+    try:
+        code_task = code_task_runner.submit(prompt)
+    except Exception as exc:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error=f"CodeTaskRunner submit failed: {exc}",
+        )
+
+    def _state_value(value: Any) -> str:
+        return getattr(value, "value", str(value))
+
+    started = time.monotonic()
+    while _state_value(code_task.state) in {CodeTaskState.QUEUED.value, CodeTaskState.RUNNING.value}:
+        if time.monotonic() - started > CODE_TASK_TIMEOUT:
+            return ExecutionResult(
+                success=False,
+                executor="code_task_runner",
+                error=f"CodeTaskRunner timed out after {CODE_TASK_TIMEOUT}s",
+                metadata={"code_task_id": code_task.id},
+            )
+        write_openclaw_worker_heartbeat(status="processing", current_task_id=task["id"])
+        await asyncio.sleep(1)
+
+    logs = list(getattr(code_task, "log", []) or [])
+    tools_run = [f"{entry.action}: {entry.detail}" for entry in logs]
+    evidence_actions = {"reading", "writing", "editing", "appending", "git", "testing", "executing"}
+    has_tool_evidence = any(entry.action in evidence_actions for entry in logs)
+    result_text = code_task.result or ""
+
+    if _state_value(code_task.state) == CodeTaskState.ERROR.value:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error=code_task.error or "CodeTaskRunner failed",
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    if not has_tool_evidence:
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error="CodeTaskRunner completed without tool/action evidence; refusing to mark DB task done.",
+            result=result_text,
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    if _is_generic_port_health_result(result_text):
+        return ExecutionResult(
+            success=False,
+            executor="code_task_runner",
+            error="CodeTaskRunner returned a generic port health summary for a non-health task.",
+            result=result_text,
+            tools_run=tools_run,
+            metadata={"code_task_id": code_task.id},
+        )
+
+    return ExecutionResult(
+        success=True,
+        executor="code_task_runner",
+        result=result_text,
+        tools_run=tools_run,
+        files_modified=list(getattr(code_task, "files_changed", []) or []),
+        metadata={"code_task_id": code_task.id},
+    )
+
+
+async def _execute_openclaw_chat_task(task: dict) -> ExecutionResult:
+    gate = check_openclaw_gate()
+    if not gate.allowed:
+        return ExecutionResult(
+            success=False,
+            executor="openclaw_chat",
+            error=gate.founder_message,
+            metadata={"openclaw_gate": gate.to_dict()},
+        )
+
+    result = await _dispatch_to_openclaw(_build_task_prompt(task))
+    if not result.get("success"):
+        return ExecutionResult(
+            success=False,
+            executor="openclaw_chat",
+            error=result.get("error", "OpenClaw dispatch failed"),
+        )
+
+    response_text = result.get("response", "") or ""
+    skill_used = result.get("skill_used")
+    if not _is_explicit_health_task(task) and _is_generic_port_health_result(response_text, skill_used):
+        return ExecutionResult(
+            success=False,
+            executor="openclaw_chat",
+            error="OpenClaw returned generic service health for a non-health task; refusing to mark done.",
+            result=response_text,
+            metadata={"skill_used": skill_used, "source": result.get("source")},
+        )
+
+    return ExecutionResult(
+        success=True,
+        executor="openclaw_chat",
+        result=response_text,
+        metadata={"skill_used": skill_used, "source": result.get("source")},
+    )
+
+
+async def _execute_task(task: dict) -> ExecutionResult:
+    if _is_explicit_health_task(task):
+        return await _execute_health_check(task)
+
+    local_result = await _try_safe_local_execution(task)
+    if local_result is not None:
+        return local_result
+
+    if _is_code_task(task):
+        return await _execute_code_task(task)
+
+    return await _execute_openclaw_chat_task(task)
+
+
 async def _notify_telegram(message: str):
     """Send a notification via the MAX chat/Telegram pipeline."""
     try:
@@ -161,16 +767,10 @@ async def _notify_telegram(message: str):
 
 
 async def _process_task(task: dict):
-    """Process a single task: dispatch to OpenClaw, store result, notify."""
+    """Process a single task through the appropriate truthful executor."""
     task_id = task["id"]
     log.info(f"Processing task #{task_id}: {task['title']} [desk={task['desk']}, priority={task['priority']}]")
     write_openclaw_worker_heartbeat(status="processing", current_task_id=task_id)
-
-    gate = check_openclaw_gate()
-    if not gate.allowed:
-        _update_task(task_id, error=gate.founder_message)
-        log.warning("OpenClaw gate blocked task #%s: %s", task_id, gate.founder_message)
-        return
 
     # Mark as running
     _update_task(task_id, status="running", started_at=datetime.now().isoformat())
@@ -189,11 +789,45 @@ async def _process_task(task: dict):
             except Exception as e:
                 log.warning(f"Drawing task failed, falling through to OpenClaw: {e}")
 
-        prompt = _build_task_prompt(task)
-        result = await _dispatch_to_openclaw(prompt)
+        before_files = _git_changed_files()
+        before_head = _git_head()
+        execution = await _execute_task(task)
+        after_files = _git_changed_files()
+        after_head = _git_head()
+        commit_hash = after_head if before_head and after_head and after_head != before_head else execution.commit_hash
+        files_modified = (
+            _git_files_changed_between(before_head, after_head)
+            if before_head and after_head and after_head != before_head
+            else sorted(after_files - before_files)
+        )
 
-        if result["success"]:
-            response_text = result["response"]
+        if execution.success:
+            if not _is_explicit_health_task(task) and _is_generic_port_health_result(execution.result):
+                _fail_running_task(
+                    task_id,
+                    "Executor returned generic service health for a non-health task; refusing to mark done.",
+                )
+                log.error("Task #%s refused generic health completion", task_id)
+                return
+
+            response_text = _compose_task_result(
+                task,
+                ExecutionResult(
+                    **{
+                        **execution.__dict__,
+                        "files_modified": files_modified,
+                        "commit_hash": commit_hash,
+                    }
+                ),
+            )
+
+            if not _is_explicit_health_task(task) and _is_generic_port_health_result(response_text):
+                _fail_running_task(
+                    task_id,
+                    "Executor result collapsed to generic service health for a non-health task; refusing to mark done.",
+                )
+                log.error("Task #%s refused generic health completion", task_id)
+                return
 
             # Check for NEEDS_APPROVAL
             if "NEEDS_APPROVAL" in response_text:
@@ -212,6 +846,8 @@ async def _process_task(task: dict):
                 task_id,
                 status="done",
                 result=response_text[:5000],
+                files_modified=json.dumps(files_modified) if files_modified else None,
+                commit_hash=commit_hash,
                 completed_at=datetime.now().isoformat(),
             )
             log.info(f"Task #{task_id} completed: {task['title']}")
@@ -225,23 +861,20 @@ async def _process_task(task: dict):
                 )
 
         else:
-            # Dispatch failed
-            retry_count = task.get("retry_count", 0)
-            max_retries = task.get("max_retries", 2)
-
-            if retry_count < max_retries:
-                _update_task(task_id, status="queued", retry_count=retry_count + 1,
-                             error=result["error"][:2000])
-                log.warning(f"Task #{task_id} failed, requeueing (attempt {retry_count + 1}/{max_retries})")
-            else:
-                _update_task(task_id, status="failed", error=result["error"][:2000],
-                             completed_at=datetime.now().isoformat())
-                log.error(f"Task #{task_id} failed after {max_retries} retries: {result['error'][:200]}")
-                await _notify_telegram(
-                    f"❌ OpenClaw Task #{task_id} FAILED: {task['title']}\n"
-                    f"Desk: {task['desk']}\n"
-                    f"Error: {result['error'][:300]}"
-                )
+            error = execution.error or "Executor failed without an error message"
+            _update_task(
+                task_id,
+                status="failed",
+                result=(execution.result or "")[:5000] or None,
+                error=error[:2000],
+                completed_at=datetime.now().isoformat(),
+            )
+            log.error("Task #%s failed truthfully via %s: %s", task_id, execution.executor, error[:200])
+            await _notify_telegram(
+                f"❌ OpenClaw Task #{task_id} FAILED: {task['title']}\n"
+                f"Desk: {task['desk']}\n"
+                f"Error: {error[:300]}"
+            )
 
     except httpx.ConnectError:
         _update_task(task_id, status="failed", error="OpenClaw not reachable on port 7878",
@@ -255,6 +888,8 @@ async def _process_task(task: dict):
         _update_task(task_id, status="failed", error=str(e)[:2000],
                      completed_at=datetime.now().isoformat())
         log.error(f"Task #{task_id} unexpected error: {e}")
+    finally:
+        write_openclaw_worker_heartbeat(status="polling", current_task_id=None)
 
 
 # ── AUTONOMOUS DEV CAPABILITIES ──────────────────────────────────────
@@ -466,6 +1101,7 @@ async def openclaw_worker_loop():
     global _tasks_completed_since_summary
     log.info("OpenClaw worker loop started — polling every %ds", POLL_INTERVAL)
     write_openclaw_worker_heartbeat(status="starting")
+    _recover_orphaned_running_tasks()
 
     # Brief startup delay
     await asyncio.sleep(10)
@@ -475,6 +1111,7 @@ async def openclaw_worker_loop():
     while True:
         try:
             write_openclaw_worker_heartbeat(status="polling")
+            _recover_orphaned_running_tasks()
             # Clean up zombies
             _cleanup_zombies()
 

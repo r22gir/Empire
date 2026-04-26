@@ -14,6 +14,7 @@ import httpx
 
 GATE_TTL_SECONDS = 20
 WORKER_HEARTBEAT_FRESH_SECONDS = 90
+STALE_RUNNING_SECONDS = int(os.getenv("OPENCLAW_STALE_RUNNING_SECONDS", "120"))
 OPENCLAW_URL = os.getenv("OPENCLAW_URL", "http://localhost:7878").rstrip("/")
 DB_PATH = Path.home() / "empire-repo" / "backend" / "data" / "empire.db"
 HEARTBEAT_PATH = Path.home() / "empire-repo" / "backend" / "data" / "max" / "openclaw_worker_heartbeat.json"
@@ -59,6 +60,24 @@ def _queue_snapshot(db_path: Path = DB_PATH) -> tuple[bool, dict[str, Any], dict
             rows = conn.execute("SELECT status, COUNT(*) FROM openclaw_tasks GROUP BY status").fetchall()
             stats = {row[0]: row[1] for row in rows}
             stats["total"] = sum(stats.values())
+            running_rows = conn.execute(
+                "SELECT id, started_at FROM openclaw_tasks WHERE status = 'running'"
+            ).fetchall()
+            stale_running_ids = []
+            now_ts = datetime.now(timezone.utc).timestamp()
+            for task_id, started_at in running_rows:
+                try:
+                    parsed = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    age = now_ts - parsed.timestamp()
+                except Exception:
+                    age = STALE_RUNNING_SECONDS + 1
+                if age > STALE_RUNNING_SECONDS:
+                    stale_running_ids.append(task_id)
+            if stale_running_ids:
+                stats["stale_running"] = len(stale_running_ids)
+                stats["stale_running_ids"] = stale_running_ids[:10]
             recent = conn.execute(
                 """SELECT status, COUNT(*)
                    FROM openclaw_tasks
@@ -162,6 +181,8 @@ def check_openclaw_gate(force: bool = False, timeout: float = 2.0) -> OpenClawGa
     health_endpoint = f"{OPENCLAW_URL}/health"
     queue_ready, queue_stats, recent_viability = _queue_snapshot()
     worker_heartbeat = read_openclaw_worker_heartbeat()
+    stale_running_ids = queue_stats.get("stale_running_ids") or []
+    current_worker_task = str(worker_heartbeat.get("current_task_id"))
     state = "unknown"
     reason = "health check not completed"
     status_code = None
@@ -175,6 +196,9 @@ def check_openclaw_gate(force: bool = False, timeout: float = 2.0) -> OpenClawGa
         elif not queue_ready:
             state = "degraded"
             reason = f"queue not ready: {queue_stats.get('error', 'unknown')}"
+        elif stale_running_ids and current_worker_task not in {str(task_id) for task_id in stale_running_ids}:
+            state = "degraded"
+            reason = f"stale running OpenClaw task(s) without active worker: {stale_running_ids}"
         elif worker_heartbeat.get("state") == "stale":
             state = "degraded"
             reason = f"worker heartbeat stale ({worker_heartbeat.get('age_seconds')}s old)"
