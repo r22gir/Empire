@@ -1,0 +1,146 @@
+/* ============================================================
+   EmpireBox Design Token System
+   Dark Premium Command Center Theme
+   Generated: 2026-04-27 — feature/unified-dark-ui-design-system
+   ============================================================ */
+
+/* ── Design Token Aliases (reference only, do not use directly) ── */
+:root {
+  /* ── Background Colors ── */
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #12121a;
+  --bg-tertiary: #1a1a24;
+  --bg-elevated: #22222e;
+  --bg-glass: rgba(18, 18, 26, 0.85);
+  --bg-glass-hover: rgba(28, 28, 42, 0.9);
+
+  /* ── Panel / Card ── */
+  --panel-bg: #13131d;
+  --panel-border: rgba(255, 255, 255, 0.07);
+  --panel-hover: rgba(255, 255, 255, 0.04);
+  --panel-active: rgba(99, 102, 241, 0.15);
+
+  /* ── Text ── */
+  --text-primary: #e2e2e8;
+  --text-secondary: #9494a8;
+  --text-muted: #6b6b80;
+  --text-faint: #3d3d52;
+  --text-inverse: #0a0a0f;
+
+  /* ── Status Colors ── */
+  --success: #10b981;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-border: rgba(16, 185, 129, 0.3);
+  --warning: #f59e0b;
+  --warning-bg: rgba(245, 158, 11, 0.12);
+  --warning-border: rgba(245, 158, 11, 0.3);
+  --error: #ef4444;
+  --error-bg: rgba(239, 68, 68, 0.12);
+  --error-border: rgba(239, 68, 68, 0.3);
+  --info: #6366f1;
+  --info-bg: rgba(99, 102, 241, 0.12);
+  --info-border: rgba(99, 102, 241, 0.3);
+  --pending: #8b5cf6;
+  --pending-bg: rgba(139, 92, 246, 0.12);
+  --pending-border: rgba(139, 92, 246, 0.3);
+
+  /* ── Accent / Brand ── */
+  --accent-primary: #6366f1;
+  --accent-primary-hover: #7c7ff7;
+  --accent-primary-bg: rgba(99, 102, 241, 0.15);
+  --accent-secondary: #8b5cf6;
+  --accent-secondary-hover: #a78bfa;
+  --accent-secondary-bg: rgba(139, 92, 246, 0.15);
+  --accent-glow: rgba(99, 102, 241, 0.25);
+  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+
+  /* ── Borders ── */
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-accent: rgba(99, 102, 241, 0.4);
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.2);
+  --shadow-glow-strong: 0 0 30px rgba(99, 102, 241, 0.35);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+
+  /* ── Spacing Scale ── */
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --font-display: 'Inter', var(--font-sans);
+
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.8125rem;  /* 13px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0625rem;  /* 17px */
+  --text-xl: 1.25rem;    /* 20px */
+  --text-2xl: 1.5rem;    /* 24px */
+  --text-3xl: 1.875rem;  /* 30px */
+  --text-4xl: 2.25rem;   /* 36px */
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.75;
+
+  /* ── Border Radius ── */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms ease;
+  --transition-base: 250ms ease;
+  --transition-normal: 300ms ease;
+  --transition-slow: 400ms ease;
+  --transition-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── Layout ── */
+  --sidebar-width: 280px;
+  --sidebar-collapsed-width: 64px;
+  --topbar-height: 56px;
+  --panel-padding: var(--space-4);
+  --panel-gap: var(--space-4);
+
+  /* ── Z-Index Scale ── */
+  --z-base: 0;
+  --z-elevated: 10;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-popover: 500;
+  --z-toast: 600;
+
+  /* ── Overlay ── */
+  --overlay-bg: rgba(0, 0, 0, 0.6);
+  --overlay-blur: blur(4px);
+}
+
+/* ── Status Color Tokens (for semantic usage) ── */
+[data-status="success"], .status-success { --status-color: var(--success); --status-bg: var(--success-bg); --status-border: var(--success-border); }
+[data-status="warning"], .status-warning { --status-color: var(--warning); --status-bg: var(--warning-bg); --status-border: var(--warning-border); }
+[data-status="error"], .status-error   { --status-color: var(--error);   --status-bg: var(--error-bg);   --status-border: var(--error-border); }
+[data-status="info"], .status-info      { --status-color: var(--info);    --status-bg: var(--info-bg);    --status-border: var(--info-border); }
+[data-status="pending"], .status-pending { --status-color: var(--pending); --status-bg: var(--pending-bg); --status-border: var(--pending-border); }
+[data-status="neutral"], .status-neutral { --status-color: var(--text-muted); --status-bg: var(--panel-bg); --status-border: var(--panel-border); }

@@ -16,7 +16,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark">
       <head>
         <meta httpEquiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
         <meta httpEquiv="Pragma" content="no-cache" />
@@ -26,7 +26,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           if('caches' in window){caches.keys().then(function(n){n.forEach(function(k){caches.delete(k)})});}
         `}} />
       </head>
-      <body className="antialiased"><I18nWrapper>{children}</I18nWrapper></body>
+      <body className="antialiased">
+        <I18nWrapper>{children}</I18nWrapper>
+      </body>
     </html>
   );
 }
