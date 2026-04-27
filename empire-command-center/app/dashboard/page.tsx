@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   GitCommit, Bot, ListTodo, Users,
-  Activity, Wifi, WifiOff, Clock, HardDrive, Cpu
+  Activity, Clock, HardDrive, Cpu, Stethoscope, Rocket, Database, Shield, History, RefreshCw
 } from 'lucide-react';
 import {
   EmpireShell,
@@ -53,7 +53,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const load = async () => {
-      // Fetch system stats
       try {
         const r = await fetch(`${API}/system/stats`);
         if (r.ok) {
@@ -69,7 +68,6 @@ export default function DashboardPage() {
         }
       } catch { /* silent */ }
 
-      // Fetch AI routing status
       try {
         const r2 = await fetch(`${API}/ai/routing/status`);
         if (r2.ok) {
@@ -80,7 +78,6 @@ export default function DashboardPage() {
         setProviders(getDefaultProviders());
       }
 
-      // Fetch active tasks
       try {
         const r3 = await fetch(`${API}/tasks/active`);
         if (r3.ok) {
@@ -98,7 +95,6 @@ export default function DashboardPage() {
         }
       } catch { /* silent */ }
 
-      // Health checks
       try {
         const rb = await fetch(`${API.replace('/api/v1','')}/health`);
         setBackendOk(rb.ok);
@@ -115,13 +111,14 @@ export default function DashboardPage() {
     return () => clearInterval(iv);
   }, []);
 
-  const defaultMetric = (v: string | number | undefined, fallback: string) =>
-    (loading ? '—' : (v ?? fallback));
+  const val = (v: string | number | undefined, fallback: string) =>
+    loading ? '—' : String(v ?? fallback);
 
   return (
     <EmpireShell commitHash="f535d53">
-      <div style={{ padding: 'var(--space-6)' }}>
-        {/* Page header */}
+      <div style={{ padding: 'var(--space-6)' }} className="animated-gradient">
+
+        {/* Header */}
         <div style={{ marginBottom: 'var(--space-6)' }}>
           <h1 style={{
             fontSize: 'var(--text-2xl)',
@@ -138,171 +135,76 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* TOP ROW: 4 metric cards */}
+        {/* TOP ROW: 4 metric cards with glow */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: 'var(--space-4)',
+          gap: 'var(--space-6)',
           marginBottom: 'var(--space-6)',
         }}>
           <EmpireMetricCard
-            title="Commits"
-            value={defaultMetric(stats.totalCommits, '816')}
+            title="commits"
+            value={val(stats.totalCommits, '816')}
             icon={<GitCommit size={18} />}
             color="primary"
             subtitle="on main branch"
+            glow
           />
           <EmpireMetricCard
-            title="MAX Desks"
-            value={defaultMetric(stats.totalDesks, '18')}
+            title="desks"
+            value={val(stats.totalDesks, '18')}
             icon={<Bot size={18} />}
             color="primary"
             subtitle="all operational"
+            glow
           />
           <EmpireMetricCard
-            title="Active Tasks"
-            value={defaultMetric(stats.totalTasks, '139')}
+            title="tasks"
+            value={val(stats.totalTasks, '60')}
             icon={<ListTodo size={18} />}
-            color="success"
+            color="primary"
             subtitle="across all desks"
+            glow
           />
           <EmpireMetricCard
-            title="Customers"
-            value={defaultMetric(stats.totalCustomers, '113')}
+            title="customers"
+            value={val(stats.totalCustomers, '113')}
             icon={<Users size={18} />}
             color="success"
             subtitle="in CRM"
+            glow
           />
         </div>
 
-        {/* MIDDLE ROW: AI Routing (2/3) + System Health (1/3) */}
+        {/* MIDDLE ROW: AI Routing Matrix (2/3) + System Health (1/3) */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: '2fr 1fr',
           gap: 'var(--space-6)',
           marginBottom: 'var(--space-6)',
         }}>
-          {/* AI Routing Matrix */}
           <EmpireDataPanel
-            title="AI Provider Routing"
-            subtitle="Active provider chain with fallback"
+            title="AI Routing Matrix"
+            subtitle="Provider chain with fallback sequence"
+            glass
           >
             <EmpireRoutingMatrix
               providers={providers.length > 0 ? providers : getDefaultProviders()}
             />
           </EmpireDataPanel>
 
-          {/* System Health */}
           <EmpireDataPanel
             title="System Health"
-            subtitle="Service status at a glance"
+            subtitle="Live service status"
+            glass
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-subtle)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <HardDrive size={16} style={{ color: 'var(--text-muted)' }} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>Backend</span>
-                </div>
-                <EmpireStatusPill
-                  status={backendOk ? 'success' : 'error'}
-                  label={backendOk ? 'Port 8000' : 'Offline'}
-                  pulse={backendOk}
-                  size="sm"
-                />
-              </div>
-
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-subtle)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <Activity size={16} style={{ color: 'var(--text-muted)' }} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>Frontend</span>
-                </div>
-                <EmpireStatusPill
-                  status={frontendOk ? 'success' : 'error'}
-                  label={frontendOk ? 'Port 3005' : 'Offline'}
-                  pulse={frontendOk}
-                  size="sm"
-                />
-              </div>
-
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-subtle)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <Bot size={16} style={{ color: 'var(--text-muted)' }} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>MAX</span>
-                </div>
-                <EmpireStatusPill status="success" label="18 desks" pulse size="sm" />
-              </div>
-
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-subtle)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <Cpu size={16} style={{ color: 'var(--text-muted)' }} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>OpenClaw</span>
-                </div>
-                <EmpireStatusPill status="success" label="Port 7878" size="sm" />
-              </div>
-
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-subtle)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <Clock size={16} style={{ color: 'var(--text-muted)' }} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>Avg Response</span>
-                </div>
-                <EmpireStatusPill status="info" label={String(defaultMetric(stats.avgResponse, '120ms'))} size="sm" />
-              </div>
-
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: 'var(--space-3) var(--space-4)',
-                background: 'rgba(255,255,255,0.03)',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-subtle)',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-                  <Wifi size={16} style={{ color: 'var(--text-muted)' }} />
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>Uptime</span>
-                </div>
-                <EmpireStatusPill status="success" label={String(defaultMetric(stats.uptime, '99.9%'))} size="sm" />
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              <ServiceRow icon={<HardDrive size={15} />} label="Backend" status={backendOk ? 'success' : 'error'} value="Port 8000" pulse={backendOk} />
+              <ServiceRow icon={<Activity size={15} />} label="Frontend" status={frontendOk ? 'success' : 'error'} value="Port 3005" pulse={frontendOk} />
+              <ServiceRow icon={<Bot size={15} />} label="MAX" status="success" value="18 desks" pulse />
+              <ServiceRow icon={<Cpu size={15} />} label="OpenClaw" status="success" value="Port 7878" />
+              <ServiceRow icon={<Clock size={15} />} label="Avg Response" status="info" value={val(stats.avgResponse, '120ms')} />
+              <ServiceRow icon={<Activity size={15} />} label="Uptime" status="success" value={val(stats.uptime, '99.9%')} />
             </div>
           </EmpireDataPanel>
         </div>
@@ -313,64 +215,69 @@ export default function DashboardPage() {
           gridTemplateColumns: '1fr 1fr',
           gap: 'var(--space-6)',
         }}>
-          {/* Active Tasks */}
           <EmpireDataPanel
-            title="Active Tasks"
-            subtitle="Running across all desks"
+            title="Active Tasks Leaderboard"
+            subtitle="Real-time task status"
+            glass
           >
             <EmpireLeaderboardCard
-              title=""
+              title="Active Tasks"
               items={activeTasks.length > 0 ? activeTasks : getSampleTasks()}
-              maxItems={8}
+              maxItems={6}
               emptyMessage="No active tasks"
             />
           </EmpireDataPanel>
 
-          {/* Quick Actions */}
           <EmpireDataPanel
             title="Quick Actions"
             subtitle="Common operations"
+            glass
             actions={[
-              {
-                label: 'Refresh',
-                onClick: () => window.location.reload(),
-                variant: 'ghost' as const,
-              },
+              { label: 'Refresh', onClick: () => window.location.reload(), variant: 'ghost' as const },
             ]}
           >
             <EmpireActionPanel
               layout="vertical"
               actions={[
-                {
-                  label: 'Run Diagnostics',
-                  onClick: () => fetch(`${API}/system/health`).catch(() => {}),
-                  variant: 'primary' as const,
-                  icon: <Activity size={14} />,
-                },
-                {
-                  label: 'Deploy Config',
-                  onClick: () => alert('Deploy triggered — connect to /api/v1/system/deploy'),
-                  variant: 'secondary' as const,
-                  icon: <Cpu size={14} />,
-                },
-                {
-                  label: 'View MAX Logs',
-                  onClick: () => window.open('/max', '_blank'),
-                  variant: 'ghost' as const,
-                  icon: <Bot size={14} />,
-                },
-                {
-                  label: 'OpenClaw Tasks',
-                  onClick: () => window.open('/openclaw', '_blank'),
-                  variant: 'ghost' as const,
-                  icon: <ListTodo size={14} />,
-                },
+                { label: 'Run Diagnostics', onClick: () => fetch(`${API}/system/health`).catch(() => {}), variant: 'primary' as const, icon: <Stethoscope size={14} /> },
+                { label: 'Deploy Config', onClick: () => {}, variant: 'primary' as const, icon: <Rocket size={14} /> },
+                { label: 'Sync Logs', onClick: () => {}, variant: 'secondary' as const, icon: <RefreshCw size={14} /> },
+                { label: 'Audit Permissions', onClick: () => {}, variant: 'secondary' as const, icon: <Shield size={14} /> },
+                { label: 'Trigger Backup', onClick: () => {}, variant: 'secondary' as const, icon: <Database size={14} /> },
+                { label: 'View Audit Trail', onClick: () => {}, variant: 'ghost' as const, icon: <History size={14} /> },
               ]}
             />
           </EmpireDataPanel>
         </div>
+
       </div>
     </EmpireShell>
+  );
+}
+
+function ServiceRow({ icon, label, status, value, pulse }: {
+  icon: React.ReactNode;
+  label: string;
+  status: 'success' | 'error' | 'info' | 'warning' | 'pending' | 'neutral';
+  value: string;
+  pulse?: boolean;
+}) {
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: 'var(--space-3) var(--space-4)',
+      background: 'rgba(255,255,255,0.04)',
+      borderRadius: 'var(--radius-md)',
+      border: '1px solid rgba(255,255,255,0.08)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+        <span style={{ color: 'var(--text-muted)' }}>{icon}</span>
+        <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-primary)' }}>{label}</span>
+      </div>
+      <EmpireStatusPill status={status} label={value} size="sm" pulse={pulse} />
+    </div>
   );
 }
 
@@ -387,20 +294,20 @@ function getDefaultProviders(): Provider[] {
 
 function getSampleTasks(): ActiveTask[] {
   return [
-    { id: '1', title: 'Run empire_runtime_truth_check', subtitle: 'Atlas · CodeForge', status: 'success', statusLabel: 'done' },
-    { id: '2', title: 'Process transcript chunk batch', subtitle: 'Phoenix · TranscriptForge', status: 'success', statusLabel: 'done' },
-    { id: '3', title: 'Update MAX memory snapshot', subtitle: 'Atlas · MAX', status: 'success', statusLabel: 'done' },
-    { id: '4', title: 'VendorOps alert runner polling', subtitle: 'Kai · VendorOps', status: 'pending', statusLabel: 'running' },
-    { id: '5', title: 'RecoveryForge Layer 3 classify', subtitle: 'Phoenix · RecoveryForge', status: 'pending', statusLabel: 'running' },
+    { id: '1', title: 'empire_runtime_truth_check', subtitle: 'Atlas · CodeForge', status: 'success', statusLabel: 'done' },
+    { id: '2', title: 'transcript_chunk_batch', subtitle: 'Phoenix · TranscriptForge', status: 'success', statusLabel: 'done' },
+    { id: '3', title: 'max_memory_snapshot_sync', subtitle: 'Atlas · MAX', status: 'pending', statusLabel: 'running' },
+    { id: '4', title: 'vendorops_alert_runner', subtitle: 'Kai · VendorOps', status: 'pending', statusLabel: 'running' },
+    { id: '5', title: 'recoveryforge_layer3_classify', subtitle: 'Phoenix · RecoveryForge', status: 'pending', statusLabel: 'running' },
   ];
 }
 
 function mapTaskStatus(s: string): ActiveTask['status'] {
   if (!s) return 'neutral';
-  const lower = s.toLowerCase();
-  if (['completed', 'done', 'success', 'ok'].includes(lower)) return 'success';
-  if (['running', 'active', 'processing'].includes(lower)) return 'pending';
-  if (['failed', 'error', 'crashed'].includes(lower)) return 'error';
-  if (['warning', 'degraded', 'slow'].includes(lower)) return 'warning';
+  const l = s.toLowerCase();
+  if (['completed', 'done', 'success', 'ok'].includes(l)) return 'success';
+  if (['running', 'active', 'processing'].includes(l)) return 'pending';
+  if (['failed', 'error', 'crashed'].includes(l)) return 'error';
+  if (['warning', 'degraded', 'slow'].includes(l)) return 'warning';
   return 'neutral';
 }

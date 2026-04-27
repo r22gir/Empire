@@ -9,6 +9,7 @@ interface EmpireMetricCardProps {
   color?: 'primary' | 'success' | 'warning' | 'error' | 'muted';
   subtitle?: string;
   onClick?: () => void;
+  glow?: boolean;
 }
 
 const colorValueMap = {
@@ -27,11 +28,13 @@ export function EmpireMetricCard({
   color = 'primary',
   subtitle,
   onClick,
+  glow = false,
 }: EmpireMetricCardProps) {
   return (
     <div
       onClick={onClick}
-      style={{
+      className={glow ? 'metric-card-glow' : undefined}
+      style={glow ? undefined : {
         background: 'linear-gradient(145deg, rgba(51,65,85,0.7) 0%, rgba(30,41,59,0.5) 100%)',
         border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-lg)',
@@ -43,13 +46,13 @@ export function EmpireMetricCard({
         boxShadow: 'var(--shadow-card)',
       }}
       onMouseEnter={(e) => {
-        if (onClick) {
+        if (onClick && !glow) {
           e.currentTarget.style.borderColor = 'var(--border-default)';
           e.currentTarget.style.boxShadow = 'var(--shadow-card)';
         }
       }}
       onMouseLeave={(e) => {
-        if (onClick) {
+        if (onClick && !glow) {
           e.currentTarget.style.borderColor = 'var(--border-subtle)';
           e.currentTarget.style.boxShadow = 'none';
         }
@@ -63,7 +66,7 @@ export function EmpireMetricCard({
         right: 0,
         height: '2px',
         background: `linear-gradient(90deg, ${colorValueMap[color]}, transparent)`,
-        opacity: 0.6,
+        opacity: 0.7,
       }} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 'var(--space-3)' }}>
@@ -71,7 +74,7 @@ export function EmpireMetricCard({
           {title}
         </span>
         {icon && (
-          <span style={{ color: colorValueMap[color], opacity: 0.8 }}>{icon}</span>
+          <span style={{ color: colorValueMap[color], opacity: 0.9 }}>{icon}</span>
         )}
       </div>
 

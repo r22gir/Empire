@@ -151,6 +151,107 @@
   --overlay-blur: blur(6px);
 }
 
+/* ── Glass Morphism Classes ── */
+.glass-premium {
+  background: rgba(30, 41, 59, 0.72) !important;
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.45),
+    0 0 60px rgba(99, 102, 241, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
+
+.glass-premium::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  pointer-events: none;
+}
+
+.glass-premium:hover {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.55),
+    0 0 80px rgba(99, 102, 241, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15) !important;
+}
+
+/* Metric card glow effect */
+.metric-card-glow {
+  background: linear-gradient(145deg, rgba(99, 102, 241, 0.18) 0%, rgba(139, 92, 246, 0.09) 100%) !important;
+  border: 1px solid rgba(99, 102, 241, 0.42) !important;
+  box-shadow:
+    0 4px 20px rgba(99, 102, 241, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18) !important;
+  transition: all 0.3s ease;
+  border-radius: var(--radius-lg);
+}
+
+.metric-card-glow:hover {
+  box-shadow:
+    0 8px 30px rgba(99, 102, 241, 0.5),
+    0 0 40px rgba(99, 102, 241, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  transform: translateY(-2px);
+  border-color: rgba(99, 102, 241, 0.6) !important;
+}
+
+/* Glowing button effect */
+.button-glow {
+  position: relative;
+  overflow: hidden;
+}
+
+.button-glow::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}
+
+.button-glow:hover::after {
+  opacity: 1;
+}
+
+/* Animated gradient background */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animated-gradient {
+  background: linear-gradient(-45deg, #0f172a, #1e1b4b, #1e293b, #0f172a) !important;
+  background-size: 400% 400%;
+  animation: gradient-shift 15s ease infinite;
+}
+
+/* Active task item glow */
+.task-item-active {
+  background: rgba(99, 102, 241, 0.12) !important;
+  border-left: 2px solid var(--accent-primary) !important;
+}
+
+/* Provider node glow */
+.provider-node-online {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.5), 0 0 40px rgba(16, 185, 129, 0.2);
+}
+
 /* ── Status Semantic Tokens ── */
 [data-status="success"], .status-success { --status-color: var(--success); --status-bg: var(--success-bg); --status-border: var(--success-border); }
 [data-status="warning"], .status-warning { --status-color: var(--warning); --status-bg: var(--warning-bg); --status-border: var(--warning-border); }
