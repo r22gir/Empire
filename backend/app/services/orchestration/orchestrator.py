@@ -11,8 +11,13 @@ from typing import Any, Optional
 from fastapi import HTTPException
 import httpx
 
-from app.services.openclaw_worker import dispatch_to_openclaw
-from app.services.hermes_memory import HermesMemory
+from app.services.openclaw_worker import _dispatch_to_openclaw as dispatch_to_openclaw
+
+class HermesMemory:
+    """Stub — Hermes memory service not yet available."""
+    def __init__(self, *args, **kwargs): pass
+    def store(self, *args, **kwargs): pass
+    def recall(self, *args, **kwargs): return []
 
 logger = logging.getLogger("orchestrator")
 

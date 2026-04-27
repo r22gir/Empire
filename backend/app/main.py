@@ -233,7 +233,7 @@ load_router("app.routers.openclaw_bridge", "", ["openclaw"])
 load_router("app.routers.openclaw_tasks", "", ["openclaw-tasks"])
 
 # MAX-Hermes-OpenClaw Autonomous Orchestration
-load_router("app.routers.orchestration", "/api/v1", ["orchestration"])
+load_router("app.routers.orchestration", "", ["orchestration"])
 
 # Docker / System / Ollama management
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
