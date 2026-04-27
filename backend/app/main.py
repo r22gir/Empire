@@ -228,6 +228,9 @@ load_router("app.routers.openclaw_bridge", "", ["openclaw"])
 # OpenClaw Task Queue — persistent task queue with worker
 load_router("app.routers.openclaw_tasks", "", ["openclaw-tasks"])
 
+# MAX-Hermes-OpenClaw Autonomous Orchestration
+load_router("app.routers.orchestration", "/api/v1", ["orchestration"])
+
 # Docker / System / Ollama management
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])
