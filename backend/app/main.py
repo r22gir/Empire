@@ -170,6 +170,10 @@ load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
 # LuxeForge FREE — Public intake portal
 load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 
+# Intake (general — project intake workflow)
+from app.routers.intake import router as intake_router
+app.include_router(intake_router, tags=["intake"])
+
 # AMP — Actitud Mental Positiva platform
 load_router("app.routers.amp", "/api/v1/amp", ["amp"])
 
