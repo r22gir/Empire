@@ -59,6 +59,8 @@ import InvoiceScreen from './components/screens/InvoiceScreen';
 import ConstructionForgePage from './components/screens/ConstructionForgePage';
 import StoreFrontForgePage from './components/screens/StoreFrontForgePage';
 import TranscriptForgePage from './components/screens/TranscriptForgePage';
+import DashboardPage from './dashboard/page';
+
 const AmpLanding = lazy(() => import('./amp/page'));
 import ProductDocs from './components/business/docs/ProductDocs';
 
@@ -98,7 +100,7 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
 
 export default function CommandCenter() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
-  const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
+  const [activeScreen, setActiveScreen] = useState<ScreenMode>('dashboard');
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
@@ -126,8 +128,8 @@ export default function CommandCenter() {
   const handleProductChange = useCallback((product: EcosystemProduct) => {
     setActiveProduct(product);
     setActiveSection(null);
-    // When switching product, go to dashboard for that product (or chat for owner)
-    if (product === 'owner') setActiveScreen('chat');
+    // When switching product, go to dashboard for that product
+    if (product === 'owner') setActiveScreen('dashboard');
     else if (product === 'max-avatar') setActiveScreen('presentation');
     else if (product === 'tokens') setActiveScreen('costs');
     else if (product === 'system') setActiveScreen('report');
@@ -285,7 +287,8 @@ export default function CommandCenter() {
         case 'craft': return <CraftForgePage initialSection={activeSection || undefined} />;
         case 'social': return <SocialForgePage />;
         case 'platform': return <PlatformPage />;
-        case 'owner': return <DashboardScreen activeTab={activeTab} />;
+        case 'owner':
+          return activeScreen === 'dashboard' ? <DashboardPage /> : <DashboardScreen activeTab={activeTab} />;
         case 'luxe': return <LuxeForgePage onNavigate={(product, screen, section) => {
             setActiveProduct(product as EcosystemProduct);
             setActiveScreen(screen as ScreenMode);
