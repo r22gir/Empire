@@ -164,8 +164,9 @@ export function ChatInterface({
                   <Sparkles size={14} color="#fff" />
                 </div>
               )}
-              <div style={{
-                maxWidth: isUser ? '75%' : '85%',
+              <div suppressHydrationWarning style={{
+
+                maxWidth: isUser ? "75%" : "85%",
                 background: isUser
                   ? 'var(--accent-primary)'
                   : 'rgba(30,41,59,0.72)',
