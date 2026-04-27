@@ -21,7 +21,8 @@ html {
 
 body {
   font-family: var(--font-sans);
-  background: var(--bg-primary);
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  background-attachment: fixed;
   color: var(--text-primary);
   height: 100vh;
   overflow: hidden;
@@ -97,11 +98,35 @@ code, pre {
 
 /* Glass panel */
 .glass-panel {
-  background: var(--bg-glass);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border-subtle);
+  background: var(--panel-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--panel-glass-border);
+  box-shadow: var(--shadow-lg), var(--shadow-glow);
   border-radius: var(--radius-lg);
+}
+
+/* Card with gradient overlay */
+.gradient-card {
+  background: var(--gradient-card);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: var(--radius-lg);
+  position: relative;
+  overflow: hidden;
+  transition: all var(--transition-base);
+}
+.gradient-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+}
+.gradient-card:hover {
+  border-color: rgba(255,255,255,0.18);
+  box-shadow: var(--shadow-card-hover);
 }
 
 /* Card */

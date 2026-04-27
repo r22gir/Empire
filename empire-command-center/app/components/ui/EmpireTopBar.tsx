@@ -46,8 +46,9 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
   return (
     <div style={{
       height: 'var(--topbar-height)',
-      background: 'var(--bg-secondary)',
-      borderBottom: '1px solid var(--border-subtle)',
+      background: 'rgba(30,41,59,0.85)',
+      backdropFilter: 'blur(20px)',
+      borderBottom: '1px solid var(--border-default)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',

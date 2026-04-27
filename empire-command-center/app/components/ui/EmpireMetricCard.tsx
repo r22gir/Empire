@@ -32,14 +32,15 @@ export function EmpireMetricCard({
     <div
       onClick={onClick}
       style={{
-        background: 'var(--panel-bg)',
-        border: '1px solid var(--border-subtle)',
+        background: 'linear-gradient(145deg, rgba(51,65,85,0.7) 0%, rgba(30,41,59,0.5) 100%)',
+        border: '1px solid var(--border-default)',
         borderRadius: 'var(--radius-lg)',
         padding: 'var(--space-5)',
         cursor: onClick ? 'pointer' : 'default',
         transition: 'all var(--transition-base)',
         position: 'relative',
         overflow: 'hidden',
+        boxShadow: 'var(--shadow-card)',
       }}
       onMouseEnter={(e) => {
         if (onClick) {

@@ -13,8 +13,9 @@ interface EmpireDataPanelProps {
 export function EmpireDataPanel({ title, subtitle, actions, children, footer, noPadding }: EmpireDataPanelProps) {
   return (
     <div style={{
-      background: 'var(--panel-bg)',
-      border: '1px solid var(--border-subtle)',
+      background: 'linear-gradient(145deg, rgba(51,65,85,0.6) 0%, rgba(30,41,59,0.5) 100%)',
+      border: '1px solid var(--border-default)',
+      boxShadow: 'var(--shadow-card)',
       borderRadius: 'var(--radius-lg)',
       overflow: 'hidden',
       display: 'flex',
