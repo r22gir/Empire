@@ -273,7 +273,13 @@ Grok (15s timeout)
 | CodeForge | Atlas | **Opus 4.6** |
 | AnalyticsDesk | Raven | **Sonnet 4.6** |
 | QualityDesk | Phoenix | **Sonnet 4.6** |
+| ForgeDesk | Kai | **MiniMax-M2.7** (added 2026-04-26) |
+| ITDesk | Orion | **MiniMax-M2.7** (added 2026-04-26) |
+| MarketingDesk | Nova | **MiniMax-M2.7** (added 2026-04-26) |
+| SupportDesk | Luna | **MiniMax-M2.7** (added 2026-04-26) |
 | All others | (varies) | grok-3-fast |
+
+> **Note on MiniMax**: Empire MAX uses OpenAI-compatible `/chat/completions` calls to `https://api.minimax.io/v1`. Claude Code uses the separate Anthropic-compatible endpoint `https://api.minimax.io/anthropic` — a different route and payload format. MiniMax is added for selected desk/provider routing with Grok fallback safety preserved.
 
 ### Provider Config
 | Provider | Env Var | Purpose | Status |
@@ -281,6 +287,7 @@ Grok (15s timeout)
 | xAI Grok | XAI_API_KEY | Primary chat/vision/TTS | ✅ |
 | Anthropic Claude | ANTHROPIC_API_KEY | Sonnet + Opus | ✅ |
 | Groq | GROQ_API_KEY | Fast inference + Whisper STT | ✅ |
+| MiniMax | MINIMAX_API_KEY | Selected desk routing, OpenAI-compatible | ✅ (added 2026-04-26) |
 | OpenClaw | OPENCLAW_GATEWAY_TOKEN | Local AI gateway | ✅ |
 | Ollama | localhost:11434 | Local LLaVA | ✅ |
 | Stability AI | STABILITY_API_KEY | Image inpainting | ✅ |

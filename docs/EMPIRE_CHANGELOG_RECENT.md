@@ -30,6 +30,7 @@
 
 | Commit | Description |
 |--------|-------------|
+| `xxxxxxx` | feat(max): add MiniMax provider routing |
 | `da3fdf4` | Fix CodeTaskRunner git ops and commit validation |
 | `7b385b8` | Improve CodeTaskRunner executable tool calls |
 | `0c5c255` | Require executable tool calls for CodeTaskRunner edit tasks |

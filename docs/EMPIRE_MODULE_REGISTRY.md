@@ -111,9 +111,15 @@ Each entry documents one product/module. Fields:
 Atlas → claude-opus-4-6
 Raven → claude-sonnet-4-6
 Phoenix → claude-sonnet-4-6
+Kai (ForgeDesk) → MiniMax-M2.7 (OpenAI-compatible /chat/completions)
+Orion (ITDesk) → MiniMax-M2.7
+Nova (MarketingDesk) → MiniMax-M2.7
+Luna (SupportDesk) → MiniMax-M2.7
 Others → grok-3-fast
 Fallback chain: Grok (15s) → Claude Sonnet (30s) → Groq (10s) → OpenClaw (30s) → Ollama (30s)
 ```
+
+> **MiniMax routing note (2026-04-26)**: Empire MAX routes to MiniMax via OpenAI-compatible `/chat/completions` at `https://api.minimax.io/v1` using model `MiniMax-M2.7`. Claude Code uses the separate Anthropic-compatible endpoint (`https://api.minimax.io/anthropic`) — different route, different payload format. MiniMax is added for selected desk routing with Grok fallback safety preserved for all MiniMax calls.
 
 ### Hermes Integration
 - `hermes_phase1.py` — memory bridge

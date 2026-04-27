@@ -27,6 +27,7 @@ class AIModel(Enum):
     OPENAI_NANO = "gpt-4.1-nano"
     OPENAI_MINI = "gpt-4o-mini"
     OPENAI_4O = "gpt-4o"
+    MINIMAX = "minimax"
 
 
 class TaskComplexity(Enum):
@@ -157,12 +158,12 @@ DESK_MODEL_ROUTING = {
     "analytics": AIModel.CLAUDE_SONNET,   # Raven — data analysis
     "quality": AIModel.CLAUDE_SONNET,     # Phoenix — accuracy critical
     "innovation": AIModel.CLAUDE_SONNET,  # Spark — creative reasoning
-    "forge": AIModel.GROQ,               # Kai — routine ops, speed
+    "forge": AIModel.MINIMAX,             # Kai — routine ops, speed
     "sales": AIModel.GROQ,              # Aria — needs reasoning, not just lookups
     "costtracker": AIModel.OPENAI_NANO,  # Cipher — basic expense math
-    "it": AIModel.GROQ,                  # Orion — health checks routine
-    "marketing": AIModel.GROQ,          # Nova — content needs reasoning
-    "support": AIModel.OPENAI_MINI,      # Fast responses
+    "it": AIModel.MINIMAX,               # Orion — health checks routine
+    "marketing": AIModel.MINIMAX,         # Nova — content needs reasoning
+    "support": AIModel.MINIMAX,          # Fast responses
     # All others fall through to complexity-based routing
 }
 
@@ -180,6 +181,9 @@ class AIRouter:
         self.groq_key = os.getenv("GROQ_API_KEY", "")
         self.gemini_key = os.getenv("GOOGLE_GEMINI_API_KEY", "")
         self.openai_key = os.getenv("OPENAI_API_KEY", "")
+        self.minimax_key = os.getenv("MINIMAX_API_KEY", "")
+        self.minimax_base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
+        self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
         # Priority: xAI Grok > Claude > Groq > Ollama
         if self.xai_key:
             self.primary_model = AIModel.GROK
@@ -197,6 +201,7 @@ class AIRouter:
         if self.groq_key: providers.append("Groq")
         if self.gemini_key: providers.append("Gemini")
         if self.openai_key: providers.append("OpenAI")
+        if self.minimax_key: providers.append("MiniMax")
         providers += ["OpenClaw", "Ollama"]
         model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama"}
         print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {self.xai_base_url} {self.xai_model}")
@@ -212,6 +217,7 @@ class AIRouter:
             {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
             {"id": "gpt-4o", "name": "GPT-4o", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
+            {"id": "minimax", "name": "MiniMax M1", "available": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
             {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "type": "local"},
         ]
@@ -584,6 +590,15 @@ class AIRouter:
             except Exception as e:
                 logger.warning(f"OpenAI 4o failed: {type(e).__name__}: {e}")
                 use_model = AIModel.CLAUDE
+        elif use_model == AIModel.MINIMAX:
+            try:
+                logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}) (desk)")
+                resp = await self._minimax_chat(full_messages, image_path=image_path)
+                self._log_chat_cost(full_messages, resp, self.minimax_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=False)
+            except Exception as e:
+                logger.warning(f"MiniMax failed: {type(e).__name__}: {e}")
+                use_model = AIModel.GROK  # fallback to Grok
 
         # Build ordered provider chain: requested model first, then full fallback
         # Chain: Grok -> Claude -> Groq -> OpenClaw -> Ollama
@@ -776,6 +791,18 @@ class AIRouter:
             except Exception as e:
                 logger.warning(f"OpenAI stream failed: {type(e).__name__}: {e}")
                 use_model = AIModel.GROQ
+        elif use_model == AIModel.MINIMAX:
+            try:
+                logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model})")
+                collected = []
+                async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path):
+                    collected.append(chunk)
+                    yield chunk, self.minimax_model
+                self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
+                return
+            except Exception as e:
+                logger.warning(f"MiniMax stream failed: {type(e).__name__}: {e}")
+                use_model = AIModel.GROK
 
         # Build ordered provider chain: requested model first, then full fallback
         all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
@@ -1135,6 +1162,49 @@ class AIRouter:
                 if response.status_code != 200:
                     error_body = await response.aread()
                     raise Exception(f"OpenAI HTTP {response.status_code}: {error_body.decode()[:200]}")
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    text = delta.get("content", "")
+                    if text:
+                        yield text
+
+    # ── MiniMax ───────────────────────────────────────────────────────
+
+    async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
+        """Chat via MiniMax M1 API."""
+        api_messages = self._prepare_openai_messages(messages, image_path)
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            resp = await client.post(
+                f"{self.minimax_base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
+                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096}
+            )
+            if resp.status_code != 200:
+                raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
+            return resp.json()["choices"][0]["message"]["content"]
+
+    async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
+        """Stream chat via MiniMax M1 API."""
+        api_messages = self._prepare_openai_messages(messages, image_path)
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            async with client.stream(
+                "POST",
+                f"{self.minimax_base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
+                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096, "stream": True}
+            ) as response:
+                if response.status_code != 200:
+                    error_body = await response.aread()
+                    raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
