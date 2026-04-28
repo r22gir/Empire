@@ -24,6 +24,8 @@ from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
+from app.services.max.factual_guard import is_factual_question, enforce_web_search
+from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
 from app.services.max.runtime_truth_check import format_runtime_truth_check, should_run_runtime_truth_check
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
@@ -1521,6 +1523,19 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             final_content = qr.cleaned
 
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
+
+        # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
+        tools_used_names = [r.tool for r in tool_results_list] if tool_results_list else []
+        if is_factual_question(request.message) and "web_search" not in tools_used_names:
+            fallback_response = (
+                "I need to verify this information from reliable sources before answering. "
+                "Let me search the web for current data on this topic."
+            )
+            final_content = fallback_response
+
+        # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
+        if should_defer_uncertain(request.message):
+            final_content = uncertainty_fallback(request.message)
 
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:

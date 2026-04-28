@@ -84,3 +84,29 @@ def check_output_quality(text: str) -> list[str]:
     return warnings
 
 SAFE_REFUSAL = "I can\'t help with that request. Let me know how else I can assist with Empire operations."
+
+
+def uncertainty_fallback(topic: str, suggestions: list[str] = None) -> str:
+    if suggestions is None:
+        suggestions = [
+            "Search the web for current information",
+            "Check our internal business records (Hermes memory)",
+            "Note this as a topic to research later",
+        ]
+    lines = "\n".join(f"{i}. {s}" for i, s in enumerate(suggestions, 1))
+    return (
+        f"I don\'t have verified information on \"{topic}\" from reliable Empire sources.\n\n"
+        f"Would you like me to:\n{lines}"
+    )
+
+
+def should_defer_uncertain(message: str, confidence: float = None) -> bool:
+    if confidence is not None and confidence < 0.6:
+        return True
+    uncertain_patterns = [
+        r'\b(maybe|perhaps|possibly|probably|likely|unlikely)\b',
+        r'\b(what\s+if|hypothetical|theoretical|speculate)\b',
+        r'\b(guess|estimate|roughly|approximately)\b',
+        r"(i\s+(don.t|do\s*not)\s+have\s+(that\s+)?(info|data|information|memory))",
+    ]
+    return any(re.search(p, message, re.I) for p in uncertain_patterns)

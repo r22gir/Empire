@@ -42,6 +42,8 @@ TOOL_LEVELS = {
     "update_contact": 2, "delete_contact": 2, "clear_data": 2,
     "shell_execute": 3, "dispatch_to_openclaw": 3, "deploy": 3,
     "erase_dataset": 3, "drop_table": 3,
+    # Memory search — L1 auto for founder
+    "memory_search": 1,
 }
 
 LEVEL_PATTERNS = {
