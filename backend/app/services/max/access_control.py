@@ -44,6 +44,12 @@ TOOL_LEVELS = {
     "erase_dataset": 3, "drop_table": 3,
     # Memory search — L1 auto for founder
     "memory_search": 1,
+    # Code mode tools (v10.0 autonomous pipeline)
+    "generate_code": 2,
+    "modify_file": 2,
+    "run_tests": 1,
+    "deploy_staging": 2,
+    "deploy_production": 3,
 }
 
 LEVEL_PATTERNS = {

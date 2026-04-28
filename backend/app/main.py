@@ -235,6 +235,9 @@ load_router("app.routers.openclaw_tasks", "", ["openclaw-tasks"])
 # MAX-Hermes-OpenClaw Autonomous Orchestration
 load_router("app.routers.orchestration", "", ["orchestration"])
 
+# Hermes Dev Tracker (v10.0 autonomous pipeline)
+load_router("app.services.hermes.dev_tracker", "/api/v1/hermes/dev", ["hermes-dev"])
+
 # Docker / System / Ollama management
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])
