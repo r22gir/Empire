@@ -1525,13 +1525,30 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
-        tools_used_names = [r.tool for r in tool_results_list] if tool_results_list else []
+        tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in tool_results_list]
         if is_factual_question(request.message) and "web_search" not in tools_used_names:
-            fallback_response = (
-                "I need to verify this information from reliable sources before answering. "
-                "Let me search the web for current data on this topic."
+            logger.info(f"[factual_guard] Auto-invoking web_search for factual query: {request.message[:80]}")
+            # Execute web_search synchronously via thread pool
+            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+            search_result = await asyncio.to_thread(
+                execute_tool, search_tc, desk=request.desk, access_context=_ac_context, founder=founder
             )
-            final_content = fallback_response
+            search_entry = {"tool": "web_search", "success": search_result.success, "result": search_result.result, "error": search_result.error}
+            tool_results_list.append(search_entry)
+
+            # Build grounding context and re-query AI with verified data
+            tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+            grounded_messages = list(messages)
+            grounded_messages.append(AIMessage(role="user", content=(
+                "[SYSTEM: You must answer using only the verified web search data below. "
+                "Do not fall back to training data. Cite sources from the search results.]\n\n"
+                f"{tool_summary}\n\nQuestion: {request.message}"
+            )))
+            grounded_response = await ai_router.chat(
+                grounded_messages, model=model, desk=request.desk,
+                system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
+            )
+            final_content = grounded_response.content
 
         # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
         if should_defer_uncertain(request.message):
@@ -1582,7 +1599,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             unified_store.add_message(
                 conv_id, request.channel or "web", "assistant", strip_tool_blocks(final_content),
                 model=response.model_used,
-                tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None,
+                tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in tool_results_list] if tool_results_list else None,
                 metadata=_ledger_metadata(request.channel, {"source": "max_chat_response"}),
             )
         except Exception as _ums_err:
@@ -1971,12 +1988,17 @@ async def chat_stream(request: ChatRequest):
 
                 tool_summary_parts = []
                 for r in round_results:
-                    if r.success and r.result:
-                        tool_summary_parts.append(f"[{r.tool}] Result:\n{json.dumps(r.result, indent=2, default=str)[:3000]}")
+                    _r = r if isinstance(r, dict) else r.__dict__
+                    tool_key = _r.get("tool", "?")
+                    tool_res = _r.get("result", "")
+                    tool_err = _r.get("error", "Unknown")
+                    if _r.get("success") and tool_res:
+                        tool_summary_parts.append(f"[{tool_key}] Result:\n{json.dumps(tool_res, indent=2, default=str)[:3000]}")
                     else:
-                        tool_summary_parts.append(f"[{r.tool}] Error: {r.error}")
+                        tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
-                if any(r.tool in ACTION_TOOLS and r.success for r in round_results):
+                round_results_dicts = [r if isinstance(r, dict) else r.__dict__ for r in round_results]
+                if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results_dicts):
                     tool_summary += (
                         "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
                         "use only task_id/openclaw_task_id from the current tool result above. "
@@ -2018,7 +2040,7 @@ async def chat_stream(request: ChatRequest):
                 unified_store.add_message(
                     conv_id, request.channel or "web", "assistant", strip_tool_blocks(full_response),
                     model=model_used,
-                    tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None,
+                    tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in tool_results_list] if tool_results_list else None,
                     metadata=_ledger_metadata(request.channel, {"source": "max_stream_response"}),
                 )
             except Exception as _ums_err:
@@ -2055,7 +2077,7 @@ async def chat_stream(request: ChatRequest):
             _grounding_events = []
             if tool_results_list:
                 # Convert result objects to dicts for verify_web_response
-                _tool_dicts = [{"tool": r.tool, "success": r.success, "result": r.result, "error": r.error} for r in tool_results_list]
+                _tool_dicts = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
                 _has_web = any(td["tool"] in ("web_search", "web_read") for td in _tool_dicts)
                 if _has_web:
                     try:
@@ -2124,7 +2146,7 @@ async def chat_stream(request: ChatRequest):
             _quality_badge = None
             try:
                 from app.services.max.quality_gate import validate_response as _qg_validate, get_quality_badge as _qg_badge
-                _tool_dicts_for_qg = [{"tool": r.tool, "success": r.success, "result": r.result, "error": r.error} for r in tool_results_list] if tool_results_list else []
+                _tool_dicts_for_qg = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
                 _qg_result = _qg_validate(full_response, category=request.desk or "general", tool_results=_tool_dicts_for_qg, model_used=model_used)
                 _quality_badge = _qg_badge(_qg_result)
                 _log_quality_metric(_qg_result, model_used, request.channel or "web")
