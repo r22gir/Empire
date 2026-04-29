@@ -17,7 +17,7 @@ from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
-from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
+from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.evaluation_service import evaluation_service
@@ -1099,6 +1099,84 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
     return None
 
 
+def _maybe_handle_gpu_safety_request(request: ChatRequest) -> ChatResponse | None:
+    """Check if a message is about risky GPU/kernel/apt operations on EmpireDell.
+
+    EmpireDell (Xeon E5-2650 v3, Quadro K600) runs kernel 6.8.0-31-generic + NVIDIA 470.239.06.
+    Any apt upgrade, autoremove, or NVIDIA driver change can break the graphics stack.
+    This guardrail is informational — it prepends a safety warning but does NOT block the message.
+    """
+    is_risky, safety_lock = check_gpu_safety(request.message)
+    if not is_risky:
+        return None
+
+    msg_lower = request.message.lower()
+
+    # Build the appropriate response based on what kind of query it is
+    if any(kw in msg_lower for kw in ["why is", "broken", "resolution", "screen", "display", "crash", "black screen"]):
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"**Verification commands to check current GPU state:**\n"
+            f"{GPU_VERIFICATION_COMMANDS}\n\n"
+            f"If `uname -r` does not show `6.8.0-31-generic`, the kernel may have been upgraded.\n"
+            f"If `nvidia-smi` fails or shows a version other than `470.239.06`, the NVIDIA stack is broken.\n"
+            f"Recovery steps are documented in: `~/EMPIREDELL_GRAPHICS_STABLE_STATE.md`"
+        )
+    elif any(kw in msg_lower for kw in ["can i update", "should i update", "upgrade ubuntu", "update ubuntu", "should i upgrade"]):
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"**To safely check for updates, run this simulation first:**\n"
+            f"```\n"
+            f"sudo apt update\n"
+            f"sudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n"
+            f"```\n\n"
+            f"Show me the output before running any upgrade. If it mentions `linux-image`, `nvidia`, `dkms`, `hwe`, or `grub` — "
+            f"do NOT proceed without explicit founder approval. The known-good stack must be preserved."
+        )
+    elif "nvidia-driver-470" in msg_lower or "nvidia-dkms-470" in msg_lower or "nvidia-kernel-source-470" in msg_lower:
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"The `nvidia-driver-470`, `nvidia-dkms-470`, and `nvidia-kernel-source-470` packages are **blocked** "
+            f"on EmpireDell because the DKMS/meta path caused a crash loop in April 2026.\n\n"
+            f"The working stack uses the **prebuilt** NVIDIA 470.239.06 module:\n"
+            f"- `linux-modules-nvidia-470-6.8.0-31-generic`\n"
+            f"- `nvidia-utils-470 470.239.06-0ubuntu2`\n\n"
+            f"Do NOT install the DKMS versions. If you need to recover the NVIDIA stack, "
+            f"see `~/EMPIREDELL_GRAPHICS_STABLE_STATE.md` for the exact recovery procedure."
+        )
+    elif any(cmd in msg_lower for cmd in ["apt autoremove", "apt upgrade", "apt full-upgrade", "apt-get dist-upgrade", "ubuntu-drivers autoinstall", "hwe kernel", "update-grub"]):
+        # Extract the specific command for the response
+        matched_cmd = next((cmd for cmd in ["apt autoremove", "apt upgrade", "apt full-upgrade", "apt-get dist-upgrade", "ubuntu-drivers autoinstall", "hwe kernel", "update-grub"] if cmd in msg_lower), "this command")
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"**`{matched_cmd}` is blocked on EmpireDell** because it can break the NVIDIA 470 / kernel 6.8.0-31 stack.\n\n"
+            f"**Simulation required before any system change:**\n"
+            f"```\n"
+            f"sudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n"
+            f"```\n\n"
+            f"If the simulation output mentions `linux-image`, `nvidia`, `dkms`, `hwe`, or `grub` — "
+            f"do NOT run it. Show me the output first for founder review."
+        )
+    else:
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"For any system maintenance task, run a simulation first and show me the output:\n"
+            f"```\n"
+            f"sudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n"
+            f"```\n\n"
+            f"If anything in the output mentions `linux`, `nvidia`, `dkms`, `hwe`, `grub`, or `kernel` — "
+            f"stop and ask the founder before proceeding."
+        )
+
+    return ChatResponse(
+        response=response_text,
+        model_used="gpu-safety-guardrail",
+        fallback_used=False,
+        tool_results=[{"tool": "gpu_safety_check", "success": True, "result": {"risky": True, "lock_active": True}}],
+        metadata=_response_metadata(request.channel),
+    )
+
+
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
     async def gen():
         for tool_result in response.tool_results or []:
@@ -1168,6 +1246,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
         return direct_route
+
+    # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
+    gpu_guard = _maybe_handle_gpu_safety_request(request)
+    if gpu_guard is not None:
+        return gpu_guard
 
     try:
         from app.services.max.continuity_compaction import (
@@ -1778,6 +1861,11 @@ async def chat_stream(request: ChatRequest):
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
         return _stream_immediate_response(direct_route, request.conversation_id)
+
+    # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
+    gpu_guard = _maybe_handle_gpu_safety_request(request)
+    if gpu_guard is not None:
+        return _stream_immediate_response(gpu_guard, request.conversation_id)
 
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         async def runtime_truth_gen():

@@ -220,3 +220,148 @@ def test_gmail_inbox_invalid_grant_returns_reauth_boundary(monkeypatch):
     assert "I did not read any inbox messages." in response.response
     assert response.tool_results[0]["tool"] == "check_email"
     assert response.tool_results[0]["success"] is False
+
+
+# ── EmpireDell GPU Stability Lock ─────────────────────────────────────
+
+def test_gpu_safety_apt_autoremove_blocked(monkeypatch):
+    """apt autoremove on EmpireDell is blocked by GPU stability lock."""
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("GPU safety guardrail should block before AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    request = max_router.ChatRequest(
+        message="run sudo apt autoremove",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "gpu-safety-guardrail"
+    assert "EmpireDell GPU stability lock is active" in response.response
+    assert "apt autoremove" in response.response
+    assert response.tool_results[0]["tool"] == "gpu_safety_check"
+    assert response.tool_results[0]["result"]["risky"] is True
+
+
+def test_gpu_safety_nvidia_upgrade_warns(monkeypatch):
+    """NVIDIA driver upgrade on EmpireDell triggers GPU stability lock."""
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("GPU safety guardrail should block before AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    request = max_router.ChatRequest(
+        message="upgrade NVIDIA driver",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "gpu-safety-guardrail"
+    assert "EmpireDell GPU stability lock is active" in response.response
+    assert "470.239.06" in response.response
+    assert response.tool_results[0]["result"]["risky"] is True
+
+
+def test_gpu_safety_resolution_broken_shows_verification(monkeypatch):
+    """Resolution broken query triggers GPU safety + verification commands."""
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("GPU safety guardrail should block before AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    request = max_router.ChatRequest(
+        message="why is my resolution broken?",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "gpu-safety-guardrail"
+    assert "EmpireDell GPU stability lock is active" in response.response
+    assert "uname -r" in response.response
+    assert "nvidia-smi" in response.response
+    assert "6.8.0-31-generic" in response.response
+    assert "470.239.06" in response.response
+
+
+def test_gpu_safety_update_ubuntu_requires_simulation(monkeypatch):
+    """Updating Ubuntu triggers GPU safety lock + simulation requirement."""
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("GPU safety guardrail should block before AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    request = max_router.ChatRequest(
+        message="can I update Ubuntu?",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "gpu-safety-guardrail"
+    assert "EmpireDell GPU stability lock is active" in response.response
+    assert "simulation" in response.response
+    assert "apt-get -s upgrade" in response.response
+
+
+def test_gpu_safety_nvidia_driver_470_install_blocked(monkeypatch):
+    """Installing nvidia-driver-470 is blocked because DKMS path caused crash."""
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def fail_ai_router(*args, **kwargs):
+        raise AssertionError("GPU safety guardrail should block before AI routing")
+
+    monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+
+    request = max_router.ChatRequest(
+        message="install nvidia-driver-470",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "gpu-safety-guardrail"
+    assert "DKMS" in response.response
+    assert "crash loop" in response.response
+    assert "prebuilt" in response.response
+    assert "470.239.06" in response.response
+
+
+def test_gpu_safety_safe_message_passes_through(monkeypatch):
+    """Ordinary non-GPU messages should not trigger GPU safety guardrail."""
+    max_router = importlib.import_module("app.routers.max.router")
+
+    async def no_call(*args, **kwargs):
+        # This should be called (not blocked by GPU guardrail)
+        return AIResponse(content="Hello, how can I help?", model_used="test")
+
+    call_count = {"n": 0}
+
+    async def counting_ai_router(*args, **kwargs):
+        call_count["n"] += 1
+        return await no_call(*args, **kwargs)
+
+    monkeypatch.setattr(max_router.ai_router, "chat", counting_ai_router)
+
+    request = max_router.ChatRequest(
+        message="what is the status of my quotes?",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    # Should NOT be a gpu-safety-guardrail response
+    assert response.model_used != "gpu-safety-guardrail"
+    # And it should have gone to the AI router
+    assert call_count["n"] > 0
