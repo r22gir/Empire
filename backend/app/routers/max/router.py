@@ -1028,6 +1028,63 @@ def _real_browser_action_ids(tool_results: list[Any] | None) -> set[str]:
     return valid_ids
 
 
+# Risky command patterns that should trigger GPU safety replacement in model output
+GPU_OUTPUT_RISKY_PATTERNS = [
+    r"\bapt\s+autoremove\b",
+    r"\bapt\s+upgrade\b",
+    r"\bapt\s+full-upgrade\b",
+    r"\bapt-get\s+dist-upgrade\b",
+    r"\bubuntu-drivers\s+autoinstall\b",
+    r"\bapt\s+install\s+nvidia-driver",
+    r"\bapt\s+install\s+nvidia-dkms",
+    r"\bapt\s+install\s+nvidia-kernel",
+    r"\bapt\s+purge\s+nvidia\b",
+    r"\bapt\s+remove\s+nvidia\b",
+    r"\bhwe-kernel\b",
+    r"\bdkms\s+remove\b",
+    r"\bupdate-grub\b",
+    r"\bgrub-set-default\b",
+    r"\bnvidia-driver-470\b",
+    r"\bnvidia-dkms-470\b",
+    r"\bnvidia-kernel-source-470\b",
+]
+
+
+def _apply_gpu_safety_output_guardrail(message: str | None, response_text: str) -> str:
+    """Fail-safe: if model output recommends risky GPU/kernel/apt commands, replace with safety lock.
+
+    This is a second layer after the pre-model guard. It catches cases where the model
+    responds with dangerous advice despite the input having been flagged.
+    """
+    if not message:
+        return response_text
+
+    msg_lower = message.lower()
+    resp_lower = response_text.lower()
+
+    # Only check if the original message was about EmpireDell or GPU-related topics
+    gpu_topics = ["empiredell", "gpu", "nvidia", "graphics", "display", "screen", "resolution", "kernel", "ubuntu", "apt"]
+    if not any(topic in msg_lower for topic in gpu_topics):
+        return response_text
+
+    # Check if response recommends or describes any risky command
+    for pattern in GPU_OUTPUT_RISKY_PATTERNS:
+        if re.search(pattern, resp_lower, re.IGNORECASE):
+            logger.warning(f"GPU safety output guardrail triggered by pattern: {pattern}")
+            return (
+                f"**EmpireDell GPU stability lock is active.** Known-good stack: kernel 6.8.0-31-generic + "
+                f"NVIDIA 470.239.06 (Quadro K600). Do NOT change kernel/NVIDIA packages without running a "
+                f"simulation first and getting founder approval.\n\n"
+                f"The command you asked about or that was recommended is blocked on EmpireDell. "
+                f"To safely check for issues, run this simulation first:\n"
+                f"```\nsudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n```\n"
+                f"If the simulation mentions `linux-image`, `nvidia`, `dkms`, `hwe`, or `grub` — "
+                f"do NOT proceed. Show the output to the founder for review."
+            )
+
+    return response_text
+
+
 def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
     if _is_unverified_email_send_request(message) and not _has_verified_email_send_result(tool_results):
         return _email_send_boundary_response(ChatRequest(message=message or "", history=[])).response
@@ -1637,6 +1694,9 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if should_defer_uncertain(request.message):
             final_content = uncertainty_fallback(request.message)
 
+        # Guard: GPU safety output fail-safe — replace model output recommending risky commands
+        final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
+
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:
             try:
@@ -2201,6 +2261,13 @@ async def chat_stream(request: ChatRequest):
             except Exception as _qe_err:
                 logger.warning(f"[stream] Quality engine failed: {_qe_err}")
                 _qr = None
+
+            # 2b. GPU safety output fail-safe — replace response if it recommends risky commands
+            _gpu_guard_resp = _apply_gpu_safety_output_guardrail(request.message, full_response)
+            if _gpu_guard_resp != full_response:
+                logger.warning(f"[stream] GPU safety output guardrail replaced response")
+                full_response = _gpu_guard_resp
+                yield f"data: {json.dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:
