@@ -8,8 +8,9 @@ import {
   BookmarkPlus, ExternalLink, BookOpen,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { saveReference } from '../../hooks/useLifeReferenceShelf';
+import { saveReference, useShelfContext } from '../../hooks/useLifeReferenceShelf';
 import LifeReferenceShelfPanel from './LifeReferenceShelfPanel';
+import { LifeReferenceShelfProvider } from '../../hooks/useLifeReferenceShelf';
 
 // Lazy-loaded new panels to avoid SSR issues
 const ValuationPanel = dynamic(() => import('./ValuationPanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
@@ -153,6 +154,7 @@ function fmt(date: string) {
 // ── Section 1: Intake / Search ────────────────────────────────────────────────
 
 function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssue) => void }) {
+  const { saveReference } = useShelfContext();
   const [q, setQ] = useState('');
   const [issueDate, setIssueDate] = useState('');
   const [keyword, setKeyword] = useState('');
@@ -1835,6 +1837,7 @@ export default function ArchiveForgePage() {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <LifeReferenceShelfProvider>
         {step === 'intake' && <IntakeSection onIdentified={handleIdentified} />}
         {step === 'reference' && refIssue && <ReferenceSection ref_issue={refIssue} />}
         {step === 'photos' && <PhotoSection archiveId={savedArchiveId} refIssue={refIssue} />}
@@ -1856,6 +1859,7 @@ export default function ArchiveForgePage() {
         {step === 'founder' && <FounderReviewQueue />}
         {step === 'grading' && <ConditionGradingWizard />}
         {step === 'bundle' && <BundleIntelligencePanel />}
+        </LifeReferenceShelfProvider>
       </div>
 
       {/* Navigation */}

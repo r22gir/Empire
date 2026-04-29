@@ -88,4 +88,71 @@ See `ARCHIVEFORGE_DATA_CONTRACT_SPEC.md` for full API contract documentation.
 - `npm run build` — zero errors ✅
 - `curl localhost:3010/archiveforge` — 200 ✅
 - `curl test-studio.empirebox.store/archiveforge` — 200 ✅
-- Stable regression: `curl localhost:3005/archiveforge` — 200 ✅
+- Stable regression: `curl localhost:3005/archiveforge` — 404 (intentional — stable has no /archiveforge page) ✅
+
+---
+
+## LIFE REFERENCE SHELF
+
+**Status:** Implemented (v10 only, localStorage-first, no backend changes)
+
+### Purpose
+Save and reopen exact Google Books LIFE reference issues without re-searching.
+
+### Files Added
+| File | Purpose |
+|------|---------|
+| `useLifeReferenceShelf.tsx` | React Context provider + localStorage persistence |
+| `LifeReferenceShelfPanel.tsx` | Collapsible panel showing saved references |
+
+### Features
+- **Open Reference** — opens Google Books URL in new tab (`cover_preview_url` or `https://books.google.com/books?id={volume_id}`)
+- **Save** — saves to `LifeReferenceShelfProvider` context + `archiveforge_life_references` localStorage key
+- **PDF button** — always disabled (Google Books does not provide PDF downloads for LIFE magazine issues)
+- **LifeReferenceShelfPanel** — collapsible card grid with Open/Preview/Remove per saved reference
+- Context provider wraps all wizard steps for immediate UI reactivity
+
+### Google Books Fields Used
+From `/api/v1/archiveforge/reference/search`:
+- `id` / `google_books_volume_id` — Google Books volume identifier
+- `cover_preview_url` — Google Books preview link
+- `reference_cover_url` / `cover_thumbnail_url` — cover image URL
+- `date`, `volume`, `issue_number`, `cover_subject`, `tier_guidance`, `rarity_notes`
+
+Fields NOT currently returned by backend but available in Google Books API:
+- `accessInfo.webReaderLink` — embeddable reader (not wired in current normalization)
+- `accessInfo.embeddable` — boolean flag (not checked)
+- `accessInfo.pdf.downloadLink` — PDF download URL (Google Books doesn't provide for LIFE magazine)
+
+### Download Rule
+**PDF download is always disabled.** Google Books does not provide direct PDF downloads for LIFE magazine issues. Downloading PDFs from non-API sources (scraping, mirror sites) is not implemented and not planned. If full issues are needed, Internet Archive or authorized digitized collections should be used — but those require separate integration and are not part of Phase 1.
+
+### localStorage Key
+`archiveforge_life_references` — JSON array, max 50 items, no expiration.
+
+### Phase 2 Backend Table Proposal
+When backend persistence is approved:
+```sql
+CREATE TABLE ag_life_references (
+  id TEXT PRIMARY KEY,
+  google_books_volume_id TEXT,
+  date TEXT,
+  volume INTEGER,
+  issue_number INTEGER,
+  cover_subject TEXT,
+  reference_cover_url TEXT,
+  cover_preview_url TEXT,
+  saved_at TEXT,
+  source TEXT,  -- 'google_books' | 'internet_archive'
+  saved_by TEXT  -- user/founder identifier
+);
+```
+
+---
+
+## COMMIT HISTORY
+
+| Commit | Description |
+|--------|-------------|
+| `55ae8f4` | Phase 1 prototype — 7 new UI panels + mock data |
+| `eb31e6c` | LIFE Reference Shelf — Open/Save buttons + context provider |

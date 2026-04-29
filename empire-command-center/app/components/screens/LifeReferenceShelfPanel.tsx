@@ -8,7 +8,7 @@
 
 import { useState, useEffect } from 'react';
 import { Eye, ExternalLink, BookmarkMinus, BookOpen, Download } from 'lucide-react';
-import { getSavedReferences, removeReference, type SavedLifeReference } from '../../hooks/useLifeReferenceShelf';
+import { useShelfContext, type SavedLifeReference } from '../../hooks/useLifeReferenceShelf';
 
 interface LifeReferenceShelfPanelProps {
   onOpenReference?: (ref: SavedLifeReference) => void;
@@ -16,24 +16,11 @@ interface LifeReferenceShelfPanelProps {
 }
 
 export default function LifeReferenceShelfPanel({ onOpenReference, collapsed = false }: LifeReferenceShelfPanelProps) {
-  const [saved, setSaved] = useState<SavedLifeReference[]>([]);
+  const { saved, removeReference } = useShelfContext();
   const [isOpen, setIsOpen] = useState(!collapsed);
-
-  // Poll localStorage briefly after mount to catch saves triggered after mount
-  useEffect(() => {
-    setSaved(getSavedReferences());
-    let count = 0;
-    const interval = setInterval(() => {
-      setSaved(getSavedReferences());
-      count++;
-      if (count >= 6) clearInterval(interval); // stop after ~3s
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
 
   const handleRemove = (key: string) => {
     removeReference(key);
-    setSaved(getSavedReferences());
   };
 
   const getOpenUrl = (ref: SavedLifeReference): string => {
