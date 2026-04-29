@@ -1,6 +1,7 @@
 # EMPIREBOX ACCESS LANES STATUS
 
 **Created:** 2026-04-29
+**Updated:** 2026-04-29 (added empire-studio-test tunnel for v10 test lanes)
 **Purpose:** Track stable vs v10 access lane separation
 
 ---
@@ -9,18 +10,19 @@
 
 All public lanes were running v10.0 when production should remain on stable.
 Separation completed 2026-04-29. Two independent worktrees serve stable and v10.
+Two Cloudflare Tunnels used: one for production, one for test.
 
 ---
 
 ## ACCESS LANES
 
-| Lane | Hostname | Local Port | Worktree | Commit | Build ID |
-|------|----------|------------|----------|--------|----------|
-| **studio** (prod) | studio.empirebox.store | 3005 | ~/empire-repo-stable | 966cd44 (stable/production) | build-1777489751379 |
-| **luxe** (prod) | luxe.empirebox.store | 3005 | ~/empire-repo-stable | 966cd44 (stable/production) | build-1777489751379 |
-| **api** (prod) | api.empirebox.store | 8000 | (backend, not Next.js) | — | — |
-| **test-studio** | test-studio.empirebox.store | 3010 | ~/empire-repo-v10 | dce7b68 (feature/v10.0) | build-1777489912427 |
-| **test-luxe** | test-luxe.empirebox.store | 3010 | ~/empire-repo-v10 | dce7b68 (feature/v10.0) | build-1777489912427 |
+| Lane | Hostname | Local Port | Worktree | Commit | Build ID | Tunnel |
+|------|----------|------------|----------|--------|----------|--------|
+| **studio** (prod) | studio.empirebox.store | 3005 | ~/empire-repo-stable | 966cd44 (stable/production) | build-1777489751379 | empire-studio-override |
+| **luxe** (prod) | luxe.empirebox.store | 3005 | ~/empire-repo-stable | 966cd44 (stable/production) | build-1777489751379 | empire-studio-override |
+| **api** (prod) | api.empirebox.store | 8000 | (backend, not Next.js) | — | — | empire-studio-override |
+| **test-studio** | test-studio.empirebox.store | 3010 | ~/empire-repo-v10 | dce7b68 (feature/v10.0) | build-1777489912427 | empire-studio-test |
+| **test-luxe** | test-luxe.empirebox.store | 3010 | ~/empire-repo-v10 | dce7b68 (feature/v10.0) | build-1777489912427 | empire-studio-test |
 
 ---
 
@@ -67,29 +69,57 @@ HEAD:   dce7b68902820deee90ffe73b2d6d34963c9ce51
 |---------|----------|------|--------|
 | empire-portal.service | ~/empire-repo-stable | 3005 | active |
 | empire-portal-v10.service | ~/empire-repo-v10 | 3010 | active |
-| cloudflared-empire-studio-override.service | n/a | tunnel | active |
+| cloudflared-empire-studio-override.service | n/a | tunnel (prod) | active |
+| cloudflared-empire-studio-test.service | n/a | tunnel (test v10) | active |
 
 ---
 
-## CLOUDFLARE TUNNEL
+## CLOUDFLARE TUNNELS
 
+### Tunnel 1: empire-studio-override (Production)
 **Config:** ~/.cloudflared/empire-studio.yml
 **Tunnel ID:** de194be2-b4a8-40f2-a7d2-8cf2c55e1e6c
-**Tunnel Name:** empire-studio-override
+**Credentials:** /home/rg/.cloudflared/de194be2-b4a8-40f2-a7d2-8cf2c55e1e6c.json
+**Status:** Active, 4 connections
 
-### Ingress Rules
+#### Ingress Rules
 ```
 hostname: studio.empirebox.store  path: api/v1/*  → localhost:8000
 hostname: studio.empirebox.store                    → localhost:3005
 hostname: luxe.empirebox.store    path: api/v1/*  → localhost:8000
 hostname: luxe.empirebox.store                      → localhost:3005
-hostname: test-studio.empirebox.store  path: api/v1/* → localhost:8000
-hostname: test-studio.empirebox.store                → localhost:3010
-hostname: test-luxe.empirebox.store  path: api/v1/*   → localhost:8000
-hostname: test-luxe.empirebox.store                  → localhost:3010
-hostname: api.empirebox.store                        → localhost:8000
+hostname: api.empirebox.store                      → localhost:8000
                                                     → http_status:404
 ```
+
+### Tunnel 2: empire-studio-test (v10 Test)
+**Config:** ~/.cloudflared/empire-studio-test.yml
+**Tunnel ID:** 97434c64-4176-47fa-bf8d-eef7739b44e0
+**Credentials:** /home/rg/.cloudflared/97434c64-4176-47fa-bf8d-eef7739b44e0.json
+**Status:** Active, 4 connections
+
+#### Ingress Rules
+```
+hostname: test-studio.empirebox.store  path: api/v1/*  → localhost:8000
+hostname: test-studio.empirebox.store                  → localhost:3010
+hostname: test-luxe.empirebox.store    path: api/v1/*  → localhost:8000
+hostname: test-luxe.empirebox.store                    → localhost:3010
+                                                       → http_status:404
+```
+
+---
+
+## DNS CONFIGURATION
+
+All hostnames use CNAME records pointing to their respective tunnel endpoints:
+
+| Hostname | CNAME Target | Proxy | Tunnel |
+|----------|-------------|-------|--------|
+| studio.empirebox.store | de194be2-b4a8-40f2-a7d2-8cf2c55e1e6c.cfargotunnel.com | proxied | empire-studio-override |
+| luxe.empirebox.store | de194be2-b4a8-40f2-a7d2-8cf2c55e1e6c.cfargotunnel.com | proxied | empire-studio-override |
+| api.empirebox.store | de194be2-b4a8-40f2-a7d2-8cf2c55e1e6c.cfargotunnel.com | proxied | empire-studio-override |
+| test-studio.empirebox.store | 97434c64-4176-47fa-bf8d-eef7739b44e0.cfargotunnel.com | proxied | empire-studio-test |
+| test-luxe.empirebox.store | 97434c64-4176-47fa-bf8d-eef7739b44e0.cfargotunnel.com | proxied | empire-studio-test |
 
 ---
 
@@ -117,9 +147,16 @@ systemctl --user restart empire-portal.service
 
 ---
 
-## KNOWN ISSUES
+## KNOWN ISSUES (RESOLVED)
 
-- **test-studio.empirebox.store / test-luxe.empirebox.store:** Cloudflare returns HTTP 404 for requests despite valid SSL cert and correct DNS. This is a Cloudflare edge routing issue. DNS CNAMEs point to Cloudflare, SSL certs provision correctly, but Cloudflare cannot route to the tunnel. Requires Cloudflare Dashboard investigation.
+- ~~test-studio.empirebox.store / test-luxe.empirebox.store: Cloudflare returns HTTP 404~~ — **RESOLVED 2026-04-29** by creating a separate tunnel (empire-studio-test) for test hostnames. Root cause: Cloudflare edge routing association for test hostnames was not properly established on the empire-studio-override tunnel, despite correct DNS CNAME records. Using a fresh tunnel (empire-studio-test) resolved the issue.
+
+---
+
+## HISTORY
+
+- **2026-04-29 15:40 EDT:** Deleted old empire-studio tunnel (2f85176c). Created empire-studio-test tunnel (97434c64) for v10 test lanes. DNS CNAMEs updated for test-studio and test-luxe to point to new tunnel. All 4 hostnames now return 200.
+- **2026-04-29 15:14 EDT:** Initial access lane separation: stable on port 3005, v10 on port 3010, empire-studio-override tunnel created for production routes.
 
 ---
 
