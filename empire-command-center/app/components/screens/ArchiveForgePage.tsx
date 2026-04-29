@@ -6,6 +6,15 @@ import {
   AlertTriangle, Check, Tag, FolderOpen, Box, ArrowRight,
   RefreshCw, Filter, Download, Eye, Plus, Trash2, Star, Award, Layers,
 } from 'lucide-react';
+import dynamic from 'next/dynamic';
+
+// Lazy-loaded new panels to avoid SSR issues
+const ValuationPanel = dynamic(() => import('./ValuationPanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
+const MarketIntelligencePanel = dynamic(() => import('./MarketIntelligencePanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
+const PlatformRecommendations = dynamic(() => import('./PlatformRecommendations'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
+const FounderReviewQueue = dynamic(() => import('./FounderReviewQueue'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
+const ConditionGradingWizard = dynamic(() => import('./ConditionGradingWizard'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
+const BundleIntelligencePanel = dynamic(() => import('./BundleIntelligencePanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
 
 const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
   ? 'https://api.empirebox.store/api/v1'
@@ -1575,9 +1584,9 @@ function InventorySection() {
 
 // ── Main ArchiveForgePage ─────────────────────────────────────────────────────
 
-type WizardStep = 'intake' | 'reference' | 'photos' | 'archive' | 'condition' | 'listing' | 'review' | 'inventory';
+type WizardStep = 'intake' | 'reference' | 'photos' | 'archive' | 'condition' | 'listing' | 'review' | 'inventory' | 'valuation' | 'market' | 'platform' | 'founder' | 'grading' | 'bundle';
 
-const STEP_ORDER: WizardStep[] = ['intake','reference','photos','archive','condition','listing','review','inventory'];
+const STEP_ORDER: WizardStep[] = ['intake','reference','photos','archive','condition','listing','review','inventory','valuation','market','platform','founder','grading','bundle'];
 const STEP_LABELS: Record<WizardStep, string> = {
   intake: '1. Identify',
   reference: '2. Reference',
@@ -1587,6 +1596,12 @@ const STEP_LABELS: Record<WizardStep, string> = {
   listing: '6. Listing',
   review: '7. Review',
   inventory: 'Inventory',
+  valuation: '8. Valuation',
+  market: '9. Market',
+  platform: '10. Platform',
+  founder: 'Founder',
+  grading: 'Grading',
+  bundle: 'Bundle',
 };
 
 export default function ArchiveForgePage() {
@@ -1740,6 +1755,12 @@ export default function ArchiveForgePage() {
         )}
         {step === 'review' && <ReviewPublishSection archiveId={savedArchiveId} refIssue={refIssue} />}
         {step === 'inventory' && <InventorySection />}
+        {step === 'valuation' && <ValuationPanel />}
+        {step === 'market' && <MarketIntelligencePanel />}
+        {step === 'platform' && <PlatformRecommendations />}
+        {step === 'founder' && <FounderReviewQueue />}
+        {step === 'grading' && <ConditionGradingWizard />}
+        {step === 'bundle' && <BundleIntelligencePanel />}
       </div>
 
       {/* Navigation */}
