@@ -5,8 +5,11 @@ import {
   Table2, ChevronRight, ChevronDown, Upload, X, Loader2,
   AlertTriangle, Check, Tag, FolderOpen, Box, ArrowRight,
   RefreshCw, Filter, Download, Eye, Plus, Trash2, Star, Award, Layers,
+  BookmarkPlus, ExternalLink, BookOpen,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
+import { saveReference } from '../../hooks/useLifeReferenceShelf';
+import LifeReferenceShelfPanel from './LifeReferenceShelfPanel';
 
 // Lazy-loaded new panels to avoid SSR issues
 const ValuationPanel = dynamic(() => import('./ValuationPanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
@@ -258,7 +261,11 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
             </div>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
-          {results.map(ref => (
+          {results.map(ref => {
+            const key = ref.google_books_volume_id || ref.id;
+            const openUrl = ref.cover_preview_url
+              || (ref.google_books_volume_id ? `https://books.google.com/books?id=${ref.google_books_volume_id}` : '#');
+            return (
             <div key={ref.id} style={{
               background: '#fff', border: `1.5px solid ${ref.match_score && ref.match_score > 0.5 ? '#06b6d4' : '#e5e2dc'}`,
               borderRadius: 12, padding: 12, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10,
@@ -303,12 +310,78 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
                     Match confidence: {Math.round(ref.match_score * 100)}%
                   </div>
                 )}
-                <button style={{ marginTop: 2, padding: '8px 12px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                {/* Action buttons: Open Reference, Save Reference, Select */}
+                <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                  {/* Open Reference */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); window.open(openUrl, '_blank', 'noopener,noreferrer'); }}
+                    title={`Open ${ref.cover_subject} on Google Books`}
+                    style={{
+                      padding: '5px 8px',
+                      background: '#1e40af',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                    }}
+                  >
+                    <ExternalLink size={10} /> Open Ref
+                  </button>
+                  {/* Save Reference */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); saveReference(ref); }}
+                    title="Save to LIFE Reference Shelf"
+                    style={{
+                      padding: '5px 8px',
+                      background: '#f59e0b',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                    }}
+                  >
+                    <BookmarkPlus size={10} /> Save
+                  </button>
+                  {/* Download PDF — disabled, Google Books doesn't provide magazine PDFs */}
+                  <button
+                    disabled
+                    title="PDF download not available from Google Books for LIFE magazine issues"
+                    style={{
+                      padding: '5px 8px',
+                      background: '#f5f3ef',
+                      color: '#ccc',
+                      border: '1px solid #e5e2dc',
+                      borderRadius: 6,
+                      cursor: 'not-allowed',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                    }}
+                  >
+                    <Download size={10} /> PDF
+                  </button>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onIdentified(ref); }}
+                  style={{ marginTop: 2, padding: '8px 12px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
                   Select this issue
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
           </div>
         </div>
       )}
@@ -317,6 +390,9 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
         <strong>Reference-only covers</strong> — Google Books or local reference covers help identify the issue.
         They are not listing photos. Upload your actual item photos in Step 3 before listing.
       </div>
+
+      {/* LIFE Reference Shelf — saved references panel */}
+      <LifeReferenceShelfPanel />
     </div>
   );
 }
@@ -369,6 +445,25 @@ function ReferenceSection({ ref_issue }: { ref_issue: LifeReferenceIssue }) {
 	              Match reason: {ref_issue.match_reason}
 	            </div>
 	          )}
+          {/* Action buttons for selected reference */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button
+              onClick={() => {
+                const url = ref_issue.cover_preview_url
+                  || (ref_issue.google_books_volume_id ? `https://books.google.com/books?id=${ref_issue.google_books_volume_id}` : '#');
+                if (url !== '#') window.open(url, '_blank', 'noopener,noreferrer');
+              }}
+              style={{ padding: '7px 12px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <ExternalLink size={11} /> Open Reference
+            </button>
+            <button
+              onClick={() => saveReference(ref_issue)}
+              style={{ padding: '7px 12px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <BookmarkPlus size={11} /> Save to Shelf
+            </button>
+          </div>
         </div>
       </div>
 
