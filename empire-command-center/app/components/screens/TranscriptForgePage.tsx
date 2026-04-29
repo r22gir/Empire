@@ -5,8 +5,11 @@ import {
   FileAudio, Upload, List, Eye, CheckCircle, XCircle, AlertTriangle,
   Loader2, ChevronRight, ChevronDown, Clock, User, Download,
   Copy, Check, X, Pause, Play, MessageSquare, Shield, ArrowLeft,
-  RefreshCw, Zap, BookOpen
+  RefreshCw, Zap, BookOpen, Edit3
 } from 'lucide-react';
+import { ProofreadingProvider } from '../../hooks/useTranscriptForgeProofreading';
+import TranscriptProofreadingPanel from './TranscriptProofreadingPanel';
+import TranscriptExportPanel from './TranscriptExportPanel';
 
 // ============ TYPES ============
 
@@ -113,6 +116,8 @@ export default function TranscriptForgePage() {
   const [jobs, setJobs] = useState<TranscriptJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<TranscriptJob | null>(null);
   const [activeTab, setActiveTab] = useState<'jobs' | 'detail' | 'review'>('jobs');
+  const [activeDetailTab, setActiveDetailTab] = useState<'chunks' | 'transcript' | 'proofread' | 'export'>('chunks');
+  const [showProofreading, setShowProofreading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingJob, setLoadingJob] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -592,6 +597,40 @@ export default function TranscriptForgePage() {
           </div>
         )}
 
+        {/* Detail sub-tabs */}
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #e5e7eb', paddingBottom: 0 }}>
+          {[
+            { key: 'chunks', label: 'Chunks', icon: <MessageSquare size={13} /> },
+            { key: 'transcript', label: 'Transcript', icon: <BookOpen size={13} /> },
+            { key: 'proofread', label: 'Proofread', icon: <Edit3 size={13} /> },
+            { key: 'export', label: 'Export', icon: <Download size={13} /> },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveDetailTab(tab.key as typeof activeDetailTab);
+                if (tab.key !== 'proofread') setShowProofreading(false);
+                if (tab.key === 'proofread') setShowProofreading(true);
+              }}
+              aria-selected={activeDetailTab === tab.key}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 5,
+                padding: '8px 14px',
+                background: activeDetailTab === tab.key ? '#7c3aed' : 'transparent',
+                color: activeDetailTab === tab.key ? '#fff' : '#6b7280',
+                border: 'none',
+                borderBottom: activeDetailTab === tab.key ? '2px solid #7c3aed' : '2px solid transparent',
+                borderRadius: '6px 6px 0 0',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                marginBottom: -1,
+              }}
+            >
+              {tab.icon}
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {selectedJob.state === 'first_chunk_ready' && (
           <div style={{ padding: '12px 16px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, color: '#1e40af', fontSize: 13 }}>
             <strong>Paused awaiting review of first chunk.</strong> Remaining chunks are intentionally pending. Verify the original audio against the transcript, mark chunk 1 Good or Needs Review, then continue only when ready.
@@ -638,6 +677,9 @@ export default function TranscriptForgePage() {
           </div>
         )}
 
+        {/* Tab content */}
+        {activeDetailTab === 'chunks' && (
+          <>
         {/* Chunk Review Section */}
         {['first_chunk_ready', 'processing_remaining_chunks', 'verification_running', 'needs_review'].includes(state) && (
           <div className="empire-card" style={{ padding: 20 }}>
@@ -856,6 +898,82 @@ export default function TranscriptForgePage() {
             </div>
           </div>
         )}
+          </>
+        )}
+
+        {/* Transcript tab (read-only view) */}
+        {activeDetailTab === 'transcript' && (
+          <>
+        {/* Transcript Viewer */}
+        {['approved', 'corrected_and_approved', 'rejected', 'verification_running', 'needs_review'].includes(state) && (
+          <div className="empire-card" style={{ padding: 20 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <BookOpen size={16} /> Full Transcript
+            </h3>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              {['approved', 'corrected_and_approved'].includes(state) && (
+                <button onClick={() => loadTranscript(selectedJob.job_id, 'approved')} style={{ padding: '6px 12px', background: transcriptKind === 'approved' ? '#2563eb' : '#f3f4f6', color: transcriptKind === 'approved' ? 'white' : '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                  Approved
+                </button>
+              )}
+              {['approved', 'corrected_and_approved', 'verification_running', 'needs_review'].includes(state) && (
+                <button onClick={() => loadTranscript(selectedJob.job_id, 'verified')} style={{ padding: '6px 12px', background: transcriptKind === 'verified' ? '#2563eb' : '#f3f4f6', color: transcriptKind === 'verified' ? 'white' : '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                  Verified
+                </button>
+              )}
+              {['approved', 'corrected_and_approved', 'verification_running', 'needs_review', 'rejected'].includes(state) && (
+                <button onClick={() => loadTranscript(selectedJob.job_id, 'raw')} style={{ padding: '6px 12px', background: transcriptKind === 'raw' ? '#2563eb' : '#f3f4f6', color: transcriptKind === 'raw' ? 'white' : '#374151', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer' }}>
+                  Raw
+                </button>
+              )}
+            </div>
+
+            {transcriptText ? (
+              <div style={{ position: 'relative' }}>
+                <pre style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', background: '#f9fafb', padding: 16, borderRadius: 6, maxHeight: 400, overflowY: 'auto', border: '1px solid #e5e7eb' }}>
+                  {transcriptText}
+                </pre>
+                <button
+                  onClick={() => copyToClipboard(transcriptText, selectedJob.job_id)}
+                  style={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', background: 'white', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 11, cursor: 'pointer' }}
+                >
+                  {copiedJobId === selectedJob.job_id ? <Check size={11} /> : <Copy size={11} />}
+                  {copiedJobId === selectedJob.job_id ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ color: '#9ca3af', fontSize: 13, fontStyle: 'italic' }}>
+                {state === 'approved' || state === 'corrected_and_approved' || state === 'corrected_and_approved'
+                  ? 'No approved transcript available yet.'
+                  : 'Load a transcript version above.'}
+              </div>
+            )}
+          </div>
+        )}
+          </>
+        )}
+
+        {/* Proofread tab */}
+        {activeDetailTab === 'proofread' && (
+          <div className="empire-card" style={{ padding: 20 }}>
+            <TranscriptProofreadingPanel
+              job={selectedJob}
+              apiBase={API}
+            />
+          </div>
+        )}
+
+        {/* Export tab */}
+        {activeDetailTab === 'export' && (
+          <div className="empire-card" style={{ padding: 20 }}>
+            <TranscriptExportPanel
+              jobId={selectedJob.job_id}
+              segments={[]}
+              speakerLabelMode="manual"
+            />
+          </div>
+        )}
 
         {/* Approval Actions */}
         {isApprovable && (
@@ -998,6 +1116,7 @@ export default function TranscriptForgePage() {
   }
 
   return (
+    <ProofreadingProvider>
     <div style={{ height: '100%', overflowY: 'auto', padding: '24px 28px' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
@@ -1020,5 +1139,6 @@ export default function TranscriptForgePage() {
       {activeTab === 'jobs' && renderJobsList()}
       {activeTab === 'detail' && renderJobDetail()}
     </div>
+    </ProofreadingProvider>
   );
 }
