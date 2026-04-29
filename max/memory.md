@@ -187,24 +187,24 @@ Instant ballpark from dimensions + material + complexity → 3 tiers (Essential/
 - v5.1 (Mar 18 EVE): Knowledge build, quote pipeline API, system prompt update, vision+chat enhancements
 
 ## AUTO-SYNC (updated nightly by brain_sync)
-Last sync: 2026-04-25 23:00
+Last sync: 2026-04-28 23:00
 
 ### Database Counts (empire.db)
-- tasks: 606
+- tasks: 636
 - customers: 144
 - invoices: 17
 - payments: 1
 - expenses: 6
 - inventory_items: 155
 - vendors: 51
-- contacts: 2
+- contacts: 3
 - desk_configs: 15
 - task_activity: 349
 
 ### File Storage
-- Quote JSONs: 143
+- Quote JSONs: 147
 - Inbox messages: 187
-- Brain memories: 11061
+- Brain memories: 11694
 
 ### Finance Snapshot
 - Revenue: $100 | Expenses: $5,380 | Outstanding: $4,175 | Net: $-5,280
@@ -213,5 +213,5 @@ Last sync: 2026-04-25 23:00
 - forge: 1
 
 ### System
-- CPU: 0.4% | RAM: 14.5% (4GB/31GB) | Disk: 63.7% (55GB/91GB)
-- Backend routers loaded: 84
+- CPU: 1.7% | RAM: 10.9% (3GB/31GB) | Disk: 64.4% (55GB/91GB)
+- Backend routers loaded: 86

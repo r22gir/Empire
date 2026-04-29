@@ -17,6 +17,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+def _safe_tool_attr(result, attr: str, default=None):
+    """Safely get attribute from ToolResult object or dict"""
+    if isinstance(result, dict):
+        return result.get(attr, default)
+    return getattr(result, attr, default)
+
+
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.max.inpaint_service import inpaint_service

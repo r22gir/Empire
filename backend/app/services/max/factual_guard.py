@@ -1,6 +1,13 @@
 """Factual Question Guardrail: Enforces web_search for verifiable claims."""
 import re
 
+def _safe_tool_attr(result, attr: str, default=None):
+    """Safely get attribute from ToolResult object or dict"""
+    if isinstance(result, dict):
+        return result.get(attr, default)
+    return getattr(result, attr, default)
+
+
 FACTUAL_PATTERNS = [
     r'\b(election|president|prime\s*minister|won|defeated|voted|poll|ballot)\b',
     r'\b(recent|latest|current|today|yesterday|this\s+week|this\s+month)\b',
