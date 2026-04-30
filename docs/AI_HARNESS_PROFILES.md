@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-30
 **Branch:** feature/v10.0-test-lane
-**Status:** Phase 1 — Registry & Selection (not yet wired into live MAX routing)
+**Status:** Phase 2A — Metadata-only MAX integration (live routing NOT changed)
 
 ---
 
@@ -147,23 +147,33 @@ Log is append-only. Access via `GET /api/v1/ai-harness/telemetry`.
 
 ## Current Integration Status
 
-### Registry-Only (Phase 1 — This Pass)
+### Phase 2A — Metadata-Only Integration
 
-- Profile registry: **active** (`backend/app/services/ai_harness_profiles.py`)
-- Profile selection endpoints: **active** (`/api/v1/ai-harness/*`)
-- Telemetry logging: **active**
-- `ai_router.py`: **NOT yet wired** — current MAX routing is unchanged
-- `AIRouter.chat()` / `chat_stream()`: no harness profile integration
-- `AIResponse` dataclass: no harness metadata fields yet
-- OpenClaw task dispatch: no harness profile metadata attached yet
-- Frontend AI Model Control UI: **not implemented**
+**What is LIVE in Phase 2A:**
+- Profile registry + selection service: **active**
+- All 6 endpoints including new `routing-status`: **active**
+- Harness metadata attached to MAX `/chat` and `/chat/stream` responses: **active**
+  - Metadata fields: `harness_profile_id`, `harness_provider`, `harness_model`, `harness_task_type`, `harness_reason`, `harness_fallback_used`, `harness_emergency_override`, `harness_policy_summary`
+  - Attached to `metadata.harness` in `ChatResponse` and SSE `done` events
+- `get_last_routing_decision()`: **active** — tracks last profile selection module-level
+- Telemetry path fix: **active** — writes to `~/empire-repo-v10/backend/data/logs` when running from v10 worktree
+- Emergency override available: **yes** (profile exists and is enabled)
+- Emergency override NOT auto-triggered: **correct** (Phase 2B)
 
-### Phase 2 Candidates
+**What is NOT live (unchanged):**
+- `ai_router.py` provider selection: **UNCHANGED** — no live routing change
+- `AIRouter.chat()` / `chat_stream()`: still uses existing complexity-based chains
+- `AIResponse` dataclass: harness metadata NOT in response dataclass itself
+- OpenClaw task dispatch: no harness metadata attached yet
+- Frontend read-only panel: **not implemented** (Phase 2B)
+- MAX tools: all remain `implemented: false`
 
-1. **Live MAX integration** — Pass `task_type` through chat flow, integrate `select_profile()` into `AIRouter.chat()` and `chat_stream()`, attach routing metadata to `AIResponse`
-2. **MAX explanation** — Add active model/profile indicator in MAX chat UI
-3. **OpenClaw metadata** — Attach `harness_profile_id` + `routing_reason` to OpenClaw task dispatch
-4. **Frontend read-only panel** — Show available profiles, active profile, registry status
+### Phase 2B Candidates (Next)
+
+1. **Live MAX provider routing** — Wire harness profile into `AIRouter.chat()` model selection (requires live provider testing)
+2. **MAX explanation UI** — Show active harness profile + reason in MAX chat interface
+3. **OpenClaw harness metadata** — Attach to `TaskRequest` if safe metadata field exists
+4. **Frontend read-only panel** — Profile status, last routing, registry counts
 
 ---
 
@@ -207,6 +217,9 @@ AIHarnessProfile(
 | GET | `/api/v1/ai-harness/profiles/{profile_id}` | Get one profile |
 | GET | `/api/v1/ai-harness/recommend?task_type=...` | Get recommended profiles for task type |
 | POST | `/api/v1/ai-harness/select` | Select best profile for task |
+| GET | `/api/v1/ai-harness/status` | Registry status, counts, chains, warning |
+| GET | `/api/v1/ai-harness/routing-status` | Last routing decision + Phase 2A metadata-only status |
+| GET | `/api/v1/ai-harness/telemetry` | Recent routing decisions from JSONL log |
 | GET | `/api/v1/ai-harness/status` | Registry status, defaults, chains, warnings |
 | GET | `/api/v1/ai-harness/telemetry` | Recent routing decisions (sanitized) |
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
+from app.services.ai_harness_profiles import registry as harness_registry, TASK_TYPE_MAX_CHAT
 from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
@@ -1452,6 +1453,40 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # via /v1/responses endpoint (function_calls returned alongside or instead of text)
         _tools = get_xai_tool_definitions() if request.image_filename else None
 
+        # ── Phase 2A: Metadata-only harness profile selection ──────────────────
+        # Determine task type conservatively. No live provider routing is changed.
+        _task_type = TASK_TYPE_MAX_CHAT
+        if request.desk in ("codedesk", "codeforge"):
+            _task_type = "code_patch"
+        elif request.desk in ("analyticsdesk",):
+            _task_type = "finance_analysis"
+        elif request.desk in ("labdesk", "qadesk", "qualitydesk"):
+            _task_type = "repo_audit"
+        elif request.image_filename:
+            _task_type = "image_to_quote"
+        elif request.desk in ("intakedesk",):
+            _task_type = "customer_support"
+        # Select harness profile (metadata-only — ai_router.chat is unchanged)
+        _harness_profile, _harness_routing = harness_registry.select_profile(
+            task_type=_task_type,
+            requested_provider=None,
+            requested_model=None,
+            emergency_override=False,  # Phase 2A: emergency override not auto-triggered
+            budget_mode=False,
+        )
+        _harness_meta = {
+            "harness_profile_id": _harness_profile.id if _harness_profile else None,
+            "harness_profile_display_name": _harness_profile.display_name if _harness_profile else None,
+            "harness_provider": _harness_routing.selected_provider,
+            "harness_model": _harness_routing.selected_model,
+            "harness_task_type": _task_type,
+            "harness_reason": _harness_routing.reason,
+            "harness_fallback_used": _harness_routing.fallback_used,
+            "harness_emergency_override": _harness_routing.emergency_override,
+            "harness_policy_summary": harness_registry.build_policy_summary(_harness_profile.id) if _harness_profile else "",
+        }
+        # ── End Phase 2A harness metadata ───────────────────────────────────
+
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
             timeout=45.0,
@@ -1778,6 +1813,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             logger.debug(f"Quality gate error (non-fatal): {qg_err}")
             quality_badge = None
 
+        # Merge harness metadata into existing response metadata
+        _base_metadata = _response_metadata(request.channel)
+        _base_metadata["harness"] = _harness_meta
+
         resp = ChatResponse(
             response=sanitize_output(final_content),
             model_used=response.model_used,
@@ -1785,7 +1824,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             tool_results=tool_results_list if tool_results_list else None,
             quality=quality_badge,
             response_id=_response_id,
-            metadata=_response_metadata(request.channel),
+            metadata=_base_metadata,
         )
 
         # Log response for evaluation loop (non-blocking)
@@ -2002,6 +2041,39 @@ async def chat_stream(request: ChatRequest):
                 _stream_ac_context = {"user": _stream_ac_user}
         except Exception as _ac_err:
             logger.debug(f"Access control resolve failed (stream): {_ac_err}")
+
+    # ── Phase 2A: Metadata-only harness profile selection ──────────────────
+    # Select harness profile BEFORE streaming begins (no live routing change)
+    _stream_task_type = TASK_TYPE_MAX_CHAT
+    if request.desk in ("codedesk", "codeforge"):
+        _stream_task_type = "code_patch"
+    elif request.desk in ("analyticsdesk",):
+        _stream_task_type = "finance_analysis"
+    elif request.desk in ("labdesk", "qadesk", "qualitydesk"):
+        _stream_task_type = "repo_audit"
+    elif request.image_filename:
+        _stream_task_type = "image_to_quote"
+    elif request.desk in ("intakedesk",):
+        _stream_task_type = "customer_support"
+    _stream_harness_profile, _stream_harness_routing = harness_registry.select_profile(
+        task_type=_stream_task_type,
+        requested_provider=None,
+        requested_model=None,
+        emergency_override=False,
+        budget_mode=False,
+    )
+    _stream_harness_meta = {
+        "harness_profile_id": _stream_harness_profile.id if _stream_harness_profile else None,
+        "harness_profile_display_name": _stream_harness_profile.display_name if _stream_harness_profile else None,
+        "harness_provider": _stream_harness_routing.selected_provider,
+        "harness_model": _stream_harness_routing.selected_model,
+        "harness_task_type": _stream_task_type,
+        "harness_reason": _stream_harness_routing.reason,
+        "harness_fallback_used": _stream_harness_routing.fallback_used,
+        "harness_emergency_override": _stream_harness_routing.emergency_override,
+        "harness_policy_summary": harness_registry.build_policy_summary(_stream_harness_profile.id) if _stream_harness_profile else "",
+    }
+    # ── End Phase 2A harness metadata ───────────────────────────────────
 
     async def event_generator():
         model_used = "unknown"
@@ -2292,11 +2364,14 @@ async def chat_stream(request: ChatRequest):
                 except Exception as _save_err:
                     logger.debug(f"[stream] Chat history save failed: {_save_err}")
 
+            # Merge harness metadata into response metadata
+            _stream_base_metadata = _response_metadata(request.channel)
+            _stream_base_metadata["harness"] = _stream_harness_meta
             _done_data = {
                 'type': 'done',
                 'model_used': model_used,
                 'conversation_id': conv_id,
-                'metadata': _response_metadata(request.channel),
+                'metadata': _stream_base_metadata,
             }
             if _quality_badge:
                 _done_data['quality'] = _quality_badge

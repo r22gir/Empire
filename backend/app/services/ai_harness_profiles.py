@@ -539,6 +539,8 @@ class AIHarnessProfileRegistry:
                     fallback_used=False,
                     emergency_override=True,
                 )
+                _record_routing(profile.id, profile.provider, profile.model, task_type,
+                               reason, False, "", True)
                 return profile, routing
 
         # Explicit provider + model request
@@ -562,6 +564,8 @@ class AIHarnessProfileRegistry:
                     task_type=task_type,
                     reason=f"Explicit provider/model request: provider={requested_provider}, model={requested_model}",
                 )
+                _record_routing(profile.id, profile.provider, profile.model, task_type,
+                              routing.reason, False, "", False)
                 return profile, routing
             else:
                 # Explicit provider requested but no matching task type — warn and fall through
@@ -574,6 +578,8 @@ class AIHarnessProfileRegistry:
                     fallback_used=True,
                     fallback_reason=f"No {requested_provider} profile supports task type '{task_type}'",
                 )
+                _record_routing("", "", "", task_type, routing.reason,
+                               True, routing.fallback_reason, False)
                 return None, routing
 
         # Default for task type
@@ -586,6 +592,8 @@ class AIHarnessProfileRegistry:
                 task_type=task_type,
                 reason=f"Default profile for task type '{task_type}'",
             )
+            _record_routing(profile.id, profile.provider, profile.model, task_type,
+                          routing.reason, False, "", False)
             return profile, routing
 
         # Fallback to max_default_chat_profile
@@ -600,6 +608,8 @@ class AIHarnessProfileRegistry:
                 fallback_used=True,
                 fallback_reason=f"Task type '{task_type}' has no assigned default profile",
             )
+            _record_routing(profile.id, profile.provider, profile.model, task_type,
+                          routing.reason, True, routing.fallback_reason, False)
             return profile, routing
 
         # Final fallback: ollama_budget_fallback_profile
@@ -614,16 +624,20 @@ class AIHarnessProfileRegistry:
                 fallback_used=True,
                 fallback_reason="No enabled profiles available",
             )
+            _record_routing(profile.id, profile.provider, profile.model, task_type,
+                          routing.reason, True, routing.fallback_reason, False)
             return profile, routing
 
         # Nothing available
-        return None, RoutingExplanation(
+        routing = RoutingExplanation(
             selected_profile_id="",
             selected_provider="",
             selected_model="",
             task_type=task_type,
             reason="No available profiles",
         )
+        _record_routing("", "", "", task_type, routing.reason, False, "", False)
+        return None, routing
 
     def build_policy_summary(self, profile_id: str) -> str:
         profile = self.get_profile(profile_id)
@@ -666,11 +680,34 @@ class AIHarnessProfileRegistry:
         return block
 
 
+# ── Module-level last routing decision (updated on every select_profile call) ──
+_last_routing: dict = {}
+
+
+def _record_routing(profile_id: str, provider: str, model: str, task_type: str,
+                    reason: str, fallback_used: bool, fallback_reason: str,
+                    emergency_override: bool) -> None:
+    _last_routing.update({
+        "selected_profile_id": profile_id,
+        "selected_provider": provider,
+        "selected_model": model,
+        "task_type": task_type,
+        "reason": reason,
+        "fallback_used": fallback_used,
+        "fallback_reason": fallback_reason,
+        "emergency_override": emergency_override,
+        "timestamp": datetime.now().isoformat(),
+    })
+
+
 # ── Telemetry ──────────────────────────────────────────────────────────────────
 
-_LOGS_DIR = Path.home() / "empire-repo" / "backend" / "data" / "logs"
-_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-_ROUTING_LOG = _LOGS_DIR / "ai_harness_routing.jsonl"
+# Write to the backend data/logs directory that this code is running from.
+# Resolves relative to THIS module's location, so ~/empire-repo-v10/backend when
+# running from v10 worktree, ~/empire-repo/backend when running from stable.
+_logs_dir = Path(__file__).resolve().parent.parent.parent / "data" / "logs"
+_logs_dir.mkdir(parents=True, exist_ok=True)
+_ROUTING_LOG = _logs_dir / "ai_harness_routing.jsonl"
 
 
 def log_routing_decision(
@@ -722,6 +759,11 @@ def get_recent_routing_decisions(limit: int = 20) -> list[dict]:
     except Exception as e:
         logger.warning(f"Failed to read routing log: {e}")
     return list(reversed(entries))
+
+
+def get_last_routing_decision() -> dict:
+    """Return the most recent routing decision dict (metadata-only, not from log)."""
+    return dict(_last_routing)
 
 
 # ── Module-level singleton ─────────────────────────────────────────────────────

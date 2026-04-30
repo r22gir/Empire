@@ -20,6 +20,7 @@ from app.services.ai_harness_profiles import (
     ALL_TASK_TYPES,
     log_routing_decision,
     get_recent_routing_decisions,
+    get_last_routing_decision,
     RoutingExplanation,
 )
 
@@ -252,6 +253,40 @@ async def get_status():
             "This endpoint is for audit/selection only."
         ),
     )
+
+
+@router.get("/routing-status")
+async def get_routing_status():
+    """
+    Get the current routing status and last routing decision.
+
+    Phase 2A returns metadata-only status:
+    - metadata_only: True (live provider routing is NOT changed by harness selection)
+    - live_provider_routing_integrated: False (harness metadata is informational only)
+    - emergency_override_available: True (profile exists and is enabled)
+    - emergency_override_active: last_routing.emergency_override if set
+    - last_routing: the most recent routing decision
+    - warning: Phase 2A is metadata-only; provider routing is unchanged
+    """
+    last = get_last_routing_decision()
+    emergency_profile = registry.get_profile("grok_emergency_repair_profile")
+    emergency_capable = emergency_profile is not None and emergency_profile.enabled
+
+    return {
+        "metadata_only": True,
+        "live_provider_routing_integrated": False,
+        "emergency_override_available": emergency_capable,
+        "emergency_override_active": last.get("emergency_override", False) if last.get("selected_profile_id") else False,
+        "last_routing": last if last.get("selected_profile_id") else None,
+        "profile_count": len(registry.list_profiles(enabled_only=False)),
+        "enabled_count": len(registry.list_profiles(enabled_only=True)),
+        "warning": (
+            "Phase 2A is metadata-only. Harness profiles are selected and reported for each "
+            "MAX request, but provider routing behavior is UNCHANGED. "
+            "ai_router.py is not wired to use harness profiles for actual model selection. "
+            "Live provider routing integration is Phase 2B."
+        ),
+    }
 
 
 @router.get("/telemetry")
