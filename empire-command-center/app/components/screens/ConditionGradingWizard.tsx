@@ -96,6 +96,8 @@ function WearStep({ onNext, onBack, answers, setAnswers }: {
     { key: 'centerStaple', label: 'Center Staple', desc: 'Staple integrity and rust' },
   ];
 
+  const allAnswered = dimensions.every(d => (answers[d.key] as number) !== undefined);
+
   return (
     <div className="space-y-4">
       <h3 className="text-gray-100 font-semibold text-center">Wear Assessment</h3>
@@ -134,11 +136,21 @@ function WearStep({ onNext, onBack, answers, setAnswers }: {
         <button
           className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
           onClick={onNext}
-          disabled={dimensions.some((d) => !(answers[d.key] as number))}
+          disabled={!allAnswered}
         >
           Calculate Grade →
         </button>
       </div>
+      {/* AF-1: Skip link — prototype only, no backend action */}
+      {!allAnswered && (
+        <button
+          className="w-full text-xs text-slate-500 hover:text-slate-400 hover:underline text-center"
+          onClick={onNext}
+          data-max-task="condition-grading-skip-prototype"
+        >
+          Skip for now (prototype only)
+        </button>
+      )}
     </div>
   );
 }
@@ -153,6 +165,8 @@ function ResultDisplay({ result, onReset }: {
       <div className="text-center">
         <div className={`text-6xl font-extrabold ${gradeColor}`}>{result.overallGrade}</div>
         <p className="text-gray-400 text-sm mt-2">Numeric Score: {result.numericScore}/100</p>
+        {/* AF-2: Output contract — prototype only */}
+        <p className="text-yellow-400/60 text-xs mt-1">Prototype grading — output is local and not validated by a certified grader</p>
       </div>
       <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700">
         <h4 className="text-gray-300 text-sm font-medium mb-3">Dimension Breakdown</h4>

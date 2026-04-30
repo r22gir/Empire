@@ -71,6 +71,83 @@ export interface ReviewedSegmentStore {
 }
 
 // ============================================================
+// EDIT PATCH — local export of proofreading edits
+// TF-2: Exportable patch format for local-only proofreading edits
+// ============================================================
+
+export interface EditPatchEntry {
+  chunkId: string;
+  originalText?: string;
+  editedText: string;
+  speakerLabel?: string;
+  reviewed?: boolean;
+  editedAt?: string;
+}
+
+export interface EditPatch {
+  jobId: string;
+  exportedAt: string;
+  source: 'localStorage';
+  edits: EditPatchEntry[];
+}
+
+// ============================================================
+// SPEAKER INDEX — local suggestions
+// TF-5: Non-sensitive fingerprint + label suggestions
+// ============================================================
+
+export interface SpeakerIndexEntry {
+  fingerprintHash: string;
+  speakerLabel: string;
+  lastSeenAt: string;
+  jobIds: string[];
+  usageCount: number;
+}
+
+export interface SpeakerIndexStore {
+  [fingerprintHash: string]: SpeakerIndexEntry;
+}
+
+const SPEAKER_INDEX_MAX = 100;
+
+// ============================================================
+// CONFIDENCE CALIBRATION — local feedback queue
+// TF-4: Frontend-only confidence review queue
+// ============================================================
+
+export type CalibrationVerdict = 'looks_good' | 'needs_correction' | 'unclear';
+
+export interface ConfidenceCalibrationEntry {
+  jobId: string;
+  chunkId: string;
+  confidence: number | null;
+  verdict: CalibrationVerdict;
+  note?: string;
+  reviewedAt: string;
+}
+
+export type ConfidenceCalibrationStore = Record<string, ConfidenceCalibrationEntry>;
+// key: `${jobId}_${chunkId}`
+
+// ============================================================
+// AUDIO VALIDATION RESULT
+// TF-6: Frontend audio readiness check
+// ============================================================
+
+export type AudioSource = 'chunk' | 'job' | 'none';
+export type AudioRisk = 'low' | 'medium' | 'high';
+
+export interface AudioValidationResult {
+  available: boolean;
+  source: AudioSource;
+  mimeType?: string;
+  extension?: string;
+  likelyPlayable: boolean;
+  risk: AudioRisk;
+  message: string;
+}
+
+// ============================================================
 // EXPORT OPTIONS
 // ============================================================
 

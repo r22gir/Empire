@@ -23,12 +23,13 @@ import {
   MOCK_BUNDLE_SUGGESTIONS,
   MOCK_COMPARABLE_SALES_SPARKLINE,
 } from '../config/archiveforge-mock';
+import { ARCHIVEFORGE_PHASE } from './useUIPhase';
 
 // ============================================================
 // PHASE TOGGLE — change to 'live' when backend APIs are ready
 // ============================================================
 
-const PHASE: 'prototype' | 'live' = 'prototype';
+const PHASE: 'prototype' | 'live' = ARCHIVEFORGE_PHASE;
 
 // ============================================================
 // SIMULATED DELAY (prototype mode only)

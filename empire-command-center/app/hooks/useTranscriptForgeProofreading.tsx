@@ -1,24 +1,34 @@
 /**
  * useTranscriptForgeProofreading — React Context + localStorage hook
  * Phase 1: Export + Proofreading UI
+ * Phase 1.5 Hardening: TF-2 (Edit Patch), TF-4 (Confidence Calibration), TF-5 (Speaker Index)
  *
  * Manages:
  * - Speaker labels per job/chunk (localStorage: transcriptforge_speaker_labels)
  * - Local edits per job/chunk (localStorage: transcriptforge_local_edits)
  * - Reviewed segments per job (localStorage: transcriptforge_reviewed_segments)
  * - Undo/redo stack for edits
+ * - Speaker index with fingerprint suggestions (localStorage: transcriptforge_speaker_index, limit 100)
+ * - Confidence calibration entries (localStorage: transcriptforge_confidence_calibration)
+ * - Edit patch export
  */
 
 'use client';
 
 import React, { createContext, useContext, useCallback, useState, useEffect } from 'react';
-import type { ChunkInfo } from '../schemas/transcriptforge-schemas';
 import type {
+  ChunkInfo,
   TranscriptSegment,
   SpeakerLabelStore,
   LocalEditStore,
   ReviewedSegmentStore,
   ProofreadingSession,
+  EditPatch,
+  SpeakerIndexEntry,
+  SpeakerIndexStore,
+  ConfidenceCalibrationStore,
+  ConfidenceCalibrationEntry,
+  CalibrationVerdict,
 } from '../schemas/transcriptforge-schemas';
 import { chunkToSegment } from '../schemas/transcriptforge-schemas';
 
@@ -29,7 +39,10 @@ import { chunkToSegment } from '../schemas/transcriptforge-schemas';
 const SPEAKER_KEY = 'transcriptforge_speaker_labels';
 const EDITS_KEY = 'transcriptforge_local_edits';
 const REVIEWED_KEY = 'transcriptforge_reviewed_segments';
+const SPEAKER_INDEX_KEY = 'transcriptforge_speaker_index';
+const CONFIDENCE_KEY = 'transcriptforge_confidence_calibration';
 const MAX_UNDO = 50;
+const SPEAKER_INDEX_MAX = 100;
 
 // ============================================================
 // CONTEXT
@@ -68,6 +81,18 @@ interface ProofreadingContextValue {
 
   // Storage status
   storageWarning: string | null;
+
+  // TF-2: Edit patch export
+  exportEditPatch: (jobId: string, segments: TranscriptSegment[]) => EditPatch;
+
+  // TF-5: Speaker index suggestions
+  getSpeakerSuggestions: (text: string) => SpeakerIndexEntry[];
+  recordSpeakerUsage: (label: string, jobId: string) => void;
+
+  // TF-4: Confidence calibration
+  getCalibration: (jobId: string, chunkId: string) => ConfidenceCalibrationEntry | null;
+  setCalibration: (jobId: string, chunkId: string, verdict: CalibrationVerdict, note?: string) => void;
+  getLowConfidenceSegments: (segments: TranscriptSegment[]) => TranscriptSegment[];
 }
 
 const ProofreadingContext = createContext<ProofreadingContextValue | null>(null);
@@ -88,12 +113,14 @@ export function ProofreadingProvider({ children }: { children: React.ReactNode }
   const [speakerStore, setSpeakerStore] = useState<SpeakerLabelStore>({});
   const [editStore, setEditStore] = useState<LocalEditStore>({});
   const [reviewedStore, setReviewedStore] = useState<ReviewedSegmentStore>({});
+  const [speakerIndex, setSpeakerIndex] = useState<SpeakerIndexStore>({});
+  const [calibrationStore, setCalibrationStore] = useState<ConfidenceCalibrationStore>({});
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [redoStack, setUndoStackRedo] = useState<UndoAction[]>([]);
   const [session, setSession] = useState<ProofreadingSession | null>(null);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
 
-  // Load from localStorage on mount
+  // Load all from localStorage on mount
   useEffect(() => {
     try {
       const sp = localStorage.getItem(SPEAKER_KEY);
@@ -102,8 +129,12 @@ export function ProofreadingProvider({ children }: { children: React.ReactNode }
       if (ed) setEditStore(JSON.parse(ed));
       const rev = localStorage.getItem(REVIEWED_KEY);
       if (rev) setReviewedStore(JSON.parse(rev));
+      const idx = localStorage.getItem(SPEAKER_INDEX_KEY);
+      if (idx) setSpeakerIndex(JSON.parse(idx));
+      const cal = localStorage.getItem(CONFIDENCE_KEY);
+      if (cal) setCalibrationStore(JSON.parse(cal));
     } catch {
-      setStorageWarning('localStorage unavailable — edits will not persist.');
+      console.warn('[TranscriptForge] [ProofreadingProvider] localStorage parse failed — using defaults');
     }
   }, []);
 
@@ -131,6 +162,24 @@ export function ProofreadingProvider({ children }: { children: React.ReactNode }
       setReviewedStore(store);
     } catch {
       setStorageWarning('localStorage quota exceeded — reviewed state will not persist.');
+    }
+  }, []);
+
+  const saveSpeakerIndex = useCallback((store: SpeakerIndexStore) => {
+    try {
+      localStorage.setItem(SPEAKER_INDEX_KEY, JSON.stringify(store));
+      setSpeakerIndex(store);
+    } catch {
+      console.warn('[TranscriptForge] [SpeakerIndex] localStorage quota exceeded — index will not persist');
+    }
+  }, []);
+
+  const saveCalibrationStore = useCallback((store: ConfidenceCalibrationStore) => {
+    try {
+      localStorage.setItem(CONFIDENCE_KEY, JSON.stringify(store));
+      setCalibrationStore(store);
+    } catch {
+      console.warn('[TranscriptForge] [ConfidenceCalibration] localStorage quota exceeded — calibration will not persist');
     }
   }, []);
 
@@ -277,6 +326,134 @@ export function ProofreadingProvider({ children }: { children: React.ReactNode }
     );
   }, []);
 
+  // ── TF-2: Edit Patch Export ──────────────────────────────────
+
+  const exportEditPatch = useCallback((jobId: string, segments: TranscriptSegment[]): EditPatch => {
+    const jobEdits = editStore[jobId] || {};
+    const edits = Object.entries(jobEdits).map(([chunkId, editedText]) => {
+      const segment = segments.find(s => s.id === chunkId);
+      return {
+        chunkId,
+        originalText: segment?.text || undefined,
+        editedText,
+        speakerLabel: segment?.speaker || undefined,
+        reviewed: segment?.reviewed || false,
+        editedAt: new Date().toISOString(),
+      };
+    });
+    return {
+      jobId,
+      exportedAt: new Date().toISOString(),
+      source: 'localStorage',
+      edits,
+    };
+  }, [editStore]);
+
+  // ── TF-5: Speaker Index ───────────────────────────────────────
+
+  /**
+   * Simple non-sensitive fingerprint from speaker label text.
+   * Uses first 3 chars + length to avoid storing raw audio or biometric data.
+   * Does NOT use audio fingerprints, biometric identifiers, or raw speaker data.
+   */
+  function fingerprintFromLabel(label: string): string {
+    const normalized = label.trim().toLowerCase();
+    const prefix = normalized.slice(0, 3);
+    const len = normalized.length;
+    // Simple non-cryptographic hash for index lookup
+    let hash = 0;
+    for (let i = 0; i < normalized.length; i++) {
+      hash = ((hash << 5) - hash) + normalized.charCodeAt(i);
+      hash |= 0;
+    }
+    return `${prefix}_${len}_${Math.abs(hash).toString(36).slice(-6)}`;
+  }
+
+  const getSpeakerSuggestions = useCallback((text: string): SpeakerIndexEntry[] => {
+    if (!text) return [];
+    const fp = fingerprintFromLabel(text);
+    const match = Object.values(speakerIndex).find(e => e.fingerprintHash === fp);
+    return match ? [match] : [];
+  }, [speakerIndex]);
+
+  const recordSpeakerUsage = useCallback((label: string, jobId: string) => {
+    const fp = fingerprintFromLabel(label);
+    const existing = speakerIndex[fp];
+    const now = new Date().toISOString();
+
+    let next: SpeakerIndexStore;
+    if (existing) {
+      // Update existing entry
+      next = {
+        ...speakerIndex,
+        [fp]: {
+          ...existing,
+          lastSeenAt: now,
+          jobIds: existing.jobIds.includes(jobId) ? existing.jobIds : [...existing.jobIds, jobId],
+          usageCount: existing.usageCount + 1,
+        },
+      };
+    } else {
+      // Add new entry, evict oldest if at limit
+      const entries = Object.values(speakerIndex);
+      if (entries.length >= SPEAKER_INDEX_MAX) {
+        // Evict oldest by lastSeenAt
+        const oldest = entries.reduce((min, e) => e.lastSeenAt < min.lastSeenAt ? e : min, entries[0]);
+        console.warn(`[TranscriptForge] [SpeakerIndex] index full — evicted oldest entry for ${oldest.fingerprintHash}`);
+        const { [oldest.fingerprintHash]: _, ...rest } = speakerIndex;
+        next = {
+          ...rest,
+          [fp]: {
+            fingerprintHash: fp,
+            speakerLabel: label,
+            lastSeenAt: now,
+            jobIds: [jobId],
+            usageCount: 1,
+          },
+        };
+      } else {
+        next = {
+          ...speakerIndex,
+          [fp]: {
+            fingerprintHash: fp,
+            speakerLabel: label,
+            lastSeenAt: now,
+            jobIds: [jobId],
+            usageCount: 1,
+          },
+        };
+      }
+    }
+    saveSpeakerIndex(next);
+  }, [speakerIndex, saveSpeakerIndex]);
+
+  // ── TF-4: Confidence Calibration ─────────────────────────────
+
+  const getCalibration = useCallback((jobId: string, chunkId: string): ConfidenceCalibrationEntry | null => {
+    const key = `${jobId}_${chunkId}`;
+    return calibrationStore[key] || null;
+  }, [calibrationStore]);
+
+  const setCalibration = useCallback((jobId: string, chunkId: string, verdict: CalibrationVerdict, note?: string) => {
+    const key = `${jobId}_${chunkId}`;
+    const next: ConfidenceCalibrationStore = {
+      ...calibrationStore,
+      [key]: {
+        jobId,
+        chunkId,
+        confidence: null,
+        verdict,
+        note,
+        reviewedAt: new Date().toISOString(),
+      },
+    };
+    saveCalibrationStore(next);
+  }, [calibrationStore, saveCalibrationStore]);
+
+  const getLowConfidenceSegments = useCallback((segments: TranscriptSegment[]): TranscriptSegment[] => {
+    return segments.filter(s => s.confidence !== null && s.confidence < 0.7);
+  }, []);
+
   const value: ProofreadingContextValue = {
     buildSegments,
     getSpeakerLabel,
@@ -297,6 +474,12 @@ export function ProofreadingProvider({ children }: { children: React.ReactNode }
     setActiveChunk,
     setPlayingChunk,
     storageWarning,
+    exportEditPatch,
+    getSpeakerSuggestions,
+    recordSpeakerUsage,
+    getCalibration,
+    setCalibration,
+    getLowConfidenceSegments,
   };
 
   return (

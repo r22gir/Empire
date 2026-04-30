@@ -13,6 +13,7 @@ import { Download, Eye, FileText, Copy, AlertTriangle } from 'lucide-react';
 import type { TranscriptSegment, ExportFormat, ExportOptions } from '../../schemas/transcriptforge-schemas';
 import { buildExport, downloadExport } from '../../lib/transcriptforge/exporters';
 import { chunkTimestampsValid } from '../../lib/transcriptforge/time';
+import { useProofreadingContext } from '../../hooks/useTranscriptForgeProofreading';
 
 interface TranscriptExportPanelProps {
   jobId: string;
@@ -39,6 +40,9 @@ export default function TranscriptExportPanel({ jobId, segments, speakerLabelMod
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [previewWarning, setPreviewWarning] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // TF-2: Edit patch export from proofreading context
+  const { exportEditPatch } = useProofreadingContext();
 
   // Check if SRT/VTT are available (require valid chunk timestamps)
   const timestampsValid = segments.length > 0 && chunkTimestampsValid(
@@ -84,6 +88,24 @@ export default function TranscriptExportPanel({ jobId, segments, speakerLabelMod
     }).catch(() => {
       setCopied(false);
     });
+  };
+
+  // TF-2: Export proofreading edits as a local JSON patch
+  const handleDownloadEditPatch = () => {
+    const patch = exportEditPatch(jobId, segments);
+    if (patch.edits.length === 0) {
+      // No edits to export
+      return;
+    }
+    const blob = new Blob([JSON.stringify(patch, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${jobId}_transcriptforge_edit_patch.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const activeFormat = FORMAT_BUTTONS.find(f => f.format === selectedFormat);
@@ -179,6 +201,15 @@ export default function TranscriptExportPanel({ jobId, segments, speakerLabelMod
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: segments.length === 0 ? '#e5e7eb' : '#2563eb', color: segments.length === 0 ? '#9ca3af' : '#fff', border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: segments.length === 0 ? 'not-allowed' : 'pointer' }}
         >
           <Download size={14} /> Download
+        </button>
+        {/* TF-2: Edit patch JSON export */}
+        <button
+          onClick={handleDownloadEditPatch}
+          aria-label="Download edit patch JSON"
+          title="Local edit patch — for backup / future backend sync. Does not save to backend."
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: '#f5f3ef', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, cursor: 'pointer', color: '#6b7280' }}
+        >
+          <FileText size={14} /> Edit Patch JSON
         </button>
       </div>
 

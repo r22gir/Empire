@@ -101,6 +101,12 @@ export interface GradingScore {
   notes?: string;
 }
 
+// ============================================================
+// CONDITION GRADING RESULT
+// AF-2: Draft Phase 2 request body for backend condition grading endpoint.
+// This is not persisted to backend in Phase 1.5.
+// ============================================================
+
 export interface ConditionGradeResult {
   overallGrade: string; // e.g., "C8", "VG6", "FN10"
   numericScore: number; // 1-100
