@@ -12,6 +12,7 @@ import { API } from '../../../lib/api';
 import MeasurementDiagram from '../quotes/MeasurementDiagram';
 import dynamic from 'next/dynamic';
 import AnalysisApprovalFlow from './AnalysisApprovalFlow';
+import PricingControlPanel from '../pricing/PricingControlPanel';
 
 const ThreeViewer = dynamic(() => import('./ThreeViewer'), { ssr: false });
 const CushionBuilder = dynamic(() => import('../upholstery/CushionBuilder'), { ssr: false });
@@ -654,6 +655,12 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   const [savedSessions, setSavedSessions] = useState<any[]>([]);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savingToBackend, setSavingToBackend] = useState(false);
+  // Pricing approval gate
+  const [measurementsApproved, setMeasurementsApproved] = useState(false);
+  const [pricingApproved, setPricingApproved] = useState(false);
+  const [showPricingPanel, setShowPricingPanel] = useState(false);
+  // Override values passed to line items
+  const [pricingOverrides, setPricingOverrides] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (initialImage) setImageData(initialImage);
@@ -1752,6 +1759,22 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
             <CheckCircle size={14} /> Review & Approve (4-Phase Flow)
           </button>
         )}
+        {/* Pricing review toggle */}
+        {(mode === 'measure' || mode === 'upholstery' || mode === 'mockup') && photos.length > 0 && (
+          <button
+            onClick={() => setShowPricingPanel(p => !p)}
+            className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:brightness-110"
+            style={{
+              height: 42, fontSize: 12, borderRadius: 10, marginBottom: 14,
+              background: showPricingPanel ? '#16a34a' : 'linear-gradient(135deg, #b8960c, #d4af37)',
+              color: '#fff', border: 'none',
+            }}
+          >
+            {showPricingPanel ? <CheckCircle size={14} /> : <CheckCircle size={14} />}
+            {showPricingPanel ? 'Hide' : 'Show'} Pricing Review
+            {measurementsApproved && pricingApproved ? ' ✓' : ' •'}
+          </button>
+        )}
         {(() => {
           switch (mode) {
             case 'measure': return renderMeasureResults(result);
@@ -1760,6 +1783,25 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
             case 'outline': return renderOutlineResults(result);
           }
         })()}
+        {/* Pricing Review Panel */}
+        {showPricingPanel && (
+          <div style={{ marginTop: 16 }}>
+            <PricingControlPanel
+              measureData={currentResults['measure'] as any}
+              upholsteryData={currentResults['upholstery'] as any}
+              mockupData={currentResults['mockup'] as any}
+              lineItems={[]}
+              disabled={false}
+              onApprovalChange={(ma, pa) => {
+                setMeasurementsApproved(ma);
+                setPricingApproved(pa);
+              }}
+              onOverridesChange={(overrides) => {
+                setPricingOverrides({ ...overrides } as Record<string, number>);
+              }}
+            />
+          </div>
+        )}
       </div>
     );
   };
@@ -1835,8 +1877,9 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
           {photos.length > 0 && completedSteps.length > 0 && (
             <button
               onClick={createQuoteFromAnalysis}
+              disabled={!measurementsApproved || !pricingApproved}
               className="flex items-center gap-1 cursor-pointer hover:brightness-110 transition-all"
-              style={{ padding: '4px 12px', borderRadius: 8, border: 'none', background: '#16a34a', fontSize: 11, fontWeight: 700, color: '#fff' }}
+              style={{ padding: '4px 12px', borderRadius: 8, border: 'none', background: (measurementsApproved && pricingApproved) ? '#16a34a' : '#9ca3af', fontSize: 11, fontWeight: 700, color: '#fff', cursor: (measurementsApproved && pricingApproved) ? 'pointer' : 'not-allowed', opacity: (measurementsApproved && pricingApproved) ? 1 : 0.6 }}
             >
               <CheckCircle size={12} /> Save to Quote
             </button>
@@ -2689,12 +2732,26 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                     {totalAnalyzed}/{photos.length} photos have analysis data
                   </div>
                 )}
+                {!measurementsApproved && (
+                  <div style={{ fontSize: 10, color: '#dc2626', marginTop: 6, fontWeight: 600 }}>
+                    Approve measurements in Pricing Review before saving.
+                  </div>
+                )}
+                {measurementsApproved && !pricingApproved && (
+                  <div style={{ fontSize: 10, color: '#dc2626', marginTop: 6, fontWeight: 600 }}>
+                    Approve pricing in Pricing Review before saving.
+                  </div>
+                )}
                 <button
                   onClick={createQuoteFromAnalysis}
+                  disabled={!measurementsApproved || !pricingApproved}
                   className="flex items-center gap-2 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98]"
                   style={{
                     margin: '12px auto 0', padding: '10px 24px', borderRadius: 10, fontSize: 13, fontWeight: 700,
-                    border: 'none', background: '#16a34a', color: '#fff', boxShadow: '0 2px 10px rgba(22,163,106,0.3)',
+                    border: 'none', background: (measurementsApproved && pricingApproved) ? '#16a34a' : '#9ca3af',
+                    color: '#fff', boxShadow: (measurementsApproved && pricingApproved) ? '0 2px 10px rgba(22,163,106,0.3)' : 'none',
+                    cursor: (measurementsApproved && pricingApproved) ? 'pointer' : 'not-allowed',
+                    opacity: (measurementsApproved && pricingApproved) ? 1 : 0.6,
                   }}
                 >
                   <CheckCircle size={14} /> Save Analysis to Quote
