@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Zap, Upload, Loader2, CheckCircle, FileText, X, ImageIcon, Camera } from 'lucide-react';
 import { API } from '../../../lib/api';
+import QuotePricingGate from '../pricing/QuotePricingGate';
 
 interface QuickQuoteBuilderProps {
   onClose?: () => void;
@@ -20,6 +21,8 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
   const [error, setError] = useState('');
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [measurementsApproved, setMeasurementsApproved] = useState(false);
+  const [pricingApproved, setPricingApproved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (file: File) => {
@@ -76,6 +79,11 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
   const handleSubmit = async () => {
     if (!customerName.trim() || !description.trim()) {
       setError('Please enter customer name and project description.');
+      return;
+    }
+    // Pre-submit guard: require pricing approval for all Quick Quotes
+    if (!pricingApproved) {
+      setError('Please approve pricing before generating the quote.');
       return;
     }
     setSubmitting(true);
@@ -271,10 +279,30 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
           </div>
         )}
 
+        {/* Pricing Review Gate */}
+        <QuotePricingGate
+          draftIdSuffix="quick-quote"
+          subtitle="Quick Quote"
+          disabled={submitting || uploading}
+          inputs={{
+            width: analysisResult?.width_inches ?? undefined,
+            height: analysisResult?.height_inches ?? undefined,
+            windowType: analysisResult?.window_type ?? undefined,
+            itemDescription: description || undefined,
+            quantity: 1,
+            aiConfidence: analysisResult?.confidence ?? null,
+            hasAiMeasurement: !!analysisResult,
+          }}
+          onApprovalChange={(ma, pa) => {
+            setMeasurementsApproved(ma);
+            setPricingApproved(pa);
+          }}
+        />
+
         {/* Submit */}
         <button
           onClick={handleSubmit}
-          disabled={submitting || uploading || !customerName.trim() || !description.trim()}
+          disabled={submitting || uploading || !customerName.trim() || !description.trim() || !pricingApproved}
           className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:bg-[#a08509] disabled:opacity-50 active:scale-[0.98]"
           style={{ height: 44, fontSize: 13, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.25)' }}
         >

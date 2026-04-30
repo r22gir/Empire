@@ -7,6 +7,7 @@ import {
   Eye, Download, Sparkles, ImageIcon, FolderOpen, CheckSquare, Edit3, Box, Ruler, CheckCircle, BookOpen, Printer
 } from 'lucide-react';
 import MeasurementDiagram from '../business/quotes/MeasurementDiagram';
+import QuotePricingGate from '../business/pricing/QuotePricingGate';
 import dynamic from 'next/dynamic';
 import { DiagramCatalog, DiagramViewer, findDiagramMatch, DIAGRAM_MAP } from '../business/catalog';
 
@@ -572,6 +573,8 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
+  const [measurementsApproved, setMeasurementsApproved] = useState(false);
+  const [pricingApproved, setPricingApproved] = useState(false);
 
   const [customer, setCustomer] = useState<CustomerInfo>({ name: '', email: '', phone: '', address: '' });
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
@@ -1159,6 +1162,11 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   // -- Submit --
   const handleSubmit = async () => {
+    // Pre-submit guard: require pricing approval
+    if (!pricingApproved) {
+      setError('Please approve pricing before generating the quote. Review your items in the Pricing Review panel.');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
@@ -1572,7 +1580,28 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
         )}
         {step === 4 && <StepOptions options={options} setOptions={setOptions} rooms={rooms} hardwareConfig={hardwareConfig} setHardwareConfig={setHardwareConfig} />}
         {step === 5 && !result && (
-          <StepReview customer={customer} photos={photos} rooms={rooms} options={options} totalItems={totalItems} />
+          <>
+            <StepReview customer={customer} photos={photos} rooms={rooms} options={options} totalItems={totalItems} />
+            <div style={{ marginTop: 16 }}>
+              <QuotePricingGate
+                draftIdSuffix="room-quote"
+                subtitle="Room Builder"
+                disabled={submitting}
+                inputs={{
+                  itemDescription: `Room Quote — ${rooms.filter(r => r.items.length > 0).length} room(s), ${totalItems} item(s)`,
+                  quantity: totalItems,
+                  fabricGrade: options.fabricGrade,
+                  liningType: options.liningType === 'none' ? undefined : options.liningType,
+                  pleatType: options.pleatType === 'none' ? undefined : options.pleatType,
+                  routeTo: undefined,
+                }}
+                onApprovalChange={(ma, pa) => {
+                  setMeasurementsApproved(ma);
+                  setPricingApproved(pa);
+                }}
+              />
+            </div>
+          </>
         )}
         {step === 5 && result && <ResultView result={result} />}
         {error && <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', color: '#dc2626', fontSize: 13 }}>{error}</div>}
@@ -1633,7 +1662,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
             Next <ArrowRight size={16} />
           </button>
         ) : !result ? (
-          <button onClick={handleSubmit} disabled={submitting}
+          <button onClick={handleSubmit} disabled={submitting || !pricingApproved}
             className="flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-all hover:bg-[#a08509]"
             style={{ height: 44, padding: '0 24px', borderRadius: 12, border: 'none', background: '#b8960c', color: '#fff', fontSize: 14, fontWeight: 700, boxShadow: '0 2px 10px rgba(184,150,12,0.3)' }}>
             {submitting ? <><Loader2 size={18} className="animate-spin" /> Generating...</> : <><FileText size={18} /> Generate Quote</>}
