@@ -45,12 +45,20 @@ function ChunkAudioPlayer({
   const audioRef = useRef<HTMLAudioElement>(null);
   const [loadError, setLoadError] = useState(false);
 
-  const audioUrl = `${apiBase}/transcriptforge/jobs/${jobId}/chunks/${chunk.chunk_id}/audio#t=${chunk.start_time},${chunk.end_time}`;
+  const startTime = Number(chunk.start_time);
+  const endTime = Number(chunk.end_time);
+  const hasValidTimestamps = Number.isFinite(startTime) && startTime >= 0 && Number.isFinite(endTime) && endTime > startTime;
+
+  const audioUrl = hasValidTimestamps
+    ? `${apiBase}/transcriptforge/jobs/${jobId}/chunks/${chunk.chunk_id}/audio#t=${startTime},${endTime}`
+    : `${apiBase}/transcriptforge/jobs/${jobId}/chunks/${chunk.chunk_id}/audio`;
 
   useEffect(() => {
     if (!isPlaying && audioRef.current) {
       audioRef.current.pause();
-      audioRef.current.currentTime = chunk.start_time;
+      if (hasValidTimestamps) {
+        audioRef.current.currentTime = startTime;
+      }
     }
   }, [isPlaying, chunk.start_time]);
 
@@ -86,6 +94,11 @@ function ChunkAudioPlayer({
         style={{ height: 28, fontSize: 10 }}
         aria-label={`Audio for ${chunk.chunk_id}`}
       />
+      {!hasValidTimestamps && !loadError && (
+        <span style={{ fontSize: 10, color: '#9ca3af' }} title="This chunk has no valid timestamp yet.">
+          ⏱ no timestamp
+        </span>
+      )}
     </div>
   );
 }
