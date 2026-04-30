@@ -1590,7 +1590,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
             <div style={{ marginTop: 16 }}>
               <QuotePricingGate
                 draftIdSuffix="room-quote"
-                subtitle="Room Builder"
+                flowType="room-quote"
                 disabled={submitting}
                 inputs={{
                   itemDescription: `Room Quote — ${rooms.filter(r => r.items.length > 0).length} room(s), ${totalItems} item(s)`,

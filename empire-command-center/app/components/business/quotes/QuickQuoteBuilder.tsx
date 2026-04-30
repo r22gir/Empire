@@ -287,7 +287,7 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
         {/* Pricing Review Gate */}
         <QuotePricingGate
           draftIdSuffix="quick-quote"
-          subtitle="Quick Quote"
+          flowType="quick-quote"
           disabled={submitting || uploading}
           inputs={{
             width: analysisResult?.width_inches ?? undefined,
