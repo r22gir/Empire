@@ -658,6 +658,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
   // Pricing approval gate
   const [measurementsApproved, setMeasurementsApproved] = useState(false);
   const [pricingApproved, setPricingApproved] = useState(false);
+  const [laborApproved, setLaborApproved] = useState(false);
   const [showPricingPanel, setShowPricingPanel] = useState(false);
   // Override values passed to line items
   const [pricingOverrides, setPricingOverrides] = useState<Record<string, number>>({});
@@ -1055,6 +1056,36 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
     const mockupData = currentResults['mockup'] as MockupResult | undefined;
     const outlineData = currentResults['outline'] as OutlineResult | undefined;
 
+    // ── Pre-submit guard ────────────────────────────────────────────────────────
+    if (!measurementsApproved || !pricingApproved) {
+      alert('Please complete measurement and pricing approval before saving.');
+      return null;
+    }
+    // Require dimensions (from AI or override)
+    const hasDim = !!(measureData || pricingOverrides['width'] || pricingOverrides['height']);
+    if (!hasDim) {
+      alert('No measurement dimensions available. Please add a measurement first.');
+      return null;
+    }
+    // Require labor: either has labor amount or founder explicitly approved missing labor
+    const laborAmt = pricingOverrides['laborAmount'] ?? upholsteryData?.estimated_labor_cost_low ?? 0;
+    if (laborAmt <= 0 && !laborApproved) {
+      alert('Labor amount is missing or zero. Please override the labor amount or explicitly approve missing labor.');
+      return null;
+    }
+    // Require valid total
+    const ov = pricingOverrides;
+    const fabricYards = ov['fabricYards'] ?? upholsteryData?.fabric_yards_plain ?? 0;
+    const fabricRate = ov['fabricRate'] ?? 25;
+    const fabricAmt = fabricYards * fabricRate;
+    const laborLineAmt = laborAmt;
+    const itemsSubtotal = 0; // no pre-existing line items in this flow
+    const subtotalBeforeTax = itemsSubtotal + fabricAmt + laborLineAmt;
+    if (!isFinite(subtotalBeforeTax) || subtotalBeforeTax <= 0) {
+      alert('Invalid quote total. Please check pricing inputs.');
+      return null;
+    }
+
     // 1. Create or find customer in ForgeCRM
     let crmCustomerId: string | null = null;
     if (customerName) {
@@ -1093,33 +1124,47 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       } catch { /* CRM creation is non-blocking */ }
     }
 
-    // 2. Build line items from analysis results
+    // 2. Build line items — override-aware
     const lineItems: any[] = [];
 
-    if (measureData) {
+    // Measurements line item
+    if (measureData || ov['width'] || ov['height']) {
+      const w = ov['width'] ?? measureData?.width_inches ?? 0;
+      const h = ov['height'] ?? measureData?.height_inches ?? 0;
+      const wt = measureData?.window_type || 'Standard';
       lineItems.push({
-        description: `Window Measurement — ${measureData.window_type || 'Standard'} (${measureData.width_inches}" W x ${measureData.height_inches}" H)`,
+        description: `Window Measurement — ${wt} (${w}" W x ${h}" H)`,
         quantity: 1, unit: 'ea', rate: 0, amount: 0, category: 'labor',
       });
     }
 
-    if (upholsteryData) {
+    // Upholstery — labor line item (override-aware)
+    if (upholsteryData || laborLineAmt > 0) {
+      const laborSrc = ov['laborAmount'] !== undefined ? 'Manual Override' : 'AI Estimate';
       lineItems.push({
-        description: `${upholsteryData.furniture_type || 'Furniture'} Reupholstery — ${upholsteryData.style || 'Standard'}`,
+        description: `${upholsteryData?.furniture_type || 'Furniture'} Reupholstery — ${upholsteryData?.style || 'Standard'} [${laborSrc}]`,
         quantity: 1, unit: 'ea',
-        rate: upholsteryData.estimated_labor_cost_low || 0,
-        amount: upholsteryData.estimated_labor_cost_low || 0,
+        rate: laborLineAmt,
+        amount: laborLineAmt,
         category: 'labor',
       });
-      if (upholsteryData.fabric_yards_plain > 0) {
-        lineItems.push({
-          description: `Fabric (plain) — ${upholsteryData.fabric_yards_plain} yards`,
-          quantity: upholsteryData.fabric_yards_plain, unit: 'ea', rate: 25, amount: upholsteryData.fabric_yards_plain * 25,
-          category: 'materials',
-        });
-      }
     }
 
+    // Fabric line item (override-aware)
+    if (fabricYards > 0) {
+      const fabricSrc = (ov['fabricYards'] !== undefined || ov['fabricRate'] !== undefined)
+        ? 'founder reviewed'
+        : 'AI Estimate';
+      lineItems.push({
+        description: `Fabric — ${fabricYards} yd @ $${fabricRate}/yd [${fabricSrc}]`,
+        quantity: fabricYards, unit: 'yd',
+        rate: fabricRate,
+        amount: fabricAmt,
+        category: 'materials',
+      });
+    }
+
+    // Mockup proposals
     if (mockupData?.proposals?.length) {
       mockupData.proposals.forEach((p: any) => {
         lineItems.push({
@@ -1132,8 +1177,30 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       });
     }
 
+    // 3. Compute financials — override-aware
     const subtotal = lineItems.reduce((s, i) => s + (i.amount || 0), 0);
-    const taxRate = 0.06;
+    const taxRate = ov['taxRate'] ?? 0.06;
+    const discountAmt = ov['discountAmount'] ?? 0;
+    const taxAmt = Math.round(subtotal * taxRate * 100) / 100;
+    const totalAmt = Math.round((subtotal + taxAmt - discountAmt) * 100) / 100;
+    const depositPct = ov['depositPercent'] ?? 50;
+    const depositAmt = Math.round(totalAmt * depositPct) / 100;
+
+    // 4. Build notes — include audit flags
+    const notesParts = [
+      `Generated from AI Photo Analysis.`,
+      `Photos: ${photos.length}. Steps: ${completedSteps.map(s => MODES.find(m => m.key === s)?.label).join(', ')}.`,
+      laborLineAmt === 0 && laborApproved ? '⚠ Labor amount zero — missing labor explicitly approved by founder.' : null,
+      (ov['fabricYards'] !== undefined || ov['fabricRate'] !== undefined)
+        ? '⚠ Fabric yards/rate overridden by founder.'
+        : null,
+      (ov['laborAmount'] !== undefined)
+        ? '⚠ Labor amount overridden by founder.'
+        : null,
+      measurementsApproved ? '✓ Measurements approved.' : null,
+      pricingApproved ? '✓ Pricing approved.' : null,
+      laborApproved ? '✓ Missing labor approved.' : null,
+    ].filter(Boolean);
 
     const payload = {
       customer_name: customerName || 'Walk-in Customer',
@@ -1143,20 +1210,20 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
       project_name: `AI Analysis${jobId ? ` — ${jobId}` : ''}`,
       project_description: `AI Photo Analysis: ${completedSteps.length}/4 steps completed. ${photos.length} photo(s) analyzed.${selectedStyles.length ? ` Styles: ${selectedStyles.join(', ')}` : ''}`,
       line_items: lineItems,
-      measurements: measureData ? {
-        width: measureData.width_inches,
-        height: measureData.height_inches,
+      measurements: (measureData || ov['width'] || ov['height']) ? {
+        width: ov['width'] ?? measureData?.width_inches,
+        height: ov['height'] ?? measureData?.height_inches,
         unit: 'in',
-        window_type: measureData.window_type || null,
-        notes: measureData.notes || null,
+        window_type: measureData?.window_type || null,
+        notes: measureData?.notes || null,
       } : null,
       subtotal,
       tax_rate: taxRate,
-      tax_amount: Math.round(subtotal * taxRate * 100) / 100,
-      discount_amount: 0,
-      total: Math.round(subtotal * (1 + taxRate) * 100) / 100,
-      deposit: { deposit_percent: 50, deposit_amount: Math.round(subtotal * (1 + taxRate) * 50) / 100 },
-      notes: `Generated from AI Photo Analysis.\nPhotos: ${photos.length}\nSteps: ${completedSteps.map(s => MODES.find(m => m.key === s)?.label).join(', ')}`,
+      tax_amount: taxAmt,
+      discount_amount: discountAmt,
+      total: totalAmt,
+      deposit: { deposit_percent: depositPct, deposit_amount: depositAmt },
+      notes: notesParts.join('\n'),
       rooms: [],
       ai_outlines: outlineData ? [outlineData] : [],
       ai_mockups: mockupData?.proposals || [],
@@ -1796,6 +1863,7 @@ export default function PhotoAnalysisPanel({ onAnalysisComplete, onSaveQuote, in
                 setMeasurementsApproved(ma);
                 setPricingApproved(pa);
               }}
+              onLaborApprovedChange={(approved) => setLaborApproved(approved)}
               onOverridesChange={(overrides) => {
                 setPricingOverrides({ ...overrides } as Record<string, number>);
               }}

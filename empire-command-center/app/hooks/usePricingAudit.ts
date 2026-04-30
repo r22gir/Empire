@@ -127,9 +127,8 @@ export function usePricingAudit() {
           ...prev.manualOverrides.filter(o => o.field !== field),
           { field, original, override },
         ],
-        // Any override invalidates existing approvals
-        measurementsApproved: false,
-        pricingApproved: false,
+        // Note: approval invalidation is handled by the caller (PricingControlPanel)
+        // to allow selective reset (measurements vs pricing vs labor).
       };
       persistEntry(updated);
       return updated;

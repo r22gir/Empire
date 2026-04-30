@@ -48,6 +48,8 @@ interface PricingControlPanelProps {
   } | null;
   // Callback when approvals change (to disable/enable Create Quote)
   onApprovalChange?: (measurementsApproved: boolean, pricingApproved: boolean) => void;
+  // Callback when labor explicit-approval state changes
+  onLaborApprovedChange?: (approved: boolean) => void;
   // Callback when overrides change (to update line item payload)
   onOverridesChange?: (overrides: OverrideValues) => void;
   // Current line items being assembled (before POST)
@@ -155,6 +157,7 @@ export default function PricingControlPanel({
   upholsteryData,
   mockupData,
   onApprovalChange,
+  onLaborApprovedChange,
   onOverridesChange,
   lineItems = [],
   disabled = false,
@@ -199,6 +202,8 @@ export default function PricingControlPanel({
   // Approval state
   const [measurementsApproved, setMeasurementsApproved] = useState(false);
   const [pricingApproved, setPricingApproved] = useState(false);
+  // Track whether founder explicitly approved zero/missing labor
+  const [laborApproved, setLaborApproved] = useState(false);
 
   // Derived flags
   const hasMeasurements = !!(measureData || overrides.width || overrides.height);
@@ -268,20 +273,44 @@ export default function PricingControlPanel({
       discountAmount: 0,
     };
     recordOverride(field, originals[field] ?? null, value);
-    // Invalidate approvals on any change
-    setMeasurementsApproved(false);
-    setPricingApproved(false);
+
+    // Selective approval invalidation by field type
+    if (field === 'width' || field === 'height') {
+      setMeasurementsApproved(false);
+      setPricingApproved(false);
+      onLaborApprovedChange?.(false);
+    } else if (field === 'fabricYards' || field === 'fabricRate') {
+      // Fabric changes invalidate pricing approval but not measurements
+      setPricingApproved(false);
+    } else if (field === 'laborAmount') {
+      // Labor changes invalidate pricing and the explicit labor approval
+      setPricingApproved(false);
+      setLaborApproved(false);
+      onLaborApprovedChange?.(false);
+    } else {
+      // tax, deposit, discount — invalidate pricing only
+      setPricingApproved(false);
+    }
     onOverridesChange?.({ ...overrides, [field]: value });
-  }, [measureData, upholsteryData, recordOverride, onOverridesChange, overrides]);
+  }, [measureData, upholsteryData, recordOverride, onOverridesChange, overrides, onLaborApprovedChange]);
 
   const handleReset = useCallback(() => {
     setOverrides({});
     setMeasurementsApproved(false);
     setPricingApproved(false);
+    setLaborApproved(false);
     resetApprovals();
-  }, [resetApprovals]);
+    onLaborApprovedChange?.(false);
+  }, [resetApprovals, onLaborApprovedChange]);
 
-  const canCreateQuote = !disabled && measurementsApproved && pricingApproved && hasMeasurements && subtotal > 0;
+  // Approve zero/missing labor explicitly
+  const handleApproveLabor = useCallback(() => {
+    const next = !laborApproved;
+    setLaborApproved(next);
+    onLaborApprovedChange?.(!next ? false : true);
+  }, [laborApproved, onLaborApprovedChange]);
+
+  const canCreateQuote = !disabled && measurementsApproved && pricingApproved && hasMeasurements && subtotal > 0 && (hasLabor || laborApproved);
 
   return (
     <div style={{
@@ -436,6 +465,27 @@ export default function PricingControlPanel({
             </span>
           </div>
         ) : null}
+        {!hasLabor && (
+          <div style={{ marginTop: 6 }}>
+            <button
+              onClick={handleApproveLabor}
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: laborApproved ? '2px solid #16a34a' : '2px solid #ece8e0',
+                background: laborApproved ? '#dcfce7' : '#fff',
+                color: laborApproved ? '#16a34a' : '#777',
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              <Check size={10} style={{ display: 'inline', marginRight: 4 }} />
+              {laborApproved ? 'Missing Labor Approved' : 'Approve Missing Labor'}
+            </button>
+          </div>
+        )}
         <FieldRow
           label="Labor Description"
           value={upholsteryData ? `${upholsteryData.furniture_type} — ${upholsteryData.style}` : '—'}
@@ -459,7 +509,7 @@ export default function PricingControlPanel({
           unit="%"
           badge="Hardcoded"
           override={overrides.taxRate !== undefined ? overrides.taxRate * 100 : undefined}
-          onOverride={overrides.taxRate !== undefined ? (v) => handleOverride('taxRate', v / 100) : undefined}
+          onOverride={(v) => handleOverride('taxRate', v / 100)}
         />
         <FieldRow
           label="Discount"
