@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useCallback, useEffect } from 'react';
-import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout, ChevronDown, X } from 'lucide-react';
+import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout, ChevronDown, X, MessageSquare } from 'lucide-react';
 import { EmpireShell } from '../ui/EmpireShell';
 import { DeskSelector } from './DeskSelector';
 import { ChatInterface } from './ChatInterface';
@@ -22,7 +22,8 @@ function loadLayout(): LayoutState {
     const raw = localStorage.getItem(LAYOUT_KEY);
     if (raw) return JSON.parse(raw);
   } catch { /* ignore */ }
-  return { sidebarVisible: true, rightPanelVisible: true, focusMode: false };
+  // CHAT-FIRST: default to collapsed panels — chat takes full space on first load
+  return { sidebarVisible: false, rightPanelVisible: false, focusMode: false };
 }
 
 function saveLayout(state: LayoutState) {
@@ -67,6 +68,7 @@ export function MAXDeskScreen() {
   const abortRef = React.useRef<AbortController | null>(null);
   const streamingRef = React.useRef(false);
   // Panel visibility — initialized from localStorage with safe defaults
+  // CHAT-FIRST: default to collapsed side panels so chat is maximized on load
   const [sidebarVisible, setSidebarVisible] = useState<boolean>(() => loadLayout().sidebarVisible);
   const [rightPanelVisible, setRightPanelVisible] = useState<boolean>(() => loadLayout().rightPanelVisible);
   // Focus mode: hide both side panels, maximize chat
@@ -87,7 +89,8 @@ export function MAXDeskScreen() {
 
   const resetLayout = useCallback(() => {
     try { localStorage.removeItem(LAYOUT_KEY); } catch {}
-    setSidebarVisible(false); // medium/narrow default: collapsed
+    // Always reset to chat-first collapsed state
+    setSidebarVisible(false);
     setRightPanelVisible(false);
     setFocusMode(false);
   }, []);
@@ -338,6 +341,21 @@ export function MAXDeskScreen() {
         >
           <Layout size={12} /> Reset Layout
         </button>
+        {/* Chat Only — explicit collapse of all panels */}
+        <button
+          onClick={() => { setSidebarVisible(false); setRightPanelVisible(false); setFocusMode(false); }}
+          title="Chat Only — collapse all panels for maximum chat space"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 8px', borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--accent-primary)',
+            background: 'var(--accent-primary)',
+            color: '#fff',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 700,
+          }}
+        >
+          <MessageSquare size={12} /> Chat Only
+        </button>
         {focusMode && (
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
@@ -350,7 +368,7 @@ export function MAXDeskScreen() {
 
       <div className="animated-gradient" style={{
         display: 'grid',
-        gridTemplateColumns: sidebarVisible && !focusMode ? '280px 1fr' : '0 1fr',
+        gridTemplateColumns: sidebarVisible && !focusMode ? '280px 1fr 300px' : '1fr',
         gridTemplateRows: '1fr',
         gap: 'var(--space-4)',
         height: focusMode
@@ -368,6 +386,7 @@ export function MAXDeskScreen() {
             borderRadius: 'var(--radius-lg)',
             overflow: 'hidden',
             minWidth: 0,
+            height: '100%',
           }}>
             <DeskSelector
               activeDesk={activeDesk}
@@ -385,7 +404,9 @@ export function MAXDeskScreen() {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          flex: 1,
           minWidth: 0,
+          minHeight: 0,
         }}>
           <ChatInterface
             messages={messages}

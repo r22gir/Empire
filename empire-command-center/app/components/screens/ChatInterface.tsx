@@ -608,6 +608,7 @@ export function ChatInterface({
             rows={1}
             style={{
               flex: 1,
+              minWidth: 0,
               background: 'transparent',
               border: 'none',
               color: 'var(--text-primary)',
