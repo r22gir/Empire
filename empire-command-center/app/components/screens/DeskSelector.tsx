@@ -16,23 +16,23 @@ interface Desk {
 }
 
 const ALL_DESKS: Desk[] = [
-  { id: 'codedesk', name: 'CodeDesk', agent: 'Atlas', icon: <Code2 size={16} />, description: 'Code & craft tasks' },
-  { id: 'marketdesk', name: 'MarketDesk', agent: 'Atlas', icon: <ShoppingCart size={16} />, description: 'Marketplace listings' },
-  { id: 'marketingdesk', name: 'MarketingDesk', agent: 'Atlas', icon: <MessageSquare size={16} />, description: 'Marketing & campaigns' },
-  { id: 'supportdesk', name: 'SupportDesk', agent: 'Atlas', icon: <Headphones size={16} />, description: 'Customer support' },
-  { id: 'salesdesk', name: 'SalesDesk', agent: 'Atlas', icon: <BarChart3 size={16} />, description: 'Sales pipeline' },
-  { id: 'financedesk', name: 'FinanceDesk', agent: 'Atlas', icon: <Database size={16} />, description: 'Finance & invoices' },
-  { id: 'clientsdesk', name: 'ClientsDesk', agent: 'Atlas', icon: <Users size={16} />, description: 'Client management' },
-  { id: 'contractorsdesk', name: 'ContractorsDesk', agent: 'Atlas', icon: <Wrench size={16} />, description: 'Contractor management' },
-  { id: 'itdesk', name: 'ITDesk', agent: 'Atlas', icon: <Bot size={16} />, description: 'IT support' },
-  { id: 'websitedesk', name: 'WebsiteDesk', agent: 'Atlas', icon: <Globe size={16} />, description: 'Web & content' },
-  { id: 'legaldesk', name: 'LegalDesk', agent: 'Raven', icon: <Shield size={16} />, description: 'Legal documents' },
-  { id: 'labdesk', name: 'LabDesk', agent: 'Phoenix', icon: <TestTube size={16} />, description: 'Testing & QA' },
-  { id: 'innovationdesk', name: 'InnovationDesk', agent: 'Atlas', icon: <Lightbulb size={16} />, description: 'Research & development' },
-  { id: 'intakedesk', name: 'IntakeDesk', agent: 'Atlas', icon: <UserPlus size={16} />, description: 'Client intake flow' },
-  { id: 'analyticsdesk', name: 'AnalyticsDesk', agent: 'Raven', icon: <BarChart3 size={16} />, description: 'Analytics & reporting' },
-  { id: 'qualitydesk', name: 'QualityDesk', agent: 'Phoenix', icon: <ClipboardCheck size={16} />, description: 'Quality assurance' },
-  { id: 'qadesk', name: 'QADesk', agent: 'Phoenix', icon: <Bug size={16} />, description: 'QA & bug tracking' },
+  { id: 'codedesk', name: 'Code Desk', agent: 'Atlas', icon: <Code2 size={16} />, description: 'Code & craft tasks' },
+  { id: 'marketdesk', name: 'Marketplace Desk', agent: 'Atlas', icon: <ShoppingCart size={16} />, description: 'Marketplace listings' },
+  { id: 'marketingdesk', name: 'Marketing Desk', agent: 'Atlas', icon: <MessageSquare size={16} />, description: 'Marketing & campaigns' },
+  { id: 'supportdesk', name: 'Support Desk', agent: 'Atlas', icon: <Headphones size={16} />, description: 'Customer support' },
+  { id: 'salesdesk', name: 'Sales Desk', agent: 'Atlas', icon: <BarChart3 size={16} />, description: 'Sales pipeline' },
+  { id: 'financedesk', name: 'Finance Desk', agent: 'Atlas', icon: <Database size={16} />, description: 'Finance & invoices' },
+  { id: 'clientsdesk', name: 'Clients Desk', agent: 'Atlas', icon: <Users size={16} />, description: 'Client management' },
+  { id: 'contractorsdesk', name: 'Contractors Desk', agent: 'Atlas', icon: <Wrench size={16} />, description: 'Contractor management' },
+  { id: 'itdesk', name: 'IT Desk', agent: 'Atlas', icon: <Bot size={16} />, description: 'IT support' },
+  { id: 'websitedesk', name: 'Website Desk', agent: 'Atlas', icon: <Globe size={16} />, description: 'Web & content' },
+  { id: 'legaldesk', name: 'Legal Desk', agent: 'Raven', icon: <Shield size={16} />, description: 'Legal documents' },
+  { id: 'labdesk', name: 'Lab / QA Desk', agent: 'Phoenix', icon: <TestTube size={16} />, description: 'Testing & QA' },
+  { id: 'innovationdesk', name: 'Innovation Desk', agent: 'Atlas', icon: <Lightbulb size={16} />, description: 'Research & development' },
+  { id: 'intakedesk', name: 'Intake Desk', agent: 'Atlas', icon: <UserPlus size={16} />, description: 'Client intake flow' },
+  { id: 'analyticsdesk', name: 'Analytics Desk', agent: 'Raven', icon: <BarChart3 size={16} />, description: 'Analytics & reporting' },
+  { id: 'qualitydesk', name: 'Quality Desk', agent: 'Phoenix', icon: <ClipboardCheck size={16} />, description: 'Quality assurance' },
+  { id: 'qadesk', name: 'QA Desk', agent: 'Phoenix', icon: <Bug size={16} />, description: 'QA & bug tracking' },
 ];
 
 const API = 'http://localhost:8000/api/v1';
@@ -104,7 +104,7 @@ export function DeskSelector({ activeDesk, onDeskChange, compact = false }: Desk
               key={desk.id}
               onClick={() => handleDeskClick(desk.id)}
               disabled={switching}
-              title={`${desk.name} — ${desk.agent}`}
+              title={`Chat with ${desk.name} — ${desk.agent}`}
               style={{
                 display: 'flex',
                 flexDirection: 'column',

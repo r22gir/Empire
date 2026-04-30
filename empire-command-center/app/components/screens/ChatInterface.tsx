@@ -2,40 +2,135 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Paperclip, Mic, Send, Square, Code, Volume2,
-  Trash2, Download, Image as ImageIcon, Sparkles
+  Trash2, Download, Image as ImageIcon, Sparkles,
+  ChevronDown, X, AlertTriangle, CheckCircle, Clock, Shield
 } from 'lucide-react';
 import { Message } from '../../lib/types';
 
 const API = 'http://localhost:8000/api/v1';
 
-interface Tool {
+// Tool registry with safety metadata
+interface ToolMeta {
   id: string;
   name: string;
-  icon: React.ReactNode;
+  label: string;
+  description: string;
+  enabled: boolean;
+  implemented: boolean;
+  riskLevel: 'safe' | 'ai' | 'code' | 'financial' | 'deployment' | 'destructive' | 'unknown';
+  requiresConfirmation: boolean;
 }
 
-const AVAILABLE_TOOLS: Tool[] = [
-  { id: 'code_task_runner', name: 'CodeTaskRunner', icon: <Code size={14} /> },
-  { id: 'subdesk', name: 'SubDesk', icon: <Sparkles size={14} /> },
-  { id: 'vision_router', name: 'Vision Router', icon: <ImageIcon size={14} /> },
-  { id: 'stt', name: 'STT', icon: <Mic size={14} /> },
-  { id: 'tts', name: 'TTS', icon: <Volume2 size={14} /> },
-  { id: 'inpaint', name: 'Inpaint', icon: <Sparkles size={14} /> },
-  { id: 'search', name: 'Search', icon: <Sparkles size={14} /> },
-  { id: 'extract', name: 'Extract', icon: <Sparkles size={14} /> },
-  { id: 'translate', name: 'Translate', icon: <Sparkles size={14} /> },
-  { id: 'summarize', name: 'Summarize', icon: <Sparkles size={14} /> },
-  { id: 'analyze', name: 'Analyze', icon: <Sparkles size={14} /> },
-  { id: 'classify', name: 'Classify', icon: <Sparkles size={14} /> },
-  { id: 'generate', name: 'Generate', icon: <Sparkles size={14} /> },
-  { id: 'format', name: 'Format', icon: <Sparkles size={14} /> },
-  { id: 'debug', name: 'Debug', icon: <Code size={14} /> },
-  { id: 'test', name: 'Test', icon: <Sparkles size={14} /> },
-  { id: 'deploy', name: 'Deploy', icon: <Sparkles size={14} /> },
-  { id: 'monitor', name: 'Monitor', icon: <Sparkles size={14} /> },
-  { id: 'backup', name: 'Backup', icon: <Sparkles size={14} /> },
-  { id: 'restore', name: 'Restore', icon: <Sparkles size={14} /> },
+const TOOL_REGISTRY: ToolMeta[] = [
+  { id: 'code_task_runner', name: 'CodeTaskRunner', label: 'Code Task Runner', description: 'Run a code task via OpenClaw — may create/modify files', enabled: true, implemented: false, riskLevel: 'code', requiresConfirmation: true },
+  { id: 'subdesk', name: 'SubDesk', label: 'Sub Desk', description: 'Route to a sub-desk for specialized tasks', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'vision_router', name: 'Vision Router', label: 'Vision Router', description: 'Route image analysis to the appropriate vision model', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'stt', name: 'STT', label: 'Speech to Text', description: 'Convert voice input to text', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'tts', name: 'TTS', label: 'Text to Speech', description: 'Convert AI response to voice output', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'inpaint', name: 'Inpaint', label: 'Inpaint', description: 'AI-powered image inpainting and editing', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'search', name: 'Search', label: 'Web Search', description: 'Search the web for information', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'extract', name: 'Extract', label: 'Extract Data', description: 'Extract structured data from unstructured input', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'translate', name: 'Translate', label: 'Translate', description: 'Translate text between languages', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'summarize', name: 'Summarize', label: 'Summarize', description: 'Summarize long content into key points', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'analyze', name: 'Analyze', label: 'Analyze', description: 'Analyze content and provide insights', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'classify', name: 'Classify', label: 'Classify', description: 'Classify content into categories', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'generate', name: 'Generate', label: 'Generate', description: 'Generate content or responses', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'format', name: 'Format', label: 'Format', description: 'Format and clean up content', enabled: true, implemented: false, riskLevel: 'ai', requiresConfirmation: false },
+  { id: 'debug', name: 'Debug', label: 'Debug', description: 'Debug code and find errors', enabled: true, implemented: false, riskLevel: 'code', requiresConfirmation: true },
+  { id: 'test', name: 'Test', label: 'Test', description: 'Run tests on code', enabled: true, implemented: false, riskLevel: 'code', requiresConfirmation: true },
+  { id: 'deploy', name: 'Deploy', label: 'Deploy', description: 'Deploy application or configuration', enabled: true, implemented: false, riskLevel: 'deployment', requiresConfirmation: true },
+  { id: 'monitor', name: 'Monitor', label: 'Monitor', description: 'Monitor system metrics and status', enabled: true, implemented: false, riskLevel: 'safe', requiresConfirmation: false },
+  { id: 'backup', name: 'Backup', label: 'Backup', description: 'Create a backup of data or configuration', enabled: true, implemented: false, riskLevel: 'destructive', requiresConfirmation: true },
+  { id: 'restore', name: 'Restore', label: 'Restore', description: 'Restore from a backup', enabled: true, implemented: false, riskLevel: 'destructive', requiresConfirmation: true },
 ];
+
+type RiskLevel = ToolMeta['riskLevel'];
+
+function RiskBadge({ risk }: { risk: RiskLevel }) {
+  const config = {
+    safe: { bg: 'rgba(22,163,74,0.15)', color: '#16a34a', label: 'Safe' },
+    ai: { bg: 'rgba(99,102,241,0.15)', color: '#6366f1', label: 'AI' },
+    code: { bg: 'rgba(234,179,8,0.15)', color: '#ca8a04', label: 'Code' },
+    financial: { bg: 'rgba(239,68,68,0.15)', color: '#dc2626', label: 'Financial' },
+    deployment: { bg: 'rgba(239,68,68,0.15)', color: '#dc2626', label: 'Deploy' },
+    destructive: { bg: 'rgba(239,68,68,0.15)', color: '#dc2626', label: 'Dangerous' },
+    unknown: { bg: 'rgba(255,255,255,0.05)', color: '#777', label: 'Unknown' },
+  }[risk];
+  return (
+    <span style={{
+      fontSize: 8, fontWeight: 700, padding: '1px 5px', borderRadius: 3,
+      background: config.bg, color: config.color, textTransform: 'uppercase', letterSpacing: '0.5px',
+    }}>
+      {config.label}
+    </span>
+  );
+}
+
+function StatusBadge({ meta }: { meta: ToolMeta }) {
+  if (!meta.implemented) {
+    return <span style={{ fontSize: 9, color: '#777', display: 'flex', alignItems: 'center', gap: 2 }}><Clock size={9} /> Coming soon</span>;
+  }
+  if (meta.requiresConfirmation) {
+    return <span style={{ fontSize: 9, color: '#ca8a04', display: 'flex', alignItems: 'center', gap: 2 }}><AlertTriangle size={9} /> Confirm</span>;
+  }
+  return <span style={{ fontSize: 9, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 2 }}><CheckCircle size={9} /> Available</span>;
+}
+
+function ConfirmDialog({
+  tool,
+  onConfirm,
+  onCancel,
+}: {
+  tool: ToolMeta;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 300,
+      background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: 'rgba(30,41,59,0.98)', backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.15)',
+        borderRadius: 16, padding: 24, maxWidth: 420, width: '90%',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <AlertTriangle size={18} style={{ color: '#ca8a04' }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+            Confirm: {tool.label}
+          </span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 16 }}>
+          {tool.description}<br/><br/>
+          <span style={{ fontWeight: 600 }}>Risk level:</span> <RiskBadge risk={tool.riskLevel} /><br/>
+          <span style={{ fontWeight: 600 }}>Branch:</span> feature/v10.0-test-lane (v10 test lane)<br/>
+          <span style={{ fontWeight: 600 }}>Stable protected:</span> <span style={{ color: '#16a34a', fontWeight: 600 }}>Yes — no direct production deploy</span><br/><br/>
+          <span style={{ color: '#ca8a04', fontWeight: 600 }}>Note:</span> Backend branch targeting is not yet enforced. This tool will run on whatever branch OpenClaw currently has active.
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{
+            padding: '8px 16px', borderRadius: 8,
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 12, fontWeight: 600,
+          }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} style={{
+            padding: '8px 16px', borderRadius: 8,
+            border: 'none',
+            background: tool.riskLevel === 'destructive' || tool.riskLevel === 'deployment'
+              ? '#dc2626' : 'var(--accent-primary)',
+            color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+          }}>
+            Run {tool.label}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface ChatInterfaceProps {
   messages: Message[];
@@ -45,7 +140,7 @@ interface ChatInterfaceProps {
   onStopStreaming: () => void;
   onClearChat: () => void;
   codeMode: boolean;
-  onToggleCodeMode: () => void;
+  onToggleCodeMode: (enable: boolean) => void;
   voiceMode: boolean;
   onToggleVoiceMode: () => void;
   activeDesk: string;
@@ -75,6 +170,8 @@ export function ChatInterface({
   const [input, setInput] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
+  const [confirmTool, setConfirmTool] = useState<ToolMeta | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -97,7 +194,19 @@ export function ChatInterface({
     }
   };
 
-  const handleToolClick = async (toolId: string) => {
+  const handleToolClick = (toolId: string) => {
+    const meta = TOOL_REGISTRY.find(t => t.id === toolId);
+    if (!meta) return;
+    if (!meta.implemented) return; // Coming soon — do nothing
+    if (meta.requiresConfirmation) {
+      setConfirmTool(meta);
+      return;
+    }
+    // Safe: run directly
+    executeTool(toolId);
+  };
+
+  const executeTool = async (toolId: string) => {
     setActiveTool(toolId);
     try {
       await fetch(`${API}/max/tools/execute`, {
@@ -331,58 +440,79 @@ export function ChatInterface({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Tool bar */}
+      {/* Tool bar — compact button + dropdown menu */}
       <div style={{
         padding: 'var(--space-2) var(--space-4)',
         borderTop: '1px solid var(--border-subtle)',
-        overflowX: 'auto',
         display: 'flex',
         gap: 'var(--space-2)',
-        scrollbarWidth: 'thin',
+        alignItems: 'center',
       }}>
-        {AVAILABLE_TOOLS.map((tool) => (
-          <button
-            key={tool.id}
-            onClick={() => handleToolClick(tool.id)}
-            title={`Run ${tool.name}`}
-            aria-label={`Run ${tool.name}`}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 'var(--radius-full)',
-              background: activeTool === tool.id
-                ? 'var(--accent-primary)'
-                : 'rgba(255,255,255,0.06)',
-              border: activeTool === tool.id
-                ? '1px solid var(--accent-primary)'
-                : '1px solid rgba(255,255,255,0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              color: activeTool === tool.id ? '#fff' : 'var(--text-muted)',
-              boxShadow: activeTool === tool.id
-                ? '0 0 20px rgba(99,102,241,0.4)'
-                : 'none',
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => {
-              if (activeTool !== tool.id) {
-                e.currentTarget.style.transform = 'scale(1.1)';
-                e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTool !== tool.id) {
-                e.currentTarget.style.transform = 'scale(1)';
-                e.currentTarget.style.background = 'rgba(255,255,255,0.06)';
-              }
-            }}
-          >
-            {tool.icon}
-          </button>
-        ))}
+        <button
+          onClick={() => setToolsMenuOpen(v => !v)}
+          title="Open tools menu"
+          aria-label="Open tools menu"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '5px 10px', borderRadius: 'var(--radius-md)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: toolsMenuOpen ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)',
+            color: toolsMenuOpen ? 'var(--accent-primary)' : 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600,
+          }}
+        >
+          <Sparkles size={12} /> Tools <ChevronDown size={10} />
+        </button>
+        {activeTool && (
+          <span style={{ fontSize: 10, color: 'var(--accent-primary)', fontWeight: 600 }}>
+            Running {TOOL_REGISTRY.find(t => t.id === activeTool)?.label || activeTool}...
+          </span>
+        )}
+        {/* Inline tools menu */}
+        {toolsMenuOpen && (
+          <div style={{
+            position: 'absolute', bottom: 'var(--space-4)',
+            left: 'var(--space-4)',
+            background: 'rgba(15,23,42,0.98)', backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 12, padding: 12,
+            width: 320, maxHeight: 400, overflowY: 'auto',
+            zIndex: 100, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                Tools
+              </span>
+              <button onClick={() => setToolsMenuOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}>
+                <X size={14} />
+              </button>
+            </div>
+            {TOOL_REGISTRY.map(tool => (
+              <div key={tool.id} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '6px 8px', borderRadius: 8,
+                marginBottom: 2, cursor: tool.implemented ? 'pointer' : 'not-allowed',
+                background: tool.implemented ? 'rgba(255,255,255,0.04)' : 'transparent',
+                opacity: tool.implemented ? 1 : 0.5,
+              }}
+              onClick={() => {
+                if (!tool.implemented) return;
+                setToolsMenuOpen(false);
+                handleToolClick(tool.id);
+              }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{tool.label}</span>
+                    <RiskBadge risk={tool.riskLevel} />
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{tool.description}</div>
+                </div>
+                <StatusBadge meta={tool} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Input area */}
@@ -492,8 +622,9 @@ export function ChatInterface({
           />
           <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
             <button
-              onClick={onToggleCodeMode}
-              title={codeMode ? 'Disable Code Mode' : 'Enable Code Mode'}
+              onClick={() => { onToggleCodeMode(true); }}
+              title="Enable Code Mode — opens confirmation dialog"
+              aria-label="Enable Code Mode"
               style={{
                 background: codeMode ? 'var(--accent-primary)' : 'transparent',
                 border: 'none',
@@ -611,6 +742,18 @@ export function ChatInterface({
           40% { transform: translateY(-6px); }
         }
       `}</style>
+
+      {/* Tool Confirmation Dialog */}
+      {confirmTool && (
+        <ConfirmDialog
+          tool={confirmTool}
+          onConfirm={() => {
+            executeTool(confirmTool.id);
+            setConfirmTool(null);
+          }}
+          onCancel={() => setConfirmTool(null)}
+        />
+      )}
     </div>
   );
 }

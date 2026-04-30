@@ -1,6 +1,6 @@
 'use client';
-import React, { useState, useCallback } from 'react';
-import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout, ChevronDown, X } from 'lucide-react';
 import { EmpireShell } from '../ui/EmpireShell';
 import { DeskSelector } from './DeskSelector';
 import { ChatInterface } from './ChatInterface';
@@ -9,6 +9,25 @@ import { Message } from '../../lib/types';
 
 const API = 'http://localhost:8000/api/v1';
 const STORAGE_KEY = 'empire_max_messages';
+const LAYOUT_KEY = 'empire_max_layout';
+
+interface LayoutState {
+  sidebarVisible: boolean;
+  rightPanelVisible: boolean;
+  focusMode: boolean;
+}
+
+function loadLayout(): LayoutState {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { sidebarVisible: true, rightPanelVisible: true, focusMode: false };
+}
+
+function saveLayout(state: LayoutState) {
+  try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+}
 
 function loadStoredMessages(): Message[] {
   try {
@@ -47,11 +66,56 @@ export function MAXDeskScreen() {
   const [voiceMode, setVoiceMode] = useState(false);
   const abortRef = React.useRef<AbortController | null>(null);
   const streamingRef = React.useRef(false);
-  // Panel visibility
-  const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [rightPanelVisible, setRightPanelVisible] = useState(true);
+  // Panel visibility — initialized from localStorage with safe defaults
+  const [sidebarVisible, setSidebarVisible] = useState<boolean>(() => loadLayout().sidebarVisible);
+  const [rightPanelVisible, setRightPanelVisible] = useState<boolean>(() => loadLayout().rightPanelVisible);
   // Focus mode: hide both side panels, maximize chat
-  const [focusMode, setFocusMode] = useState(false);
+  const [focusMode, setFocusMode] = useState<boolean>(() => loadLayout().focusMode);
+  // Code mode confirmation dialog
+  const [showCodeModeConfirm, setShowCodeModeConfirm] = useState(false);
+  const [pendingCodeMode, setPendingCodeMode] = useState(false); // true = enabling, false = disabling
+
+  // Persist layout to localStorage when it changes
+  useEffect(() => {
+    saveLayout({ sidebarVisible, rightPanelVisible, focusMode });
+    // On narrow screens, auto-collapse side panels for readability
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      if (sidebarVisible && !focusMode) setSidebarVisible(false);
+      if (rightPanelVisible && !focusMode) setRightPanelVisible(false);
+    }
+  }, [sidebarVisible, rightPanelVisible, focusMode]);
+
+  const resetLayout = useCallback(() => {
+    try { localStorage.removeItem(LAYOUT_KEY); } catch {}
+    setSidebarVisible(false); // medium/narrow default: collapsed
+    setRightPanelVisible(false);
+    setFocusMode(false);
+  }, []);
+
+  const toggleFocus = useCallback(() => {
+    setFocusMode(v => {
+      if (!v) {
+        // entering focus: hide both panels
+        setSidebarVisible(false);
+        setRightPanelVisible(false);
+      }
+      return !v;
+    });
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarVisible(v => {
+      if (v) setFocusMode(false);
+      return !v;
+    });
+  }, []);
+
+  const toggleRightPanel = useCallback(() => {
+    setRightPanelVisible(v => {
+      if (v) setFocusMode(false);
+      return !v;
+    });
+  }, []);
 
   const updateMessages = useCallback((msgs: Message[] | ((prev: Message[]) => Message[])) => {
     setMessages(prev => {
@@ -173,6 +237,26 @@ export function MAXDeskScreen() {
     updateMessages([WELCOME]);
   }, [updateMessages]);
 
+  const handleToggleCodeMode = useCallback((enable: boolean) => {
+    if (enable) {
+      setPendingCodeMode(true);
+      setShowCodeModeConfirm(true);
+    } else {
+      setCodeMode(false);
+    }
+  }, []);
+
+  const confirmCodeMode = useCallback(() => {
+    setCodeMode(true);
+    setShowCodeModeConfirm(false);
+    setPendingCodeMode(false);
+  }, []);
+
+  const cancelCodeMode = useCallback(() => {
+    setShowCodeModeConfirm(false);
+    setPendingCodeMode(false);
+  }, []);
+
   return (
     <EmpireShell commitHash="ce1695d">
       {/* Layout Controls Bar */}
@@ -187,8 +271,15 @@ export function MAXDeskScreen() {
         <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', flex: 1 }}>
           MAX AI
         </span>
+        {/* Always-visible branch badge */}
+        <span style={{
+          fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+          background: 'rgba(99,102,241,0.3)', color: 'var(--accent-primary)',
+        }}>
+          v10 test lane
+        </span>
         <button
-          onClick={() => { setSidebarVisible(v => !v); setFocusMode(false); }}
+          onClick={toggleSidebar}
           title={sidebarVisible ? 'Collapse desk panel' : 'Expand desk panel'}
           style={{
             display: 'flex', alignItems: 'center', gap: 4,
@@ -203,7 +294,7 @@ export function MAXDeskScreen() {
           {sidebarVisible ? 'Hide Desks' : 'Show Desks'}
         </button>
         <button
-          onClick={() => { setRightPanelVisible(v => !v); setFocusMode(false); }}
+          onClick={toggleRightPanel}
           title={rightPanelVisible ? 'Collapse context panel' : 'Expand context panel'}
           style={{
             display: 'flex', alignItems: 'center', gap: 4,
@@ -218,7 +309,7 @@ export function MAXDeskScreen() {
           {rightPanelVisible ? 'Hide Context' : 'Show Context'}
         </button>
         <button
-          onClick={() => { setFocusMode(v => !v); setSidebarVisible(false); setRightPanelVisible(false); }}
+          onClick={toggleFocus}
           title={focusMode ? 'Exit focus mode' : 'Enter focus mode — maximize chat'}
           style={{
             display: 'flex', alignItems: 'center', gap: 4,
@@ -232,33 +323,27 @@ export function MAXDeskScreen() {
           {focusMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
           {focusMode ? 'Exit Focus' : 'Focus Chat'}
         </button>
-        {focusMode && (
-          <button
-            onClick={() => {
-              try { localStorage.removeItem('empire_max_layout'); } catch {}
-              setFocusMode(false);
-              setSidebarVisible(true);
-              setRightPanelVisible(true);
-            }}
-            title="Reset layout to defaults"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '4px 8px', borderRadius: 'var(--radius-md)',
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(255,255,255,0.04)',
-              color: 'var(--text-muted)',
-              cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 500,
-            }}
-          >
-            <Layout size={12} /> Reset Layout
-          </button>
-        )}
+        {/* Reset Layout — always visible */}
+        <button
+          onClick={resetLayout}
+          title="Reset layout to defaults — clears saved preferences"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 8px', borderRadius: 'var(--radius-md)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(255,255,255,0.04)',
+            color: 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 500,
+          }}
+        >
+          <Layout size={12} /> Reset Layout
+        </button>
         {focusMode && (
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
             background: 'rgba(99,102,241,0.3)', color: 'var(--accent-primary)',
           }}>
-            v10 test lane
+            Focus Mode
           </span>
         )}
       </div>
@@ -310,7 +395,7 @@ export function MAXDeskScreen() {
             onStopStreaming={handleStopStreaming}
             onClearChat={handleClearChat}
             codeMode={codeMode}
-            onToggleCodeMode={() => setCodeMode(v => !v)}
+            onToggleCodeMode={handleToggleCodeMode}
             voiceMode={voiceMode}
             onToggleVoiceMode={() => setVoiceMode(v => !v)}
             activeDesk={activeDesk}
@@ -332,6 +417,54 @@ export function MAXDeskScreen() {
           </div>
         )}
       </div>
+
+      {/* Code Mode Confirmation Dialog */}
+      {showCodeModeConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 200,
+          background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: 'rgba(30,41,59,0.95)', backdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 16, padding: 24, maxWidth: 400, width: '90%',
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 12 }}>
+              Enable Code Mode?
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 20 }}>
+              <strong>Target branch:</strong> feature/v10.0-test-lane<br/>
+              <strong>Runtime:</strong> v10 test lane (port 3010)<br/>
+              Stable/main are protected — no direct merge or deploy will occur without explicit approval.<br/><br/>
+              <span style={{ color: 'var(--warning)', fontWeight: 600 }}>Warning:</span> Backend branch targeting is not yet enforced. Any file-changing task will run against whatever branch is currently active in OpenClaw.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={cancelCodeMode}
+                style={{
+                  padding: '8px 16px', borderRadius: 8,
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.06)', color: 'var(--text-muted)',
+                  cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmCodeMode}
+                style={{
+                  padding: '8px 16px', borderRadius: 8,
+                  border: 'none',
+                  background: 'var(--accent-primary)', color: '#fff',
+                  cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                }}
+              >
+                Enable Code Mode
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </EmpireShell>
   );
 }
