@@ -30,7 +30,8 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
         setBackendOk(false);
       }
       try {
-        const r2 = await fetch('http://localhost:3005');
+        // Check v10 frontend on port 3010, not stable on 3005
+        const r2 = await fetch('http://localhost:3010');
         setFrontendOk(r2.ok);
       } catch {
         setFrontendOk(false);
@@ -86,7 +87,7 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
           />
           <EmpireStatusPill
             status={frontendOk ? 'success' : 'error'}
-            label={frontendOk ? 'Frontend 3005' : 'Frontend DOWN'}
+            label={frontendOk ? 'v10 Frontend 3010' : 'v10 Frontend DOWN'}
             size="sm"
             pulse={frontendOk}
           />

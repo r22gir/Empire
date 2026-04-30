@@ -344,7 +344,8 @@ export function ChatInterface({
           <button
             key={tool.id}
             onClick={() => handleToolClick(tool.id)}
-            title={tool.name}
+            title={`Run ${tool.name}`}
+            aria-label={`Run ${tool.name}`}
             style={{
               width: 36,
               height: 36,
@@ -453,18 +454,18 @@ export function ChatInterface({
           </button>
           <button
             onClick={() => {}}
-            title="Voice input"
+            title="Voice input — coming soon"
+            aria-label="Voice input (not available yet)"
             style={{
               background: 'transparent',
               border: 'none',
-              color: voiceMode ? 'var(--accent-primary)' : 'var(--text-muted)',
-              cursor: 'pointer',
+              color: 'var(--text-muted)',
+              cursor: 'not-allowed',
               padding: '4px',
               display: 'flex',
               transition: 'color 0.2s',
+              opacity: 0.4,
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = voiceMode ? 'var(--accent-primary)' : 'var(--text-muted)'; }}
           >
             <Mic size={18} />
           </button>
@@ -507,17 +508,19 @@ export function ChatInterface({
               <Code size={16} />
             </button>
             <button
-              onClick={onToggleVoiceMode}
-              title={voiceMode ? 'Disable Voice' : 'Enable Voice'}
+              onClick={() => {}}
+              title="Voice mode — coming soon"
+              aria-label="Voice mode (not available yet)"
               style={{
-                background: voiceMode ? 'var(--accent-primary)' : 'transparent',
+                background: 'transparent',
                 border: 'none',
-                color: voiceMode ? '#fff' : 'var(--text-muted)',
-                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                cursor: 'not-allowed',
                 padding: '4px',
                 borderRadius: 'var(--radius-sm)',
                 display: 'flex',
                 transition: 'all 0.2s',
+                opacity: 0.4,
               }}
             >
               <Volume2 size={16} />

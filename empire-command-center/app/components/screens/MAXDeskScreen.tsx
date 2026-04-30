@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useCallback } from 'react';
+import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout } from 'lucide-react';
 import { EmpireShell } from '../ui/EmpireShell';
 import { DeskSelector } from './DeskSelector';
 import { ChatInterface } from './ChatInterface';
@@ -46,6 +47,11 @@ export function MAXDeskScreen() {
   const [voiceMode, setVoiceMode] = useState(false);
   const abortRef = React.useRef<AbortController | null>(null);
   const streamingRef = React.useRef(false);
+  // Panel visibility
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [rightPanelVisible, setRightPanelVisible] = useState(true);
+  // Focus mode: hide both side panels, maximize chat
+  const [focusMode, setFocusMode] = useState(false);
 
   const updateMessages = useCallback((msgs: Message[] | ((prev: Message[]) => Message[])) => {
     setMessages(prev => {
@@ -168,27 +174,122 @@ export function MAXDeskScreen() {
   }, [updateMessages]);
 
   return (
-    <EmpireShell commitHash="f535d53">
+    <EmpireShell commitHash="ce1695d">
+      {/* Layout Controls Bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-2)',
+        marginBottom: 'var(--space-3)',
+        padding: '0 0 var(--space-2) 0',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        <span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', flex: 1 }}>
+          MAX AI
+        </span>
+        <button
+          onClick={() => { setSidebarVisible(v => !v); setFocusMode(false); }}
+          title={sidebarVisible ? 'Collapse desk panel' : 'Expand desk panel'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 8px', borderRadius: 'var(--radius-md)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: sidebarVisible ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)',
+            color: sidebarVisible ? 'var(--accent-primary)' : 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600,
+          }}
+        >
+          {sidebarVisible ? <PanelLeftClose size={12} /> : <PanelLeftOpen size={12} />}
+          {sidebarVisible ? 'Hide Desks' : 'Show Desks'}
+        </button>
+        <button
+          onClick={() => { setRightPanelVisible(v => !v); setFocusMode(false); }}
+          title={rightPanelVisible ? 'Collapse context panel' : 'Expand context panel'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 8px', borderRadius: 'var(--radius-md)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            background: rightPanelVisible ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)',
+            color: rightPanelVisible ? 'var(--accent-primary)' : 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600,
+          }}
+        >
+          {rightPanelVisible ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+          {rightPanelVisible ? 'Hide Context' : 'Show Context'}
+        </button>
+        <button
+          onClick={() => { setFocusMode(v => !v); setSidebarVisible(false); setRightPanelVisible(false); }}
+          title={focusMode ? 'Exit focus mode' : 'Enter focus mode — maximize chat'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 8px', borderRadius: 'var(--radius-md)',
+            border: focusMode ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.1)',
+            background: focusMode ? 'var(--accent-primary)' : 'rgba(255,255,255,0.06)',
+            color: focusMode ? '#fff' : 'var(--text-muted)',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 600,
+          }}
+        >
+          {focusMode ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          {focusMode ? 'Exit Focus' : 'Focus Chat'}
+        </button>
+        {focusMode && (
+          <button
+            onClick={() => {
+              try { localStorage.removeItem('empire_max_layout'); } catch {}
+              setFocusMode(false);
+              setSidebarVisible(true);
+              setRightPanelVisible(true);
+            }}
+            title="Reset layout to defaults"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '4px 8px', borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.04)',
+              color: 'var(--text-muted)',
+              cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 500,
+            }}
+          >
+            <Layout size={12} /> Reset Layout
+          </button>
+        )}
+        {focusMode && (
+          <span style={{
+            fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+            background: 'rgba(99,102,241,0.3)', color: 'var(--accent-primary)',
+          }}>
+            v10 test lane
+          </span>
+        )}
+      </div>
+
       <div className="animated-gradient" style={{
         display: 'grid',
-        gridTemplateColumns: '280px 1fr 300px',
+        gridTemplateColumns: sidebarVisible && !focusMode ? '280px 1fr' : '0 1fr',
+        gridTemplateRows: '1fr',
         gap: 'var(--space-4)',
-        height: 'calc(100vh - var(--topbar-height) - var(--space-12))',
-        minHeight: 600,
+        height: focusMode
+          ? 'calc(100vh - var(--topbar-height) - var(--space-12) - 60px)'
+          : 'calc(100vh - var(--topbar-height) - var(--space-12))',
+        minHeight: 500,
+        transition: 'all 0.3s ease',
       }}>
-        {/* Left: Desk Selector */}
-        <div style={{
-          background: 'rgba(30,41,59,0.6)',
-          backdropFilter: 'blur(18px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 'var(--radius-lg)',
-          overflow: 'hidden',
-        }}>
-          <DeskSelector
-            activeDesk={activeDesk}
-            onDeskChange={setActiveDesk}
-          />
-        </div>
+        {/* Left: Desk Selector — only visible when sidebarVisible and not focusMode */}
+        {sidebarVisible && !focusMode && (
+          <div style={{
+            background: 'rgba(30,41,59,0.6)',
+            backdropFilter: 'blur(18px)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 'var(--radius-lg)',
+            overflow: 'hidden',
+            minWidth: 0,
+          }}>
+            <DeskSelector
+              activeDesk={activeDesk}
+              onDeskChange={setActiveDesk}
+            />
+          </div>
+        )}
 
         {/* Center: Chat */}
         <div style={{
@@ -199,6 +300,7 @@ export function MAXDeskScreen() {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          minWidth: 0,
         }}>
           <ChatInterface
             messages={messages}
@@ -215,17 +317,20 @@ export function MAXDeskScreen() {
           />
         </div>
 
-        {/* Right: Continuity Panel */}
-        <div style={{
-          background: 'rgba(30,41,59,0.6)',
-          backdropFilter: 'blur(18px)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 'var(--radius-lg)',
-          overflow: 'hidden',
-          padding: 'var(--space-4)',
-        }}>
-          <ContinuityPanel activeDesk={activeDesk} />
-        </div>
+        {/* Right: Continuity Panel — only visible when rightPanelVisible and not focusMode */}
+        {rightPanelVisible && !focusMode && (
+          <div style={{
+            background: 'rgba(30,41,59,0.6)',
+            backdropFilter: 'blur(18px)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 'var(--radius-lg)',
+            overflow: 'hidden',
+            padding: 'var(--space-4)',
+            minWidth: 0,
+          }}>
+            <ContinuityPanel activeDesk={activeDesk} />
+          </div>
+        )}
       </div>
     </EmpireShell>
   );
