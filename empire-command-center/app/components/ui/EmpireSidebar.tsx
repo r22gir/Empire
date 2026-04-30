@@ -7,7 +7,7 @@ import {
   BarChart3, Settings, HelpCircle, ChevronLeft, ChevronRight,
   Zap, Bot, Database, Globe, ShoppingCart, Layers,
   FileText, RefreshCw, Shield, Megaphone, ArrowRight,
-  Cpu, Brain
+  Cpu, Brain, FileAudio
 } from 'lucide-react';
 
 interface NavItem {
@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
   { label: 'Workroom', href: '/workroom', icon: <Wrench size={18} /> },
   { label: 'ArchiveForge', href: '/archiveforge-life', icon: <Package size={18} /> },
   { label: 'RecoveryForge', href: '/recoveryforge', icon: <RefreshCw size={18} /> },
+  { label: 'TranscriptForge', href: '/transcriptforge', icon: <FileAudio size={18} /> },
   { label: 'OpenClaw', href: '/openclaw', icon: <Cpu size={18} /> },
   { label: 'Hermes', href: '/hermes', icon: <Brain size={18} /> },
   { label: 'Orchestration', href: '/orchestration', icon: <Zap size={18} /> },
