@@ -1162,7 +1162,12 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
 
   // -- Submit --
   const handleSubmit = async () => {
-    // Pre-submit guard: require pricing approval
+    // Pre-submit guard: require both approvals (room quotes always use item dimensions)
+    const requiresMeasurementApproval = totalItems > 0;
+    if (requiresMeasurementApproval && !measurementsApproved) {
+      setError('Please approve measurements before generating the quote. Review your items in the Pricing Review panel.');
+      return;
+    }
     if (!pricingApproved) {
       setError('Please approve pricing before generating the quote. Review your items in the Pricing Review panel.');
       return;
@@ -1662,7 +1667,7 @@ export default function QuoteBuilderScreen({ onBack, editQuoteId }: Props) {
             Next <ArrowRight size={16} />
           </button>
         ) : !result ? (
-          <button onClick={handleSubmit} disabled={submitting || !pricingApproved}
+          <button onClick={handleSubmit} disabled={submitting || !pricingApproved || (totalItems > 0 && !measurementsApproved)}
             className="flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-all hover:bg-[#a08509]"
             style={{ height: 44, padding: '0 24px', borderRadius: 12, border: 'none', background: '#b8960c', color: '#fff', fontSize: 14, fontWeight: 700, boxShadow: '0 2px 10px rgba(184,150,12,0.3)' }}>
             {submitting ? <><Loader2 size={18} className="animate-spin" /> Generating...</> : <><FileText size={18} /> Generate Quote</>}

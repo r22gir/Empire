@@ -81,7 +81,12 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
       setError('Please enter customer name and project description.');
       return;
     }
-    // Pre-submit guard: require pricing approval for all Quick Quotes
+    // Pre-submit guard: require both approvals when AI measurement is present
+    const requiresMeasurementApproval = !!analysisResult;
+    if (requiresMeasurementApproval && !measurementsApproved) {
+      setError('Please approve the AI measurements before generating the quote.');
+      return;
+    }
     if (!pricingApproved) {
       setError('Please approve pricing before generating the quote.');
       return;
@@ -302,7 +307,12 @@ export default function QuickQuoteBuilder({ onClose, onQuoteCreated }: QuickQuot
         {/* Submit */}
         <button
           onClick={handleSubmit}
-          disabled={submitting || uploading || !customerName.trim() || !description.trim() || !pricingApproved}
+          disabled={
+            submitting || uploading ||
+            !customerName.trim() || !description.trim() ||
+            !pricingApproved ||
+            (!!analysisResult && !measurementsApproved)
+          }
           className="w-full flex items-center justify-center gap-2 cursor-pointer font-bold transition-all hover:bg-[#a08509] disabled:opacity-50 active:scale-[0.98]"
           style={{ height: 44, fontSize: 13, borderRadius: 12, background: '#b8960c', color: '#fff', border: 'none', boxShadow: '0 2px 8px rgba(184,150,12,0.25)' }}
         >
