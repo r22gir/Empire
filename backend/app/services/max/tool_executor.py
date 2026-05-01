@@ -33,6 +33,13 @@ try:
 except ImportError:
     access_controller = None
 
+# Environment authority
+try:
+    from app.services.max.authority import get_current_policy, WriteGuardrails
+except ImportError:
+    get_current_policy = None
+    WriteGuardrails = None
+
 # QIS — Quote Intelligence System (real pricing engine)
 try:
     from app.services.quote_engine import (
@@ -1698,6 +1705,52 @@ def _empire_runtime_truth_check(params: dict, desk: Optional[str] = None) -> Too
         return ToolResult(tool="empire_runtime_truth_check", success=True, result=result)
     except Exception as exc:
         return ToolResult(tool="empire_runtime_truth_check", success=False, error=str(exc))
+
+
+@tool("get_environment_status")
+def _get_environment_status(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Return current MAX environment identity and authority status.
+
+    Reports environment (canonical/v10_test), repo, branch, commit, memory mode,
+    write scope, canonical memory write permission, and whether promotion is allowed.
+    """
+    try:
+        from app.services.max.authority import get_current_policy, format_environment_status
+        policy = get_current_policy()
+        status = policy.get_status()
+        status["formatted"] = format_environment_status(policy)
+        return ToolResult(tool="get_environment_status", success=True, result=status)
+    except Exception as exc:
+        return ToolResult(tool="get_environment_status", success=False, error=str(exc))
+
+
+@tool("create_promotion_report")
+def _create_promotion_report(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate a promotion report for v10_test changes that need canonical approval.
+
+    Use this when v10_test changes are successful and need to be promoted to canonical.
+    The report includes files changed, tests passed, risk level, memory implications,
+    and exact approval needed before merging into feature/v10.0.
+    """
+    files_changed = params.get("files_changed", [])
+    tests_passed = params.get("tests_passed", False)
+    risk_level = params.get("risk_level", "medium")  # low / medium / high
+    memory_implications = params.get("memory_implications", [])
+    canonical_memory_needs_update = params.get("canonical_memory_needs_update", False)
+
+    try:
+        from app.services.max.authority import get_current_policy, WriteGuardrails
+        policy = get_current_policy()
+        report = WriteGuardrails.get_promotion_report(
+            files_changed=files_changed,
+            tests_passed=tests_passed,
+            risk_level=risk_level,
+            memory_implications=memory_implications,
+            canonical_memory_needs_update=canonical_memory_needs_update,
+        )
+        return ToolResult(tool="create_promotion_report", success=True, result=report)
+    except Exception as exc:
+        return ToolResult(tool="create_promotion_report", success=False, error=str(exc))
 
 
 @tool("get_notification_status")
@@ -3864,6 +3917,15 @@ def _file_write(params: dict, desk: Optional[str] = None) -> ToolResult:
         log_execution("file_write", params, reason, desk=desk, success=False)
         return ToolResult(tool="file_write", success=False, error=reason)
 
+    # Environment authority: v10_test cannot write to canonical repo
+    if get_current_policy is not None and WriteGuardrails is not None:
+        policy = get_current_policy()
+        if policy.is_v10_test:
+            allowed, guard_reason = WriteGuardrails.check_path_write(path)
+            if not allowed:
+                log_execution("file_write", params, guard_reason, desk=desk, success=False)
+                return ToolResult(tool="file_write", success=False, error=guard_reason)
+
     # Block file_write to critical system files — use file_edit instead
     if is_critical_file(path):
         log_execution("file_write", params, "critical file blocked", desk=desk, success=False)
@@ -4243,6 +4305,16 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not ok:
         log_execution("git_ops", params, reason, access_level=level, desk=desk, success=False)
         return ToolResult(tool="git_ops", success=False, error=reason)
+
+    # Environment authority: v10_test cannot push to canonical branches
+    if get_current_policy is not None and WriteGuardrails is not None:
+        policy = get_current_policy()
+        if policy.is_v10_test and command in ("add", "commit", "push"):
+            branch = command_args.strip().split()[-1] if command_args.strip() else policy.branch
+            allowed, guard_reason = WriteGuardrails.check_git_branch(branch)
+            if not allowed:
+                log_execution("git_ops", params, guard_reason, access_level=level, desk=desk, success=False)
+                return ToolResult(tool="git_ops", success=False, error=guard_reason)
 
     try:
         result = subprocess.run(

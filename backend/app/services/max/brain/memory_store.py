@@ -1,6 +1,9 @@
 """
 Persistent memory store for MAX Brain.
 SQLite-backed, lives on external drive for portability.
+
+Authority: v10_test MAX has read-only access to canonical memory.
+All write operations check the environment policy first.
 """
 import sqlite3
 import json
@@ -8,6 +11,13 @@ import uuid
 from datetime import datetime
 from typing import Optional
 from .brain_config import get_db_path
+
+# Environment authority — imported lazily to avoid circular dependencies
+try:
+    from app.services.max.authority import get_current_policy, check_memory_write
+except ImportError:
+    get_current_policy = None
+    check_memory_write = None
 
 SCHEMA_SQL = """
 -- Core memories table
@@ -145,8 +155,19 @@ class MemoryStore:
         customer_id: str = None,
         conversation_id: str = None,
         expires_at: str = None,
+        channel: str = None,
     ) -> str:
-        """Add a new memory. Returns memory ID."""
+        """Add a new memory. Returns memory ID.
+
+        v10_test environment is blocked from direct canonical memory writes.
+        Use create_memory_proposal() instead for v10_test.
+        """
+        # Environment authority: block v10_test direct memory writes
+        if get_current_policy is not None and check_memory_write is not None:
+            allowed, reason = check_memory_write(channel=channel)
+            if not allowed:
+                raise PermissionError(f"Memory write blocked: {reason}")
+
         memory_id = str(uuid.uuid4())[:8]
         conn = self._conn()
         conn.execute(
@@ -216,10 +237,18 @@ class MemoryStore:
         conn.close()
         return [dict(r) for r in rows]
 
-    def update_memory(self, memory_id: str, **kwargs) -> bool:
-        """Update fields on an existing memory."""
+    def update_memory(self, memory_id: str, channel: str = None, **kwargs) -> bool:
+        """Update fields on an existing memory.
+
+        v10_test environment is blocked from direct canonical memory writes.
+        """
         if not kwargs:
             return False
+        if get_current_policy is not None and check_memory_write is not None:
+            allowed, reason = check_memory_write(channel=channel)
+            if not allowed:
+                raise PermissionError(f"Memory update blocked: {reason}")
+
         conn = self._conn()
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [memory_id]
@@ -228,7 +257,16 @@ class MemoryStore:
         conn.close()
         return True
 
-    def delete_memory(self, memory_id: str) -> bool:
+    def delete_memory(self, memory_id: str, channel: str = None) -> bool:
+        """Delete a memory entry.
+
+        v10_test environment is blocked from direct canonical memory writes.
+        """
+        if get_current_policy is not None and check_memory_write is not None:
+            allowed, reason = check_memory_write(channel=channel)
+            if not allowed:
+                raise PermissionError(f"Memory delete blocked: {reason}")
+
         conn = self._conn()
         conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         conn.commit()
