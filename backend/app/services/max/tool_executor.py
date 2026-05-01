@@ -334,6 +334,10 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "queue_task": "queue_openclaw_task",
             "openclaw_task": "queue_openclaw_task",
             "create_openclaw_task": "queue_openclaw_task",
+            "openclaw_task_status": "get_openclaw_task_status",
+            "openclaw_status": "get_openclaw_task_status",
+            "check_openclaw_task": "get_openclaw_task_status",
+            "openclaw_queue": "get_openclaw_task_status",
             "openclaw": "dispatch_to_openclaw",
             "send_mail": "send_email",
             "email": "send_email",
@@ -3478,8 +3482,21 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
     Unlike dispatch_to_openclaw which waits for a result, this queues the task
     in the persistent DB and returns immediately. The background worker picks
     it up automatically.
+
+    Detects v10 test-lane environment and routes to port 8010 when running
+    in the v10 test backend.
+
+    Parameters:
+    - title (required): Short task title
+    - description (optional): Full task description
+    - desk: Source desk (default: general)
+    - priority: 1=critical, 3=high, 5=normal, 7=low
+    - hermes_support_requested: If true, attach Hermes guidance packet (default: false)
+    - target_repo: Target repo path (default: ~/empire-repo-v10)
+    - target_branch: Target branch (default: feature/v10.0-test-lane)
     """
     import httpx as _httpx
+    import socket as _socket
     from app.services.max.openclaw_gate import check_openclaw_gate
 
     title = params.get("title", "").strip()
@@ -3493,6 +3510,39 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
     priority = params.get("priority", 5)
     if isinstance(priority, str):
         priority = {"critical": 1, "high": 3, "normal": 5, "low": 7}.get(priority, 5)
+
+    hermes_support = params.get("hermes_support_requested", False)
+    target_repo = params.get("target_repo", "~/empire-repo-v10")
+    target_branch = params.get("target_branch", "feature/v10.0-test-lane")
+
+    # Build Hermes support packet if requested
+    hermes_packet = None
+    hermes_attachment = ""
+    if hermes_support:
+        try:
+            from app.services.max.hermes_memory import build_hermes_support_packet, render_task_support_packet
+            hermes_packet = build_hermes_support_packet(
+                task_title=title,
+                task_description=description,
+                target_repo=target_repo,
+                target_branch=target_branch,
+            )
+            hermes_attachment = render_task_support_packet(hermes_packet)
+            description = f"{description}\n\n{hermes_attachment}"
+        except Exception as e:
+            # Hermes support is best-effort — log and continue without it
+            import logging
+            logging.getLogger("openclaw_task").warning(f"Hermes support packet failed: {e}")
+
+    # Detect active backend port — prefer v10 test lane (8010) when available
+    def _port_open(port: int) -> bool:
+        try:
+            with _socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return True
+        except OSError:
+            return False
+
+    backend_port = 8010 if _port_open(8010) else 8000
     gate = check_openclaw_gate()
     if gate.state in {"degraded", "unknown"}:
         return ToolResult(
@@ -3504,7 +3554,7 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
 
     try:
         resp = _httpx.post(
-            "http://localhost:8000/api/v1/openclaw/tasks",
+            f"http://localhost:{backend_port}/api/v1/openclaw/tasks",
             json={
                 "title": title,
                 "description": description,
@@ -3537,13 +3587,108 @@ def _queue_openclaw_task(params: dict, desk: Optional[str] = None) -> ToolResult
                 "desk": task_desk,
                 "status": "queued",
                 "identity_verified": True,
-                "message": data.get("message") or f"Task #{data.get('id')} queued for OpenClaw. Worker will pick it up within 30 seconds.",
+                "backend_port": backend_port,
+                "target_repo": target_repo,
+                "target_branch": target_branch,
+                "write_scope": "v10_test_lane_only",
+                "stable_repo_blocked": True,
+                "canonical_memory_blocked": True,
+                "hermes_support": "enabled" if hermes_support else "not_requested",
+                "hermes_packet_id": hermes_packet.get("packet_id") if hermes_packet else None,
+                "message": data.get("message") or f"Task #{data.get('id')} queued for OpenClaw. Worker will pick it up within 30 seconds. Hermes support: {'enabled' if hermes_support else 'not requested'}.",
                 "openclaw_gate": data.get("openclaw_gate") or gate.to_dict(),
             })
         return ToolResult(tool="queue_openclaw_task", success=False,
                          error=f"Queue API returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         return ToolResult(tool="queue_openclaw_task", success=False, error=str(e))
+
+
+# ── OPENCLAW TASK STATUS ──────────────────────────────────────────
+
+@tool("get_openclaw_task_status")
+def _get_openclaw_task_status(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Get the status of an OpenClaw task by ID, or list recent tasks.
+
+    Use this when the founder asks:
+    - "What is OpenClaw doing?"
+    - "What is task #N?"
+    - "OpenClaw status"
+    - "Task queue status"
+    - "Is OpenClaw working?"
+    """
+    task_id = params.get("task_id")
+    list_all = params.get("list_all", False)
+    status_filter = params.get("status")
+
+    if task_id:
+        try:
+            task = _fetch_openclaw_task(int(task_id))
+            if not task:
+                return ToolResult(
+                    tool="get_openclaw_task_status",
+                    success=False,
+                    error=f"Task #{task_id} not found",
+                )
+            return ToolResult(
+                tool="get_openclaw_task_status",
+                success=True,
+                result={
+                    "task_id": task["id"],
+                    "title": task.get("title"),
+                    "status": task.get("status"),
+                    "desk": task.get("desk"),
+                    "priority": task.get("priority"),
+                    "assigned_to": task.get("assigned_to"),
+                    "result": task.get("result"),
+                    "error": task.get("error"),
+                    "files_modified": task.get("files_modified"),
+                    "commit_hash": task.get("commit_hash"),
+                    "retry_count": task.get("retry_count"),
+                    "created_at": task.get("created_at"),
+                    "started_at": task.get("started_at"),
+                    "completed_at": task.get("completed_at"),
+                },
+            )
+        except Exception as e:
+            return ToolResult(tool="get_openclaw_task_status", success=False, error=str(e))
+
+    # List tasks
+    try:
+        with get_db() as conn:
+            if status_filter:
+                rows = conn.execute(
+                    "SELECT * FROM openclaw_tasks WHERE status = ? ORDER BY priority ASC, created_at DESC LIMIT 20",
+                    (status_filter,),
+                ).fetchall()
+            elif list_all:
+                rows = conn.execute(
+                    "SELECT * FROM openclaw_tasks ORDER BY priority ASC, created_at DESC LIMIT 20"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM openclaw_tasks WHERE status IN ('queued','running') ORDER BY priority ASC, created_at DESC LIMIT 20"
+                ).fetchall()
+
+            tasks = [dict(r) for r in rows]
+            stats = {}
+            for row in conn.execute(
+                "SELECT status, COUNT(*) as count FROM openclaw_tasks GROUP BY status"
+            ).fetchall():
+                stats[row[0]] = row[1]
+
+            return ToolResult(
+                tool="get_openclaw_task_status",
+                success=True,
+                result={
+                    "tasks": tasks,
+                    "counts": stats,
+                    "total": sum(stats.values()),
+                    "active": stats.get("queued", 0) + stats.get("running", 0),
+                },
+            )
+    except Exception as e:
+        return ToolResult(tool="get_openclaw_task_status", success=False, error=str(e))
 
 
 # ── RESET MAX STATE ────────────────────────────────────────────────

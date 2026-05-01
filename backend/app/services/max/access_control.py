@@ -50,6 +50,9 @@ TOOL_LEVELS = {
     "run_tests": 1,
     "deploy_staging": 2,
     "deploy_production": 3,
+    # Task delegation tools
+    "queue_openclaw_task": 2,
+    "get_openclaw_task_status": 1,
 }
 
 LEVEL_PATTERNS = {

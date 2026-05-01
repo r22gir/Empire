@@ -10,7 +10,12 @@ from typing import Any
 import httpx
 
 
+# Signals that indicate the user is asking about runtime/deployment status.
+# IMPORTANT: These are matched as whole-word patterns to avoid false positives
+# on legitimate task-delegation messages like "start OpenClaw working on X" or
+# "create an OpenClaw task — is max broken?".
 INTENT_SIGNALS = [
+    # Explicit runtime-status requests (require exact phrase)
     "runtime truth",
     "runtime status",
     "status only",
@@ -21,6 +26,7 @@ INTENT_SIGNALS = [
     "current status",
     "current runtime",
     "max status",
+    # Deployment / commit queries (require exact phrase)
     "commit is running",
     "what commit",
     "live commit",
@@ -29,7 +35,7 @@ INTENT_SIGNALS = [
     "is archiveforge live",
     "is transcriptforge live",
     "is this live",
-    "why don't i see the fix",
+    "why don’t i see the fix",
     "website not loading",
     "did the new build deploy",
     "did that push",
@@ -51,29 +57,91 @@ INTENT_SIGNALS = [
     "is it fixed",
     "is max broken",
     "is max fixed",
-    "what's new",
-    "whats new",
+        "whats new",
+"what’s new",
     "what is new",
     "what changed",
-    "what's new today",
-    "whats new today",
+    "what’s new today",
     "what changed today",
     "what is new today",
-    "today's status",
+        "today status",
+"today’s status",
     "todays status",
+    # Standalone "how is X running?" style queries (word-boundary matched below)
+]
+
+# Short signals (<= 5 chars) must match as whole words to avoid substring noise.
+_SHORT_SIGNALS = {"max", "live", "new?"}
+
+# If ANY of these task-delegation keywords appear in the message, do NOT run
+# the runtime truth check — route to the AI model for task planning instead.
+TASK_DELEGATION_BLOCKLIST = [
+    "create ",
+    "create an",
+    "create a",
+    "start ",
+    "start an",
+    "start a",
+    "delegate ",
+    "add task",
+    "add a task",
+    "queue task",
+    "submit task",
+    "submit a task",
+    "send task",
+    "run task",
+    "start working",
+    "start openclaw",
+    "start codeforge",
+    "start hermes",
+    "openclaw task",
+    "codeforge task",
+    "hermes task",
+    "dispatch openclaw",
+    "dispatch to openclaw",
+    "new task for",
+    "new openclaw task",
+    "new codeforge task",
+    "task for openclaw",
+    "task for codeforge",
+    "task for hermes",
 ]
 
 
 def _normalize_intent_text(message: str | None) -> str:
     text = (message or "").lower().strip()
-    text = text.replace("’", "'").replace("`", "'")
+    # Normalize all quote variants to straight apostrophe U+0027
+    text = text.replace("\u2018", "'")   # LEFT SINGLE QUOTATION MARK → straight
+    text = text.replace("\u2019", "'")   # RIGHT SINGLE QUOTATION MARK → straight
+    text = text.replace("`", "'")        # BACKTICK → straight
     text = re.sub(r"\s+", " ", text)
     return text
 
 
 def should_run_runtime_truth_check(message: str | None) -> bool:
     text = _normalize_intent_text(message)
-    return any(signal in text for signal in INTENT_SIGNALS)
+    if not text:
+        return False
+
+    # Block task-delegation messages — do not intercept task creation/tracking.
+    for block in TASK_DELEGATION_BLOCKLIST:
+        if block in text:
+            return False
+
+    # Normalize each signal the same way before substring matching.
+    for signal in INTENT_SIGNALS:
+        normalized_signal = signal.replace("\u2019", "'").replace("\u2018", "'")
+        if normalized_signal in text:
+            # Disambiguate short signals that could be substrings of task words.
+            if signal in _SHORT_SIGNALS:
+                # Require word-boundary match (preceded/followed by non-alphanumeric).
+                pattern = r"(?<![a-z0-9])" + re.escape(normalized_signal) + r"(?![a-z0-9])"
+                if re.search(pattern, text):
+                    return True
+            else:
+                return True
+
+    return False
 
 
 def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:

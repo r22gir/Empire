@@ -279,6 +279,147 @@ def render_hermes_bridge_for_prompt(*, compact: bool = False) -> str:
     return "\n".join(lines)
 
 
+def build_hermes_support_packet(
+    task_title: str,
+    task_description: str,
+    target_repo: str = "~/empire-repo-v10",
+    target_branch: str = "feature/v10.0-test-lane",
+) -> dict[str, Any]:
+    """Build a structured Hermes support packet to attach to an OpenClaw task.
+
+    Hermes does NOT execute code. It provides a guidance packet that helps the
+    OpenClaw/CodeForge worker execute correctly by clarifying:
+    - intake fields expected
+    - missing measurement checklist
+    - quote package checklist
+    - browser/form/page extraction plan
+    - approval checkpoints
+    - safety notes
+    - v10 test-lane boundaries
+
+    This packet is stored as task metadata and is included in the task description
+    when the task is queued.
+    """
+    from datetime import datetime, timezone
+
+    packet_id = f"hermes_support_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    return {
+        "packet_id": packet_id,
+        "hermes_role": "support_guidance_only",
+        "hermes_does_not": ["write code", "modify files", "commit directly", "access memory"],
+        "hermes_does": [
+            "attach structured guidance to task",
+            "provide intake field checklist",
+            "clarify measurement requirements",
+            "outline quote package requirements",
+            "document approval checkpoints",
+            "warn about safety boundaries",
+        ],
+        "task_title": task_title,
+        "task_description": task_description,
+        "target": {
+            "repo": target_repo,
+            "branch": target_branch,
+            "write_scope": "v10_test_lane_only",
+            "stable_repo_blocked": True,
+            "canonical_memory_blocked": True,
+        },
+        "checklists": {
+            "intake_fields": [
+                "customer_name — full name",
+                "customer_email — contact",
+                "customer_phone — for follow-up",
+                "product_type — drapery / upholstery / CNC / other",
+                "room_measurements — width x height per window/space",
+                "material_preference — if specified by customer",
+                "budget_range — if provided",
+                "timeline — when needed by",
+                "photos — reference images uploaded",
+            ],
+            "measurement_requirements": [
+                "Width: measure at 3 points (top, middle, bottom), use narrowest",
+                "Height: measure at 3 points (left, center, right), use longest",
+                "Depth: for drapery, measure wall-to-window face depth",
+                "Rod/track width: end-to-end measurement",
+                "Mounting type: inside mount vs outside mount",
+                "Special shapes: arch, bay, corner — requires diagram",
+            ],
+            "quote_package_checklist": [
+                "line_item_per_product — itemized pricing",
+                "material_cost — fabric/material alone",
+                "labor_cost — fabrication + installation",
+                "hardware_cost — rods, tracks, brackets",
+                "tax_and_permits — if applicable",
+                "total_quote — single grand total",
+                "validity_period — quote expires date",
+                "payment_terms — deposit + balance",
+                "revised_quote_triggers — what requires re-quote",
+            ],
+            "approval_checkpoints": [
+                "founder_approval_required — for quotes over threshold",
+                "customer_approval_signature — written/email confirmation",
+                "material_selection_approval — customer picks from catalog",
+                "final_measurement_confirmation — on-site before fabrication",
+                "change_order_approval — any scope change needs sign-off",
+            ],
+            "browser_page_extraction": [
+                "URL of source page",
+                "Form fields visible on page",
+                "Required vs optional fields",
+                "Any authentication requirements",
+                "API endpoint if form POSTs directly",
+            ],
+        },
+        "safety_notes": [
+            "Hermes is read-only guidance — never modifies code or data",
+            "All file changes must go through OpenClaw/CodeForge on v10 test-lane only",
+            "Stable repo (~/empire-repo) requires explicit founder promotion approval",
+            "Canonical memory writes require founder channel authorization (web_cc / telegram / email)",
+            "v10 test-lane is: ~/empire-repo-v10 on branch feature/v10.0-test-lane",
+            "Never commit directly to main, master, or feature/v10.0 without explicit approval",
+        ],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "hermes_version": "phase1_v1",
+    }
+
+
+def render_task_support_packet(packet: dict[str, Any]) -> str:
+    """Render a Hermes support packet as a readable markdown string for attachment to task description."""
+    lines = [
+        "## Hermes Support Packet",
+        f"*Packet ID: {packet.get('packet_id')}*",
+        f"*Hermes role: {packet.get('hermes_role')}*",
+        "",
+        "**IMPORTANT: Hermes does NOT write code or modify files. It provides guidance only.**",
+        "",
+        f"**Task:** {packet.get('task_title')}",
+        f"**Description:** {packet.get('task_description')}",
+        "",
+        "### Target Environment",
+        f"- Repo: `{packet.get('target', {}).get('repo')}`",
+        f"- Branch: `{packet.get('target', {}).get('branch')}`",
+        f"- Write scope: `{packet.get('target', {}).get('write_scope')}`",
+        f"- Stable repo blocked: `{packet.get('target', {}).get('stable_repo_blocked')}`",
+        f"- Canonical memory blocked: `{packet.get('target', {}).get('canonical_memory_blocked')}`",
+        "",
+    ]
+
+    checklists = packet.get("checklists", {})
+    for section, items in checklists.items():
+        section_title = section.replace("_", " ").title()
+        lines.append(f"### {section_title}")
+        for item in items:
+            lines.append(f"- [ ] {item}")
+        lines.append("")
+
+    lines.append("### Safety Notes")
+    for note in packet.get("safety_notes", []):
+        lines.append(f"- ⚠️ {note}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def write_context_from_verified_session(
     *,
     runtime_truth: dict[str, Any],
