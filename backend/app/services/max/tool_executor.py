@@ -1633,15 +1633,17 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
 
     # Systemd services — check via systemctl first
     systemd_services = {
-        "backend": {"port": 8000, "systemd": "empire-backend", "description": "FastAPI Backend API"},
-        "command_center": {"port": 3005, "systemd": "empire-cc", "description": "Command Center (Next.js)"},
-        "openclaw": {"port": 7878, "systemd": "empire-openclaw", "description": "OpenClaw AI Server"},
+        "backend": {"port": 8000, "systemd": "empire-backend.service", "description": "Stable Backend API (port 8000)"},
+        "command_center": {"port": 3005, "systemd": "empire-portal.service", "description": "Stable Frontend — Command Center (port 3005)"},
+        "openclaw": {"port": 7878, "systemd": "empire-openclaw.service", "description": "OpenClaw AI Server"},
     }
-    # Port-only services
+    # Port-only services (no systemd)
     port_services = {
         "ollama": {"port": 11434, "description": "Ollama LLM Server"},
         "recoveryforge": {"port": 3077, "description": "RecoveryForge"},
         "relistapp": {"port": 3007, "description": "RelistApp"},
+        "v10_frontend": {"port": 3010, "description": "v10 Test Frontend (port 3010) — dev server, not systemd-managed"},
+        "v10_backend": {"port": 8010, "description": "v10 Test Backend (port 8010) — dev server, not systemd-managed"},
     }
 
     results = {}
@@ -1690,6 +1692,39 @@ def _empire_runtime_truth_check(params: dict, desk: Optional[str] = None) -> Too
         return ToolResult(tool="empire_runtime_truth_check", success=True, result=result)
     except Exception as exc:
         return ToolResult(tool="empire_runtime_truth_check", success=False, error=str(exc))
+
+
+@tool("get_notification_status")
+def _get_notification_status(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Return current notification system configuration status — no secrets exposed.
+
+    Reports Telegram (bot_token_set, chat_id_set, is_configured), email (SendGrid,
+    SMTP), and which channels are wired for real sends vs stubs/logging-only.
+    Used by MAX to report truthful notification status without fabricating sends.
+    """
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        from app.services.max.email_service import EmailService
+
+        tg = telegram_bot
+        es = EmailService()
+
+        return ToolResult(tool="get_notification_status", success=True, result={
+            "telegram": {
+                "is_configured": tg.is_configured,
+                "bot_token_set": bool(tg.bot_token),
+                "founder_chat_id_set": bool(tg.founder_chat_id),
+                "can_send": tg.is_configured,
+            },
+            "email": {
+                "is_configured": es.is_configured,
+                "sendgrid_configured": bool(es.sendgrid_key),
+                "smtp_configured": bool(es.user and es.password),
+                "can_send": es.is_configured,
+            },
+        })
+    except Exception as exc:
+        return ToolResult(tool="get_notification_status", success=False, error=str(exc))
 
 
 @tool("empire_max_continuity_audit")
