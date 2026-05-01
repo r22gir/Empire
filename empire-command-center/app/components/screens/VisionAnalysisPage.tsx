@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, lazy, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Camera, Users, Search, FileText, Download, History, BarChart3,
   Loader2, Plus, ChevronRight, CheckCircle, Clock, Eye, BookOpen, CreditCard,
@@ -56,6 +57,7 @@ export default function VisionAnalysisPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [jobs, setJobs] = useState<AnalysisJob[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const router = useRouter();
 
   // Fetch CRM customers for assignment
   useEffect(() => {
@@ -237,7 +239,7 @@ export default function VisionAnalysisPage() {
                         </button>
                         {job.status === 'complete' && (
                           <button
-                            onClick={(e) => { e.stopPropagation(); alert(`Opening quote for ${job.customerName}...`); }}
+                            onClick={(e) => { e.stopPropagation(); router.push(`/quote/${job.customerEmail || job.id}`); }}
                             className="flex items-center gap-1 cursor-pointer hover:bg-[#f0fdf4] transition-colors"
                             style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid #bbf7d0', background: '#faf9f7', fontSize: 9, fontWeight: 700, color: '#16a34a' }}
                           >
