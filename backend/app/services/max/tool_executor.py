@@ -1651,19 +1651,25 @@ def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult
     # Backend is always online if this code is executing
     results["backend"] = {"status": "online", "port": 8000, "description": "FastAPI Backend API", "type": "systemd"}
 
-    # Other systemd services
+    # Other systemd services — check systemd, fall back to port check if inactive/not-found
     for name, svc in systemd_services.items():
         if name == "backend":
             continue
+        is_active = False
         try:
             import subprocess as _sp
-            r = _sp.run(["systemctl", "is-active", svc["systemd"]], capture_output=True, text=True, timeout=5)
+            r = _sp.run(["systemctl", "--user", "is-active", svc["systemd"]], capture_output=True, text=True, timeout=5)
             is_active = r.stdout.strip() == "active"
-            results[name] = {"status": "online" if is_active else "offline", "port": svc["port"], "description": svc["description"], "type": "systemd"}
         except Exception:
-            # Fallback to port check
+            pass  # systemctl failed, will fall through to port check
+
+        if is_active:
+            results[name] = {"status": "online", "port": svc["port"], "description": svc["description"], "type": "systemd"}
+        else:
+            # systemd says inactive (or exception) — verify with port check before marking offline
             try:
-                with socket.create_connection(("127.0.0.1", svc["port"]), timeout=2):
+                with socket.create_connection(("127.0.0.1", svc["port"]), timeout=2) as sock:
+                    sock.settimeout(2)
                     results[name] = {"status": "online", "port": svc["port"], "description": svc["description"], "type": "port"}
             except Exception:
                 results[name] = {"status": "offline", "port": svc["port"], "description": svc["description"]}
