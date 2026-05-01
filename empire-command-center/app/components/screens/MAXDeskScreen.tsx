@@ -1,13 +1,13 @@
 'use client';
 import React, { useState, useCallback, useEffect } from 'react';
-import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout, ChevronDown, X, MessageSquare } from 'lucide-react';
+import Link from 'next/link';
+import { Maximize2, Minimize2, PanelLeftClose, PanelRightClose, PanelLeftOpen, PanelRightOpen, Layout, ChevronDown, X, MessageSquare, PenLine } from 'lucide-react';
 import { EmpireShell } from '../ui/EmpireShell';
 import { DeskSelector } from './DeskSelector';
 import { ChatInterface } from './ChatInterface';
 import { ContinuityPanel } from './ContinuityPanel';
 import { Message } from '../../lib/types';
-
-const API = 'http://localhost:8000/api/v1';
+import { API } from '../../lib/api';
 const STORAGE_KEY = 'empire_max_messages';
 const LAYOUT_KEY = 'empire_max_layout';
 
@@ -356,6 +356,22 @@ export function MAXDeskScreen() {
         >
           <MessageSquare size={12} /> Chat Only
         </button>
+        {/* Drawing Studio — visual measurement/quote/render */}
+        <Link
+          href="/studio"
+          title="Drawing Studio — visual measurement, quote, and render workflow"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '4px 8px', borderRadius: 'var(--radius-md)',
+            border: '1px solid rgba(184,150,12,0.6)',
+            background: 'rgba(184,150,12,0.15)',
+            color: '#b8960c',
+            cursor: 'pointer', fontSize: 'var(--text-xs)', fontWeight: 700,
+            textDecoration: 'none',
+          }}
+        >
+          <PenLine size={12} /> Studio
+        </Link>
         {focusMode && (
           <span style={{
             fontSize: 9, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
