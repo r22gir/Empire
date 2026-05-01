@@ -1698,6 +1698,39 @@ def _empire_runtime_truth_check(params: dict, desk: Optional[str] = None) -> Too
         return ToolResult(tool="empire_runtime_truth_check", success=False, error=str(exc))
 
 
+@tool("get_notification_status")
+def _get_notification_status(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Return current notification system configuration status — no secrets exposed.
+
+    Reports Telegram (bot_token_set, chat_id_set, is_configured), email (SendGrid,
+    SMTP), and which channels are wired for real sends vs stubs/logging-only.
+    Used by MAX to report truthful notification status without fabricating sends.
+    """
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        from app.services.max.email_service import EmailService
+
+        tg = telegram_bot
+        es = EmailService()
+
+        return ToolResult(tool="get_notification_status", success=True, result={
+            "telegram": {
+                "is_configured": tg.is_configured,
+                "bot_token_set": bool(tg.bot_token),
+                "founder_chat_id_set": bool(tg.founder_chat_id),
+                "can_send": tg.is_configured,
+            },
+            "email": {
+                "is_configured": es.is_configured,
+                "sendgrid_configured": bool(es.sendgrid_key),
+                "smtp_configured": bool(es.user and es.password),
+                "can_send": es.is_configured,
+            },
+        })
+    except Exception as exc:
+        return ToolResult(tool="get_notification_status", success=False, error=str(exc))
+
+
 @tool("empire_max_continuity_audit")
 def _empire_max_continuity_audit(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Inspect current MAX continuity handoff, surface identity, and task state."""
