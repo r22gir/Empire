@@ -147,7 +147,11 @@ def _http_status(url: str, timeout: float = 4.0) -> dict[str, Any]:
 
 
 def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
-    """Return current runtime status without changing services."""
+    """Return current runtime status without changing services.
+
+    Checks stable (8000/3005) and v10 test (8010/3010) separately so MAX
+    can report which is up/down without confusion.
+    """
     commit = _git_commit()
     registry_info = {}
     startup_health = None
@@ -167,10 +171,15 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     backend_service = _service_status("empire-backend.service")
     frontend_service = _service_status("empire-portal.service")
 
+    # Check stable ports
     local_api_git = _http_json("http://127.0.0.1:8000/api/v1/dev/git")
     local_backend_root = _http_status("http://127.0.0.1:8000/")
     local_frontend_root = _http_status("http://127.0.0.1:3005/")
     local_memory_bank = _http_status("http://127.0.0.1:8000/api/v1/chats/memory-bank?channel=all&limit=1")
+
+    # Check v10 test lane ports (8010 = backend, 3010 = frontend)
+    local_v10_backend_root = _http_status("http://127.0.0.1:8010/")
+    local_v10_frontend_root = _http_status("http://127.0.0.1:3010/")
 
     public_api_git = None
     public_backend_root = None
@@ -189,9 +198,9 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
 
     stale_or_broken: list[str] = []
     if not backend_service["active"] or not _port_open("127.0.0.1", 8000) or not local_backend_root["ok"]:
-        stale_or_broken.append("backend_local_unhealthy")
+        stale_or_broken.append("backend_port_8000_unhealthy")
     if not frontend_service["active"] or not _port_open("127.0.0.1", 3005) or not local_frontend_root["ok"]:
-        stale_or_broken.append("frontend_local_unhealthy")
+        stale_or_broken.append("frontend_port_3005_unhealthy")
     if local_hash and commit["hash"] and local_hash != commit["hash"]:
         stale_or_broken.append("local_api_commit_stale")
     if public and public_hash and commit["hash"] and public_hash != commit["hash"]:
@@ -210,15 +219,37 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "registry": registry_info,
         "startup_health": startup_health,
         "openclaw_gate": openclaw_gate,
-        "backend_status": {
-            "service": backend_service,
-            "port_8000_open": _port_open("127.0.0.1", 8000),
-            "local_root": local_backend_root,
+        # Stable backend on port 8000 (empire-backend.service)
+        "backend_port_8000": {
+            "port": 8000,
+            "service": "empire-backend.service",
+            "service_active": backend_service.get("active", False),
+            "port_open": _port_open("127.0.0.1", 8000),
+            "local_root_status": local_backend_root.get("status_code"),
         },
-        "frontend_status": {
-            "service": frontend_service,
-            "port_3005_open": _port_open("127.0.0.1", 3005),
-            "local_root": local_frontend_root,
+        # v10 test backend on port 8010 (not systemd — dev server)
+        "backend_port_8010": {
+            "port": 8010,
+            "service": "v10 test backend (dev server, not systemd)",
+            "service_active": None,  # not systemd-managed
+            "port_open": _port_open("127.0.0.1", 8010),
+            "local_root_status": local_v10_backend_root.get("status_code"),
+        },
+        # Stable frontend on port 3005 (empire-portal.service)
+        "frontend_port_3005": {
+            "port": 3005,
+            "service": "empire-portal.service",
+            "service_active": frontend_service.get("active", False),
+            "port_open": _port_open("127.0.0.1", 3005),
+            "local_root_status": local_frontend_root.get("status_code"),
+        },
+        # v10 test frontend on port 3010 (not systemd — dev server)
+        "frontend_port_3010": {
+            "port": 3010,
+            "service": "v10 test frontend (dev server, not systemd)",
+            "service_active": None,  # not systemd-managed
+            "port_open": _port_open("127.0.0.1", 3010),
+            "local_root_status": local_v10_frontend_root.get("status_code"),
         },
         "local_freshness": {
             "api_git": local_api_git,
@@ -249,14 +280,23 @@ def _wants_key_only(message: str | None) -> bool:
 
 
 def format_runtime_truth_check(result: dict[str, Any], message: str | None = None) -> str:
+    """Format runtime truth check result into human-readable text.
+
+    Reports stable vs v10 test lane separately so MAX never says
+    a generic 'frontend down' without specifying which port.
+    """
     commit = result.get("current_commit", {})
-    backend = result.get("backend_status", {})
-    frontend = result.get("frontend_status", {})
-    local = result.get("local_freshness", {})
-    public = result.get("public_freshness", {})
     openclaw_gate = result.get("openclaw_gate") or {}
     stale = result.get("stale_or_broken") or []
     startup = result.get("startup_health") or {}
+
+    # Extract port-specific status
+    b8000 = result.get("backend_port_8000", {})
+    b8010 = result.get("backend_port_8010", {})
+    f3005 = result.get("frontend_port_3005", {})
+    f3010 = result.get("frontend_port_3010", {})
+    local = result.get("local_freshness", {})
+    public = result.get("public_freshness", {})
 
     public_hash = None
     public_git = public.get("api_git") or {}
@@ -274,12 +314,29 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
                 f"current_commit: {commit.get('hash')}",
                 f"local_api_commit: {local_hash}",
                 f"public_api_commit: {public_hash}",
-                f"backend_active: {backend.get('service', {}).get('active')}",
-                f"portal_active: {frontend.get('service', {}).get('active')}",
+                f"backend_8000_active: {b8000.get('service_active')}",
+                f"frontend_3005_active: {f3005.get('service_active')}",
+                f"v10_backend_8010_open: {b8010.get('port_open')}",
+                f"v10_frontend_3010_open: {f3010.get('port_open')}",
                 f"openclaw_gate: {openclaw_gate.get('state')}",
                 f"stale_or_broken: {', '.join(stale) if stale else 'none'}",
             ]
         )
+
+    def _svc(label, svc_info):
+        """Format a service entry with port label and status."""
+        active = svc_info.get("service_active")
+        port_open = svc_info.get("port_open")
+        status_code = svc_info.get("local_root_status")
+        svc_name = svc_info.get("service", "")
+        status = []
+        if active is not None:
+            status.append(f"systemd={'active' if active else 'inactive'}")
+        if port_open is not None:
+            status.append(f"port_open={port_open}")
+        if status_code:
+            status.append(f"http={status_code}")
+        return f"{label} ({svc_name}): {' | '.join(status)}"
 
     lines = [
         "Runtime truth check completed.",
@@ -287,8 +344,10 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         f"- Current repo commit: {commit.get('hash')} ({commit.get('message')})",
         f"- Registry: version={(result.get('registry') or {}).get('registry_version')} loaded_at={(result.get('registry') or {}).get('loaded_at')} last_error={(result.get('registry') or {}).get('last_error')}",
         f"- OpenClaw gate: state={openclaw_gate.get('state')} allowed={openclaw_gate.get('allowed')} reason={openclaw_gate.get('reason')}",
-        f"- Backend: service_active={backend.get('service', {}).get('active')} port_8000_open={backend.get('port_8000_open')} local_root={backend.get('local_root', {}).get('status_code')}",
-        f"- Frontend: service_active={frontend.get('service', {}).get('active')} port_3005_open={frontend.get('port_3005_open')} local_root={frontend.get('local_root', {}).get('status_code')}",
+        f"- Stable Backend (port 8000): {'UP' if b8000.get('port_open') else 'DOWN'} | systemd={b8000.get('service_active')} | http={b8000.get('local_root_status')}",
+        f"- v10 Test Backend (port 8010): {'UP' if b8010.get('port_open') else 'DOWN/not started'} | {b8010.get('service', 'dev server')}",
+        f"- Stable Frontend (port 3005): {'UP' if f3005.get('port_open') else 'DOWN'} | systemd={f3005.get('service_active')} | http={f3005.get('local_root_status')}",
+        f"- v10 Test Frontend (port 3010): {'UP' if f3010.get('port_open') else 'DOWN/not started'} | {f3010.get('service', 'dev server')}",
         f"- Local API commit: {local_hash} matches_current={local.get('api_matches_current_commit')}",
         f"- Public API commit: {public_hash} matches_current={public.get('api_matches_current_commit')}",
         f"- Public API root: {(public.get('api_root') or {}).get('status_code')} | Public Studio root: {(public.get('studio_root') or {}).get('status_code')}",

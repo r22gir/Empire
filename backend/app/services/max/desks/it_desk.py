@@ -13,6 +13,15 @@ from .base_desk import BaseDesk, DeskTask, DeskAction, TaskPriority
 logger = logging.getLogger("max.desks.it")
 
 # Known Empire services and ports
+
+def _result_ok(r):
+    """Return (success: bool, result: dict or None, error: str or None) from ToolResult or dict."""
+    if r is None:
+        return False, None, "No result"
+    if isinstance(r, dict):
+        return bool(r.get("success")), r.get("result"), r.get("error")
+    # ToolResult dataclass
+    return bool(getattr(r, "success", False)), getattr(r, "result", None), getattr(r, "error", None)
 EMPIRE_SERVICES = {
     "Backend API": 8000,
     "Empire App": 3000,
@@ -245,15 +254,16 @@ class ITDesk(BaseDesk):
             cmd = "start"
 
         r = execute_tool({"tool": "service_manager", "command": cmd, "service": service}, desk="it")
-        if r.success and r.result:
-            services = r.result.get("services", [])
+        ok, res, err = _result_ok(r)
+        if ok and res:
+            services = res.get("services", []) if isinstance(res, dict) else []
             lines = [f"Service {cmd}: {service}"]
             for s in services:
                 status = "UP" if s.get("running") else "DOWN"
                 lines.append(f"  {s.get('name')}: {status} (:{s.get('port', '?')})")
             return await self.complete_task(task, "\n".join(lines))
         else:
-            return await self.escalate(task, f"Service {cmd} failed: {r.error or 'unknown error'}. Needs founder intervention.")
+            return await self.escalate(task, f"Service {cmd} failed: {err or 'unknown error'}. Needs founder intervention.")
 
     async def _handle_log_analysis(self, task: DeskTask) -> DeskTask:
         task.actions.append(DeskAction(action="log_analysis", detail="Analyzing logs"))

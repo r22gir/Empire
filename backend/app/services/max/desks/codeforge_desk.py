@@ -8,6 +8,16 @@ import os
 import re
 from .base_desk import BaseDesk, DeskTask, DeskAction
 
+
+def _result_ok(r):
+    """Return (success: bool, result: dict or None, error: str or None) from ToolResult or dict."""
+    if r is None:
+        return False, None, "No result"
+    if isinstance(r, dict):
+        return bool(r.get("success")), r.get("result"), r.get("error")
+    # ToolResult dataclass
+    return bool(getattr(r, "success", False)), getattr(r, "result", None), getattr(r, "error", None)
+
 logger = logging.getLogger("max.desks.codeforge")
 
 
@@ -112,11 +122,12 @@ class CodeForgeDesk(BaseDesk):
             if os.path.isfile(target):
                 task.actions.append(DeskAction(action="file_read", detail=f"Direct read: {target}"))
                 r = execute_tool({"tool": "file_read", "path": target}, desk="codeforge")
-                if r.success and r.result:
-                    raw = r.result.get("content", str(r.result))
+                ok, res, err = _result_ok(r)
+                if ok and res:
+                    raw = res.get("content", str(res)) if isinstance(res, dict) else str(res)
                     return await self.complete_task(task, self._format_file_content(raw, target))
                 else:
-                    return await self.fail_task(task, r.error or "File read failed")
+                    return await self.fail_task(task, err or "File read failed")
             else:
                 return await self.fail_task(
                     task, f"File not found: {target}"
@@ -181,8 +192,9 @@ class CodeForgeDesk(BaseDesk):
         if paths:
             target = paths[0]
             r = execute_tool({"tool": "file_read", "path": target}, desk="codeforge")
-            if r.success and r.result:
-                current_content = r.result.get("content", "")
+            ok, res, err = _result_ok(r)
+            if ok and res:
+                current_content = res.get("content", "") if isinstance(res, dict) else ""
                 ai_result = await self.ai_call(
                     f"Edit this file to complete the task. Output ONLY the complete new file content.\n\n"
                     f"Task: {task.title}\nDetails: {task.description}\n\n"
@@ -198,7 +210,7 @@ class CodeForgeDesk(BaseDesk):
                 else:
                     return await self.fail_task(task, "AI failed to generate edit")
             else:
-                return await self.fail_task(task, r.error or "Could not read file")
+                return await self.fail_task(task, err or "Could not read file")
         else:
             try:
                 result = await self.ai_execute_task(task)
@@ -213,10 +225,11 @@ class CodeForgeDesk(BaseDesk):
 
         # Run a health check
         r = execute_tool({"tool": "test_runner", "command": "health"}, desk="codeforge")
-        if r.success and r.result:
-            passed = r.result.get("passed", 0)
-            failed = r.result.get("failed", 0)
-            details = r.result.get("results", [])
+        ok, res, err = _result_ok(r)
+        if ok and res:
+            passed = res.get("passed", 0)
+            failed = res.get("failed", 0)
+            details = res.get("results", [])
 
             lines = [f"Health Check: {passed} passed, {failed} failed"]
             for d in details:
@@ -227,7 +240,7 @@ class CodeForgeDesk(BaseDesk):
             result = "\n".join(lines)
             return await self.complete_task(task, result)
         else:
-            return await self.fail_task(task, r.error or "Test runner failed")
+            return await self.fail_task(task, err or "Test runner failed")
 
     async def _handle_git(self, task: DeskTask) -> DeskTask:
         """Git operations."""
@@ -245,10 +258,11 @@ class CodeForgeDesk(BaseDesk):
             cmd = "status"
 
         r = execute_tool({"tool": "git_ops", "command": cmd}, desk="codeforge")
-        if r.success and r.result:
-            return await self.complete_task(task, r.result.get("output", "No output"))
+        ok, res, err = _result_ok(r)
+        if ok and res:
+            return await self.complete_task(task, res.get("output", "No output") if isinstance(res, dict) else "Done")
         else:
-            return await self.fail_task(task, r.error or "Git operation failed")
+            return await self.fail_task(task, err or "Git operation failed")
 
     async def _handle_general_dev(self, task: DeskTask) -> DeskTask:
         """General development task — use AI to determine approach."""

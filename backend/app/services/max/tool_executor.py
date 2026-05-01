@@ -1628,26 +1628,32 @@ def _get_weather(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("get_services_health")
 def _get_services_health(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Check which Empire services are running using systemd + port checks."""
+    """Check which Empire services are running using systemd + port checks.
+
+    Separates v10 test lane (port 3010/8010) from stable (port 8000/3005)
+    so MAX can report which is up/down without confusion.
+    """
     import socket
 
     # Systemd services — check via systemctl first
     systemd_services = {
-        "backend": {"port": 8000, "systemd": "empire-backend", "description": "FastAPI Backend API"},
-        "command_center": {"port": 3005, "systemd": "empire-cc", "description": "Command Center (Next.js)"},
+        "backend": {"port": 8000, "systemd": "empire-backend", "description": "Stable Backend API (port 8000)"},
+        "command_center": {"port": 3005, "systemd": "empire-cc", "description": "Stable Frontend — Command Center (port 3005)"},
         "openclaw": {"port": 7878, "systemd": "empire-openclaw", "description": "OpenClaw AI Server"},
     }
-    # Port-only services
+    # Port-only services (no systemd)
     port_services = {
         "ollama": {"port": 11434, "description": "Ollama LLM Server"},
         "recoveryforge": {"port": 3077, "description": "RecoveryForge"},
         "relistapp": {"port": 3007, "description": "RelistApp"},
+        "v10_frontend": {"port": 3010, "description": "v10 Test Frontend (port 3010) — dev server, not systemd-managed"},
+        "v10_backend": {"port": 8010, "description": "v10 Test Backend (port 8010) — dev server, not systemd-managed"},
     }
 
     results = {}
 
     # Backend is always online if this code is executing
-    results["backend"] = {"status": "online", "port": 8000, "description": "FastAPI Backend API", "type": "systemd"}
+    results["backend"] = {"status": "online", "port": 8000, "description": "Stable Backend API (port 8000)", "type": "systemd"}
 
     # Other systemd services
     for name, svc in systemd_services.items():
@@ -2954,8 +2960,23 @@ def _run_desk_task(params: dict, desk: Optional[str] = None) -> ToolResult:
         except RuntimeError:
             data = asyncio.run(_submit())
 
-        if data.get("state") == "completed":
-            return ToolResult(tool="run_desk_task", success=True, result=data)
+        # Normalize: data may be a DeskTask object or a dict
+        if hasattr(data, "state"):
+            _state = data.state.value if hasattr(data.state, "value") else str(data.state)
+            _data_dict = {
+                "id": data.id,
+                "title": data.title,
+                "state": _state,
+                "result": data.result,
+                "desk": getattr(data, "desk_id", None) or "auto",
+            }
+        elif isinstance(data, dict):
+            _data_dict = data
+        else:
+            _data_dict = {"result": str(data)}
+
+        if _data_dict.get("state") == "completed":
+            return ToolResult(tool="run_desk_task", success=True, result=_data_dict)
         else:
             # Desk task didn't complete — also queue for OpenClaw as backup
             try:
@@ -4226,10 +4247,16 @@ def _git_ops(params: dict, desk: Optional[str] = None) -> ToolResult:
 SERVICE_MAP = {
     "backend": {"port": 8000, "systemd": "empire-backend", "log": "/tmp/backend.log"},
     "cc": {"port": 3005, "systemd": "empire-portal", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    # Aliases so MAX can say service="command_center" or "frontend" and it resolves
+    "command_center": {"port": 3005, "systemd": "empire-portal", "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    "frontend": {"port": 3005, "systemd": "empire-portal", "log_dir": os.path.expanduser("~/empire-repo/logs")},
     "openclaw": {"port": 7878, "systemd": "empire-openclaw", "log": "/tmp/openclaw.log"},
     "ollama": {"port": 11434, "systemd": "ollama", "log": None},
     "recoveryforge": {"port": 3077, "systemd": None, "log_dir": os.path.expanduser("~/empire-repo/logs")},
     "relistapp": {"port": 3007, "systemd": None, "log_dir": os.path.expanduser("~/empire-repo/logs")},
+    # v10 test lane entries — port-check only, not systemd-managed
+    "v10_frontend": {"port": 3010, "systemd": None, "log_dir": None},
+    "v10_backend": {"port": 8010, "systemd": None, "log_dir": None},
 }
 
 # Systemd service names for monitored services
