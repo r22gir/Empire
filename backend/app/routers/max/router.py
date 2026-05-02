@@ -2800,6 +2800,17 @@ async def max_status():
         for item in skills
         if item.get("status") == "implemented_callable"
     ]
+
+    # Provider policy info for transparency
+    provider_policy = {
+        "primary": str(ai_router.primary_model.value) if ai_router.primary_model else "unknown",
+        "minimax_configured": bool(ai_router.minimax_key),
+        "xai_configured": bool(ai_router.xai_key),
+        "xai_disabled": ai_router.max_disable_xai,
+        "xai_disabled_reason": "credits_unavailable" if ai_router.max_disable_xai else None,
+        "max_primary_provider_env": ai_router.max_primary_provider or None,
+    }
+
     return {
         "status": "ok",
         "current_commit": _git_commit(),
@@ -2818,6 +2829,7 @@ async def max_status():
         "hermes_memory_bridge": get_hermes_memory_status(),
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
+        "provider_policy": provider_policy,
     }
 
 
@@ -2967,6 +2979,11 @@ async def orchestration_status():
         desk_statuses = []
 
     configured_models = ai_router.get_available_models()
+    # Pass through provider policy flags so status consumers see the full picture
+    minimax_key = bool(ai_router.minimax_key)
+    xai_key = bool(ai_router.xai_key)
+    xai_disabled = ai_router.max_disable_xai
+    primary_provider = str(ai_router.primary_model.value) if ai_router.primary_model else "unknown"
     cloud_providers = [
         {
             "id": model["id"],
@@ -2976,6 +2993,8 @@ async def orchestration_status():
             "status_source": "env_configured",
             **({"model": model["model"]} if model.get("model") else {}),
             **({"base_url": model["base_url"]} if model.get("base_url") else {}),
+            **({"disabled": model.get("disabled")} if model.get("disabled") else {}),
+            **({"disabled_reason": model.get("disabled_reason")} if model.get("disabled_reason") else {}),
         }
         for model in configured_models
         if model.get("type") == "cloud"
@@ -3005,17 +3024,26 @@ async def orchestration_status():
             "openclaw": "/api/v1/openclaw/tasks",
         },
         "routing": {
-            "normal_web_chat": "simple: Gemini -> Grok -> Groq -> Claude Sonnet; moderate: Grok -> Groq -> Claude Sonnet -> Gemini; complex: Claude Sonnet -> Grok -> OpenAI GPT-4o -> Groq; critical/code: Claude Opus -> Claude Sonnet",
+            "normal_web_chat": "simple: MiniMax -> Gemini -> Grok -> Groq -> Sonnet; moderate: MiniMax -> Grok -> Groq -> Sonnet -> Gemini; complex: MiniMax -> Claude Sonnet -> Grok -> GPT-4o -> Groq; critical/code: Claude Opus -> Claude Sonnet",
             "telegram_chat": "MAX chat with Telegram brevity directive and founder channel persistence",
             "voice_input": "Groq Whisper STT through /api/v1/voice/transcribe; transcribed text enters MAX chat",
-            "voice_output": "xAI Grok TTS through /api/v1/max/tts",
+            "voice_output": "xAI Grok TTS through /api/v1/max/tts" if not xai_disabled else "MiniMax TTS via /api/v1/max/tts",
             "image_analysis": f"local Ollama triage {PRIMARY_VISION_MODEL} -> {FALLBACK_VISION_MODEL}, then MAX cloud routing as needed",
             "document_analysis": "uploaded PDF/text/code content is extracted and prepended to MAX chat context",
             "desk_delegation": "MAX run_desk_task / ai-desks tasks; CodeForge uses Claude Opus; finance/support/sales/etc. use desk routing",
             "openclaw_execution": "MAX tools can dispatch or queue OpenClaw tasks below desk/MAX control",
+            "provider_policy": f"MAX_PRIMARY_PROVIDER={ai_router.max_primary_provider or 'unset'} MAX_DISABLE_XAI={xai_disabled}",
         },
         "providers": {
             "cloud": cloud_providers,
+            "provider_policy": {
+                "primary": primary_provider,
+                "minimax_configured": minimax_key,
+                "xai_configured": xai_key,
+                "xai_disabled": xai_disabled,
+                "xai_disabled_reason": "credits_unavailable" if xai_disabled else None,
+                "fallback_order": "minimax -> grok -> groq -> claude -> gemini" if minimax_key else "grok -> groq -> claude -> gemini",
+            },
             "local": [
                 {
                     "id": "ollama",
