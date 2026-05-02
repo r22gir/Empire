@@ -2808,6 +2808,8 @@ async def max_status():
         "xai_configured": bool(ai_router.xai_key),
         "xai_disabled": ai_router.max_disable_xai,
         "xai_disabled_reason": "credits_unavailable" if ai_router.max_disable_xai else None,
+        "ollama_disabled": ai_router.max_disable_ollama,
+        "ollama_disabled_reason": "founder_disabled_due_to_stall_suspected" if ai_router.max_disable_ollama else None,
         "max_primary_provider_env": ai_router.max_primary_provider or None,
     }
 

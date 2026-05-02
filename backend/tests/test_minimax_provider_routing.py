@@ -14,8 +14,10 @@ import pytest
 # Ensure clean env for testing
 os.environ.pop("MAX_PRIMARY_PROVIDER", None)
 os.environ.pop("MAX_DISABLE_XAI", None)
+os.environ.pop("MAX_DISABLE_OLLAMA", None)
 os.environ.pop("MINIMAX_API_KEY", None)
 os.environ.pop("XAI_API_KEY", None)
+os.environ.pop("OLLAMA_ENABLED", None)
 
 
 class TestMiniMaxPrimaryProvider:
@@ -158,3 +160,56 @@ class TestNoKeyExposure:
                 if isinstance(value, str):
                     assert "sk-secret" not in value
                     assert "xai-secret" not in value
+
+
+class TestOllamaDisablePolicy:
+    """MAX_DISABLE_OLLAMA=true must prevent Ollama from being used anywhere."""
+
+    def test_ollama_disabled_prevents_selection(self):
+        """Ollama should not be selected when MAX_DISABLE_OLLAMA=true."""
+        os.environ["MINIMAX_API_KEY"] = "test-key"
+        os.environ["MAX_PRIMARY_PROVIDER"] = "minimax"
+        os.environ["MAX_DISABLE_OLLAMA"] = "true"
+        os.environ.pop("XAI_API_KEY", None)
+
+        import importlib
+        import app.services.max.ai_router as ai_router_mod
+        importlib.reload(ai_router_mod)
+
+        router = ai_router_mod.AIRouter()
+        assert router.max_disable_ollama is True
+        assert router.primary_model == ai_router_mod.AIModel.MINIMAX
+
+    def test_ollama_disabled_in_model_list(self):
+        """Ollama should show disabled=True in model list when MAX_DISABLE_OLLAMA=true."""
+        os.environ["MINIMAX_API_KEY"] = "test-key"
+        os.environ["MAX_PRIMARY_PROVIDER"] = "minimax"
+        os.environ["MAX_DISABLE_OLLAMA"] = "true"
+
+        import importlib
+        import app.services.max.ai_router as ai_router_mod
+        importlib.reload(ai_router_mod)
+
+        router = ai_router_mod.AIRouter()
+        models = router.get_available_models()
+
+        ollama_model = next(m for m in models if m["id"] == "ollama-llama")
+        assert ollama_model["disabled"] is True
+        assert ollama_model["disabled_reason"] == "founder_disabled_due_to_stall_suspected"
+
+    def test_ollama_not_in_provider_list(self):
+        """Ollama should not appear in providers list when disabled."""
+        os.environ["MINIMAX_API_KEY"] = "test-key"
+        os.environ["MAX_PRIMARY_PROVIDER"] = "minimax"
+        os.environ["MAX_DISABLE_OLLAMA"] = "true"
+
+        import importlib
+        import app.services.max.ai_router as ai_router_mod
+        importlib.reload(ai_router_mod)
+
+        router = ai_router_mod.AIRouter()
+        # Providers list is built in __init__ — check via available models
+        models = router.get_available_models()
+        ollama = next((m for m in models if m["id"] == "ollama-llama"), None)
+        assert ollama is not None
+        assert ollama["disabled"] is True

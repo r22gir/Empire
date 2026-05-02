@@ -4,6 +4,7 @@ Monitors ecosystem health, delegates to OpenClaw, logs to Hermes, notifies found
 """
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -31,6 +32,7 @@ class EmpireOrchestrator:
     def __init__(self):
         self.enabled = False
         self.hermes = HermesMemory()
+        self.max_disable_ollama = os.getenv("MAX_DISABLE_OLLAMA", "").lower() in ("true", "1", "yes")
         self.alert_thresholds = {
             "task_failure_rate_pct": 10,
             "api_response_time_s": 2.0,
@@ -96,9 +98,11 @@ class EmpireOrchestrator:
             await self.check_backend_health(),
             await self.check_frontend_health(),
             await self.check_openclaw_health(),
-            await self.check_ollama_health(),
             await self.check_max_desks(),
         ]
+        # Only probe Ollama if not disabled by founder policy
+        if not self.max_disable_ollama:
+            checks.append(await self.check_ollama_health())
         for check in checks:
             if not check.get("healthy", False):
                 return {
