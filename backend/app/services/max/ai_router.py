@@ -513,6 +513,12 @@ class AIRouter:
                 self._log_chat_cost(full_messages, resp, "ollama-llama3.1", feature, business, tenant_id)
                 return AIResponse(content=resp, model_used="ollama-llama3.1", fallback_used=fallback)
 
+            elif provider_type == "minimax":
+                logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
+                resp = await self._minimax_chat(full_messages, image_path=image_path)
+                self._log_chat_cost(full_messages, resp, self.minimax_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=fallback)
+
         except Exception as e:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
         return None
