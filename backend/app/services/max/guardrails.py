@@ -147,20 +147,63 @@ def check_input(text: str, message_context: dict = None) -> Tuple[bool, str]:
     return True, "ok"
 
 
-def sanitize_output(text: str) -> str:
-    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    # Strip think tags — do not expose internal reasoning to users
-    # Complete <think>... blocks (non-greedy, handles both opening and closing in same chunk)
-    text = re.sub(r"<think>[\s\S]*?", "", text)
-    # Handle cross-chunk splits: if text starts with orphaned <think> (no closing),
-    # strip from start to last newline before remaining content
-    if text.startswith("<think>"):
+# ── Reasoning tag stripper ─────────────────────────────────────────────
+# Removes AI internal reasoning (think tags) from output so users never see it.
+# Handles complete blocks, orphan open/close tags, and cross-chunk splits.
+
+def strip_reasoning_tags(text: str) -> str:
+    """Remove all AI reasoning/reasoning tag content from text."""
+    if not text:
+        return text
+
+    # 1. Remove complete <think>... blocks (non-greedy .*? so each block matched individually,
+    #    DOTALL so . matches newlines, optional trailing newline preserved)
+    text = re.sub(r"<think>.*?<\/think>\n?", "", text, flags=re.IGNORECASE | re.DOTALL)
+
+    # 2. Remove <thinking>...</thinking> blocks
+    text = re.sub(r"<thinking>[\s\S]*?</thinking>", "", text, flags=re.IGNORECASE)
+
+    # 3. Remove orphan closing tag  at end of chunk (no opening in this chunk)
+    #    This appears after strip of complete tags leaves stray closing tag
+    text = re.sub(r"<\/think>$", "", text, flags=re.IGNORECASE)
+
+    # 4. Handle cross-chunk split: orphaned <think> at START of text
+    #    Strip everything from <think> to the last newline before real content
+    while text.startswith("<think>"):
         nl_idx = text.rfind("\n")
         if nl_idx > 0:
             text = text[nl_idx + 1:]
         else:
+            # No newline, just strip the tag itself
             text = text[len("<think>"):]
+
+    # 5. Remove stray opening tags
+    text = re.sub(r"<think>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<think>", "", text, flags=re.IGNORECASE)
+
+    # 6. Remove stray closing tags
+    text = re.sub(r"", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"", "", text, flags=re.IGNORECASE)
+
+    # 7. Remove answer/final wrapper tags (extract content)
+    text = re.sub(r"<answer>([\s\S]*?)</answer>", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"<final>([\s\S]*?)</final>", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"<回答>([\s\S]*?)</回答>", r"\1", text, flags=re.IGNORECASE)
+
+    # 8. Collapse excessive blank lines (more than 2 consecutive newlines)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 9. Trim leading/trailing whitespace
+    text = text.strip()
+
+    return text
+
+
+def sanitize_output(text: str) -> str:
+    """Sanitize output: remove API keys and strip reasoning tags."""
+    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = strip_reasoning_tags(text)
     return text
 
 

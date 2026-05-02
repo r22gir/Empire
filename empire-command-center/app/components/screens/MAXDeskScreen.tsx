@@ -273,7 +273,7 @@ export function MAXDeskScreen() {
       localStorage.removeItem(STORAGE_KEY);
     } catch { /* ignore */ }
     updateMessages([WELCOME]);
-  }, [updateMessage]);
+  }, [updateMessages]);
 
   const handleToggleCodeMode = useCallback((enable: boolean) => {
     if (enable) {
