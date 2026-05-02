@@ -146,11 +146,21 @@ def check_input(text: str, message_context: dict = None) -> Tuple[bool, str]:
             logger.info(f"Founder override: skipping blocked_topic block")
     return True, "ok"
 
+
 def sanitize_output(text: str) -> str:
     text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
     text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
     # Strip think tags — do not expose internal reasoning to users
-    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    # Complete <think>... blocks (non-greedy, handles both opening and closing in same chunk)
+    text = re.sub(r"<think>[\s\S]*?", "", text)
+    # Handle cross-chunk splits: if text starts with orphaned <think> (no closing),
+    # strip from start to last newline before remaining content
+    if text.startswith("<think>"):
+        nl_idx = text.rfind("\n")
+        if nl_idx > 0:
+            text = text[nl_idx + 1:]
+        else:
+            text = text[len("<think>"):]
     return text
 
 
