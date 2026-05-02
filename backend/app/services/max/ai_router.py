@@ -184,13 +184,25 @@ class AIRouter:
         self.minimax_key = os.getenv("MINIMAX_API_KEY", "")
         self.minimax_base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
         self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
-        # Priority: xAI Grok > Claude > Groq > Ollama
-        if self.xai_key:
+        # Empire-wide provider policy — set via MAX_PRIMARY_PROVIDER and MAX_DISABLE_XAI env vars
+        self.max_primary_provider = os.getenv("MAX_PRIMARY_PROVIDER", "").lower()
+        self.max_disable_xai = os.getenv("MAX_DISABLE_XAI", "").lower() in ("true", "1", "yes")
+        # Priority: MAX_PRIMARY_PROVIDER env overrides default xAI > Claude > Groq chain
+        # MiniMax is primary when MAX_PRIMARY_PROVIDER=minimax and key is present
+        if self.max_primary_provider == "minimax" and self.minimax_key:
+            self.primary_model = AIModel.MINIMAX
+        elif self.max_primary_provider == "claude" and self.anthropic_key:
+            self.primary_model = AIModel.CLAUDE
+        elif self.max_primary_provider == "groq" and self.groq_key:
+            self.primary_model = AIModel.GROQ
+        elif self.xai_key and not self.max_disable_xai:
             self.primary_model = AIModel.GROK
         elif self.anthropic_key:
             self.primary_model = AIModel.CLAUDE
         elif self.groq_key:
             self.primary_model = AIModel.GROQ
+        elif self.minimax_key:
+            self.primary_model = AIModel.MINIMAX
         else:
             self.primary_model = AIModel.OLLAMA
         self.system_prompt = get_system_prompt()
@@ -203,12 +215,15 @@ class AIRouter:
         if self.openai_key: providers.append("OpenAI")
         if self.minimax_key: providers.append("MiniMax")
         providers += ["OpenClaw", "Ollama"]
-        model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama"}
-        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {self.xai_base_url} {self.xai_model}")
+        model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama", AIModel.MINIMAX: "MiniMax"}
+        xai_label = "ON" if self.xai_key and not self.max_disable_xai else ("disabled" if self.max_disable_xai else "no_key")
+        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {xai_label} | disable_xai={self.max_disable_xai}")
 
     def get_available_models(self):
+        # Determine xAI available (key present and not disabled via env)
+        xai_available = bool(self.xai_key) and not self.max_disable_xai
         return [
-            {"id": "grok", "name": "xAI Grok", "available": bool(self.xai_key), "configured": bool(self.xai_key), "primary": self.primary_model == AIModel.GROK, "type": "cloud", "model": self.xai_model, "base_url": self.xai_base_url, "status_source": "env_configured"},
+            {"id": "grok", "name": "xAI Grok", "available": xai_available, "configured": bool(self.xai_key), "disabled": self.max_disable_xai, "disabled_reason": "credits_unavailable" if self.max_disable_xai else None, "primary": self.primary_model == AIModel.GROK, "type": "cloud", "model": self.xai_model, "base_url": self.xai_base_url, "status_source": "env_configured"},
             {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud"},
             {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
             {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
@@ -217,7 +232,7 @@ class AIRouter:
             {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
             {"id": "gpt-4o", "name": "GPT-4o", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
-            {"id": "minimax", "name": "MiniMax M1", "available": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url},
+            {"id": "minimax", "name": "MiniMax", "available": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url, "status_source": "env_configured"},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
             {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "type": "local"},
         ]
@@ -384,18 +399,21 @@ class AIRouter:
         """Build provider chain based on task complexity. Returns list of (provider_type, model_override) tuples.
 
         Routing policy (owner-defined):
+        - MiniMax: PRIMARY when MAX_PRIMARY_PROVIDER=minimax and key is present
+        - xAI Grok: SKIPPED when MAX_DISABLE_XAI=true (credits unavailable)
         - Gemini Flash: ONLY single-word greetings and vision tasks (SIMPLE)
-        - xAI Grok: DEFAULT for all normal conversation (MODERATE)
         - Claude Sonnet: Analysis, quality writing, memory/search (COMPLEX)
         - Claude Opus: Code Mode only (CRITICAL)
         """
         providers_chain = []
 
         if complexity == TaskComplexity.SIMPLE:
-            # SIMPLE: Gemini FREE (greetings only) -> Grok -> Groq -> Sonnet
+            # SIMPLE: MiniMax -> Gemini FREE (greetings only) -> Grok -> Groq -> Sonnet
+            if self.minimax_key:
+                providers_chain.append(("minimax", None))
             if self.gemini_key:
                 providers_chain.append(("gemini", None))
-            if self.xai_key:
+            if self.xai_key and not self.max_disable_xai:
                 providers_chain.append(("grok", None))
             if self.groq_key:
                 providers_chain.append(("groq", None))
@@ -403,8 +421,10 @@ class AIRouter:
                 providers_chain.append(("claude", "claude-sonnet-4-6"))
 
         elif complexity == TaskComplexity.MODERATE:
-            # MODERATE: xAI Grok (DEFAULT) -> Groq -> Sonnet -> Gemini (last resort)
-            if self.xai_key:
+            # MODERATE: MiniMax PRIMARY -> Grok (if allowed) -> Groq -> Sonnet -> Gemini (last resort)
+            if self.minimax_key:
+                providers_chain.append(("minimax", None))
+            if self.xai_key and not self.max_disable_xai:
                 providers_chain.append(("grok", None))
             if self.groq_key:
                 providers_chain.append(("groq", None))
@@ -414,10 +434,12 @@ class AIRouter:
                 providers_chain.append(("gemini", None))
 
         elif complexity == TaskComplexity.COMPLEX:
-            # COMPLEX: Claude Sonnet -> Grok -> GPT-4o -> Groq
+            # COMPLEX: MiniMax PRIMARY -> Claude Sonnet -> Grok (if allowed) -> GPT-4o -> Groq
+            if self.minimax_key:
+                providers_chain.append(("minimax", None))
             if self.anthropic_key:
                 providers_chain.append(("claude", "claude-sonnet-4-6"))
-            if self.xai_key:
+            if self.xai_key and not self.max_disable_xai:
                 providers_chain.append(("grok", None))
             if self.openai_key:
                 providers_chain.append(("openai", "gpt-4o"))
