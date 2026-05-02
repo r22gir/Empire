@@ -20,6 +20,7 @@ XAI_BRAIN_MODEL = os.getenv("XAI_BRAIN_MODEL") or os.getenv("XAI_MODEL", "grok-4
 
 # Empire-wide provider policy — read once at import time
 MAX_DISABLE_XAI = os.getenv("MAX_DISABLE_XAI", "").lower() in ("true", "1", "yes")
+MAX_DISABLE_OLLAMA = os.getenv("MAX_DISABLE_OLLAMA", "").lower() in ("true", "1", "yes")
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
 MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
 MINIMAX_MODEL = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
@@ -37,40 +38,43 @@ class LocalLLM:
         self._minimax_url = f"{MINIMAX_BASE_URL}/chat/completions"
         self._minimax_model = MINIMAX_MODEL
         self._max_disable_xai = MAX_DISABLE_XAI
+        self._max_disable_ollama = MAX_DISABLE_OLLAMA
         self._ollama_available: bool | None = None
 
     async def generate(self, prompt: str, system: str = "", max_tokens: int = 500) -> str:
-        """Generate a response — Ollama -> MiniMax (if policy allows) -> stop.
+        """Generate a response — MiniMax primary -> Ollama (if allowed) -> xAI (if allowed) -> stop.
 
+        Ollama is skipped when MAX_DISABLE_OLLAMA=true.
         xAI Grok is only used when MAX_DISABLE_XAI is false and all other
         providers have failed. This function never calls xAI when disabled.
         """
-        # Try Ollama first (always allowed — local, no external dependency)
-        for model in [self.model, self.fallback]:
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        f"{self.base_url}/api/generate",
-                        json={
-                            "model": model,
-                            "prompt": prompt,
-                            "system": system,
-                            "stream": False,
-                            "options": {"num_predict": max_tokens},
-                        },
-                        timeout=15.0,
-                    )
-                    response.raise_for_status()
-                    return response.json()["response"]
-            except Exception:
-                continue
-
-        # MiniMax cloud — primary when configured and xAI is disabled
+        # MiniMax cloud — primary when configured
         if self._minimax_key:
             try:
                 return await self._minimax_generate(prompt, system, max_tokens)
             except Exception as e:
                 logger.warning(f"MiniMax brain fallback failed: {e}")
+
+        # Ollama local — only when not disabled by MAX_DISABLE_OLLAMA policy
+        if not self._max_disable_ollama:
+            for model in [self.model, self.fallback]:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            f"{self.base_url}/api/generate",
+                            json={
+                                "model": model,
+                                "prompt": prompt,
+                                "system": system,
+                                "stream": False,
+                                "options": {"num_predict": max_tokens},
+                            },
+                            timeout=15.0,
+                        )
+                        response.raise_for_status()
+                        return response.json()["response"]
+                except Exception:
+                    continue
 
         # xAI Grok — ONLY when not disabled by MAX_DISABLE_XAI policy
         if self._xai_key and not self._max_disable_xai:
@@ -80,8 +84,8 @@ class LocalLLM:
                 logger.warning(f"Grok brain fallback failed: {e}")
 
         # No provider succeeded — return empty, do NOT fake a response
-        logger.error("[brain] All LLM providers failed: Ollama unavailable, MiniMax key=%s, xAI disabled=%s",
-                     bool(self._minimax_key), self._max_disable_xai)
+        logger.error("[brain] All LLM providers failed: Ollama disabled=%s, MiniMax key=%s, xAI disabled=%s",
+                     self._max_disable_ollama, bool(self._minimax_key), self._max_disable_xai)
         return ""
 
     async def _minimax_generate(self, prompt: str, system: str = "", max_tokens: int = 500) -> str:
@@ -137,20 +141,21 @@ class LocalLLM:
             return resp.json()["choices"][0]["message"]["content"]
 
     async def is_available(self) -> bool:
-        """Check if any LLM is available (Ollama, or MiniMax if xAI is disabled)."""
-        # Check Ollama first
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{self.base_url}/api/tags", timeout=3.0)
-                models = [m.get("name", "") for m in resp.json().get("models", [])]
-                if any(self.model in m or self.fallback in m for m in models):
-                    return True
-        except Exception:
-            pass
-
-        # MiniMax is available if key is set (regardless of xAI disable — it's an alternative)
+        """Check if any LLM is available (MiniMax, or Ollama if not disabled, or xAI if not disabled)."""
+        # MiniMax is available if key is set
         if self._minimax_key:
             return True
+
+        # Ollama only when not disabled by policy
+        if not self._max_disable_ollama:
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(f"{self.base_url}/api/tags", timeout=3.0)
+                    models = [m.get("name", "") for m in resp.json().get("models", [])]
+                    if any(self.model in m or self.fallback in m for m in models):
+                        return True
+            except Exception:
+                pass
 
         # xAI Grok only counts when not disabled
         if self._xai_key and not self._max_disable_xai:

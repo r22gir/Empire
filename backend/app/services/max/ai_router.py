@@ -187,6 +187,7 @@ class AIRouter:
         # Empire-wide provider policy — set via MAX_PRIMARY_PROVIDER and MAX_DISABLE_XAI env vars
         self.max_primary_provider = os.getenv("MAX_PRIMARY_PROVIDER", "").lower()
         self.max_disable_xai = os.getenv("MAX_DISABLE_XAI", "").lower() in ("true", "1", "yes")
+        self.max_disable_ollama = os.getenv("MAX_DISABLE_OLLAMA", "").lower() in ("true", "1", "yes")
         # Priority: MAX_PRIMARY_PROVIDER env overrides default xAI > Claude > Groq chain
         # MiniMax is primary when MAX_PRIMARY_PROVIDER=minimax and key is present
         if self.max_primary_provider == "minimax" and self.minimax_key:
@@ -214,10 +215,13 @@ class AIRouter:
         if self.gemini_key: providers.append("Gemini")
         if self.openai_key: providers.append("OpenAI")
         if self.minimax_key: providers.append("MiniMax")
-        providers += ["OpenClaw", "Ollama"]
+        providers += ["OpenClaw"]
+        if not self.max_disable_ollama:
+            providers.append("Ollama")
         model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama", AIModel.MINIMAX: "MiniMax"}
         xai_label = "ON" if self.xai_key and not self.max_disable_xai else ("disabled" if self.max_disable_xai else "no_key")
-        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {xai_label} | disable_xai={self.max_disable_xai}")
+        ollama_label = "disabled" if self.max_disable_ollama else "enabled"
+        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {xai_label} | Ollama: {ollama_label}")
 
     def get_available_models(self):
         # Determine xAI available (key present and not disabled via env)
@@ -234,7 +238,7 @@ class AIRouter:
             {"id": "gpt-4o", "name": "GPT-4o", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
             {"id": "minimax", "name": "MiniMax", "available": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url, "status_source": "env_configured"},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
-            {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "type": "local"},
+            {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "disabled": self.max_disable_ollama, "disabled_reason": "founder_disabled_due_to_stall_suspected" if self.max_disable_ollama else None, "type": "local"},
         ]
 
     AUDIO_EXTS = {'.m4a', '.mp3', '.wav', '.ogg', '.flac', '.wma', '.aac'}
