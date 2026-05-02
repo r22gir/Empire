@@ -2808,6 +2808,17 @@ async def max_status():
         for item in skills
         if item.get("status") == "implemented_callable"
     ]
+
+    # Provider policy info for transparency
+    provider_policy = {
+        "primary": str(ai_router.primary_model.value) if ai_router.primary_model else "unknown",
+        "minimax_configured": bool(ai_router.minimax_key),
+        "xai_configured": bool(ai_router.xai_key),
+        "xai_disabled": ai_router.max_disable_xai,
+        "xai_disabled_reason": "credits_unavailable" if ai_router.max_disable_xai else None,
+        "max_primary_provider_env": ai_router.max_primary_provider or None,
+    }
+
     return {
         "status": "ok",
         "current_commit": _git_commit(),
@@ -2826,6 +2837,7 @@ async def max_status():
         "hermes_memory_bridge": get_hermes_memory_status(),
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
+        "provider_policy": provider_policy,
     }
 
 
