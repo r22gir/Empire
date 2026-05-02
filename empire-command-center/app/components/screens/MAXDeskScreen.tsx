@@ -30,12 +30,43 @@ function saveLayout(state: LayoutState) {
   try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(state)); } catch { /* ignore */ }
 }
 
+function stripThinkTags(text: string): string {
+  // Strip think tags that may span streaming chunk boundaries
+  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/&lt;think&gt;[\s\S]*?&lt;\/think&gt;/gi, '');
+}
+
+function isToolJson(str: string): boolean {
+  try {
+    const parsed = JSON.parse(str);
+    return typeof parsed === 'object' && parsed !== null && !str.startsWith('{');
+  } catch {
+    return false;
+  }
+}
+
+// Ensure MAXDeskScreen only shows clean response text
+function cleanResponse(content: string): string {
+  const stripped = stripThinkTags(content);
+  // If cleaned response is mostly whitespace/think content, show nothing (wait for done)
+  if (stripped.trim().length === 0) return '';
+  return stripped;
+}
+
 function loadStoredMessages(): Message[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const msgs = JSON.parse(raw);
-      if (Array.isArray(msgs) && msgs.length > 0) return msgs;
+      if (Array.isArray(msgs) && msgs.length > 0) {
+        // Reset messages with old provider labels from broken sessions
+        const cleaned = msgs.map((m: Message) => ({
+          ...m,
+          content: stripThinkTags(m.content),
+          // Clear stale model labels from pre-v10 sessions
+          model: m.model === 'openclaw' || m.model === 'ollama' || m.model === 'OpenClaw' ? undefined : m.model,
+        }));
+        return cleaned;
+      }
     }
   } catch { /* ignore */ }
   return [];
@@ -237,8 +268,12 @@ export function MAXDeskScreen() {
   }, []);
 
   const handleClearChat = useCallback(() => {
+    // Clear localStorage so no stale Ollama/OpenClaw messages persist
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch { /* ignore */ }
     updateMessages([WELCOME]);
-  }, [updateMessages]);
+  }, [updateMessage]);
 
   const handleToggleCodeMode = useCallback((enable: boolean) => {
     if (enable) {

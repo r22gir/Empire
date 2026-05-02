@@ -108,7 +108,7 @@ export function EmpireTopBar({
           />
           <EmpireStatusPill
             status="success"
-            label="OpenClaw"
+            label="OpenClaw tool"
             size="sm"
           />
         </div>
