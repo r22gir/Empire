@@ -1492,6 +1492,24 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             timeout=45.0,
         )
 
+        # ── Phase 5 harness truth fix: reflect actual model used ──────────────
+        # Harness metadata is set BEFORE routing; overwrite with truth from actual response
+        _effective_model = response.model_used or ""
+        if "minimax" in _effective_model.lower():
+            _harness_meta["harness_provider"] = "minimax"
+            _harness_meta["harness_model"] = _effective_model
+            _harness_meta["harness_policy_summary"] = "MiniMax-M2.7 selected via MAX_PRIMARY_PROVIDER=minimax; xAI disabled; Ollama disabled"
+        elif "claude" in _effective_model.lower():
+            _harness_meta["harness_provider"] = "anthropic"
+            _harness_meta["harness_model"] = _effective_model
+        elif "grok" in _effective_model.lower():
+            _harness_meta["harness_provider"] = "xai"
+            _harness_meta["harness_model"] = _effective_model
+        elif "groq" in _effective_model.lower():
+            _harness_meta["harness_provider"] = "groq"
+            _harness_meta["harness_model"] = _effective_model
+        # ── End Phase 5 ─────────────────────────────────────────────────────
+
         # Resolve access control user
         _ac_context = None
         if access_controller:
@@ -2366,6 +2384,22 @@ async def chat_stream(request: ChatRequest):
 
             # Merge harness metadata into response metadata
             _stream_base_metadata = _response_metadata(request.channel)
+            # ── Streaming harness truth fix: reflect actual model used ──────────
+            _stream_effective = model_used or ""
+            if "minimax" in _stream_effective.lower():
+                _stream_harness_meta["harness_provider"] = "minimax"
+                _stream_harness_meta["harness_model"] = _stream_effective
+                _stream_harness_meta["harness_policy_summary"] = "MiniMax-M2.7 selected via MAX_PRIMARY_PROVIDER=minimax; xAI disabled; Ollama disabled"
+            elif "claude" in _stream_effective.lower():
+                _stream_harness_meta["harness_provider"] = "anthropic"
+                _stream_harness_meta["harness_model"] = _stream_effective
+            elif "grok" in _stream_effective.lower():
+                _stream_harness_meta["harness_provider"] = "xai"
+                _stream_harness_meta["harness_model"] = _stream_effective
+            elif "groq" in _stream_effective.lower():
+                _stream_harness_meta["harness_provider"] = "groq"
+                _stream_harness_meta["harness_model"] = _stream_effective
+            # ── End Streaming harness truth fix ─────────────────────────────────
             _stream_base_metadata["harness"] = _stream_harness_meta
             _done_data = {
                 'type': 'done',
