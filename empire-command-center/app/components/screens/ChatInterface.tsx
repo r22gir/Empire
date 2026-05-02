@@ -6,8 +6,7 @@ import {
   ChevronDown, X, AlertTriangle, CheckCircle, Clock, Shield
 } from 'lucide-react';
 import { Message } from '../../lib/types';
-
-const API = 'http://localhost:8000/api/v1';
+import { API } from '../../lib/api';
 
 // Tool registry with safety metadata
 interface ToolMeta {

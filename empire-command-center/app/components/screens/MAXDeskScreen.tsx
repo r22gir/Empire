@@ -261,7 +261,11 @@ export function MAXDeskScreen() {
   }, []);
 
   return (
-    <EmpireShell commitHash="ce1695d">
+    <EmpireShell
+      commitHash="ce1695d"
+      backendUrl={API}
+      backendLabel="Backend 8010"
+    >
       {/* Layout Controls Bar */}
       <div style={{
         display: 'flex',

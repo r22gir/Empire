@@ -6,9 +6,11 @@ import { EmpireTopBar } from './EmpireTopBar';
 interface EmpireShellProps {
   children: React.ReactNode;
   commitHash?: string;
+  backendUrl?: string;
+  backendLabel?: string;
 }
 
-export function EmpireShell({ children, commitHash = 'f535d53' }: EmpireShellProps) {
+export function EmpireShell({ children, commitHash = 'f535d53', backendUrl, backendLabel }: EmpireShellProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   return (
@@ -25,6 +27,8 @@ export function EmpireShell({ children, commitHash = 'f535d53' }: EmpireShellPro
       <EmpireTopBar
         commitHash={commitHash}
         sidebarWidth={sidebarCollapsed ? 64 : 280}
+        backendUrl={backendUrl}
+        backendLabel={backendLabel}
       />
       <main style={{
         marginLeft: sidebarCollapsed ? '64px' : '280px',

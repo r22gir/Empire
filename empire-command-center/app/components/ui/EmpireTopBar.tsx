@@ -14,9 +14,17 @@ interface EmpireTopBarProps {
   commitHash?: string;
   onMenuToggle?: () => void;
   sidebarWidth?: number;
+  backendUrl?: string;
+  backendLabel?: string;
 }
 
-export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: EmpireTopBarProps) {
+export function EmpireTopBar({
+  commitHash,
+  onMenuToggle,
+  sidebarWidth = 280,
+  backendUrl,
+  backendLabel = 'Backend 8000',
+}: EmpireTopBarProps) {
   const [backendOk, setBackendOk] = useState(false);
   const [frontendOk, setFrontendOk] = useState(false);
 
@@ -24,7 +32,8 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
     // Health polling
     const checkHealth = async () => {
       try {
-        const r = await fetch('http://localhost:8000/health');
+        const healthTarget = backendUrl ? `${backendUrl.replace(/\/api\/v1$/, '')}/health` : 'http://localhost:8000/health';
+        const r = await fetch(healthTarget);
         setBackendOk(r.ok);
       } catch {
         setBackendOk(false);
@@ -40,7 +49,7 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
     checkHealth();
     const interval = setInterval(checkHealth, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [backendUrl]);
 
   const shortHash = commitHash ? commitHash.slice(0, 7) : 'f535d53';
 
@@ -81,7 +90,7 @@ export function EmpireTopBar({ commitHash, onMenuToggle, sidebarWidth = 280 }: E
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', marginLeft: 'var(--space-2)' }}>
           <EmpireStatusPill
             status={backendOk ? 'success' : 'error'}
-            label={backendOk ? 'Backend 8000' : 'Backend DOWN'}
+            label={backendOk ? backendLabel : 'Backend DOWN'}
             size="sm"
             pulse={backendOk}
           />
