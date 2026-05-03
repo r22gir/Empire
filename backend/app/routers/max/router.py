@@ -18,7 +18,7 @@ from pathlib import Path
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.ai_harness_profiles import registry as harness_registry, TASK_TYPE_MAX_CHAT
-from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
+from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.evaluation_service import evaluation_service
@@ -2167,7 +2167,7 @@ async def chat_stream(request: ChatRequest):
         try:
             async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                 model_used = m_used
-                safe_chunk = sanitize_output(chunk)
+                safe_chunk = sanitize_output_streaming(chunk)
                 full_response += safe_chunk
                 yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
@@ -2265,7 +2265,7 @@ async def chat_stream(request: ChatRequest):
                 followup_text = ""
                 async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                     model_used = m_used
-                    safe_chunk = sanitize_output(chunk)
+                    safe_chunk = sanitize_output_streaming(chunk)
                     followup_text += safe_chunk
                     yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 

@@ -200,10 +200,68 @@ def strip_reasoning_tags(text: str) -> str:
 
 
 def sanitize_output(text: str) -> str:
-    """Sanitize output: remove API keys and strip reasoning tags."""
+    """Sanitize output: remove API keys, strip reasoning tags, trim edges.
+    Called on final response only — not on intermediate streaming chunks.
+    """
     text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
     text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
     text = strip_reasoning_tags(text)
+    return text.strip()
+
+
+def sanitize_output_streaming(text: str) -> str:
+    """Streaming-safe sanitization: removes reasoning/API content but preserves
+    all internal whitespace so chunks concatenate without word-merging.
+    Called on each intermediate streaming chunk.
+    """
+    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = strip_reasoning_tags(text)
+    # Remove internal monologue patterns that leak into streaming output
+    # These are phrases the model uses to plan its response internally
+    text = _strip_internal_monologue(text)
+    return text
+
+
+INTERNAL_MONOLOGUE_PATTERNS = [
+    # Pure monologue lines (line-start anchored, short content only)
+    r"^[ \t]*(?:I should|I need to|Let me|I'm going to|I'll|I will|I might|I would)\s+.{{1,19}}$",
+    r"^[ \t]*(?:I'm MAX,|I am MAX,|I'm the founder|As MAX,)\s+.{{1,30}}$",
+    r"^[ \t]*(?:My role is to|My job is to|My purpose is to)\s+.{{1,30}}$",
+    r"^[ \t]*(?:I'll respond|Respond directly|I should respond)\s+.{{1,30}}$",
+    r"^[ \t]*(?:I think|I believe|I guess|I suppose)\b.{{1,40}}$",
+    r"^[ \t]*(?:Let me think|Let me check|Let me look)\b.{{1,30}}$",
+    r"^[ \t]*(?:So |And |But |Then |Now |Next |Also |Finally |Finally,)\s*$",
+    r"^[ \t]*(?:Based on|According to)\s*$",
+]
+
+
+# Patterns for inline monologue — when monologue and response are in the same chunk
+# We detect the boundary by looking for a natural break after the monologue
+INLINE_MONOLOGUE_PATTERNS = [
+    # Strip monologue observation up to the actual response (before </think>\n\n)
+    r"The (?:founder|user|person|customer) is [^\n]*\n\n",
+    r"I should respond [^\n]*\n\n",
+    r"I need to [^\n]*\n\n",
+    r"Let me [^\n]*\n\n",
+    r"I'll respond [^\n]*\n\n",
+    r"Simple \w+ from [^\n]*\n\n",
+]
+
+
+def _strip_internal_monologue(text: str) -> str:
+    """Strip internal monologue patterns that leak into streaming output.
+    Handles both:
+    - Pure monologue lines (MULTILINE, line-start anchored)
+    - Inline monologue before actual response content (before </think> marker)
+    """
+    for pattern in INTERNAL_MONOLOGUE_PATTERNS:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE)
+    # Handle inline monologue: strip everything from observation up to </think> marker
+    for pattern in INLINE_MONOLOGUE_PATTERNS:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
+    # Collapse multiple spaces to single space within remaining text
+    text = re.sub(r" {2,}", " ", text)
     return text
 
 

@@ -136,6 +136,7 @@ def should_run_runtime_truth_check(message: str | None) -> bool:
 
 # Casual "what's new" signals — bounded summary, NOT full runtime truth check
 WHATS_NEW_SIGNALS = [
+    # Core "what's new" patterns
     "what's new",
     "whats new",
     "what is new",
@@ -149,6 +150,30 @@ WHATS_NEW_SIGNALS = [
     "recent updates",
     "recent changes",
     "status summary",
+    # Extended recent activity patterns
+    "latest updates",
+    "most recent updates",
+    "recent activity",
+    "recent work",
+    "latest changes",
+    "latest status",
+    "what happened",
+    "what happened recently",
+    "any new updates",
+    "any updates",
+    "new updates",
+    "updates in empire",
+    "empirebox updates",
+    "empire updates",
+    "ecosystem updates",
+    # Time-window recent activity (extracts time_window_hours if passed)
+    "last 24 hours",
+    "last 48 hours",
+    "since yesterday",
+    "this morning",
+    "last week",
+    "recent commits",
+    "latest commits",
 ]
 
 
