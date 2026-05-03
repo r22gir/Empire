@@ -218,7 +218,9 @@ export function MAXDeskScreen() {
         history: historySlice,
         channel: 'dashboard',
       };
-      if (activeDesk) body.desk = activeDesk;
+      // Only send desk if it's a real non-default value
+      // Sending 'codedesk' (the UI default) bypasses the whats_new_summary shortcut
+      if (activeDesk && activeDesk !== 'codedesk') body.desk = activeDesk;
       if (codeMode) body.code_mode = true;
       if (imageFile) body.image_filename = imageFile.name;
 
