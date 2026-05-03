@@ -44,6 +44,36 @@ function isToolJson(str: string): boolean {
   }
 }
 
+// Sanitize message content: strip think tags and any raw tool-result JSON
+// that leaked into content during old broken sessions
+function sanitizeContent(content: string): string {
+  if (!content) return content;
+  let cleaned = stripThinkTags(content);
+  // Strip standalone tool-result JSON objects (e.g. {"tool":"foo","success":true,...})
+  // These appear as leaked internal artifacts from old backend responses
+  cleaned = cleaned.replace(/\{[\s]*"tool"\s*:\s*"[^"]+"[\s\S]*?\}(?=\s*$|\s*(?:[A-Z]|$))/gm, '');
+  // Strip HTML artifact tags (except safe markdown-compatible ones)
+  cleaned = cleaned.replace(/<[^>]+>/g, (match) => {
+    const allowed = ['<br/>', '<br>', '<strong>', '</strong>', '<em>', '</em>', '<code>', '</code>', '<pre>', '</pre>', '<ul>', '</ul>', '<ol>', '</ol>', '<li>', '</li>', '<p>', '</p>', '<span>', '</span>'];
+    return allowed.includes(match.toLowerCase()) ? match : '';
+  });
+  // Collapse excessive blank lines
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  return cleaned.trim();
+}
+
+// Map raw model IDs to clean user-facing labels
+function displayModel(model?: string): string | undefined {
+  if (!model) return undefined;
+  const m = model.toLowerCase();
+  if (m === 'openclaw' || m === 'ollama' || m === 'openai' || m === 'grok' || m === 'claude') return undefined;
+  if (m === 'whats-new-summary') return 'MAX Summary';
+  if (m.includes('minimax')) return 'MiniMax';
+  if (m === 'empire-runtime-truth-check') return 'MAX Runtime Check';
+  if (m === 'empire-runtime-truth-check') return undefined; // don't show for inspect-only checks
+  return model;
+}
+
 // Ensure MAXDeskScreen only shows clean response text
 function cleanResponse(content: string): string {
   const stripped = stripThinkTags(content);
@@ -58,12 +88,11 @@ function loadStoredMessages(): Message[] {
     if (raw) {
       const msgs = JSON.parse(raw);
       if (Array.isArray(msgs) && msgs.length > 0) {
-        // Reset messages with old provider labels from broken sessions
+        // Reset messages with old provider labels and raw artifact content
         const cleaned = msgs.map((m: Message) => ({
           ...m,
-          content: stripThinkTags(m.content),
-          // Clear stale model labels from pre-v10 sessions
-          model: m.model === 'openclaw' || m.model === 'ollama' || m.model === 'OpenClaw' ? undefined : m.model,
+          content: sanitizeContent(m.content),
+          model: displayModel(m.model),
         }));
         return cleaned;
       }
@@ -233,9 +262,9 @@ export function MAXDeskScreen() {
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: accumulated || 'No response.',
+        content: sanitizeContent(accumulated) || 'No response.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        model: modelUsed,
+        model: displayModel(modelUsed),
       };
       updateMessages([...newMsgs, assistantMsg]);
       setStreamingContent('');
@@ -244,7 +273,8 @@ export function MAXDeskScreen() {
         if (accumulated) {
           updateMessages(prev => [...prev, {
             id: (Date.now() + 1).toString(),
-            role: 'assistant', content: accumulated + '\n\n*[Stopped]*',
+            role: 'assistant',
+            content: sanitizeContent(accumulated) + '\n\n*[Stopped]*',
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           }]);
         }
@@ -268,12 +298,15 @@ export function MAXDeskScreen() {
   }, []);
 
   const handleClearChat = useCallback(() => {
-    // Clear localStorage so no stale Ollama/OpenClaw messages persist
+    // Clear localStorage and sessionStorage so no stale messages persist
     try {
       localStorage.removeItem(STORAGE_KEY);
     } catch { /* ignore */ }
-    updateMessages([WELCOME]);
-  }, [updateMessages]);
+    try {
+      sessionStorage.clear();
+    } catch { /* ignore */ }
+    setMessages([WELCOME]);
+  }, []);
 
   const handleToggleCodeMode = useCallback((enable: boolean) => {
     if (enable) {
