@@ -21,7 +21,7 @@ from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_m
 from app.services.ai_harness_profiles import registry as harness_registry, TASK_TYPE_MAX_CHAT
 from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
-from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions, get_minimax_tool_definitions
 from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
@@ -1531,9 +1531,10 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if request.channel == "telegram" and enriched_prompt:
             enriched_prompt += TELEGRAM_DIRECTIVE
 
-        # Pass tool definitions to xAI when image is attached — enables native function_call
-        # via /v1/responses endpoint (function_calls returned alongside or instead of text)
-        _tools = get_xai_tool_definitions() if request.image_filename else None
+        # Pass tool definitions for function calling — enables native tool_calls on all providers
+        # (xAI uses /v1/responses for tools; MiniMax/Groq/etc. use /v1/chat/completions with tools param)
+        # Use MiniMax-compatible tool definitions (broader set than xAI-only)
+        _tools = get_minimax_tool_definitions()
 
         # ── Phase 2A: Metadata-only harness profile selection ──────────────────
         # Determine task type conservatively. No live provider routing is changed.
@@ -2121,6 +2122,9 @@ async def chat_stream(request: ChatRequest):
     if request.channel == "telegram" and enriched_prompt:
         enriched_prompt += TELEGRAM_DIRECTIVE
 
+    # Pass tool definitions for function calling — enables native tool_calls on MiniMax
+    _tools = get_minimax_tool_definitions()
+
     # Conversation tracking ID
     conv_id = request.conversation_id or str(uuid.uuid4())
     conversation_tracker.add_message(conv_id, "user", request.message)
@@ -2189,7 +2193,7 @@ async def chat_stream(request: ChatRequest):
         model_used = "unknown"
         full_response = ""
         try:
-            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
+            async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or "", tools=_tools):
                 model_used = m_used
                 safe_chunk = sanitize_output_streaming(chunk)
                 full_response += safe_chunk
@@ -2287,7 +2291,7 @@ async def chat_stream(request: ChatRequest):
 
                 yield f"data: {json.dumps({'type': 'text', 'content': chr(10) + chr(10)})}\n\n"
                 followup_text = ""
-                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
+                async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or "", tools=_tools):
                     model_used = m_used
                     safe_chunk = sanitize_output_streaming(chunk)
                     followup_text += safe_chunk

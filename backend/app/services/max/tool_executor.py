@@ -239,6 +239,122 @@ def get_xai_tool_definitions() -> list:
     return XAI_TOOL_DEFINITIONS
 
 
+# ── MiniMax / OpenAI-compatible Tool Definitions ────────────────────────
+# These are passed to MiniMax (and other OpenAI-compatible providers) to enable
+# native function calling. Built from TOOL_REGISTRY introspection.
+
+# Manually curated set of key tools for MAX quote/email operations
+MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "create_quick_quote",
+            "description": "Create a quick workroom quote with 3 design proposal options (A/B/C). Saves JSON + generates PDF. Required: customer_name. Optional: rooms, design_proposals, location, lining. Use this when the founder asks to create a quote or estimate.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "customer_name": {"type": "string", "description": "Customer name"},
+                    "customer_email": {"type": "string", "description": "Customer email"},
+                    "customer_phone": {"type": "string", "description": "Customer phone"},
+                    "project_name": {"type": "string", "description": "Project name"},
+                    "rooms": {"type": "array", "description": "Array of room objects with windows and upholstery items"},
+                    "design_proposals": {"type": "array", "description": "Array of design proposal options (A, B, C)"},
+                    "location": {"type": "string", "description": "Location for tax calculation (e.g., MD, DC)"},
+                    "lining": {"type": "string", "description": "Lining type: standard, blackout, interlining"},
+                    "photos": {"type": "array", "description": "Photo references for the quote"},
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_quotes",
+            "description": "Search quotes by customer name, project name, or status. Returns list of matching quotes with quote_number, customer_name, project_name, status, total, and created_at.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (customer name, project name, or quote number)"},
+                    "status": {"type": "string", "description": "Filter by status: draft, sent, accepted, rejected"},
+                    "limit": {"type": "integer", "description": "Maximum number of results (default 10)"},
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_quote",
+            "description": "Get full details of a specific quote by ID or quote number.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quote_id": {"type": "string", "description": "Quote ID (e.g., 'a2ff0944') or quote_number (e.g., 'EST-2026-125')"},
+                },
+                "required": ["quote_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_proposal",
+            "description": "Select a design proposal (A/B/C) on a quote, finalizing the total and converting quote from 'proposal' status to 'draft'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "quote_id": {"type": "string", "description": "Quote ID"},
+                    "option": {"type": "string", "description": "Proposal option: A, B, or C"},
+                },
+                "required": ["quote_id", "option"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_contacts",
+            "description": "Search contacts/customers by name, email, or phone.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results (default 10)"},
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_system_stats",
+            "description": "Get Empire system statistics: uptime, token usage, active services, desk status, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_services_health",
+            "description": "Check health status of all Empire services: database, OpenClaw, AI providers, Telegram, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+]
+
+
+def get_minimax_tool_definitions() -> list:
+    """Return tool definitions suitable for MiniMax and other OpenAI-compatible providers.
+    Includes the core tools for MAX operations (quotes, contacts, system status)."""
+    return MAX_CORE_TOOL_DEFINITIONS
+
+
 # ── Tool Dispatcher ────────────────────────────────────────────────
 
 TOOL_REGISTRY = {}

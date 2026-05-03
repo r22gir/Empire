@@ -519,9 +519,9 @@ class AIRouter:
 
             elif provider_type == "minimax":
                 logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
-                resp = await self._minimax_chat(full_messages, image_path=image_path)
-                self._log_chat_cost(full_messages, resp, self.minimax_model, feature, business, tenant_id)
-                return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=fallback)
+                resp = await self._minimax_chat(full_messages, image_path=image_path, tools=tools)
+                self._log_chat_cost(full_messages, resp.content, self.minimax_model, feature, business, tenant_id)
+                return resp
 
         except Exception as e:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
@@ -692,7 +692,7 @@ class AIRouter:
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
-    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "") -> AsyncGenerator[tuple[str, str], None]:
+    async def chat_stream(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AsyncGenerator[tuple[str, str], None]:
         # Per-desk model routing
         if model is None and desk and desk in DESK_MODEL_ROUTING:
             use_model = DESK_MODEL_ROUTING[desk]
@@ -783,7 +783,7 @@ class AIRouter:
                     elif provider_type == "minimax":
                         logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
                         collected = []
-                        async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path):
+                        async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path, tools=tools):
                             collected.append(chunk)
                             yield chunk, self.minimax_model
                         self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
@@ -836,7 +836,7 @@ class AIRouter:
             try:
                 logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model})")
                 collected = []
-                async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path):
+                async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path, tools=tools):
                     collected.append(chunk)
                     yield chunk, self.minimax_model
                 self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
@@ -1220,46 +1220,112 @@ class AIRouter:
 
     # ── MiniMax ───────────────────────────────────────────────────────
 
-    async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
-        """Chat via MiniMax M1 API."""
+    async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None, tools: Optional[list] = None) -> AIResponse:
+        """Chat via MiniMax M1 API. Supports function calling when tools are provided."""
         api_messages = self._prepare_openai_messages(messages, image_path)
+        payload = {"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096}
+        if tools:
+            payload["tools"] = tools
         async with httpx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(
                 f"{self.minimax_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096}
+                json=payload
             )
             if resp.status_code != 200:
                 raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
-            return resp.json()["choices"][0]["message"]["content"]
+            data = resp.json()
+            content = data["choices"][0]["message"].get("content", "")
+            # Parse tool_calls if present (MiniMax native function calling)
+            function_calls = None
+            raw_tool_calls = data["choices"][0]["message"].get("tool_calls", [])
+            if raw_tool_calls:
+                function_calls = []
+                for tc in raw_tool_calls:
+                    fc = tc.get("function", {})
+                    function_calls.append({
+                        "id": tc.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": fc.get("name", ""),
+                            "arguments": fc.get("arguments", "{}"),
+                        }
+                    })
+            return AIResponse(content=content, model_used=f"minimax-{self.minimax_model}", function_calls=function_calls)
 
-    async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
-        """Stream chat via MiniMax M1 API."""
+    async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None, tools: Optional[list] = None) -> AsyncGenerator[str, None]:
+        """Stream chat via MiniMax M1 API. Supports function calling when tools are provided.
+        Yields text chunks and tool call blocks (via fenced code markers) that parse_tool_blocks can extract."""
         api_messages = self._prepare_openai_messages(messages, image_path)
+        payload = {"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096, "stream": True}
+        if tools:
+            payload["tools"] = tools
         async with httpx.AsyncClient(timeout=45.0) as client:
             async with client.stream(
                 "POST",
                 f"{self.minimax_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
-                json={"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096, "stream": True}
+                json=payload
             ) as response:
                 if response.status_code != 200:
                     error_body = await response.aread()
                     raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
+                # Collect tool calls for later yielding as a tool block
+                tool_calls_found: list[dict] = []
+                current_fc: dict | None = None
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
                     data_str = line[6:].strip()
                     if data_str == "[DONE]":
-                        return
+                        # Finalize any pending tool call
+                        if current_fc is not None and current_fc.get("name") and current_fc.get("arguments"):
+                            try:
+                                args_obj = json.loads(current_fc["arguments"])
+                                tool_calls_found.append({"name": current_fc["name"], "arguments": args_obj})
+                            except json.JSONDecodeError:
+                                tool_calls_found.append({"name": current_fc["name"], "arguments": current_fc["arguments"]})
+                            current_fc = None
+                        break
                     try:
                         data = json.loads(data_str)
                     except json.JSONDecodeError:
                         continue
                     delta = data.get("choices", [{}])[0].get("delta", {})
+                    # Handle content chunks
                     text = delta.get("content", "")
                     if text:
                         yield text
+                    # Handle function_call chunks (MiniMax streams tool_calls as delta events)
+                    for fc_delta in delta.get("tool_calls", []):
+                        fc_func = fc_delta.get("function", {})
+                        name = fc_func.get("name", "")
+                        args_str = fc_func.get("arguments", "")
+                        if name:
+                            # New function name — finalize any pending call first
+                            if current_fc is not None and current_fc.get("name") and current_fc.get("arguments"):
+                                try:
+                                    args_obj = json.loads(current_fc["arguments"])
+                                    tool_calls_found.append({"name": current_fc["name"], "arguments": args_obj})
+                                except json.JSONDecodeError:
+                                    tool_calls_found.append({"name": current_fc["name"], "arguments": current_fc["arguments"]})
+                            current_fc = {"name": name, "arguments": ""}
+                        if current_fc is not None and args_str:
+                            current_fc["arguments"] += args_str
+                # Finalize any pending tool call when the stream ends.
+                # MiniMax does not always send "data: [DONE]" — we finalize on stream exhaustion.
+                if current_fc is not None and current_fc.get("name") and current_fc.get("arguments"):
+                    try:
+                        args_obj = json.loads(current_fc["arguments"])
+                        tool_calls_found.append({"name": current_fc["name"], "arguments": args_obj})
+                    except json.JSONDecodeError:
+                        tool_calls_found.append({"name": current_fc["name"], "arguments": current_fc["arguments"]})
+                # If tool calls were found, yield them as a fenced tool block for parse_tool_blocks
+                if tool_calls_found:
+                    # Yield each tool call as a separate tool block
+                    for fc in tool_calls_found:
+                        tool_block = json.dumps({"tool": fc["name"], "params": fc["arguments"]})
+                        yield f"\n```tool\n{tool_block}\n```\n"
 
     # ── OpenClaw ──────────────────────────────────────────────────────
 
