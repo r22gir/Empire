@@ -2283,10 +2283,12 @@ async def chat_stream(request: ChatRequest):
             # Save assistant response to unified cross-channel store
             try:
                 from app.services.max.unified_message_store import unified_store
+                # Normalize ToolResult objects before accessing .get()
+                _normalized_results = [r.to_dict() if hasattr(r, 'to_dict') else r for r in tool_results_list]
                 unified_store.add_message(
                     conv_id, request.channel or "web", "assistant", strip_tool_blocks(full_response),
                     model=model_used,
-                    tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in tool_results_list] if tool_results_list else None,
+                    tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in _normalized_results] if tool_results_list else None,
                     metadata=_ledger_metadata(request.channel, {"source": "max_stream_response"}),
                 )
             except Exception as _ums_err:
@@ -2322,8 +2324,9 @@ async def chat_stream(request: ChatRequest):
             # 1. Grounding verification for web-sourced responses
             _grounding_events = []
             if tool_results_list:
-                # Convert result objects to dicts for verify_web_response
-                _tool_dicts = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
+                # Normalize ToolResult objects to dicts once for all quality checks
+                _norm = [r.to_dict() if hasattr(r, 'to_dict') else r for r in tool_results_list]
+                _tool_dicts = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in _norm]
                 _has_web = any(td["tool"] in ("web_search", "web_read") for td in _tool_dicts)
                 if _has_web:
                     try:
@@ -2392,7 +2395,7 @@ async def chat_stream(request: ChatRequest):
             _quality_badge = None
             try:
                 from app.services.max.quality_gate import validate_response as _qg_validate, get_quality_badge as _qg_badge
-                _tool_dicts_for_qg = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
+                _tool_dicts_for_qg = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in _norm]
                 _qg_result = _qg_validate(full_response, category=request.desk or "general", tool_results=_tool_dicts_for_qg, model_used=model_used)
                 _quality_badge = _qg_badge(_qg_result)
                 _log_quality_metric(_qg_result, model_used, request.channel or "web")

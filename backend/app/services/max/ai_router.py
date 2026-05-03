@@ -412,7 +412,7 @@ class AIRouter:
         providers_chain = []
 
         if complexity == TaskComplexity.SIMPLE:
-            # SIMPLE: MiniMax -> Gemini FREE (greetings only) -> Grok -> Groq -> Sonnet
+            # SIMPLE: MiniMax PRIMARY -> Gemini (greetings only) -> Grok (if enabled) -> Groq -> Sonnet
             if self.minimax_key:
                 providers_chain.append(("minimax", None))
             if self.gemini_key:
@@ -425,7 +425,7 @@ class AIRouter:
                 providers_chain.append(("claude", "claude-sonnet-4-6"))
 
         elif complexity == TaskComplexity.MODERATE:
-            # MODERATE: MiniMax PRIMARY -> Grok (if allowed) -> Groq -> Sonnet -> Gemini (last resort)
+            # MODERATE: MiniMax PRIMARY -> Grok (if enabled) -> Groq -> Sonnet -> Gemini
             if self.minimax_key:
                 providers_chain.append(("minimax", None))
             if self.xai_key and not self.max_disable_xai:
@@ -438,7 +438,7 @@ class AIRouter:
                 providers_chain.append(("gemini", None))
 
         elif complexity == TaskComplexity.COMPLEX:
-            # COMPLEX: MiniMax PRIMARY -> Claude Sonnet -> Grok (if allowed) -> GPT-4o -> Groq
+            # COMPLEX: MiniMax PRIMARY -> Claude Sonnet -> Grok (if enabled) -> GPT-4o -> Groq
             if self.minimax_key:
                 providers_chain.append(("minimax", None))
             if self.anthropic_key:
@@ -778,6 +778,15 @@ class AIRouter:
                             collected.append(chunk)
                             yield chunk, oai_model
                         self._log_chat_cost(full_messages, "".join(collected), oai_model, feature, business, tenant_id)
+                        return
+
+                    elif provider_type == "minimax":
+                        logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
+                        collected = []
+                        async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path):
+                            collected.append(chunk)
+                            yield chunk, self.minimax_model
+                        self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
                         return
 
                 except Exception as e:
