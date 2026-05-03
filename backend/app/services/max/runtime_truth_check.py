@@ -51,16 +51,6 @@ INTENT_SIGNALS = [
     "is it fixed",
     "is max broken",
     "is max fixed",
-    "what's new",
-    "whats new",
-    "what is new",
-    "what changed",
-    "what's new today",
-    "whats new today",
-    "what changed today",
-    "what is new today",
-    "today's status",
-    "todays status",
 ]
 
 
@@ -74,6 +64,77 @@ def _normalize_intent_text(message: str | None) -> str:
 def should_run_runtime_truth_check(message: str | None) -> bool:
     text = _normalize_intent_text(message)
     return any(signal in text for signal in INTENT_SIGNALS)
+
+
+# Casual "what's new" signals — bounded summary, NOT full runtime truth check
+WHATS_NEW_SIGNALS = [
+    "what's new",
+    "whats new",
+    "what is new",
+    "what changed",
+    "what's new today",
+    "whats new today",
+    "what changed today",
+    "what is new today",
+    "today's status",
+    "todays status",
+    "recent updates",
+    "recent changes",
+    "status summary",
+]
+
+
+def should_run_whats_new_summary(message: str | None) -> bool:
+    text = _normalize_intent_text(message)
+    return any(signal in text for signal in WHATS_NEW_SIGNALS)
+
+
+def _git_recent_commits(count: int = 5) -> list[dict[str, str]]:
+    """Get recent git commits — used for bounded what's new summary."""
+    try:
+        proc = subprocess.run(
+            ["git", "log", f"--oneline", f"-{count}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if proc.returncode != 0:
+            return []
+        commits = []
+        for line in proc.stdout.strip().splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2:
+                commits.append({"hash": parts[0], "message": parts[1]})
+        return commits
+    except Exception:
+        return []
+
+
+def _git_recent_commits_v10() -> list[dict[str, str]]:
+    """Get recent commits from the v10 repo."""
+    v10_path = "/home/rg/empire-repo-v10"
+    try:
+        proc = subprocess.run(
+            ["git", "log", f"--oneline", f"-{5}"],
+            capture_output=True, text=True, timeout=5,
+            cwd=v10_path,
+        )
+        if proc.returncode != 0:
+            return []
+        commits = []
+        for line in proc.stdout.strip().splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2:
+                commits.append({"hash": parts[0], "message": parts[1]})
+        return commits
+    except Exception:
+        return []
+
+
+def _port_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
@@ -362,4 +423,99 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         lines.append(f"- Stale/broken findings: {', '.join(stale)}")
     else:
         lines.append("- Stale/broken findings: none detected by this inspect-only check")
+    return "\n".join(lines)
+
+
+def run_whats_new_summary() -> dict[str, Any]:
+    """Bounded what's new summary — only safe, non-invasive checks.
+
+    Limits: recent git commits (live + v10), port status for key services,
+    optional OpenClaw task count. No shell sprawl, no DB table scans.
+    """
+    live_commits = _git_recent_commits(5)
+    v10_commits = _git_recent_commits_v10()
+    commit = _git_commit()
+
+    # Key port checks (bounded set — no broad scanning)
+    ports = {
+        "live_backend_8000": _port_open("127.0.0.1", 8000),
+        "live_frontend_3005": _port_open("127.0.0.1", 3005),
+        "v10_backend_8010": _port_open("127.0.0.1", 8010),
+        "v10_frontend_3010": _port_open("127.0.0.1", 3010),
+    }
+
+    # Optional OpenClaw task stats (only if OpenClaw is up)
+    openclaw_stats = None
+    try:
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get("http://127.0.0.1:7878/openclaw/tasks/stats", follow_redirects=True)
+            if resp.status_code == 200:
+                data = resp.json()
+                openclaw_stats = {
+                    "total": data.get("total", 0),
+                    "completed": data.get("completed", 0),
+                    "pending": data.get("pending", 0),
+                }
+    except Exception:
+        openclaw_stats = None  # Don't fail on OpenClaw being down
+
+    return {
+        "skill": "whats-new-summary",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "live_commit": commit,
+        "live_recent_commits": live_commits,
+        "v10_recent_commits": v10_commits,
+        "ports": ports,
+        "openclaw_stats": openclaw_stats,
+    }
+
+
+def format_whats_new_summary(result: dict[str, Any]) -> str:
+    """Format what's new summary into a concise user-facing update."""
+    commit = result.get("live_commit", {})
+    live_commits = result.get("live_recent_commits", []) or []
+    v10_commits = result.get("v10_recent_commits", []) or []
+    ports = result.get("ports", {})
+
+    lines = ["Here's what's new:\n"]
+
+    # Recent live commits (show top 3)
+    if live_commits:
+        lines.append("- Recent live changes:")
+        for c in live_commits[:3]:
+            lines.append(f"  • {c.get('hash', '?')} — {c.get('message', '')}")
+    else:
+        lines.append("- Live: no recent commits found")
+
+    # Recent v10 commits (show top 2)
+    if v10_commits:
+        lines.append("- v10 test lane recent changes:")
+        for c in v10_commits[:2]:
+            lines.append(f"  • {c.get('hash', '?')} — {c.get('message', '')}")
+
+    # Service status
+    b8000 = ports.get("live_backend_8000")
+    f3005 = ports.get("live_frontend_3005")
+    b8010 = ports.get("v10_backend_8010")
+    f3010 = ports.get("v10_frontend_3010")
+    status_parts = []
+    if b8000:
+        status_parts.append("Live backend (8000) is up")
+    else:
+        status_parts.append("Live backend (8000) is down")
+    if f3005:
+        status_parts.append("Live frontend (3005) is up")
+    if b8010:
+        status_parts.append("v10 backend (8010) is up")
+    if f3010:
+        status_parts.append("v10 frontend (3010) is up")
+    lines.append(f"- Status: {', '.join(status_parts)}")
+
+    # OpenClaw stats if available
+    stats = result.get("openclaw_stats")
+    if stats:
+        lines.append(
+            f"- OpenClaw: {stats.get('total', 0)} tasks ({stats.get('completed', 0)} done, {stats.get('pending', 0)} pending)"
+        )
+
     return "\n".join(lines)

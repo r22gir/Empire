@@ -8,6 +8,24 @@ import json as _json
 import logging
 import asyncio
 import tempfile
+
+
+def tool_result_to_dict(result):
+    """Normalize a tool result to a dict, handling ToolResult objects, dicts, and None."""
+    if result is None:
+        return {}
+    if isinstance(result, dict):
+        return result
+    if hasattr(result, "to_dict"):
+        return result.to_dict()
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    return {
+        "tool": getattr(result, "tool", None),
+        "success": getattr(result, "success", None),
+        "result": getattr(result, "result", None),
+        "error": getattr(result, "error", None),
+    }
 import subprocess
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -872,7 +890,8 @@ class TelegramBot:
 
         if access_controller and tool_results:
             for tr in tool_results:
-                err = tr.get("error") or ""
+                tr_dict = tool_result_to_dict(tr)
+                err = tr_dict.get("error") or ""
                 if err.startswith("__ACCESS_PENDING__"):
                     parts = err.split("__", 4)
                     if len(parts) >= 5:
@@ -886,8 +905,9 @@ class TelegramBot:
 
         sent_files = set()
         for tr in (tool_results or []):
-            if tr.get("success") and tr.get("result"):
-                res = tr["result"]
+            tr_dict = tool_result_to_dict(tr)
+            if tr_dict.get("success") and tr_dict.get("result"):
+                res = tr_dict["result"]
                 file_path = res.get("file_path") or res.get("pdf_path")
                 if file_path and os.path.exists(file_path) and file_path not in sent_files:
                     caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
@@ -1150,8 +1170,9 @@ class TelegramBot:
 
             sent_files = set()
             for tr in tool_results:
-                if tr.get("success") and tr.get("result"):
-                    res = tr["result"]
+                tr_dict = tool_result_to_dict(tr)
+                if tr_dict.get("success") and tr_dict.get("result"):
+                    res = tr_dict["result"]
                     file_path = res.get("file_path") or res.get("pdf_path")
                     if file_path and os.path.exists(file_path) and file_path not in sent_files:
                         doc_caption = res.get("caption", f"📎 {os.path.basename(file_path)}")

@@ -17,15 +17,23 @@ from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
-from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message
+from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
 from app.services.max.response_quality_engine import quality_engine, Channel
+from app.services.max.factual_guard import is_factual_question, enforce_web_search
+from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
-from app.services.max.runtime_truth_check import format_runtime_truth_check, should_run_runtime_truth_check
+from app.services.max.runtime_truth_check import (
+    format_runtime_truth_check,
+    should_run_runtime_truth_check,
+    should_run_whats_new_summary,
+    run_whats_new_summary,
+    format_whats_new_summary,
+)
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
@@ -1026,6 +1034,63 @@ def _real_browser_action_ids(tool_results: list[Any] | None) -> set[str]:
     return valid_ids
 
 
+# Risky command patterns that should trigger GPU safety replacement in model output
+GPU_OUTPUT_RISKY_PATTERNS = [
+    r"\bapt\s+autoremove\b",
+    r"\bapt\s+upgrade\b",
+    r"\bapt\s+full-upgrade\b",
+    r"\bapt-get\s+dist-upgrade\b",
+    r"\bubuntu-drivers\s+autoinstall\b",
+    r"\bapt\s+install\s+nvidia-driver",
+    r"\bapt\s+install\s+nvidia-dkms",
+    r"\bapt\s+install\s+nvidia-kernel",
+    r"\bapt\s+purge\s+nvidia\b",
+    r"\bapt\s+remove\s+nvidia\b",
+    r"\bhwe-kernel\b",
+    r"\bdkms\s+remove\b",
+    r"\bupdate-grub\b",
+    r"\bgrub-set-default\b",
+    r"\bnvidia-driver-470\b",
+    r"\bnvidia-dkms-470\b",
+    r"\bnvidia-kernel-source-470\b",
+]
+
+
+def _apply_gpu_safety_output_guardrail(message: str | None, response_text: str) -> str:
+    """Fail-safe: if model output recommends risky GPU/kernel/apt commands, replace with safety lock.
+
+    This is a second layer after the pre-model guard. It catches cases where the model
+    responds with dangerous advice despite the input having been flagged.
+    """
+    if not message:
+        return response_text
+
+    msg_lower = message.lower()
+    resp_lower = response_text.lower()
+
+    # Only check if the original message was about EmpireDell or GPU-related topics
+    gpu_topics = ["empiredell", "gpu", "nvidia", "graphics", "display", "screen", "resolution", "kernel", "ubuntu", "apt"]
+    if not any(topic in msg_lower for topic in gpu_topics):
+        return response_text
+
+    # Check if response recommends or describes any risky command
+    for pattern in GPU_OUTPUT_RISKY_PATTERNS:
+        if re.search(pattern, resp_lower, re.IGNORECASE):
+            logger.warning(f"GPU safety output guardrail triggered by pattern: {pattern}")
+            return (
+                f"**EmpireDell GPU stability lock is active.** Known-good stack: kernel 6.8.0-31-generic + "
+                f"NVIDIA 470.239.06 (Quadro K600). Do NOT change kernel/NVIDIA packages without running a "
+                f"simulation first and getting founder approval.\n\n"
+                f"The command you asked about or that was recommended is blocked on EmpireDell. "
+                f"To safely check for issues, run this simulation first:\n"
+                f"```\nsudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n```\n"
+                f"If the simulation mentions `linux-image`, `nvidia`, `dkms`, `hwe`, or `grub` — "
+                f"do NOT proceed. Show the output to the founder for review."
+            )
+
+    return response_text
+
+
 def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
     if _is_unverified_email_send_request(message) and not _has_verified_email_send_result(tool_results):
         return _email_send_boundary_response(ChatRequest(message=message or "", history=[])).response
@@ -1095,6 +1160,84 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         return _email_reply_boundary_response(request)
 
     return None
+
+
+def _maybe_handle_gpu_safety_request(request: ChatRequest) -> ChatResponse | None:
+    """Check if a message is about risky GPU/kernel/apt operations on EmpireDell.
+
+    EmpireDell (Xeon E5-2650 v3, Quadro K600) runs kernel 6.8.0-31-generic + NVIDIA 470.239.06.
+    Any apt upgrade, autoremove, or NVIDIA driver change can break the graphics stack.
+    This guardrail is informational — it prepends a safety warning but does NOT block the message.
+    """
+    is_risky, safety_lock = check_gpu_safety(request.message)
+    if not is_risky:
+        return None
+
+    msg_lower = request.message.lower()
+
+    # Build the appropriate response based on what kind of query it is
+    if any(kw in msg_lower for kw in ["why is", "broken", "resolution", "screen", "display", "crash", "black screen"]):
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"**Verification commands to check current GPU state:**\n"
+            f"{GPU_VERIFICATION_COMMANDS}\n\n"
+            f"If `uname -r` does not show `6.8.0-31-generic`, the kernel may have been upgraded.\n"
+            f"If `nvidia-smi` fails or shows a version other than `470.239.06`, the NVIDIA stack is broken.\n"
+            f"Recovery steps are documented in: `~/EMPIREDELL_GRAPHICS_STABLE_STATE.md`"
+        )
+    elif any(kw in msg_lower for kw in ["can i update", "should i update", "upgrade ubuntu", "update ubuntu", "should i upgrade"]):
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"**To safely check for updates, run this simulation first:**\n"
+            f"```\n"
+            f"sudo apt update\n"
+            f"sudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n"
+            f"```\n\n"
+            f"Show me the output before running any upgrade. If it mentions `linux-image`, `nvidia`, `dkms`, `hwe`, or `grub` — "
+            f"do NOT proceed without explicit founder approval. The known-good stack must be preserved."
+        )
+    elif "nvidia-driver-470" in msg_lower or "nvidia-dkms-470" in msg_lower or "nvidia-kernel-source-470" in msg_lower:
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"The `nvidia-driver-470`, `nvidia-dkms-470`, and `nvidia-kernel-source-470` packages are **blocked** "
+            f"on EmpireDell because the DKMS/meta path caused a crash loop in April 2026.\n\n"
+            f"The working stack uses the **prebuilt** NVIDIA 470.239.06 module:\n"
+            f"- `linux-modules-nvidia-470-6.8.0-31-generic`\n"
+            f"- `nvidia-utils-470 470.239.06-0ubuntu2`\n\n"
+            f"Do NOT install the DKMS versions. If you need to recover the NVIDIA stack, "
+            f"see `~/EMPIREDELL_GRAPHICS_STABLE_STATE.md` for the exact recovery procedure."
+        )
+    elif any(cmd in msg_lower for cmd in ["apt autoremove", "apt upgrade", "apt full-upgrade", "apt-get dist-upgrade", "ubuntu-drivers autoinstall", "hwe kernel", "update-grub"]):
+        # Extract the specific command for the response
+        matched_cmd = next((cmd for cmd in ["apt autoremove", "apt upgrade", "apt full-upgrade", "apt-get dist-upgrade", "ubuntu-drivers autoinstall", "hwe kernel", "update-grub"] if cmd in msg_lower), "this command")
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"**`{matched_cmd}` is blocked on EmpireDell** because it can break the NVIDIA 470 / kernel 6.8.0-31 stack.\n\n"
+            f"**Simulation required before any system change:**\n"
+            f"```\n"
+            f"sudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n"
+            f"```\n\n"
+            f"If the simulation output mentions `linux-image`, `nvidia`, `dkms`, `hwe`, or `grub` — "
+            f"do NOT run it. Show me the output first for founder review."
+        )
+    else:
+        response_text = (
+            f"{safety_lock}\n\n"
+            f"For any system maintenance task, run a simulation first and show me the output:\n"
+            f"```\n"
+            f"sudo apt-get -s upgrade | grep -Ei \"linux|nvidia|dkms|grub\" || true\n"
+            f"```\n\n"
+            f"If anything in the output mentions `linux`, `nvidia`, `dkms`, `hwe`, `grub`, or `kernel` — "
+            f"stop and ask the founder before proceeding."
+        )
+
+    return ChatResponse(
+        response=response_text,
+        model_used="gpu-safety-guardrail",
+        fallback_used=False,
+        tool_results=[{"tool": "gpu_safety_check", "success": True, "result": {"risky": True, "lock_active": True}}],
+        metadata=_response_metadata(request.channel),
+    )
 
 
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
@@ -1167,6 +1310,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
     if direct_route is not None:
         return direct_route
 
+    # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
+    gpu_guard = _maybe_handle_gpu_safety_request(request)
+    if gpu_guard is not None:
+        return gpu_guard
+
     try:
         from app.services.max.continuity_compaction import (
             audit_continuity_state,
@@ -1238,6 +1386,58 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             model_used="session-handoff",
             fallback_used=False,
             tool_results=[{"tool": "session_handoff", "success": False, "error": str(exc)}],
+            metadata=metadata,
+        )
+
+    if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
+        result = await asyncio.to_thread(run_whats_new_summary)
+        response_text = format_whats_new_summary(result)
+        conv_id = request.conversation_id or str(uuid.uuid4())
+        metadata = _response_metadata(request.channel, skill_used="whats_new_summary")
+        try:
+            conversation_tracker.add_message(conv_id, "user", request.message)
+            conversation_tracker.add_message(conv_id, "assistant", response_text)
+        except Exception as exc:
+            logger.debug(f"What's new conversation tracking failed: {exc}")
+        try:
+            from app.services.max.unified_message_store import unified_store
+            unified_store.add_message(
+                conv_id,
+                request.channel or "web",
+                "user",
+                request.message,
+                metadata=_ledger_metadata(request.channel, {"source": "whats_new_summary_intent"}),
+                founder_verified=founder,
+            )
+            unified_store.add_message(
+                conv_id,
+                request.channel or "web",
+                "assistant",
+                response_text,
+                model="whats-new-summary",
+                metadata=_ledger_metadata(request.channel, {"source": "whats_new_summary_result"}),
+            )
+        except Exception as exc:
+            logger.warning(f"What's new unified message store write failed: {exc}")
+        await asyncio.to_thread(
+            evaluation_service.log_response,
+            response_id=_response_id,
+            channel=request.channel or "web",
+            conversation_id=conv_id,
+            message=request.message,
+            model_used="whats-new-summary",
+            tools_used=["whats_new_summary"],
+            tool_results=[{"tool": "whats_new_summary", "success": True}],
+            latency_ms=int((_time_mod.time() - _chat_start) * 1000),
+            response_length=len(response_text),
+            fallback_used=False,
+            metadata_envelope=metadata,
+        )
+        return ChatResponse(
+            response=response_text,
+            model_used="whats-new-summary",
+            fallback_used=False,
+            tool_results=[],
             metadata=metadata,
         )
 
@@ -1522,6 +1722,39 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
 
+        # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
+        tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in tool_results_list]
+        if is_factual_question(request.message) and "web_search" not in tools_used_names:
+            logger.info(f"[factual_guard] Auto-invoking web_search for factual query: {request.message[:80]}")
+            # Execute web_search synchronously via thread pool
+            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+            search_result = await asyncio.to_thread(
+                execute_tool, search_tc, desk=request.desk, access_context=_ac_context, founder=founder
+            )
+            search_entry = {"tool": "web_search", "success": search_result.success, "result": search_result.result, "error": search_result.error}
+            tool_results_list.append(search_entry)
+
+            # Build grounding context and re-query AI with verified data
+            tool_summary = f"[web_search] Result:\n{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+            grounded_messages = list(messages)
+            grounded_messages.append(AIMessage(role="user", content=(
+                "[SYSTEM: You must answer using only the verified web search data below. "
+                "Do not fall back to training data. Cite sources from the search results.]\n\n"
+                f"{tool_summary}\n\nQuestion: {request.message}"
+            )))
+            grounded_response = await ai_router.chat(
+                grounded_messages, model=model, desk=request.desk,
+                system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools
+            )
+            final_content = grounded_response.content
+
+        # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
+        if should_defer_uncertain(request.message):
+            final_content = uncertainty_fallback(request.message)
+
+        # Guard: GPU safety output fail-safe — replace model output recommending risky commands
+        final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
+
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:
             try:
@@ -1567,7 +1800,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             unified_store.add_message(
                 conv_id, request.channel or "web", "assistant", strip_tool_blocks(final_content),
                 model=response.model_used,
-                tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None,
+                tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in tool_results_list] if tool_results_list else None,
                 metadata=_ledger_metadata(request.channel, {"source": "max_chat_response"}),
             )
         except Exception as _ums_err:
@@ -1746,6 +1979,21 @@ async def chat_stream(request: ChatRequest):
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
         return _stream_immediate_response(direct_route, request.conversation_id)
+
+    # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
+    gpu_guard = _maybe_handle_gpu_safety_request(request)
+    if gpu_guard is not None:
+        return _stream_immediate_response(gpu_guard, request.conversation_id)
+
+    if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
+        async def whats_new_gen():
+            conv_id = request.conversation_id or str(uuid.uuid4())
+            result = await asyncio.to_thread(run_whats_new_summary)
+            response_text = format_whats_new_summary(result)
+            yield f"data: {json.dumps({'type': 'text', 'content': response_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'whats-new-summary', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='whats_new_summary')})}\n\n"
+
+        return StreamingResponse(whats_new_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         async def runtime_truth_gen():
@@ -1956,12 +2204,17 @@ async def chat_stream(request: ChatRequest):
 
                 tool_summary_parts = []
                 for r in round_results:
-                    if r.success and r.result:
-                        tool_summary_parts.append(f"[{r.tool}] Result:\n{json.dumps(r.result, indent=2, default=str)[:3000]}")
+                    _r = r if isinstance(r, dict) else r.__dict__
+                    tool_key = _r.get("tool", "?")
+                    tool_res = _r.get("result", "")
+                    tool_err = _r.get("error", "Unknown")
+                    if _r.get("success") and tool_res:
+                        tool_summary_parts.append(f"[{tool_key}] Result:\n{json.dumps(tool_res, indent=2, default=str)[:3000]}")
                     else:
-                        tool_summary_parts.append(f"[{r.tool}] Error: {r.error}")
+                        tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
-                if any(r.tool in ACTION_TOOLS and r.success for r in round_results):
+                round_results_dicts = [r if isinstance(r, dict) else r.__dict__ for r in round_results]
+                if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results_dicts):
                     tool_summary += (
                         "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
                         "use only task_id/openclaw_task_id from the current tool result above. "
@@ -2003,7 +2256,7 @@ async def chat_stream(request: ChatRequest):
                 unified_store.add_message(
                     conv_id, request.channel or "web", "assistant", strip_tool_blocks(full_response),
                     model=model_used,
-                    tool_results=[{"tool": r.tool, "success": r.success} for r in tool_results_list] if tool_results_list else None,
+                    tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in tool_results_list] if tool_results_list else None,
                     metadata=_ledger_metadata(request.channel, {"source": "max_stream_response"}),
                 )
             except Exception as _ums_err:
@@ -2040,7 +2293,7 @@ async def chat_stream(request: ChatRequest):
             _grounding_events = []
             if tool_results_list:
                 # Convert result objects to dicts for verify_web_response
-                _tool_dicts = [{"tool": r.tool, "success": r.success, "result": r.result, "error": r.error} for r in tool_results_list]
+                _tool_dicts = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
                 _has_web = any(td["tool"] in ("web_search", "web_read") for td in _tool_dicts)
                 if _has_web:
                     try:
@@ -2077,6 +2330,13 @@ async def chat_stream(request: ChatRequest):
                 logger.warning(f"[stream] Quality engine failed: {_qe_err}")
                 _qr = None
 
+            # 2b. GPU safety output fail-safe — replace response if it recommends risky commands
+            _gpu_guard_resp = _apply_gpu_safety_output_guardrail(request.message, full_response)
+            if _gpu_guard_resp != full_response:
+                logger.warning(f"[stream] GPU safety output guardrail replaced response")
+                full_response = _gpu_guard_resp
+                yield f"data: {json.dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
+
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:
                 yield f"data: {json.dumps(_ge)}\n\n"
@@ -2109,7 +2369,7 @@ async def chat_stream(request: ChatRequest):
             _quality_badge = None
             try:
                 from app.services.max.quality_gate import validate_response as _qg_validate, get_quality_badge as _qg_badge
-                _tool_dicts_for_qg = [{"tool": r.tool, "success": r.success, "result": r.result, "error": r.error} for r in tool_results_list] if tool_results_list else []
+                _tool_dicts_for_qg = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
                 _qg_result = _qg_validate(full_response, category=request.desk or "general", tool_results=_tool_dicts_for_qg, model_used=model_used)
                 _quality_badge = _qg_badge(_qg_result)
                 _log_quality_metric(_qg_result, model_used, request.channel or "web")

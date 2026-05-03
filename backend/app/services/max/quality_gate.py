@@ -5,10 +5,28 @@ Runs checks on every AI response before delivery to ensure accuracy and reliabil
 import logging
 import re
 import time
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass, field, asdict
+from typing import Any, Optional
 
 logger = logging.getLogger("max.quality_gate")
+
+
+def tool_result_to_dict(result: Any) -> dict:
+    """Normalize a tool result to a dict, handling ToolResult objects, dicts, and None."""
+    if result is None:
+        return {}
+    if isinstance(result, dict):
+        return result
+    if hasattr(result, "to_dict"):
+        return result.to_dict()
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    return {
+        "tool": getattr(result, "tool", None),
+        "success": getattr(result, "success", None),
+        "result": getattr(result, "result", None),
+        "error": getattr(result, "error", None),
+    }
 
 # Confidence levels
 VERIFIED = "verified"       # Checked against DB
@@ -53,7 +71,7 @@ def validate_response(
         "submit_desk_task", "send_sms", "send_telegram",
     }
     if not is_action and tool_results:
-        tools_used = {tr.get("tool", "") for tr in tool_results}
+        tools_used = {tool_result_to_dict(tr).get("tool", "") for tr in tool_results}
         if tools_used & ACTION_TOOLS:
             is_action = True
 
@@ -83,7 +101,7 @@ def validate_response(
         if any("tool_error" in w for w in result.warnings):
             result.level = MODERATE
             result.disclaimer = ""  # Tool error details are already in the response
-        elif tool_results and all(tr.get("success") for tr in tool_results):
+        elif tool_results and all(tool_result_to_dict(tr).get("success") for tr in tool_results):
             result.level = VERIFIED
         else:
             result.level = HIGH
@@ -98,7 +116,7 @@ def validate_response(
             result.level = MODERATE
         elif any("uncertainty" in w for w in result.warnings):
             result.level = LOW if len([w for w in result.warnings if "uncertainty" in w]) >= 2 else MODERATE
-        elif tool_results and all(tr.get("success") for tr in tool_results):
+        elif tool_results and all(tool_result_to_dict(tr).get("success") for tr in tool_results):
             result.level = VERIFIED
         elif tool_results:
             result.level = HIGH
@@ -110,9 +128,10 @@ def _check_tool_results(result: QualityResult, tool_results: list):
     """Check if any tool calls failed."""
     result.checks_performed.append("tool_verification")
     for tr in tool_results:
-        if not tr.get("success"):
-            tool_name = tr.get("tool", "unknown")
-            error = tr.get("error", "unknown error")
+        tr_dict = tool_result_to_dict(tr)
+        if not tr_dict.get("success"):
+            tool_name = tr_dict.get("tool", "unknown")
+            error = tr_dict.get("error", "unknown error")
             # Skip access pending errors (those are expected flow)
             if "__ACCESS_PENDING__" in str(error):
                 continue
@@ -151,7 +170,7 @@ def _check_entity_references(result: QualityResult, response: str, tool_results:
     invoice_refs = re.findall(r'INV-\d{4,}', response, re.IGNORECASE)
 
     # Check if these were verified by tool calls
-    tool_data = " ".join(str(tr.get("result", "")) for tr in tool_results)
+    tool_data = " ".join(str(tool_result_to_dict(tr).get("result", "")) for tr in tool_results)
     for ref in quote_refs + invoice_refs:
         if ref not in tool_data and ref.upper() not in tool_data.upper():
             result.warnings.append(f"unverified_entity:{ref}")
