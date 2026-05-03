@@ -1246,17 +1246,38 @@ async def get_quote_intake_photos(quote_id: str):
     return {"quote_id": quote_id, "intake_project_id": intake_project_id, "photos": photos, "count": len(photos)}
 
 
-@router.get("/{quote_id}")
-async def get_quote(quote_id: str):
-    """Get a single quote by ID. Tries SQL first, falls back to JSON."""
+@router.get("/{quote_id_or_number}")
+async def get_quote(quote_id_or_number: str):
+    """Get a single quote by ID or quote number. Tries SQL first, falls back to JSON.
+    Accepts either UUID (b780c838) or quote_number (EST-2026-134)."""
+    # Fast path: try UUID direct lookup
+    uuid_file = os.path.join(QUOTES_DIR, f"{quote_id_or_number}.json")
+    if os.path.exists(uuid_file):
+        with open(uuid_file) as f:
+            return json.load(f)
+
+    # Try SQL fallback (quote_number lookup via quotes_v2)
     try:
         from app.services.quote_service import get_quote as get_quote_sql
-        result = get_quote_sql(quote_id)
+        result = get_quote_sql(quote_id_or_number)
         if result:
             return result
     except Exception:
         pass
-    return _load_quote(quote_id)
+
+    # Slower fallback: scan JSON store for matching quote_number
+    for fname in os.listdir(QUOTES_DIR):
+        if not fname.endswith(".json") or fname.endswith("_verification.json"):
+            continue
+        try:
+            with open(os.path.join(QUOTES_DIR, fname)) as f:
+                quote = json.load(f)
+            if quote.get("quote_number") == quote_id_or_number:
+                return quote
+        except Exception:
+            continue
+
+    raise HTTPException(404, detail=f"Quote {quote_id_or_number} not found")
 
 
 @router.patch("/{quote_id}")
