@@ -520,3 +520,71 @@ def write_context_from_verified_session(
         "commit_hash": current_commit,
         "surface": surface.get("canonical_channel") or surface.get("surface_key"),
     }
+
+
+# ── HermesMemoryBridge: MVP triad interface ───────────────────────────────────
+
+class HermesMemoryBridge:
+    """
+    MVP implementation of the Hermes memory bridge for the MAX→Hermes→OpenClaw triad.
+    Provides context assembly, draft creation, and approval gate management.
+    """
+
+    def __init__(self):
+        self._db_path = Path.home() / "empire-repo-v10" / "backend" / "data" / "empire.db"
+
+    async def assemble_context(
+        self,
+        task_type: str,
+        entity_type: str,
+        client_id: Optional[str] = None,
+        desk: Optional[str] = None,
+    ) -> dict:
+        """Assemble context for a task. Returns context dict with id and metadata."""
+        import uuid
+        context_id = str(uuid.uuid4())[:8]
+        return {
+            "context_id": context_id,
+            "task_type": task_type,
+            "entity_type": entity_type,
+            "client_id": client_id,
+            "desk": desk,
+            "assembled_at": datetime.now(timezone.utc).isoformat(),
+            "truth_hierarchy": TRUTH_HIERARCHY,
+        }
+
+    async def create_draft(
+        self,
+        draft_type: str,
+        base_data: Optional[dict] = None,
+    ) -> dict:
+        """Create a draft record. Returns draft dict with id and status."""
+        import uuid
+        draft_id = f"draft_{uuid.uuid4().hex[:12]}"
+        return {
+            "id": draft_id,
+            "type": draft_type,
+            "status": base_data.get("status", "draft") if base_data else "draft",
+            "data": base_data or {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    async def create_approval_gate(
+        self,
+        action: str,
+        draft_id: str,
+        level: str = "L1",
+        timeout_minutes: int = 15,
+    ) -> dict:
+        """Create an approval gate for a draft. Returns gate dict."""
+        import uuid
+        gate_id = f"gate_{uuid.uuid4().hex[:12]}"
+        return {
+            "id": gate_id,
+            "action": action,
+            "draft_id": draft_id,
+            "level": level,
+            "status": "pending",
+            "timeout_minutes": timeout_minutes,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }

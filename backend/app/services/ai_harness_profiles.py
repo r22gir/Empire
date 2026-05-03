@@ -663,6 +663,10 @@ class AIHarnessProfileRegistry:
 
         return "\n".join(lines)
 
+    def build_profile_policy_summary(self, profile_id: str) -> str:
+        """Alias for build_policy_summary for backward compatibility."""
+        return self.build_policy_summary(profile_id)
+
     def build_system_instruction_block(
         self, profile_id: str, task_type: str
     ) -> str:
@@ -764,6 +768,11 @@ def get_recent_routing_decisions(limit: int = 20) -> list[dict]:
 def get_last_routing_decision() -> dict:
     """Return the most recent routing decision dict (metadata-only, not from log)."""
     return dict(_last_routing)
+
+
+def get_profile_service() -> AIHarnessProfileRegistry:
+    """Return the global harness profile registry singleton."""
+    return registry
 
 
 # ── Module-level singleton ─────────────────────────────────────────────────────

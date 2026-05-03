@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from app.services.max.workroom_quote_flow import execute_workroom_quote_flow
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.ai_harness_profiles import registry as harness_registry, TASK_TYPE_MAX_CHAT
@@ -59,6 +60,26 @@ except ImportError:
 logger = logging.getLogger("max.api")
 router = APIRouter(prefix="/max", tags=["MAX AI Assistant"])
 
+class WorkroomQuoteRequest(BaseModel):
+    founder_intent: str
+    client_id: Optional[str] = None
+    photo_ids: Optional[list[str]] = None
+    harness_profile_id: Optional[str] = None
+    emergency_override: bool = False
+
+@router.post("/workroom-quote")
+async def start_workroom_quote(req: WorkroomQuoteRequest):
+    """
+    MVP Triad Endpoint: Proves MAX → Hermes → OpenClaw works.
+    Returns structured response showing all three components coordinated.
+    """
+    return await execute_workroom_quote_flow(
+        founder_intent=req.founder_intent,
+        client_id=req.client_id,
+        photo_ids=req.photo_ids,
+        harness_profile_id=req.harness_profile_id,
+        emergency_override=req.emergency_override
+    )
 
 # ── Conversation windowing ───────────────────────────────────────────
 MAX_CONTEXT_MESSAGES = 10   # Keep last N messages verbatim
@@ -330,6 +351,9 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
+    # Phase 2B opt-in harness routing
+    harness_routing_profile_id: Optional[str] = None
+    emergency_override: bool = False
 
 
 TELEGRAM_DIRECTIVE = (
