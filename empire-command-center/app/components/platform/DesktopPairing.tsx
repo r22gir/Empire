@@ -2,7 +2,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { QrCode, Smartphone, Copy, RefreshCw, Power, PowerOff, Loader2, CheckCircle, XCircle, ExternalLink } from 'lucide-react';
 
-const QR_API = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'}/qr`;
+import { API } from '@/lib/api';
+
+const QR_API = `${API}/qr`;
 
 interface PairingStatus {
   status: 'running' | 'stopped' | 'starting' | 'stopping';

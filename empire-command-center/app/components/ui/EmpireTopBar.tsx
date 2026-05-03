@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, User, GitCommit, Wifi, WifiOff, Activity, Cpu, HardDrive } from 'lucide-react';
 import { EmpireStatusPill } from './EmpireStatusPill';
+import { BACKEND_URL, BACKEND_LABEL } from '@/lib/api';
 
 interface ProviderStatus {
   id: string;
@@ -23,7 +24,7 @@ export function EmpireTopBar({
   onMenuToggle,
   sidebarWidth = 280,
   backendUrl,
-  backendLabel = 'Backend 8000',
+  backendLabel = BACKEND_LABEL,
 }: EmpireTopBarProps) {
   const [backendOk, setBackendOk] = useState(false);
   const [frontendOk, setFrontendOk] = useState(false);
@@ -32,7 +33,7 @@ export function EmpireTopBar({
     // Health polling
     const checkHealth = async () => {
       try {
-        const healthTarget = backendUrl ? `${backendUrl.replace(/\/api\/v1$/, '')}/health` : 'http://localhost:8000/health';
+        const healthTarget = backendUrl ? `${backendUrl.replace(/\/api\/v1$/, '')}/health` : `${BACKEND_URL}/health`;
         const r = await fetch(healthTarget);
         setBackendOk(r.ok);
       } catch {

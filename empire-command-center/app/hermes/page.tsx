@@ -7,8 +7,7 @@ import {
 import { EmpireShell } from '../components/ui/EmpireShell';
 import { EmpireDataPanel } from '../components/ui/EmpireDataPanel';
 import { EmpireStatusPill } from '../components/ui/EmpireStatusPill';
-
-const API = 'http://localhost:8000/api/v1';
+import { API } from '@/lib/api';
 
 interface ValidationCard {
   id: string;

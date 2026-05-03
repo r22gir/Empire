@@ -6,6 +6,7 @@ import {
   UserPlus, ClipboardCheck, Bug, TestTube, Database,
   Layers, MessageSquare, Settings
 } from 'lucide-react';
+import { API } from '@/lib/api';
 
 interface Desk {
   id: string;
@@ -34,8 +35,6 @@ const ALL_DESKS: Desk[] = [
   { id: 'qualitydesk', name: 'Quality Desk', agent: 'Phoenix', icon: <ClipboardCheck size={16} />, description: 'Quality assurance' },
   { id: 'qadesk', name: 'QA Desk', agent: 'Phoenix', icon: <Bug size={16} />, description: 'QA & bug tracking' },
 ];
-
-const API = 'http://localhost:8000/api/v1';
 
 interface DeskSelectorProps {
   activeDesk: string;

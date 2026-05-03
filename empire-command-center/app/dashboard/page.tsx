@@ -13,6 +13,7 @@ import {
   EmpireLeaderboardCard,
   EmpireActionPanel,
 } from '../components/ui';
+import { API } from '@/lib/api';
 
 interface SystemStats {
   uptime?: string;
@@ -40,8 +41,6 @@ interface ActiveTask {
   statusLabel?: string;
   badge?: string;
 }
-
-const API = 'http://localhost:8000/api/v1';
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<SystemStats>({});

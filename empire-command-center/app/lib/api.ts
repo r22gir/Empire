@@ -1,8 +1,10 @@
-export const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+export const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8010/api/v1';
+export const BACKEND_URL = API.replace(/\/api\/v1$/, '');
+export const BACKEND_LABEL = process.env.NEXT_PUBLIC_BACKEND_LABEL || 'Backend 8010';
+export const FRONTEND_LABEL = process.env.NEXT_PUBLIC_FRONTEND_LABEL || 'v10 Frontend 3010';
 
-export const API_BASE = API.replace(/\/api\/v1\/?$/, '');
+/** Backwards compat */
+export const API_BASE = BACKEND_URL;
 
 /** Append cache-bust param to any URL to defeat browser/CDN caching */
 function bustCache(url: string): string {

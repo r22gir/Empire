@@ -20,9 +20,7 @@ const FounderReviewQueue = dynamic(() => import('./FounderReviewQueue'), { ssr: 
 const ConditionGradingWizard = dynamic(() => import('./ConditionGradingWizard'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
 const BundleIntelligencePanel = dynamic(() => import('./BundleIntelligencePanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8010/api/v1';
 
 const AG_API = `${API}/archiveforge`;
 
