@@ -28,7 +28,13 @@ from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.max.factual_guard import is_factual_question, enforce_web_search
 from app.services.max.guardrails import uncertainty_fallback, should_defer_uncertain
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
-from app.services.max.runtime_truth_check import format_runtime_truth_check, should_run_runtime_truth_check
+from app.services.max.runtime_truth_check import (
+    format_runtime_truth_check,
+    should_run_runtime_truth_check,
+    should_run_whats_new_summary,
+    run_whats_new_summary,
+    format_whats_new_summary,
+)
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
@@ -1327,6 +1333,58 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=metadata,
         )
 
+    if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
+        result = await asyncio.to_thread(run_whats_new_summary)
+        response_text = format_whats_new_summary(result)
+        conv_id = request.conversation_id or str(uuid.uuid4())
+        metadata = _response_metadata(request.channel, skill_used="whats_new_summary")
+        try:
+            conversation_tracker.add_message(conv_id, "user", request.message)
+            conversation_tracker.add_message(conv_id, "assistant", response_text)
+        except Exception as exc:
+            logger.debug(f"What's new conversation tracking failed: {exc}")
+        try:
+            from app.services.max.unified_message_store import unified_store
+            unified_store.add_message(
+                conv_id,
+                request.channel or "web",
+                "user",
+                request.message,
+                metadata=_ledger_metadata(request.channel, {"source": "whats_new_summary_intent"}),
+                founder_verified=founder,
+            )
+            unified_store.add_message(
+                conv_id,
+                request.channel or "web",
+                "assistant",
+                response_text,
+                model="whats-new-summary",
+                metadata=_ledger_metadata(request.channel, {"source": "whats_new_summary_result"}),
+            )
+        except Exception as exc:
+            logger.warning(f"What's new unified message store write failed: {exc}")
+        await asyncio.to_thread(
+            evaluation_service.log_response,
+            response_id=_response_id,
+            channel=request.channel or "web",
+            conversation_id=conv_id,
+            message=request.message,
+            model_used="whats-new-summary",
+            tools_used=["whats_new_summary"],
+            tool_results=[{"tool": "whats_new_summary", "success": True}],
+            latency_ms=int((_time_mod.time() - _chat_start) * 1000),
+            response_length=len(response_text),
+            fallback_used=False,
+            metadata_envelope=metadata,
+        )
+        return ChatResponse(
+            response=response_text,
+            model_used="whats-new-summary",
+            fallback_used=False,
+            tool_results=[],
+            metadata=metadata,
+        )
+
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         result = await asyncio.to_thread(execute_tool, _runtime_truth_tool_payload(), founder=founder)
         response_text = (
@@ -1923,6 +1981,16 @@ async def chat_stream(request: ChatRequest):
     gpu_guard = _maybe_handle_gpu_safety_request(request)
     if gpu_guard is not None:
         return _stream_immediate_response(gpu_guard, request.conversation_id)
+
+    if not request.desk and not request.image_filename and should_run_whats_new_summary(request.message):
+        async def whats_new_gen():
+            conv_id = request.conversation_id or str(uuid.uuid4())
+            result = await asyncio.to_thread(run_whats_new_summary)
+            response_text = format_whats_new_summary(result)
+            yield f"data: {json.dumps({'type': 'text', 'content': response_text})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'model_used': 'whats-new-summary', 'conversation_id': conv_id, 'metadata': _response_metadata(request.channel, skill_used='whats_new_summary')})}\n\n"
+
+        return StreamingResponse(whats_new_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         async def runtime_truth_gen():
