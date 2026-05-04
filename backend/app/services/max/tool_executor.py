@@ -376,6 +376,71 @@ MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "v10_read_file",
+            "description": "Read file content within the v10 sandbox (~/.empire-repo-v10). Use to inspect code before proposing changes. Returns up to max_lines lines (default 200, max 500).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative or absolute path within ~/empire-repo-v10"},
+                    "max_lines": {"type": "integer", "description": "Max lines to return (default 200, max 500)"}
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v10_diff_preview",
+            "description": "Show unified diff between current file content and proposed new content. Use before v10_write_file to preview changes. Read-only operation — does not modify files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative or absolute path within ~/empire-repo-v10"},
+                    "new_content": {"type": "string", "description": "The proposed new file content"}
+                },
+                "required": ["path", "new_content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v10_write_file",
+            "description": "Write or append to a file within the v10 sandbox (~/.empire-repo-v10). Default dry_run=True — returns preview without modifying file. Live write requires dry_run=False AND confirm=True. Critical system files are always blocked.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative or absolute path within ~/empire-repo-v10"},
+                    "content": {"type": "string", "description": "File content to write"},
+                    "mode": {"type": "string", "description": "Mode: 'overwrite' (default) or 'append'"},
+                    "dry_run": {"type": "boolean", "description": "If true, returns preview without writing (default: true)"},
+                    "confirm": {"type": "boolean", "description": "Required for live write alongside dry_run=False. Safety guard — must be explicitly set."}
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "v10_execute_command",
+            "description": "Execute a terminal command in the v10 sandbox (~/.empire-repo-v10). Default dry_run=True — shows command without executing. Live execution requires dry_run=False AND confirm=True. Commands filtered: allowlist (git, python, pytest, uvicorn, curl, etc.) + denylist (rm -rf, sudo, pipe-to-shell, etc.).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Shell command to execute"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 30, max 120)"},
+                    "dry_run": {"type": "boolean", "description": "If true, returns preview without executing (default: true)"},
+                    "confirm": {"type": "boolean", "description": "Required for live execution alongside dry_run=False. Safety guard."}
+                },
+                "required": ["command"]
+            }
+        }
+    },
 ]
 
 
@@ -5247,3 +5312,91 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
         "count": len(results),
         "results": results,
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# V10 SANDBOX — SECURE CODE EXECUTION TOOLS
+# Enforces ~/empire-repo-v10 path restriction + audit logging
+# Default dry-run mode for write/execute operations
+# ═══════════════════════════════════════════════════════════════════════
+
+from app.services.openclaw.code_tools import (
+    v10_read_file,
+    v10_write_file,
+    v10_execute_command,
+    v10_diff_preview,
+)
+
+
+@tool("v10_read_file")
+def _v10_read_file(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Read file content within v10 sandbox (~/empire-repo-v10 only).
+    Use to inspect existing code before proposing changes.
+    Max 200 lines unless max_lines is specified.
+    """
+    path = params.get("path", "")
+    max_lines = min(int(params.get("max_lines", 200)), 500)
+    if not path:
+        return ToolResult(tool="v10_read_file", success=False, error="path is required")
+    result = v10_read_file(path, max_lines=max_lines)
+    if "error" in result:
+        return ToolResult(tool="v10_read_file", success=False, error=result["error"])
+    return ToolResult(tool="v10_read_file", success=True, result=result)
+
+
+@tool("v10_write_file")
+def _v10_write_file(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Write file within v10 sandbox (~/empire-repo-v10 only).
+    Default dry_run=True — shows preview without modifying file.
+    Live write requires dry_run=False AND confirm=True.
+    Critical files (tool_executor.py, main.py, etc.) are always blocked.
+    """
+    path = params.get("path", "")
+    content = params.get("content", "")
+    mode = params.get("mode", "overwrite")
+    dry_run = params.get("dry_run", True)
+    confirm = params.get("confirm", False)
+    if not path:
+        return ToolResult(tool="v10_write_file", success=False, error="path is required")
+    result = v10_write_file(path, content, mode=mode, dry_run=dry_run, confirm=confirm)
+    if "error" in result and "dry_run" not in result:
+        return ToolResult(tool="v10_write_file", success=False, error=result["error"])
+    return ToolResult(tool="v10_write_file", success=True, result=result)
+
+
+@tool("v10_execute_command")
+def _v10_execute_command(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Execute terminal command in v10 sandbox (~/empire-repo-v10 only).
+    Default dry_run=True — shows command without executing.
+    Live execution requires dry_run=False AND confirm=True.
+    Commands filtered through allowlist (git, python, pytest, etc.)
+    and denylist (rm -rf, sudo, chmod 777, pipe-to-shell, etc.).
+    """
+    command = params.get("command", "")
+    timeout = min(int(params.get("timeout", 30)), 120)
+    dry_run = params.get("dry_run", True)
+    confirm = params.get("confirm", False)
+    if not command:
+        return ToolResult(tool="v10_execute_command", success=False, error="command is required")
+    result = v10_execute_command(command, timeout=timeout, dry_run=dry_run, confirm=confirm)
+    if "error" in result and "status" not in result:
+        return ToolResult(tool="v10_execute_command", success=False, error=result["error"])
+    return ToolResult(tool="v10_execute_command", success=True, result=result)
+
+
+@tool("v10_diff_preview")
+def _v10_diff_preview(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Show unified diff between current file and proposed changes.
+    Use before v10_write_file to preview what will change.
+    Read-only — does not modify any file.
+    """
+    path = params.get("path", "")
+    new_content = params.get("new_content", "")
+    if not path:
+        return ToolResult(tool="v10_diff_preview", success=False, error="path is required")
+    if not new_content:
+        return ToolResult(tool="v10_diff_preview", success=False, error="new_content is required")
+    result = v10_diff_preview(path, new_content)
+    if "error" in result:
+        return ToolResult(tool="v10_diff_preview", success=False, error=result["error"])
+    return ToolResult(tool="v10_diff_preview", success=True, result=result)
