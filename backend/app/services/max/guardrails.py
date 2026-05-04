@@ -246,6 +246,8 @@ INLINE_MONOLOGUE_PATTERNS = [
     r"Let me [^\n]*\n\n",
     r"I'll respond [^\n]*\n\n",
     r"Simple \w+ from [^\n]*\n\n",
+    # CamelCase transitions where internal monologue words run together without spaces
+    r"(?<=[a-z])(?=[A-Z])",
 ]
 
 
@@ -259,7 +261,11 @@ def _strip_internal_monologue(text: str) -> str:
         text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.MULTILINE)
     # Handle inline monologue: strip everything from observation up to </think> marker
     for pattern in INLINE_MONOLOGUE_PATTERNS:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
+        if pattern == r"(?<=[a-z])(?=[A-Z])":
+            # Insert space at camelCase boundaries to fix concatenated words
+            text = re.sub(pattern, " ", text)
+        else:
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE | re.DOTALL)
     # Collapse multiple spaces to single space within remaining text
     text = re.sub(r" {2,}", " ", text)
     return text

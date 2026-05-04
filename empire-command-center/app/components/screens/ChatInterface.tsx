@@ -151,7 +151,8 @@ function parseMarkdown(text: string): string {
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code style="background:rgba(99,102,241,0.15);padding:2px 6px;border-radius:4px;font-family:var(--font-mono);font-size:0.85em;">$1</code>')
     .replace(/```(\w+)?\n([\s\S]+?)```/g, '<pre style="background:rgba(30,41,59,0.9);padding:var(--space-3);border-radius:var(--radius-md);overflow-x:auto;margin:8px 0;"><code>$2</code></pre>')
-    .replace(/\n/g, '<br/>');
+    // Don't replace \n with <br/> — rely on white-space: pre-wrap CSS for line breaks
+    ;
 }
 
 export function ChatInterface({
@@ -295,6 +296,8 @@ export function ChatInterface({
                     color: isUser ? '#fff' : 'var(--text-primary)',
                     fontSize: 'var(--text-sm)',
                     lineHeight: 1.6,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
                   }}
                   dangerouslySetInnerHTML={{ __html: parseMarkdown(msg.content) }}
                 />
@@ -366,17 +369,19 @@ export function ChatInterface({
               <Sparkles size={14} color="#fff" />
             </div>
             <div style={{
-              maxWidth: '85%',
-              background: 'rgba(30,41,59,0.72)',
-              backdropFilter: 'blur(18px)',
-              border: '1px solid rgba(255,255,255,0.12)',
-              borderRadius: 'var(--radius-lg)',
-              padding: 'var(--space-3) var(--space-4)',
-            }}>
+                maxWidth: '85%',
+                background: 'rgba(30,41,59,0.72)',
+                backdropFilter: 'blur(18px)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 'var(--radius-lg)',
+                padding: 'var(--space-3) var(--space-4)',
+              }}>
               <div style={{
                 color: 'var(--text-primary)',
                 fontSize: 'var(--text-sm)',
                 lineHeight: 1.6,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
               }}>
                 <span dangerouslySetInnerHTML={{ __html: parseMarkdown(streamingContent) }} />
                 <span style={{
