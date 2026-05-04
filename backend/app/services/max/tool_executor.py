@@ -346,6 +346,36 @@ MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web for current information, prices, suppliers, product specs, news, or research. Returns titles, URLs, and snippets from DuckDuckGo (primary) or Brave Search (fallback).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query — be specific for best results"},
+                    "num_results": {"type": "integer", "description": "Number of results to return (default 5, max 10)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_read",
+            "description": "Fetch and read a web page, extracting readable text content. Use after web_search to read full articles, product pages, or when the user shares a URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL to fetch (must start with http:// or https://)"},
+                    "max_chars": {"type": "integer", "description": "Maximum characters to return (default 6000)"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
 ]
 
 

@@ -625,9 +625,9 @@ class AIRouter:
         elif use_model == AIModel.MINIMAX:
             try:
                 logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}) (desk)")
-                resp = await self._minimax_chat(full_messages, image_path=image_path)
-                self._log_chat_cost(full_messages, resp, self.minimax_model, feature, business, tenant_id)
-                return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=False)
+                resp = await self._minimax_chat(full_messages, image_path=image_path, tools=tools)
+                self._log_chat_cost(full_messages, resp.content, self.minimax_model, feature, business, tenant_id)
+                return AIResponse(content=resp.content, model_used=f"minimax-{self.minimax_model}", fallback_used=False, function_calls=resp.function_calls)
             except Exception as e:
                 logger.warning(f"MiniMax failed: {type(e).__name__}: {e}")
                 use_model = AIModel.GROK  # fallback to Grok

@@ -1644,6 +1644,17 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
             round_results = []
             for tc in tool_calls:
+                # ── Normalize MiniMax function_calls format ─────────────────────────────────
+                # MiniMax returns: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "..."}}
+                # execute_tool expects: {"tool": "...", "params": {...}}
+                if "function" in tc and "name" in tc["function"]:
+                    try:
+                        args_dict = json.loads(tc["function"].get("arguments", "{}"))
+                    except (json.JSONDecodeError, TypeError):
+                        args_dict = {}
+                    tc = {"tool": tc["function"]["name"], "params": args_dict}
+                # ── End MiniMax format normalization ───────────────────────────────────────
+
                 # Inject image_filename into quote tools so uploaded photos flow through
                 if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                     tc["image_filename"] = request.image_filename
@@ -2219,6 +2230,17 @@ async def chat_stream(request: ChatRequest):
 
                 round_results = []
                 for tc in tool_calls:
+                    # ── Normalize MiniMax function_calls format ─────────────────────────────────
+                    # MiniMax returns: {"id": "...", "type": "function", "function": {"name": "...", "arguments": "..."}}
+                    # execute_tool expects: {"tool": "...", "params": {...}}
+                    if "function" in tc and "name" in tc["function"]:
+                        try:
+                            args_dict = json.loads(tc["function"].get("arguments", "{}"))
+                        except (json.JSONDecodeError, TypeError):
+                            args_dict = {}
+                        tc = {"tool": tc["function"]["name"], "params": args_dict}
+                    # ── End MiniMax format normalization ───────────────────────────────────────
+
                     # Inject image_filename into quote tools so uploaded photos flow through
                     if request.image_filename and tc.get("tool") in ("create_quick_quote", "photo_to_quote") and "image_filename" not in tc:
                         tc["image_filename"] = request.image_filename
