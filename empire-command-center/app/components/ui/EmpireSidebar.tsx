@@ -7,7 +7,7 @@ import {
   BarChart3, Settings, HelpCircle, ChevronLeft, ChevronRight,
   Zap, Bot, Database, Globe, ShoppingCart, Layers,
   FileText, RefreshCw, Shield, Megaphone, ArrowRight,
-  Cpu, Brain, FileAudio
+  Cpu, Brain, FileAudio, Terminal
 } from 'lucide-react';
 
 interface NavItem {
@@ -23,6 +23,7 @@ const navItems: NavItem[] = [
   { label: 'CRM', href: '/crm', icon: <Users size={18} /> },
   { label: 'Finance', href: '/finance', icon: <BarChart3 size={18} /> },
   { label: 'Workroom', href: '/workroom', icon: <Wrench size={18} /> },
+  { label: 'System Admin', href: '/system-admin', icon: <Terminal size={18} /> },
   { label: 'ArchiveForge', href: '/archiveforge-life', icon: <Package size={18} /> },
   { label: 'RecoveryForge', href: '/recoveryforge', icon: <RefreshCw size={18} /> },
   { label: 'TranscriptForge', href: '/transcriptforge', icon: <FileAudio size={18} /> },

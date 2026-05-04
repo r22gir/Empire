@@ -243,6 +243,9 @@ load_router("app.services.hermes.dev_tracker", "/api/v1/hermes/dev", ["hermes-de
 load_router("app.routers.docker_manager", "/api/v1", ["docker"])
 load_router("app.routers.system_monitor", "/api/v1", ["system"])
 load_router("app.routers.ollama_manager", "/api/v1", ["ollama"])
+
+# Service Manager — unified process control
+load_router("app.routers.admin", "/api/v1", ["admin"])
 load_router("app.routers.recovery_control", "/api/v1", ["recovery"])
 
 # Serve intake uploads as static files
