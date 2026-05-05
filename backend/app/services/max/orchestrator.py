@@ -1,5 +1,5 @@
 """MAX Orchestrator — Autonomous feature proposal generator."""
-import asyncio, json, os, time, sys
+import asyncio, json, os, time, sys, traceback
 from pathlib import Path
 from typing import Optional
 
@@ -107,12 +107,13 @@ async def generate_proposal(prompt: dict) -> dict:
         )
 
         resp = await ai_router.chat(messages=[AIMessage(role="system", content=sys_msg), AIMessage(role="user", content=prompt_text)])
+        resp_text = resp.content if hasattr(resp, 'content') else str(resp)
 
-        match = re.search(r'START_JSON\s*(.*?)\s*END_JSON', resp, re.DOTALL)
+        match = re.search(r'START_JSON\s*(.*?)\s*END_JSON', resp_text, re.DOTALL)
         if not match:
-            match = re.search(r'\{.*\}', resp, re.DOTALL)
+            match = re.search(r'\{.*\}', resp_text, re.DOTALL)
         if not match:
-            raise ValueError(f"No JSON found in response: {resp[:100]}")
+            raise ValueError(f"No JSON found in response: {resp_text[:100]}")
 
         data = json.loads(match.group(1 if match.lastindex else 0))
         for k, v in fallback.items():
@@ -175,15 +176,12 @@ async def main():
                             break
                         await asyncio.sleep(10)
                 except (KeyError, AttributeError, TypeError) as e:
-                    import traceback
                     log(f"⚠️ Processing error {type(e).__name__}: {e} | pid={pid} | proposal_type={type(proposal)} | trace={traceback.format_exc()[-150:]}")
                     continue
                 except Exception as e:
-                    import traceback
                     log(f"⚠️ Processing error: {e} | pid={pid} | trace={traceback.format_exc()[-150:]}")
                     continue
         except Exception as e:
-            import traceback
             log(f"⚠️ Orchestrator error: {e} — {traceback.format_exc()[-200:]}")
             await asyncio.sleep(5)
         await asyncio.sleep(30)
