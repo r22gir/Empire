@@ -106,7 +106,7 @@ async def generate_proposal(prompt: dict) -> dict:
             f"User request: {prompt_text}"
         )
 
-        resp = await ai_router.chat(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt_text}])
+        resp = await ai_router.chat(messages=[AIMessage(role="system", content=sys_msg), AIMessage(role="user", content=prompt_text)])
 
         match = re.search(r'START_JSON\s*(.*?)\s*END_JSON', resp, re.DOTALL)
         if not match:
@@ -169,8 +169,8 @@ async def main():
                             log(f"❌ PROPOSAL {app.upper()}: {proposal.get('feature')}")
                             break
                         await asyncio.sleep(10)
-                except KeyError as e:
-                    log(f"⚠️ Missing key {e} for prompt {p.get('id', 'unknown')}. Skipping.")
+                except (KeyError, AttributeError, TypeError) as e:
+                    log(f"⚠️ Processing error {type(e).__name__}: {e} for prompt {p.get('id', 'unknown')}. Skipping.")
                     continue
                 except Exception as e:
                     log(f"⚠️ Processing error: {e}")
