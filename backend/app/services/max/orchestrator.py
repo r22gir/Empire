@@ -148,9 +148,13 @@ async def main():
                         "text": prompt_text,
                         "priority": priority
                     })
+                    log(f"🔍 DEBUG: proposal type={type(proposal)} keys={list(proposal.keys()) if isinstance(proposal, dict) else 'NOT_DICT'}")
 
                     # Validate required keys
-                    if not proposal.get("feature"):
+                    if not isinstance(proposal, dict):
+                        log(f"⚠️ Proposal {pid} is not a dict: {type(proposal)}. Using fallback.")
+                        proposal = {"id": pid, "feature": prompt_text, "priority": priority, "impact": "TBD", "files_to_modify": [], "test_strategy": "pytest", "risk": "Medium", "rollback_plan": "git revert", "status": "draft"}
+                    elif not proposal.get("feature"):
                         log(f"⚠️ Proposal {pid} missing 'feature'. Using fallback.")
                         proposal["feature"] = prompt_text
 
@@ -170,10 +174,12 @@ async def main():
                             break
                         await asyncio.sleep(10)
                 except (KeyError, AttributeError, TypeError) as e:
-                    log(f"⚠️ Processing error {type(e).__name__}: {e} for prompt {p.get('id', 'unknown')}. Skipping.")
+                    import traceback
+                    log(f"⚠️ Processing error {type(e).__name__}: {e} | pid={pid} | proposal_type={type(proposal)} | trace={traceback.format_exc()[-150:]}")
                     continue
                 except Exception as e:
-                    log(f"⚠️ Processing error: {e}")
+                    import traceback
+                    log(f"⚠️ Processing error: {e} | pid={pid} | trace={traceback.format_exc()[-150:]}")
                     continue
         except Exception as e:
             import traceback
