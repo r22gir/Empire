@@ -176,10 +176,10 @@ async def main():
                             break
                         await asyncio.sleep(10)
                 except (KeyError, AttributeError, TypeError) as e:
-                    log(f"⚠️ Processing error {type(e).__name__}: {e} | pid={pid} | proposal_type={type(proposal)} | trace={traceback.format_exc()[-150:]}")
+                    log(f"⚠️ Processing error {type(e).__name__}: {e} | prompt={p.get('id', 'unknown')} | trace={traceback.format_exc()[-150:]}")
                     continue
                 except Exception as e:
-                    log(f"⚠️ Processing error: {e} | pid={pid} | trace={traceback.format_exc()[-150:]}")
+                    log(f"⚠️ Processing error: {e} | prompt={p.get('id', 'unknown')} | trace={traceback.format_exc()[-150:]}")
                     continue
         except Exception as e:
             log(f"⚠️ Orchestrator error: {e} — {traceback.format_exc()[-200:]}")
