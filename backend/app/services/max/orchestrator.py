@@ -69,12 +69,28 @@ async def generate_proposal(prompt: dict) -> dict:
     from app.lib.ai_router import ai_router
     from app.services.hermes.memory_store import MemoryStore
     import json, re
-    fallback = {"id": prompt["id"], "feature": prompt["text"], "priority": prompt.get("priority", "medium"), "impact": "TBD", "files_to_modify": ["~/empire-repo-v10/staging_only"], "test_strategy": "pytest + Playwright", "risk": "Medium", "rollback_plan": "Revert commit & restore backup", "status": "draft"}
+
+    pid = prompt.get("id") or f"p_{int(time.time())}"
+    prompt_text = prompt.get("text", "Unknown prompt")
+    priority = prompt.get("priority", "medium")
+
+    # Safe fallback — all required keys present
+    fallback = {
+        "id": pid,
+        "feature": prompt_text,
+        "priority": priority,
+        "impact": "TBD",
+        "files_to_modify": ["~/empire-repo-v10/staging_only"],
+        "test_strategy": "pytest + Playwright",
+        "risk": "Medium",
+        "rollback_plan": "Revert commit & restore backup",
+        "status": "draft",
+    }
+
     try:
         hermes = MemoryStore()
         ctx = hermes.get_context("preferences,past_decisions,business_metrics") if hasattr(hermes, "get_context") else "desktop-first, L2/L3 gates, 113 customers"
 
-        # MiniMax-friendly: external schema string, START_JSON/END_JSON delimiters
         schema = '{"feature":"string","priority":"high|medium|low","impact":"string","files_to_modify":["string"],"test_strategy":"string","risk":"Low|Medium|High","rollback_plan":"string"}'
         sys_msg = (
             f"You are MAX, EmpireBox's AI orchestrator.\n"
@@ -85,12 +101,11 @@ async def generate_proposal(prompt: dict) -> dict:
             f"3. NEVER mention ~/empire-repo/ (production)\n"
             f"4. If unsure, use empty array for files_to_modify\n"
             f"Context: {ctx}\n"
-            f"User request: {prompt['text']}"
+            f"User request: {prompt_text}"
         )
 
-        resp = await ai_router.chat(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt["text"]}])
+        resp = await ai_router.chat(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt_text}])
 
-        # Parse: first try START_JSON...END_JSON, then fallback to raw regex
         match = re.search(r'START_JSON\s*(.*?)\s*END_JSON', resp, re.DOTALL)
         if not match:
             match = re.search(r'\{.*\}', resp, re.DOTALL)
@@ -100,9 +115,12 @@ async def generate_proposal(prompt: dict) -> dict:
         data = json.loads(match.group(1 if match.lastindex else 0))
         for k, v in fallback.items():
             data.setdefault(k, v)
-        data["id"], data["status"] = prompt["id"], "draft"
+        data["id"] = pid
 
-        # Safety: block any prod paths
+        if not data.get("feature"):
+            log(f"⚠️ LLM missing 'feature', using prompt text")
+            data["feature"] = prompt_text
+
         if any("empire-repo/" in f and "empire-repo-v10/" not in f for f in data.get("files_to_modify", [])):
             raise ValueError("PROD_PATH_BLOCKED")
 
@@ -116,36 +134,45 @@ async def main():
     while True:
         try:
             for p in get_pending():
-                pid = p.get("id") or f"p_{int(time.time())}"
-                prompt_text = p.get("text", "")
-                priority = p.get("priority", "medium")
+                try:
+                    pid = p.get("id") or f"p_{int(time.time())}"
+                    prompt_text = p.get("text", "")
+                    priority = p.get("priority", "medium")
 
-                log(f"📥 Processing prompt: {pid}: {prompt_text[:50]}...")
+                    log(f"📥 Processing prompt: {pid}: {prompt_text[:50]}...")
 
-                # Generate proposal with LLM (MiniMax primary)
-                proposal = await generate_proposal({
-                    "id": pid,
-                    "text": prompt_text,
-                    "priority": priority
-                })
+                    proposal = await generate_proposal({
+                        "id": pid,
+                        "text": prompt_text,
+                        "priority": priority
+                    })
 
-                # Save proposal
-                save_proposal(pid, proposal)
-                log(f"💾 Proposal saved: {proposal.get('feature', 'unknown')}")
+                    # Validate required keys
+                    if not proposal.get("feature"):
+                        log(f"⚠️ Proposal {pid} missing 'feature'. Using fallback.")
+                        proposal["feature"] = prompt_text
 
-                # Mark prompt as processed
-                mark_done(pid)
+                    safe_proposal = {"id": pid, "status": "draft", **proposal}
+                    save_proposal(pid, safe_proposal)
+                    log(f"💾 Proposal saved: {proposal.get('feature', 'unknown')}")
 
-                # Wait for approval (poll every 10s, up to 8 hours)
-                for _ in range(2880):
-                    app = check_approval(pid)
-                    if app == "approved":
-                        log(f"✅ PROPOSAL APPROVED: {proposal.get('feature')}")
-                        break
-                    if app and app != "approved":
-                        log(f"❌ PROPOSAL {app.upper()}: {proposal.get('feature')}")
-                        break
-                    await asyncio.sleep(10)
+                    mark_done(pid)
+
+                    for _ in range(2880):
+                        app = check_approval(pid)
+                        if app == "approved":
+                            log(f"✅ PROPOSAL APPROVED: {proposal.get('feature')}")
+                            break
+                        if app and app != "approved":
+                            log(f"❌ PROPOSAL {app.upper()}: {proposal.get('feature')}")
+                            break
+                        await asyncio.sleep(10)
+                except KeyError as e:
+                    log(f"⚠️ Missing key {e} for prompt {p.get('id', 'unknown')}. Skipping.")
+                    continue
+                except Exception as e:
+                    log(f"⚠️ Processing error: {e}")
+                    continue
         except Exception as e:
             import traceback
             log(f"⚠️ Orchestrator error: {e} — {traceback.format_exc()[-200:]}")
