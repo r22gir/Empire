@@ -66,8 +66,8 @@ def get_memory_context() -> str:
         return f"(Memory unavailable: {e})"
 
 async def generate_proposal(prompt: dict) -> dict:
-    from app.lib.ai_router import ai_router
-    from app.services.hermes.memory_store import MemoryStore
+    from app.services.max.ai_router import ai_router
+    from app.services.max.brain.memory_store import MemoryStore
     import json, re
 
     pid = prompt.get("id") or f"p_{int(time.time())}"
@@ -88,8 +88,10 @@ async def generate_proposal(prompt: dict) -> dict:
     }
 
     try:
-        hermes = MemoryStore()
-        ctx = hermes.get_context("preferences,past_decisions,business_metrics") if hasattr(hermes, "get_context") else "desktop-first, L2/L3 gates, 113 customers"
+        mems = hermes.search_memories("preferences past_decisions business_metrics EmpireBox", limit=5)
+        ctx = "; ".join([f"{m.get('subject','')}: {m.get('content','')[:100]}" for m in mems]) if mems else "desktop-first, L2/L3 gates, 113 customers"
+    except Exception:
+        ctx = "desktop-first, L2/L3 gates, 113 customers"
 
         schema = '{"feature":"string","priority":"high|medium|low","impact":"string","files_to_modify":["string"],"test_strategy":"string","risk":"Low|Medium|High","rollback_plan":"string"}'
         sys_msg = (
