@@ -140,6 +140,7 @@ async def main():
                     pid = p.get("id") or f"p_{int(time.time())}"
                     prompt_text = p.get("text", "")
                     priority = p.get("priority", "medium")
+                    proposal = None  # Ensure exists in except scope
 
                     log(f"📥 Processing prompt: {pid}: {prompt_text[:50]}...")
 
