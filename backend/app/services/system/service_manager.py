@@ -20,8 +20,7 @@ class ServiceManager:
             "v10_backend": {
                 "port": 8010,
                 "cmd": "cd ~/empire-repo-v10/backend && source ~/empire-repo/backend/venv/bin/activate && uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload",
-                "cwd": "~/empire-repo-v10/backend",
-            },
+                "cwd": "~/empire-repo-v10/backend",},
             "v10_frontend": {
                 "port": 3010,
                 "cmd": "cd ~/empire-repo-v10/empire-command-center && npm run dev -- -p 3010",
@@ -52,6 +51,7 @@ class ServiceManager:
                 "cmd": "cloudflared tunnel run v10-empirebox",
                 "cwd": os.path.expanduser("~"),
             },
+            "max_orchestrator": {"port": 0, "cmd": "/home/rg/empire-repo-v10/backend/bin/start_max.sh", "cwd": "/home/rg/empire-repo-v10/backend", "auto_start": False},
             "ollama": {
                 "port": 11434,
                 "cmd": "ollama serve",
@@ -158,18 +158,30 @@ class ServiceManager:
         # Start the process
         try:
             cwd = os.path.expanduser(config["cwd"])
-            proc = subprocess.Popen(
-                config["cmd"],
-                shell=True,
-                cwd=cwd,
-                start_new_session=True,
-                preexec_fn=os.setsid,
-            )
-            pids[name] = proc.pid
+            cmd = config["cmd"]
+            # Use bash -c for reliable subprocess launching avoiding preexec_fn issues
+            pid = os.spawnlp(os.P_NOWAIT, "/bin/bash", "bash", "-c", f"cd {cwd} && {cmd}")
+            result = {"status": "started", "pid": pid, "name": name, "port": config.get("port")}
+            # Debug write
+            with open("/tmp/sm_start_result.txt", "w") as f:
+                f.write(f"SUCCESS: {result}\n")
+                f.write(f"cmd: {cmd}\n")
+                f.write(f"cwd: {cwd}\n")
+            pids[name] = pid
             self._save_pids(pids)
-            return {"status": "started", "pid": proc.pid, "name": name, "port": config.get("port")}
+            return result
         except Exception as e:
-            return {"error": f"Failed to start {name}: {str(e)}"}
+            import traceback
+            tb = traceback.format_exc()
+            err_file = Path.home() / ".empire_service_errors.log"
+            err_file.open("a").write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} start_service({name}) failed:\n{tb}\n")
+            result = {"error": f"Failed to start {name}: {str(e)}", "traceback": tb[:500]}
+            # Debug write
+            with open("/tmp/sm_start_result.txt", "w") as f:
+                f.write(f"ERROR: {result}\n")
+                f.write(f"Exception: {e}\n")
+                f.write(tb)
+            return result
 
     def stop_service(self, name: str) -> dict:
         """Stop a service by killing its process group."""

@@ -1,0 +1,9 @@
+{
+  "max_orchestrator": {
+    "name": "MAX Orchestrator",
+    "port": 0,
+    "script": "python3 -m app.services.max.orchestrator",
+    "log": "data/max/max.log",
+    "auto_start": false
+  }
+}
