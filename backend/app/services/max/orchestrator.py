@@ -66,101 +66,51 @@ def get_memory_context() -> str:
         return f"(Memory unavailable: {e})"
 
 async def generate_proposal(prompt: dict) -> dict:
-    """Generate a structured feature proposal using MiniMax LLM.
-
-    Args:
-        prompt: {"id": str, "text": str, "priority": str}
-
-    Returns:
-        dict matching proposal schema above
-    """
-    prompt_text = prompt.get("text", "")
-    priority = prompt.get("priority", "medium")
-    pid = prompt.get("id", f"p_{int(time.time())}")
-
-    log(f"🧠 Generating proposal via MiniMax for: {prompt_text[:50]}...")
-
-    # Build system prompt with Hermes context
-    memory_context = get_memory_context()
-    system_msg = f"""{HERMES_CONTEXT}
-
-Recent MAX context:
-{memory_context}
-
-User request: {prompt_text}
-Priority: {priority}
-
-{PROPOSAL_SCHEMA}"""
-
-    # Call MiniMax via ai_router (primary model is MiniMax)
-    messages = [AIMessage(role="user", content=system_msg)]
-
-    content = ""
+    from app.lib.ai_router import ai_router
+    from app.services.hermes.memory_store import MemoryStore
+    import json, re
+    fallback = {"id": prompt["id"], "feature": prompt["text"], "priority": prompt.get("priority", "medium"), "impact": "TBD", "files_to_modify": ["~/empire-repo-v10/staging_only"], "test_strategy": "pytest + Playwright", "risk": "Medium", "rollback_plan": "Revert commit & restore backup", "status": "draft"}
     try:
-        response = await ai_router.chat(
-            messages=messages,
-            desk="max_orchestrator",  # routes to MiniMax primary
-            tenant_id="system",
-            source="orchestrator",
+        hermes = MemoryStore()
+        ctx = hermes.get_context("preferences,past_decisions,business_metrics") if hasattr(hermes, "get_context") else "desktop-first, L2/L3 gates, 113 customers"
+
+        # MiniMax-friendly: external schema string, START_JSON/END_JSON delimiters
+        schema = '{"feature":"string","priority":"high|medium|low","impact":"string","files_to_modify":["string"],"test_strategy":"string","risk":"Low|Medium|High","rollback_plan":"string"}'
+        sys_msg = (
+            f"You are MAX, EmpireBox's AI orchestrator.\n"
+            f"Output ONLY a single JSON object matching this schema:\n{schema}\n"
+            f"Rules:\n"
+            f"1. Wrap output EXACTLY in START_JSON and END_JSON tags\n"
+            f"2. ALL file paths MUST start with ~/empire-repo-v10/\n"
+            f"3. NEVER mention ~/empire-repo/ (production)\n"
+            f"4. If unsure, use empty array for files_to_modify\n"
+            f"Context: {ctx}\n"
+            f"User request: {prompt['text']}"
         )
 
-        content = response.content.strip()
+        resp = await ai_router.chat(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt["text"]}])
 
-        # Clean thinking tags
-        content = content.replace("", "").replace("<think>", "").replace("", "").strip()
+        # Parse: first try START_JSON...END_JSON, then fallback to raw regex
+        match = re.search(r'START_JSON\s*(.*?)\s*END_JSON', resp, re.DOTALL)
+        if not match:
+            match = re.search(r'\{.*\}', resp, re.DOTALL)
+        if not match:
+            raise ValueError(f"No JSON found in response: {resp[:100]}")
 
-        # Try to find JSON object - handle nested braces
-        proposal = None
-        import re
-        # First try direct JSON parse
-        try:
-            proposal = json.loads(content)
-        except json.JSONDecodeError:
-            # Try to extract JSON object with balanced braces
-            try:
-                brace_start = content.find('{')
-                if brace_start >= 0:
-                    brace_count = 0
-                    for i, c in enumerate(content[brace_start:], start=brace_start):
-                        if c == '{':
-                            brace_count += 1
-                        elif c == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                json_str = content[brace_start:i+1]
-                                proposal = json.loads(json_str)
-                                break
-            except (json.JSONDecodeError, ValueError):
-                pass
+        data = json.loads(match.group(1 if match.lastindex else 0))
+        for k, v in fallback.items():
+            data.setdefault(k, v)
+        data["id"], data["status"] = prompt["id"], "draft"
 
-        if proposal is None:
-            raise ValueError(f"Could not extract JSON from response: {content[:200]}")
+        # Safety: block any prod paths
+        if any("empire-repo/" in f and "empire-repo-v10/" not in f for f in data.get("files_to_modify", [])):
+            raise ValueError("PROD_PATH_BLOCKED")
 
-        proposal["id"] = pid
-        proposal["status"] = "draft"
-        log(f"✅ Proposal generated via {response.model_used}: {proposal.get('feature', 'unknown')}")
-        return proposal
-
-    except (json.JSONDecodeError, ValueError) as e:
-        log(f"⚠️ Failed to parse LLM response: {e}. Response: {content[:200] if content else 'N/A'}")
+        log(f"✅ Proposal generated: {data.get('feature', 'unknown')}")
+        return data
     except Exception as e:
-        log(f"⚠️ LLM call failed: {type(e).__name__}: {e}")
-
-    # Fallback: static proposal
-    log(f"⚠️ Using fallback proposal for: {prompt_text[:50]}")
-    return {
-        "id": pid,
-        "feature": prompt_text,
-        "priority": priority,
-        "impact": "TBD — requires estimation",
-        "files_to_modify": [],
-        "test_strategy": "Manual testing + CI validation",
-        "risk": "Medium",
-        "rollback_plan": "git revert to previous commit",
-        "status": "draft",
-        "fallback": True,
-    }
-
+        log(f"⚠️ LLM failed: {e}. Fallback used.")
+        return fallback
 async def main():
     log("🤖 MAX orchestrator started")
     while True:
