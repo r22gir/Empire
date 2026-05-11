@@ -71,3 +71,33 @@ export interface Quote {
   photos?: { filename: string; path?: string; type?: string; data_uri?: string }[];
   created_at?: string;
 }
+
+// ── ArchiveForge / Comps Types ────────────────────────────────────────────────
+
+export interface CompsListing {
+  price: number;
+  condition: string;
+  sold_date: string;
+  title?: string;
+  url?: string;
+}
+
+export interface CompsResult {
+  google_books_id: string;
+  source: 'fixture' | 'apify';
+  base_avg_sold: number;
+  suggested_min: number;
+  suggested_max: number;
+  condition_multiplier: number;
+  comps: CompsListing[];
+  last_updated: string;
+}
+
+export interface LifeReferenceIssue {
+  google_books_id: string;
+  date: string;
+  volume: string;
+  issue: string;
+  cover_subject: string;
+  reference_cover_url: string;
+}

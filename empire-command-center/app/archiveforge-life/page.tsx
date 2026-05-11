@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { WizardProvider } from '../contexts/WizardContext';
 import ArchiveForgePage from '../components/screens/ArchiveForgePage';
 
 export const metadata: Metadata = {
@@ -83,7 +84,9 @@ export default function ArchiveForgeLifePublicPage() {
         </aside>
 
         <section id="life-workflow" style={workflow} data-af-workflow aria-label="ArchiveForge LIFE workflow">
-          <ArchiveForgePage />
+          <WizardProvider>
+            <ArchiveForgePage />
+          </WizardProvider>
         </section>
       </section>
     </main>
