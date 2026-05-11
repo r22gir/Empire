@@ -356,6 +356,17 @@ async def start_background_services():
     except Exception as e:
         print(f"✗ MAX startup health record: {e}")
 
+    # Telegram Bot — ALWAYS init (webhook mode is parallel-safe; no lock conflict)
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        if telegram_bot.is_configured:
+            asyncio.create_task(telegram_bot.start_webhook_mode())
+            print("✓ Telegram Bot: starting in webhook mode")
+        else:
+            print("✗ Telegram Bot: not configured")
+    except Exception as e:
+        print(f"✗ Telegram Bot: {e}")
+
     if not is_primary:
         print("⏭ Secondary worker — skipping singleton background services")
         return
@@ -372,17 +383,6 @@ async def start_background_services():
         print("✓ Unified Business tables: ready")
     except Exception as _e:
         print(f"✗ Unified Business migration: {_e}")
-
-    # Telegram Bot — webhook mode (avoids Conflict error from polling)
-    try:
-        from app.services.max.telegram_bot import telegram_bot
-        if telegram_bot.is_configured:
-            asyncio.create_task(telegram_bot.start_webhook_mode())
-            print("✓ Telegram Bot: starting in webhook mode")
-        else:
-            print("✗ Telegram Bot: not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_FOUNDER_CHAT_ID)")
-    except Exception as e:
-        print(f"✗ Telegram Bot: {e}")
 
     # Desk Scheduler
     try:
@@ -664,6 +664,14 @@ try:
     print("✓ Loaded: /api/v1/smart-analyze")
 except Exception as e:
     print(f"✗ smart_analyzer: {e}")
+
+# Hermes Guardian Health Endpoints
+try:
+    from app.api.v1 import health
+    app.include_router(health.router, prefix="/api/v1", tags=["Health"])
+    print("✓ Loaded: /api/v1/health")
+except Exception as e:
+    print(f"✗ health: {e}")
 
 # TranscriptForge — Legal/High-Risk Transcription Pipeline
 load_router("app.routers.transcriptforge", "", ["transcriptforge"])
