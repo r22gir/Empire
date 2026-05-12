@@ -1,3 +1,4 @@
+'use client';
 // WizardContext.tsx — ArchiveForge V1.1 wizard state management
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { CompsResult, LifeReferenceIssue } from '../lib/types';
