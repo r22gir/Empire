@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { saveReference, useShelfContext } from '../../hooks/useLifeReferenceShelf';
 import LifeReferenceShelfPanel from './LifeReferenceShelfPanel';
 import { LifeReferenceShelfProvider } from '../../hooks/useLifeReferenceShelf';
+import { useWizard } from '../../contexts/WizardContext';
 
 // Lazy-loaded new panels to avoid SSR issues
 const ValuationPanel = dynamic(() => import('./ValuationPanel'), { ssr: false, loading: () => <div className="animate-pulse p-8"><div className="h-48 bg-gray-200 rounded" /></div> });
@@ -162,6 +163,10 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
   const [sourceStatus, setSourceStatus] = useState('');
   const [activeSearchTerm, setActiveSearchTerm] = useState('');
   const searchSeq = useRef(0);
+  const [photoHint, setPhotoHint] = useState('');
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoCaption, setPhotoCaption] = useState('');
+  const [photoError, setPhotoError] = useState('');
 
   const doSearch = useCallback(async () => {
     const legacyQuery = q.trim();
@@ -240,6 +245,62 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
           placeholder="Optional quick search: 1969 moon landing, Nov 1963, vol 11 issue 25..."
           style={{ padding: '9px 12px', border: '1px solid #eee8df', borderRadius: 8, fontSize: 12, outline: 'none' }}
         />
+
+        {/* ── Search by Photo ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px', background: '#f9f8f6', borderRadius: 8, border: '1px solid #e5e2dc' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#1a1a1a' }}>📷 Or search by cover photo</div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              value={photoHint}
+              onChange={e => setPhotoHint(e.target.value)}
+              placeholder="Optional hint: queen elizabeth, 1957..."
+              style={{ flex: '1 1 180px', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, outline: 'none' }}
+            />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: '#6366f1', color: '#fff', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+              {photoUploading ? <Loader2 size={13} className="animate-spin" /> : <Camera size={13} />}
+              {photoUploading ? 'Analyzing...' : 'Upload Cover Photo'}
+              <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                onChange={async e => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setPhotoUploading(true);
+                  setPhotoError('');
+                  setPhotoCaption('');
+                  try {
+                    const formData = new FormData();
+                    if (photoHint.trim()) formData.append('user_hint', photoHint.trim());
+                    formData.append('file', file);
+                    const r = await fetch(`${AG_API}/identify-from-photo`, { method: 'POST', body: formData });
+                    const d = await r.json();
+                    if (d.error) { setPhotoError(d.error); return; }
+                    setPhotoCaption(d.caption || '');
+                    if (d.results?.length) {
+                      setResults(d.results);
+                      setSourceStatus(d.source_status || '');
+                      setActiveSearchTerm(d.query_used || 'photo search');
+                      setSearched(true);
+                      if (searchSeq.current === searchSeq.current) {} // suppress unused warning
+                    } else {
+                      setPhotoError('No matching issues found. Try a clearer photo or add a keyword hint.');
+                    }
+                  } catch (err) {
+                    setPhotoError('Upload failed: ' + String(err));
+                  } finally {
+                    setPhotoUploading(false);
+                  }
+                }}
+              />
+            </label>
+          </div>
+          {photoCaption && (
+            <div style={{ fontSize: 11, color: '#6b7280', fontStyle: 'italic', padding: '4px 8px', background: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}>
+              AI caption: <strong>{photoCaption.slice(0, 120)}{photoCaption.length > 120 ? '...' : ''}</strong>
+            </div>
+          )}
+          {photoError && (
+            <div style={{ fontSize: 11, color: '#dc2626', padding: '4px 8px' }}>{photoError}</div>
+          )}
+        </div>
       </div>
 
       {searched && results.length === 0 && (
@@ -811,6 +872,8 @@ function ArchiveSection({ data, archiveId, onChange }: {
 // ── Section 5: Condition + Value ───────────────────────────────────────────────
 
 function ConditionSection({ data, onChange }: { data: Partial<ArchiveItem>; onChange: (d: Partial<ArchiveItem>) => void }) {
+  const { state } = useWizard();
+  const comps = state.comps;
   const update = (field: keyof ArchiveItem, value: any) => onChange({ ...data, [field]: value });
   const CONDITIONS = [
     { score: 5, label: "Near Mint", desc: "No visible wear, clean pages, vibrant colors", color: '#16a34a' },
@@ -820,6 +883,10 @@ function ConditionSection({ data, onChange }: { data: Partial<ArchiveItem>; onCh
     { score: 1, label: "Poor", desc: "Heavy damage, missing pages, major defects", color: '#991b1b' },
   ];
   const Tiers = ['A','B','C'];
+
+  // Auto-populate rough_comp from comps once available and user hasn't manually edited
+  const compMin = comps?.suggested_min;
+  const compMax = comps?.suggested_max;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -888,16 +955,23 @@ function ConditionSection({ data, onChange }: { data: Partial<ArchiveItem>; onCh
       </div>
 
       <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+        {comps && (
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12 }}>
+            <strong style={{ color: '#166534' }}>Comps auto-loaded</strong>
+            <span style={{ color: '#166534' }}> — suggested range <strong>${comps.suggested_min?.toFixed(0)}–${comps.suggested_max?.toFixed(0)}</strong> (condition ×{comps.condition_multiplier}, {comps.source})
+            </span>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
           <div>
             <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Comp Range Min ($)</label>
-            <input type="number" value={data.rough_comp_min || ''} onChange={e => update('rough_comp_min', parseFloat(e.target.value) || 0)}
-              placeholder="0" style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
+            <input type="number" value={data.rough_comp_min || compMin || ''} onChange={e => update('rough_comp_min', parseFloat(e.target.value) || 0)}
+              placeholder={compMin ? String(compMin.toFixed(0)) : '0'} style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
           </div>
           <div>
             <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Comp Range Max ($)</label>
-            <input type="number" value={data.rough_comp_max || ''} onChange={e => update('rough_comp_max', parseFloat(e.target.value) || 0)}
-              placeholder="0" style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
+            <input type="number" value={data.rough_comp_max || compMax || ''} onChange={e => update('rough_comp_max', parseFloat(e.target.value) || 0)}
+              placeholder={compMax ? String(compMax.toFixed(0)) : '0'} style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
           </div>
         </div>
         <div>
@@ -1713,7 +1787,10 @@ export default function ArchiveForgePage() {
 
   const currentStepIdx = STEP_ORDER.indexOf(step);
 
-  const handleIdentified = (ref: LifeReferenceIssue) => {
+  // WizardContext for comps auto-loading
+  const { fetchComps, fetchLiveComps } = useWizard();
+
+  const handleIdentified = async (ref: LifeReferenceIssue) => {
     setRefIssue(ref);
     setArchiveData(prev => ({
 	      ...prev,
@@ -1732,10 +1809,13 @@ export default function ArchiveForgePage() {
 	      cover_subject: ref.cover_subject,
 	      reference_cover_url: ref.reference_cover_url,
       tier: ref.tier_guidance,
-      rough_comp_min: parseFloat(ref.rarity_notes.match(/\$([\d,]+)/)?.[1]?.replace(',','') || '0') || 0,
-      rough_comp_max: parseFloat(ref.rarity_notes.match(/\$([\d,]+)–?\$?([\d,]+)/)?.[2]?.replace(',','') || '0') || 0,
     }));
     setStep('reference');
+    const gbid = ref.google_books_volume_id;
+    if (gbid) {
+      await fetchComps(gbid);
+      await fetchLiveComps(gbid);
+    }
   };
 
   // Create archive record (POST) — called when moving from reference → photos

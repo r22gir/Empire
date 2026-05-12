@@ -1213,6 +1213,107 @@ async def get_live_comps(
     return {"status": "success", "comps": result.model_dump()}
 
 
+@router.post("/identify-from-photo")
+async def identify_from_photo(
+    file: UploadFile = File(..., description="Photo of magazine cover"),
+    user_hint: str = Form("", description="Optional text hint from user (e.g. 'queen elizabeth')"),
+):
+    """Identify a LIFE magazine issue by uploaded cover photo.
+
+    Uses LLaVA (via Ollama) to caption the image, then searches Google Books.
+    Returns matching issues in the same format as /reference/search.
+    """
+    import base64
+    import tempfile
+    import os
+
+    # Read and base64-encode the uploaded image
+    image_bytes = await file.read()
+    image_b64 = base64.b64encode(image_bytes).decode()
+
+    # Step 1: Caption the cover with LLaVA
+    caption_prompt = (
+        "Describe this LIFE magazine cover for historical identification. "
+        "Include: decade/era (e.g. 1950s), art style, subjects shown, cover layout, "
+        "any visible text or headlines, and any people recognizable. "
+        "Be specific about visual clues that help date the issue."
+    )
+
+    caption = None
+    try:
+        from app.services.ollama_vision_router import generate_vision_response
+        caption, model_used = await generate_vision_response(
+            prompt=caption_prompt,
+            image_b64=image_b64,
+            preferred_model="llava",
+            timeout=60.0,
+        )
+    except Exception as e:
+        return {"error": f"Vision model failed: {e}"}, 500
+
+    if not caption:
+        return {"error": "Vision model returned no caption. Is llava installed? Run: ollama pull llava:latest"}, 502
+
+    # Step 2: Build search query from caption + user hint
+    # Extract decade hints from caption
+    decade_hints = []
+    import re
+    for decade_match in re.finditer(r"(19\d0)s?", caption):
+        decade_hints.append(decade_match.group(1))
+    for year_match in re.finditer(r"19(\d{2})", caption):
+        yr = int(year_match.group(1))
+        if 36 <= yr <= 72:
+            decade_hints.append(f"19{yr}")
+
+    # Build query parts
+    query_parts = ["LIFE magazine"]
+    if user_hint.strip():
+        query_parts.append(user_hint.strip())
+    # Add caption keywords (strip long description, take first sentence)
+    short_caption = caption.strip().split(".")[0][:200]
+    query_parts.append(short_caption)
+    if decade_hints:
+        query_parts.append(" ".join(decade_hints))
+
+    query_used = " ".join(query_parts)
+
+    # Step 3: Run Google Books search
+    query_date = None
+    api_results, api_status = await _search_google_books_api(query_used, query_date, caption)
+
+    results: list[dict] = []
+    seen: set[str] = set()
+
+    for issue in api_results:
+        if issue.get("match_score", 0) <= 0.05:
+            continue
+        key = issue.get("google_books_volume_id") or issue.get("id")
+        if key and key not in seen:
+            results.append(issue)
+            seen.add(key)
+
+    # Fallback: also check known Google Books issues
+    for known in LIFE_GOOGLE_BOOKS_KNOWN_ISSUES:
+        normalized = _normalize_known_google_issue(known, query_used, None, caption)
+        if normalized["match_score"] <= 0.05:
+            continue
+        key = normalized.get("google_books_volume_id") or normalized["id"]
+        if key not in seen:
+            results.append(normalized)
+            seen.add(key)
+
+    results.sort(key=lambda item: item.get("match_score", 0), reverse=True)
+
+    return {
+        "results": results[:12],
+        "caption": caption,
+        "caption_model": model_used or "llava",
+        "query_used": query_used,
+        "source_status": api_status,
+        "truth_note": "Google Books covers are reference-only. Upload actual item photos before listing.",
+    }
+
+
 @router.get("/reference/search")
 async def search_life_cover_reference(
     date: str = Query("", description="Exact issue date or approximate date"),
