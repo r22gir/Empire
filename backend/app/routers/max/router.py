@@ -238,6 +238,7 @@ def _execute_live_lookup(decision: LiveLookupDecision, request) -> Optional[str]
     Returns a context string to inject, or None if lookup failed.
     """
     tool_name = decision.preferred_tool or "minimax_web_search"
+    logger.info(f"[live_lookup] EXECUTING lookup: tool={tool_name}, query={decision.query[:60]}")
 
     if tool_name == "minimax_web_search":
         search_params = {"query": decision.query, "num_results": 5}
@@ -1561,9 +1562,13 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             logger.info(f"Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
 
         messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
+        # Inject live lookup result as a user message (highest priority — most recent context)
+        # This ensures the model treats verified info as the primary context for its answer
         if _ll_result_content:
-            messages.append(AIMessage(role="system", content=_ll_result_content))
-        messages.append(AIMessage(role="user", content=request.message))
+            # Prepend live lookup context to user message so it's the most salient input
+            messages.append(AIMessage(role="user", content=f"{_ll_result_content}\n\nUser question: {request.message}"))
+        else:
+            messages.append(AIMessage(role="user", content=request.message))
         model = None
         if request.model:
             try:
@@ -1819,8 +1824,14 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         final_content = _apply_truth_guardrails(request.message, final_content, tool_results_list)
 
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
+        # Skip if live_lookup_router already handled the lookup
         tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in tool_results_list]
-        if is_factual_question(request.message) and "web_search" not in tools_used_names:
+        if _ll_lookup_done:
+            # Live lookup already ran — skip factual_guard grounding re-query
+            # Just add minimax_web_search to tools_used_names to prevent double-lookup
+            if "minimax_web_search" not in tools_used_names and "web_search" not in tools_used_names:
+                tools_used_names.append("minimax_web_search")
+        elif is_factual_question(request.message) and "web_search" not in tools_used_names and "minimax_web_search" not in tools_used_names:
             logger.info(f"[factual_guard] Auto-invoking web_search for factual query: {request.message[:80]}")
             # Execute web_search synchronously via thread pool
             search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}

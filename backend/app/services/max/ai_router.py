@@ -523,8 +523,12 @@ class AIRouter:
                 return AIResponse(content=resp, model_used="ollama-llama3.1", fallback_used=fallback)
 
             elif provider_type == "minimax":
+                # Skip MiniMax for vision — Anthropic endpoint does NOT support type=image
+                if image_path:
+                    logger.info("[MAX] Skipping MiniMax for vision task (image not supported)")
+                    raise Exception("MiniMax vision not supported")
                 logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
-                resp = await self._minimax_chat(full_messages, image_path=image_path, tools=tools)
+                resp = await self._minimax_chat(full_messages, image_path=None, tools=tools)
                 self._log_chat_cost(full_messages, resp.content, self.minimax_model, feature, business, tenant_id)
                 return resp
 
