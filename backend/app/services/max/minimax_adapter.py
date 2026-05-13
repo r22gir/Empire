@@ -69,11 +69,12 @@ def _cli_env() -> dict:
 class CapabilityStatus:
     id: str
     label: str
-    status: Literal["available", "untested", "error", "blocked_key_scope", "unavailable", "unverified"] = "untested"
+    status: Literal["available", "untested", "error", "blocked_key_scope", "blocked_quota", "unavailable", "unverified"] = "untested"
     last_smoke_test: Optional[str] = None
     last_error: Optional[str] = None
     access_path: Literal["api", "cli", "mcp"] = "api"
     endpoint: str = ""
+    note: Optional[str] = None
 
 
 @dataclass
@@ -144,7 +145,7 @@ class MiniMaxStatusReport:
             "tts": {
                 "status": self.tts.status,
                 "endpoint": self.tts.endpoint,
-                "note": "Current key returned 401 on /v1/t2a_v2 — blocked_key_scope",
+                "note": self.tts.note,
                 "last_smoke_test": self.tts.last_smoke_test,
                 "last_error": self.tts.last_error,
             },
@@ -340,7 +341,7 @@ class MiniMaxSpeechClient:
     def __init__(self):
         self.cli_path = os.getenv("MINIMAX_CLI_PATH", "mmx")
 
-    def synthesize(self, text: str, voice: str = "english_expressive_narrator", speed: float = 1.0, timeout: float = 60.0) -> dict:
+    def synthesize(self, text: str, voice: str = "English_expressive_narrator", speed: float = 1.0, timeout: float = 60.0) -> dict:
         """Generate speech from text via mmx CLI. Returns {output_file, duration_s}."""
         # mmx speech synthesize --text "..." --voice "male-qn-qingse"
         cmd = [self.cli_path, "speech", "synthesize", "--text", text[:1000], "--voice", voice]
@@ -405,18 +406,39 @@ class MiniMaxMusicClient:
         Uses --lyrics-optimizer (auto-generate lyrics from prompt) as default,
         which works on the current plan. --instrumental requires music-2.5+/2.6
         which may not be available on all token plans.
+        Music generation is slow (60-120s). Uses Popen + wait() to avoid stdin
+        blocking issues that can occur with communicate() in some subprocess contexts.
         """
         cmd = [self.cli_path, "music", "generate", "--prompt", prompt[:8000], "--lyrics-optimizer", "--output", "json"]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(MINIMAX_OUTPUT_DIR), env=_cli_env())
-            if result.returncode != 0:
-                raise Exception(f"mmx music failed: {result.stderr[:200]}")
-            data = json.loads(result.stdout)
-            return {"task_id": data.get("task_id", ""), "music_url": data.get("music_url", ""), "status": "processing", "model": data.get("model", "music-01")}
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(MINIMAX_OUTPUT_DIR),
+                env=_cli_env(),
+            )
+            exit_code = proc.wait(timeout=timeout)
+            if exit_code != 0:
+                # Read any stderr available before raising
+                try:
+                    stderr = proc.stderr.read() if proc.stderr else b""
+                    err_msg = stderr.decode()[:200]
+                except Exception:
+                    err_msg = f"exit code {exit_code}"
+                raise Exception(f"mmx music failed (code {exit_code}): {err_msg}")
+            # Find the most recently created music file in output dir
+            music_files = sorted(
+                MINIMAX_OUTPUT_DIR.glob("music_*.mp3"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            if not music_files:
+                raise Exception("mmx music completed but no music_*.mp3 found in output dir")
+            saved = str(music_files[0].name)
+            return {"saved": saved, "music_url": "", "task_id": "", "status": "ready", "model": "music-2.6"}
         except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
             raise Exception(f"mmx music timeout after {timeout}s")
-        except json.JSONDecodeError:
-            raise Exception(f"mmx music invalid JSON: {result.stdout[:200]}")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -434,8 +456,8 @@ async def get_capability_report() -> dict:
         html_artifacts=CapabilityStatus("html_artifacts", "HTML Artifact Generation", status="available", last_smoke_test=now, access_path="api", endpoint="https://api.minimax.io/anthropic/chat/completions"),
         image_generation=CapabilityStatus("image_generation", "Image Generation (API)", status="error", access_path="api", endpoint="https://api.minimax.io/v1/image_generation"),
         image_to_image=CapabilityStatus("image_to_image", "Image-to-Image", status="unverified", access_path="api", endpoint="https://api.minimax.io/v1/image_generation"),
-        video_generation=CapabilityStatus("video_generation", "Video Generation", status="untested", access_path="cli", endpoint="mmx video generate"),
-        music_generation=CapabilityStatus("music_generation", "Music Generation", status="untested", access_path="cli", endpoint="mmx music generate"),
+        video_generation=CapabilityStatus("video_generation", "Video Generation", status="blocked_quota", access_path="cli", endpoint="mmx video generate", note="Token Plan Hs_plus weekly quota exhausted — resets 2026-05-18"),
+        music_generation=CapabilityStatus("music_generation", "Music Generation", status="untested", access_path="cli", endpoint="mmx music generate --lyrics-optimizer"),
         vision=CapabilityStatus("vision", "Vision (image understanding)", status="available", last_smoke_test=now, access_path="cli", endpoint="mmx vision describe"),
         web_search=CapabilityStatus("web_search", "Web Search", status="available", last_smoke_test=now, access_path="cli", endpoint="mmx search query"),
         tts=CapabilityStatus("tts", "Text-to-Speech", status="available", last_smoke_test=now, access_path="cli", endpoint="mmx speech synthesize"),
@@ -511,6 +533,17 @@ async def get_capability_report() -> dict:
     except Exception as e:
         report.tts.status = "error"
         report.tts.last_error = str(e)[:200]
+
+    # ── Smoke test music via CLI ──
+    try:
+        music_client = MiniMaxMusicClient()
+        result = music_client.generate("test music", timeout=300.0)
+        if result.get("saved") or result.get("music_url"):
+            report.music_generation.status = "available"
+            report.music_generation.last_smoke_test = now
+    except Exception as e:
+        report.music_generation.status = "error"
+        report.music_generation.last_error = str(e)[:200]
 
     return report.to_dict()
 

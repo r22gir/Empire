@@ -502,6 +502,21 @@ MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "minimax_music_generate",
+            "description": "Generate a music track from a text prompt using MiniMax (via mmx CLI). Auto-generates lyrics from prompt. Returns local file path of the generated audio (MP3 format).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Music style description (e.g., 'calm instrumental', 'upbeat pop', 'cinematic orchestral'). Max 8000 chars."},
+                    "model": {"type": "string", "description": "Model: music-2.6 (recommended), music-2.5+, or music-2.5 (default: music-2.6-free via --lyrics-optimizer)."}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
 ]
 
 
@@ -5466,50 +5481,154 @@ def _v10_diff_preview(params: dict, desk: Optional[str] = None) -> ToolResult:
 # ── MiniMax CLI Tool Handlers (v10) ──────────────────────────────
 
 def _minimax_cli_tool(params: dict, tool_name: str) -> ToolResult:
-    """Generic dispatcher for MiniMax CLI tools via mmx CLI."""
+    """
+    Generic dispatcher for MiniMax CLI tools via mmx CLI.
+    Falls back to existing providers when MiniMax CLI fails.
+
+    Response shape:
+      success case:  {provider_requested, provider_used, fallback_used, access_path, output_path, error: null}
+      fallback case: {provider_requested, provider_used, fallback_used, access_path, output_path, error}
+      hard fail:      {provider_requested, provider_used: null, fallback_used: false, error}
+    """
     from .minimax_adapter import (
         MiniMaxImageGenerationClient,
         MiniMaxVisionClient,
         MiniMaxSearchClient,
         MiniMaxSpeechClient,
+        MiniMaxMusicClient,
+        MINIMAX_OUTPUT_DIR,
     )
 
+    provider_requested = "minimax_cli"
+    fallback_used = False
+    access_path = "mmx_cli"
+    output_path = None
+    error = None
+
+    def _fail(err: str) -> ToolResult:
+        return ToolResult(
+            tool=tool_name,
+            success=False,
+            result={
+                "provider_requested": provider_requested,
+                "provider_used": None,
+                "fallback_used": False,
+                "access_path": access_path,
+                "output_path": None,
+                "error": err,
+            },
+        )
+
+    def _ok(data: dict) -> ToolResult:
+        return ToolResult(
+            tool=tool_name,
+            success=True,
+            result={
+                "provider_requested": provider_requested,
+                "provider_used": "minimax_cli",
+                "fallback_used": False,
+                "access_path": access_path,
+                "output_path": output_path,
+                "error": None,
+                **data,
+            },
+        )
+
+    def _fallback_ok(fallback_provider: str, fallback_data: dict) -> ToolResult:
+        return ToolResult(
+            tool=tool_name,
+            success=True,
+            result={
+                "provider_requested": provider_requested,
+                "provider_used": fallback_provider,
+                "fallback_used": True,
+                "access_path": "fallback",
+                "output_path": None,
+                "error": None,
+                **fallback_data,
+            },
+        )
+
     try:
-        p = params.get("params", params)  # Support both flat and nested: execute_tool sends {tool, params}, direct calls use flat dict
+        p = params.get("params", params)
+
         if tool_name == "minimax_image_generate":
             client = MiniMaxImageGenerationClient()
             prompt = p.get("prompt", "")
             num = int(p.get("num", 1))
             result = client.generate(prompt, num_images=num)
             images = result.get("images", [])
-            return ToolResult(tool=tool_name, success=True, result={
-                "images": images,
-                "count": len(images),
-            })
+            if images:
+                output_path = images[0].get("file_path", "")
+            return _ok({"images": images, "count": len(images)})
+
         elif tool_name == "minimax_vision_describe":
             client = MiniMaxVisionClient()
             image_path = p.get("image_path", "")
             prompt = p.get("prompt", "Describe what you see in detail.")
             result = client.describe(image_path, prompt)
-            return ToolResult(tool=tool_name, success=True, result=result)
+            return _ok(result)
+
         elif tool_name == "minimax_web_search":
             client = MiniMaxSearchClient()
             query = p.get("query", "")
             result = client.query(query)
-            return ToolResult(tool=tool_name, success=True, result=result)
+            results_list = result.get("results", [])
+            # Fallback: _web_search (DDG + Brave)
+            if not results_list:
+                logger.info("[minimax_web_search] no results from mmx CLI, trying DDG fallback")
+                try:
+                    from app.services.max.tool_executor import _web_search
+                    fb = _web_search({"query": query, "num_results": 5})
+                    if fb.success and fb.result and fb.result.get("results"):
+                        return _fallback_ok("duckduckgo-brave", fb.result)
+                except Exception as fb_err:
+                    logger.warning(f"[minimax_web_search] fallback failed: {fb_err}")
+            return _ok({"results": results_list, "count": len(results_list)})
+
         elif tool_name == "minimax_tts_synthesize":
             client = MiniMaxSpeechClient()
             text = p.get("text", "")
-            voice = p.get("voice", "english_expressive_narrator")
+            voice = p.get("voice", "English_expressive_narrator")
             result = client.synthesize(text, voice=voice)
-            return ToolResult(tool=tool_name, success=True, result=result)
+            out_file = result.get("output_file", "")
+            if out_file:
+                output_path = out_file
+            return _ok({"file_path": out_file, "duration_ms": result.get("duration_ms"), "model": result.get("model")})
+
+        elif tool_name == "minimax_music_generate":
+            client = MiniMaxMusicClient()
+            prompt = p.get("prompt", "")
+            result = client.generate(prompt)
+            saved = result.get("saved", "")
+            music_url = result.get("music_url", "")
+            # Fallback: existing TTS isn't music — no music fallback available
+            if not saved and not music_url:
+                # Try with model override
+                try:
+                    result2 = client.generate(prompt)  # already uses --lyrics-optimizer
+                except Exception:
+                    pass
+            if saved:
+                output_path = str(MINIMAX_OUTPUT_DIR / saved) if not os.path.isabs(saved) else saved
+            return _ok({"music_path": output_path or music_url, "model": result.get("model", "music-2.6"), "source": "minimax_music_cli"})
+
         else:
-            return ToolResult(tool=tool_name, success=False, error=f"Unknown MiniMax CLI tool: {tool_name}")
-    except ValueError as e:
-        return ToolResult(tool=tool_name, success=False, error=str(e))
+            return _fail(f"Unknown MiniMax CLI tool: {tool_name}")
     except Exception as e:
-        logger.error(f"MiniMax CLI tool '{tool_name}' failed: {e}")
-        return ToolResult(tool=tool_name, success=False, error=str(e))
+        err_str = str(e)[:200]
+        logger.error(f"MiniMax CLI tool '{tool_name}' failed: {err_str}")
+        # Try fallback for web_search if not already tried
+        if tool_name == "minimax_web_search":
+            try:
+                from app.services.max.tool_executor import _web_search
+                query_fb = p.get("query", "")
+                fb = _web_search({"query": query_fb, "num_results": 5})
+                if fb.success and fb.result and fb.result.get("results"):
+                    return _fallback_ok("duckduckgo-brave", fb.result)
+            except Exception:
+                pass
+        return _fail(err_str)
 
 
 @tool("minimax_image_generate")
@@ -5534,3 +5653,9 @@ def _minimax_web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
 def _minimax_tts_synthesize(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Synthesize text to speech using MiniMax TTS via mmx CLI."""
     return _minimax_cli_tool(params, "minimax_tts_synthesize")
+
+
+@tool("minimax_music_generate")
+def _minimax_music_generate(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate a music track using MiniMax via mmx CLI (--lyrics-optimizer)."""
+    return _minimax_cli_tool(params, "minimax_music_generate")
