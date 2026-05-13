@@ -441,6 +441,67 @@ MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
             }
         }
     },
+    # ── MiniMax CLI multimodal tools (v10) ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "minimax_image_generate",
+            "description": "Generate an image from a text prompt using MiniMax (via mmx CLI). Returns local file path(s) of generated image(s). Supported genres: photorealistic, anime, digital art, watercolor, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string", "description": "Detailed image generation prompt"},
+                    "num": {"type": "integer", "description": "Number of images to generate (default 1, max 4)"}
+                },
+                "required": ["prompt"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "minimax_vision_describe",
+            "description": "Describe or analyze an image using MiniMax vision (via mmx CLI). Accepts a local file path. Returns a text description of the image contents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "image_path": {"type": "string", "description": "Absolute path to the image file on the server"},
+                    "prompt": {"type": "string", "description": "Specific question or instruction about the image (default: 'Describe what you see in detail.')"}
+                },
+                "required": ["image_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "minimax_web_search",
+            "description": "Search the web using MiniMax search (via mmx CLI). Use inside MAX tool mode for current prices, supplier info, product specs, news, or research.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query — be specific for best results"},
+                    "num_results": {"type": "integer", "description": "Number of results to return (default 5, max 10)"}
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "minimax_tts_synthesize",
+            "description": "Convert text to natural speech using MiniMax TTS (via mmx CLI). Returns local file path of the generated audio (MP3 format).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "Text to synthesize into speech"},
+                    "voice": {"type": "string", "description": "Voice name (e.g., 'af_heart', 'bf_emma', 'bm_george'). Default: 'af_heart'"}
+                },
+                "required": ["text"]
+            }
+        }
+    },
 ]
 
 
@@ -5400,3 +5461,75 @@ def _v10_diff_preview(params: dict, desk: Optional[str] = None) -> ToolResult:
     if "error" in result:
         return ToolResult(tool="v10_diff_preview", success=False, error=result["error"])
     return ToolResult(tool="v10_diff_preview", success=True, result=result)
+
+
+# ── MiniMax CLI Tool Handlers (v10) ──────────────────────────────
+
+def _minimax_cli_tool(params: dict, tool_name: str) -> ToolResult:
+    """Generic dispatcher for MiniMax CLI tools via mmx CLI."""
+    from .minimax_adapter import (
+        MiniMaxImageGenerationClient,
+        MiniMaxVisionClient,
+        MiniMaxSearchClient,
+        MiniMaxSpeechClient,
+    )
+
+    try:
+        if tool_name == "minimax_image_generate":
+            client = MiniMaxImageGenerationClient()
+            prompt = params.get("prompt", "")
+            num = int(params.get("num", 1))
+            result = client.generate(prompt, num=num)
+            images = result.get("images", [])
+            return ToolResult(tool=tool_name, success=True, result={
+                "images": images,
+                "count": len(images),
+            })
+        elif tool_name == "minimax_vision_describe":
+            client = MiniMaxVisionClient()
+            image_path = params.get("image_path", "")
+            prompt = params.get("prompt", "Describe what you see in detail.")
+            result = client.describe(image_path, prompt)
+            return ToolResult(tool=tool_name, success=True, result=result)
+        elif tool_name == "minimax_web_search":
+            client = MiniMaxSearchClient()
+            query = params.get("query", "")
+            result = client.query(query)
+            return ToolResult(tool=tool_name, success=True, result=result)
+        elif tool_name == "minimax_tts_synthesize":
+            client = MiniMaxSpeechClient()
+            text = params.get("text", "")
+            voice = params.get("voice", "af_heart")
+            result = client.synthesize(text, voice=voice)
+            return ToolResult(tool=tool_name, success=True, result=result)
+        else:
+            return ToolResult(tool=tool_name, success=False, error=f"Unknown MiniMax CLI tool: {tool_name}")
+    except ValueError as e:
+        return ToolResult(tool=tool_name, success=False, error=str(e))
+    except Exception as e:
+        logger.error(f"MiniMax CLI tool '{tool_name}' failed: {e}")
+        return ToolResult(tool=tool_name, success=False, error=str(e))
+
+
+@tool("minimax_image_generate")
+def _minimax_image_generate(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate image(s) using MiniMax via mmx CLI."""
+    return _minimax_cli_tool(params, "minimax_image_generate")
+
+
+@tool("minimax_vision_describe")
+def _minimax_vision_describe(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Describe/analyze an image using MiniMax vision via mmx CLI."""
+    return _minimax_cli_tool(params, "minimax_vision_describe")
+
+
+@tool("minimax_web_search")
+def _minimax_web_search(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Search the web using MiniMax via mmx CLI."""
+    return _minimax_cli_tool(params, "minimax_web_search")
+
+
+@tool("minimax_tts_synthesize")
+def _minimax_tts_synthesize(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Synthesize text to speech using MiniMax TTS via mmx CLI."""
+    return _minimax_cli_tool(params, "minimax_tts_synthesize")
