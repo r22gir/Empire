@@ -11,13 +11,13 @@
 |-----------|--------|-------------|-----------------|
 | Text/Chat | ✅ available | OpenAI-compatible API | `https://api.minimax.io/v1/chat/completions` |
 | HTML Artifacts | ✅ available | OpenAI-compatible API | Same as text |
-| Image Generation | ✅ available | mmx CLI | `mmx image generate --prompt "..."` |
-| Vision/Image Description | ✅ available | mmx CLI | `mmx vision describe --image <path>` |
+| Image Generation | ✅ available | mmx CLI | `mmx image generate --prompt "..." --n <num>` |
+| Vision/Image Description | ✅ available | mmx CLI | `mmx vision describe --image <path> --prompt "..."` |
 | Web Search | ✅ available | mmx CLI | `mmx search query --q "..."` |
-| TTS/Speech Synthesis | ✅ available | mmx CLI | `mmx speech synthesize --text "..."` |
+| TTS/Speech Synthesis | ✅ available | mmx CLI | `mmx speech synthesize --text "..." --voice <voice>` |
 | STT/Transcription | ❌ unavailable | — | MiniMax STT not verified — existing provider remains active |
-| Video Generation | ⚠️ untested | mmx CLI | `mmx video generate` — CLI present, not smoke-tested |
-| Music Generation | ⚠️ untested | mmx CLI | `mmx music generate` — CLI present, not smoke-tested |
+| Video Generation | ⚠️ quota_exceeded | mmx CLI | `mmx video generate` — weekly limit reached on current plan |
+| Music Generation | ✅ available | mmx CLI | `mmx music generate --prompt "..." --lyrics-optimizer` |
 
 ---
 
@@ -44,10 +44,20 @@
 ### TTS
 - **Provider:** `MiniMaxSpeechClient` via mmx CLI (`mmx speech synthesize`)
 - **Fallback:** Existing TTS provider if mmx fails
+- **Voice:** Default `english_expressive_narrator` (other verified voices: `english_radiant_girl`, `english_magnetic_voiced_man`, `english_upbeat_woman`, `english_trustworth_man`, `english_calmwoman`)
 
 ### STT
 - **Provider:** Existing provider unchanged
-- **Status:** MiniMax STT endpoint not verified; do not switch
+- **Status:** MiniMax STT not verified; do not switch
+
+### Video Generation
+- **Provider:** `MiniMaxVideoClient` via mmx CLI (`mmx video generate`)
+- **Status:** Weekly usage limit exceeded on Token Plan Hs_plus — resets 2026-05-18
+- **Fallback:** None configured
+
+### Music Generation
+- **Provider:** `MiniMaxMusicClient` via mmx CLI (`mmx music generate --lyrics-optimizer`)
+- **Note:** `--lyrics-optimizer` is used by default (auto-generates lyrics). Pure instrumental requires music-2.5+/2.6 plan
 
 ---
 
@@ -56,15 +66,18 @@
 ### What works for this key
 ```
 POST https://api.minimax.io/v1/chat/completions     → 200 ✅ (text/chat/artifact)
-POST https://api.minimax.io/v1/image_generation    → 404 ❌
-POST https://api.minimax.io/v1/t2a_v2               → 404 ❌
+POST https://api.minimax.io/v1/image_generation      → 404 ❌
+POST https://api.minimax.io/v1/t2a_v2                → 404 ❌
 POST https://api.minimax.io/anthropic/chat/completions → 404 ❌
-mmx CLI (speech, vision, search, image)              → 200 ✅
+mmx CLI (speech, vision, search, image)             → 200 ✅
+mmx CLI (music with --lyrics-optimizer)             → 200 ✅
+mmx CLI (video)                                     → 429/quota exceeded ⚠️
 ```
 
 ### What doesn't work for this key
 - Direct API calls for TTS, image generation, speech (return 404/401)
 - Anthropic-compatible endpoint (`https://api.minimax.io/anthropic/*`) — 404
+- Video generation — weekly quota exhausted
 
 ### mmx CLI vs Direct API
 The mmx CLI works because it uses its own key resolution from `~/.mmx/config.json` and routes internally. The direct API calls fail because `MINIMAX_BASE_URL=/v1` causes double-path URLs (`/v1/v1/...`).
@@ -78,9 +91,11 @@ MINIMAX_CLI_ENABLED=true              # Enable mmx CLI multimodal tools
 MAX_ENABLE_MINIMAX_CLI_TOOLS=true     # Register tools in MAX registry
 MAX_ENABLE_MINIMAX_IMAGE=true        # Image generation via mmx CLI
 MAX_ENABLE_MINIMAX_VISION=true        # Vision via mmx CLI first
-MAX_ENABLE_MINIMAX_WEB_SEARCH=true   # Web search via mmx CLI
-MAX_ENABLE_MINIMAX_TTS=true          # TTS via mmx CLI
-MAX_ENABLE_MINIMAX_STT=false         # STT NOT switched — keep existing provider
+MAX_ENABLE_MINIMAX_WEB_SEARCH=true    # Web search via mmx CLI
+MAX_ENABLE_MINIMAX_TTS=true           # TTS via mmx CLI
+MAX_ENABLE_MINIMAX_STT=false          # STT NOT switched — keep existing provider
+MAX_ENABLE_MINIMAX_VIDEO=false        # Video disabled — quota exhausted
+MAX_ENABLE_MINIMAX_MUSIC=false        # Music NOT yet enabled by default
 ```
 
 ---
@@ -120,37 +135,51 @@ curl -s http://localhost:8010/max/health
 curl -s http://localhost:8010/api/v1/minimax/status | python3 -m json.tool
 
 # Direct mmx CLI tests
-mmx speech synthesize --text "test" --output json
+mmx speech synthesize --text "test" --voice "English_expressive_narrator" --output json
 mmx vision describe --image /tmp/test.png --prompt "what" --output json
 mmx search query --q "test" --output json
-mmx image generate --prompt "red square" --n1 --output json
+mmx image generate --prompt "red square" --n 1 --output json
+mmx music generate --prompt "calm chime" --lyrics-optimizer --output json
 ```
 
 ---
 
 ## Files Changed
 
-- `backend/app/services/max/minimax_adapter.py` — split clients + `_cli_env()` fix
+- `backend/app/services/max/minimax_adapter.py` — split clients + `_cli_env()` fix + music lyrics-optimizer
 - `backend/app/services/max/ai_router.py` — image blocking + Anthropic comment
+- `backend/app/routers/max/router.py` — capability router + minimax_cli_tools in status
 - `backend/app/routers/minimax.py` — capability router (existing)
 - `backend/.env.example` — feature flags added
+- `backend/app/services/max/tool_executor.py` — tool registry entries + handlers + params nesting fix
 - `docs/v10/MINIMAX_CLI_INTEGRATION.md` — this file
 
 ---
 
 ## Known Limitations
 
-1. **Video/Music:** CLI present but not smoke-tested — `untested` status
+1. **Video:** Weekly quota exhausted on Token Plan Hs_plus — resets 2026-05-18
 2. **STT:** Not available through MiniMax — existing provider remains active
 3. **Anthropic endpoint:** Returns 404 for this key — not usable
 4. **Direct API image/TTS:** Returns 404 — only mmx CLI works for multimodal
 5. **Image input in chat:** MiniMax text endpoint does NOT support `type="image"` — blocked with ValueError
+6. **Music instrumental:** Requires music-2.5+/2.6 plan; `--lyrics-optimizer` used as fallback
 
 ---
 
-## Next Recommended Phase
+## Workflow Routing Summary
 
-1. Wire MiniMax CLI tools into MAX tool registry (Phase 3 of the mission)
-2. Smoke-test video/music with tiny prompts (do not run large generations)
-3. Update AI Model Distributor UI to show MiniMax CLI status
-4. Run full end-to-end tests for image generation, vision, search, and TTS in browser
+v10 MAX uses MiniMax for:
+- **Text/Chat:** MiniMax `/v1/chat/completions` (MiniMax-M2.7)
+- **HTML Artifacts:** MiniMax via text endpoint
+- **Image Generation:** `minimax_image_generate` → mmx CLI → `image_*.jpg`
+- **Vision:** `minimax_vision_describe` → mmx CLI → text description
+- **Web Search:** `minimax_web_search` → mmx CLI → 10 results
+- **TTS:** `minimax_tts_synthesize` → mmx CLI → `speech_*.mp3`
+- **Video:** Disabled — quota exhausted
+- **Music:** Available via `MiniMaxMusicClient` with `--lyrics-optimizer`
+
+v10 MAX does NOT use MiniMax for:
+- **STT:** Existing provider (not MiniMax)
+- **Ollama:** Disabled and not required
+- **xAI Grok:** Disabled (credits unavailable)
