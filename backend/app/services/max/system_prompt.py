@@ -416,6 +416,39 @@ Lite $29/mo (50K tokens) | Pro $79/mo (200K tokens) | Empire $199/mo (1M tokens)
 - **Tables** — For structured comparisons
 - **Images** — search_images tool for fabric samples, design references. understand_image tool for analyzing any image (URL, base64, or local path) and getting a structured description.
 
+== Artifact Mode ==
+For complex structured outputs that warrant review and approval (architecture dashboards, implementation plans, UI mockups, approval boards, quote/pricing explainers, code review summaries, deployment reports, incident reports, module maps), emit an artifact alongside the visible response:
+
+```
+MAX_VISIBLE_RESPONSE: [Short 1-2 sentence summary of what was produced]
+MAX_ARTIFACT_JSON:
+```json
+{{
+  "id": "<uuid-v4>",
+  "artifact_type": "html_artifact|markdown_report|react_component_proposal|plain_text",
+  "title": "<descriptive title>",
+  "description": "<optional 1-sentence description>",
+  "content_format": "html|markdown|json|tsx|text",
+  "content": "<the actual content>",
+  "source": "max",
+  "mode": "review_only|approval_required",
+  "requires_approval": true|false,
+  "allowed_actions": ["approve","reject","request_changes","export_html","copy_source","open_fullscreen"],
+  "safety": {{
+    "scripts_allowed": false,
+    "external_network_allowed": false,
+    "sandboxed": true,
+    "sanitized": true
+  }}
+}}
+```
+Rules:
+- html_artifact and react_component_proposal always require_approval=true, scripts_allowed=false
+- MAX must NOT emit arbitrary executable JavaScript
+- Prefer static HTML + inline CSS + inline SVG — no external scripts, no external CSS, no remote images, no trackers, no forms
+- If artifact JSON is invalid, the MAX_VISIBLE_RESPONSE is displayed as plain text (fallback)
+- Artifact JSON block is parsed by the system — do not include any other text after the closing ```
+
 == Tool Blocks Required ==
 You MUST include a ```tool ... ``` block for every action. Text alone does NOT trigger execution.
 
@@ -566,28 +599,36 @@ def get_max_brain_context() -> str:
     except Exception as e:
         logger.debug(f"Brain context: git log unavailable: {e}")
 
-    # ── c. Service health (port check only — fast) ──
+    # ── c. Service health — query Hermes Guardian live endpoint ──
     try:
-        import socket
-        services = {
-            "Backend API": 8000,
-            "Command Center": 3005,
-            "OpenClaw": 7878,
-            "Ollama": 11434,
-        }
-        status_lines = ["### Service Health"]
-        for name, port in services.items():
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.settimeout(0.3)
-                s.connect(("127.0.0.1", port))
-                s.close()
-                status_lines.append(f"- {name} (:{port}): **online**")
-            except (ConnectionRefusedError, OSError):
-                status_lines.append(f"- {name} (:{port}): offline")
-        sections.append("\n".join(status_lines))
+        import urllib.request
+        req = urllib.request.Request("http://127.0.0.1:8010/api/v1/health")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            lines = [f"### Service Health (Hermes Guardian) — {data['status'].upper()} | {data['online']}/{data['total']} online"]
+            for name, info in data.get("services", {}).items():
+                icon = "✅" if info["status"] == "online" else "❌"
+                lat = f" ({info['latency_ms']}ms)" if info.get("latency_ms") else ""
+                lines.append(f"- {icon} {name}: {info['status']}{lat}")
+            sections.append("\n".join(lines))
     except Exception as e:
-        logger.debug(f"Brain context: service health check failed: {e}")
+        # Fallback to socket checks if Guardian unavailable
+        try:
+            import socket
+            services = {"Backend API": 8000, "Command Center": 3005, "OpenClaw": 7878}
+            status_lines = ["### Service Health (socket fallback)"]
+            for name, port in services.items():
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(0.3)
+                    s.connect(("127.0.0.1", port))
+                    s.close()
+                    status_lines.append(f"- {name} (:{port}): **online**")
+                except (ConnectionRefusedError, OSError):
+                    status_lines.append(f"- {name} (:{port}): offline")
+            sections.append("\n".join(status_lines))
+        except Exception:
+            pass
 
     # ── d. Pending/urgent tasks ──
     try:

@@ -34,6 +34,7 @@ export interface Message {
     response_at: string;
     skill_used: string | null;
   };
+  artifacts?: MaxArtifact[];
 }
 
 export interface ToolResult {
@@ -100,4 +101,32 @@ export interface LifeReferenceIssue {
   issue: string;
   cover_subject: string;
   reference_cover_url: string;
+}
+
+// ── MAX Artifact Types ─────────────────────────────────────────────────────────
+
+export type ArtifactType = 'plain_text' | 'markdown_report' | 'html_artifact' | 'react_component_proposal';
+export type ArtifactMode = 'review_only' | 'approval_required' | 'approved' | 'rejected' | 'changes_requested';
+export type ArtifactFormat = 'text' | 'markdown' | 'html' | 'json' | 'tsx';
+
+export interface ArtifactSafety {
+  scripts_allowed: boolean;
+  external_network_allowed: boolean;
+  sandboxed: boolean;
+  sanitized: boolean;
+}
+
+export interface MaxArtifact {
+  id: string;
+  artifact_type: ArtifactType;
+  title: string;
+  description?: string;
+  content_format: ArtifactFormat;
+  content: string;
+  source: 'max' | 'openclaw' | 'hermes' | 'founder';
+  mode: ArtifactMode;
+  requires_approval: boolean;
+  allowed_actions: ('approve' | 'reject' | 'request_changes' | 'export_html' | 'copy_source' | 'open_fullscreen')[];
+  safety: ArtifactSafety;
+  metadata?: Record<string, unknown>;
 }

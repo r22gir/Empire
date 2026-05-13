@@ -6,8 +6,10 @@ import { EmpireShell } from '../ui/EmpireShell';
 import { DeskSelector } from './DeskSelector';
 import { ChatInterface } from './ChatInterface';
 import { ContinuityPanel } from './ContinuityPanel';
-import { Message } from '../../lib/types';
+import { Message, MaxArtifact, ArtifactMode } from '../../lib/types';
 import { API } from '../../lib/api';
+import { parseArtifactBlocks, validateArtifact } from '../../lib/artifacts';
+import { ArtifactViewer } from '../max/artifacts/ArtifactViewer';
 const STORAGE_KEY = 'empire_max_messages';
 const LAYOUT_KEY = 'empire_max_layout';
 
@@ -136,6 +138,9 @@ export function MAXDeskScreen() {
   // Code mode confirmation dialog
   const [showCodeModeConfirm, setShowCodeModeConfirm] = useState(false);
   const [pendingCodeMode, setPendingCodeMode] = useState(false); // true = enabling, false = disabling
+  // Artifact local approval state (no backend persistence in Phase 1)
+  const [artifactStates, setArtifactStates] = useState<Record<string, ArtifactMode>>({});
+  const [activeArtifact, setActiveArtifact] = useState<MaxArtifact | null>(null);
 
   // Persist layout to localStorage when it changes
   useEffect(() => {
@@ -250,6 +255,12 @@ export function MAXDeskScreen() {
             if (ev.type === 'text' && ev.content) {
               accumulated += ev.content;
               setStreamingContent(accumulated);
+            } else if (ev.type === 'artifact' && ev.artifact) {
+              // SSE artifact event — validate and store
+              const validated = validateArtifact(ev.artifact);
+              if (validated) {
+                setArtifactStates(prev => ({ ...prev, [validated.id]: validated.mode }));
+              }
             } else if (ev.type === 'done') {
               modelUsed = ev.model_used || '';
               if (ev.conversation_id) { /* track if needed */ }
@@ -261,12 +272,16 @@ export function MAXDeskScreen() {
         }
       }
 
+      // Parse any embedded MAX_ARTIFACT_JSON blocks from the full response text
+      const { visible: cleanContent, artifacts: parsedArtifacts } = parseArtifactBlocks(accumulated);
+
       const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: sanitizeContent(accumulated) || 'No response.',
+        content: sanitizeContent(cleanContent) || 'No response.',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         model: displayModel(modelUsed),
+        artifacts: parsedArtifacts.length > 0 ? parsedArtifacts : undefined,
       };
       updateMessages([...newMsgs, assistantMsg]);
       setStreamingContent('');
@@ -510,6 +525,10 @@ export function MAXDeskScreen() {
             voiceMode={voiceMode}
             onToggleVoiceMode={() => setVoiceMode(v => !v)}
             activeDesk={activeDesk}
+            artifactStates={artifactStates}
+            onApproveArtifact={(id) => setArtifactStates(prev => ({ ...prev, [id]: 'approved' }))}
+            onRejectArtifact={(id) => setArtifactStates(prev => ({ ...prev, [id]: 'rejected' }))}
+            onRequestChangesArtifact={(id) => setArtifactStates(prev => ({ ...prev, [id]: 'changes_requested' }))}
           />
         </div>
 
@@ -575,6 +594,13 @@ export function MAXDeskScreen() {
             </div>
           </div>
         </div>
+      )}
+    {/* Artifact Viewer Modal */}
+      {activeArtifact && (
+        <ArtifactViewer
+          artifact={activeArtifact}
+          onClose={() => setActiveArtifact(null)}
+        />
       )}
     </EmpireShell>
   );

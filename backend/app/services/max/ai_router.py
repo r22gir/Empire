@@ -182,6 +182,11 @@ class AIRouter:
         self.gemini_key = os.getenv("GOOGLE_GEMINI_API_KEY", "")
         self.openai_key = os.getenv("OPENAI_API_KEY", "")
         self.minimax_key = os.getenv("MINIMAX_API_KEY", "")
+        # IMPORTANT: Split endpoint routing (MiniMax docs):
+        # - Anthropic-compatible: https://api.minimax.io/anthropic — NOT reachable for this key (returns 404)
+        # - Standard OpenAI-compatible (verified working): https://api.minimax.io/v1
+        # - Image generation API: https://api.minimax.io/v1/image_generation
+        # NOTE: Vision must NOT use Anthropic endpoint — use CLI instead
         self.minimax_base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
         self.minimax_model = os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
         # Empire-wide provider policy — set via MAX_PRIMARY_PROVIDER and MAX_DISABLE_XAI env vars
@@ -623,9 +628,13 @@ class AIRouter:
                 logger.warning(f"OpenAI 4o failed: {type(e).__name__}: {e}")
                 use_model = AIModel.CLAUDE
         elif use_model == AIModel.MINIMAX:
+            # Skip MiniMax for vision tasks — Anthropic endpoint does NOT support type=image
+            if image_path:
+                logger.info("[MAX] Skipping MiniMax for vision task (image not supported on Anthropic endpoint)")
+                raise Exception("MiniMax cannot handle vision — skip")
             try:
                 logger.info(f"[MAX] Chat via MiniMax ({self.minimax_model}) (desk)")
-                resp = await self._minimax_chat(full_messages, image_path=image_path, tools=tools)
+                resp = await self._minimax_chat(full_messages, image_path=None, tools=tools)
                 self._log_chat_cost(full_messages, resp.content, self.minimax_model, feature, business, tenant_id)
                 return AIResponse(content=resp.content, model_used=f"minimax-{self.minimax_model}", fallback_used=False, function_calls=resp.function_calls)
             except Exception as e:
@@ -781,9 +790,13 @@ class AIRouter:
                         return
 
                     elif provider_type == "minimax":
+                        # Skip MiniMax for vision — Anthropic endpoint does NOT support type=image
+                        if image_path:
+                            logger.info("[MAX] Skipping MiniMax for vision task (image not supported)")
+                            raise Exception("MiniMax vision not supported")
                         logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
                         collected = []
-                        async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path, tools=tools):
+                        async for chunk in self._minimax_chat_stream(full_messages, image_path=None, tools=tools):
                             collected.append(chunk)
                             yield chunk, self.minimax_model
                         self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
@@ -833,10 +846,14 @@ class AIRouter:
                 logger.warning(f"OpenAI stream failed: {type(e).__name__}: {e}")
                 use_model = AIModel.GROQ
         elif use_model == AIModel.MINIMAX:
+            # Skip MiniMax for vision tasks — Anthropic endpoint does NOT support type=image
+            if image_path:
+                logger.info("[MAX] Skipping MiniMax for vision (image not supported on Anthropic endpoint)")
+                raise Exception("MiniMax cannot handle vision")
             try:
                 logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model})")
                 collected = []
-                async for chunk in self._minimax_chat_stream(full_messages, image_path=image_path, tools=tools):
+                async for chunk in self._minimax_chat_stream(full_messages, image_path=None, tools=tools):
                     collected.append(chunk)
                     yield chunk, self.minimax_model
                 self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
@@ -1219,14 +1236,23 @@ class AIRouter:
                         yield text
 
     # ── MiniMax ───────────────────────────────────────────────────────
+    # IMPORTANT: Uses standard OpenAI-compatible endpoint (https://api.minimax.io/v1)
+    # for text/chat/artifact. Image input (image_path) must NEVER be sent here —
+    # use _gemini_chat or _openai_chat for vision tasks instead.
+    # Anthropic endpoint (https://api.minimax.io/anthropic) returns 404 for this key.
 
     async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None, tools: Optional[list] = None) -> AIResponse:
-        """Chat via MiniMax M1 API. Supports function calling when tools are provided."""
-        api_messages = self._prepare_openai_messages(messages, image_path)
-        payload = {"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096}
+        """Chat via MiniMax OpenAI-compatible endpoint. NO image input supported."""
+        if image_path:
+            raise ValueError(
+                "MiniMax Anthropic endpoint does NOT support image input. "
+                "Use Gemini or OpenAI for vision tasks."
+            )
+        api_messages = self._prepare_openai_messages(messages, None)  # no image
+        payload = {"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096, "temperature": 0.7}
         if tools:
             payload["tools"] = tools
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 f"{self.minimax_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
@@ -1254,9 +1280,13 @@ class AIRouter:
             return AIResponse(content=content, model_used=f"minimax-{self.minimax_model}", function_calls=function_calls)
 
     async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None, tools: Optional[list] = None) -> AsyncGenerator[str, None]:
-        """Stream chat via MiniMax M1 API. Supports function calling when tools are provided.
-        Yields text chunks and tool call blocks (via fenced code markers) that parse_tool_blocks can extract."""
-        api_messages = self._prepare_openai_messages(messages, image_path)
+        """Stream chat via MiniMax OpenAI-compatible endpoint. NO image input supported."""
+        if image_path:
+            raise ValueError(
+                "MiniMax Anthropic endpoint does NOT support image input. "
+                "Use Gemini or OpenAI for vision tasks."
+            )
+        api_messages = self._prepare_openai_messages(messages, None)  # no image
         payload = {"model": self.minimax_model, "messages": api_messages, "max_tokens": 4096, "stream": True}
         if tools:
             payload["tools"] = tools

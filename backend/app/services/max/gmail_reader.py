@@ -121,7 +121,20 @@ def check_inbox(
     unread_only: bool = True,
     filter_to: Optional[str] = None,
 ) -> dict:
-    """Fetch recent emails with a hard 15s timeout. Thread-safe, never blocks event loop."""
+    """Fetch recent emails with a hard 15s timeout. Thread-safe, never blocks event loop.
+
+    Tries IMAP first (if GMAIL_IMAP_PASSWORD is set), falls back to OAuth.
+    """
+    # Try IMAP first if configured
+    if os.getenv("GMAIL_IMAP_PASSWORD"):
+        try:
+            imap_result = _check_inbox_imap(limit, unread_only, filter_to)
+            if imap_result.get("success"):
+                return imap_result
+        except Exception as e:
+            logger.warning(f"IMAP check failed, falling back to OAuth: {e}")
+
+    # Fall back to OAuth
     try:
         future = _executor.submit(_check_inbox_sync, limit, unread_only, filter_to)
         return future.result(timeout=15)
@@ -130,4 +143,66 @@ def check_inbox(
         return {"success": False, "error": "Gmail request timed out (15s)", "emails": [], "count": 0}
     except Exception as e:
         logger.error(f"Gmail check error: {e}")
+        return {"success": False, "error": str(e), "emails": [], "count": 0}
+
+
+def _check_inbox_imap(limit: int = 10, unread_only: bool = True, filter_to: Optional[str] = None) -> dict:
+    """Check Gmail inbox via IMAP (no OAuth needed)."""
+    import imaplib
+    import email
+    from email.header import decode_header
+
+    host = os.getenv("GMAIL_IMAP_HOST", "imap.gmail.com")
+    port = int(os.getenv("GMAIL_IMAP_PORT", "993"))
+    user = os.getenv("GMAIL_IMAP_USER", os.getenv("MAX_EMAIL", "max@empirebox.store"))
+    password = os.getenv("GMAIL_IMAP_PASSWORD")
+    max_email = filter_to or os.getenv("MAX_EMAIL", "max@empirebox.store")
+
+    if not password:
+        return {"success": False, "error": "IMAP password not configured", "emails": []}
+
+    try:
+        mail = imaplib.IMAP4_SSL(host, port)
+        mail.login(user, password)
+        mail.select("INBOX")
+
+        search_filter = f'UNSEEN' if unread_only else 'ALL'
+        status, messages = mail.search(None, search_filter)
+        email_ids = messages[0].split()
+
+        # Filter by TO address if needed
+        target_ids = []
+        for eid in reversed(email_ids):
+            if len(target_ids) >= limit:
+                break
+            _, msg_data = mail.fetch(eid, '(RFC822.HEADER)')
+            msg = email.message_from_bytes(msg_data[0][1])
+            to_addr = msg.get("To", "")
+            if max_email.lower() in to_addr.lower():
+                target_ids.append(eid)
+
+        emails = []
+        for eid in target_ids:
+            _, msg_data = mail.fetch(eid, '(RFC822.HEADER)')
+            msg = email.message_from_bytes(msg_data[0][1])
+            subject = decode_header(msg.get("Subject", ""))[0]
+            subject = subject[0] if isinstance(subject, tuple) else subject
+            if isinstance(subject, bytes):
+                subject = subject.decode("utf-8", errors="replace")
+            from_raw = decode_header(msg.get("From", ""))[0]
+            from_addr = from_raw[0] if isinstance(from_raw, tuple) else from_raw
+            if isinstance(from_addr, bytes):
+                from_addr = from_addr.decode("utf-8", errors="replace")
+            emails.append({
+                "from": from_addr,
+                "to": msg.get("To", ""),
+                "subject": subject,
+                "date": msg.get("Date", ""),
+                "preview": subject,
+                "unread": True,
+            })
+
+        mail.logout()
+        return {"success": True, "count": len(emails), "unread_total": len(emails), "filter": max_email, "emails": emails}
+    except Exception as e:
         return {"success": False, "error": str(e), "emails": [], "count": 0}

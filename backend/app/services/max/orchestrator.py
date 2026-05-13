@@ -5,8 +5,9 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from app.services.max.queue import get_pending, mark_done, save_proposal, check_approval
-from app.services.max.ai_router import AIMessage, ai_router
+from app.services.max.ai_router import AIMessage, AIModel, ai_router
 from app.services.max.brain.memory_store import MemoryStore
+from app.services.openclaw.executor import execute_proposal
 
 LOG = Path(os.path.expanduser("~/empire-repo-v10/backend/data/max/max.log"))
 PROPOSALS_DIR = Path(os.path.expanduser("~/empire-repo-v10/backend/data/max/proposals"))
@@ -65,6 +66,20 @@ def get_memory_context() -> str:
     except Exception as e:
         return f"(Memory unavailable: {e})"
 
+ORCHESTRATOR_PROMPT = """You are MAX, EmpireBox's AI orchestrator.
+Output ONLY a single JSON object matching this schema:
+{{"feature":"string","priority":"high|medium|low","impact":"string","files_to_modify":["string"],"test_strategy":"string","risk":"Low|Medium|High","rollback_plan":"string"}}
+Rules:
+1. Wrap output EXACTLY in START_JSON and END_JSON tags
+2. ALL file paths MUST start with ~/empire-repo-v10/
+3. NEVER mention ~/empire-repo/ (production)
+4. If unsure, use empty array for files_to_modify
+Context: {ctx}
+User request: {prompt_text}"""
+
+def build_orchestrator_sysmsg(ctx: str, prompt_text: str) -> str:
+    return ORCHESTRATOR_PROMPT.format(ctx=ctx, prompt_text=prompt_text)
+
 async def generate_proposal(prompt: dict) -> dict:
     from app.services.max.ai_router import ai_router
     from app.services.max.brain.memory_store import MemoryStore
@@ -93,21 +108,16 @@ async def generate_proposal(prompt: dict) -> dict:
     except Exception:
         ctx = "desktop-first, L2/L3 gates, 113 customers"
 
-        schema = '{"feature":"string","priority":"high|medium|low","impact":"string","files_to_modify":["string"],"test_strategy":"string","risk":"Low|Medium|High","rollback_plan":"string"}'
-        sys_msg = (
-            f"You are MAX, EmpireBox's AI orchestrator.\n"
-            f"Output ONLY a single JSON object matching this schema:\n{schema}\n"
-            f"Rules:\n"
-            f"1. Wrap output EXACTLY in START_JSON and END_JSON tags\n"
-            f"2. ALL file paths MUST start with ~/empire-repo-v10/\n"
-            f"3. NEVER mention ~/empire-repo/ (production)\n"
-            f"4. If unsure, use empty array for files_to_modify\n"
-            f"Context: {ctx}\n"
-            f"User request: {prompt_text}"
-        )
+    sys_msg = build_orchestrator_sysmsg(ctx, prompt_text)
 
-        resp = await ai_router.chat(messages=[AIMessage(role="system", content=sys_msg), AIMessage(role="user", content=prompt_text)])
+    try:
+        # Call _minimax_chat directly to avoid 55k MAX system prompt prepending that chat() does
+        resp = await ai_router._minimax_chat(
+            messages=[AIMessage(role="system", content=sys_msg), AIMessage(role="user", content=prompt_text)],
+            image_path=None, tools=None
+        )
         resp_text = resp.content if hasattr(resp, 'content') else str(resp)
+        log(f"🔍 RAW resp type={type(resp)} content_len={len(resp_text)} model={getattr(resp, 'model_used', 'unknown')}")
 
         match = re.search(r'START_JSON\s*(.*?)\s*END_JSON', resp_text, re.DOTALL)
         if not match:
@@ -170,6 +180,13 @@ async def main():
                         app = check_approval(pid)
                         if app == "approved":
                             log(f"✅ PROPOSAL APPROVED: {proposal.get('feature')}")
+                            # Execute the approved proposal (pass ai_router for real code gen)
+                            log(f"🔧 Executing proposal {pid} (dry_run=False)...")
+                            result = await execute_proposal(pid, dry_run=False, ai_router=ai_router)
+                            if result.get("errors"):
+                                log(f"❌ Execution errors: {result['errors']}")
+                            else:
+                                log(f"✅ Executed: {result.get('written_files', [])}")
                             break
                         if app and app != "approved":
                             log(f"❌ PROPOSAL {app.upper()}: {proposal.get('feature')}")
@@ -177,9 +194,11 @@ async def main():
                         await asyncio.sleep(10)
                 except (KeyError, AttributeError, TypeError) as e:
                     log(f"⚠️ Processing error {type(e).__name__}: {e} | prompt={p.get('id', 'unknown')} | trace={traceback.format_exc()[-150:]}")
+                    mark_done(pid)
                     continue
                 except Exception as e:
                     log(f"⚠️ Processing error: {e} | prompt={p.get('id', 'unknown')} | trace={traceback.format_exc()[-150:]}")
+                    mark_done(pid)
                     continue
         except Exception as e:
             log(f"⚠️ Orchestrator error: {e} — {traceback.format_exc()[-200:]}")

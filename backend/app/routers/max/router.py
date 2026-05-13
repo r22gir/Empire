@@ -36,6 +36,7 @@ from app.services.max.runtime_truth_check import (
     run_whats_new_summary,
     format_whats_new_summary,
 )
+from app.services.max.artifact_parser import parse_max_artifact_blocks, ArtifactPayload
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
@@ -376,6 +377,7 @@ class ChatResponse(BaseModel):
     quality: Optional[Dict[str, Any]] = None
     response_id: Optional[str] = None  # for feedback linkage
     metadata: Optional[Dict[str, Any]] = None
+    artifacts: Optional[List[ArtifactPayload]] = None
 
 
 class TaskCreateRequest(BaseModel):
@@ -2503,6 +2505,11 @@ async def chat_stream(request: ChatRequest):
                 except Exception as _save_err:
                     logger.debug(f"[stream] Chat history save failed: {_save_err}")
 
+            # Parse artifact JSON blocks from full response and emit SSE artifact events
+            parsed_artifacts = parse_max_artifact_blocks(full_response)
+            for artifact in parsed_artifacts:
+                yield f"data: {json.dumps({'type': 'artifact', 'artifact': artifact.model_dump()})}\n\n"
+
             # Merge harness metadata into response metadata
             _stream_base_metadata = _response_metadata(request.channel)
             # ── Streaming harness truth fix: reflect actual model used ──────────
@@ -3045,6 +3052,36 @@ async def max_supermemory_product_snapshots():
     """Write compact registry-derived product snapshots to the Supermemory scaffold."""
     from app.services.max.supermemory_recall import write_product_snapshots
     return write_product_snapshots()
+
+
+@router.get("/providers")
+async def max_providers():
+    """Standalone route for MAX provider list — used by dashboards and status panels."""
+    configured_models = ai_router.get_available_models()
+    cloud = [
+        {
+            "id": m["id"],
+            "name": m["name"],
+            "configured": bool(m["available"]),
+            "primary": bool(m.get("primary")),
+            "model": m.get("model"),
+            "base_url": m.get("base_url"),
+            "status_source": "env_configured",
+        }
+        for m in configured_models
+        if m.get("type") == "cloud"
+    ]
+    local = [
+        {
+            "id": m["id"],
+            "name": m["name"],
+            "configured": bool(m["available"]),
+            "primary": bool(m.get("primary")),
+        }
+        for m in configured_models
+        if m.get("type") == "local"
+    ]
+    return {"cloud": cloud, "local": local}
 
 
 @router.get("/orchestration/status")

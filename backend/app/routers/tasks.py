@@ -211,6 +211,16 @@ def create_task(task: TaskCreate):
         return {"task": created}
 
 
+@router.get("/active")
+def get_active_tasks():
+    """Get all active (non-completed) tasks."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM tasks WHERE status NOT IN ('done', 'cancelled') ORDER BY priority DESC, created_at DESC"
+        ).fetchall()
+        return {"tasks": [_enrich_task(dict_row(r)) for r in rows], "count": len(rows)}
+
+
 @router.get("/{task_id}")
 def get_task(task_id: str):
     """Get task detail with its activity log."""

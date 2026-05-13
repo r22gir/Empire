@@ -80,6 +80,9 @@ def load_router(module_path, prefix, tags):
 load_router("app.routers.max", "", ["max"])
 load_router("app.routers.max", "/api/v1", ["api-v1"])
 
+# MiniMax Capability Adapter (v10 — multimodal: TTS, image, video, music)
+load_router("app.routers.minimax", "/api/v1", ["minimax"])
+
 # Files API
 load_router("app.api.v1.files", "/api/v1", ["files"])
 

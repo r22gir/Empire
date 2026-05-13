@@ -5,8 +5,10 @@ import {
   Trash2, Download, Image as ImageIcon, Sparkles,
   ChevronDown, X, AlertTriangle, CheckCircle, Clock, Shield
 } from 'lucide-react';
-import { Message } from '../../lib/types';
+import { Message, MaxArtifact } from '../../lib/types';
 import { API } from '../../lib/api';
+import { ArtifactCard } from '../max/artifacts/ArtifactCard';
+import { ArtifactViewer } from '../max/artifacts/ArtifactViewer';
 
 // Tool registry with safety metadata
 interface ToolMeta {
@@ -143,6 +145,11 @@ interface ChatInterfaceProps {
   voiceMode: boolean;
   onToggleVoiceMode: () => void;
   activeDesk: string;
+  onOpenArtifact?: (artifact: MaxArtifact) => void;
+  artifactStates?: Record<string, string>;
+  onApproveArtifact?: (id: string) => void;
+  onRejectArtifact?: (id: string) => void;
+  onRequestChangesArtifact?: (id: string) => void;
 }
 
 function parseMarkdown(text: string): string {
@@ -166,12 +173,18 @@ export function ChatInterface({
   onToggleCodeMode,
   voiceMode,
   onToggleVoiceMode,
+  onOpenArtifact,
+  artifactStates,
+  onApproveArtifact,
+  onRejectArtifact,
+  onRequestChangesArtifact,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [toolsMenuOpen, setToolsMenuOpen] = useState(false);
   const [confirmTool, setConfirmTool] = useState<ToolMeta | null>(null);
+  const [activeArtifact, setActiveArtifact] = useState<MaxArtifact | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -329,6 +342,18 @@ export function ChatInterface({
                   {msg.model && <span>{msg.model}</span>}
                   {msg.latency && <span>{msg.latency}</span>}
                 </div>
+                {/* Artifact cards */}
+                {msg.artifacts && msg.artifacts.map((artifact) => (
+                  <ArtifactCard
+                    key={artifact.id}
+                    artifact={artifact}
+                    displayMode={(artifactStates?.[artifact.id] as any) || undefined}
+                    onOpenViewer={(a) => setActiveArtifact(a)}
+                    onApprove={onApproveArtifact ? (id) => onApproveArtifact(id) : undefined}
+                    onReject={onRejectArtifact ? (id) => onRejectArtifact(id) : undefined}
+                    onRequestChanges={onRequestChangesArtifact ? (id) => onRequestChangesArtifact(id) : undefined}
+                  />
+                ))}
               </div>
               {isUser && (
                 <div style={{
@@ -757,6 +782,27 @@ export function ChatInterface({
             setConfirmTool(null);
           }}
           onCancel={() => setConfirmTool(null)}
+        />
+      )}
+
+      {/* Artifact Viewer Modal */}
+      {activeArtifact && (
+        <ArtifactViewer
+          artifact={activeArtifact}
+          displayMode={(artifactStates?.[activeArtifact.id] as any) || undefined}
+          onClose={() => setActiveArtifact(null)}
+          onApprove={(id) => {
+            onApproveArtifact?.(id);
+            setActiveArtifact(null);
+          }}
+          onReject={(id) => {
+            onRejectArtifact?.(id);
+            setActiveArtifact(null);
+          }}
+          onRequestChanges={(id) => {
+            onRequestChangesArtifact?.(id);
+            setActiveArtifact(null);
+          }}
         />
       )}
     </div>

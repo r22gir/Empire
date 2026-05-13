@@ -6,6 +6,11 @@ import type { NextConfig } from "next";
 const BUILD_TIMESTAMP = Date.now();
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: "/home/rg/empire-repo-v10/empire-command-center",
+  },
+  serverExternalPackages: ["@react-three/fiber", "@react-three/drei", "sharp"],
+  port: 3010,
   async headers() {
     return [
       {
