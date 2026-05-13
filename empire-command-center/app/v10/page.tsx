@@ -15,6 +15,13 @@ interface V10Status {
     ollama_disabled_reason: string | null;
     max_primary_provider_env: string | null;
   };
+  minimax_cli_tools?: {
+    image_generation: boolean;
+    vision: boolean;
+    web_search: boolean;
+    tts: boolean;
+    stt: boolean;
+  };
   current_commit: { hash: string; message: string } | null;
 }
 
@@ -159,6 +166,33 @@ export default function V10Page() {
               <span style={{ color: provider?.ollama_disabled ? '#ff6b35' : '#22c55e' }}>
                 {provider?.ollama_disabled ? `disabled (${provider.ollama_disabled_reason})` : 'enabled'}
               </span>
+            </div>
+          </div>
+        </div>
+
+        {/* MiniMax CLI Tools */}
+        <div style={{
+          background: '#1e1e32',
+          border: '1px solid #4ecdc4',
+          borderRadius: '8px',
+          padding: '1.5rem',
+        }}>
+          <h2 style={{ color: '#4ecdc4', marginTop: 0 }}>MiniMax CLI Tools (v10)</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {(['image_generation', 'vision', 'web_search', 'tts'] as const).map((tool) => {
+              const enabled = maxStatus?.minimax_cli_tools?.[tool];
+              return (
+                <div key={tool}>
+                  <span style={{ color: '#888' }}>{tool.replace('_', ' ')}: </span>
+                  <span style={{ color: enabled ? '#22c55e' : '#ff4444' }}>
+                    {enabled ? `✓ via mmx CLI` : '✗ unavailable'}
+                  </span>
+                </div>
+              );
+            })}
+            <div>
+              <span style={{ color: '#888' }}>STT: </span>
+              <span style={{ color: '#ff6b35' }}>✗ existing provider</span>
             </div>
           </div>
         </div>

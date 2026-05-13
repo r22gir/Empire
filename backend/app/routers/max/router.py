@@ -3002,6 +3002,13 @@ async def max_status():
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
         "provider_policy": provider_policy,
+        "minimax_cli_tools": {
+            "image_generation": os.getenv("MAX_ENABLE_MINIMAX_IMAGE", "false").lower() in ("true", "1", "yes"),
+            "vision": os.getenv("MAX_ENABLE_MINIMAX_VISION", "false").lower() in ("true", "1", "yes"),
+            "web_search": os.getenv("MAX_ENABLE_MINIMAX_WEB_SEARCH", "false").lower() in ("true", "1", "yes"),
+            "tts": os.getenv("MAX_ENABLE_MINIMAX_TTS", "false").lower() in ("true", "1", "yes"),
+            "stt": os.getenv("MAX_ENABLE_MINIMAX_STT", "false").lower() in ("true", "1", "yes"),
+        },
     }
 
 
