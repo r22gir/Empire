@@ -158,10 +158,10 @@ def strip_reasoning_tags(text: str) -> str:
 
     # 1. Remove complete <think>... blocks (non-greedy .*? so each block matched individually,
     #    DOTALL so . matches newlines, optional trailing newline preserved)
-    text = re.sub(r"<think>.*?<\/think>\n?", "", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"<think>.*?<\/think>\n?", " ", text, flags=re.IGNORECASE | re.DOTALL)
 
     # 2. Remove <thinking>...</thinking> blocks
-    text = re.sub(r"<thinking>[\s\S]*?</thinking>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<thinking>[\s\S]*?</thinking>", " ", text, flags=re.IGNORECASE)
 
     # 3. Remove orphan closing tag  at end of chunk (no opening in this chunk)
     #    This appears after strip of complete tags leaves stray closing tag
