@@ -36,6 +36,7 @@ from app.services.max.runtime_truth_check import (
     run_whats_new_summary,
     format_whats_new_summary,
 )
+from app.services.max.live_lookup_router import should_live_lookup, LiveLookupDecision
 from app.services.max.artifact_parser import parse_max_artifact_blocks, ArtifactPayload
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
@@ -229,6 +230,43 @@ def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult
     except Exception as exc:
         logger.warning(f"Runtime truth unified message store write failed: {exc}")
     return conv_id
+
+
+def _execute_live_lookup(decision: LiveLookupDecision, request) -> Optional[str]:
+    """
+    Execute a live lookup based on the router's decision.
+    Returns a context string to inject, or None if lookup failed.
+    """
+    tool_name = decision.preferred_tool or "minimax_web_search"
+
+    if tool_name == "minimax_web_search":
+        search_params = {"query": decision.query, "num_results": 5}
+        result = execute_tool({"tool": "minimax_web_search", "params": search_params})
+    else:
+        # Dedicated tool — use whatever name was resolved
+        result = execute_tool({"tool": tool_name, "params": {"query": decision.query}})
+
+    if not result.success:
+        logger.warning(f"[live_lookup] tool={tool_name} failed: {result.error}")
+        return None
+
+    # Format as a concise context string for the model
+    r = result.result or {}
+    if tool_name == "minimax_web_search":
+        results = r.get("results", [])
+        if not results:
+            return None
+        top = results[:3]
+        summary_lines = [f"- {item.get('title','No title')}: {item.get('snippet','')[:150]}" for item in top]
+        return (
+            f"[LIVE LOOKUP: {decision.query}]\n"
+            + "Verified information from web search:\n"
+            + "\n".join(summary_lines)
+            + "\n[Use this verified information to answer the user's question. Do not fall back to training data.]"
+        )
+    else:
+        # Dedicated tool result — return raw output as context
+        return f"[LIVE LOOKUP via {tool_name}]: {str(r)[:2000]}"
 
 
 def _execute_drawing_handoff(handoff):
@@ -1494,6 +1532,28 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
         )
 
+    # ── Live Lookup Router ──────────────────────────────────────────────
+    _ll_decision = should_live_lookup(request.message, {})
+    _ll_lookup_done = False
+    _ll_result_content = None
+    if _ll_decision.needs_lookup:
+        _ll_lookup_result = _execute_live_lookup(_ll_decision, request)
+        if _ll_lookup_result is not None:
+            _ll_result_content = _ll_lookup_result
+            _ll_lookup_done = True
+            logger.info(f"[live_lookup] lookup done via {_ll_decision.preferred_tool}: {_ll_decision.query[:60]}")
+        elif _ll_decision.lookup_policy == "required":
+            return ChatResponse(
+                response=(
+                    f"Live lookup failed for \"{_ll_decision.query}\". "
+                    f"Reason: {_ll_decision.reason}. Please try again or rephrase."
+                ),
+                model_used="live-lookup-gate",
+                fallback_used=False,
+                tool_results=[],
+                metadata=_response_metadata(request.channel, error="live_lookup_failed"),
+            )
+
     try:
         # Apply conversation windowing to prevent context overload
         windowed_history = _window_conversation(request.history)
@@ -1501,6 +1561,8 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             logger.info(f"Conversation windowed: {len(request.history)} -> {len(windowed_history)} messages")
 
         messages = [AIMessage(role=h["role"], content=h["content"]) for h in windowed_history]
+        if _ll_result_content:
+            messages.append(AIMessage(role="system", content=_ll_result_content))
         messages.append(AIMessage(role="user", content=request.message))
         model = None
         if request.model:
