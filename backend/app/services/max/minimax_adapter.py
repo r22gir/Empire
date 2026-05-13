@@ -340,7 +340,7 @@ class MiniMaxSpeechClient:
     def __init__(self):
         self.cli_path = os.getenv("MINIMAX_CLI_PATH", "mmx")
 
-    def synthesize(self, text: str, voice: str = "male-qn-qingse", speed: float = 1.0, timeout: float = 60.0) -> dict:
+    def synthesize(self, text: str, voice: str = "english_expressive_narrator", speed: float = 1.0, timeout: float = 60.0) -> dict:
         """Generate speech from text via mmx CLI. Returns {output_file, duration_s}."""
         # mmx speech synthesize --text "..." --voice "male-qn-qingse"
         cmd = [self.cli_path, "speech", "synthesize", "--text", text[:1000], "--voice", voice]
@@ -401,8 +401,12 @@ class MiniMaxMusicClient:
         self.cli_path = os.getenv("MINIMAX_CLI_PATH", "mmx")
 
     def generate(self, prompt: str, timeout: float = 300.0) -> dict:
-        """Generate music via mmx music generate."""
-        cmd = [self.cli_path, "music", "generate", "--prompt", prompt[:8000], "--output", "json"]
+        """Generate music via mmx music generate.
+        Uses --lyrics-optimizer (auto-generate lyrics from prompt) as default,
+        which works on the current plan. --instrumental requires music-2.5+/2.6
+        which may not be available on all token plans.
+        """
+        cmd = [self.cli_path, "music", "generate", "--prompt", prompt[:8000], "--lyrics-optimizer", "--output", "json"]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=str(MINIMAX_OUTPUT_DIR), env=_cli_env())
             if result.returncode != 0:

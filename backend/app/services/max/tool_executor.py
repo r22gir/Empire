@@ -496,7 +496,7 @@ MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
                 "type": "object",
                 "properties": {
                     "text": {"type": "string", "description": "Text to synthesize into speech"},
-                    "voice": {"type": "string", "description": "Voice name (e.g., 'af_heart', 'bf_emma', 'bm_george'). Default: 'af_heart'"}
+                    "voice": {"type": "string", "description": "Voice name (e.g., 'English_expressive_narrator', 'English_radiant_girl', 'English_magnetic_voiced_man'). Default: 'English_expressive_narrator'"}
                 },
                 "required": ["text"]
             }
@@ -5475,10 +5475,11 @@ def _minimax_cli_tool(params: dict, tool_name: str) -> ToolResult:
     )
 
     try:
+        p = params.get("params", params)  # Support both flat and nested: execute_tool sends {tool, params}, direct calls use flat dict
         if tool_name == "minimax_image_generate":
             client = MiniMaxImageGenerationClient()
-            prompt = params.get("prompt", "")
-            num = int(params.get("num", 1))
+            prompt = p.get("prompt", "")
+            num = int(p.get("num", 1))
             result = client.generate(prompt, num_images=num)
             images = result.get("images", [])
             return ToolResult(tool=tool_name, success=True, result={
@@ -5487,19 +5488,19 @@ def _minimax_cli_tool(params: dict, tool_name: str) -> ToolResult:
             })
         elif tool_name == "minimax_vision_describe":
             client = MiniMaxVisionClient()
-            image_path = params.get("image_path", "")
-            prompt = params.get("prompt", "Describe what you see in detail.")
+            image_path = p.get("image_path", "")
+            prompt = p.get("prompt", "Describe what you see in detail.")
             result = client.describe(image_path, prompt)
             return ToolResult(tool=tool_name, success=True, result=result)
         elif tool_name == "minimax_web_search":
             client = MiniMaxSearchClient()
-            query = params.get("query", "")
+            query = p.get("query", "")
             result = client.query(query)
             return ToolResult(tool=tool_name, success=True, result=result)
         elif tool_name == "minimax_tts_synthesize":
             client = MiniMaxSpeechClient()
-            text = params.get("text", "")
-            voice = params.get("voice", "af_heart")
+            text = p.get("text", "")
+            voice = p.get("voice", "english_expressive_narrator")
             result = client.synthesize(text, voice=voice)
             return ToolResult(tool=tool_name, success=True, result=result)
         else:
