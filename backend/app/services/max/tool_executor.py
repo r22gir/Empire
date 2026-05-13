@@ -5479,7 +5479,7 @@ def _minimax_cli_tool(params: dict, tool_name: str) -> ToolResult:
             client = MiniMaxImageGenerationClient()
             prompt = params.get("prompt", "")
             num = int(params.get("num", 1))
-            result = client.generate(prompt, num=num)
+            result = client.generate(prompt, num_images=num)
             images = result.get("images", [])
             return ToolResult(tool=tool_name, success=True, result={
                 "images": images,
