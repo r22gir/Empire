@@ -743,6 +743,19 @@ ARCHIVEFORGE_ROUTE_MARKERS = (
     "intake draft",
     "life intake",
 )
+ARCHIVEFORGE_INFO_MARKERS = (
+    "what is archiveforge",
+    "what's archiveforge",
+    "what archiveforge features are working",
+    "what archiveforge features work",
+    "help me process a life magazine",
+    "help me process life magazine",
+    "how do i process a life magazine",
+    "how do i process life magazine",
+    "can archiveforge publish",
+    "publish to marketplace",
+    "marketforge publish",
+)
 EXPLICIT_DRAWING_OVERRIDE_PATTERNS = (
     r"\bdrawing\b",
     r"\bdraw\b",
@@ -875,6 +888,83 @@ def _archiveforge_no_draft_response(request: ChatRequest) -> ChatResponse:
             },
         }],
         metadata=_response_metadata(request.channel, skill_used="hermes_form_prep"),
+    )
+
+
+def _is_archiveforge_info_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not _prefer_archiveforge_over_drawing(message):
+        return False
+    if any(marker in text for marker in ARCHIVEFORGE_INFO_MARKERS):
+        return True
+    # Route general question-style ArchiveForge asks to a truthful status/workflow response.
+    return ("archiveforge" in text or "life magazine" in text) and any(
+        token in text for token in ("what", "how", "help", "can", "publish", "workflow", "working", "features")
+    )
+
+
+def _archiveforge_publish_status_snapshot() -> dict | None:
+    try:
+        from app.main import app as fastapi_app
+        from app.routers.archiveforge import MARKETFORGE_PRODUCTS_URL
+
+        mounted_paths = {
+            getattr(route, "path", "")
+            for route in getattr(fastapi_app, "routes", [])
+        }
+        if "/marketplace/products" in mounted_paths:
+            return {
+                "publish_available": True,
+                "target": MARKETFORGE_PRODUCTS_URL,
+                "reason": "MarketForge products route is mounted in the running API.",
+            }
+        return {
+            "publish_available": False,
+            "target": MARKETFORGE_PRODUCTS_URL,
+            "reason": "MarketForge products route is not mounted at /marketplace/products.",
+        }
+    except Exception:
+        return None
+
+
+def _archiveforge_info_response(request: ChatRequest) -> ChatResponse:
+    publish_status = _archiveforge_publish_status_snapshot()
+    if publish_status is None:
+        publish_line = (
+            "Publish status is currently unverified from /api/v1/archiveforge/publish-status. "
+            "Use Step 7 Review & Publish and confirm the live publish-status banner."
+        )
+    elif publish_status.get("publish_available"):
+        publish_line = (
+            f"Publish route is live at {publish_status.get('target')}. "
+            "Publishing is explicit in Step 7 (manual review + click), never automatic."
+        )
+    else:
+        publish_line = (
+            f"Publish is currently blocked: {publish_status.get('reason') or 'market route unavailable'}. "
+            "Save drafts locally until publish-status is green."
+        )
+
+    response_lines = [
+        "ArchiveForge is Empire's LIFE-magazine intake and listing workflow.",
+        "Working flow: identify issue -> upload actual photos -> condition/tier -> listing draft -> review -> save/push state.",
+        "Verified core actions: archive create/list/detail/update, photo upload, draft generation/save, inventory/stats, and guarded publish path.",
+        publish_line,
+        "To start intake, ask: `prepare LIFE magazine intake draft ...` with whatever fields you know.",
+    ]
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="archiveforge-status",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "archiveforge_status",
+            "success": True,
+            "result": {
+                "publish_status": publish_status,
+                "workflow": "life_magazine_intake",
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="archiveforge_status"),
     )
 
 
@@ -1180,6 +1270,9 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
 
     if not request.desk and not request.image_filename and _is_hermes_prefill_request(request.message):
         return _hermes_prefill_response(request)
+
+    if not request.desk and not request.image_filename and _is_archiveforge_info_request(request.message):
+        return _archiveforge_info_response(request)
 
     if not request.desk and not request.image_filename and _prefer_archiveforge_over_drawing(request.message):
         return _archiveforge_no_draft_response(request)

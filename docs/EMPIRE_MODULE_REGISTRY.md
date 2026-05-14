@@ -447,11 +447,12 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: Photo-first intake for collectible print/media (LIFE Magazine focus)
-**Last verified**: da3fdf4
+**Last verified**: dd57341 (May 14, 2026)
 
 ### Frontend
 - `app/components/screens/ArchiveForgePage.tsx`
 - `app/archiveforge-life/` — LIFE-specific pages
+- `app/archiveforge/page.tsx` — redirect to `/archiveforge-life` (legacy path compatibility)
 
 ### Backend
 - `backend/app/routers/archiveforge.py`
@@ -464,6 +465,7 @@ approved / corrected_and_approved / rejected
 - Reboxing workflow + inventory management
 - Persistent photo storage (V1.1)
 - Photo upload + capture
+- Safe archive delete cleanup (photos + drafts + file cleanup)
 
 ### Recent Fixes
 - `e3a6f33` — fix(archiveforge): make LIFE cover search query-bound
@@ -473,6 +475,8 @@ approved / corrected_and_approved / rejected
 
 ### Docs
 - `docs/archiveforge/`
+- `docs/ARCHIVEFORGE_STATUS.md`
+- `docs/ARCHIVEFORGE_WORKFLOW.md`
 
 ---
 

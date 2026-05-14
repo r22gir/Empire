@@ -1307,9 +1307,37 @@ async def save_listing_draft(archive_id: int, req: SaveDraftRequest):
 async def delete_archive(archive_id: int):
     """Delete an archive item."""
     with get_db() as db:
-        affected = db.execute("DELETE FROM ag_archives WHERE id = ?", (archive_id,)).rowcount
-    if not affected:
-        raise HTTPException(404, "Archive item not found")
+        existing = db.execute("SELECT id FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
+        if not existing:
+            raise HTTPException(404, "Archive item not found")
+
+        photo_rows = dict_rows(db.execute(
+            "SELECT id, file_path FROM ag_archive_photos WHERE archive_id = ?",
+            (archive_id,),
+        ).fetchall())
+
+        # Remove draft/history children before parent row to avoid FK failures.
+        db.execute("DELETE FROM ag_listing_drafts WHERE archive_id = ?", (archive_id,))
+        db.execute("DELETE FROM ag_archive_photos WHERE archive_id = ?", (archive_id,))
+        db.execute("DELETE FROM ag_archives WHERE id = ?", (archive_id,))
+        db.commit()
+
+    # Best-effort cleanup for persisted files.
+    for photo in photo_rows:
+        file_path = Path(photo.get("file_path", ""))
+        if file_path.exists():
+            try:
+                file_path.unlink()
+            except OSError:
+                pass
+
+    item_dir = UPLOADS_DIR / str(archive_id)
+    if item_dir.exists():
+        try:
+            item_dir.rmdir()
+        except OSError:
+            pass
+
     return {"id": archive_id, "deleted": True}
 
 
