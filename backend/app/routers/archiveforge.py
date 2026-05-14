@@ -20,6 +20,7 @@ import json
 import sqlite3
 import logging
 import re
+import os
 import shutil
 import uuid
 import urllib.parse
@@ -29,12 +30,21 @@ from pathlib import Path
 
 from app.db.database import get_db, dict_rows, dict_row, DB_PATH
 
-UPLOADS_DIR = Path("/home/rg/empire-repo/backend/data/archiveforge_uploads")
+UPLOADS_DIR = Path(
+    os.getenv(
+        "ARCHIVEFORGE_UPLOADS_DIR",
+        str(Path(DB_PATH).parent / "archiveforge_uploads"),
+    )
+)
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 # MarketForge product creation endpoint. ArchiveForge must not claim publish
 # success unless this real endpoint accepts the product payload.
-MARKETFORGE_PRODUCTS_URL = "http://localhost:8000/marketplace/products"
+MARKETFORGE_PRODUCTS_URL = os.getenv(
+    "ARCHIVEFORGE_MARKETFORGE_PRODUCTS_URL",
+    "http://localhost:8010/marketplace/products",
+)
+ARCHIVEFORGE_API_BASE_URL = os.getenv("ARCHIVEFORGE_API_BASE_URL", "http://localhost:8010").rstrip("/")
 GOOGLE_BOOKS_API_URL = "https://www.googleapis.com/books/v1/volumes"
 
 PUSH_STATUSES = ["not_pushed", "draft_saved", "pushing", "pushed", "failed"]
@@ -1721,7 +1731,13 @@ async def push_to_marketforge(archive_id: int):
             "SELECT * FROM ag_archive_photos WHERE archive_id = ? ORDER BY created_at ASC",
             (archive_id,),
         ).fetchall())
-    photo_urls = [f"http://localhost:8000/api/v1/archiveforge/photo/{p['id']}" for p in photo_rows]
+    parsed_target = urllib.parse.urlparse(MARKETFORGE_PRODUCTS_URL)
+    photo_origin = (
+        f"{parsed_target.scheme}://{parsed_target.netloc}"
+        if parsed_target.scheme and parsed_target.netloc
+        else ARCHIVEFORGE_API_BASE_URL
+    )
+    photo_urls = [f"{photo_origin}/api/v1/archiveforge/photo/{p['id']}" for p in photo_rows]
 
     if not photo_urls:
         raise HTTPException(400, "Cannot publish — no actual listing photos uploaded. Upload at least a front cover photo in Step 3.")
