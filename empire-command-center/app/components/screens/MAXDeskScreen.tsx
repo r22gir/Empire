@@ -13,6 +13,10 @@ import { ArtifactViewer } from '../max/artifacts/ArtifactViewer';
 const STORAGE_KEY = 'empire_max_messages';
 const LAYOUT_KEY = 'empire_max_layout';
 
+// Schema version for v10 chat history — mismatches trigger history clear
+const MAX_CHAT_SCHEMA_VERSION = 'v10-2026-05-minimax-live-lookup';
+const MAX_CHAT_SCHEMA_KEY = 'empire_max_schema';
+
 interface LayoutState {
   sidebarVisible: boolean;
   rightPanelVisible: boolean;
@@ -69,6 +73,7 @@ function displayModel(model?: string): string | undefined {
   if (!model) return undefined;
   const m = model.toLowerCase();
   if (m === 'openclaw' || m === 'ollama' || m === 'openai' || m === 'grok' || m === 'claude') return undefined;
+  if (m.includes('groq')) return undefined; // never show Groq label
   if (m === 'whats-new-summary') return 'MAX Summary';
   if (m.includes('minimax')) return 'MiniMax';
   if (m === 'empire-runtime-truth-check') return 'MAX Runtime Check';
@@ -86,6 +91,13 @@ function cleanResponse(content: string): string {
 
 function loadStoredMessages(): Message[] {
   try {
+    const schema = localStorage.getItem(MAX_CHAT_SCHEMA_KEY);
+    if (schema !== MAX_CHAT_SCHEMA_VERSION) {
+      // Schema mismatch — clear old history and set new schema
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(MAX_CHAT_SCHEMA_KEY, MAX_CHAT_SCHEMA_VERSION);
+      return [];
+    }
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const msgs = JSON.parse(raw);
@@ -318,6 +330,9 @@ export function MAXDeskScreen() {
     // Clear localStorage and sessionStorage so no stale messages persist
     try {
       localStorage.removeItem(STORAGE_KEY);
+    } catch { /* ignore */ }
+    try {
+      localStorage.removeItem(MAX_CHAT_SCHEMA_KEY);
     } catch { /* ignore */ }
     try {
       sessionStorage.clear();
