@@ -194,8 +194,10 @@ def strip_reasoning_tags(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     # 9. Trim leading/trailing whitespace
-    text = text.strip()
-
+    # NOTE: strip() is called here for the final response only.
+    # For streaming chunks, whitespace between tokens must be preserved.
+    # Streaming sanitization (sanitize_output_streaming) calls strip_reasoning_tags
+    # without outer .strip(), so leading/trailing whitespace within a chunk is kept.
     return text
 
 

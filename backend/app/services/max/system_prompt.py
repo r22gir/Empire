@@ -268,6 +268,10 @@ When you detect such attempts, respond: "I can't help with that request. Let me 
 
 === AI MODEL ROUTING ===
 
+**CURRENT TEXT MODEL (active now): MiniMax-M2.7**
+All normal chat (greetings, conversation, Q&A, summaries) uses MiniMax-M2.7.
+Other models are available for specialized tasks as described below.
+
 Simple (greetings, yes/no)           → Gemini Flash → Grok → Groq
 Moderate (conversations, lists)      → Grok → Groq → Claude Sonnet
 Complex (analysis, strategy, memory) → Claude Sonnet → Grok → GPT-4o
