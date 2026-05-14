@@ -447,7 +447,7 @@ approved / corrected_and_approved / rejected
 
 **Status**: live
 **Purpose**: Photo-first intake for collectible print/media (LIFE Magazine focus)
-**Last verified**: dd57341 (May 14, 2026)
+**Last verified**: May 14, 2026 (feature/v10.0 working tree)
 
 ### Frontend
 - `app/components/screens/ArchiveForgePage.tsx`
@@ -461,11 +461,19 @@ approved / corrected_and_approved / rejected
 ### Features (V1.2)
 - Direct LIFE intake page
 - V1.2 Review & Publish step
-- MarketForge product publish route (wired)
+- MarketForge staged publish route (internal only)
+- Explicit publish approval gate (`approval_confirmed=true`)
+- Required publish fields: `marketforge_category_id` + `marketforge_ships_from_zip`
+- External publish target host blocking
 - Reboxing workflow + inventory management
 - Persistent photo storage (V1.1)
 - Photo upload + capture
 - Safe archive delete cleanup (photos + drafts + file cleanup)
+
+### Publish Safety Notes
+- Successful ArchiveForge publish currently writes to internal `mf_products` in SQLite through `marketforge_products.py`.
+- No external marketplace action is performed by default.
+- Missing/invalid MarketForge fields persist `marketforge_push_status=blocked_missing_marketforge_fields`.
 
 ### Recent Fixes
 - `e3a6f33` — fix(archiveforge): make LIFE cover search query-bound

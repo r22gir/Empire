@@ -32,18 +32,23 @@ Legacy compatibility:
    - Save draft via `/api/v1/archiveforge/archives/{id}/save-draft`
 7. Review & publish (Step 7)
    - Validate title/description/photos/status
-   - Publish status banner from `/api/v1/archiveforge/publish-status`
-   - Push endpoint: `/api/v1/archiveforge/push/{id}` (manual explicit action only)
+   - Set required MarketForge fields on the archive:
+     - `marketforge_category_id` (UUID)
+     - `marketforge_ships_from_zip` (5-digit ZIP)
+   - Publish status banner from `/api/v1/archiveforge/publish-status?archive_id={id}`
+   - Push endpoint: `/api/v1/archiveforge/push/{id}?approval_confirmed=true` (manual explicit action only)
 8. Inventory view
    - `/api/v1/archiveforge/archives`, `/stats`, `/inventory`
 
 ## Publish Safety
 
-- Publish is manual and explicit in Step 7.
-- No auto publish.
-- When publish route is unavailable, UI shows disabled/unavailable status.
-- Current local publish target is internal MarketForge route:
+- Publish is manual and explicit in Step 7; no auto publish.
+- `approval_confirmed=true` is required or publish returns HTTP 400.
+- Missing/invalid MarketForge fields block publish with HTTP 409 and persisted status `blocked_missing_marketforge_fields`.
+- ArchiveForge publish target is internal staged route only:
   - `http://localhost:8000/marketplace/products`
+- External host targets are blocked by publish-status safety checks.
+- Successful publish means internal product record creation in `mf_products`, not external marketplace go-live.
 
 ## API Smoke Commands
 
@@ -61,6 +66,21 @@ curl -s https://studio.empirebox.store/api/v1/archiveforge/publish-status | pyth
 curl -s https://studio.empirebox.store/api/v1/archiveforge/stats | python3 -m json.tool
 curl -s "https://studio.empirebox.store/api/v1/archiveforge/archives?limit=3" | python3 -m json.tool
 ```
+
+## Manual Browser Verification (lightweight)
+
+Because frontend e2e test tooling is not configured in this repo, use this manual check:
+
+1. Open `http://localhost:3005/archiveforge` and verify redirect to `/archiveforge-life`.
+2. Create an archive item in the life workflow.
+3. Save draft and move status to `READY_TO_LIST`.
+4. Upload at least one photo.
+5. In Review & Publish:
+   - leave MarketForge fields blank and verify publish is blocked with clear validation
+   - enter valid UUID + ZIP and save fields
+   - verify publish requires explicit approval path and succeeds only after trigger
+6. Confirm saved item appears in list/detail pages.
+7. Confirm no core-flow “coming soon” blocker text is shown.
 
 ## MAX Guidance Behavior
 

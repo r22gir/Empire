@@ -20,11 +20,13 @@ import json
 import sqlite3
 import logging
 import re
+import os
 import shutil
 import uuid
 import httpx
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from app.db.database import get_db, dict_rows, dict_row, DB_PATH
 
@@ -33,10 +35,14 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 
 # MarketForge product creation endpoint. ArchiveForge must not claim publish
 # success unless this real endpoint accepts the product payload.
-MARKETFORGE_PRODUCTS_URL = "http://localhost:8000/marketplace/products"
+MARKETFORGE_PRODUCTS_URL = os.getenv(
+    "ARCHIVEFORGE_MARKETFORGE_PRODUCTS_URL",
+    "http://localhost:8000/marketplace/products",
+)
+INTERNAL_MARKETFORGE_HOSTS = {"localhost", "127.0.0.1", "::1"}
 GOOGLE_BOOKS_API_URL = "https://www.googleapis.com/books/v1/volumes"
 
-PUSH_STATUSES = ["not_pushed", "draft_saved", "pushing", "pushed", "failed"]
+PUSH_STATUSES = ["not_pushed", "draft_saved", "blocked_missing_marketforge_fields", "pushing", "pushed", "failed"]
 LISTING_STATUSES = ["none", "draft", "ready", "pushed", "failed"]
 
 router = APIRouter(prefix="/archiveforge", tags=["archiveforge"])
@@ -441,34 +447,111 @@ async def _search_google_books_api(query_used: str, query_date: Optional[datetim
         return [], f"google_books_api_error:{type(exc).__name__}"
 
 
-async def _marketforge_publish_status() -> dict:
+def _marketforge_target_is_internal(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host in INTERNAL_MARKETFORGE_HOSTS
+
+
+def _marketforge_photo_origin(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return os.getenv("ARCHIVEFORGE_API_BASE_URL", "http://localhost:8000")
+
+
+def _is_valid_marketforge_category_id(value: str) -> bool:
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _resolve_marketforge_publish_fields(archive: dict | None) -> dict:
+    if not archive:
+        return {
+            "category_id": "",
+            "ships_from_zip": "",
+            "missing_required_fields": [],
+            "invalid_required_fields": [],
+        }
+
+    category_id = str(archive.get("marketforge_category_id") or "").strip()
+    ships_from_zip = str(archive.get("marketforge_ships_from_zip") or "").strip()
+
+    missing: list[str] = []
+    invalid: list[str] = []
+    if not category_id:
+        missing.append("marketforge_category_id")
+    elif not _is_valid_marketforge_category_id(category_id):
+        invalid.append("marketforge_category_id")
+
+    if not ships_from_zip:
+        missing.append("marketforge_ships_from_zip")
+    elif not re.fullmatch(r"\d{5}", ships_from_zip):
+        invalid.append("marketforge_ships_from_zip")
+
+    return {
+        "category_id": category_id,
+        "ships_from_zip": ships_from_zip,
+        "missing_required_fields": missing,
+        "invalid_required_fields": invalid,
+    }
+
+
+async def _marketforge_publish_status(archive: dict | None = None) -> dict:
+    field_status = _resolve_marketforge_publish_fields(archive)
+    base_status = {
+        "target": MARKETFORGE_PRODUCTS_URL,
+        "publish_mode": "internal_staged_only",
+        "approval_required": True,
+        "external_publish_enabled": False,
+        "required_marketforge_fields": [
+            "marketforge_category_id",
+            "marketforge_ships_from_zip",
+            "approval_confirmed",
+        ],
+        **field_status,
+    }
+
+    if not _marketforge_target_is_internal(MARKETFORGE_PRODUCTS_URL):
+        return {
+            **base_status,
+            "publish_available": False,
+            "reason": "External MarketForge target is blocked. ArchiveForge publish is internal/staged only.",
+            "action_label": "Save draft only — external publish blocked",
+        }
+
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             res = await client.get(MARKETFORGE_PRODUCTS_URL)
         if res.status_code == 404:
             return {
+                **base_status,
                 "publish_available": False,
-                "target": MARKETFORGE_PRODUCTS_URL,
                 "reason": "MarketForge products endpoint is not mounted at /marketplace/products.",
                 "action_label": "Save draft only — MarketForge publish unavailable",
             }
         if res.status_code >= 500:
             return {
+                **base_status,
                 "publish_available": False,
-                "target": MARKETFORGE_PRODUCTS_URL,
                 "reason": f"MarketForge products endpoint returned HTTP {res.status_code}.",
                 "action_label": "Save draft only — MarketForge publish unavailable",
             }
-        return {
+        response = {
+            **base_status,
             "publish_available": True,
-            "target": MARKETFORGE_PRODUCTS_URL,
             "reason": "MarketForge products endpoint responded.",
             "action_label": "Publish to MarketForge",
         }
+        if base_status["missing_required_fields"] or base_status["invalid_required_fields"]:
+            response["action_label"] = "Save required MarketForge fields before publish"
+        return response
     except Exception as exc:
         return {
+            **base_status,
             "publish_available": False,
-            "target": MARKETFORGE_PRODUCTS_URL,
             "reason": f"MarketForge products endpoint unreachable: {type(exc).__name__}",
             "action_label": "Save draft only — MarketForge publish unavailable",
         }
@@ -550,6 +633,8 @@ def _init_tables():
             batch_tag TEXT DEFAULT '',
             listing_draft_status TEXT DEFAULT 'draft',
             -- MarketForge publish tracking
+            marketforge_category_id TEXT DEFAULT '',
+            marketforge_ships_from_zip TEXT DEFAULT '',
             listing_status TEXT DEFAULT 'none',
             marketforge_listing_id TEXT DEFAULT '',
             marketforge_push_status TEXT DEFAULT 'not_pushed',
@@ -635,6 +720,8 @@ def _init_tables():
         "item_specifics": "TEXT DEFAULT '{}'",
         "batch_tag": "TEXT DEFAULT ''",
         "listing_draft_status": "TEXT DEFAULT 'draft'",
+        "marketforge_category_id": "TEXT DEFAULT ''",
+        "marketforge_ships_from_zip": "TEXT DEFAULT ''",
         "listing_status": "TEXT DEFAULT 'none'",
         "marketforge_listing_id": "TEXT DEFAULT ''",
         "marketforge_push_status": "TEXT DEFAULT 'not_pushed'",
@@ -697,6 +784,8 @@ class ArchiveCreate(BaseModel):
     rough_comp_min: float = 0
     rough_comp_max: float = 0
     sale_plan: str = ""
+    marketforge_category_id: str = ""
+    marketforge_ships_from_zip: str = ""
 
 
 class ArchiveUpdate(BaseModel):
@@ -737,6 +826,8 @@ class ArchiveUpdate(BaseModel):
     listing_status: Optional[str] = None
     marketforge_push_status: Optional[str] = None
     marketforge_error_message: Optional[str] = None
+    marketforge_category_id: Optional[str] = None
+    marketforge_ships_from_zip: Optional[str] = None
 
 
 class StatusTransition(BaseModel):
@@ -849,9 +940,24 @@ async def search_life_cover_reference(
 
 
 @router.get("/publish-status")
-async def archiveforge_publish_status():
+async def archiveforge_publish_status(archive_id: Optional[int] = Query(None, ge=1)):
     """Truthful status for ArchiveForge → MarketForge publishing."""
-    return await _marketforge_publish_status()
+    archive = None
+    if archive_id is not None:
+        with get_db() as db:
+            row = db.execute("SELECT * FROM ag_archives WHERE id = ?", (archive_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Archive item not found")
+        archive = dict_row(row)
+    status = await _marketforge_publish_status(archive=archive)
+    if archive_id is not None:
+        status["archive_id"] = archive_id
+        status["publish_ready"] = bool(
+            status.get("publish_available")
+            and not status.get("missing_required_fields")
+            and not status.get("invalid_required_fields")
+        )
+    return status
 
 
 @router.get("/reference/{ref_id}")
@@ -940,8 +1046,9 @@ async def create_archive(req: ArchiveCreate):
                 source_slot_position, processed_box_code, processed_status,
                 archive_location, condition_score, has_address_label, is_complete,
                 defects, notes, tier, rough_comp_min, rough_comp_max, sale_plan,
+                marketforge_category_id, marketforge_ships_from_zip,
                 listing_status, marketforge_push_status)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 reference_issue_db_id, reference_issue_key, req.reference_source,
                 req.google_books_volume_id, req.issue_title, req.volume_label,
@@ -956,6 +1063,7 @@ async def create_archive(req: ArchiveCreate):
                 int(req.has_address_label), int(req.is_complete),
                 req.defects, req.notes, req.tier,
                 req.rough_comp_min, req.rough_comp_max, req.sale_plan,
+                req.marketforge_category_id, req.marketforge_ships_from_zip,
                 'none', 'not_pushed',
             ),
         )
@@ -1094,7 +1202,7 @@ def _condition_to_marketforge(score: int) -> str:
     return mapping.get(score, "good")
 
 
-def _build_marketforge_payload(archive: dict, photo_urls: list[str]) -> dict:
+def _build_marketforge_payload(archive: dict, photo_urls: list[str], category_id: str, ships_from_zip: str) -> dict:
     """Build a MarketForge ProductCreate payload from an archive record."""
     price = archive.get("rough_comp_min", 0) or 10.0
     if archive.get("rough_comp_max", 0):
@@ -1117,7 +1225,7 @@ def _build_marketforge_payload(archive: dict, photo_urls: list[str]) -> dict:
     return {
         "title": archive.get("listing_title") or f"LIFE Magazine {archive.get('issue_date', '')} — {archive.get('cover_subject', 'Vintage')}",
         "description": item_desc,
-        "category_id": "00000000-0000-0000-0000-000000000001",  # placeholder — must be real UUID
+        "category_id": category_id,
         "condition": _condition_to_marketforge(archive.get("condition_score", 3)),
         "price": round(price, 2),
         "shipping_price": 0.0,
@@ -1128,13 +1236,19 @@ def _build_marketforge_payload(archive: dict, photo_urls: list[str]) -> dict:
         "package_length_in": 12,
         "package_width_in": 10,
         "package_height_in": 1,
-        "ships_from_zip": "98101",  # placeholder — must be real ZIP
+        "ships_from_zip": ships_from_zip,
         "quantity": 1,
     }
 
 
 @router.post("/push/{archive_id}")
-async def push_to_marketforge(archive_id: int):
+async def push_to_marketforge(
+    archive_id: int,
+    approval_confirmed: bool = Query(
+        False,
+        description="Explicit approval gate for staged internal publish. Must be true to push.",
+    ),
+):
     """
     Attempt to push an archive listing draft to MarketForge.
 
@@ -1145,11 +1259,10 @@ async def push_to_marketforge(archive_id: int):
     at /marketplace/products in main.py. If not mounted, this returns 502
     with a clear dependency message.
     """
-    publish_status = await _marketforge_publish_status()
-    if not publish_status["publish_available"]:
+    if not approval_confirmed:
         raise HTTPException(
-            503,
-            f"MarketForge publish unavailable: {publish_status['reason']} Save the listing as a draft until MarketForge product creation is wired.",
+            400,
+            "Cannot publish — explicit approval is required. Re-submit with approval_confirmed=true.",
         )
 
     # 1. Load archive
@@ -1158,6 +1271,13 @@ async def push_to_marketforge(archive_id: int):
     if not row:
         raise HTTPException(404, "Archive item not found")
     archive = dict_row(row)
+
+    publish_status = await _marketforge_publish_status(archive=archive)
+    if not publish_status["publish_available"]:
+        raise HTTPException(
+            503,
+            f"MarketForge publish unavailable: {publish_status['reason']} Save the listing as a draft until MarketForge product creation is wired.",
+        )
 
     # 2. Validate processed_status
     valid_publish_statuses = ["READY_TO_LIST", "LISTED"]
@@ -1180,15 +1300,41 @@ async def push_to_marketforge(archive_id: int):
             "SELECT * FROM ag_archive_photos WHERE archive_id = ? ORDER BY created_at ASC",
             (archive_id,),
         ).fetchall())
-    photo_urls = [f"http://localhost:8000/api/v1/archiveforge/photo/{p['id']}" for p in photo_rows]
+    photo_origin = _marketforge_photo_origin(MARKETFORGE_PRODUCTS_URL)
+    photo_urls = [f"{photo_origin}/api/v1/archiveforge/photo/{p['id']}" for p in photo_rows]
 
     if not photo_urls:
         raise HTTPException(400, "Cannot publish — no actual listing photos uploaded. Upload at least a front cover photo in Step 3.")
 
-    # 5. Build payload
-    payload = _build_marketforge_payload(archive, photo_urls)
+    # 5. Validate required MarketForge publish fields
+    missing_fields = publish_status.get("missing_required_fields", [])
+    invalid_fields = publish_status.get("invalid_required_fields", [])
+    if missing_fields or invalid_fields:
+        missing_text = f"missing fields: {', '.join(missing_fields)}" if missing_fields else ""
+        invalid_text = f"invalid fields: {', '.join(invalid_fields)}" if invalid_fields else ""
+        reason = "Cannot publish — " + "; ".join(part for part in (missing_text, invalid_text) if part)
+        reason += ". Set marketforge_category_id (UUID) and marketforge_ships_from_zip (5-digit ZIP) on this archive first."
+        with get_db() as db:
+            db.execute(
+                """UPDATE ag_archives
+                   SET marketforge_push_status = 'blocked_missing_marketforge_fields',
+                       marketforge_error_message = ?,
+                       listing_status = 'draft',
+                       updated_at = datetime('now')
+                   WHERE id = ?""",
+                (reason, archive_id),
+            )
+        raise HTTPException(409, reason)
 
-    # 6. Attempt MarketForge push
+    # 6. Build payload
+    payload = _build_marketforge_payload(
+        archive,
+        photo_urls,
+        category_id=publish_status["category_id"],
+        ships_from_zip=publish_status["ships_from_zip"],
+    )
+
+    # 7. Attempt MarketForge push
     # Set status to pushing
     with get_db() as db:
         db.execute(
