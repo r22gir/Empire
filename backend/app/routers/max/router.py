@@ -1120,9 +1120,37 @@ def _apply_truth_guardrails(message: str | None, response_text: str, tool_result
     return response_text
 
 
+def _is_provider_identity_request(message: str | None) -> bool:
+    text = re.sub(r"[^a-z0-9\s?]", " ", (message or "").lower())
+    probes = (
+        "what ai",
+        "what model are you using",
+        "who powers you",
+    )
+    return any(p in text for p in probes)
+
+
+def _provider_identity_response(request: ChatRequest) -> ChatResponse:
+    # Founder-requested canonical v10 identity wording.
+    response_text = (
+        "I'm MAX. My current v10 text/chat model is MiniMax-M2.7. "
+        "MiniMax CLI also powers image generation, vision, web search, TTS, and music. "
+        "STT remains on the existing provider. Video is available but currently quota-blocked."
+    )
+    return ChatResponse(
+        response=response_text,
+        model_used="provider-identity",
+        fallback_used=False,
+        metadata=_response_metadata(request.channel, skill_used="provider_identity"),
+    )
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         return None
+
+    if not request.image_filename and _is_provider_identity_request(request.message):
+        return _provider_identity_response(request)
 
     if not request.desk and not request.image_filename and _is_openclaw_gate_request(request.message):
         return _openclaw_gate_response(request)
@@ -2288,6 +2316,22 @@ async def chat_stream(request: ChatRequest):
                 model_used = m_used
                 safe_chunk = sanitize_output_streaming(chunk)
                 full_response += safe_chunk
+                # TRACE: log raw→sanitized→SSE for "who are you?" channel
+                if request.channel == "trace-who":
+                    _trace_path = Path("/tmp/empire-trace/stream_trace.jsonl")
+                    entry = {
+                        "stage": "backend_raw_chunk",
+                        "chunk_repr": repr(chunk),
+                        "chunk_len": len(chunk),
+                        "chunk_spaces": chunk.count(" "),
+                        "safe_repr": repr(safe_chunk),
+                        "safe_len": len(safe_chunk),
+                        "safe_spaces": safe_chunk.count(" "),
+                        "sse_content_repr": repr(safe_chunk),
+                        "full_accumulated_len": len(full_response),
+                        "full_accumulated_spaces": full_response.count(" "),
+                    }
+                    _trace_path.write_text(json.dumps(entry) + "\n")
                 yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
