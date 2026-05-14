@@ -34,6 +34,7 @@ from app.services.max.runtime_truth_check import (
     run_whats_new_summary,
     format_whats_new_summary,
 )
+from app.services.max.empire_module_knowledge import resolve_empire_module_question
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
 from app.services.max.brain import ContextBuilder, ConversationTracker
 from app.services.max.brain.brain_config import (
@@ -781,6 +782,30 @@ OPENCLAW_GATE_MARKERS = (
     "openclaw health",
     "open claw health",
 )
+CURRENT_EVENTS_MARKERS = (
+    "what happened",
+    "latest",
+    "news",
+    "today",
+    "current events",
+    "this morning",
+    "breaking",
+)
+CURRENT_EVENTS_TOPICS = (
+    "iran",
+    "israel",
+    "ukraine",
+    "gaza",
+    "russia",
+    "china",
+    "taiwan",
+    "syria",
+    "war",
+    "ceasefire",
+    "sanctions",
+    "protests",
+    "election",
+)
 EMAIL_SEND_TRUTH_PATTERNS = (
     r"^\s*send to my email\s*$",
     r"^\s*send this to my email\s*$",
@@ -965,6 +990,91 @@ def _archiveforge_info_response(request: ChatRequest) -> ChatResponse:
             },
         }],
         metadata=_response_metadata(request.channel, skill_used="archiveforge_status"),
+    )
+
+
+def _sanitize_internal_leakage_text(text: str | None) -> str:
+    """Remove internal tool/reasoning leakage from visible responses."""
+    if not text:
+        return ""
+    cleaned = strip_tool_blocks(text)
+    cleaned = re.sub(r"```(?:tool|json|actions?)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"```", "", cleaned)
+    cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
+    module_hit = resolve_empire_module_question(request.message)
+    if not module_hit:
+        return None
+    response_text = _sanitize_internal_leakage_text(module_hit.get("response", ""))
+    return ChatResponse(
+        response=response_text,
+        model_used="empire-module-knowledge",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "empire_module_knowledge",
+            "success": True,
+            "result": {
+                "module": module_hit.get("module"),
+                "sources": module_hit.get("sources", []),
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="empire_module_knowledge"),
+    )
+
+
+def _is_current_events_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    if not text.strip():
+        return False
+    # Keep service/runtime and explicit module questions on their own routes.
+    if should_run_runtime_truth_check(text):
+        return False
+    if resolve_empire_module_question(text):
+        return False
+    return any(marker in text for marker in CURRENT_EVENTS_MARKERS) and any(topic in text for topic in CURRENT_EVENTS_TOPICS)
+
+
+def _live_lookup_router_response(request: ChatRequest) -> ChatResponse:
+    query = (request.message or "").strip()
+    result = execute_tool({"tool": "web_search", "query": query, "num_results": 5})
+    if not result.success:
+        return ChatResponse(
+            response=f"Live Lookup could not fetch current results: {result.error}",
+            model_used="live-lookup-router",
+            fallback_used=False,
+            tool_results=[result.to_dict()],
+            metadata=_response_metadata(request.channel, skill_used="live_lookup_router"),
+        )
+
+    payload = result.result or {}
+    rows = payload.get("results") or payload.get("items") or []
+    lines = [f"Live Lookup summary for: {query}"]
+    sources = []
+    for row in rows[:5]:
+        title = str(row.get("title") or "").strip()
+        snippet = str(row.get("snippet") or "").strip()
+        url = str(row.get("url") or "").strip()
+        if title:
+            lines.append(f"- {title}: {snippet}" if snippet else f"- {title}")
+        if url:
+            sources.append(url)
+    if sources:
+        lines.append("Sources:")
+        for url in sources[:5]:
+            lines.append(f"- {url}")
+    response_text = _sanitize_internal_leakage_text("\n".join(lines))
+    return ChatResponse(
+        response=response_text,
+        model_used="live-lookup-router",
+        fallback_used=False,
+        tool_results=[result.to_dict()],
+        metadata=_response_metadata(request.channel, skill_used="live_lookup_router"),
     )
 
 
@@ -1239,8 +1349,16 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
-    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
-        return None
+    if not request.desk and not request.image_filename:
+        module_response = _empire_module_response(request)
+        if module_response is not None:
+            return module_response
+
+        if should_run_runtime_truth_check(request.message):
+            return None
+
+        if _is_current_events_request(request.message):
+            return _live_lookup_router_response(request)
 
     if not request.image_filename and _is_provider_identity_request(request.message):
         return _provider_identity_response(request)
@@ -1375,9 +1493,10 @@ def _maybe_handle_gpu_safety_request(request: ChatRequest) -> ChatResponse | Non
 
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
     async def gen():
+        cleaned_response = sanitize_output(_sanitize_internal_leakage_text(response.response))
         for tool_result in response.tool_results or []:
             yield f"data: {json.dumps({'type': 'tool_result', **tool_result})}\n\n"
-        yield f"data: {json.dumps({'type': 'text', 'content': response.response})}\n\n"
+        yield f"data: {json.dumps({'type': 'text', 'content': cleaned_response})}\n\n"
         done = {
             "type": "done",
             "model_used": response.model_used,
@@ -1441,6 +1560,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
+        direct_route.response = sanitize_output(_sanitize_internal_leakage_text(direct_route.response))
         return direct_route
 
     # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
@@ -1887,6 +2007,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Guard: GPU safety output fail-safe — replace model output recommending risky commands
         final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
+        final_content = _sanitize_internal_leakage_text(final_content)
 
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:
@@ -2377,6 +2498,7 @@ async def chat_stream(request: ChatRequest):
                 full_response = followup_text
 
             # Track assistant response — fire-and-forget background tasks
+            full_response = _sanitize_internal_leakage_text(full_response)
             conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
             asyncio.create_task(_safe_background(
                 conversation_tracker.check_and_summarize(conv_id),
@@ -2469,6 +2591,7 @@ async def chat_stream(request: ChatRequest):
                 logger.warning(f"[stream] GPU safety output guardrail replaced response")
                 full_response = _gpu_guard_resp
                 yield f"data: {json.dumps({'type': 'gpu_safety_replace', 'replacement': full_response})}\n\n"
+            full_response = _sanitize_internal_leakage_text(full_response)
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:

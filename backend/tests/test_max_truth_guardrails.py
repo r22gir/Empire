@@ -98,9 +98,10 @@ def test_archiveforge_lookup_returns_truthful_status_response(monkeypatch):
     )
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
 
-    assert response.model_used == "archiveforge-status"
-    assert response.tool_results[0]["result"]["workflow"] == "life_magazine_intake"
-    assert "ArchiveForge is Empire's LIFE-magazine intake and listing workflow." in response.response
+    assert response.model_used == "empire-module-knowledge"
+    assert response.tool_results[0]["tool"] == "empire_module_knowledge"
+    assert response.tool_results[0]["result"]["module"] == "ArchiveForge"
+    assert "ArchiveForge is the Empire module for archive and magazine workflows" in response.response
     assert "No Hermes intake draft was created from this message." not in response.response
 
 
