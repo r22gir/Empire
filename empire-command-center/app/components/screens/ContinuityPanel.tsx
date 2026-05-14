@@ -45,10 +45,16 @@ export function ContinuityPanel({ activeDesk, isOpen = true, onClose }: Continui
   useEffect(() => {
     const fetchContinuity = async () => {
       try {
-        const r = await fetch(`${API}/max/continuity`);
+        const r = await fetch(`${API}/max/status`);
         if (r.ok) {
           const d = await r.json();
-          setData(d);
+          const pp = d.provider_policy ?? {};
+          setData({
+            provider: pp.primary ?? 'MiniMax-M2.7',
+            current_desk: activeDesk,
+            latency: undefined,
+            token_usage: undefined,
+          });
         }
       } catch { /* silent */ }
       setLoading(false);
@@ -56,17 +62,17 @@ export function ContinuityPanel({ activeDesk, isOpen = true, onClose }: Continui
     fetchContinuity();
     const iv = setInterval(fetchContinuity, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [activeDesk]);
 
   const memoryCount = data.memory_count ?? 99;
   const brainCount = data.brain_count ?? 3000;
   const memories = data.recent_summaries ?? [];
   const brainEntries = data.top_memories ?? [];
   const currentDesk = data.current_desk ?? activeDesk;
-  const currentAgent = data.current_agent ?? 'Atlas';
-  const provider = data.provider ?? 'Grok-4-fast';
-  const latency = data.latency ?? '1.4s';
-  const tokenUsage = data.token_usage ?? '$0.0023';
+  const currentAgent = data.current_agent ?? 'MAX';
+  const provider = data.provider ?? 'MiniMax-M2.7';
+  const latency = data.latency ?? '—';
+  const tokenUsage = data.token_usage ?? '—';
 
   const filteredMemories = memories.filter(m =>
     m.summary.toLowerCase().includes(searchTerm.toLowerCase())
