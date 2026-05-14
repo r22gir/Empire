@@ -36,6 +36,7 @@ from app.services.max.runtime_truth_check import (
     run_whats_new_summary,
     format_whats_new_summary,
 )
+from app.services.max.empire_module_knowledge import resolve_empire_module_question
 from app.services.max.live_lookup_router import should_live_lookup, LiveLookupDecision
 from app.services.max.artifact_parser import parse_max_artifact_blocks, ArtifactPayload
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
@@ -944,6 +945,41 @@ def _archiveforge_no_draft_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+def _sanitize_internal_leakage_text(text: str | None) -> str:
+    """Remove internal tool/reasoning leakage from visible responses."""
+    if not text:
+        return ""
+    cleaned = strip_tool_blocks(text)
+    cleaned = re.sub(r"```(?:tool|json|actions?)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"```", "", cleaned)
+    cleaned = re.sub(r"\bI should check\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bruntime check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bdelegation check required\b[^\n.]*[.\n]?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
+    module_hit = resolve_empire_module_question(request.message)
+    if not module_hit:
+        return None
+    response_text = _sanitize_internal_leakage_text(module_hit.get("response", ""))
+    return ChatResponse(
+        response=response_text,
+        model_used="empire-module-knowledge",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "empire_module_knowledge",
+            "success": True,
+            "result": {
+                "module": module_hit.get("module"),
+                "sources": module_hit.get("sources", []),
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="empire_module_knowledge"),
+    )
+
+
 def _is_unverified_email_send_request(message: str | None) -> bool:
     text = (message or "").strip().lower()
     return any(re.search(pattern, text) for pattern in EMAIL_SEND_TRUTH_PATTERNS)
@@ -1146,8 +1182,13 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
-    if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
-        return None
+    if not request.desk and not request.image_filename:
+        module_response = _empire_module_response(request)
+        if module_response is not None:
+            return module_response
+
+        if should_run_runtime_truth_check(request.message):
+            return None
 
     if not request.image_filename and _is_provider_identity_request(request.message):
         return _provider_identity_response(request)
@@ -1279,9 +1320,10 @@ def _maybe_handle_gpu_safety_request(request: ChatRequest) -> ChatResponse | Non
 
 def _stream_immediate_response(response: ChatResponse, conversation_id: str | None = None) -> StreamingResponse:
     async def gen():
+        cleaned_response = sanitize_output(_sanitize_internal_leakage_text(response.response))
         for tool_result in response.tool_results or []:
             yield f"data: {json.dumps({'type': 'tool_result', **tool_result})}\n\n"
-        yield f"data: {json.dumps({'type': 'text', 'content': response.response})}\n\n"
+        yield f"data: {json.dumps({'type': 'text', 'content': cleaned_response})}\n\n"
         done = {
             "type": "done",
             "model_used": response.model_used,
@@ -1345,6 +1387,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
+        direct_route.response = sanitize_output(_sanitize_internal_leakage_text(direct_route.response))
         return direct_route
 
     # EmpireDell GPU stability lock — warn on risky GPU/kernel/apt queries
@@ -1886,6 +1929,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Guard: Structured uncertainty fallback for low-confidence/hypothetical questions
         if should_defer_uncertain(request.message):
             final_content = uncertainty_fallback(request.message)
+        final_content = _sanitize_internal_leakage_text(final_content)
 
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:
@@ -2448,6 +2492,7 @@ async def chat_stream(request: ChatRequest):
                 full_response = followup_text
 
             # Track assistant response — fire-and-forget background tasks
+            full_response = _sanitize_internal_leakage_text(full_response)
             conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
             asyncio.create_task(_safe_background(
                 conversation_tracker.check_and_summarize(conv_id),
@@ -2536,6 +2581,8 @@ async def chat_stream(request: ChatRequest):
             except Exception as _qe_err:
                 logger.warning(f"[stream] Quality engine failed: {_qe_err}")
                 _qr = None
+
+            full_response = _sanitize_internal_leakage_text(full_response)
 
             # Emit grounding events (after quality engine so all fixes are sequential)
             for _ge in _grounding_events:
