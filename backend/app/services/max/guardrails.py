@@ -151,7 +151,7 @@ def check_input(text: str, message_context: dict = None) -> Tuple[bool, str]:
 # Removes AI internal reasoning (think tags) from output so users never see it.
 # Handles complete blocks, orphan open/close tags, and cross-chunk splits.
 
-def strip_reasoning_tags(text: str) -> str:
+def strip_reasoning_tags(text: str, *, trim_edges: bool = True) -> str:
     """Remove all AI reasoning/reasoning tag content from text."""
     if not text:
         return text
@@ -193,8 +193,11 @@ def strip_reasoning_tags(text: str) -> str:
     # 8. Collapse excessive blank lines (more than 2 consecutive newlines)
     text = re.sub(r"\n{3,}", "\n\n", text)
 
-    # 9. Trim leading/trailing whitespace
-    text = text.strip()
+    # 9. Trim leading/trailing whitespace for full responses only.
+    # Streaming chunks must preserve edge whitespace so chunk boundaries
+    # don't collapse words when concatenated in the browser.
+    if trim_edges:
+        text = text.strip()
 
     return text
 
@@ -203,7 +206,15 @@ def sanitize_output(text: str) -> str:
     """Sanitize output: remove API keys and strip reasoning tags."""
     text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
     text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
-    text = strip_reasoning_tags(text)
+    text = strip_reasoning_tags(text, trim_edges=True)
+    return text
+
+
+def sanitize_output_streaming(text: str) -> str:
+    """Streaming-safe sanitization: preserves edge whitespace per chunk."""
+    text = re.sub(r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = re.sub(r"xai-[a-zA-Z0-9]{20,}", "[REDACTED_KEY]", text)
+    text = strip_reasoning_tags(text, trim_edges=False)
     return text
 
 
