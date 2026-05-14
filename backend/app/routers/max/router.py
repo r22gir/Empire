@@ -17,7 +17,7 @@ from pathlib import Path
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
-from app.services.max.guardrails import check_input, sanitize_output, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
+from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.evaluation_service import evaluation_service
@@ -1111,9 +1111,49 @@ def _apply_truth_guardrails(message: str | None, response_text: str, tool_result
     return response_text
 
 
+def _is_provider_identity_request(message: str | None) -> bool:
+    text = re.sub(r"[^a-z0-9\s?]", " ", (message or "").lower())
+    probes = (
+        "what ai",
+        "what model are you using",
+        "who powers you",
+    )
+    return any(p in text for p in probes)
+
+
+def _provider_identity_response(request: ChatRequest) -> ChatResponse:
+    primary = str(ai_router.primary_model.value) if ai_router.primary_model else "unknown"
+    if primary == "minimax":
+        model_label = ai_router.minimax_model or "MiniMax-M2.7"
+        lead = f"I'm MAX. My current text/chat model is {model_label}."
+    else:
+        lead = f"I'm MAX. My current text/chat provider is {primary}."
+
+    details: list[str] = []
+    if bool(ai_router.xai_key):
+        if ai_router.max_disable_xai:
+            details.append("xAI is configured but currently disabled (credits_unavailable).")
+        else:
+            details.append("xAI is configured and available.")
+    if ai_router.max_disable_ollama:
+        details.append("Ollama is currently disabled (founder_disabled_due_to_stall_suspected).")
+    else:
+        details.append("Ollama is enabled.")
+
+    return ChatResponse(
+        response=" ".join([lead, *details]).strip(),
+        model_used="provider-identity",
+        fallback_used=False,
+        metadata=_response_metadata(request.channel, skill_used="provider_identity"),
+    )
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
     if not request.desk and not request.image_filename and should_run_runtime_truth_check(request.message):
         return None
+
+    if not request.image_filename and _is_provider_identity_request(request.message):
+        return _provider_identity_response(request)
 
     if not request.desk and not request.image_filename and _is_openclaw_gate_request(request.message):
         return _openclaw_gate_response(request)
@@ -2137,7 +2177,7 @@ async def chat_stream(request: ChatRequest):
         try:
             async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                 model_used = m_used
-                safe_chunk = sanitize_output(chunk)
+                safe_chunk = sanitize_output_streaming(chunk)
                 full_response += safe_chunk
                 yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
@@ -2235,7 +2275,7 @@ async def chat_stream(request: ChatRequest):
                 followup_text = ""
                 async for chunk, m_used in ai_router.chat_stream(loop_messages, model=model, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                     model_used = m_used
-                    safe_chunk = sanitize_output(chunk)
+                    safe_chunk = sanitize_output_streaming(chunk)
                     followup_text += safe_chunk
                     yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
