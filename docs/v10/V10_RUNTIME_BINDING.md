@@ -52,7 +52,7 @@ WorkingDirectory=/home/rg/empire-repo-v10/backend
 ExecStart=/home/rg/empire-repo-v10/backend/venv/bin/python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8010 --timeout-keep-alive 65
 Restart=always
 RestartSec=5
-Environment=PATH=/home/rg/empire-repo-v10/backend/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/home/rg/empire-repo-v10/backend/venv/bin:/home/rg/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=PYTHONPATH=/home/rg/empire-repo-v10/backend
 
 [Install]
