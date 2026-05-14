@@ -51,6 +51,12 @@ INTENT_SIGNALS = [
     "is it fixed",
     "is max broken",
     "is max fixed",
+    "what services are online",
+    "services are online",
+    "which services are online",
+    "service health",
+    "services online",
+    "what is online",
 ]
 
 

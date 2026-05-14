@@ -17,6 +17,9 @@ Each entry documents one product/module. Fields:
 - **Gaps**: known issues or missing pieces
 - **Last verified**: commit or date of last check
 
+Current-truth companion brief:
+- `docs/EMPIREBOX_CURRENT_TRUTH_2026-05-14.md`
+
 ---
 
 ## Command Center
