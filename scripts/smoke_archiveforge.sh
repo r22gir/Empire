@@ -27,7 +27,7 @@ with open(sys.argv[1], "wb") as f:
     f.write(png)
 PY
 
-echo "[1/10] publish-status"
+echo "[1/11] publish-status"
 curl -s "${BASE_URL}/publish-status" > "$TMP_JSON"
 python3 - "$TMP_JSON" <<'PY'
 import json
@@ -46,7 +46,7 @@ print("true" if j.get("publish_available") else "false")
 PY
 )"
 
-echo "[2/10] create archive"
+echo "[2/11] create archive"
 curl -s -X POST "${BASE_URL}/archives" \
   -H "Content-Type: application/json" \
   -d '{
@@ -60,7 +60,9 @@ curl -s -X POST "${BASE_URL}/archives" \
     "processed_box_code":"AF-SMOKE-DST",
     "processed_status":"RAW",
     "archive_location":"smoke shelf",
-    "tier":"A"
+    "tier":"A",
+    "marketforge_category_id":"11111111-1111-1111-1111-111111111111",
+    "marketforge_ships_from_zip":"98101"
   }' > "$TMP_JSON"
 ARCHIVE_ID="$(
   python3 - "$TMP_JSON" <<'PY'
@@ -73,7 +75,7 @@ PY
 )"
 echo "archive_id: ${ARCHIVE_ID}"
 
-echo "[3/10] save draft"
+echo "[3/11] save draft"
 curl -s -X POST "${BASE_URL}/archives/${ARCHIVE_ID}/save-draft" \
   -H "Content-Type: application/json" \
   -d '{"listing_title":"AF smoke title","listing_description":"AF smoke description","batch_tag":"AF-SMOKE"}' > "$TMP_JSON"
@@ -86,7 +88,7 @@ assert j.get("saved") is True
 print("draft_saved:", j.get("saved"))
 PY
 
-echo "[4/10] status transitions"
+echo "[4/11] status transitions"
 for status in IDENTIFIED PHOTOGRAPHED VALUED READY_TO_LIST; do
   curl -s -X PATCH "${BASE_URL}/archives/${ARCHIVE_ID}/status" \
     -H "Content-Type: application/json" \
@@ -102,7 +104,7 @@ print("status:", j.get("processed_status"))
 PY
 done
 
-echo "[5/10] upload photo"
+echo "[5/11] upload photo"
 curl -s -X POST "${BASE_URL}/uploads/${ARCHIVE_ID}" \
   -F role=front \
   -F "file=@${TMP_IMG}" > "$TMP_JSON"
@@ -115,7 +117,7 @@ assert str(j.get("archive_id")) == sys.argv[2]
 print("photo_id:", j.get("id"))
 PY
 
-echo "[6/10] list/detail"
+echo "[6/11] list/detail"
 curl -s "${BASE_URL}/archives?limit=5" > "$TMP_JSON"
 python3 - "$TMP_JSON" "$ARCHIVE_ID" <<'PY'
 import json
@@ -137,8 +139,16 @@ print("detail_ok:", j.get("id"))
 PY
 
 if [[ "${PUBLISH_AVAILABLE}" == "true" ]]; then
-  echo "[7/10] publish (available)"
-  curl -s -X POST "${BASE_URL}/push/${ARCHIVE_ID}" > "$TMP_JSON"
+  echo "[7/11] publish approval gate (required)"
+  HTTP_CODE="$(curl -s -o "$TMP_JSON" -w "%{http_code}" -X POST "${BASE_URL}/push/${ARCHIVE_ID}")"
+  if [[ "$HTTP_CODE" != "400" ]]; then
+    echo "Expected 400 without approval_confirmed, got ${HTTP_CODE}"
+    exit 1
+  fi
+  echo "publish_without_approval_http: ${HTTP_CODE}"
+
+  echo "[8/11] publish with approval"
+  curl -s -X POST "${BASE_URL}/push/${ARCHIVE_ID}?approval_confirmed=true" > "$TMP_JSON"
   python3 - "$TMP_JSON" <<'PY'
 import json
 import sys
@@ -148,8 +158,8 @@ assert j.get("push_status") == "pushed"
 print("push_status:", j.get("push_status"))
 PY
 else
-  echo "[7/10] publish (blocked expected)"
-  HTTP_CODE="$(curl -s -o "$TMP_JSON" -w "%{http_code}" -X POST "${BASE_URL}/push/${ARCHIVE_ID}")"
+  echo "[7/11] publish (blocked expected)"
+  HTTP_CODE="$(curl -s -o "$TMP_JSON" -w "%{http_code}" -X POST "${BASE_URL}/push/${ARCHIVE_ID}?approval_confirmed=true")"
   if [[ "$HTTP_CODE" != "503" ]]; then
     echo "Expected 503 when publish unavailable, got ${HTTP_CODE}"
     exit 1
@@ -157,7 +167,7 @@ else
   echo "publish_blocked_http: ${HTTP_CODE}"
 fi
 
-echo "[8/10] verify listing state"
+echo "[9/11] verify listing state"
 curl -s "${BASE_URL}/archives/${ARCHIVE_ID}" > "$TMP_JSON"
 python3 - "$TMP_JSON" <<'PY'
 import json
@@ -165,12 +175,12 @@ import sys
 
 j = json.load(open(sys.argv[1]))
 assert (j.get("listing_title") or "").strip() != ""
-assert j.get("marketforge_push_status") in {"draft_saved", "pushed", "failed", "not_pushed", "pushing"}
+assert j.get("marketforge_push_status") in {"draft_saved", "blocked_missing_marketforge_fields", "pushed", "failed", "not_pushed", "pushing"}
 print("listing_title_present:", bool((j.get("listing_title") or "").strip()))
 print("marketforge_push_status:", j.get("marketforge_push_status"))
 PY
 
-echo "[9/10] delete archive"
+echo "[10/11] delete archive"
 curl -s -X DELETE "${BASE_URL}/archives/${ARCHIVE_ID}" > "$TMP_JSON"
 python3 - "$TMP_JSON" <<'PY'
 import json
@@ -182,7 +192,7 @@ print("deleted:", j.get("deleted"))
 PY
 ARCHIVE_ID=""
 
-echo "[10/10] verify deleted"
+echo "[11/11] verify deleted"
 HTTP_CODE="$(curl -s -o "$TMP_JSON" -w "%{http_code}" "${BASE_URL}/archives/999999999")"
 echo "missing_archive_http: ${HTTP_CODE}"
 echo "ArchiveForge smoke: PASS"

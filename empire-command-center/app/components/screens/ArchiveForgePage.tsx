@@ -73,6 +73,8 @@ interface ArchiveItem {
   listing_description: string;
   item_specifics: Record<string, string>;
   batch_tag: string;
+  marketforge_category_id: string;
+  marketforge_ships_from_zip: string;
   listing_status: string;
   marketforge_listing_id: string;
   marketforge_push_status: string;
@@ -969,18 +971,35 @@ function ReviewPublishSection({ archiveId, refIssue }: {
 	  const [pushState, setPushState] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
 	  const [pushResult, setPushResult] = useState<any>(null);
 	  const [pushError, setPushError] = useState('');
-	  const [publishStatus, setPublishStatus] = useState<{ publish_available: boolean; reason: string; action_label: string; target: string } | null>(null);
+	  const [publishStatus, setPublishStatus] = useState<{
+      publish_available: boolean;
+      reason: string;
+      action_label: string;
+      target: string;
+      approval_required?: boolean;
+      missing_required_fields?: string[];
+      invalid_required_fields?: string[];
+      publish_mode?: string;
+    } | null>(null);
+  const [marketforgeCategoryId, setMarketforgeCategoryId] = useState('');
+  const [marketforgeShipsFromZip, setMarketforgeShipsFromZip] = useState('');
+  const [savingPublishFields, setSavingPublishFields] = useState(false);
 
   const load = useCallback(async () => {
     if (!archiveId) { setLoading(false); return; }
     setLoading(true);
-    try {
+	    try {
 	      const [archRes, photoRes, publishRes] = await Promise.all([
 	        fetch(`${AG_API}/archives/${archiveId}`),
 	        fetch(`${AG_API}/uploads/${archiveId}`),
-	        fetch(`${AG_API}/publish-status`),
+	        fetch(`${AG_API}/publish-status?archive_id=${archiveId}`),
 	      ]);
-	      if (archRes.ok) setItem(await archRes.json());
+	      if (archRes.ok) {
+          const archiveItem = await archRes.json();
+          setItem(archiveItem);
+          setMarketforgeCategoryId(archiveItem.marketforge_category_id || '');
+          setMarketforgeShipsFromZip(archiveItem.marketforge_ships_from_zip || '');
+        }
 	      if (photoRes.ok) setPhotos((await photoRes.json()).photos || []);
 	      if (publishRes.ok) setPublishStatus(await publishRes.json());
 	    } catch { /* */ }
@@ -995,13 +1014,44 @@ function ReviewPublishSection({ archiveId, refIssue }: {
   const hasDescription = !!(item.listing_description);
 	  const hasPhotos = photos.length > 0;
 	  const publishUnavailable = publishStatus && publishStatus.publish_available === false;
+  const missingRequiredFields = publishStatus?.missing_required_fields || [];
+  const invalidRequiredFields = publishStatus?.invalid_required_fields || [];
 
 	  const validationErrors: string[] = [];
 	  if (publishUnavailable) validationErrors.push(publishStatus.reason || 'MarketForge publish is unavailable');
+	  if (missingRequiredFields.length > 0) validationErrors.push(`Missing required MarketForge fields: ${missingRequiredFields.join(', ')}`);
+	  if (invalidRequiredFields.length > 0) validationErrors.push(`Invalid MarketForge fields: ${invalidRequiredFields.join(', ')}`);
 	  if (!canPublish) validationErrors.push(`Status must be ${validStatuses.join(' or ')} (currently ${item.processed_status || 'unset'})`);
   if (!hasTitle) validationErrors.push('Listing title is blank — go back to Step 6 and save a draft');
   if (!hasDescription) validationErrors.push('Listing description is blank — go back to Step 6 and save a draft');
   if (!hasPhotos) validationErrors.push('No actual listing photos uploaded — go back to Step 3');
+
+  const savePublishFields = useCallback(async () => {
+    if (!archiveId) return false;
+    setSavingPublishFields(true);
+    try {
+      const res = await fetch(`${AG_API}/archives/${archiveId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          marketforge_category_id: marketforgeCategoryId.trim(),
+          marketforge_ships_from_zip: marketforgeShipsFromZip.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `Failed to save publish fields (${res.status})`);
+      }
+      await load();
+      return true;
+    } catch (e: any) {
+      setPushState('error');
+      setPushError(e?.message || 'Could not save publish fields');
+      return false;
+    } finally {
+      setSavingPublishFields(false);
+    }
+  }, [archiveId, load, marketforgeCategoryId, marketforgeShipsFromZip]);
 
   const handlePublish = async () => {
     if (!archiveId) return;
@@ -1009,7 +1059,12 @@ function ReviewPublishSection({ archiveId, refIssue }: {
     setPushError('');
     setPushResult(null);
     try {
-      const res = await fetch(`${AG_API}/push/${archiveId}`, { method: 'POST' });
+      const saved = await savePublishFields();
+      if (!saved) {
+        setPushState('error');
+        return;
+      }
+      const res = await fetch(`${AG_API}/push/${archiveId}?approval_confirmed=true`, { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         setPushState('success');
@@ -1220,14 +1275,45 @@ function ReviewPublishSection({ archiveId, refIssue }: {
 	                  : `Publish unavailable: ${publishStatus.reason}`}
 	              </div>
 	            )}
+            <div style={{ marginBottom: 10, display: 'grid', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 11, color: '#666', marginBottom: 3 }}>MarketForge Category ID (UUID)</div>
+                <input
+                  value={marketforgeCategoryId}
+                  onChange={e => setMarketforgeCategoryId(e.target.value)}
+                  placeholder="e.g. 00000000-0000-0000-0000-000000000000"
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: '#666', marginBottom: 3 }}>Ships From ZIP (5 digits)</div>
+                <input
+                  value={marketforgeShipsFromZip}
+                  onChange={e => setMarketforgeShipsFromZip(e.target.value)}
+                  placeholder="e.g. 98101"
+                  style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}
+                />
+              </div>
+              <button
+                onClick={savePublishFields}
+                disabled={savingPublishFields}
+                style={{
+                  padding: '8px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                  border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75',
+                  cursor: savingPublishFields ? 'wait' : 'pointer',
+                }}
+              >
+                {savingPublishFields ? 'Saving…' : 'Save Publish Fields'}
+              </button>
+            </div>
 	            <button
 	              onClick={handlePublish}
-	              disabled={pushState === 'pushing' || validationErrors.length > 0}
+	              disabled={savingPublishFields || pushState === 'pushing' || validationErrors.length > 0}
               style={{
                 width: '100%', padding: '12px', borderRadius: 10, fontSize: 14, fontWeight: 700,
                 background: validationErrors.length > 0 ? '#e5e7eb' : '#16a34a',
                 color: validationErrors.length > 0 ? '#9ca3af' : '#fff',
-                border: 'none', cursor: validationErrors.length > 0 || pushState === 'pushing' ? 'not-allowed' : 'pointer',
+                border: 'none', cursor: validationErrors.length > 0 || savingPublishFields || pushState === 'pushing' ? 'not-allowed' : 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >

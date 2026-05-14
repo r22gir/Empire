@@ -3,101 +3,85 @@
 Last updated: May 14, 2026
 Repo: `~/empire-repo`
 Branch: `feature/v10.0`
-Runtime commit (MAX status): `dd57341`
 
 ## Runtime Truth
 
 - Local backend: `http://localhost:8000`
 - Local frontend: `http://localhost:3005`
 - Public studio: `https://studio.empirebox.store`
-- Public API path: `https://studio.empirebox.store/api/v1/archiveforge/*`
-- API domain used by frontend in public mode: `https://api.empirebox.store/api/v1`
+- Public API: `https://studio.empirebox.store/api/v1/archiveforge/*`
+- Primary UI route: `/archiveforge-life`
+- Legacy route: `/archiveforge` redirects to `/archiveforge-life` (HTTP 307)
 
-## Routes and Pages
+## Publish Safety Truth
 
-- Primary route: `/archiveforge-life` (full production workflow)
-- Legacy route: `/archiveforge` now redirects to `/archiveforge-life` (no stub/fake flow)
+ArchiveForge publish is **internal staged publish**, not external marketplace publish.
 
-## Backend Endpoints (live)
+When publish succeeds:
 
-Mounted under `/api/v1/archiveforge`:
+1. ArchiveForge posts to internal `POST /marketplace/products`.
+2. `marketforge_products.py` writes a row to SQLite table `mf_products`.
+3. Archive row is updated with `marketforge_listing_id`, push status, and timestamps.
 
-- Reference: `/reference`, `/reference/search`, `/reference/{id}`, `/reference/all`
-- Archive CRUD: `/archives` (GET/POST), `/archives/{id}` (GET/PATCH/DELETE)
-- Workflow: `/archives/{id}/status`, `/archives/{id}/rebox`
-- Listing: `/archives/{id}/listing-draft`, `/archives/{id}/save-draft`, `/drafts`
-- Photos: `/uploads/{archive_id}` (GET/POST), `/photo/{photo_id}` (GET/DELETE)
-- Inventory: `/inventory`, `/inventory/export`, `/stats`
-- Publish: `/publish-status`, `/push/{archive_id}`
+There is no direct external marketplace API call in this flow.
 
-## Database Tables (verified in `backend/data/empire.db`)
+## Publish Guardrails (Current)
+
+- `approval_confirmed=true` is required on `/api/v1/archiveforge/push/{archive_id}`.
+- Publish is blocked with `409` if these fields are missing/invalid on the archive:
+  - `marketforge_category_id` (must be UUID)
+  - `marketforge_ships_from_zip` (must be 5-digit ZIP)
+- External MarketForge targets are blocked by host allowlist in publish-status logic.
+- Push status `blocked_missing_marketforge_fields` is persisted when publish is rejected for missing/invalid MarketForge fields.
+
+## Data Model
+
+Verified tables in `backend/data/empire.db`:
 
 - `ag_archives`
 - `ag_archive_photos`
 - `ag_listing_drafts`
 - `ag_box_registry`
-- `mf_products` (local MarketForge product target used by ArchiveForge push)
+- `mf_products`
 
-## Capability Matrix
+`ag_archives` now includes:
+
+- `marketforge_category_id`
+- `marketforge_ships_from_zip`
+
+## Capability Snapshot
 
 | Capability | Status | Notes |
 |---|---|---|
-| Dashboard loads | ✅ | Step UI loads in browser |
-| Intake/create item | ✅ | `POST /archives` |
-| Photo upload | ✅ | persisted file + DB row |
-| Metadata edit | ✅ | `PATCH /archives/{id}` |
-| OCR/analysis hook clarity | ✅ | not required for core flow; no fake OCR claim in core path |
-| Google Books/cover lookup | ✅ | API + curated fallback, confidence shown |
-| LIFE issue workflow | ✅ | step-by-step flow verified in browser |
-| Cover relevance | ✅ | ranking/date-keyword scoring; irrelevant fallback suppressed |
-| Listing draft generation/save | ✅ | `listing-draft` + `save-draft` live |
-| Pricing/comps | ⚠️ partial | manual comp fields supported; no fake live comps claim in core flow |
-| Listing review | ✅ | Step 7 review panel |
-| Publish path gate | ✅ | explicit manual step/button; publish-status surfaced |
-| Save item | ✅ | persisted in `ag_archives` |
-| Search/list inventory | ✅ | list + stats + filters |
-| Detail page/data | ✅ | `GET /archives/{id}` |
-| Delete/update safety | ✅ | delete now removes dependent rows/files safely |
-| UI error clarity | ✅ | validation and publish errors displayed |
-| MAX ArchiveForge truth | ✅ | status/workflow answers are truthful, prefill still routed correctly |
-| Public route health | ✅ | studio `/archiveforge-life` + `/api/v1/archiveforge/*` reachable |
-| Docs current | ✅ | this status + workflow doc updated |
+| Intake / save / list / detail | ✅ | create + edit + list + detail live |
+| Listing draft generation + save | ✅ | both endpoints live |
+| Review + publish UI | ✅ | includes required publish fields and validation |
+| Publish approval gate | ✅ | explicit approval query required |
+| Placeholder publish defaults removed | ✅ | no silent fallback category/ZIP defaults |
+| External publish route protection | ✅ | external host blocked |
+| Public ArchiveForge API routing | ✅ | studio `/api/v1/archiveforge/*` returns 200 |
 
-## Fixes Applied In This Cycle
+## Verification Results
 
-1. Fixed delete failure (`500`) in archive core flow by deleting child rows/files before parent archive delete.
-2. Replaced legacy `/archiveforge` stub page with redirect to `/archiveforge-life`.
-3. Updated MAX direct route behavior for ArchiveForge informational prompts so it returns truthful workflow/status instead of generic “no draft created.”
+Local tests:
 
-## Verified Tests
+- `backend/venv/bin/pytest backend/tests/test_archiveforge_workflow.py -q` → **13 passed**
+- `backend/venv/bin/pytest backend/tests/test_max_truth_guardrails.py -q` → **14 passed**
+- `bash scripts/smoke_archiveforge.sh` → **PASS**
+- `cd empire-command-center && npm run build` → **PASS**
 
-- Backend smoke: `./scripts/smoke_archiveforge.sh` (PASS)
-- Local browser workflow (headless Playwright runner): intake → photos → status transitions → draft → review/publish (PASS)
-- Public browser smoke: `https://studio.empirebox.store/archiveforge-life` loads Step 1 (PASS)
-- Public API smoke:
-  - `GET /api/v1/archiveforge/publish-status` (200)
-  - `GET /api/v1/archiveforge/stats` (200)
-  - `GET /api/v1/archiveforge/archives?limit=3` (200)
-- MAX prompts validated:
-  - “What is ArchiveForge?”
-  - “Help me process a LIFE magazine in ArchiveForge.”
-  - “Can ArchiveForge publish to marketplace yet?”
-  - “What ArchiveForge features are working?”
+Public smoke:
 
-## Gated / Known Limitations
+- `GET https://studio.empirebox.store/api/v1/archiveforge/publish-status` → 200
+- `GET https://studio.empirebox.store/api/v1/archiveforge/stats` → 200
+- `GET https://studio.empirebox.store/api/v1/archiveforge/archives?limit=3` → 200
+- `GET https://studio.empirebox.store/archiveforge-life` → 200
 
-- Publish is explicit/manual in Step 7; never automatic.
-- MarketForge payload still uses placeholder `category_id` and `ships_from_zip` defaults in current router payload builder.
-- No claim of live external comps pipeline in core workflow; manual comp fields are supported.
+v10 parity check:
 
-## Rollback
+- `GET https://test-studio.empirebox.store/api/v1/archiveforge/publish-status` now reports target `http://localhost:8010/marketplace/products`.
 
-If rollback is required, revert these files:
+## Known Limitations
 
-- `backend/app/routers/archiveforge.py`
-- `backend/app/routers/max/router.py`
-- `backend/tests/test_max_truth_guardrails.py`
-- `empire-command-center/app/archiveforge/page.tsx`
-- `scripts/smoke_archiveforge.sh`
-- `docs/ARCHIVEFORGE_STATUS.md`
-- `docs/ARCHIVEFORGE_WORKFLOW.md`
+- Marketplace publish remains internal staged only by design until founder-approved external integration is explicitly enabled.
+- No automatic category inference fallback is used for publish; operator must provide category UUID and ship ZIP.
