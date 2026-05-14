@@ -347,7 +347,6 @@ export function MAXDeskScreen() {
 
   return (
     <EmpireShell
-      commitHash="ce1695d"
       backendUrl={API}
       backendLabel="Backend 8010"
     >
@@ -600,6 +599,9 @@ export function MAXDeskScreen() {
         <ArtifactViewer
           artifact={activeArtifact}
           onClose={() => setActiveArtifact(null)}
+          onApprove={(id) => setArtifactStates(prev => ({ ...prev, [id]: 'approved' }))}
+          onReject={(id) => setArtifactStates(prev => ({ ...prev, [id]: 'rejected' }))}
+          onRequestChanges={(id) => setArtifactStates(prev => ({ ...prev, [id]: 'changes_requested' }))}
         />
       )}
     </EmpireShell>

@@ -28,6 +28,7 @@ export function EmpireTopBar({
 }: EmpireTopBarProps) {
   const [backendOk, setBackendOk] = useState(false);
   const [frontendOk, setFrontendOk] = useState(false);
+  const [liveCommit, setLiveCommit] = useState<string | null>(null);
 
   useEffect(() => {
     // Health polling
@@ -52,7 +53,27 @@ export function EmpireTopBar({
     return () => clearInterval(interval);
   }, [backendUrl]);
 
-  const shortHash = commitHash ? commitHash.slice(0, 7) : 'f535d53';
+  // Fetch live commit from backend on mount
+  useEffect(() => {
+    const fetchCommit = async () => {
+      try {
+        const apiBase = backendUrl || BACKEND_URL;
+        const statusUrl = `${apiBase.replace(/\/api\/v1$/, '')}/api/v1/max/status`;
+        const r = await fetch(statusUrl, { cache: 'no-store' });
+        if (r.ok) {
+          const data = await r.json();
+          if (data.current_commit?.hash) {
+            setLiveCommit(data.current_commit.hash);
+            return;
+          }
+        }
+      } catch { /* fall through to prop-based */ }
+    };
+    fetchCommit();
+  }, [backendUrl]);
+
+  const displayCommit = liveCommit || commitHash || null;
+  const shortHash = displayCommit ? displayCommit.slice(0, 7) : null;
 
   return (
     <div style={{
