@@ -105,6 +105,11 @@ export function stripDangerousHtml(html: string): { cleaned: string; hadDangerou
   cleaned = cleaned.replace(/<(?:iframe|object|embed|form)\b[^>]*\/?>/gi, '');
   if (cleaned !== before5) hadDangerous = true;
 
+  const before6 = cleaned;
+  // Strip <link> tags (external stylesheets, preload, icon, etc.)
+  cleaned = cleaned.replace(/<link\b[^>]*>/gi, '');
+  if (cleaned !== before6) hadDangerous = true;
+
   return { cleaned, hadDangerous };
 }
 

@@ -2014,6 +2014,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=_base_metadata,
         )
 
+        # Parse artifact JSON blocks and attach to response
+        parsed = parse_max_artifact_blocks(final_content)
+        if parsed:
+            resp.artifacts = parsed
+
         # Log response for evaluation loop (non-blocking)
         _final_latency_ms = int((_time_mod.time() - _chat_start) * 1000)
         background_tasks.add_task(

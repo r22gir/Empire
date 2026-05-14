@@ -105,6 +105,11 @@ def strip_dangerous_html(html: str) -> str:
     )
     had_external = cleaned != before
 
+    # Remove <link> tags (external stylesheets, preload, icon, etc.)
+    before = cleaned
+    cleaned = re.sub(r"<link\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    had_external = had_external or (cleaned != before)
+
     # Remove iframes, objects, embeds, forms
     before = cleaned
     cleaned = re.sub(r"<(?:iframe|object|embed|form)\b[^>]*>[\s\S]*?</(?:iframe|object|embed|form)>", "", cleaned, flags=re.IGNORECASE)
