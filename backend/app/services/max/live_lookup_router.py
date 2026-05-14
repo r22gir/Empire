@@ -197,7 +197,13 @@ def _extract_query(message: str) -> str:
         text = re.sub(p, "", text, flags=re.IGNORECASE)
     filler = ["the ", "a ", "an ", "please ", "actually ", "really ", "currently "]
     for f in filler:
-        text = text.replace(f, " ")
+        if f in ("a ", "an "):
+            # Only strip a/an from START of query — not from inside words like Iran, Canada
+            if text.startswith(f):
+                text = text[len(f):]
+            # else: don't strip a/an from middle of query
+        else:
+            text = text.replace(f, " ")
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > 200:
         text = text[:200]

@@ -97,6 +97,51 @@ TASK_DELEGATION_BLOCKLIST = [
     "task for hermes",
 ]
 
+# External/public topics that should NOT trigger what's-new summary.
+# These indicate the user is asking about the world, not EmpireBox/MAX.
+WHATS_NEW_NEGATIVE_GUARDS = [
+    # Countries / conflict zones
+    "iran", "israel", "ukraine", "russia", "china", "taiwan",
+    "korea", "north korea", "south korea", "syria", "lebanon",
+    "gaza", "palestine", "haiti", "venezuela", "pakistan",
+    "afghanistan", "iraq", "yemen", "sudan", "myanmar",
+    # War / conflict
+    "war ", "war today", "war in ", "the war", "conflict",
+    # Financial markets
+    "stock market", "markets today", "stock news", "trading day",
+    "nasdaq", "dow jones", "s&p", "crypto today", "bitcoin",
+    "market today", "financial news",
+    # Tech / companies (external)
+    "openai", "google", "microsoft", "apple", "meta ", "amazon",
+    "nvidia", "tesla", "facebook", "twitter", "x corp",
+    "ai news", "tech news", "startup news",
+    # News / current events
+    "news today", "headlines", "breaking news", "current events",
+    "today's news", "in the news",
+    # Weather
+    "weather in", "weather like", "forecast for", "rain in",
+    "snow in", "temperature in",
+    # General current-awareness
+    "happened today", "what happened in", "what's happening in",
+    "latest on", "recent news in",
+    # Sports
+    "football", "basketball", "soccer", "sports",
+]
+
+# Anchor signals that confirm the user IS asking about EmpireBox/MAX.
+# Presence of ANY anchor allows what's-new to run even with negative guards.
+WHATS_NEW_ANCHORS = [
+    "empirebox", "empire box", "empire-box",
+    "max status", "max what's new", "max new",
+    "system status", "system what's new",
+    "v10 status", "v10 what's new",
+    "in empire", "in max ", "on empirebox",
+    "for empirebox", "empirebox status",
+    "backend status", "frontend status",
+    "what's new in v10", "whats new in v10",
+    "what's new in empire", "whats new in empire",
+]
+
 
 def _normalize_intent_text(message: str | None) -> str:
     text = (message or "").lower().strip()
@@ -184,16 +229,36 @@ def should_run_whats_new_summary(message: str | None) -> bool:
     for block in TASK_DELEGATION_BLOCKLIST:
         if block in text:
             return False
+
+    # Check for positive signal
+    matched_signal = None
     for signal in WHATS_NEW_SIGNALS:
         normalized_signal = signal.replace("\u2019", "'").replace("\u2018", "'")
         if normalized_signal in text:
             if signal in _SHORT_SIGNALS:
                 pattern = r"(?<![a-z0-9])" + re.escape(normalized_signal) + r"(?![a-z0-9])"
                 if re.search(pattern, text):
-                    return True
+                    matched_signal = signal
+                    break
             else:
-                return True
-    return False
+                matched_signal = signal
+                break
+
+    if not matched_signal:
+        return False
+
+    # Check for anchor signal — if present, always allow (Empire/MAX/system question)
+    for anchor in WHATS_NEW_ANCHORS:
+        if anchor in text:
+            return True
+
+    # Check negative guards — if any match, this is a public-world question
+    # do NOT run what's-new summary
+    for guard in WHATS_NEW_NEGATIVE_GUARDS:
+        if guard in text:
+            return False
+
+    return True
 
 
 def _git_recent_commits(count: int = 5) -> list[dict[str, str]]:
