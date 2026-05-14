@@ -83,7 +83,7 @@ def test_queen_elizabeth_life_prompt_honors_plain_key_output_shape(monkeypatch, 
     ]
 
 
-def test_archiveforge_lookup_returns_truthful_no_draft(monkeypatch):
+def test_archiveforge_lookup_returns_truthful_status_response(monkeypatch):
     max_router = importlib.import_module("app.routers.max.router")
 
     async def fail_ai_router(*args, **kwargs):
@@ -92,15 +92,16 @@ def test_archiveforge_lookup_returns_truthful_no_draft(monkeypatch):
     monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
 
     request = max_router.ChatRequest(
-        message="ArchiveForge cover search issue lookup for Queen Elizabeth",
+        message="What ArchiveForge features are working?",
         history=[],
         channel="web",
     )
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
 
-    assert response.model_used == "hermes-form-prep"
-    assert response.tool_results[0]["result"]["draft_created"] is False
-    assert "No Hermes intake draft was created from this message." in response.response
+    assert response.model_used == "archiveforge-status"
+    assert response.tool_results[0]["result"]["workflow"] == "life_magazine_intake"
+    assert "ArchiveForge is Empire's LIFE-magazine intake and listing workflow." in response.response
+    assert "No Hermes intake draft was created from this message." not in response.response
 
 
 def test_browser_assist_guardrail_blocks_fabricated_ids(monkeypatch):
