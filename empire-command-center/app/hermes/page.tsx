@@ -8,7 +8,7 @@ import { EmpireShell } from '../components/ui/EmpireShell';
 import { EmpireDataPanel } from '../components/ui/EmpireDataPanel';
 import { EmpireStatusPill } from '../components/ui/EmpireStatusPill';
 
-const API = 'http://localhost:8000/api/v1';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface ValidationCard {
   id: string;

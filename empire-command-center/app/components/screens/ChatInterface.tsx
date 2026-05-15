@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { Message } from '../../lib/types';
 
-const API = 'http://localhost:8000/api/v1';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface Tool {
   id: string;

@@ -3,12 +3,13 @@ Auto-Quote Engine — Photo → Analysis → Sketch → Quote → Email
 Triggered by new photo upload via /intake.
 """
 import logging
+import os
 from typing import Any
 import httpx
 
 logger = logging.getLogger("auto_quote")
 
-API = "http://localhost:8000/api/v1"
+API = os.getenv("EMPIRE_API_BASE_URL", "http://localhost:8000/api/v1").rstrip("/")
 
 
 class AutoQuoteEngine:

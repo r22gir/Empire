@@ -36,7 +36,7 @@ const ALL_DESKS: Desk[] = [
   { id: 'qadesk', name: 'QADesk', agent: 'Phoenix', icon: <Bug size={16} />, description: 'Q&A' },
 ];
 
-const API = 'http://localhost:8000/api/v1';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface DeskSelectorProps {
   activeDesk: string;

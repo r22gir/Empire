@@ -22,10 +22,11 @@ class HermesMemory:
 
 logger = logging.getLogger("orchestrator")
 
-API = "http://localhost:8000/api/v1"
+API = os.getenv("EMPIRE_API_BASE_URL", "http://localhost:8000/api/v1").rstrip("/")
+_backend_root = API[:-7] if API.endswith("/api/v1") else API
 OPENCLAW_API = "http://localhost:7878"
-BACKEND_HEALTH = "http://localhost:8000/health"
-FRONTEND_HEALTH = "http://localhost:3005"
+BACKEND_HEALTH = os.getenv("EMPIRE_BACKEND_HEALTH_URL", f"{_backend_root}/health")
+FRONTEND_HEALTH = os.getenv("EMPIRE_FRONTEND_HEALTH_URL", "http://localhost:3005")
 
 
 class EmpireOrchestrator:
@@ -140,7 +141,7 @@ class EmpireOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(
-                    f"http://localhost:8000/api/v1/hermes/search",
+                    f"{API}/hermes/search",
                     params={"query": incident_type, "limit": 5},
                 )
                 if r.ok:
@@ -154,7 +155,7 @@ class EmpireOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    f"http://localhost:8000/api/v1/hermes/incidents",
+                    f"{API}/hermes/incidents",
                     json={
                         "incident_id": incident_id,
                         "resolved": success,
@@ -187,7 +188,7 @@ class EmpireOrchestrator:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(
-                    f"http://localhost:8000/api/v1/notifications/telegram",
+                    f"{API}/notifications/telegram",
                     json={
                         "message": message,
                         "priority": priority,

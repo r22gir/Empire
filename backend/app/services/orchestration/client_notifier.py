@@ -3,12 +3,13 @@ Client Notifier — Job stage changes trigger personalized updates
 Webhook: /workroom/jobs/:id/stage
 """
 import logging
+import os
 from datetime import datetime
 import httpx
 
 logger = logging.getLogger("client_notifier")
 
-API = "http://localhost:8000/api/v1"
+API = os.getenv("EMPIRE_API_BASE_URL", "http://localhost:8000/api/v1").rstrip("/")
 
 STAGE_MESSAGES = {
     "quote_sent": {

@@ -8,8 +8,7 @@ import {
 import { EmpireShell } from '../components/ui/EmpireShell';
 import { EmpireDataPanel } from '../components/ui/EmpireDataPanel';
 import { EmpireStatusPill } from '../components/ui/EmpireStatusPill';
-
-const API = 'http://localhost:8000/api/v1';
+import { API } from '../lib/api';
 
 interface HealthService {
   name: string;
@@ -77,8 +76,8 @@ export default function OrchestrationPage() {
   const health = data?.health || {
     score: 94,
     services: [
-      { name: 'Backend', status: 'healthy', port: 8000 },
-      { name: 'Frontend', status: 'healthy', port: 3010 },
+      { name: 'Backend', status: 'healthy', port: 8020 },
+      { name: 'Frontend', status: 'healthy', port: 3020 },
       { name: 'OpenClaw', status: 'healthy', port: 7878, tasks: 60 },
       { name: 'MAX', status: 'healthy', desks: 18 },
       { name: 'Hermes', status: 'healthy', memories: '3000+' },

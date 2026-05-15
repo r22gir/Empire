@@ -158,9 +158,11 @@ def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
 
 def _git_commit() -> dict[str, Any]:
     short = _run(["git", "rev-parse", "--short", "HEAD"])
+    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     message = _run(["git", "log", "--oneline", "-1"])
     return {
         "hash": short.get("stdout", ""),
+        "branch": branch.get("stdout", ""),
         "message": message.get("stdout", ""),
     }
 

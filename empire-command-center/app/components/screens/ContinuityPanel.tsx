@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Database, Brain, Activity, ChevronRight, X, Search } from 'lucide-react';
 import { EmpireDetailDrawer } from '../ui/EmpireDetailDrawer';
 
-const API = 'http://localhost:8000/api/v1';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
 interface MemoryEntry {
   id: string;

@@ -6,7 +6,7 @@ import { ChatInterface } from './ChatInterface';
 import { ContinuityPanel } from './ContinuityPanel';
 import { Message } from '../../lib/types';
 
-const API = 'http://localhost:8000/api/v1';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 const STORAGE_KEY = 'empire_max_messages';
 
 function loadStoredMessages(): Message[] {

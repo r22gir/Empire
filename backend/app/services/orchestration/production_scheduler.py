@@ -3,12 +3,13 @@ Production Scheduler — Workroom daily optimization
 Runs at 7 AM daily, optimizes job queue, notifies founder.
 """
 import logging
+import os
 from datetime import datetime, timedelta
 import httpx
 
 logger = logging.getLogger("scheduler")
 
-API = "http://localhost:8000/api/v1"
+API = os.getenv("EMPIRE_API_BASE_URL", "http://localhost:8000/api/v1").rstrip("/")
 
 
 class ProductionScheduler:
