@@ -124,6 +124,36 @@ Search filters:
 
 `current_only=true` excludes superseded records.
 
+## MAX Retrieval Policy (v10)
+
+MAX uses Hermes artifact retrieval only for memory-oriented questions, including:
+- prior decisions ("what did we decide")
+- latest design/report/packet requests
+- module artifact memory comparisons versus prior plans
+- OpenClaw/Codex context preparation prompts
+
+MAX does **not** use artifact memory as primary truth for:
+- runtime/service health
+- repo/code state
+- database truth
+- public route/API freshness
+- current-events/news queries
+
+Truth precedence remains:
+1. runtime
+2. repo truth
+3. database truth
+4. module docs
+5. approved/current artifacts
+6. session context
+7. model opinion
+
+By default, artifact retrieval uses:
+- `approval_status=approved`
+- `current_only=true`
+
+Draft/rejected/superseded artifacts are only returned when explicitly requested.
+
 ## Security Model
 
 HTML safety:
@@ -155,16 +185,36 @@ Order:
    - old -> `superseded`
    - new tracks `supersedes=[old_id]`
 
+Status updates append actor metadata:
+- `actor_type`: `founder|max|openclaw|hermes|unknown`
+- `actor_label`: optional display label
+- `note`: optional status note
+- `timestamp`: UTC status event timestamp
+
+Signer-bound approvals are **not** implemented yet.
+
+## UI State Reconciliation
+
+Artifact Viewer now distinguishes:
+- local-only review state (not persisted)
+- persisted Hermes artifact state (artifact id + backend approval status)
+
+When a persisted artifact exists, Approve/Reject/Request Changes updates backend status via:
+- `POST /api/v1/hermes/artifacts/{id}/status`
+
+If persistence does not exist yet, review actions remain local-only.
+
 ## Known Limitations
 
 1. MAX tool executor is not yet wired to automatically call artifact search/get tools in prompts.
-2. Artifact persistence is currently manual via API/UI action, not auto-ingest.
-3. No signed approval identity yet; status updates are trusted application actions.
+2. Artifact persistence is still manual via API/UI action; there is no auto-ingest for all MAX responses.
+3. No signed approval identity yet; actor metadata is lightweight and application-level.
 4. No cross-lane sharing; this implementation is lane-local and v10-only.
+5. Anti-stale rules rely on status/current filters and supersede links; no semantic conflict detector yet.
 
 ## Next Recommended Phase
 
-1. Add explicit MAX tool bindings for artifact search/get/update in `tool_executor`.
-2. Add founder-authenticated approval actor metadata.
-3. Add artifact ranking weights (freshness + approval + module relevance).
+1. Add signer-bound approval identity and audit attestations.
+2. Add artifact ranking weights (freshness + approval + module relevance).
+3. Add semantic stale/conflict detection across artifacts.
 4. Add artifact packet templates for ArchiveForge/Workroom/MarketForge.

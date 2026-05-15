@@ -55,12 +55,17 @@ class ArtifactUpdateStatusRequest(BaseModel):
     approval_status: str
     notes: Optional[str] = None
     safety_status: Optional[str] = None
+    actor_type: Optional[str] = None
+    actor_label: Optional[str] = None
+    actor_note: Optional[str] = None
 
 
 class ArtifactSupersedeRequest(BaseModel):
     superseded_id: str
     replacement_id: str
     notes: Optional[str] = None
+    actor_type: Optional[str] = None
+    actor_label: Optional[str] = None
 
 
 @router.get("/status")
@@ -115,6 +120,8 @@ def artifact_supersede(req: ArtifactSupersedeRequest):
             superseded_id=req.superseded_id,
             replacement_id=req.replacement_id,
             notes=req.notes,
+            actor_type=req.actor_type,
+            actor_label=req.actor_label,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -138,6 +145,9 @@ def artifact_update_status(artifact_id: str, req: ArtifactUpdateStatusRequest):
             approval_status=req.approval_status,
             notes=req.notes,
             safety_status=req.safety_status,
+            actor_type=req.actor_type,
+            actor_label=req.actor_label,
+            actor_note=req.actor_note,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -153,4 +163,3 @@ def artifact_export(artifact_id: str, export_format: str = Query(default="json")
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-

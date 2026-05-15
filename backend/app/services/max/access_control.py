@@ -53,6 +53,12 @@ TOOL_LEVELS = {
     # Task delegation tools
     "queue_openclaw_task": 2,
     "get_openclaw_task_status": 1,
+    # Hermes artifact memory tools
+    "hermes_artifact_search": 1,
+    "hermes_artifact_get": 1,
+    "hermes_artifact_write": 2,
+    "hermes_artifact_update_status": 2,
+    "hermes_artifact_supersede": 2,
 }
 
 LEVEL_PATTERNS = {

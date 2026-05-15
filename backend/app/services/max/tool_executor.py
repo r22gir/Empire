@@ -27,6 +27,13 @@ def _safe_tool_attr(result, attr: str, default=None):
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
 from app.services.max.inpaint_service import inpaint_service
+from app.services.max.hermes_artifact_layer import (
+    hermes_artifact_get as hermes_layer_artifact_get,
+    hermes_artifact_search as hermes_layer_artifact_search,
+    hermes_artifact_supersede as hermes_layer_artifact_supersede,
+    hermes_artifact_update_status as hermes_layer_artifact_update_status,
+    hermes_artifact_write as hermes_layer_artifact_write,
+)
 
 try:
     from app.services.max.access_control import access_controller
@@ -373,6 +380,40 @@ MAX_CORE_TOOL_DEFINITIONS: list[dict] = [
                     "max_chars": {"type": "integer", "description": "Maximum characters to return (default 6000)"}
                 },
                 "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hermes_artifact_search",
+            "description": "Search Hermes Knowledge Artifact Layer memory. Supporting memory only; runtime/repo/database truth outrank artifacts. Defaults to approved and current artifacts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query for artifact title/summary/content"},
+                    "module": {"type": "string", "description": "Optional module filter (archiveforge, workroom, marketforge, etc.)"},
+                    "artifact_type": {"type": "string", "description": "Optional artifact type filter"},
+                    "approval_status": {"type": "string", "description": "Optional status filter (approved, draft, rejected, superseded)"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tag filters"},
+                    "current_only": {"type": "boolean", "description": "Exclude superseded artifacts (default true)"},
+                    "include_superseded": {"type": "boolean", "description": "Include superseded records (default false)"},
+                    "limit": {"type": "integer", "description": "Max results (default 5, max 20)"},
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hermes_artifact_get",
+            "description": "Get a Hermes artifact by id with metadata, approval status, summary, extracted text, and provenance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "artifact_id": {"type": "string", "description": "Hermes artifact id, e.g. ha_xxx"}
+                },
+                "required": ["artifact_id"]
             }
         }
     },
@@ -4027,7 +4068,7 @@ def _reset_max_state(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── TOOL DOCUMENTATION (for system prompt) ─────────────────────────
 
-TOOLS_DOC = """## Available Tools (42 total)
+TOOLS_DOC = """## Available Tools (Hermes-aware)
 You have access to real tools that query live data. Use them instead of making up information.
 To call a tool, include a tool block in your response:
 
@@ -4055,6 +4096,10 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "get_desk_status"}`
 - **search_conversations** — Search conversation history across all channels (Telegram, Web, CC). Searches brain memories, conversation summaries, and chat backups.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
+- **hermes_artifact_search** — Search Hermes Knowledge Artifact Layer (supporting memory only). Defaults to approved + current artifacts.
+  `{"tool": "hermes_artifact_search", "query": "what did we decide about archiveforge", "module": "archiveforge", "current_only": true}`
+- **hermes_artifact_get** — Get one Hermes artifact by id with metadata, summary, extracted text, provenance, and stale warning.
+  `{"tool": "hermes_artifact_get", "artifact_id": "ha_..."}`
 
 ### Action Tools
 - **create_quick_quote** — Create a quick quote with 3 stacked design proposals (Essential/Designer/Premium). Uses QT-CUSTOMER-DATE-NNN numbering. Total starts at $0 until a proposal is selected.
@@ -5388,6 +5433,254 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
         "count": len(results),
         "results": results,
     })
+
+
+# ── HERMES ARTIFACT MEMORY TOOLS ─────────────────────────────────────
+
+def _tool_payload(params: dict) -> dict:
+    """Accept both root-level tool args and MiniMax-style nested params."""
+    nested = params.get("params")
+    if not isinstance(nested, dict):
+        return params
+    merged = dict(nested)
+    for key, value in params.items():
+        if key in {"tool", "params"}:
+            continue
+        merged.setdefault(key, value)
+    return merged
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return False
+
+
+@tool("hermes_artifact_search")
+def _hermes_artifact_search_tool(params: dict, desk: Optional[str] = None) -> ToolResult:
+    p = _tool_payload(params)
+    query = (p.get("query") or "").strip() or None
+    module = (p.get("module") or "").strip() or None
+    artifact_type = (p.get("artifact_type") or "").strip() or None
+    approval_status = (p.get("approval_status") or "").strip() or None
+    current_only = True if p.get("current_only") is None else bool(p.get("current_only"))
+    include_superseded = bool(p.get("include_superseded", False))
+    tags = p.get("tags") if isinstance(p.get("tags"), list) else []
+    limit = max(1, min(int(p.get("limit", 5) or 5), 20))
+
+    # Default to approved/current memory unless explicitly broadened.
+    if not approval_status and not _truthy(p.get("include_non_approved")):
+        approval_status = "approved"
+
+    try:
+        search = hermes_layer_artifact_search(
+            query=query,
+            module=module,
+            artifact_type=artifact_type,
+            approval_status=approval_status,
+            tags=tags,
+            current_only=current_only,
+            include_superseded=include_superseded,
+            limit=limit,
+        )
+        enriched = []
+        for row in search.get("results", []):
+            bundle = hermes_layer_artifact_get(str(row.get("id") or ""))
+            metadata = (bundle or {}).get("metadata") or {}
+            extracted = (bundle or {}).get("extracted_text") or ""
+            enriched.append(
+                {
+                    "id": row.get("id"),
+                    "title": row.get("title"),
+                    "artifact_type": row.get("artifact_type"),
+                    "module": row.get("module"),
+                    "approval_status": row.get("approval_status"),
+                    "updated_at": row.get("updated_at"),
+                    "created_at": metadata.get("created_at"),
+                    "summary": row.get("summary"),
+                    "extracted_text_preview": extracted[:360],
+                    "artifact_path": row.get("artifact_path"),
+                    "provenance": row.get("provenance") or {},
+                    "stale_warning": (bundle or {}).get("stale_warning"),
+                    "truth_boundary": row.get("truth_boundary"),
+                }
+            )
+
+        return ToolResult(
+            tool="hermes_artifact_search",
+            success=True,
+            result={
+                "query": search.get("query"),
+                "count": len(enriched),
+                "results": enriched,
+                "filters": search.get("filters"),
+                "truth_hierarchy": search.get("truth_hierarchy"),
+            },
+        )
+    except Exception as exc:
+        return ToolResult(tool="hermes_artifact_search", success=False, error=str(exc))
+
+
+@tool("hermes_artifact_get")
+def _hermes_artifact_get_tool(params: dict, desk: Optional[str] = None) -> ToolResult:
+    p = _tool_payload(params)
+    artifact_id = (p.get("artifact_id") or p.get("id") or "").strip()
+    if not artifact_id:
+        return ToolResult(tool="hermes_artifact_get", success=False, error="artifact_id is required")
+    try:
+        bundle = hermes_layer_artifact_get(artifact_id)
+        if not bundle:
+            return ToolResult(tool="hermes_artifact_get", success=False, error=f"artifact not found: {artifact_id}")
+        status = str(bundle.get("approval_status") or "")
+        warning = bundle.get("stale_warning")
+        if status in {"draft", "rejected", "superseded"} and not warning:
+            warning = f"artifact_status_{status}_not_current_truth"
+        result = dict(bundle)
+        result["stale_warning"] = warning
+        return ToolResult(tool="hermes_artifact_get", success=True, result=result)
+    except Exception as exc:
+        return ToolResult(tool="hermes_artifact_get", success=False, error=str(exc))
+
+
+@tool("hermes_artifact_write")
+def _hermes_artifact_write_tool(params: dict, desk: Optional[str] = None) -> ToolResult:
+    p = _tool_payload(params)
+    founder = bool(params.get("_founder"))
+    if not founder:
+        return ToolResult(
+            tool="hermes_artifact_write",
+            success=False,
+            error="write_gate_blocked: founder_required",
+        )
+    reason = str(p.get("reason") or p.get("workflow") or "").strip().lower()
+    explicit_save = _truthy(p.get("explicit_save")) or _truthy(p.get("approval_confirmed"))
+    allowed_reasons = {"founder_explicit", "ui_save_to_hermes", "controlled_workflow"}
+    if not explicit_save and reason not in allowed_reasons:
+        return ToolResult(
+            tool="hermes_artifact_write",
+            success=False,
+            error=(
+                "write_gate_blocked: explicit founder save intent required "
+                "(set explicit_save=true or workflow in founder_explicit/ui_save_to_hermes/controlled_workflow)"
+            ),
+        )
+    title = str(p.get("title") or "").strip()
+    artifact_type = str(p.get("artifact_type") or "").strip()
+    content = str(p.get("content") or "")
+    if not title or not artifact_type or not content:
+        return ToolResult(
+            tool="hermes_artifact_write",
+            success=False,
+            error="title, artifact_type, and content are required",
+        )
+    try:
+        saved = hermes_layer_artifact_write(
+            title=title,
+            artifact_type=artifact_type,
+            content=content,
+            content_format=str(p.get("content_format") or "html"),
+            module=(str(p.get("module") or "").strip() or None),
+            source_agent=str(p.get("source_agent") or "max"),
+            approval_status=str(p.get("approval_status") or "draft"),
+            tags=p.get("tags") if isinstance(p.get("tags"), list) else [],
+            retrieval_keywords=p.get("retrieval_keywords") if isinstance(p.get("retrieval_keywords"), list) else [],
+            supersedes=p.get("supersedes") if isinstance(p.get("supersedes"), list) else [],
+            source_prompt=(str(p.get("source_prompt") or "") or None),
+            source_prompt_hash=(str(p.get("source_prompt_hash") or "") or None),
+            source_files=p.get("source_files") if isinstance(p.get("source_files"), list) else [],
+            source_endpoints=p.get("source_endpoints") if isinstance(p.get("source_endpoints"), list) else [],
+            provenance=p.get("provenance") if isinstance(p.get("provenance"), dict) else {},
+        )
+        return ToolResult(tool="hermes_artifact_write", success=True, result=saved)
+    except Exception as exc:
+        return ToolResult(tool="hermes_artifact_write", success=False, error=str(exc))
+
+
+@tool("hermes_artifact_update_status")
+def _hermes_artifact_update_status_tool(params: dict, desk: Optional[str] = None) -> ToolResult:
+    p = _tool_payload(params)
+    founder = bool(params.get("_founder"))
+    if not founder:
+        return ToolResult(
+            tool="hermes_artifact_update_status",
+            success=False,
+            error="status_update_blocked: founder_required",
+        )
+    artifact_id = (p.get("artifact_id") or p.get("id") or "").strip()
+    if not artifact_id:
+        return ToolResult(tool="hermes_artifact_update_status", success=False, error="artifact_id is required")
+
+    intent = str(p.get("intent") or "").strip().lower()
+    approval_status = str(p.get("approval_status") or "").strip().lower()
+    intent_to_status = {
+        "approve": "approved",
+        "reject": "rejected",
+        "request_changes": "changes_requested",
+        "changes_requested": "changes_requested",
+        "supersede": "superseded",
+    }
+    if not approval_status and intent in intent_to_status:
+        approval_status = intent_to_status[intent]
+    if approval_status not in {"draft", "approved", "rejected", "changes_requested", "superseded"}:
+        return ToolResult(
+            tool="hermes_artifact_update_status",
+            success=False,
+            error="approval_status must be one of: draft, approved, rejected, changes_requested, superseded",
+        )
+    try:
+        updated = hermes_layer_artifact_update_status(
+            artifact_id,
+            approval_status=approval_status,
+            notes=(str(p.get("notes") or "") or None),
+            safety_status=(str(p.get("safety_status") or "") or None),
+            actor_type=str(p.get("actor_type") or "founder"),
+            actor_label=str(p.get("actor_label") or "Founder/Web MAX"),
+            actor_note=str(p.get("actor_note") or intent or "") or None,
+        )
+        return ToolResult(tool="hermes_artifact_update_status", success=True, result=updated)
+    except Exception as exc:
+        return ToolResult(tool="hermes_artifact_update_status", success=False, error=str(exc))
+
+
+@tool("hermes_artifact_supersede")
+def _hermes_artifact_supersede_tool(params: dict, desk: Optional[str] = None) -> ToolResult:
+    p = _tool_payload(params)
+    founder = bool(params.get("_founder"))
+    if not founder:
+        return ToolResult(
+            tool="hermes_artifact_supersede",
+            success=False,
+            error="supersede_blocked: founder_required",
+        )
+    superseded_id = (p.get("superseded_id") or "").strip()
+    replacement_id = (p.get("replacement_id") or "").strip()
+    if not superseded_id or not replacement_id:
+        return ToolResult(
+            tool="hermes_artifact_supersede",
+            success=False,
+            error="superseded_id and replacement_id are required",
+        )
+    if not (_truthy(p.get("approval_confirmed")) or _truthy(p.get("explicit_confirm"))):
+        return ToolResult(
+            tool="hermes_artifact_supersede",
+            success=False,
+            error="supersede_blocked: explicit_confirm=true or approval_confirmed=true required",
+        )
+    try:
+        linked = hermes_layer_artifact_supersede(
+            superseded_id=superseded_id,
+            replacement_id=replacement_id,
+            notes=(str(p.get("notes") or "") or None),
+            actor_type=str(p.get("actor_type") or "founder"),
+            actor_label=str(p.get("actor_label") or "Founder/Web MAX"),
+        )
+        return ToolResult(tool="hermes_artifact_supersede", success=True, result=linked)
+    except Exception as exc:
+        return ToolResult(tool="hermes_artifact_supersede", success=False, error=str(exc))
 
 
 # ═══════════════════════════════════════════════════════════════════════

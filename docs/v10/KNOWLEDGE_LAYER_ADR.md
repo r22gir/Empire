@@ -33,9 +33,11 @@ In scope (this ADR implementation):
 - HTML sanitization and extracted-text generation
 - v10 API exposure
 - minimal UI save action
+- MAX retrieval wiring for artifact-memory questions using internal tool hooks
+- default approved/current filtering to reduce stale memory use
+- lightweight approval actor metadata on status updates
 
 Out of scope (next phase):
-- automatic MAX agent retrieval tooling
 - signed approval identity model
 - enterprise authorization model
 - cross-lane synchronization
@@ -58,6 +60,7 @@ Positive:
 - durable review artifacts
 - searchable historical packets
 - explicit supersede relationships
+- MAX can answer prior-decision questions from approved/current artifact memory
 
 Tradeoffs:
 - additional storage and metadata maintenance
@@ -69,6 +72,7 @@ Tradeoffs:
 - no external URL execution in stored HTML
 - no form/iframe/object/embed storage in final artifact HTML
 - UI remains sandboxed for HTML preview
+- artifacts are supporting memory only and never override runtime/repo/database/module-doc truth
 
 ## Rollback
 

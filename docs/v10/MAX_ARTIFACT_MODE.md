@@ -133,7 +133,22 @@ interface Message { ..., artifacts?: MaxArtifact[] }
 
 - Approve/reject/request-changes state is still local UI state by default.
 - "Save to Hermes Memory" now calls backend persistence (`/api/v1/hermes/artifacts/write`) and returns a durable artifact id.
-- Local review state and backend persisted status are separate until full workflow merge is implemented.
+- If an artifact is persisted, Approve/Reject/Request Changes attempts backend status sync via:
+  - `POST /api/v1/hermes/artifacts/{id}/status`
+- Status updates include lightweight actor metadata (`actor_type`, `actor_label`, `actor_note`, `timestamp`).
+- Local review state and backend persisted status are still distinct; local-only artifacts stay local-only until saved.
+
+### MAX Memory Retrieval
+
+MAX can now retrieve Hermes artifact memory through internal tool hooks:
+- `hermes_artifact_search`
+- `hermes_artifact_get`
+
+Policy:
+- artifacts are supporting memory only
+- defaults: approved + current artifacts
+- stale/superseded artifacts are excluded unless explicitly requested
+- runtime/repo/database/module-doc truth remains higher priority
 
 ### Copy/Export
 
@@ -175,10 +190,10 @@ The MAX system prompt instructs:
 - **Non-streaming**: `ChatResponse.artifacts` only populated in non-streaming mode. Streaming route emits artifacts via SSE events but the final HTTP response body does not contain an `artifacts` field.
 - **Model tool use**: When MAX calls a tool instead of responding inline, artifact blocks may not be emitted. Instruct MAX to "reply only with text, do not use any tools" if artifacts are needed.
 - **\<link> sanitizer gap**: Previously, external stylesheet `<link>` tags were not stripped. Fixed in backend `artifact_parser.py` and frontend `artifacts.ts`.
-- **Split review model**: Approval button state remains local UI state; durable approval lifecycle lives in Hermes artifact metadata APIs and is not yet automatically synchronized with UI state.
+- **Split review model**: Backend sync exists for persisted artifacts, but signer-bound approval identity is not implemented yet.
 
 ---
 
 ## Last Updated
 
-2026-05-13
+2026-05-15

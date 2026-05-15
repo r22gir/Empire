@@ -42,6 +42,7 @@ APPROVAL_STATES = {
 }
 
 SOURCE_AGENTS = {"max", "hermes", "openclaw", "founder"}
+ACTOR_TYPES = {"founder", "max", "openclaw", "hermes", "unknown"}
 
 DEFAULT_MODULE_SLUGS = {
     "workroom",
@@ -78,6 +79,27 @@ MODULE_ALIASES = {
     "ai-model-control": "ai-model-control",
     "ai model control": "ai-model-control",
     "system": "system",
+}
+QUERY_STOPWORDS = {
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "how",
+    "did",
+    "does",
+    "about",
+    "with",
+    "from",
+    "that",
+    "this",
+    "were",
+    "have",
+    "has",
+    "into",
+    "just",
+    "please",
 }
 
 
@@ -129,6 +151,11 @@ def _normalize_module(module: str | None) -> str:
 def _normalize_source_agent(source_agent: str | None) -> str:
     value = (source_agent or "max").strip().lower()
     return value if value in SOURCE_AGENTS else "max"
+
+
+def _normalize_actor_type(actor_type: str | None) -> str:
+    value = (actor_type or "unknown").strip().lower()
+    return value if value in ACTOR_TYPES else "unknown"
 
 
 def _sha256_short(value: str | None) -> str | None:
@@ -399,6 +426,15 @@ def hermes_artifact_write(
         "headings": sanitized["headings"],
         "had_dangerous_content": sanitized["had_dangerous_content"],
         "removed_counts": sanitized["removed_counts"],
+        "approval_history": [
+            {
+                "approval_status": status,
+                "actor_type": source if source in ACTOR_TYPES else "unknown",
+                "actor_label": None,
+                "note": "artifact_created",
+                "timestamp": now,
+            }
+        ],
         "paths": {
             "artifact_dir": str(base),
             "artifact_html": str(files["html"]),
@@ -465,6 +501,9 @@ def hermes_artifact_update_status(
     approval_status: str,
     notes: str | None = None,
     safety_status: str | None = None,
+    actor_type: str | None = None,
+    actor_label: str | None = None,
+    actor_note: str | None = None,
 ) -> dict[str, Any]:
     if approval_status not in APPROVAL_STATES:
         raise ValueError(f"invalid approval_status: {approval_status}")
@@ -479,12 +518,25 @@ def hermes_artifact_update_status(
         updated["status_notes"] = notes
     if safety_status is not None:
         updated["safety_status"] = safety_status
+    history = list(updated.get("approval_history") or [])
+    history.append(
+        {
+            "approval_status": approval_status,
+            "actor_type": _normalize_actor_type(actor_type),
+            "actor_label": (actor_label or "").strip() or None,
+            "note": (actor_note or notes or "").strip() or None,
+            "timestamp": updated["updated_at"],
+        }
+    )
+    updated["approval_history"] = history
     _write_json(meta_path, updated)
     _append_index(
         "artifact_update_status",
         {
             "id": artifact_id,
             "approval_status": approval_status,
+            "actor_type": _normalize_actor_type(actor_type),
+            "actor_label": (actor_label or "").strip() or None,
             "metadata_path": str(meta_path),
         },
     )
@@ -496,6 +548,8 @@ def hermes_artifact_supersede(
     superseded_id: str,
     replacement_id: str,
     notes: str | None = None,
+    actor_type: str | None = None,
+    actor_label: str | None = None,
 ) -> dict[str, Any]:
     old = _find_metadata(superseded_id)
     new = _find_metadata(replacement_id)
@@ -514,12 +568,36 @@ def hermes_artifact_supersede(
     old_payload["updated_at"] = _now_iso()
     if notes:
         old_payload["status_notes"] = notes
+    _actor = _normalize_actor_type(actor_type)
+    _actor_label = (actor_label or "").strip() or None
+    old_history = list(old_payload.get("approval_history") or [])
+    old_history.append(
+        {
+            "approval_status": "superseded",
+            "actor_type": _actor,
+            "actor_label": _actor_label,
+            "note": (notes or "").strip() or "superseded_by_replacement",
+            "timestamp": old_payload["updated_at"],
+        }
+    )
+    old_payload["approval_history"] = old_history
 
     supersedes = list(new_payload.get("supersedes") or [])
     if superseded_id not in supersedes:
         supersedes.append(superseded_id)
     new_payload["supersedes"] = supersedes
     new_payload["updated_at"] = _now_iso()
+    new_history = list(new_payload.get("approval_history") or [])
+    new_history.append(
+        {
+            "approval_status": new_payload.get("approval_status") or "draft",
+            "actor_type": _actor,
+            "actor_label": _actor_label,
+            "note": (notes or "").strip() or "registered_supersedes_link",
+            "timestamp": new_payload["updated_at"],
+        }
+    )
+    new_payload["approval_history"] = new_history
 
     _write_json(old_path, old_payload)
     _write_json(new_path, new_payload)
@@ -528,6 +606,8 @@ def hermes_artifact_supersede(
         {
             "superseded_id": superseded_id,
             "replacement_id": replacement_id,
+            "actor_type": _actor,
+            "actor_label": _actor_label,
             "old_metadata_path": str(old_path),
             "new_metadata_path": str(new_path),
         },
@@ -567,6 +647,11 @@ def hermes_artifact_search(
     module_slug = _normalize_module(module) if module else None
     tag_set = {t.strip().lower() for t in (tags or []) if t and t.strip()}
     query_l = (query or "").strip().lower()
+    query_terms = [
+        term
+        for term in re.findall(r"[a-z0-9]+", query_l)
+        if len(term) >= 3 and term not in QUERY_STOPWORDS
+    ]
     out: list[dict[str, Any]] = []
 
     for row in records:
@@ -597,10 +682,15 @@ def hermes_artifact_search(
                     " ".join(row.get("retrieval_keywords") or []),
                 ]
             ).lower()
-            if query_l not in haystack:
-                text_path = Path(str((row.get("paths") or {}).get("extracted_text") or ""))
-                text_value = text_path.read_text(encoding="utf-8").lower() if text_path.exists() else ""
-                if query_l not in text_value:
+            text_path = Path(str((row.get("paths") or {}).get("extracted_text") or ""))
+            text_value = text_path.read_text(encoding="utf-8").lower() if text_path.exists() else ""
+            if query_l not in haystack and query_l not in text_value:
+                if query_terms:
+                    matched_terms = sum(1 for term in query_terms if (term in haystack) or (term in text_value))
+                    required_matches = 1
+                    if matched_terms < required_matches:
+                        continue
+                else:
                     continue
 
         summary_path = Path(str((row.get("paths") or {}).get("summary_text") or ""))
@@ -694,4 +784,3 @@ def get_hermes_artifact_layer_status() -> dict[str, Any]:
         "commit": scaffold["commit"],
         "truth_hierarchy": scaffold["truth_hierarchy"],
     }
-

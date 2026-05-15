@@ -980,6 +980,163 @@ def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
     )
 
 
+HERMES_ARTIFACT_RETRIEVAL_MARKERS = (
+    "what did we decide",
+    "what did we agree",
+    "decision",
+    "architecture decision",
+    "latest design",
+    "latest report",
+    "latest artifact",
+    "review packet",
+    "approval packet",
+    "prior plan",
+    "compare current state",
+    "compare against plan",
+    "artifact memory",
+    "hermes memory",
+    "openclaw context",
+    "codex context",
+)
+HERMES_ARTIFACT_NON_APPROVED_MARKERS = ("draft", "rejected", "changes requested", "superseded")
+HERMES_ARTIFACT_MODULE_HINTS = {
+    "archiveforge": ("archiveforge", "archive forge", "life magazine", "magazine archive"),
+    "marketforge": ("marketforge", "market forge"),
+    "workroom": ("workroom",),
+    "drawing-studio": ("drawing studio", "drawing"),
+    "vendorops": ("vendorops", "vendor ops"),
+    "relistapp": ("relistapp", "relist app"),
+    "socialforge": ("socialforge", "social forge"),
+    "openclaw": ("openclaw", "open claw"),
+    "hermes": ("hermes",),
+    "system": ("runtime", "lane", "routing"),
+}
+
+
+def _artifact_module_hint(message: str | None) -> str | None:
+    text = (message or "").lower()
+    for module, aliases in HERMES_ARTIFACT_MODULE_HINTS.items():
+        if any(alias in text for alias in aliases):
+            return module
+    return None
+
+
+def _is_hermes_artifact_retrieval_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    if should_run_runtime_truth_check(message):
+        return False
+    return any(marker in text for marker in HERMES_ARTIFACT_RETRIEVAL_MARKERS)
+
+
+def _format_provenance_short(provenance: dict[str, Any]) -> str:
+    source_agent = provenance.get("source_agent") or "unknown"
+    files = provenance.get("source_files") or []
+    endpoints = provenance.get("source_endpoints") or []
+    parts = [f"source_agent={source_agent}"]
+    if files:
+        parts.append(f"source_files={', '.join(str(x) for x in files[:3])}")
+    if endpoints:
+        parts.append(f"source_endpoints={', '.join(str(x) for x in endpoints[:3])}")
+    return "; ".join(parts)
+
+
+def _hermes_artifact_memory_response(request: ChatRequest, founder: bool) -> ChatResponse | None:
+    if not _is_hermes_artifact_retrieval_request(request.message):
+        return None
+
+    message_text = request.message or ""
+    text_l = message_text.lower()
+    include_non_approved = any(marker in text_l for marker in HERMES_ARTIFACT_NON_APPROVED_MARKERS)
+    include_superseded = "superseded" in text_l
+    module = _artifact_module_hint(message_text)
+
+    search_call: dict[str, Any] = {
+        "tool": "hermes_artifact_search",
+        "query": message_text,
+        "module": module,
+        "current_only": True,
+        "limit": 3,
+    }
+    if include_non_approved:
+        search_call["include_non_approved"] = True
+        search_call["approval_status"] = None
+    else:
+        search_call["approval_status"] = "approved"
+    if include_superseded:
+        search_call["include_superseded"] = True
+
+    search_result = execute_tool(search_call, founder=founder)
+    tool_results: list[dict[str, Any]] = [search_result.to_dict()]
+    if not search_result.success:
+        return ChatResponse(
+            response=(
+                "Hermes artifact retrieval failed.\n"
+                f"- Error: {search_result.error}\n"
+                "- Runtime/repo/database/module docs remain the primary truth sources."
+            ),
+            model_used="hermes-artifact-memory",
+            fallback_used=False,
+            tool_results=tool_results,
+            metadata=_response_metadata(request.channel, skill_used="hermes_artifact_memory"),
+        )
+
+    payload = search_result.result or {}
+    hits = payload.get("results") or []
+    if not hits:
+        return ChatResponse(
+            response=(
+                "No matching Hermes artifacts were found for this request.\n"
+                "- I did not find approved/current artifact memory for that query.\n"
+                "- Runtime checks, repo truth, and module docs still outrank artifact memory."
+            ),
+            model_used="hermes-artifact-memory",
+            fallback_used=False,
+            tool_results=tool_results,
+            metadata=_response_metadata(request.channel, skill_used="hermes_artifact_memory"),
+        )
+
+    lines = [
+        "Using Hermes artifact memory as supporting context (runtime/repo/database/module docs outrank artifacts)."
+    ]
+
+    for idx, hit in enumerate(hits[:3], start=1):
+        artifact_id = str(hit.get("id") or "")
+        get_result = execute_tool({"tool": "hermes_artifact_get", "artifact_id": artifact_id}, founder=founder)
+        tool_results.append(get_result.to_dict())
+        bundle = get_result.result if get_result.success else {}
+        metadata = (bundle or {}).get("metadata") or {}
+        approval_status = metadata.get("approval_status") or hit.get("approval_status") or "unknown"
+        updated_at = metadata.get("updated_at") or hit.get("updated_at") or "unknown"
+        stale_warning = (bundle or {}).get("stale_warning")
+        current_flag = "no (superseded/stale)" if stale_warning else "yes"
+        summary = (bundle or {}).get("summary") or hit.get("summary") or ""
+        summary = _sanitize_internal_leakage_text(summary)
+        summary = summary[:340] + ("..." if len(summary) > 340 else "")
+        provenance = metadata.get("provenance") or hit.get("provenance") or {}
+        lines.append(f"{idx}. {hit.get('title') or artifact_id}")
+        lines.append(f"   - approval_status: {approval_status}")
+        lines.append(f"   - updated_at: {updated_at}")
+        lines.append(f"   - current: {current_flag}")
+        lines.append(f"   - provenance: {_format_provenance_short(provenance)}")
+        if approval_status != "approved":
+            lines.append("   - warning: this artifact is not approved and should not be treated as current truth.")
+        if stale_warning:
+            lines.append(f"   - stale_warning: {stale_warning}")
+        if summary:
+            lines.append(f"   - summary: {summary}")
+
+    lines.append("Memory basis: Hermes artifacts. Truth basis for live state remains runtime/repo/database checks.")
+    return ChatResponse(
+        response="\n".join(lines),
+        model_used="hermes-artifact-memory",
+        fallback_used=False,
+        tool_results=tool_results,
+        metadata=_response_metadata(request.channel, skill_used="hermes_artifact_memory"),
+    )
+
+
 def _is_unverified_email_send_request(message: str | None) -> bool:
     text = (message or "").strip().lower()
     return any(re.search(pattern, text) for pattern in EMAIL_SEND_TRUTH_PATTERNS)
@@ -1181,8 +1338,12 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
     )
 
 
-def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
+def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = False) -> ChatResponse | None:
     if not request.desk and not request.image_filename:
+        artifact_memory_response = _hermes_artifact_memory_response(request, founder=founder)
+        if artifact_memory_response is not None:
+            return artifact_memory_response
+
         module_response = _empire_module_response(request)
         if module_response is not None:
             return module_response
@@ -1385,7 +1546,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
 
-    direct_route = _maybe_handle_direct_route_request(request)
+    direct_route = _maybe_handle_direct_route_request(request, founder=founder)
     if direct_route is not None:
         direct_route.response = sanitize_output(_sanitize_internal_leakage_text(direct_route.response))
         return direct_route
@@ -2161,7 +2322,7 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
-    direct_route = _maybe_handle_direct_route_request(request)
+    direct_route = _maybe_handle_direct_route_request(request, founder=founder)
     if direct_route is not None:
         return _stream_immediate_response(direct_route, request.conversation_id)
 

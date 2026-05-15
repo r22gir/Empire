@@ -9,6 +9,8 @@ import { Check, X, MessageSquare, Copy, ExternalLink, Save } from 'lucide-react'
 import { MaxArtifact, ArtifactMode } from '../../../lib/types';
 import { API } from '../../../lib/api';
 
+const HERMES_ARTIFACT_STATE_KEY = 'v10_hermes_artifact_state_v1';
+
 interface ArtifactActionsProps {
   artifact: MaxArtifact;
   displayMode: ArtifactMode;
@@ -34,6 +36,11 @@ export function ArtifactActions({
     { status: 'saved'; artifactId: string } |
     { status: 'error'; error: string }
   >({ status: 'idle' });
+  const [persistedBackendStatus, setPersistedBackendStatus] = React.useState<{
+    artifactId: string;
+    approvalStatus: string;
+    updatedAt?: string;
+  } | null>(null);
 
   const isApproved = displayMode === 'approved';
   const isRejected = displayMode === 'rejected';
@@ -47,6 +54,109 @@ export function ArtifactActions({
     }
     return 'system';
   }, [artifact.metadata]);
+
+  const persistedFromMetadata = React.useMemo(() => {
+    const meta = (artifact.metadata || {}) as Record<string, unknown>;
+    const id = meta.hermes_artifact_id;
+    return typeof id === 'string' && id.trim() ? id.trim() : '';
+  }, [artifact.metadata]);
+
+  const readPersistedMap = React.useCallback((): Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string }> => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = window.localStorage.getItem(HERMES_ARTIFACT_STATE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string }> : {};
+    } catch {
+      return {};
+    }
+  }, []);
+
+  const writePersistedMap = React.useCallback((nextMap: Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string }>) => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(HERMES_ARTIFACT_STATE_KEY, JSON.stringify(nextMap));
+    } catch {
+      // Non-fatal; UI still works without local cache.
+    }
+  }, []);
+
+  const rememberPersistedState = React.useCallback((artifactId: string, approvalStatus?: string, updatedAt?: string) => {
+    const map = readPersistedMap();
+    map[artifact.id] = { artifactId, approvalStatus, updatedAt };
+    writePersistedMap(map);
+    setPersistedBackendStatus({
+      artifactId,
+      approvalStatus: approvalStatus || 'draft',
+      updatedAt,
+    });
+  }, [artifact.id, readPersistedMap, writePersistedMap]);
+
+  React.useEffect(() => {
+    if (persistedFromMetadata) {
+      setPersistedBackendStatus({
+        artifactId: persistedFromMetadata,
+        approvalStatus: 'draft',
+      });
+      return;
+    }
+    const map = readPersistedMap();
+    const saved = map[artifact.id];
+    if (saved?.artifactId) {
+      setPersistedBackendStatus({
+        artifactId: saved.artifactId,
+        approvalStatus: saved.approvalStatus || 'draft',
+        updatedAt: saved.updatedAt,
+      });
+    }
+  }, [artifact.id, persistedFromMetadata, readPersistedMap]);
+
+  async function syncBackendStatus(nextStatus: 'approved' | 'rejected' | 'changes_requested') {
+    if (!persistedBackendStatus?.artifactId) return;
+    try {
+      const response = await fetch(`${API}/hermes/artifacts/${encodeURIComponent(persistedBackendStatus.artifactId)}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          approval_status: nextStatus,
+          actor_type: 'founder',
+          actor_label: 'Founder/Web MAX',
+          actor_note: 'artifact_viewer_review_action',
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      rememberPersistedState(
+        persistedBackendStatus.artifactId,
+        String(data.approval_status || nextStatus),
+        String(data.updated_at || ''),
+      );
+    } catch (err) {
+      setPersistState({
+        status: 'error',
+        error: `Backend status sync failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  }
+
+  async function handleApprove() {
+    onApprove(artifact.id);
+    await syncBackendStatus('approved');
+  }
+
+  async function handleReject() {
+    onReject(artifact.id);
+    await syncBackendStatus('rejected');
+  }
+
+  async function handleRequestChanges() {
+    onRequestChanges(artifact.id);
+    await syncBackendStatus('changes_requested');
+  }
 
   async function saveToHermesMemory() {
     if (persistState.status === 'saving') return;
@@ -81,7 +191,9 @@ export function ArtifactActions({
         throw new Error(text || `HTTP ${response.status}`);
       }
       const data = await response.json();
-      setPersistState({ status: 'saved', artifactId: String(data.artifact_id || '') });
+      const savedId = String(data.artifact_id || '');
+      setPersistState({ status: 'saved', artifactId: savedId });
+      rememberPersistedState(savedId, String(data?.metadata?.approval_status || 'draft'), String(data?.metadata?.updated_at || ''));
     } catch (err) {
       setPersistState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
     }
@@ -113,10 +225,15 @@ export function ArtifactActions({
         {isPending && <><Check size={14} /> Pending Approval — review and approve or reject</>}
       </div>
 
-      {/* Note: local review state only */}
-      {(isApproved || isRejected || isChanges) && (
+      {/* Local vs persisted status */}
+      {persistedBackendStatus ? (
+        <div style={{ fontSize: 10, color: '#22c55e' }}>
+          Persisted Hermes state — id={persistedBackendStatus.artifactId}, approval_status={persistedBackendStatus.approvalStatus}
+          {persistedBackendStatus.updatedAt ? `, updated_at=${persistedBackendStatus.updatedAt}` : ''}
+        </div>
+      ) : (
         <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>
-          Local review state — not persisted to backend. Refresh to reset.
+          Local-only review state — persist to Hermes before backend approval state can be synced.
         </div>
       )}
 
@@ -124,7 +241,7 @@ export function ArtifactActions({
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {isPending && artifact.allowed_actions.includes('approve') && (
           <button
-            onClick={() => onApprove(artifact.id)}
+            onClick={handleApprove}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '8px 16px', borderRadius: 8,
@@ -139,7 +256,7 @@ export function ArtifactActions({
 
         {isPending && artifact.allowed_actions.includes('reject') && (
           <button
-            onClick={() => onReject(artifact.id)}
+            onClick={handleReject}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '8px 16px', borderRadius: 8,
@@ -154,7 +271,7 @@ export function ArtifactActions({
 
         {isPending && artifact.allowed_actions.includes('request_changes') && (
           <button
-            onClick={() => onRequestChanges(artifact.id)}
+            onClick={handleRequestChanges}
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '8px 16px', borderRadius: 8,

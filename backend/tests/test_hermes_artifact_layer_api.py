@@ -52,10 +52,20 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
 
     update_res = client.post(
         f"/api/v1/hermes/artifacts/{artifact_id}/status",
-        json={"approval_status": "approved", "notes": "Founder approved"},
+        json={
+            "approval_status": "approved",
+            "notes": "Founder approved",
+            "actor_type": "founder",
+            "actor_label": "Founder QA",
+            "actor_note": "api status approval test",
+        },
     )
     assert update_res.status_code == 200
-    assert update_res.json()["approval_status"] == "approved"
+    payload = update_res.json()
+    assert payload["approval_status"] == "approved"
+    history = payload.get("approval_history") or []
+    assert history[-1]["actor_type"] == "founder"
+    assert history[-1]["actor_label"] == "Founder QA"
 
     export_res = client.get(f"/api/v1/hermes/artifacts/{artifact_id}/export?export_format=json")
     assert export_res.status_code == 200
@@ -112,4 +122,3 @@ def test_artifact_api_supersede(monkeypatch, tmp_path):
     ids_current = {row["id"] for row in current["results"]}
     assert new_id in ids_current
     assert old_id not in ids_current
-
