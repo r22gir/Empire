@@ -2,7 +2,7 @@
 
 ## Overview
 
-MAX Artifact Mode allows MAX to generate structured, reviewable artifacts alongside a visible text response. Artifacts are parsed server-side, validated, sanitized, streamed via SSE, and rendered in a sandboxed browser viewer with local approval actions.
+MAX Artifact Mode allows MAX to generate structured, reviewable artifacts alongside a visible text response. Artifacts are parsed server-side, validated, sanitized, streamed via SSE, rendered in a sandboxed browser viewer, and can be optionally persisted into the Hermes Knowledge Artifact Layer.
 
 This is a v10-only feature (`feature/v10.0-test-lane`, port 8010).
 
@@ -108,7 +108,7 @@ interface Message { ..., artifacts?: MaxArtifact[] }
 | `ArtifactViewer` | Full modal with Preview/Source/Actions tabs |
 | `SafeHtmlPreview` | Sandboxed iframe renderer |
 | `ArtifactSourcePanel` | Escaped source code view |
-| `ArtifactActions` | Approve/Reject/Request Changes local buttons |
+| `ArtifactActions` | Approve/Reject/Request Changes + Save to Hermes Memory |
 
 ### SafeHtmlPreview Sandboxing
 
@@ -129,9 +129,11 @@ interface Message { ..., artifacts?: MaxArtifact[] }
 - `<link>` tags stripped
 - `<iframe>`, `<form>`, `<object>`, `<embed>` stripped
 
-### Local Approval State
+### Review State vs Persistence
 
-Approval/rejection state is **local only** (React state in `MAXDeskScreen`). It does not persist to the backend, trigger deployments, or execute code. State resets on page refresh.
+- Approve/reject/request-changes state is still local UI state by default.
+- "Save to Hermes Memory" now calls backend persistence (`/api/v1/hermes/artifacts/write`) and returns a durable artifact id.
+- Local review state and backend persisted status are separate until full workflow merge is implemented.
 
 ### Copy/Export
 
@@ -173,7 +175,7 @@ The MAX system prompt instructs:
 - **Non-streaming**: `ChatResponse.artifacts` only populated in non-streaming mode. Streaming route emits artifacts via SSE events but the final HTTP response body does not contain an `artifacts` field.
 - **Model tool use**: When MAX calls a tool instead of responding inline, artifact blocks may not be emitted. Instruct MAX to "reply only with text, do not use any tools" if artifacts are needed.
 - **\<link> sanitizer gap**: Previously, external stylesheet `<link>` tags were not stripped. Fixed in backend `artifact_parser.py` and frontend `artifacts.ts`.
-- **Local state only**: Approval state does not persist across page refreshes.
+- **Split review model**: Approval button state remains local UI state; durable approval lifecycle lives in Hermes artifact metadata APIs and is not yet automatically synchronized with UI state.
 
 ---
 

@@ -3131,6 +3131,7 @@ async def max_status():
     from app.services.max.runtime_truth_check import _git_commit
     from app.services.max.openclaw_gate import check_openclaw_gate
     from app.services.max.hermes_memory import get_hermes_memory_status
+    from app.services.max.hermes_artifact_layer import get_hermes_artifact_layer_status
 
     registry = load_operating_registry()
     skills = registry.get("skills", [])
@@ -3181,6 +3182,7 @@ async def max_status():
         "active_skill_hooks": callable_hooks,
         "startup_health": read_startup_health_record(),
         "hermes_memory_bridge": get_hermes_memory_status(),
+        "hermes_artifact_layer": get_hermes_artifact_layer_status(),
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
         "provider_policy": provider_policy,

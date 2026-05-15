@@ -187,7 +187,7 @@ export function ArtifactViewer({
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span style={{ fontSize: 10, color: '#475569' }}>
-            v10 Artifact Viewer — local review only
+            v10 Artifact Viewer — local review + optional Hermes persistence
           </span>
           <span style={{ fontSize: 10, color: '#475569' }}>
             {artifact.source} · {artifact.content_format}

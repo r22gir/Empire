@@ -5,8 +5,9 @@
  */
 
 import React from 'react';
-import { Check, X, MessageSquare, Copy, ExternalLink } from 'lucide-react';
+import { Check, X, MessageSquare, Copy, ExternalLink, Save } from 'lucide-react';
 import { MaxArtifact, ArtifactMode } from '../../../lib/types';
+import { API } from '../../../lib/api';
 
 interface ArtifactActionsProps {
   artifact: MaxArtifact;
@@ -27,10 +28,64 @@ export function ArtifactActions({
   onCopySource,
   onOpenFullscreen,
 }: ArtifactActionsProps) {
+  const [persistState, setPersistState] = React.useState<
+    { status: 'idle' } |
+    { status: 'saving' } |
+    { status: 'saved'; artifactId: string } |
+    { status: 'error'; error: string }
+  >({ status: 'idle' });
+
   const isApproved = displayMode === 'approved';
   const isRejected = displayMode === 'rejected';
   const isChanges = displayMode === 'changes_requested';
   const isPending = displayMode === 'approval_required';
+  const inferredModule = React.useMemo(() => {
+    const meta = (artifact.metadata || {}) as Record<string, unknown>;
+    const module = meta.module;
+    if (typeof module === 'string' && module.trim()) {
+      return module;
+    }
+    return 'system';
+  }, [artifact.metadata]);
+
+  async function saveToHermesMemory() {
+    if (persistState.status === 'saving') return;
+    setPersistState({ status: 'saving' });
+    try {
+      const meta = (artifact.metadata || {}) as Record<string, unknown>;
+      const provenance = (meta.provenance && typeof meta.provenance === 'object')
+        ? meta.provenance as Record<string, unknown>
+        : {};
+      const response = await fetch(`${API}/hermes/artifacts/write`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: artifact.title,
+          artifact_type: artifact.artifact_type,
+          content: artifact.content,
+          content_format: artifact.content_format,
+          module: inferredModule,
+          source_agent: artifact.source,
+          approval_status: displayMode === 'approved' ? 'approved' : 'draft',
+          tags: [artifact.artifact_type, inferredModule, artifact.source],
+          retrieval_keywords: [artifact.title, inferredModule],
+          provenance: {
+            ...provenance,
+            source_agent: artifact.source,
+            artifact_view: 'v10_artifact_viewer',
+          },
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      setPersistState({ status: 'saved', artifactId: String(data.artifact_id || '') });
+    } catch (err) {
+      setPersistState({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '14px' }}>
@@ -144,7 +199,34 @@ export function ArtifactActions({
             <ExternalLink size={12} /> Fullscreen
           </button>
         )}
+
+        <button
+          onClick={saveToHermesMemory}
+          disabled={persistState.status === 'saving'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 12px', borderRadius: 6,
+            border: '1px solid rgba(99,102,241,0.35)',
+            background: 'rgba(99,102,241,0.12)', color: '#818cf8',
+            cursor: persistState.status === 'saving' ? 'not-allowed' : 'pointer',
+            fontSize: 11, fontWeight: 600, opacity: persistState.status === 'saving' ? 0.7 : 1,
+          }}
+        >
+          <Save size={12} />
+          {persistState.status === 'saving' ? 'Saving...' : 'Save to Hermes Memory'}
+        </button>
       </div>
+
+      {persistState.status === 'saved' && (
+        <div style={{ fontSize: 10, color: '#22c55e' }}>
+          Persisted to Hermes artifact layer: {persistState.artifactId || '(saved)'}
+        </div>
+      )}
+      {persistState.status === 'error' && (
+        <div style={{ fontSize: 10, color: '#ef4444' }}>
+          Persist failed: {persistState.error}
+        </div>
+      )}
 
       {/* Safety info */}
       <div style={{

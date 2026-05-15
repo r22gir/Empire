@@ -122,6 +122,7 @@ load_router("app.routers.crypto_payments", "/api/v1/crypto-payments", ["crypto"]
 load_router("app.routers.economic", "/api/v1/economic", ["economic"])
 load_router("app.routers.chat_backup", "/api/v1/chat-backup", ["chat-backup"])
 load_router("app.routers.memory", "/api/v1", ["memory"])
+load_router("app.routers.hermes_artifacts", "/api/v1", ["hermes-artifacts"])
 load_router("app.routers.quotes", "/api/v1", ["quotes"])
 load_router("app.routers.quotes_v2", "/api/v1", ["quotes-v2"])
 load_router("app.routers.pricing", "/api/v1", ["pricing"])
