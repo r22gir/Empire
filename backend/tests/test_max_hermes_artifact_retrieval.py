@@ -81,6 +81,8 @@ def test_hermes_tool_search_and_get_default_to_approved_current(monkeypatch, tmp
     assert old not in ids
     assert draft not in ids
     assert all(row["approval_status"] == "approved" for row in rows)
+    assert all("score" in row for row in rows)
+    assert all("matched_fields" in row for row in rows)
 
     search_all = execute_tool(
         {
@@ -173,6 +175,9 @@ def test_hermes_status_update_writes_actor_metadata(monkeypatch, tmp_path):
             "intent": "approve",
             "actor_type": "founder",
             "actor_label": "Founder QA",
+            "actor_source": "local_ui",
+            "approval_method": "ui",
+            "approval_confidence": "local_ui",
             "actor_note": "approved after review",
         },
         founder=True,
@@ -183,6 +188,9 @@ def test_hermes_status_update_writes_actor_metadata(monkeypatch, tmp_path):
     assert history[-1]["actor_type"] == "founder"
     assert history[-1]["actor_label"] == "Founder QA"
     assert history[-1]["note"] == "approved after review"
+    assert history[-1]["approval_actor_source"] == "local_ui"
+    assert history[-1]["approval_method"] == "ui"
+    assert history[-1]["approval_confidence"] == "local_ui"
 
     bundle = hermes_artifact_get(artifact_id)
     assert bundle is not None
@@ -228,10 +236,11 @@ def test_router_artifact_memory_response_uses_hermes_tools(monkeypatch, tmp_path
     assert response.status_code == 200
     data = response.json()
     assert data["model_used"] == "hermes-artifact-memory"
-    assert "Using Hermes artifact memory as supporting context" in data["response"]
-    assert "approval_status: approved" in data["response"]
-    assert "provenance:" in data["response"]
-    assert "Truth basis for live state remains runtime/repo/database checks." in data["response"]
+    assert "Artifact memory used (supporting context only" in data["response"]
+    assert "Approval: approved" in data["response"]
+    assert "Status: current" in data["response"]
+    assert "Source Agent: hermes" in data["response"]
+    assert "Note: This answer is grounded in Hermes artifact memory." in data["response"]
     tools = [row.get("tool") for row in (data.get("tool_results") or [])]
     assert "hermes_artifact_search" in tools
     assert "hermes_artifact_get" in tools

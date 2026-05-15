@@ -48,6 +48,9 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
     assert search_res.status_code == 200
     search_data = search_res.json()
     assert search_data["count"] >= 1
+    assert search_data["ranking_version"] == "hermes_artifact_rank_v2"
+    assert "score" in search_data["results"][0]
+    assert "matched_fields" in search_data["results"][0]
     assert any(item["id"] == artifact_id for item in search_data["results"])
 
     update_res = client.post(
@@ -55,17 +58,26 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
         json={
             "approval_status": "approved",
             "notes": "Founder approved",
+            "actor_id": "founder-session-api",
             "actor_type": "founder",
             "actor_label": "Founder QA",
+            "actor_source": "verified_session",
+            "approval_method": "api",
+            "approval_confidence": "verified_session",
             "actor_note": "api status approval test",
         },
     )
     assert update_res.status_code == 200
     payload = update_res.json()
     assert payload["approval_status"] == "approved"
+    assert payload["approval_actor_id"] == "founder-session-api"
+    assert payload["approval_actor_source"] == "verified_session"
+    assert payload["approval_method"] == "api"
+    assert payload["approval_confidence"] == "verified_session"
     history = payload.get("approval_history") or []
-    assert history[-1]["actor_type"] == "founder"
-    assert history[-1]["actor_label"] == "Founder QA"
+    assert history[-1]["approval_actor_type"] == "founder"
+    assert history[-1]["approval_actor_label"] == "Founder QA"
+    assert history[-1]["approval_confidence"] == "verified_session"
 
     export_res = client.get(f"/api/v1/hermes/artifacts/{artifact_id}/export?export_format=json")
     assert export_res.status_code == 200
@@ -122,3 +134,11 @@ def test_artifact_api_supersede(monkeypatch, tmp_path):
     ids_current = {row["id"] for row in current["results"]}
     assert new_id in ids_current
     assert old_id not in ids_current
+
+    current_approved_only = client.post(
+        "/api/v1/hermes/artifacts/search",
+        json={"query": "archive report", "module": "archiveforge", "current_only": True, "approval_status": "approved"},
+    )
+    assert current_approved_only.status_code == 200
+    approved_rows = current_approved_only.json()["results"]
+    assert all(row["approval_status"] == "approved" for row in approved_rows)

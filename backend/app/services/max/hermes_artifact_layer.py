@@ -43,6 +43,31 @@ APPROVAL_STATES = {
 
 SOURCE_AGENTS = {"max", "hermes", "openclaw", "founder"}
 ACTOR_TYPES = {"founder", "max", "openclaw", "hermes", "unknown"}
+ACTOR_SOURCES = {
+    "verified_session",
+    "local_ui",
+    "api",
+    "max_internal",
+    "openclaw",
+    "system_generated",
+    "unknown",
+}
+APPROVAL_METHODS = {"ui", "api", "max_internal", "openclaw", "unknown"}
+APPROVAL_CONFIDENCE = {"verified_session", "local_ui", "system_generated", "unknown"}
+
+APPROVAL_STATUS_WEIGHTS = {
+    "approved": 1.0,
+    "changes_requested": 0.45,
+    "draft": 0.3,
+    "rejected": 0.1,
+    "superseded": 0.0,
+}
+SOURCE_AGENT_TRUST = {
+    "founder": 1.0,
+    "max": 0.9,
+    "hermes": 0.85,
+    "openclaw": 0.8,
+}
 
 DEFAULT_MODULE_SLUGS = {
     "workroom",
@@ -156,6 +181,87 @@ def _normalize_source_agent(source_agent: str | None) -> str:
 def _normalize_actor_type(actor_type: str | None) -> str:
     value = (actor_type or "unknown").strip().lower()
     return value if value in ACTOR_TYPES else "unknown"
+
+
+def _normalize_actor_source(actor_source: str | None) -> str:
+    value = (actor_source or "unknown").strip().lower()
+    return value if value in ACTOR_SOURCES else "unknown"
+
+
+def _normalize_approval_method(approval_method: str | None) -> str:
+    value = (approval_method or "unknown").strip().lower()
+    return value if value in APPROVAL_METHODS else "unknown"
+
+
+def _normalize_approval_confidence(approval_confidence: str | None) -> str:
+    value = (approval_confidence or "unknown").strip().lower()
+    return value if value in APPROVAL_CONFIDENCE else "unknown"
+
+
+def _default_approval_method(actor_type: str, actor_source: str) -> str:
+    if actor_source == "local_ui":
+        return "ui"
+    if actor_source in {"api", "verified_session"}:
+        return "api"
+    if actor_source == "openclaw" or actor_type == "openclaw":
+        return "openclaw"
+    if actor_source == "max_internal" or actor_type in {"max", "hermes"}:
+        return "max_internal"
+    return "unknown"
+
+
+def _default_approval_confidence(actor_source: str, approval_method: str) -> str:
+    if actor_source == "verified_session":
+        return "verified_session"
+    if actor_source == "local_ui" or approval_method == "ui":
+        return "local_ui"
+    if actor_source in {"system_generated", "max_internal", "openclaw"}:
+        return "system_generated"
+    if approval_method in {"max_internal", "openclaw"}:
+        return "system_generated"
+    return "unknown"
+
+
+def _approval_identity(
+    *,
+    actor_id: str | None = None,
+    actor_type: str | None = None,
+    actor_label: str | None = None,
+    actor_source: str | None = None,
+    actor_note: str | None = None,
+    approval_method: str | None = None,
+    approval_confidence: str | None = None,
+    timestamp: str | None = None,
+) -> dict[str, Any]:
+    normalized_actor_type = _normalize_actor_type(actor_type)
+    normalized_actor_id = (actor_id or "").strip() or None
+    normalized_actor_label = (actor_label or "").strip() or None
+    normalized_actor_source = _normalize_actor_source(actor_source)
+    if normalized_actor_source == "verified_session" and not normalized_actor_id:
+        normalized_actor_source = "unknown"
+
+    method = _normalize_approval_method(approval_method)
+    if method == "unknown" and not approval_method:
+        method = _default_approval_method(normalized_actor_type, normalized_actor_source)
+
+    confidence = _normalize_approval_confidence(approval_confidence)
+    if confidence == "unknown" and not approval_confidence:
+        confidence = _default_approval_confidence(normalized_actor_source, method)
+    if confidence == "verified_session" and normalized_actor_source != "verified_session":
+        confidence = _default_approval_confidence(normalized_actor_source, method)
+
+    event_time = timestamp or _now_iso()
+    note = (actor_note or "").strip() or None
+    return {
+        "approval_actor_id": normalized_actor_id,
+        "approval_actor_type": normalized_actor_type,
+        "approval_actor_label": normalized_actor_label,
+        "approval_actor_source": normalized_actor_source,
+        "approval_timestamp": event_time,
+        "approval_note": note,
+        "approval_method": method,
+        "approval_confidence": confidence,
+    }
 
 
 def _sha256_short(value: str | None) -> str | None:
@@ -315,6 +421,71 @@ def _summary_from_text(text: str) -> str:
     return compact[:417].rstrip() + "..."
 
 
+def _parse_iso(value: str | None) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        return datetime.fromisoformat(raw)
+    except Exception:
+        return None
+
+
+def _freshness_score(ts: str | None) -> float:
+    dt = _parse_iso(ts)
+    if not dt:
+        return 0.2
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    age_days = max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0)
+    if age_days <= 1:
+        return 1.0
+    if age_days <= 7:
+        return 0.9
+    if age_days <= 30:
+        return 0.75
+    if age_days <= 90:
+        return 0.55
+    if age_days <= 180:
+        return 0.35
+    return 0.2
+
+
+def _provenance_score(provenance: dict[str, Any]) -> float:
+    score = 0.0
+    if provenance.get("source_agent"):
+        score += 0.3
+    if provenance.get("source_prompt_hash"):
+        score += 0.2
+    if provenance.get("source_files"):
+        score += 0.2
+    if provenance.get("source_endpoints"):
+        score += 0.2
+    if provenance.get("truth_hierarchy"):
+        score += 0.1
+    return min(1.0, score)
+
+
+def _artifact_stale_warning(record: dict[str, Any]) -> str | None:
+    status = str(record.get("approval_status") or "").lower()
+    if status == "superseded" or record.get("superseded_by"):
+        return "artifact_superseded_or_not_current"
+    if status in {"draft", "rejected", "changes_requested"}:
+        return f"artifact_status_{status}_not_current_truth"
+    if status != "approved":
+        return "artifact_not_approved_current_truth"
+    return None
+
+
+def _is_current_approved(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("approval_status") or "").lower() == "approved"
+        and not record.get("superseded_by")
+    )
+
+
 def _artifact_files(base: Path) -> dict[str, Path]:
     return {
         "metadata": base / "metadata.json",
@@ -401,6 +572,32 @@ def hermes_artifact_write(
     provenance_payload.setdefault("source_endpoints", source_endpoints or [])
     provenance_payload.setdefault("truth_hierarchy", list(TRUTH_HIERARCHY))
 
+    creation_method = "openclaw" if source == "openclaw" else "max_internal" if source in {"max", "hermes"} else "unknown"
+    creation_identity = _approval_identity(
+        actor_type=source if source in ACTOR_TYPES else "unknown",
+        actor_source="system_generated",
+        actor_note="artifact_created",
+        approval_method=creation_method,
+        approval_confidence="system_generated",
+        timestamp=now,
+    )
+    creation_history_row = {
+        "approval_status": status,
+        "approval_actor_id": creation_identity["approval_actor_id"],
+        "approval_actor_type": creation_identity["approval_actor_type"],
+        "approval_actor_label": creation_identity["approval_actor_label"],
+        "approval_actor_source": creation_identity["approval_actor_source"],
+        "approval_timestamp": creation_identity["approval_timestamp"],
+        "approval_note": creation_identity["approval_note"],
+        "approval_method": creation_identity["approval_method"],
+        "approval_confidence": creation_identity["approval_confidence"],
+        # Backward-compat aliases
+        "actor_type": creation_identity["approval_actor_type"],
+        "actor_label": creation_identity["approval_actor_label"],
+        "note": creation_identity["approval_note"],
+        "timestamp": creation_identity["approval_timestamp"],
+    }
+
     metadata = {
         "id": artifact_id,
         "title": title,
@@ -414,6 +611,14 @@ def hermes_artifact_write(
         "branch": branch,
         "commit": commit,
         "approval_status": status,
+        "approval_actor_id": creation_identity["approval_actor_id"],
+        "approval_actor_type": creation_identity["approval_actor_type"],
+        "approval_actor_label": creation_identity["approval_actor_label"],
+        "approval_actor_source": creation_identity["approval_actor_source"],
+        "approval_timestamp": creation_identity["approval_timestamp"],
+        "approval_note": creation_identity["approval_note"],
+        "approval_method": creation_identity["approval_method"],
+        "approval_confidence": creation_identity["approval_confidence"],
         "safety_status": sanitized["safety_status"],
         "provenance": provenance_payload,
         "supersedes": supersedes_list,
@@ -426,15 +631,7 @@ def hermes_artifact_write(
         "headings": sanitized["headings"],
         "had_dangerous_content": sanitized["had_dangerous_content"],
         "removed_counts": sanitized["removed_counts"],
-        "approval_history": [
-            {
-                "approval_status": status,
-                "actor_type": source if source in ACTOR_TYPES else "unknown",
-                "actor_label": None,
-                "note": "artifact_created",
-                "timestamp": now,
-            }
-        ],
+        "approval_history": [creation_history_row],
         "paths": {
             "artifact_dir": str(base),
             "artifact_html": str(files["html"]),
@@ -480,9 +677,7 @@ def hermes_artifact_get(artifact_id: str) -> dict[str, Any] | None:
     summary = files["summary"].read_text(encoding="utf-8") if files["summary"].exists() else ""
     extracted = files["text"].read_text(encoding="utf-8") if files["text"].exists() else ""
     provenance = _read_json(files["provenance"]) or record.get("provenance") or {}
-    warning = None
-    if record.get("approval_status") == "superseded" or record.get("superseded_by"):
-        warning = "artifact_superseded_or_not_current"
+    warning = _artifact_stale_warning(record)
     return {
         "metadata": {k: v for k, v in record.items() if k != "_meta_path"},
         "summary": summary,
@@ -490,6 +685,7 @@ def hermes_artifact_get(artifact_id: str) -> dict[str, Any] | None:
         "artifact_path": str(files["html"]),
         "provenance": provenance,
         "approval_status": record.get("approval_status"),
+        "is_current": _is_current_approved(record),
         "stale_warning": warning,
         "truth_hierarchy": list(TRUTH_HIERARCHY),
     }
@@ -501,8 +697,12 @@ def hermes_artifact_update_status(
     approval_status: str,
     notes: str | None = None,
     safety_status: str | None = None,
+    actor_id: str | None = None,
     actor_type: str | None = None,
     actor_label: str | None = None,
+    actor_source: str | None = None,
+    approval_method: str | None = None,
+    approval_confidence: str | None = None,
     actor_note: str | None = None,
 ) -> dict[str, Any]:
     if approval_status not in APPROVAL_STATES:
@@ -518,14 +718,43 @@ def hermes_artifact_update_status(
         updated["status_notes"] = notes
     if safety_status is not None:
         updated["safety_status"] = safety_status
+
+    identity = _approval_identity(
+        actor_id=actor_id,
+        actor_type=actor_type,
+        actor_label=actor_label,
+        actor_source=actor_source,
+        actor_note=actor_note or notes,
+        approval_method=approval_method,
+        approval_confidence=approval_confidence,
+        timestamp=updated["updated_at"],
+    )
+    updated["approval_actor_id"] = identity["approval_actor_id"]
+    updated["approval_actor_type"] = identity["approval_actor_type"]
+    updated["approval_actor_label"] = identity["approval_actor_label"]
+    updated["approval_actor_source"] = identity["approval_actor_source"]
+    updated["approval_timestamp"] = identity["approval_timestamp"]
+    updated["approval_note"] = identity["approval_note"]
+    updated["approval_method"] = identity["approval_method"]
+    updated["approval_confidence"] = identity["approval_confidence"]
+
     history = list(updated.get("approval_history") or [])
     history.append(
         {
             "approval_status": approval_status,
-            "actor_type": _normalize_actor_type(actor_type),
-            "actor_label": (actor_label or "").strip() or None,
-            "note": (actor_note or notes or "").strip() or None,
-            "timestamp": updated["updated_at"],
+            "approval_actor_id": identity["approval_actor_id"],
+            "approval_actor_type": identity["approval_actor_type"],
+            "approval_actor_label": identity["approval_actor_label"],
+            "approval_actor_source": identity["approval_actor_source"],
+            "approval_timestamp": identity["approval_timestamp"],
+            "approval_note": identity["approval_note"],
+            "approval_method": identity["approval_method"],
+            "approval_confidence": identity["approval_confidence"],
+            # Backward-compat aliases
+            "actor_type": identity["approval_actor_type"],
+            "actor_label": identity["approval_actor_label"],
+            "note": identity["approval_note"],
+            "timestamp": identity["approval_timestamp"],
         }
     )
     updated["approval_history"] = history
@@ -535,8 +764,12 @@ def hermes_artifact_update_status(
         {
             "id": artifact_id,
             "approval_status": approval_status,
-            "actor_type": _normalize_actor_type(actor_type),
-            "actor_label": (actor_label or "").strip() or None,
+            "approval_actor_id": identity["approval_actor_id"],
+            "approval_actor_type": identity["approval_actor_type"],
+            "approval_actor_label": identity["approval_actor_label"],
+            "approval_actor_source": identity["approval_actor_source"],
+            "approval_method": identity["approval_method"],
+            "approval_confidence": identity["approval_confidence"],
             "metadata_path": str(meta_path),
         },
     )
@@ -548,8 +781,12 @@ def hermes_artifact_supersede(
     superseded_id: str,
     replacement_id: str,
     notes: str | None = None,
+    actor_id: str | None = None,
     actor_type: str | None = None,
     actor_label: str | None = None,
+    actor_source: str | None = None,
+    approval_method: str | None = None,
+    approval_confidence: str | None = None,
 ) -> dict[str, Any]:
     old = _find_metadata(superseded_id)
     new = _find_metadata(replacement_id)
@@ -568,16 +805,42 @@ def hermes_artifact_supersede(
     old_payload["updated_at"] = _now_iso()
     if notes:
         old_payload["status_notes"] = notes
-    _actor = _normalize_actor_type(actor_type)
-    _actor_label = (actor_label or "").strip() or None
+    identity = _approval_identity(
+        actor_id=actor_id,
+        actor_type=actor_type,
+        actor_label=actor_label,
+        actor_source=actor_source,
+        actor_note=(notes or "").strip() or "superseded_by_replacement",
+        approval_method=approval_method,
+        approval_confidence=approval_confidence,
+        timestamp=old_payload["updated_at"],
+    )
+    old_payload["approval_actor_id"] = identity["approval_actor_id"]
+    old_payload["approval_actor_type"] = identity["approval_actor_type"]
+    old_payload["approval_actor_label"] = identity["approval_actor_label"]
+    old_payload["approval_actor_source"] = identity["approval_actor_source"]
+    old_payload["approval_timestamp"] = identity["approval_timestamp"]
+    old_payload["approval_note"] = identity["approval_note"]
+    old_payload["approval_method"] = identity["approval_method"]
+    old_payload["approval_confidence"] = identity["approval_confidence"]
+
     old_history = list(old_payload.get("approval_history") or [])
     old_history.append(
         {
             "approval_status": "superseded",
-            "actor_type": _actor,
-            "actor_label": _actor_label,
-            "note": (notes or "").strip() or "superseded_by_replacement",
-            "timestamp": old_payload["updated_at"],
+            "approval_actor_id": identity["approval_actor_id"],
+            "approval_actor_type": identity["approval_actor_type"],
+            "approval_actor_label": identity["approval_actor_label"],
+            "approval_actor_source": identity["approval_actor_source"],
+            "approval_timestamp": identity["approval_timestamp"],
+            "approval_note": identity["approval_note"],
+            "approval_method": identity["approval_method"],
+            "approval_confidence": identity["approval_confidence"],
+            # Backward-compat aliases
+            "actor_type": identity["approval_actor_type"],
+            "actor_label": identity["approval_actor_label"],
+            "note": identity["approval_note"],
+            "timestamp": identity["approval_timestamp"],
         }
     )
     old_payload["approval_history"] = old_history
@@ -587,14 +850,42 @@ def hermes_artifact_supersede(
         supersedes.append(superseded_id)
     new_payload["supersedes"] = supersedes
     new_payload["updated_at"] = _now_iso()
+    new_identity = _approval_identity(
+        actor_id=actor_id,
+        actor_type=actor_type,
+        actor_label=actor_label,
+        actor_source=actor_source,
+        actor_note=(notes or "").strip() or "registered_supersedes_link",
+        approval_method=approval_method,
+        approval_confidence=approval_confidence,
+        timestamp=new_payload["updated_at"],
+    )
+    new_payload["approval_actor_id"] = new_identity["approval_actor_id"]
+    new_payload["approval_actor_type"] = new_identity["approval_actor_type"]
+    new_payload["approval_actor_label"] = new_identity["approval_actor_label"]
+    new_payload["approval_actor_source"] = new_identity["approval_actor_source"]
+    new_payload["approval_timestamp"] = new_identity["approval_timestamp"]
+    new_payload["approval_note"] = new_identity["approval_note"]
+    new_payload["approval_method"] = new_identity["approval_method"]
+    new_payload["approval_confidence"] = new_identity["approval_confidence"]
+
     new_history = list(new_payload.get("approval_history") or [])
     new_history.append(
         {
             "approval_status": new_payload.get("approval_status") or "draft",
-            "actor_type": _actor,
-            "actor_label": _actor_label,
-            "note": (notes or "").strip() or "registered_supersedes_link",
-            "timestamp": new_payload["updated_at"],
+            "approval_actor_id": new_identity["approval_actor_id"],
+            "approval_actor_type": new_identity["approval_actor_type"],
+            "approval_actor_label": new_identity["approval_actor_label"],
+            "approval_actor_source": new_identity["approval_actor_source"],
+            "approval_timestamp": new_identity["approval_timestamp"],
+            "approval_note": new_identity["approval_note"],
+            "approval_method": new_identity["approval_method"],
+            "approval_confidence": new_identity["approval_confidence"],
+            # Backward-compat aliases
+            "actor_type": new_identity["approval_actor_type"],
+            "actor_label": new_identity["approval_actor_label"],
+            "note": new_identity["approval_note"],
+            "timestamp": new_identity["approval_timestamp"],
         }
     )
     new_payload["approval_history"] = new_history
@@ -606,8 +897,12 @@ def hermes_artifact_supersede(
         {
             "superseded_id": superseded_id,
             "replacement_id": replacement_id,
-            "actor_type": _actor,
-            "actor_label": _actor_label,
+            "approval_actor_id": identity["approval_actor_id"],
+            "approval_actor_type": identity["approval_actor_type"],
+            "approval_actor_label": identity["approval_actor_label"],
+            "approval_actor_source": identity["approval_actor_source"],
+            "approval_method": identity["approval_method"],
+            "approval_confidence": identity["approval_confidence"],
             "old_metadata_path": str(old_path),
             "new_metadata_path": str(new_path),
         },
@@ -628,6 +923,120 @@ def _in_range(ts: str, date_from: str | None, date_to: str | None) -> bool:
     if date_to and ts > date_to:
         return False
     return True
+
+
+def _match_ratio(terms: list[str], values: list[str]) -> float:
+    if not terms:
+        return 0.0
+    haystack = " ".join(values).lower()
+    matches = sum(1 for term in terms if term and term in haystack)
+    return matches / max(1, len(terms))
+
+
+def _rank_artifact(
+    row: dict[str, Any],
+    *,
+    query_l: str,
+    query_terms: list[str],
+    module_slug: str | None,
+    artifact_type_filter: str | None,
+    tag_set: set[str],
+    summary: str,
+    extracted_text: str,
+) -> dict[str, Any]:
+    status = str(row.get("approval_status") or "").lower()
+    title = str(row.get("title") or "")
+    module_value = str(row.get("module") or "")
+    artifact_type_value = str(row.get("artifact_type") or "")
+    tags_value = [str(t).strip().lower() for t in (row.get("tags") or []) if str(t).strip()]
+    keywords_value = [str(t).strip().lower() for t in (row.get("retrieval_keywords") or []) if str(t).strip()]
+    provenance = row.get("provenance") or {}
+    source_agent = str(row.get("source_agent") or provenance.get("source_agent") or "unknown").lower()
+
+    stale_warning = _artifact_stale_warning(row)
+    current_weight = 1.0 if _is_current_approved(row) else 0.0
+    approval_weight = APPROVAL_STATUS_WEIGHTS.get(status, 0.1)
+    if stale_warning == "artifact_superseded_or_not_current":
+        approval_weight = min(approval_weight, 0.2)
+
+    module_weight = 0.2
+    if module_slug:
+        module_weight = 1.0 if module_value == module_slug else 0.0
+    elif module_value and module_value in query_l:
+        module_weight = 0.65
+
+    artifact_type_weight = 0.0
+    if artifact_type_filter:
+        artifact_type_weight = 1.0 if artifact_type_value == artifact_type_filter else 0.0
+    elif artifact_type_value and artifact_type_value in query_l:
+        artifact_type_weight = 0.6
+
+    title_l = title.lower()
+    exact_phrase_match = 0.0
+    if query_l:
+        if query_l == title_l or query_l in title_l:
+            exact_phrase_match = 1.0
+        elif query_l in " ".join(keywords_value) or query_l in " ".join(tags_value):
+            exact_phrase_match = 0.8
+        elif query_l in extracted_text.lower():
+            exact_phrase_match = 0.7
+
+    title_weight = _match_ratio(query_terms, [title_l])
+    tag_weight = _match_ratio(query_terms or sorted(tag_set), tags_value)
+    retrieval_weight = _match_ratio(query_terms, keywords_value)
+
+    freshness_score = _freshness_score(row.get("updated_at") or row.get("created_at"))
+    provenance_weight = _provenance_score(provenance)
+    source_agent_weight = SOURCE_AGENT_TRUST.get(source_agent, 0.45)
+
+    matched_fields: list[str] = []
+    if status:
+        matched_fields.append(f"approval_status:{status}")
+    if current_weight > 0:
+        matched_fields.append("current")
+    if module_weight > 0:
+        matched_fields.append("module")
+    if artifact_type_weight > 0:
+        matched_fields.append("artifact_type")
+    if exact_phrase_match > 0:
+        matched_fields.append("exact_phrase")
+    if title_weight > 0:
+        matched_fields.append("title")
+    if tag_weight > 0:
+        matched_fields.append("tags")
+    if retrieval_weight > 0:
+        matched_fields.append("retrieval_keywords")
+    if provenance_weight > 0:
+        matched_fields.append("provenance")
+    if freshness_score >= 0.75:
+        matched_fields.append("freshness")
+    if source_agent_weight >= 0.8:
+        matched_fields.append("source_agent")
+
+    score = (
+        approval_weight * 30.0
+        + current_weight * 15.0
+        + module_weight * 12.0
+        + exact_phrase_match * 10.0
+        + title_weight * 8.0
+        + tag_weight * 6.0
+        + retrieval_weight * 6.0
+        + artifact_type_weight * 5.0
+        + freshness_score * 4.0
+        + provenance_weight * 3.0
+        + source_agent_weight * 1.0
+    )
+    return {
+        "score": round(score, 4),
+        "matched_fields": sorted(set(matched_fields)),
+        "freshness_score": round(freshness_score, 4),
+        "approval_weight": round(approval_weight, 4),
+        "module_weight": round(module_weight, 4),
+        "provenance_weight": round(provenance_weight, 4),
+        "stale_warning": stale_warning,
+        "summary": summary,
+        "extracted_text": extracted_text,
+    }
 
 
 def hermes_artifact_search(
@@ -652,7 +1061,7 @@ def hermes_artifact_search(
         for term in re.findall(r"[a-z0-9]+", query_l)
         if len(term) >= 3 and term not in QUERY_STOPWORDS
     ]
-    out: list[dict[str, Any]] = []
+    ranked_rows: list[dict[str, Any]] = []
 
     for row in records:
         status = row.get("approval_status")
@@ -695,24 +1104,54 @@ def hermes_artifact_search(
 
         summary_path = Path(str((row.get("paths") or {}).get("summary_text") or ""))
         summary = summary_path.read_text(encoding="utf-8") if summary_path.exists() else ""
-        out.append(
+        text_path = Path(str((row.get("paths") or {}).get("extracted_text") or ""))
+        extracted = text_path.read_text(encoding="utf-8") if text_path.exists() else ""
+        ranking = _rank_artifact(
+            row,
+            query_l=query_l,
+            query_terms=query_terms,
+            module_slug=module_slug,
+            artifact_type_filter=artifact_type,
+            tag_set=tag_set,
+            summary=summary,
+            extracted_text=extracted,
+        )
+        ranked_rows.append(
             {
                 "id": row.get("id"),
                 "title": row.get("title"),
                 "artifact_type": row.get("artifact_type"),
                 "module": row.get("module"),
+                "source_agent": row.get("source_agent"),
                 "approval_status": status,
+                "is_current": _is_current_approved(row),
                 "safety_status": row.get("safety_status"),
+                "created_at": row.get("created_at"),
                 "updated_at": row.get("updated_at"),
-                "summary": summary,
+                "summary": ranking["summary"],
                 "artifact_path": (row.get("paths") or {}).get("artifact_html"),
                 "provenance": row.get("provenance") or {},
                 "superseded_by": row.get("superseded_by"),
+                "score": ranking["score"],
+                "matched_fields": ranking["matched_fields"],
+                "freshness_score": ranking["freshness_score"],
+                "approval_weight": ranking["approval_weight"],
+                "module_weight": ranking["module_weight"],
+                "provenance_weight": ranking["provenance_weight"],
+                "stale_warning": ranking["stale_warning"],
                 "truth_boundary": "supporting_only_beneath_runtime_repo_database_and_module_docs",
             }
         )
-        if len(out) >= limit:
-            break
+
+    ranked_rows.sort(
+        key=lambda item: (
+            float(item.get("score") or 0.0),
+            item.get("updated_at") or "",
+            item.get("created_at") or "",
+        ),
+        reverse=True,
+    )
+    out = ranked_rows[:limit]
 
     return {
         "count": len(out),
@@ -728,6 +1167,7 @@ def hermes_artifact_search(
             "current_only": current_only,
             "include_superseded": include_superseded,
         },
+        "ranking_version": "hermes_artifact_rank_v2",
         "truth_hierarchy": list(TRUTH_HIERARCHY),
     }
 

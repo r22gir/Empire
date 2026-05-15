@@ -5506,6 +5506,13 @@ def _hermes_artifact_search_tool(params: dict, desk: Optional[str] = None) -> To
                     "artifact_path": row.get("artifact_path"),
                     "provenance": row.get("provenance") or {},
                     "stale_warning": (bundle or {}).get("stale_warning"),
+                    "is_current": row.get("is_current"),
+                    "score": row.get("score"),
+                    "matched_fields": row.get("matched_fields") or [],
+                    "freshness_score": row.get("freshness_score"),
+                    "approval_weight": row.get("approval_weight"),
+                    "module_weight": row.get("module_weight"),
+                    "provenance_weight": row.get("provenance_weight"),
                     "truth_boundary": row.get("truth_boundary"),
                 }
             )
@@ -5637,8 +5644,12 @@ def _hermes_artifact_update_status_tool(params: dict, desk: Optional[str] = None
             approval_status=approval_status,
             notes=(str(p.get("notes") or "") or None),
             safety_status=(str(p.get("safety_status") or "") or None),
+            actor_id=str(p.get("actor_id") or "") or None,
             actor_type=str(p.get("actor_type") or "founder"),
             actor_label=str(p.get("actor_label") or "Founder/Web MAX"),
+            actor_source=str(p.get("actor_source") or "max_internal"),
+            approval_method=str(p.get("approval_method") or "max_internal"),
+            approval_confidence=str(p.get("approval_confidence") or "system_generated"),
             actor_note=str(p.get("actor_note") or intent or "") or None,
         )
         return ToolResult(tool="hermes_artifact_update_status", success=True, result=updated)
@@ -5675,8 +5686,12 @@ def _hermes_artifact_supersede_tool(params: dict, desk: Optional[str] = None) ->
             superseded_id=superseded_id,
             replacement_id=replacement_id,
             notes=(str(p.get("notes") or "") or None),
+            actor_id=str(p.get("actor_id") or "") or None,
             actor_type=str(p.get("actor_type") or "founder"),
             actor_label=str(p.get("actor_label") or "Founder/Web MAX"),
+            actor_source=str(p.get("actor_source") or "max_internal"),
+            approval_method=str(p.get("approval_method") or "max_internal"),
+            approval_confidence=str(p.get("approval_confidence") or "system_generated"),
         )
         return ToolResult(tool="hermes_artifact_supersede", success=True, result=linked)
     except Exception as exc:

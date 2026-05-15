@@ -135,8 +135,11 @@ interface Message { ..., artifacts?: MaxArtifact[] }
 - "Save to Hermes Memory" now calls backend persistence (`/api/v1/hermes/artifacts/write`) and returns a durable artifact id.
 - If an artifact is persisted, Approve/Reject/Request Changes attempts backend status sync via:
   - `POST /api/v1/hermes/artifacts/{id}/status`
-- Status updates include lightweight actor metadata (`actor_type`, `actor_label`, `actor_note`, `timestamp`).
+- Status updates include approval identity metadata:
+  - `approval_actor_id`, `approval_actor_type`, `approval_actor_label`, `approval_actor_source`
+  - `approval_method`, `approval_confidence`, `approval_timestamp`, `approval_note`
 - Local review state and backend persisted status are still distinct; local-only artifacts stay local-only until saved.
+- UI shows persisted vs local-only state, current/superseded status, actor label, and latest status timestamp when available.
 
 ### MAX Memory Retrieval
 
@@ -149,6 +152,7 @@ Policy:
 - defaults: approved + current artifacts
 - stale/superseded artifacts are excluded unless explicitly requested
 - runtime/repo/database/module-doc truth remains higher priority
+- memory-grounded answers include a compact artifact grounding block (title/id/module/status/date/source) and explicitly note that artifact memory is not runtime truth
 
 ### Copy/Export
 
@@ -190,7 +194,7 @@ The MAX system prompt instructs:
 - **Non-streaming**: `ChatResponse.artifacts` only populated in non-streaming mode. Streaming route emits artifacts via SSE events but the final HTTP response body does not contain an `artifacts` field.
 - **Model tool use**: When MAX calls a tool instead of responding inline, artifact blocks may not be emitted. Instruct MAX to "reply only with text, do not use any tools" if artifacts are needed.
 - **\<link> sanitizer gap**: Previously, external stylesheet `<link>` tags were not stripped. Fixed in backend `artifact_parser.py` and frontend `artifacts.ts`.
-- **Split review model**: Backend sync exists for persisted artifacts, but signer-bound approval identity is not implemented yet.
+- **Approval identity**: metadata-backed approval identity exists, but signer-bound/cryptographic approval is not implemented yet.
 
 ---
 

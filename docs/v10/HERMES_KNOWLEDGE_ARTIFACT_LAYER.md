@@ -83,6 +83,14 @@ Each artifact stores:
 - `branch`
 - `commit`
 - `approval_status` (`draft|approved|rejected|changes_requested|superseded`)
+- `approval_actor_id`
+- `approval_actor_type`
+- `approval_actor_label`
+- `approval_actor_source`
+- `approval_timestamp`
+- `approval_note`
+- `approval_method` (`ui|api|max_internal|openclaw|unknown`)
+- `approval_confidence` (`verified_session|local_ui|system_generated|unknown`)
 - `safety_status`
 - `provenance`
 - `supersedes`
@@ -123,6 +131,15 @@ Search filters:
 - `include_superseded`
 
 `current_only=true` excludes superseded records.
+
+Search result ranking metadata:
+- `score`
+- `matched_fields`
+- `freshness_score`
+- `approval_weight`
+- `module_weight`
+- `provenance_weight`
+- `stale_warning`
 
 ## MAX Retrieval Policy (v10)
 
@@ -186,12 +203,17 @@ Order:
    - new tracks `supersedes=[old_id]`
 
 Status updates append actor metadata:
-- `actor_type`: `founder|max|openclaw|hermes|unknown`
-- `actor_label`: optional display label
-- `note`: optional status note
-- `timestamp`: UTC status event timestamp
+- `approval_actor_id`: optional actor/session id
+- `approval_actor_type`: `founder|max|openclaw|hermes|unknown`
+- `approval_actor_label`: optional display label
+- `approval_actor_source`: `verified_session|local_ui|api|max_internal|openclaw|system_generated|unknown`
+- `approval_timestamp`: UTC status event timestamp
+- `approval_note`: optional status note
+- `approval_method`: `ui|api|max_internal|openclaw|unknown`
+- `approval_confidence`: `verified_session|local_ui|system_generated|unknown`
 
 Signer-bound approvals are **not** implemented yet.
+`verified_session` confidence is only used when a real session actor id is present; otherwise confidence is downgraded to `local_ui`, `system_generated`, or `unknown`.
 
 ## UI State Reconciliation
 
@@ -206,11 +228,10 @@ If persistence does not exist yet, review actions remain local-only.
 
 ## Known Limitations
 
-1. MAX tool executor is not yet wired to automatically call artifact search/get tools in prompts.
-2. Artifact persistence is still manual via API/UI action; there is no auto-ingest for all MAX responses.
-3. No signed approval identity yet; actor metadata is lightweight and application-level.
-4. No cross-lane sharing; this implementation is lane-local and v10-only.
-5. Anti-stale rules rely on status/current filters and supersede links; no semantic conflict detector yet.
+1. Artifact persistence is still manual via API/UI action; there is no auto-ingest for all MAX responses.
+2. No signed approval identity yet; actor metadata is lightweight and application-level.
+3. No cross-lane sharing; this implementation is lane-local and v10-only.
+4. Anti-stale rules rely on status/current filters, ranking, and supersede links; no semantic conflict detector yet.
 
 ## Next Recommended Phase
 

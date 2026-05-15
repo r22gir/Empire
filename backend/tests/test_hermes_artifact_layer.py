@@ -86,6 +86,9 @@ def test_write_sanitizes_html_and_generates_extracted_text(monkeypatch, tmp_path
     assert summary
     assert metadata["module"] == "archiveforge"
     assert metadata["approval_status"] == "draft"
+    assert metadata["approval_method"] == "max_internal"
+    assert metadata["approval_confidence"] == "system_generated"
+    assert metadata["approval_actor_source"] == "system_generated"
     assert metadata["lane"] == "v10-test"
     assert metadata["safety_status"] == "sanitized_no_scripts_no_external_network"
 
@@ -119,13 +122,30 @@ def test_search_update_export_and_supersede(monkeypatch, tmp_path):
     old_id = old_artifact["artifact_id"]
     new_id = new_artifact["artifact_id"]
 
-    updated = hermes_artifact_update_status(old_id, approval_status="approved", notes="Founder accepted v1")
+    updated = hermes_artifact_update_status(
+        old_id,
+        approval_status="approved",
+        notes="Founder accepted v1",
+        actor_id="founder-session-1",
+        actor_type="founder",
+        actor_label="Founder QA",
+        actor_source="verified_session",
+        approval_method="api",
+        approval_confidence="verified_session",
+        actor_note="review accepted",
+    )
     assert updated["approval_status"] == "approved"
     assert updated["status_notes"] == "Founder accepted v1"
+    assert updated["approval_actor_id"] == "founder-session-1"
+    assert updated["approval_actor_source"] == "verified_session"
+    assert updated["approval_confidence"] == "verified_session"
+    assert updated["approval_note"] == "review accepted"
 
     search_before = hermes_artifact_search(query="packet", module="archiveforge", current_only=True)
     assert any(item["id"] == old_id for item in search_before["results"])
     assert any(item["id"] == new_id for item in search_before["results"])
+    assert all("score" in item for item in search_before["results"])
+    assert all("matched_fields" in item for item in search_before["results"])
 
     supersede = hermes_artifact_supersede(
         superseded_id=old_id,
@@ -149,12 +169,103 @@ def test_search_update_export_and_supersede(monkeypatch, tmp_path):
     ids_all = {item["id"] for item in search_all["results"]}
     assert old_id in ids_all
     assert new_id in ids_all
+    old_row = next(item for item in search_all["results"] if item["id"] == old_id)
+    assert old_row["stale_warning"] == "artifact_superseded_or_not_current"
+    assert old_row["is_current"] is False
 
     export = hermes_artifact_export(new_id, export_format="json")
     export_path = Path(export["path"])
     assert export_path.exists()
     exported = export_path.read_text(encoding="utf-8")
     assert "\"truth_hierarchy\"" in exported
+
+
+def test_ranking_prefers_approved_current_module_match(monkeypatch, tmp_path):
+    root = tmp_path / "empire-box-memory"
+    monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(root))
+    monkeypatch.setenv("EMPIRE_LANE", "v10-test")
+
+    approved_current = hermes_artifact_write(
+        title="ArchiveForge Publish Safety Review",
+        artifact_type="markdown_report",
+        content="ArchiveForge publish gate approved current notes",
+        content_format="markdown",
+        module="archiveforge",
+        source_agent="max",
+        approval_status="approved",
+        tags=["archiveforge", "publish"],
+        retrieval_keywords=["publish safety", "archiveforge"],
+        provenance={
+            "source_agent": "max",
+            "source_files": ["docs/v10/HERMES_KNOWLEDGE_ARTIFACT_LAYER.md"],
+            "source_endpoints": ["/api/v1/hermes/artifacts/search"],
+        },
+    )["artifact_id"]
+
+    rejected = hermes_artifact_write(
+        title="ArchiveForge Publish Safety Draft",
+        artifact_type="markdown_report",
+        content="Older rejected draft",
+        content_format="markdown",
+        module="archiveforge",
+        source_agent="max",
+        approval_status="rejected",
+        tags=["archiveforge"],
+        retrieval_keywords=["publish safety"],
+    )["artifact_id"]
+
+    rows = hermes_artifact_search(
+        query="archiveforge publish safety review",
+        module="archiveforge",
+        current_only=False,
+        include_superseded=True,
+        limit=10,
+    )["results"]
+    assert rows
+    top = rows[0]
+    assert top["id"] == approved_current
+    assert top["approval_status"] == "approved"
+    assert top["is_current"] is True
+    assert top["score"] >= rows[-1]["score"]
+    assert "module" in top["matched_fields"]
+    assert "approval_status:approved" in top["matched_fields"]
+    assert top["freshness_score"] >= 0
+    assert top["approval_weight"] > 0
+    assert top["module_weight"] > 0
+    assert top["provenance_weight"] > 0
+
+    rejected_row = next(item for item in rows if item["id"] == rejected)
+    assert rejected_row["approval_status"] == "rejected"
+    assert rejected_row["is_current"] is False
+    assert rejected_row["stale_warning"] == "artifact_status_rejected_not_current_truth"
+
+
+def test_verified_session_confidence_requires_actor_id(monkeypatch, tmp_path):
+    root = tmp_path / "empire-box-memory"
+    monkeypatch.setenv("EMPIRE_BOX_MEMORY_DIR", str(root))
+    monkeypatch.setenv("EMPIRE_LANE", "v10-test")
+
+    artifact_id = hermes_artifact_write(
+        title="Session confidence packet",
+        artifact_type="markdown_report",
+        content="# session confidence",
+        content_format="markdown",
+        module="system",
+        source_agent="max",
+        approval_status="draft",
+    )["artifact_id"]
+
+    updated = hermes_artifact_update_status(
+        artifact_id,
+        approval_status="approved",
+        actor_type="founder",
+        actor_source="verified_session",
+        approval_method="api",
+        approval_confidence="verified_session",
+        actor_note="attempt verified without actor id",
+    )
+    assert updated["approval_actor_source"] == "unknown"
+    assert updated["approval_confidence"] != "verified_session"
 
 
 def test_truth_hierarchy_runtime_precedence():

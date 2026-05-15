@@ -40,6 +40,12 @@ export function ArtifactActions({
     artifactId: string;
     approvalStatus: string;
     updatedAt?: string;
+    approvalTimestamp?: string;
+    isCurrent?: boolean;
+    supersededBy?: string | null;
+    approvalActorLabel?: string;
+    approvalActorType?: string;
+    approvalConfidence?: string;
   } | null>(null);
 
   const isApproved = displayMode === 'approved';
@@ -61,19 +67,19 @@ export function ArtifactActions({
     return typeof id === 'string' && id.trim() ? id.trim() : '';
   }, [artifact.metadata]);
 
-  const readPersistedMap = React.useCallback((): Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string }> => {
+  const readPersistedMap = React.useCallback((): Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string }> => {
     if (typeof window === 'undefined') return {};
     try {
       const raw = window.localStorage.getItem(HERMES_ARTIFACT_STATE_KEY);
       if (!raw) return {};
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed as Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string }> : {};
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string }> : {};
     } catch {
       return {};
     }
   }, []);
 
-  const writePersistedMap = React.useCallback((nextMap: Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string }>) => {
+  const writePersistedMap = React.useCallback((nextMap: Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string }>) => {
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(HERMES_ARTIFACT_STATE_KEY, JSON.stringify(nextMap));
@@ -82,14 +88,42 @@ export function ArtifactActions({
     }
   }, []);
 
-  const rememberPersistedState = React.useCallback((artifactId: string, approvalStatus?: string, updatedAt?: string) => {
+  const rememberPersistedState = React.useCallback((
+    artifactId: string,
+    approvalStatus?: string,
+    updatedAt?: string,
+    extra?: {
+      approvalTimestamp?: string;
+      isCurrent?: boolean;
+      supersededBy?: string | null;
+      approvalActorLabel?: string;
+      approvalActorType?: string;
+      approvalConfidence?: string;
+    },
+  ) => {
     const map = readPersistedMap();
-    map[artifact.id] = { artifactId, approvalStatus, updatedAt };
+    map[artifact.id] = {
+      artifactId,
+      approvalStatus,
+      updatedAt,
+      approvalTimestamp: extra?.approvalTimestamp,
+      isCurrent: extra?.isCurrent,
+      supersededBy: extra?.supersededBy,
+      approvalActorLabel: extra?.approvalActorLabel,
+      approvalActorType: extra?.approvalActorType,
+      approvalConfidence: extra?.approvalConfidence,
+    };
     writePersistedMap(map);
     setPersistedBackendStatus({
       artifactId,
       approvalStatus: approvalStatus || 'draft',
       updatedAt,
+      approvalTimestamp: extra?.approvalTimestamp,
+      isCurrent: extra?.isCurrent,
+      supersededBy: extra?.supersededBy,
+      approvalActorLabel: extra?.approvalActorLabel,
+      approvalActorType: extra?.approvalActorType,
+      approvalConfidence: extra?.approvalConfidence,
     });
   }, [artifact.id, readPersistedMap, writePersistedMap]);
 
@@ -108,9 +142,47 @@ export function ArtifactActions({
         artifactId: saved.artifactId,
         approvalStatus: saved.approvalStatus || 'draft',
         updatedAt: saved.updatedAt,
+        approvalTimestamp: saved.approvalTimestamp,
+        isCurrent: saved.isCurrent,
+        supersededBy: saved.supersededBy ?? null,
+        approvalActorLabel: saved.approvalActorLabel,
+        approvalActorType: saved.approvalActorType,
+        approvalConfidence: saved.approvalConfidence,
       });
     }
   }, [artifact.id, persistedFromMetadata, readPersistedMap]);
+
+  React.useEffect(() => {
+    async function fetchPersistedDetails(artifactId: string) {
+      try {
+        const response = await fetch(`${API}/hermes/artifacts/${encodeURIComponent(artifactId)}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        const metadata = data?.metadata || {};
+        const history = Array.isArray(metadata.approval_history) ? metadata.approval_history : [];
+        const last = history.length > 0 ? history[history.length - 1] : {};
+        rememberPersistedState(
+          artifactId,
+          String(metadata.approval_status || persistedBackendStatus?.approvalStatus || 'draft'),
+          String(metadata.updated_at || ''),
+          {
+            approvalTimestamp: String(metadata.approval_timestamp || last?.approval_timestamp || ''),
+            isCurrent: Boolean(data?.is_current),
+            supersededBy: metadata.superseded_by ? String(metadata.superseded_by) : null,
+            approvalActorLabel: String(metadata.approval_actor_label || last?.approval_actor_label || ''),
+            approvalActorType: String(metadata.approval_actor_type || last?.approval_actor_type || ''),
+            approvalConfidence: String(metadata.approval_confidence || last?.approval_confidence || ''),
+          },
+        );
+      } catch {
+        // Keep existing local/persisted state even if detail fetch fails.
+      }
+    }
+
+    if (persistedBackendStatus?.artifactId) {
+      fetchPersistedDetails(persistedBackendStatus.artifactId);
+    }
+  }, [persistedBackendStatus?.artifactId, rememberPersistedState]);
 
   async function syncBackendStatus(nextStatus: 'approved' | 'rejected' | 'changes_requested') {
     if (!persistedBackendStatus?.artifactId) return;
@@ -122,6 +194,9 @@ export function ArtifactActions({
           approval_status: nextStatus,
           actor_type: 'founder',
           actor_label: 'Founder/Web MAX',
+          actor_source: 'local_ui',
+          approval_method: 'ui',
+          approval_confidence: 'local_ui',
           actor_note: 'artifact_viewer_review_action',
         }),
       });
@@ -134,6 +209,14 @@ export function ArtifactActions({
         persistedBackendStatus.artifactId,
         String(data.approval_status || nextStatus),
         String(data.updated_at || ''),
+        {
+          approvalTimestamp: String(data.approval_timestamp || ''),
+          isCurrent: Boolean(data.approval_status === 'approved' && !data.superseded_by),
+          supersededBy: data.superseded_by ? String(data.superseded_by) : null,
+          approvalActorLabel: String(data.approval_actor_label || ''),
+          approvalActorType: String(data.approval_actor_type || ''),
+          approvalConfidence: String(data.approval_confidence || ''),
+        },
       );
     } catch (err) {
       setPersistState({
@@ -227,9 +310,39 @@ export function ArtifactActions({
 
       {/* Local vs persisted status */}
       {persistedBackendStatus ? (
-        <div style={{ fontSize: 10, color: '#22c55e' }}>
-          Persisted Hermes state — id={persistedBackendStatus.artifactId}, approval_status={persistedBackendStatus.approvalStatus}
-          {persistedBackendStatus.updatedAt ? `, updated_at=${persistedBackendStatus.updatedAt}` : ''}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, color: '#22c55e' }}>
+              Persisted Hermes state
+            </span>
+            <span style={{ fontSize: 10, color: '#94a3b8' }}>
+              id={persistedBackendStatus.artifactId}
+            </span>
+            <span style={{ fontSize: 10, color: '#f8fafc' }}>
+              approval_status={persistedBackendStatus.approvalStatus}
+            </span>
+            <span style={{ fontSize: 10, color: persistedBackendStatus.isCurrent ? '#10b981' : '#f59e0b' }}>
+              {persistedBackendStatus.isCurrent ? 'current' : 'not-current'}
+            </span>
+            {persistedBackendStatus.supersededBy && (
+              <span style={{ fontSize: 10, color: '#f59e0b' }}>
+                superseded_by={persistedBackendStatus.supersededBy}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: '#64748b' }}>
+            {persistedBackendStatus.approvalActorLabel
+              ? `approval_actor=${persistedBackendStatus.approvalActorLabel}`
+              : persistedBackendStatus.approvalActorType
+                ? `approval_actor_type=${persistedBackendStatus.approvalActorType}`
+                : 'approval_actor=unknown'}
+            {persistedBackendStatus.approvalConfidence ? `, confidence=${persistedBackendStatus.approvalConfidence}` : ''}
+            {persistedBackendStatus.approvalTimestamp
+              ? `, approval_timestamp=${persistedBackendStatus.approvalTimestamp}`
+              : persistedBackendStatus.updatedAt
+                ? `, updated_at=${persistedBackendStatus.updatedAt}`
+                : ''}
+          </div>
         </div>
       ) : (
         <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>

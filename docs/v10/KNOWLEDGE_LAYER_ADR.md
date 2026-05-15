@@ -35,7 +35,8 @@ In scope (this ADR implementation):
 - minimal UI save action
 - MAX retrieval wiring for artifact-memory questions using internal tool hooks
 - default approved/current filtering to reduce stale memory use
-- lightweight approval actor metadata on status updates
+- approval identity metadata (actor/source/method/confidence/timestamp/history)
+- ranking/reranking with explicit score and matched field metadata
 
 Out of scope (next phase):
 - signed approval identity model
@@ -65,6 +66,7 @@ Positive:
 Tradeoffs:
 - additional storage and metadata maintenance
 - requires governance to avoid artifact sprawl
+- ranking remains heuristic (not embedding-based reranking yet)
 
 ## Safety Constraints
 

@@ -1034,9 +1034,16 @@ def _format_provenance_short(provenance: dict[str, Any]) -> str:
     source_agent = provenance.get("source_agent") or "unknown"
     files = provenance.get("source_files") or []
     endpoints = provenance.get("source_endpoints") or []
+    safe_files = []
+    for value in files[:3]:
+        raw = str(value)
+        if raw.startswith("/"):
+            safe_files.append(raw.rsplit("/", 1)[-1])
+        else:
+            safe_files.append(raw)
     parts = [f"source_agent={source_agent}"]
-    if files:
-        parts.append(f"source_files={', '.join(str(x) for x in files[:3])}")
+    if safe_files:
+        parts.append(f"source_files={', '.join(safe_files)}")
     if endpoints:
         parts.append(f"source_endpoints={', '.join(str(x) for x in endpoints[:3])}")
     return "; ".join(parts)
@@ -1098,7 +1105,7 @@ def _hermes_artifact_memory_response(request: ChatRequest, founder: bool) -> Cha
         )
 
     lines = [
-        "Using Hermes artifact memory as supporting context (runtime/repo/database/module docs outrank artifacts)."
+        "Artifact memory used (supporting context only; runtime/repo/database/module-doc truth outranks this):"
     ]
 
     for idx, hit in enumerate(hits[:3], start=1):
@@ -1108,26 +1115,35 @@ def _hermes_artifact_memory_response(request: ChatRequest, founder: bool) -> Cha
         bundle = get_result.result if get_result.success else {}
         metadata = (bundle or {}).get("metadata") or {}
         approval_status = metadata.get("approval_status") or hit.get("approval_status") or "unknown"
-        updated_at = metadata.get("updated_at") or hit.get("updated_at") or "unknown"
+        updated_at = metadata.get("updated_at") or metadata.get("created_at") or hit.get("updated_at") or "unknown"
         stale_warning = (bundle or {}).get("stale_warning")
-        current_flag = "no (superseded/stale)" if stale_warning else "yes"
+        current_flag = "superseded_or_not_current" if stale_warning else "current"
         summary = (bundle or {}).get("summary") or hit.get("summary") or ""
         summary = _sanitize_internal_leakage_text(summary)
         summary = summary[:340] + ("..." if len(summary) > 340 else "")
         provenance = metadata.get("provenance") or hit.get("provenance") or {}
-        lines.append(f"{idx}. {hit.get('title') or artifact_id}")
-        lines.append(f"   - approval_status: {approval_status}")
-        lines.append(f"   - updated_at: {updated_at}")
-        lines.append(f"   - current: {current_flag}")
-        lines.append(f"   - provenance: {_format_provenance_short(provenance)}")
+        source_agent = metadata.get("source_agent") or provenance.get("source_agent") or hit.get("source_agent") or "unknown"
+        title = hit.get("title") or artifact_id
+        short_id = artifact_id[:12] if artifact_id else "unknown"
+        module_value = metadata.get("module") or hit.get("module") or "system"
+        lines.append(f"{idx}. Title: {title}")
+        lines.append(f"   - Artifact ID: {short_id}")
+        lines.append(f"   - Module: {module_value}")
+        lines.append(f"   - Approval: {approval_status}")
+        lines.append(f"   - Status: {current_flag}")
+        lines.append(f"   - Updated: {updated_at}")
+        lines.append(f"   - Source Agent: {source_agent}")
+        lines.append(f"   - Provenance: {_format_provenance_short(provenance)}")
         if approval_status != "approved":
-            lines.append("   - warning: this artifact is not approved and should not be treated as current truth.")
+            lines.append("   - Warning: not approved; do not treat as current truth.")
         if stale_warning:
-            lines.append(f"   - stale_warning: {stale_warning}")
+            lines.append(f"   - Stale Warning: {stale_warning}")
         if summary:
-            lines.append(f"   - summary: {summary}")
+            lines.append(f"   - Summary: {summary}")
 
-    lines.append("Memory basis: Hermes artifacts. Truth basis for live state remains runtime/repo/database checks.")
+    lines.append(
+        "Note: This answer is grounded in Hermes artifact memory. For live state, runtime/repo/database checks remain authoritative."
+    )
     return ChatResponse(
         response="\n".join(lines),
         model_used="hermes-artifact-memory",
