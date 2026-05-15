@@ -3139,6 +3139,12 @@ async def max_status():
         for item in skills
         if item.get("status") == "implemented_callable"
     ]
+    current_commit = _git_commit()
+    lane = os.getenv("EMPIRE_LANE", "unknown")
+    backend_port_raw = os.getenv("EMPIRE_BACKEND_PORT", "").strip()
+    frontend_port_raw = os.getenv("EMPIRE_FRONTEND_EXPECTED_PORT", "").strip()
+    backend_port = int(backend_port_raw) if backend_port_raw.isdigit() else None
+    frontend_port = int(frontend_port_raw) if frontend_port_raw.isdigit() else None
 
     # Provider policy info for transparency
     provider_policy = {
@@ -3154,7 +3160,14 @@ async def max_status():
 
     return {
         "status": "ok",
-        "current_commit": _git_commit(),
+        "current_commit": current_commit,
+        "runtime_lane": {
+            "lane": lane,
+            "branch": current_commit.get("branch"),
+            "backend_port": backend_port,
+            "frontend_expected_port": frontend_port,
+            "worktree": str(Path.cwd()),
+        },
         "registry": get_registry_load_info(),
         "surfaces": [
             {
