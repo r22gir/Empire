@@ -7,6 +7,8 @@ import subprocess
 import logging
 from fastapi import APIRouter
 
+from app.services.max.lane_runtime_metadata import get_lane_git_metadata
+
 router = APIRouter()
 logger = logging.getLogger("dev")
 
@@ -60,42 +62,59 @@ async def dev_status():
 
 @router.get("/dev/git")
 async def dev_git():
-    """Current git state."""
-    repo = os.path.expanduser("~/empire-repo")
-    result = {}
+    """Backward-compatible git state payload (lane-aware source)."""
+    meta = get_lane_git_metadata()
+    return {
+        "branch": meta.get("branch") or "unknown",
+        "last_commit_hash": meta.get("commit") or "",
+        "message": meta.get("message") or "",
+        "uncommitted_count": meta.get("uncommitted_count", 0),
+        "lane": meta.get("lane"),
+        "worktree_path": meta.get("worktree_path"),
+        "source_path_used": meta.get("source_path_used"),
+        "expected_worktree_path": meta.get("expected_worktree_path"),
+        "expected_backend_port": meta.get("expected_backend_port"),
+        "expected_frontend_port": meta.get("expected_frontend_port"),
+        "freshness_status": meta.get("freshness_status"),
+        "mismatch_reason": meta.get("mismatch_reason"),
+    }
 
+
+@router.get("/git")
+async def git_status():
+    """Lane-aware git metadata for runtime freshness checks."""
+    meta = get_lane_git_metadata()
+    startup_commit = None
     try:
-        r = subprocess.run(
-            ["git", "branch", "--show-current"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
-        )
-        result["branch"] = r.stdout.strip()
-    except Exception:
-        result["branch"] = "unknown"
+        from app.services.max.startup_health import read_startup_health_record
 
-    try:
-        r = subprocess.run(
-            ["git", "log", "--oneline", "-1"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
-        )
-        parts = r.stdout.strip().split(" ", 1)
-        result["last_commit_hash"] = parts[0] if parts else ""
-        result["message"] = parts[1] if len(parts) > 1 else ""
+        startup = read_startup_health_record() or {}
+        startup_commit = startup.get("running_commit_hash")
     except Exception:
-        result["last_commit_hash"] = ""
-        result["message"] = ""
+        startup_commit = None
 
-    try:
-        r = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
-        )
-        lines = [l for l in r.stdout.strip().split("\n") if l.strip()]
-        result["uncommitted_count"] = len(lines)
-    except Exception:
-        result["uncommitted_count"] = 0
-
-    return result
+    return {
+        "status": "ok",
+        "lane": meta.get("lane"),
+        "worktree_path": meta.get("worktree_path"),
+        "backend_cwd": meta.get("backend_cwd"),
+        "source_path_used": meta.get("source_path_used"),
+        "expected_worktree_path": meta.get("expected_worktree_path"),
+        "current_commit": {
+            "branch": meta.get("branch") or "unknown",
+            "hash": meta.get("commit") or "",
+            "message": meta.get("message") or "",
+        },
+        "local_commit": meta.get("commit") or "",
+        "startup_commit": startup_commit,
+        "public_commit": None,
+        "expected_backend_port": meta.get("expected_backend_port"),
+        "expected_frontend_port": meta.get("expected_frontend_port"),
+        "public_base_url": meta.get("public_base_url"),
+        "uncommitted_count": meta.get("uncommitted_count", 0),
+        "freshness_status": meta.get("freshness_status"),
+        "mismatch_reason": meta.get("mismatch_reason"),
+    }
 
 
 @router.get("/dev/audit")

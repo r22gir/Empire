@@ -136,16 +136,28 @@ systemctl --user restart empire-portal-v10.service
 
 ## Git Commit Verification
 
-v10 backend commit must match `697b040` (or current HEAD if deployed).
+v10 backend commit must match the active `feature/v10.0-test-lane` HEAD for the running worktree.
 
 ```bash
 cd ~/empire-repo-v10/backend && git log -1 --oneline
 ```
 
-Expected: `697b040` — "MAX v5.0: operating registry, per-desk routing, system prompt"
+Cross-check lane metadata endpoints:
+
+```bash
+curl -s http://localhost:8010/api/v1/max/status | python3 -m json.tool
+curl -s http://localhost:8010/api/v1/git | python3 -m json.tool
+curl -s http://localhost:8010/api/v1/dev/git | python3 -m json.tool
+```
+
+`/api/v1/max/status` and `/api/v1/git` must agree on:
+- lane: `v10-test`
+- branch: `feature/v10.0-test-lane`
+- worktree: `~/empire-repo-v10`
+- commit hash
 
 ---
 
 ## Last Updated
 
-2026-05-13
+2026-05-15

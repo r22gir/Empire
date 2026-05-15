@@ -3344,7 +3344,8 @@ async def max_status():
             "branch": current_commit.get("branch"),
             "backend_port": backend_port,
             "frontend_expected_port": frontend_port,
-            "worktree": str(Path.cwd()),
+            "worktree": current_commit.get("worktree_path") or str(Path.cwd()),
+            "source_path_used": current_commit.get("source_path_used"),
         },
         "registry": get_registry_load_info(),
         "surfaces": [

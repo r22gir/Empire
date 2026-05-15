@@ -68,6 +68,20 @@ Tradeoffs:
 - requires governance to avoid artifact sprawl
 - ranking remains heuristic (not embedding-based reranking yet)
 
+## Runtime Freshness Addendum (2026-05-15)
+
+Because runtime truth outranks artifacts, git freshness checks must be lane-scoped.
+
+Implemented:
+- lane-aware metadata helper for branch/commit/worktree resolution
+- `GET /api/v1/git` as the canonical lane metadata endpoint
+- compatibility `GET /api/v1/dev/git` now backed by the same lane-aware source
+- runtime truth check now compares commits using active lane endpoints:
+  - local: `http://127.0.0.1:{active_backend_port}/api/v1/git`
+  - public: `{lane_public_base}/api/v1/git`
+
+This removes false freshness mismatch reports that occurred when runtime checks read from a parked root worktree or the wrong hostname.
+
 ## Safety Constraints
 
 - no script execution from stored HTML

@@ -171,6 +171,24 @@ By default, artifact retrieval uses:
 
 Draft/rejected/superseded artifacts are only returned when explicitly requested.
 
+## Runtime Truth Integration (Lane-Aware Git Freshness)
+
+Artifact memory must remain below runtime/repo truth, so runtime freshness must be lane-correct.
+
+v10 runtime checks now use lane-aware git metadata from:
+- `GET /api/v1/git` (primary)
+- `GET /api/v1/dev/git` (compatibility view)
+
+The source is resolved from active backend service context (`EMPIRE_LANE`, `EMPIRE_BACKEND_PORT`, `EMPIRE_FRONTEND_EXPECTED_PORT`, and git top-level from backend cwd), not a hardcoded repo root.
+
+For lane `v10-test`:
+- expected worktree: `~/empire-repo-v10`
+- expected backend port: `8010`
+- expected frontend port: `3010`
+- expected public base: `https://test-studio.empirebox.store`
+
+Runtime freshness comparison now avoids false stale results caused by cross-lane repo reads. If public git check is unavailable, freshness reports `public_unavailable` instead of a stale commit claim.
+
 ## Security Model
 
 HTML safety:

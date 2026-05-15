@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 
+from app.services.max.lane_runtime_metadata import get_lane_git_metadata
+
 
 # Signals that indicate the user is asking about runtime/deployment status.
 # IMPORTANT: These are matched as whole-word patterns to avoid false positives
@@ -321,13 +323,14 @@ def _run(cmd: list[str], timeout: int = 5) -> dict[str, Any]:
 
 
 def _git_commit() -> dict[str, Any]:
-    short = _run(["git", "rev-parse", "--short", "HEAD"])
-    branch = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-    message = _run(["git", "log", "--oneline", "-1"])
+    lane_meta = get_lane_git_metadata()
     return {
-        "hash": short.get("stdout", ""),
-        "branch": branch.get("stdout", ""),
-        "message": message.get("stdout", ""),
+        "hash": lane_meta.get("commit") or "",
+        "branch": lane_meta.get("branch") or "",
+        "message": lane_meta.get("message") or "",
+        "lane": lane_meta.get("lane"),
+        "worktree_path": lane_meta.get("worktree_path"),
+        "source_path_used": lane_meta.get("source_path_used"),
     }
 
 
@@ -385,7 +388,20 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     Checks stable (8000/3005) and v10 test (8010/3010) separately so MAX
     can report which is up/down without confusion.
     """
+    lane_meta = get_lane_git_metadata()
     commit = _git_commit()
+    lane = lane_meta.get("lane") or "unknown"
+    active_backend_port = int(lane_meta.get("expected_backend_port") or 8000)
+    active_frontend_port = int(lane_meta.get("expected_frontend_port") or 3005)
+    public_base_url = lane_meta.get("public_base_url")
+
+    service_map = {
+        "main": ("empire-backend.service", "empire-portal.service"),
+        "stable": ("empire-backend.service", "empire-portal.service"),
+        "feature-v10": ("empire-backend-feature.service", "empire-portal-feature.service"),
+        "v10-test": ("empire-backend-v10.service", "empire-portal-v10.service"),
+    }
+    backend_unit, frontend_unit = service_map.get(lane, ("empire-backend.service", "empire-portal.service"))
     registry_info = {}
     startup_health = None
     try:
@@ -401,16 +417,22 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         openclaw_gate = openclaw_gate_result.to_dict()
     except Exception as exc:
         openclaw_gate = {"state": "unknown", "allowed": False, "reason": str(exc)}
-    backend_service = _service_status("empire-backend.service")
-    frontend_service = _service_status("empire-portal.service")
+    backend_service = _service_status(backend_unit)
+    frontend_service = _service_status(frontend_unit)
+    stable_backend_service = _service_status("empire-backend.service")
+    stable_frontend_service = _service_status("empire-portal.service")
 
-    # Check stable ports
-    local_api_git = _http_json("http://127.0.0.1:8000/api/v1/dev/git")
-    local_backend_root = _http_status("http://127.0.0.1:8000/")
-    local_frontend_root = _http_status("http://127.0.0.1:3005/")
-    local_memory_bank = _http_status("http://127.0.0.1:8000/api/v1/chats/memory-bank?channel=all&limit=1")
+    # Active lane checks (git freshness + route checks must use the active lane backend)
+    local_api_git = _http_json(f"http://127.0.0.1:{active_backend_port}/api/v1/git")
+    local_backend_root = _http_status(f"http://127.0.0.1:{active_backend_port}/")
+    local_frontend_root = _http_status(f"http://127.0.0.1:{active_frontend_port}/")
+    local_memory_bank = _http_status(
+        f"http://127.0.0.1:{active_backend_port}/api/v1/chats/memory-bank?channel=all&limit=1"
+    )
 
-    # Check v10 test lane ports (8010 = backend, 3010 = frontend)
+    # Explicit lane checks for stable and v10 side-by-side visibility
+    local_stable_backend_root = _http_status("http://127.0.0.1:8000/")
+    local_stable_frontend_root = _http_status("http://127.0.0.1:3005/")
     local_v10_backend_root = _http_status("http://127.0.0.1:8010/")
     local_v10_frontend_root = _http_status("http://127.0.0.1:3010/")
 
@@ -418,29 +440,77 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     public_backend_root = None
     public_frontend_root = None
     public_memory_bank = None
-    if public:
-        public_api_git = _http_json("https://api.empirebox.store/api/v1/dev/git")
-        public_backend_root = _http_status("https://api.empirebox.store/")
-        public_frontend_root = _http_status("https://studio.empirebox.store/")
-        public_memory_bank = _http_status("https://api.empirebox.store/api/v1/chats/memory-bank?channel=all&limit=1")
+    if public and public_base_url:
+        public_api_git = _http_json(f"{public_base_url}/api/v1/git")
+        public_backend_root = _http_status(f"{public_base_url}/")
+        public_frontend_root = _http_status(f"{public_base_url}/")
+        public_memory_bank = _http_status(f"{public_base_url}/api/v1/chats/memory-bank?channel=all&limit=1")
+    elif public:
+        public_api_git = {"ok": False, "error": f"public_base_url_unavailable_for_lane:{lane}"}
+        public_backend_root = {"ok": False, "error": "public_base_url_unavailable"}
+        public_frontend_root = {"ok": False, "error": "public_base_url_unavailable"}
+        public_memory_bank = {"ok": False, "error": "public_base_url_unavailable"}
 
-    local_hash = (local_api_git.get("data") or {}).get("last_commit_hash") if isinstance(local_api_git.get("data"), dict) else None
+    def _extract_commit_hash(payload: dict[str, Any] | None) -> str | None:
+        if not isinstance(payload, dict):
+            return None
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            return None
+        current = data.get("current_commit")
+        if isinstance(current, dict) and current.get("hash"):
+            return str(current.get("hash"))
+        for key in ("local_commit", "last_commit_hash", "commit"):
+            value = data.get(key)
+            if value:
+                return str(value)
+        return None
+
+    local_hash = _extract_commit_hash(local_api_git)
     public_hash = None
-    if public_api_git and isinstance(public_api_git.get("data"), dict):
-        public_hash = public_api_git["data"].get("last_commit_hash")
+    if public_api_git:
+        public_hash = _extract_commit_hash(public_api_git)
+
+    local_commit_mismatch = bool(local_hash and commit["hash"] and local_hash != commit["hash"])
+    public_commit_mismatch = bool(public and public_hash and commit["hash"] and public_hash != commit["hash"])
+
+    mismatch_reason = lane_meta.get("mismatch_reason")
+    if local_commit_mismatch:
+        mismatch_reason = (
+            f"local_commit_mismatch current_commit={commit['hash']} local_commit={local_hash} "
+            f"source_path={lane_meta.get('source_path_used')} lane={lane}"
+        )
+    elif public_commit_mismatch:
+        mismatch_reason = (
+            f"public_commit_mismatch current_commit={commit['hash']} public_commit={public_hash} "
+            f"public_base_url={public_base_url}"
+        )
+
+    public_check_unavailable = bool(public and public_api_git and not public_api_git.get("ok"))
+    if public_check_unavailable and not mismatch_reason:
+        mismatch_reason = f"public_check_unavailable lane={lane} reason={public_api_git.get('error', 'unavailable')}"
+
+    if local_commit_mismatch or public_commit_mismatch or lane_meta.get("mismatch_reason"):
+        freshness_status = "mismatch"
+    elif public_check_unavailable:
+        freshness_status = "public_unavailable"
+    elif local_hash and commit["hash"] and (not public or not public_hash or public_hash == commit["hash"]):
+        freshness_status = "ok"
+    else:
+        freshness_status = "partial"
 
     stale_or_broken: list[str] = []
-    if not backend_service["active"] or not _port_open("127.0.0.1", 8000) or not local_backend_root["ok"]:
-        stale_or_broken.append("backend_port_8000_unhealthy")
-    if not frontend_service["active"] or not _port_open("127.0.0.1", 3005) or not local_frontend_root["ok"]:
-        stale_or_broken.append("frontend_port_3005_unhealthy")
-    if local_hash and commit["hash"] and local_hash != commit["hash"]:
-        stale_or_broken.append("local_api_commit_stale")
-    if public and public_hash and commit["hash"] and public_hash != commit["hash"]:
-        stale_or_broken.append("public_api_commit_stale")
-    if public and public_backend_root and not public_backend_root["ok"]:
+    if not backend_service["active"] or not _port_open("127.0.0.1", active_backend_port) or not local_backend_root["ok"]:
+        stale_or_broken.append(f"active_backend_port_{active_backend_port}_unhealthy")
+    if not frontend_service["active"] or not _port_open("127.0.0.1", active_frontend_port) or not local_frontend_root["ok"]:
+        stale_or_broken.append(f"active_frontend_port_{active_frontend_port}_unhealthy")
+    if local_commit_mismatch:
+        stale_or_broken.append("local_api_commit_mismatch")
+    if public_commit_mismatch:
+        stale_or_broken.append("public_api_commit_mismatch")
+    if public and public_backend_root and public_backend_root.get("ok") is False and not public_check_unavailable:
         stale_or_broken.append("public_api_unhealthy")
-    if public and public_frontend_root and not public_frontend_root["ok"]:
+    if public and public_frontend_root and public_frontend_root.get("ok") is False and not public_check_unavailable:
         stale_or_broken.append("public_studio_unhealthy")
 
     return {
@@ -449,6 +519,12 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "mode": "inspect_only",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "current_commit": commit,
+        "lane": lane,
+        "worktree_path": lane_meta.get("worktree_path"),
+        "source_path_used": lane_meta.get("source_path_used"),
+        "expected_worktree_path": lane_meta.get("expected_worktree_path"),
+        "expected_backend_port": active_backend_port,
+        "expected_frontend_port": active_frontend_port,
         "registry": registry_info,
         "startup_health": startup_health,
         "openclaw_gate": openclaw_gate,
@@ -456,9 +532,9 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "backend_port_8000": {
             "port": 8000,
             "service": "empire-backend.service",
-            "service_active": backend_service.get("active", False),
+            "service_active": stable_backend_service.get("active", False),
             "port_open": _port_open("127.0.0.1", 8000),
-            "local_root_status": local_backend_root.get("status_code"),
+            "local_root_status": local_stable_backend_root.get("status_code"),
         },
         # v10 test backend on port 8010 (not systemd — dev server)
         "backend_port_8010": {
@@ -472,9 +548,9 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         "frontend_port_3005": {
             "port": 3005,
             "service": "empire-portal.service",
-            "service_active": frontend_service.get("active", False),
+            "service_active": stable_frontend_service.get("active", False),
             "port_open": _port_open("127.0.0.1", 3005),
-            "local_root_status": local_frontend_root.get("status_code"),
+            "local_root_status": local_stable_frontend_root.get("status_code"),
         },
         # v10 test frontend on port 3010 (not systemd — dev server)
         "frontend_port_3010": {
@@ -486,15 +562,32 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         },
         "local_freshness": {
             "api_git": local_api_git,
+            "local_commit": local_hash,
             "api_matches_current_commit": bool(local_hash and local_hash == commit["hash"]),
             "memory_bank_route": local_memory_bank,
         },
         "public_freshness": {
             "api_git": public_api_git,
+            "public_commit": public_hash,
             "api_matches_current_commit": bool(public_hash and public_hash == commit["hash"]) if public else None,
             "api_root": public_backend_root,
             "studio_root": public_frontend_root,
             "memory_bank_route": public_memory_bank,
+        },
+        "git_freshness": {
+            "lane": lane,
+            "worktree_path": lane_meta.get("worktree_path"),
+            "source_path_used": lane_meta.get("source_path_used"),
+            "branch": commit.get("branch"),
+            "current_commit": commit.get("hash"),
+            "startup_commit": (startup_health or {}).get("running_commit_hash") if isinstance(startup_health, dict) else None,
+            "local_commit": local_hash,
+            "public_commit": public_hash,
+            "public_base_url": public_base_url,
+            "expected_backend_port": active_backend_port,
+            "expected_frontend_port": active_frontend_port,
+            "freshness_status": freshness_status,
+            "mismatch_reason": mismatch_reason,
         },
         "restart_required": bool(stale_or_broken),
         "stale_or_broken": stale_or_broken,
@@ -531,15 +624,26 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     local = result.get("local_freshness", {})
     public = result.get("public_freshness", {})
 
-    public_hash = None
-    public_git = public.get("api_git") or {}
-    if isinstance(public_git.get("data"), dict):
-        public_hash = public_git["data"].get("last_commit_hash")
+    def _extract_hash(api_git_payload: dict[str, Any] | None) -> str | None:
+        if not isinstance(api_git_payload, dict):
+            return None
+        data = api_git_payload.get("data")
+        if not isinstance(data, dict):
+            return None
+        current = data.get("current_commit")
+        if isinstance(current, dict) and current.get("hash"):
+            return str(current.get("hash"))
+        for key in ("local_commit", "last_commit_hash", "commit"):
+            value = data.get(key)
+            if value:
+                return str(value)
+        return None
 
-    local_hash = None
+    public_git = public.get("api_git") or {}
     local_git = local.get("api_git") or {}
-    if isinstance(local_git.get("data"), dict):
-        local_hash = local_git["data"].get("last_commit_hash")
+    public_hash = public.get("public_commit") or _extract_hash(public_git)
+    local_hash = local.get("local_commit") or _extract_hash(local_git)
+    git_freshness = result.get("git_freshness") or {}
 
     if _wants_key_only(message):
         return "\n".join(
@@ -575,6 +679,8 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         "Runtime truth check completed.",
         f"- Mode: {result.get('mode')} ({result.get('repair_capability')})",
         f"- Current repo commit: {commit.get('hash')} ({commit.get('message')})",
+        f"- Active lane: {result.get('lane')} | worktree={result.get('worktree_path')} | source_path={result.get('source_path_used')}",
+        f"- Expected active ports: backend={result.get('expected_backend_port')} frontend={result.get('expected_frontend_port')}",
         f"- Registry: version={(result.get('registry') or {}).get('registry_version')} loaded_at={(result.get('registry') or {}).get('loaded_at')} last_error={(result.get('registry') or {}).get('last_error')}",
         f"- OpenClaw gate: state={openclaw_gate.get('state')} allowed={openclaw_gate.get('allowed')} reason={openclaw_gate.get('reason')}",
         f"- Stable Backend (port 8000): {'UP' if b8000.get('port_open') else 'DOWN'} | systemd={b8000.get('service_active')} | http={b8000.get('local_root_status')}",
@@ -582,8 +688,9 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         f"- Stable Frontend (port 3005): {'UP' if f3005.get('port_open') else 'DOWN'} | systemd={f3005.get('service_active')} | http={f3005.get('local_root_status')}",
         f"- v10 Test Frontend (port 3010): {'UP' if f3010.get('port_open') else 'DOWN/not started'} | {f3010.get('service', 'dev server')}",
         f"- Local API commit: {local_hash} matches_current={local.get('api_matches_current_commit')}",
-        f"- Public API commit: {public_hash} matches_current={public.get('api_matches_current_commit')}",
+        f"- Public API commit: {public_hash if public_hash else 'unavailable'} matches_current={public.get('api_matches_current_commit')}",
         f"- Public API root: {(public.get('api_root') or {}).get('status_code')} | Public Studio root: {(public.get('studio_root') or {}).get('status_code')}",
+        f"- Lane git freshness: status={git_freshness.get('freshness_status')} mismatch_reason={git_freshness.get('mismatch_reason')}",
         f"- Restart required by this check: {result.get('restart_required')}",
     ]
     startup_hash = startup.get("running_commit_hash") if isinstance(startup, dict) else None
