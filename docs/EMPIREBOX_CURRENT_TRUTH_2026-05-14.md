@@ -2,7 +2,7 @@
 
 Last updated: May 14, 2026
 Source: Founder current-truth brief
-Scope: Stable/live path first (`~/empire-repo`, branch `feature/v10.0`)
+Scope: Stable/live path first (`~/empire-repo-main`, branch `main`)
 
 ## Stable/Live Runtime
 
@@ -10,6 +10,13 @@ Scope: Stable/live path first (`~/empire-repo`, branch `feature/v10.0`)
 - Frontend: `http://localhost:3005`
 - Public studio: `https://studio.empirebox.store`
 - Public API routing: `https://studio.empirebox.store/api/v1/* -> localhost:8000`
+
+## Lane Separation (2026-05-15)
+
+- Main/stable (production path): `main` on `3005/8000` from `/home/rg/empire-repo-main`
+- Feature review lane: `feature/v10.0` on `3020/8020` from `/home/rg/empire-repo-feature`
+- v10 test lane: `feature/v10.0-test-lane` on `3010/8010` from `/home/rg/empire-repo-v10`
+- Public stable hostnames map to `3005/8000`; public test hostnames map to `3010/8010`
 
 ## Module vs Service Truth
 
@@ -92,4 +99,3 @@ For ArchiveForge responses, grounding priority is:
 2. `docs/ARCHIVEFORGE_STATUS.md`
 3. `docs/ARCHIVEFORGE_WORKFLOW.md`
 4. `docs/EMPIRE_MODULE_REGISTRY.md`
-
