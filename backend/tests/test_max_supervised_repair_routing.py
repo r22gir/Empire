@@ -119,6 +119,15 @@ def _approval_prompt(task_ref: str) -> str:
     return f"Approved task_ref={task_ref}. Create exactly one bounded OpenClaw task."
 
 
+def _level1_prompt() -> str:
+    return (
+        "MAX, start Level 1 supervised v10 delegation. "
+        "First verify v10 lane, git freshness, Hermes enabled, inspect queue if supported, "
+        "confirm task_id=8 is cancelled, then recommend exactly 3 bounded v10 tasks. "
+        "Do not create any tasks."
+    )
+
+
 def _openclaw_task_row(
     task_id: int = 8,
     status: str = "queued",
@@ -204,6 +213,84 @@ class _ReadOnlyDBCtx:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+def test_level1_delegation_routes_before_disposition_and_stays_read_only(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(
+        max_router,
+        "_collect_supervised_v10_openclaw_queue_snapshot",
+        lambda limit=10: {
+            "supported": True,
+            "count": 1,
+            "tasks": [{"id": 8, "status": "cancelled", "title": "already handled"}],
+            "note": "queue listing supported",
+        },
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_collect_supervised_v10_openclaw_task_status",
+        lambda task_id: {
+            "supported": True,
+            "task_id": task_id,
+            "found": True,
+            "title": "Supervised v10 repair: enforce recommendation-to-create confirmation token",
+            "status": "cancelled",
+            "lane": "v10-test",
+            "branch": "feature/v10.0-test-lane",
+            "worktree": "/home/rg/empire-repo-v10",
+            "source": "supervised-v10-openclaw-task-create",
+            "created_at": "2026-05-16 03:23:52",
+        },
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_collect_supervised_v10_approved_hermes_context",
+        lambda founder, limit=4: {
+            "query": "q",
+            "artifacts": [
+                {"id": "ha1", "title": "artifact 1", "module": "system", "lane": "v10-test", "approval_status": "approved"},
+                {"id": "ha2", "title": "artifact 2", "module": "system", "lane": "v10-test", "approval_status": "approved"},
+            ],
+            "tool_results": [],
+        },
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_build_supervised_v10_level1_recommended_tasks",
+        lambda: [
+            {"title": "Task A", "scope": "A", "why_safe": "safe", "likely_files_affected": ["a"], "tests_required": ["t1"], "founder_approval_required_before_creation": True, "task_ref_required_for_creation": True},
+            {"title": "Task B", "scope": "B", "why_safe": "safe", "likely_files_affected": ["b"], "tests_required": ["t2"], "founder_approval_required_before_creation": True, "task_ref_required_for_creation": True},
+            {"title": "Task C", "scope": "C", "why_safe": "safe", "likely_files_affected": ["c"], "tests_required": ["t3"], "founder_approval_required_before_creation": True, "task_ref_required_for_creation": True},
+        ],
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_supervised_v10_openclaw_task_disposition_response",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("level1 sprint should not route to disposition")),
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_enqueue_supervised_v10_openclaw_task",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("level1 sprint must not queue tasks")),
+    )
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(message=_level1_prompt(), history=[], channel="web"),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-level1-delegation-sprint"
+    result = (response.tool_results[-1] or {}).get("result") or {}
+    assert result.get("created_tasks") == 0
+    assert result.get("mutated_tasks") == 0
+    assert result.get("no_task_creation_performed") is True
+    assert result.get("no_task_mutation_performed") is True
+    assert len(result.get("recommended_tasks") or []) == 3
+    assert "- task_ref_batch_support: not_supported" in response.response
 
 
 def test_supervised_preflight_routes_correctly():

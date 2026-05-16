@@ -939,6 +939,24 @@ SUPERVISED_OPENCLAW_TASK_DISPOSITION_MARKERS = (
     "mark openclaw task",
     "mark open claw task",
 )
+SUPERVISED_V10_LEVEL1_DELEGATION_MARKERS = (
+    "start level 1 supervised v10 delegation",
+    "level 1 supervised v10 delegation",
+    "level 1 delegation sprint",
+    "supervised v10 delegation sprint",
+    "commander/coordinator",
+    "commander coordinator",
+    "commander",
+    "coordinator",
+    "recommend exactly 3 bounded v10 tasks",
+)
+SUPERVISED_V10_LEVEL1_NO_CREATE_MARKERS = (
+    "do not create any tasks",
+    "do not create tasks",
+    "do not create any task",
+    "do not create task",
+    "no task creation",
+)
 SUPERVISED_OPENCLAW_TASK_DISPOSITION_APPROVAL_PATTERNS = (
     re.compile(
         r"\bapproved\b[\s\S]{0,240}\bcancel(?:l|led|ling)?\b[\s\S]{0,240}\b(openclaw|open claw)\b[\s\S]{0,240}\btask[_\s-]*id\b",
@@ -1345,9 +1363,30 @@ def _is_supervised_v10_openclaw_task_inspect_request(message: str | None) -> boo
     return bool(mentions_openclaw and mentions_task and (inspect_signal or read_signal))
 
 
+def _is_supervised_v10_level1_delegation_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    if _is_supervised_v10_openclaw_task_create_request(text):
+        return False
+    level_signal = any(marker in text for marker in SUPERVISED_V10_LEVEL1_DELEGATION_MARKERS)
+    coordinator_signal = ("commander" in text) or ("coordinator" in text)
+    supervised_signal = "supervised" in text and "v10" in text
+    recommend_three_signal = bool(
+        re.search(r"\brecommend\s+exactly\s+(3|three)\b", text)
+        or re.search(r"\bexactly\s+(3|three)\s+bounded\s+v10\s+tasks\b", text)
+    )
+    no_create_signal = any(marker in text for marker in SUPERVISED_V10_LEVEL1_NO_CREATE_MARKERS)
+    if not recommend_three_signal:
+        return False
+    return bool((level_signal or coordinator_signal or supervised_signal) and no_create_signal)
+
+
 def _is_supervised_v10_openclaw_task_disposition_request(message: str | None) -> bool:
     text = (message or "").lower().strip()
     if not text:
+        return False
+    if _is_supervised_v10_level1_delegation_request(text):
         return False
     if _is_supervised_v10_openclaw_task_create_request(text):
         return False
@@ -1463,6 +1502,187 @@ def _build_supervised_v10_openclaw_task_payload() -> dict[str, Any]:
             "backend/tests/test_max_supervised_repair_routing.py",
         ],
     }
+
+
+def _collect_supervised_v10_openclaw_queue_snapshot(limit: int = 10) -> dict[str, Any]:
+    from app.db.database import dict_rows, get_db
+
+    try:
+        with get_db() as db:
+            rows = dict_rows(
+                db.execute(
+                    """
+                    SELECT id, title, status, priority, desk, source, created_at
+                    FROM openclaw_tasks
+                    WHERE status IN ('queued', 'running', 'paused')
+                    ORDER BY priority ASC, created_at ASC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                ).fetchall()
+            )
+        return {
+            "supported": True,
+            "count": len(rows),
+            "tasks": rows,
+            "note": "queue listing supported",
+        }
+    except Exception as exc:
+        return {
+            "supported": False,
+            "count": None,
+            "tasks": [],
+            "note": f"queue listing unavailable: {exc}",
+        }
+
+
+def _collect_supervised_v10_openclaw_task_status(task_id: int) -> dict[str, Any]:
+    from app.db.database import dict_row, get_db
+
+    try:
+        with get_db() as db:
+            row = dict_row(db.execute("SELECT * FROM openclaw_tasks WHERE id = ?", (int(task_id),)).fetchone())
+    except Exception as exc:
+        return {
+            "supported": False,
+            "task_id": task_id,
+            "found": False,
+            "note": f"task lookup unavailable: {exc}",
+        }
+
+    if not row:
+        return {
+            "supported": True,
+            "task_id": task_id,
+            "found": False,
+            "status": None,
+            "lane": None,
+            "branch": None,
+            "worktree": None,
+            "note": "task not found",
+        }
+
+    description = str(row.get("description") or "")
+    payload = _parse_task_payload_from_description(description)
+    lane = str(payload.get("lane") or ("v10-test" if "supervised-v10" in str(row.get("source") or "") else "unknown"))
+    branch = str(payload.get("branch") or ("feature/v10.0-test-lane" if lane == "v10-test" else "unknown"))
+    worktree = str(payload.get("worktree") or ("/home/rg/empire-repo-v10" if lane == "v10-test" else "unknown"))
+    return {
+        "supported": True,
+        "task_id": int(row.get("id") or task_id),
+        "found": True,
+        "title": row.get("title"),
+        "status": str(row.get("status") or "unknown").lower(),
+        "lane": lane,
+        "branch": branch,
+        "worktree": worktree,
+        "source": row.get("source"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _collect_supervised_v10_approved_hermes_context(*, founder: bool, limit: int = 4) -> dict[str, Any]:
+    search_query = "v10 supervised delegation sprint runtime truth openclaw queue hermes artifacts"
+    search_call = {
+        "tool": "hermes_artifact_search",
+        "query": search_query,
+        "approval_status": "approved",
+        "current_only": True,
+        "include_superseded": False,
+        "limit": max(4, int(limit) * 2),
+    }
+    search_result = execute_tool(search_call, founder=founder)
+    tool_results: list[dict[str, Any]] = [search_result.to_dict()]
+    artifacts_used: list[dict[str, Any]] = []
+    if search_result.success:
+        for hit in (search_result.result or {}).get("results", []):
+            artifact_id = str(hit.get("id") or "").strip()
+            if not artifact_id:
+                continue
+            get_result = execute_tool({"tool": "hermes_artifact_get", "artifact_id": artifact_id}, founder=founder)
+            tool_results.append(get_result.to_dict())
+            if not get_result.success:
+                continue
+            bundle = get_result.result or {}
+            metadata = bundle.get("metadata") or {}
+            lane = str(metadata.get("lane") or hit.get("lane") or "").strip()
+            approval_status = str(metadata.get("approval_status") or hit.get("approval_status") or "").strip()
+            is_current = bool(bundle.get("is_current"))
+            if approval_status != "approved" or not is_current:
+                continue
+            if lane and lane != "v10-test":
+                continue
+            summary = str(bundle.get("summary") or hit.get("summary") or "").strip()
+            artifacts_used.append(
+                {
+                    "id": artifact_id,
+                    "title": hit.get("title") or artifact_id,
+                    "module": metadata.get("module") or hit.get("module") or "system",
+                    "approval_status": approval_status,
+                    "is_current": is_current,
+                    "lane": lane or "v10-test",
+                    "updated_at": metadata.get("updated_at") or metadata.get("created_at") or hit.get("updated_at"),
+                    "summary": summary[:240] + ("..." if len(summary) > 240 else ""),
+                }
+            )
+            if len(artifacts_used) >= int(limit):
+                break
+    return {
+        "query": search_query,
+        "artifacts": artifacts_used,
+        "tool_results": tool_results,
+    }
+
+
+def _build_supervised_v10_level1_recommended_tasks() -> list[dict[str, Any]]:
+    return [
+        {
+            "title": "Level1 route precedence hardening for supervised delegation",
+            "scope": "Harden supervised route precedence to prevent cancellation/disposition keywords from overriding read-only delegation sprint intent.",
+            "why_safe": "v10-only router and routing tests; no task queue writes; no stable/main paths.",
+            "likely_files_affected": [
+                "backend/app/routers/max/router.py",
+                "backend/tests/test_max_supervised_repair_routing.py",
+            ],
+            "tests_required": [
+                "pytest backend/tests/test_max_supervised_repair_routing.py -q",
+                "pytest backend/tests/test_max_truth_guardrails.py -q",
+            ],
+            "founder_approval_required_before_creation": True,
+            "task_ref_required_for_creation": True,
+        },
+        {
+            "title": "Read-only OpenClaw queue snapshot normalization for delegation sprint",
+            "scope": "Normalize queued/running task summaries for supervised planning without mutating task states or creating tasks.",
+            "why_safe": "read-only DB query helpers plus tests; no OpenClaw execution side effects.",
+            "likely_files_affected": [
+                "backend/app/routers/max/router.py",
+                "backend/tests/test_max_supervised_repair_routing.py",
+            ],
+            "tests_required": [
+                "pytest backend/tests/test_max_supervised_repair_routing.py -q",
+                "pytest backend/tests/test_runtime_git_lane_mapping.py -q",
+            ],
+            "founder_approval_required_before_creation": True,
+            "task_ref_required_for_creation": True,
+        },
+        {
+            "title": "Delegation sprint batch planning contract with explicit single-task_ref limitation",
+            "scope": "Add explicit response contract documenting that single-task task_ref creation is supported while batch task_ref creation remains blocked.",
+            "why_safe": "response-contract and test-only change in v10 lane; prevents accidental multi-task creation expectations.",
+            "likely_files_affected": [
+                "backend/app/routers/max/router.py",
+                "backend/tests/test_max_supervised_repair_routing.py",
+            ],
+            "tests_required": [
+                "pytest backend/tests/test_max_supervised_repair_routing.py -q",
+                "pytest backend/tests/test_max_hermes_artifact_retrieval.py -q",
+            ],
+            "founder_approval_required_before_creation": True,
+            "task_ref_required_for_creation": True,
+        },
+    ]
 
 
 def _task_payload_from_supervised_recommendation(record: dict[str, Any]) -> dict[str, Any]:
@@ -2008,6 +2228,124 @@ def _supervised_v10_repair_recommend_task_response(request: ChatRequest, founder
         fallback_used=False,
         tool_results=recommendation.get("tool_results") or [],
         metadata=_response_metadata(request.channel, skill_used="supervised_v10_repair_recommend_task"),
+    )
+
+
+def _supervised_v10_level1_delegation_sprint_response(request: ChatRequest, founder: bool) -> ChatResponse | None:
+    if not _is_supervised_v10_level1_delegation_request(request.message):
+        return None
+
+    preflight = _build_supervised_v10_repair_preflight_result()
+    queue_snapshot = _collect_supervised_v10_openclaw_queue_snapshot(limit=10)
+    task8_status = _collect_supervised_v10_openclaw_task_status(8)
+    hermes_context = _collect_supervised_v10_approved_hermes_context(founder=founder, limit=4)
+    recommended_tasks = _build_supervised_v10_level1_recommended_tasks()
+
+    response_lines = [
+        "Supervised v10 Level 1 delegation sprint (read-only):",
+        f"- lane: {preflight.get('lane')}",
+        f"- branch: {preflight.get('branch')}",
+        f"- commit: {preflight.get('commit')}",
+        f"- backend_port: {preflight.get('backend_port')}",
+        f"- frontend_port: {preflight.get('frontend_port')}",
+        f"- git_freshness_status: {preflight.get('git_freshness_status')}",
+        f"- hermes_artifact_layer_enabled: {preflight.get('hermes_artifact_layer_enabled')}",
+        f"- safe_to_create_bounded_openclaw_task: {preflight.get('safe_to_create_bounded_openclaw_task')}",
+    ]
+
+    if queue_snapshot.get("supported"):
+        response_lines.append(
+            f"- openclaw_queue_supported: True (active_count={queue_snapshot.get('count')})"
+        )
+        top_ids = [str(item.get("id")) for item in (queue_snapshot.get("tasks") or [])[:5] if item.get("id") is not None]
+        response_lines.append(f"- openclaw_queue_sample_task_ids: {', '.join(top_ids) if top_ids else 'none'}")
+    else:
+        response_lines.append("- openclaw_queue_supported: False")
+        response_lines.append(f"- openclaw_queue_note: {queue_snapshot.get('note')}")
+
+    if task8_status.get("supported") and task8_status.get("found"):
+        response_lines.extend(
+            [
+                f"- task_id_8_status: {task8_status.get('status')}",
+                f"- task_id_8_lane: {task8_status.get('lane')}",
+                f"- task_id_8_branch: {task8_status.get('branch')}",
+                f"- task_id_8_worktree: {task8_status.get('worktree')}",
+            ]
+        )
+    elif task8_status.get("supported"):
+        response_lines.append("- task_id_8_status: not_found")
+    else:
+        response_lines.append("- task_id_8_status: unavailable")
+        response_lines.append(f"- task_id_8_note: {task8_status.get('note')}")
+
+    artifacts = hermes_context.get("artifacts") or []
+    response_lines.append("Hermes approved/current context used:")
+    if artifacts:
+        for idx, artifact in enumerate(artifacts[:4], start=1):
+            response_lines.append(
+                f"{idx}. {artifact.get('title')} ({str(artifact.get('id') or '')[:12]}) "
+                f"[module={artifact.get('module')}, lane={artifact.get('lane')}, status={artifact.get('approval_status')}/current]"
+            )
+    else:
+        response_lines.append("- No approved/current v10 Hermes artifacts matched; recommendations use runtime-safe defaults.")
+
+    response_lines.append("Recommended bounded v10 tasks (exactly 3; no task creation):")
+    for idx, task in enumerate(recommended_tasks, start=1):
+        response_lines.extend(
+            [
+                f"{idx}. {task.get('title')}",
+                f"   scope: {task.get('scope')}",
+                f"   why_safe: {task.get('why_safe')}",
+                f"   likely_files_affected: {', '.join(task.get('likely_files_affected') or [])}",
+                f"   tests_required: {', '.join(task.get('tests_required') or [])}",
+                f"   founder_approval_required_before_creation: {task.get('founder_approval_required_before_creation')}",
+                f"   task_ref_required_for_creation: {task.get('task_ref_required_for_creation')}",
+            ]
+        )
+
+    response_lines.extend(
+        [
+            "- task_ref_batch_support: not_supported",
+            "- task_ref_note: task_ref creation is currently supported only for the single-task supervised recommendation/create route.",
+            "- created_tasks: 0",
+            "- mutated_tasks: 0",
+            "- note: read-only delegation sprint; no disposition, no creation, no promotion.",
+        ]
+    )
+
+    result = {
+        "lane": preflight.get("lane"),
+        "branch": preflight.get("branch"),
+        "commit": preflight.get("commit"),
+        "git_freshness_status": preflight.get("git_freshness_status"),
+        "hermes_artifact_layer_enabled": preflight.get("hermes_artifact_layer_enabled"),
+        "openclaw_queue": queue_snapshot,
+        "task8_status": task8_status,
+        "hermes_context": artifacts,
+        "recommended_tasks": recommended_tasks,
+        "task_ref_batch_support": "not_supported",
+        "created_tasks": 0,
+        "mutated_tasks": 0,
+        "no_task_creation_performed": True,
+        "no_task_mutation_performed": True,
+        "stable_main_untouched": True,
+    }
+
+    tool_results = list(hermes_context.get("tool_results") or [])
+    tool_results.append(
+        {
+            "tool": "supervised_v10_level1_delegation_sprint",
+            "success": True,
+            "result": result,
+        }
+    )
+
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="supervised-v10-level1-delegation-sprint",
+        fallback_used=False,
+        tool_results=tool_results,
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_level1_delegation_sprint"),
     )
 
 
@@ -3142,6 +3480,10 @@ def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = Fal
         supervised_preflight_response = _supervised_v10_repair_preflight_response(request)
         if supervised_preflight_response is not None:
             return supervised_preflight_response
+
+        supervised_level1_response = _supervised_v10_level1_delegation_sprint_response(request, founder=founder)
+        if supervised_level1_response is not None:
+            return supervised_level1_response
 
         supervised_disposition_response = _supervised_v10_openclaw_task_disposition_response(request, founder=founder)
         if supervised_disposition_response is not None:
