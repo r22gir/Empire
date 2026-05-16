@@ -11,6 +11,7 @@ import json
 import os
 import logging
 import re
+import subprocess
 import hashlib
 import secrets
 import uuid
@@ -912,6 +913,24 @@ SUPERVISED_REPAIR_TASK_CREATE_REQUEST_MARKERS = (
     "create openclaw task for the recommended task",
     "create the recommended openclaw task",
 )
+SUPERVISED_OPENCLAW_TASK_INSPECT_MARKERS = (
+    "inspect openclaw task",
+    "inspect open claw task",
+    "check openclaw task",
+    "check open claw task",
+    "read openclaw task",
+    "report task title",
+    "do not create a new task",
+    "duplicate validation task",
+    "should be cancelled",
+    "marked complete",
+    "left alone",
+)
+SUPERVISED_OPENCLAW_TASK_ID_PATTERNS = (
+    re.compile(r"\btask[_\s-]*id\s*[:=#]?\s*(\d+)\b", re.IGNORECASE),
+    re.compile(r"\btask\s*#\s*(\d+)\b", re.IGNORECASE),
+    re.compile(r"\bopen\s*claw\s+task\s*[:=#]?\s*(\d+)\b", re.IGNORECASE),
+)
 SUPERVISED_REPAIR_TASK_REF_PREFIX = "sv10r_"
 SUPERVISED_REPAIR_TASK_REF_TTL_MINUTES = 90
 SUPERVISED_REPAIR_TASK_REF_APPROVAL_PATTERN = re.compile(
@@ -1172,6 +1191,67 @@ def _extract_supervised_task_ref_approval(message: str | None) -> tuple[str | No
     return token, bool(token)
 
 
+def _extract_openclaw_task_id(message: str | None) -> int | None:
+    text = (message or "").strip()
+    if not text:
+        return None
+    for pattern in SUPERVISED_OPENCLAW_TASK_ID_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        try:
+            return int(match.group(1))
+        except Exception:
+            continue
+    return None
+
+
+def _is_reference_commit_reachable(reference_commit: str, worktree_path: str) -> bool:
+    ref = (reference_commit or "").strip()
+    worktree = (worktree_path or "").strip()
+    if not ref or not worktree:
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "-C", worktree, "merge-base", "--is-ancestor", ref, "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _parse_task_payload_from_description(description: str | None) -> dict[str, Any]:
+    text = str(description or "")
+    marker = "Task payload:"
+    idx = text.find(marker)
+    if idx < 0:
+        return {}
+    tail = text[idx + len(marker):].strip()
+    start = tail.find("{")
+    if start < 0:
+        return {}
+    blob = tail[start:].strip()
+    try:
+        parsed = json.loads(blob)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _task_summary_line(description: str | None) -> str:
+    text = str(description or "").strip()
+    if not text:
+        return ""
+    first = text.splitlines()[0].strip()
+    if len(first) > 280:
+        return first[:277] + "..."
+    return first
+
+
 def _has_supervised_scope_tamper(
     message: str | None,
     *,
@@ -1214,6 +1294,26 @@ def _prefer_archiveforge_over_drawing(message: str | None) -> bool:
 def _is_openclaw_gate_request(message: str | None) -> bool:
     text = (message or "").lower().strip()
     return any(marker in text for marker in OPENCLAW_GATE_MARKERS)
+
+
+def _is_supervised_v10_openclaw_task_inspect_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    if _is_supervised_v10_openclaw_task_create_request(text):
+        return False
+    if _is_supervised_v10_repair_recommend_request(text):
+        return False
+    if _is_supervised_v10_repair_preflight_request(text):
+        return False
+    task_id = _extract_openclaw_task_id(text)
+    mentions_openclaw = ("openclaw" in text) or ("open claw" in text)
+    mentions_task = "task" in text or "task_id" in text or "task id" in text
+    inspect_signal = any(marker in text for marker in SUPERVISED_OPENCLAW_TASK_INSPECT_MARKERS)
+    read_signal = any(marker in text for marker in ("inspect", "check", "read", "report"))
+    if task_id is not None and mentions_openclaw and (inspect_signal or read_signal):
+        return True
+    return bool(mentions_openclaw and mentions_task and (inspect_signal or read_signal))
 
 
 def _is_supervised_v10_repair_preflight_request(message: str | None) -> bool:
@@ -2013,6 +2113,188 @@ def _supervised_v10_openclaw_task_create_response(request: ChatRequest, founder:
     )
 
 
+def _supervised_v10_openclaw_task_inspect_response(request: ChatRequest, founder: bool) -> ChatResponse | None:
+    del founder  # inspection is read-only and does not require founder write privileges
+    if not _is_supervised_v10_openclaw_task_inspect_request(request.message):
+        return None
+
+    task_id = _extract_openclaw_task_id(request.message)
+    if task_id is None:
+        response_lines = [
+            "Supervised v10 OpenClaw task inspection attempted.",
+            "- task_id: none",
+            "- failed_gate: missing_task_id",
+            "- reason: no numeric task_id found in request",
+            "- note: read-only inspection only; no mutation performed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-inspect",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_inspect",
+                "success": False,
+                "error": "missing_task_id",
+                "result": {
+                    "task_id": None,
+                    "failed_gate": "missing_task_id",
+                    "reason": "no numeric task_id found in request",
+                    "no_mutation_performed": True,
+                    "created_task": False,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_inspect"),
+        )
+
+    from app.db.database import dict_row, get_db
+
+    with get_db() as db:
+        task_row = dict_row(db.execute("SELECT * FROM openclaw_tasks WHERE id = ?", (task_id,)).fetchone())
+
+    if not task_row:
+        response_lines = [
+            "Supervised v10 OpenClaw task inspection attempted.",
+            f"- task_id: {task_id}",
+            "- failed_gate: task_not_found",
+            f"- reason: task_id={task_id} was not found",
+            "- note: read-only inspection only; no mutation performed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-inspect",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_inspect",
+                "success": False,
+                "error": "task_not_found",
+                "result": {
+                    "task_id": task_id,
+                    "failed_gate": "task_not_found",
+                    "reason": f"task_id={task_id} was not found",
+                    "no_mutation_performed": True,
+                    "created_task": False,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_inspect"),
+        )
+
+    preflight = _build_supervised_v10_repair_preflight_result()
+    description = str(task_row.get("description") or "")
+    payload = _parse_task_payload_from_description(description)
+    scope = str(payload.get("scope") or _task_summary_line(description))
+    required_tests = payload.get("required_tests") if isinstance(payload.get("required_tests"), list) else []
+
+    lane = str(payload.get("lane") or "v10-test")
+    branch = str(payload.get("branch") or "unknown")
+    worktree = str(payload.get("worktree") or "/home/rg/empire-repo-v10")
+    title = str(task_row.get("title") or "")
+    status = str(task_row.get("status") or "unknown").lower()
+    source = str(task_row.get("source") or "unknown")
+
+    scope_blob = f"{title}\n{scope}\n{description}".lower()
+    task_ref_validation_related = any(
+        marker in scope_blob
+        for marker in (
+            "task_ref handshake",
+            "recommendation-to-create confirmation token",
+            "recommendation to create confirmation token",
+        )
+    )
+    reference_commit = "2140447"
+    reference_commit_reachable = _is_reference_commit_reachable(reference_commit, worktree)
+
+    duplicate_assessment = "unknown"
+    recommendation = "inspect manually"
+    reason = "insufficient evidence to classify task as duplicate or active execution target."
+
+    if task_ref_validation_related and reference_commit_reachable:
+        duplicate_assessment = "duplicate_validation_task"
+        if status in {"queued", "paused"}:
+            recommendation = "cancel"
+            reason = (
+                f"task scope matches task_ref handshake validation already completed in commit {reference_commit}; "
+                "re-running appears redundant."
+            )
+        elif status == "running":
+            recommendation = "inspect manually"
+            reason = (
+                f"task scope matches task_ref handshake validation already completed in commit {reference_commit}; "
+                "verify worker state before any cancellation."
+            )
+        else:
+            recommendation = "leave alone"
+            reason = (
+                f"task scope matches task_ref handshake validation already completed in commit {reference_commit}; "
+                "task is not actively queued/running."
+            )
+    elif status in {"done", "cancelled"}:
+        duplicate_assessment = "completed_task"
+        recommendation = "leave alone"
+        reason = f"task status is {status}; no further action recommended."
+    elif status in {"queued", "running", "paused"}:
+        duplicate_assessment = "real_pending_task"
+        recommendation = "leave alone"
+        reason = "task appears to be an active queue item and does not match completed duplicate-validation signatures."
+
+    response_lines = [
+        "Supervised v10 OpenClaw task inspection (read-only):",
+        f"- task_id: {task_row.get('id')}",
+        f"- task_title: {title or 'none'}",
+        f"- status: {status}",
+        f"- lane: {lane}",
+        f"- branch: {branch}",
+        f"- worktree: {worktree}",
+        f"- created_at: {task_row.get('created_at') or 'unknown'}",
+        f"- updated_at: {task_row.get('updated_at') or 'not_available'}",
+        f"- source_origin: {source}",
+        f"- task_summary: {scope or 'none'}",
+        f"- required_tests: {', '.join(str(x) for x in required_tests) or 'none'}",
+        f"- task_commit_hash: {task_row.get('commit_hash') or 'none'}",
+        f"- runtime_commit: {preflight.get('commit')}",
+        f"- task_ref_handshake_related: {task_ref_validation_related}",
+        f"- duplicate_assessment: {duplicate_assessment}",
+        f"- recommendation: {recommendation}",
+        f"- reason: {reason}",
+        "- note: no task was created, cancelled, completed, or mutated by this route",
+    ]
+
+    result = {
+        "task_id": task_row.get("id"),
+        "task_title": title,
+        "status": status,
+        "lane": lane,
+        "branch": branch,
+        "worktree": worktree,
+        "created_at": task_row.get("created_at"),
+        "updated_at": task_row.get("updated_at"),
+        "source_origin": source,
+        "task_summary": scope,
+        "required_tests": required_tests,
+        "task_commit_hash": task_row.get("commit_hash"),
+        "runtime_commit": preflight.get("commit"),
+        "reference_commit": reference_commit,
+        "reference_commit_reachable": reference_commit_reachable,
+        "task_ref_handshake_related": task_ref_validation_related,
+        "duplicate_assessment": duplicate_assessment,
+        "recommendation": recommendation,
+        "reason": reason,
+        "no_mutation_performed": True,
+        "created_task": False,
+    }
+
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="supervised-v10-openclaw-task-inspect",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "supervised_v10_openclaw_task_inspect",
+            "success": True,
+            "result": result,
+        }],
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_inspect"),
+    )
+
+
 def _openclaw_gate_response(request: ChatRequest) -> ChatResponse:
     try:
         from app.services.max.openclaw_gate import check_openclaw_gate
@@ -2513,6 +2795,10 @@ def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = Fal
         supervised_preflight_response = _supervised_v10_repair_preflight_response(request)
         if supervised_preflight_response is not None:
             return supervised_preflight_response
+
+        supervised_inspect_response = _supervised_v10_openclaw_task_inspect_response(request, founder=founder)
+        if supervised_inspect_response is not None:
+            return supervised_inspect_response
 
         artifact_memory_response = _hermes_artifact_memory_response(request, founder=founder)
         if artifact_memory_response is not None:

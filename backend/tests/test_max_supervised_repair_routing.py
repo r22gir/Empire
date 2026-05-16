@@ -119,6 +119,59 @@ def _approval_prompt(task_ref: str) -> str:
     return f"Approved task_ref={task_ref}. Create exactly one bounded OpenClaw task."
 
 
+def _openclaw_task_row(task_id: int = 8, status: str = "queued") -> dict:
+    return {
+        "id": task_id,
+        "title": "Supervised v10 repair: enforce recommendation-to-create confirmation token",
+        "description": (
+            "Add a task_ref handshake so supervised recommendation output produces a single bounded token, "
+            "and the create route requires that exact token before queueing OpenClaw work.\n\n"
+            "Task payload:\n"
+            "{\n"
+            '  "lane": "v10-test",\n'
+            '  "branch": "feature/v10.0-test-lane",\n'
+            '  "worktree": "/home/rg/empire-repo-v10",\n'
+            '  "scope": "Add a task_ref handshake so supervised recommendation output produces a single bounded token, and the create route requires that exact token before queueing OpenClaw work.",\n'
+            '  "required_tests": ["pytest backend/tests/test_max_supervised_repair_routing.py -q"]\n'
+            "}"
+        ),
+        "status": status,
+        "source": "supervised-v10-openclaw-task-create",
+        "commit_hash": None,
+        "created_at": "2026-05-16 03:23:52",
+    }
+
+
+class _FakeCursor:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class _ReadOnlyDB:
+    def __init__(self, row):
+        self._row = row
+        self.queries: list[str] = []
+
+    def execute(self, query, params=()):
+        self.queries.append(str(query))
+        assert str(query).lstrip().upper().startswith("SELECT")
+        return _FakeCursor(self._row)
+
+
+class _ReadOnlyDBCtx:
+    def __init__(self, db):
+        self.db = db
+
+    def __enter__(self):
+        return self.db
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def test_supervised_preflight_routes_correctly():
     max_router = importlib.import_module("app.routers.max.router")
 
@@ -129,6 +182,112 @@ def test_supervised_preflight_routes_correctly():
     )
     response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
     assert response.model_used == "supervised-v10-repair-preflight"
+
+
+def test_openclaw_task_inspect_routes_before_module_knowledge(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _ReadOnlyDB(_openclaw_task_row(task_id=8, status="queued"))
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(max_router, "_is_reference_commit_reachable", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        max_router.ai_router,
+        "chat",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not hit ai_router for inspect route")),
+    )
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="MAX, inspect OpenClaw task_id=8. Do not create a new task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-inspect"
+    assert "- task_id: 8" in response.response
+    assert "- duplicate_assessment: duplicate_validation_task" in response.response
+    assert "- recommendation: cancel" in response.response
+    assert len(fake_db.queries) == 1
+
+
+def test_openclaw_task_inspect_is_read_only_and_does_not_queue(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _ReadOnlyDB(_openclaw_task_row(task_id=8, status="queued"))
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(max_router, "_is_reference_commit_reachable", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        max_router,
+        "_enqueue_supervised_v10_openclaw_task",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("inspect route must not queue tasks")),
+    )
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="check OpenClaw task id 8 and report task title/status/lane; do not create a new task",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    result = (response.tool_results[0] or {}).get("result") or {}
+    assert response.model_used == "supervised-v10-openclaw-task-inspect"
+    assert result.get("created_task") is False
+    assert result.get("no_mutation_performed") is True
+    assert result.get("task_title") == "Supervised v10 repair: enforce recommendation-to-create confirmation token"
+
+
+def test_openclaw_task_inspect_missing_task_id_returns_missing_gate(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="inspect OpenClaw task. do not create a new task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-inspect"
+    assert "- failed_gate: missing_task_id" in response.response
+
+
+def test_openclaw_task_inspect_unknown_task_returns_not_found(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _ReadOnlyDB(None)
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="inspect OpenClaw task_id=999999. do not create a new task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-inspect"
+    assert "- failed_gate: task_not_found" in response.response
 
 
 def test_recommendation_emits_task_ref_and_stores_pending_recommendation(monkeypatch):
