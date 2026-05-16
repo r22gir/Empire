@@ -160,6 +160,12 @@ Policy:
 - runtime/repo/database/module-doc truth remains higher priority
 - memory-grounded answers include a compact artifact grounding block (title/id/module/status/date/source + attestation level/hash/confidence + re-attestation warning) and explicitly note that artifact memory is not runtime truth
 
+Supervised v10 repair integration:
+- recommendation stage returns a one-time `task_ref` token and stores the bounded recommendation server-side
+- create stage requires explicit approval with that exact token
+- create payload is sourced from the stored recommendation
+- preflight/recommendation routes do not queue OpenClaw tasks
+
 ### Copy/Export
 
 - **Copy Source**: `navigator.clipboard.writeText(artifact.content)`

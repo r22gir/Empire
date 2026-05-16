@@ -110,6 +110,22 @@ Ordering for retrieval/ranking favors:
 
 Attestation hashes are deterministic/tamper-evident audit records, not legal signatures.
 
+## Supervised Repair Task-Create Handshake Addendum
+
+Supervised v10 OpenClaw task creation now requires a recommendation-issued `task_ref` handshake.
+
+Decision:
+- recommendation stage issues a bounded `task_ref` and persists a lane/branch/safety-bound recommendation record
+- create stage requires explicit founder approval phrase with matching token:
+  - `Approved task_ref=<TOKEN>. Create exactly one bounded OpenClaw task.`
+- token is one-time and expiring
+- queue payload is sourced from the stored recommendation, not rebuilt from a generic default
+
+Reason:
+- binds founder approval to the exact recommendation that was reviewed
+- blocks replay and scope drift
+- preserves lane isolation and safety gate guarantees for v10-only execution
+
 ## Rollback
 
 If needed:

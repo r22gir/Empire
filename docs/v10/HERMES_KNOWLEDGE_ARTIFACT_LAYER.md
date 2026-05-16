@@ -172,6 +172,35 @@ By default, artifact retrieval uses:
 
 Draft/rejected/superseded artifacts are only returned when explicitly requested.
 
+## Supervised Repair `task_ref` Handshake (v10-only)
+
+For supervised v10 repair recommendations, MAX now issues a one-time `task_ref` token and persists a pending recommendation record before any OpenClaw task creation.
+
+Recommendation response includes:
+- `task_ref`
+- `task_ref_created_at`
+- `task_ref_expires_at`
+- recommendation hash + safety gate snapshot
+- approval instruction:
+  - `Approved task_ref=<TOKEN>. Create exactly one bounded OpenClaw task.`
+
+Stored recommendation fields include lane/branch/commit binding, bounded task scope, allowed/forbidden paths, required tests, and Hermes context IDs used for recommendation grounding.
+
+Creation route behavior:
+- requires exact approval phrase with token
+- rejects missing/unknown/expired/consumed token
+- rejects lane/branch mismatch
+- rejects scope tamper attempts
+- re-checks safety gates at create time
+- builds task payload from stored recommendation (not from a generic template)
+- marks token consumed on successful queue
+
+Token policy:
+- TTL: 90 minutes
+- single-use only
+- lane-bound (`v10-test`)
+- branch-bound (`feature/v10.0-test-lane`)
+
 ## Runtime Truth Integration (Lane-Aware Git Freshness)
 
 Artifact memory must remain below runtime/repo truth, so runtime freshness must be lane-correct.

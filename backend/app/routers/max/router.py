@@ -11,8 +11,10 @@ import json
 import os
 import logging
 import re
+import hashlib
+import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.services.max.workroom_quote_flow import execute_workroom_quote_flow
@@ -910,6 +912,24 @@ SUPERVISED_REPAIR_TASK_CREATE_REQUEST_MARKERS = (
     "create openclaw task for the recommended task",
     "create the recommended openclaw task",
 )
+SUPERVISED_REPAIR_TASK_REF_PREFIX = "sv10r_"
+SUPERVISED_REPAIR_TASK_REF_TTL_MINUTES = 90
+SUPERVISED_REPAIR_TASK_REF_APPROVAL_PATTERN = re.compile(
+    r"\bapproved\s+task_ref=([A-Za-z0-9_-]{8,120})\.\s*create\s+exactly\s+one\s+bounded\s+openclaw\s+task\b",
+    re.IGNORECASE | re.DOTALL,
+)
+SUPERVISED_REPAIR_SCOPE_TAMPER_MARKERS = (
+    "instead",
+    "different task",
+    "change scope",
+    "modify scope",
+    "expand scope",
+    "also include",
+    "plus include",
+    "in addition to",
+    "replace scope",
+    "new scope",
+)
 EMAIL_SEND_TRUTH_PATTERNS = (
     r"^\s*send to my email\s*$",
     r"^\s*send this to my email\s*$",
@@ -932,6 +952,240 @@ GMAIL_INBOX_PATTERNS = (
     r"\bcheck email\b",
 )
 FAKE_BROWSER_ID_PATTERN = re.compile(r"\bhermes_browser(?:_id)?_[A-Za-z0-9_:-]+\b", re.IGNORECASE)
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso_timestamp(value: str | None) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        normalized = raw.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _canonical_json(payload: Any) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _ensure_supervised_task_ref_table() -> None:
+    from app.db.database import get_db
+
+    with get_db() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS max_supervised_repair_recommendations (
+                task_ref TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                consumed INTEGER NOT NULL DEFAULT 0,
+                consumed_at TEXT,
+                lane TEXT NOT NULL,
+                branch TEXT NOT NULL,
+                commit_hash TEXT NOT NULL,
+                task_title TEXT NOT NULL,
+                task_scope TEXT NOT NULL,
+                allowed_paths_json TEXT NOT NULL,
+                forbidden_paths_json TEXT NOT NULL,
+                required_tests_json TEXT NOT NULL,
+                final_report_required INTEGER NOT NULL,
+                commit_required INTEGER NOT NULL,
+                stable_main_untouched_required INTEGER NOT NULL,
+                promotion_forbidden INTEGER NOT NULL,
+                hermes_artifact_ids_json TEXT NOT NULL,
+                hermes_context_json TEXT NOT NULL,
+                safety_gate_snapshot_json TEXT NOT NULL,
+                recommendation_hash TEXT NOT NULL,
+                task_payload_json TEXT NOT NULL,
+                consumed_task_id INTEGER
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_max_supervised_task_ref_expires ON max_supervised_repair_recommendations (expires_at)"
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_max_supervised_task_ref_consumed ON max_supervised_repair_recommendations (consumed)"
+        )
+
+
+def _build_task_ref_safety_snapshot(preflight: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "lane": preflight.get("lane"),
+        "branch": preflight.get("branch"),
+        "commit": preflight.get("commit"),
+        "backend_port": preflight.get("backend_port"),
+        "frontend_port": preflight.get("frontend_port"),
+        "git_freshness_status": preflight.get("git_freshness_status"),
+        "hermes_artifact_layer_enabled": preflight.get("hermes_artifact_layer_enabled"),
+        "safe_to_create_bounded_openclaw_task": preflight.get("safe_to_create_bounded_openclaw_task"),
+    }
+
+
+def _store_supervised_pending_recommendation(
+    *,
+    preflight: dict[str, Any],
+    task_payload: dict[str, Any],
+    artifacts_used: list[dict[str, Any]],
+) -> dict[str, Any]:
+    from app.db.database import get_db
+
+    _ensure_supervised_task_ref_table()
+    created_at = _now_utc_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=SUPERVISED_REPAIR_TASK_REF_TTL_MINUTES)).isoformat()
+    task_ref = f"{SUPERVISED_REPAIR_TASK_REF_PREFIX}{secrets.token_hex(10)}"
+    hermes_artifact_ids = [str(a.get("id")) for a in artifacts_used if a.get("id")]
+    hermes_context = [
+        {
+            "id": a.get("id"),
+            "title": a.get("title"),
+            "module": a.get("module"),
+            "approval_status": a.get("approval_status"),
+            "updated_at": a.get("updated_at"),
+        }
+        for a in artifacts_used
+    ]
+    safety_snapshot = _build_task_ref_safety_snapshot(preflight)
+    recommendation_payload = {
+        "task_ref": task_ref,
+        "lane": preflight.get("lane"),
+        "branch": preflight.get("branch"),
+        "commit": preflight.get("commit"),
+        "task_title": task_payload.get("title"),
+        "task_scope": task_payload.get("scope"),
+        "allowed_paths": task_payload.get("allowed_paths") or [],
+        "forbidden_paths": task_payload.get("forbidden_paths") or [],
+        "required_tests": task_payload.get("required_tests") or [],
+        "final_report_required": bool(task_payload.get("final_report_required")),
+        "commit_required": bool(task_payload.get("commit_required")),
+        "stable_main_untouched_required": bool(task_payload.get("stable_main_untouched_required")),
+        "promotion_forbidden": bool(task_payload.get("promotion_forbidden")),
+        "hermes_artifact_ids": hermes_artifact_ids,
+        "safety_gate_snapshot": safety_snapshot,
+    }
+    recommendation_hash = _sha256_hex(_canonical_json(recommendation_payload))
+
+    with get_db() as db:
+        db.execute(
+            """
+            INSERT INTO max_supervised_repair_recommendations (
+                task_ref, created_at, expires_at, consumed, consumed_at, lane, branch, commit_hash,
+                task_title, task_scope, allowed_paths_json, forbidden_paths_json, required_tests_json,
+                final_report_required, commit_required, stable_main_untouched_required, promotion_forbidden,
+                hermes_artifact_ids_json, hermes_context_json, safety_gate_snapshot_json,
+                recommendation_hash, task_payload_json
+            ) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task_ref,
+                created_at,
+                expires_at,
+                str(preflight.get("lane") or ""),
+                str(preflight.get("branch") or ""),
+                str(preflight.get("commit") or ""),
+                str(task_payload.get("title") or ""),
+                str(task_payload.get("scope") or ""),
+                json.dumps(task_payload.get("allowed_paths") or []),
+                json.dumps(task_payload.get("forbidden_paths") or []),
+                json.dumps(task_payload.get("required_tests") or []),
+                1 if bool(task_payload.get("final_report_required")) else 0,
+                1 if bool(task_payload.get("commit_required")) else 0,
+                1 if bool(task_payload.get("stable_main_untouched_required")) else 0,
+                1 if bool(task_payload.get("promotion_forbidden")) else 0,
+                json.dumps(hermes_artifact_ids),
+                json.dumps(hermes_context),
+                json.dumps(safety_snapshot),
+                recommendation_hash,
+                json.dumps(task_payload, sort_keys=True),
+            ),
+        )
+
+    return {
+        "task_ref": task_ref,
+        "task_ref_created_at": created_at,
+        "task_ref_expires_at": expires_at,
+        "recommendation_hash": recommendation_hash,
+        "safety_gate_snapshot": safety_snapshot,
+        "hermes_artifact_ids": hermes_artifact_ids,
+        "hermes_context": hermes_context,
+    }
+
+
+def _load_supervised_pending_recommendation(task_ref: str) -> dict[str, Any] | None:
+    from app.db.database import dict_row, get_db
+
+    _ensure_supervised_task_ref_table()
+    with get_db() as db:
+        row = dict_row(
+            db.execute(
+                "SELECT * FROM max_supervised_repair_recommendations WHERE task_ref = ?",
+                (task_ref,),
+            ).fetchone()
+        )
+    if not row:
+        return None
+
+    def _json_field(key: str, default: Any) -> Any:
+        try:
+            raw = row.get(key)
+            return json.loads(raw) if raw else default
+        except Exception:
+            return default
+
+    row["consumed"] = bool(row.get("consumed"))
+    row["allowed_paths"] = _json_field("allowed_paths_json", [])
+    row["forbidden_paths"] = _json_field("forbidden_paths_json", [])
+    row["required_tests"] = _json_field("required_tests_json", [])
+    row["hermes_artifact_ids"] = _json_field("hermes_artifact_ids_json", [])
+    row["hermes_context"] = _json_field("hermes_context_json", [])
+    row["safety_gate_snapshot"] = _json_field("safety_gate_snapshot_json", {})
+    row["task_payload"] = _json_field("task_payload_json", {})
+    row["final_report_required"] = bool(row.get("final_report_required"))
+    row["commit_required"] = bool(row.get("commit_required"))
+    row["stable_main_untouched_required"] = bool(row.get("stable_main_untouched_required"))
+    row["promotion_forbidden"] = bool(row.get("promotion_forbidden"))
+    if "commit" not in row and row.get("commit_hash"):
+        row["commit"] = row.get("commit_hash")
+    return row
+
+
+def _extract_supervised_task_ref_approval(message: str | None) -> tuple[str | None, bool]:
+    text = (message or "").strip()
+    if not text:
+        return None, False
+    match = SUPERVISED_REPAIR_TASK_REF_APPROVAL_PATTERN.search(text)
+    if not match:
+        return None, False
+    token = str(match.group(1) or "").strip()
+    return token, bool(token)
+
+
+def _has_supervised_scope_tamper(
+    message: str | None,
+    *,
+    stored_title: str,
+    stored_scope: str,
+) -> bool:
+    text = (message or "").lower()
+    if any(marker in text for marker in SUPERVISED_REPAIR_SCOPE_TAMPER_MARKERS):
+        return True
+    if "title:" in text and stored_title and stored_title.lower() not in text:
+        return True
+    if "scope:" in text and stored_scope and stored_scope.lower() not in text:
+        return True
+    return False
 
 
 def _mentions_browser_assist(message: str | None) -> bool:
@@ -983,6 +1237,7 @@ def _is_supervised_v10_openclaw_task_create_request(message: str | None) -> bool
     text = (message or "").lower().strip()
     if not text:
         return False
+    task_ref_approval_signal = bool(SUPERVISED_REPAIR_TASK_REF_APPROVAL_PATTERN.search(text))
     approval_signal = any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_MARKERS)
     if any(marker in text for marker in SUPERVISED_REPAIR_RECOMMEND_NO_CREATE_MARKERS) and not approval_signal:
         return False
@@ -995,7 +1250,7 @@ def _is_supervised_v10_openclaw_task_create_request(message: str | None) -> bool
             and ("create" in text or "proceed" in text)
         )
     supervision_signal = any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS) or "supervised" in text
-    return bool(approval_signal or (supervision_signal and create_signal))
+    return bool(task_ref_approval_signal or approval_signal or (supervision_signal and create_signal))
 
 
 def _is_supervised_v10_repair_recommend_request(message: str | None) -> bool:
@@ -1013,13 +1268,6 @@ def _is_supervised_v10_repair_recommend_request(message: str | None) -> bool:
     if not supervision_signal or not recommend_signal:
         return False
     return bool(hermes_signal or no_create_signal)
-
-
-def _has_supervised_v10_create_approval(message: str | None) -> bool:
-    text = (message or "").lower().strip()
-    if not text:
-        return False
-    return any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_MARKERS)
 
 
 def _build_supervised_v10_openclaw_task_payload() -> dict[str, Any]:
@@ -1060,6 +1308,40 @@ def _build_supervised_v10_openclaw_task_payload() -> dict[str, Any]:
             "backend/tests/test_max_supervised_repair_routing.py",
         ],
     }
+
+
+def _task_payload_from_supervised_recommendation(record: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(record.get("task_payload") or {})
+    if not payload:
+        payload = {
+            "title": record.get("task_title"),
+            "scope": record.get("task_scope"),
+            "lane": record.get("lane"),
+            "branch": record.get("branch"),
+            "allowed_paths": record.get("allowed_paths") or [],
+            "forbidden_paths": record.get("forbidden_paths") or [],
+            "required_tests": record.get("required_tests") or [],
+            "final_report_required": bool(record.get("final_report_required")),
+            "commit_required": bool(record.get("commit_required")),
+            "stable_main_untouched_required": bool(record.get("stable_main_untouched_required")),
+            "promotion_forbidden": bool(record.get("promotion_forbidden")),
+            "founder_approval_source": "supervised-v10-openclaw-task-create",
+        }
+    payload["task_ref"] = record.get("task_ref")
+    payload["hermes_artifact_ids"] = record.get("hermes_artifact_ids") or []
+    payload["hermes_context"] = record.get("hermes_context") or []
+    payload.setdefault("worktree", "/home/rg/empire-repo-v10")
+    payload.setdefault("v10_only", True)
+    payload.setdefault("bounded_task", True)
+    payload.setdefault("founder_approval_source", "supervised-v10-openclaw-task-create")
+    return payload
+
+
+def _is_supervised_task_ref_expired(record: dict[str, Any]) -> bool:
+    expires_at = _parse_iso_timestamp(record.get("expires_at"))
+    if not expires_at:
+        return True
+    return expires_at <= datetime.now(timezone.utc)
 
 
 def _evaluate_supervised_v10_create_gates(
@@ -1165,7 +1447,7 @@ def _format_supervised_v10_task_description(task_payload: dict[str, Any]) -> str
     return "\n".join(lines)
 
 
-def _enqueue_supervised_v10_openclaw_task(task_payload: dict[str, Any]) -> dict[str, Any]:
+def _enqueue_supervised_v10_openclaw_task(task_payload: dict[str, Any], task_ref: str | None = None) -> dict[str, Any]:
     from app.db.database import get_db
     from app.services.max.openclaw_gate import check_openclaw_gate, openclaw_gate_metadata
 
@@ -1181,7 +1463,25 @@ def _enqueue_supervised_v10_openclaw_task(task_payload: dict[str, Any]) -> dict[
 
     try:
         description = _format_supervised_v10_task_description(task_payload)
+        consumed_at = _now_utc_iso()
         with get_db() as db:
+            if task_ref:
+                cursor = db.execute(
+                    """
+                    UPDATE max_supervised_repair_recommendations
+                    SET consumed = 1, consumed_at = ?
+                    WHERE task_ref = ? AND consumed = 0
+                    """,
+                    (consumed_at, task_ref),
+                )
+                if cursor.rowcount != 1:
+                    return {
+                        "queued": False,
+                        "failed_gate": "task_ref_consumed",
+                        "reason": f"task_ref is already consumed or unavailable: {task_ref}",
+                        "openclaw_gate": gate_blob,
+                        "payload": task_payload,
+                    }
             cursor = db.execute(
                 """INSERT INTO openclaw_tasks
                    (title, description, desk, priority, source, assigned_to, max_retries, parent_task_id, error)
@@ -1198,14 +1498,23 @@ def _enqueue_supervised_v10_openclaw_task(task_payload: dict[str, Any]) -> dict[
                     None,
                 ),
             )
-            db.commit()
             task_id = cursor.lastrowid
+            if task_ref:
+                db.execute(
+                    """
+                    UPDATE max_supervised_repair_recommendations
+                    SET consumed_task_id = ?
+                    WHERE task_ref = ?
+                    """,
+                    (task_id, task_ref),
+                )
         return {
             "queued": True,
             "task_id": task_id,
             "created_count": 1,
             "openclaw_gate": gate_blob,
             "payload": task_payload,
+            "consumed_task_ref": task_ref,
         }
     except Exception as exc:
         return {
@@ -1438,6 +1747,13 @@ def _build_supervised_v10_repair_recommendation(*, founder: bool) -> dict[str, A
             if len(artifacts_used) >= 3:
                 break
 
+    task_payload = _build_supervised_v10_openclaw_task_payload()
+    recommendation_record = _store_supervised_pending_recommendation(
+        preflight=preflight,
+        task_payload=task_payload,
+        artifacts_used=artifacts_used,
+    )
+
     recommended_task = {
         "title": "Supervised v10 repair: enforce recommendation-to-create confirmation token",
         "scope": (
@@ -1458,6 +1774,16 @@ def _build_supervised_v10_repair_recommendation(*, founder: bool) -> dict[str, A
             "pytest backend/tests/test_runtime_git_lane_mapping.py -q",
         ],
         "founder_approval_required_before_creation": True,
+        "task_ref": recommendation_record.get("task_ref"),
+        "task_ref_created_at": recommendation_record.get("task_ref_created_at"),
+        "task_ref_expires_at": recommendation_record.get("task_ref_expires_at"),
+        "safety_gate_snapshot": recommendation_record.get("safety_gate_snapshot"),
+        "hermes_artifact_ids": recommendation_record.get("hermes_artifact_ids") or [],
+        "recommendation_hash": recommendation_record.get("recommendation_hash"),
+        "approval_instruction": (
+            f"Approved task_ref={recommendation_record.get('task_ref')}. "
+            "Create exactly one bounded OpenClaw task."
+        ),
     }
 
     return {
@@ -1465,6 +1791,8 @@ def _build_supervised_v10_repair_recommendation(*, founder: bool) -> dict[str, A
         "search_query": search_query,
         "artifacts_used": artifacts_used,
         "recommended_task": recommended_task,
+        "task_payload": task_payload,
+        "task_ref_record": recommendation_record,
         "tool_results": tool_results,
         "note": "no task created yet",
     }
@@ -1508,7 +1836,13 @@ def _supervised_v10_repair_recommend_task_response(request: ChatRequest, founder
             f"- why_safe: {task.get('why_safe')}",
             f"- likely_files_affected: {', '.join(task.get('likely_files_affected') or [])}",
             f"- tests_required: {', '.join(task.get('tests_required') or [])}",
+            f"- task_ref: {task.get('task_ref')}",
+            f"- task_ref_created_at: {task.get('task_ref_created_at')}",
+            f"- task_ref_expires_at: {task.get('task_ref_expires_at')}",
+            f"- hermes_artifact_ids: {', '.join(task.get('hermes_artifact_ids') or []) or 'none'}",
             f"- founder_approval_required_before_creation: {task.get('founder_approval_required_before_creation')}",
+            "- Founder approval required. To create this exact task, reply:",
+            f"Approved task_ref={task.get('task_ref')}. Create exactly one bounded OpenClaw task.",
             "- note: no task created yet",
         ]
     )
@@ -1527,24 +1861,109 @@ def _supervised_v10_openclaw_task_create_response(request: ChatRequest, founder:
         return None
 
     preflight = _build_supervised_v10_repair_preflight_result()
-    task_payload = _build_supervised_v10_openclaw_task_payload()
-    approval_granted = _has_supervised_v10_create_approval(request.message)
-    gate_eval = _evaluate_supervised_v10_create_gates(
-        preflight=preflight,
-        task_payload=task_payload,
-        approval_granted=approval_granted,
-    )
+    task_ref, approval_granted = _extract_supervised_task_ref_approval(request.message)
     founder_approval_required_before_creation = not approval_granted
+    gate_eval: dict[str, Any] = {"ok": False, "failed_gate": None, "reason": None, "gate_status": {}}
     enqueue_result: dict[str, Any]
-    if gate_eval.get("ok"):
-        enqueue_result = _enqueue_supervised_v10_openclaw_task(task_payload)
-    else:
+    task_payload: dict[str, Any] = {}
+    recommendation_record: dict[str, Any] | None = None
+
+    if not approval_granted:
         enqueue_result = {
             "queued": False,
-            "failed_gate": gate_eval.get("failed_gate"),
-            "reason": gate_eval.get("reason"),
-            "payload": task_payload,
+            "failed_gate": "founder_approval",
+            "reason": (
+                "missing exact approval phrase. Use: "
+                "'Approved task_ref=<TOKEN>. Create exactly one bounded OpenClaw task.'"
+            ),
         }
+    else:
+        recommendation_record = _load_supervised_pending_recommendation(str(task_ref or ""))
+        if not recommendation_record:
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_ref_unknown",
+                "reason": f"task_ref not found: {task_ref}",
+            }
+        elif bool(recommendation_record.get("consumed")):
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_ref_consumed",
+                "reason": f"task_ref already consumed: {task_ref}",
+            }
+        elif _is_supervised_task_ref_expired(recommendation_record):
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_ref_expired",
+                "reason": f"task_ref expired at {recommendation_record.get('expires_at')}",
+            }
+        elif str(recommendation_record.get("lane") or "") != str(preflight.get("lane") or ""):
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_ref_lane_mismatch",
+                "reason": (
+                    f"task_ref lane mismatch: stored={recommendation_record.get('lane')} "
+                    f"runtime={preflight.get('lane')}"
+                ),
+            }
+        elif str(recommendation_record.get("branch") or "") != str(preflight.get("branch") or ""):
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_ref_branch_mismatch",
+                "reason": (
+                    f"task_ref branch mismatch: stored={recommendation_record.get('branch')} "
+                    f"runtime={preflight.get('branch')}"
+                ),
+            }
+        elif _has_supervised_scope_tamper(
+            request.message,
+            stored_title=str(recommendation_record.get("task_title") or ""),
+            stored_scope=str(recommendation_record.get("task_scope") or ""),
+        ):
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_scope_tamper",
+                "reason": "approval prompt attempted to alter stored recommended task title/scope",
+            }
+        elif not bool((recommendation_record.get("safety_gate_snapshot") or {}).get("safe_to_create_bounded_openclaw_task")):
+            enqueue_result = {
+                "queued": False,
+                "failed_gate": "task_ref_safety_snapshot",
+                "reason": "stored recommendation snapshot was not safe-to-create",
+            }
+        else:
+            task_payload = _task_payload_from_supervised_recommendation(recommendation_record)
+            if str(task_payload.get("lane") or "") != str(preflight.get("lane") or ""):
+                enqueue_result = {
+                    "queued": False,
+                    "failed_gate": "task_payload_lane",
+                    "reason": (
+                        f"task payload lane mismatch: payload={task_payload.get('lane')} runtime={preflight.get('lane')}"
+                    ),
+                }
+            elif str(task_payload.get("branch") or "") != str(preflight.get("branch") or ""):
+                enqueue_result = {
+                    "queued": False,
+                    "failed_gate": "task_payload_branch",
+                    "reason": (
+                        f"task payload branch mismatch: payload={task_payload.get('branch')} runtime={preflight.get('branch')}"
+                    ),
+                }
+            else:
+                gate_eval = _evaluate_supervised_v10_create_gates(
+                    preflight=preflight,
+                    task_payload=task_payload,
+                    approval_granted=True,
+                )
+                if gate_eval.get("ok"):
+                    enqueue_result = _enqueue_supervised_v10_openclaw_task(task_payload, task_ref=str(task_ref))
+                else:
+                    enqueue_result = {
+                        "queued": False,
+                        "failed_gate": gate_eval.get("failed_gate"),
+                        "reason": gate_eval.get("reason"),
+                        "payload": task_payload,
+                    }
 
     queued = bool(enqueue_result.get("queued"))
     failed_gate = enqueue_result.get("failed_gate")
@@ -1555,12 +1974,14 @@ def _supervised_v10_openclaw_task_create_response(request: ChatRequest, founder:
         f"- lane: {preflight.get('lane')}",
         f"- branch: {preflight.get('branch')}",
         f"- commit: {preflight.get('commit')}",
-        f"- task_title: {task_payload.get('title')}",
+        f"- task_ref: {task_ref or 'none'}",
+        f"- task_title: {task_payload.get('title') or (recommendation_record or {}).get('task_title') or 'none'}",
         f"- queued: {queued}",
         f"- founder_approval_required_before_creation: {founder_approval_required_before_creation}",
         f"- failed_gate: {failed_gate or 'none'}",
         f"- reason: {reason or 'none'}",
         f"- task_id: {task_id if task_id is not None else 'none'}",
+        f"- consumed_task_ref: {enqueue_result.get('consumed_task_ref') or 'none'}",
         f"- note: {'task created' if queued else 'task not created'}",
     ]
     return ChatResponse(
@@ -1575,12 +1996,15 @@ def _supervised_v10_openclaw_task_create_response(request: ChatRequest, founder:
                 "queued": queued,
                 "task_id": task_id,
                 "created_count": int(enqueue_result.get("created_count") or 0),
+                "consumed_task_ref": enqueue_result.get("consumed_task_ref"),
                 "failed_gate": failed_gate,
                 "reason": reason,
                 "founder_approval_required_before_creation": founder_approval_required_before_creation,
                 "founder_approval_granted": approval_granted,
+                "task_ref": task_ref,
                 "safety_gates": gate_eval.get("gate_status"),
                 "payload": task_payload,
+                "recommendation": recommendation_record,
                 "preflight": preflight,
                 "openclaw_gate": enqueue_result.get("openclaw_gate"),
             },
