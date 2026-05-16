@@ -161,9 +161,10 @@ Truth precedence remains:
 2. repo truth
 3. database truth
 4. module docs
-5. approved/current artifacts
-6. session context
-7. model opinion
+5. approved + attested + current artifacts
+6. approved + current artifacts
+7. session context
+8. model opinion
 
 By default, artifact retrieval uses:
 - `approval_status=approved`
@@ -232,6 +233,60 @@ Status updates append actor metadata:
 
 Signer-bound approvals are **not** implemented yet.
 `verified_session` confidence is only used when a real session actor id is present; otherwise confidence is downgraded to `local_ui`, `system_generated`, or `unknown`.
+
+## Approval Attestation (Signer-Bound Scaffolding)
+
+Each status transition now writes a tamper-evident attestation record:
+
+- `attestation_id`
+- `artifact_id`
+- `artifact_version_hash`
+- `artifact_metadata_hash`
+- `artifact_content_hash`
+- `approval_status`
+- `actor_id`, `actor_type`, `actor_label`, `actor_source`, `actor_session_id`
+- `approval_method`, `approval_confidence`
+- `attestation_level`
+- `attested_at`
+- `attestation_note`
+- `previous_attestation_hash`
+- `attestation_hash`
+
+Supported `attestation_level`:
+- `none`
+- `local_ui`
+- `session_verified`
+- `founder_attested`
+- `system_generated`
+- `imported`
+
+Rules:
+- Local UI review defaults to `local_ui`.
+- `session_verified` and `founder_attested` require verified session actor evidence.
+- MAX/Hermes/OpenClaw internal status events default to `system_generated`.
+- Imported/legacy artifacts are backfilled as `imported` when needed.
+
+This is tamper-evident hashing and chain-linking, not legal/cryptographic signing.
+
+## Hash Model
+
+Artifacts maintain:
+- `latest_content_hash`
+- `latest_metadata_hash`
+- `latest_version_hash`
+- `latest_attestation_hash`
+- `latest_attestation_hash_short`
+- `latest_attestation_level`
+- `requires_reattestation`
+- `is_current`
+
+Hash notes:
+- Content hash is based on sanitized HTML + extracted text.
+- Metadata hash uses canonical JSON excluding volatile fields (timestamps/history pointers).
+- Version hash combines content hash + metadata hash + status + supersede state.
+- Attestation hash is deterministic over the attestation payload and links to `previous_attestation_hash`.
+
+If content changes after approval, `requires_reattestation=true` and the artifact is treated as not current until a new attestation is written.
 
 ## UI State Reconciliation
 

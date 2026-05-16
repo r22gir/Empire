@@ -1117,7 +1117,22 @@ def _hermes_artifact_memory_response(request: ChatRequest, founder: bool) -> Cha
         approval_status = metadata.get("approval_status") or hit.get("approval_status") or "unknown"
         updated_at = metadata.get("updated_at") or metadata.get("created_at") or hit.get("updated_at") or "unknown"
         stale_warning = (bundle or {}).get("stale_warning")
-        current_flag = "superseded_or_not_current" if stale_warning else "current"
+        is_current = bool((bundle or {}).get("is_current"))
+        superseded_by = metadata.get("superseded_by") or hit.get("superseded_by")
+        requires_reattestation = bool((bundle or {}).get("requires_reattestation") or hit.get("requires_reattestation"))
+        current_flag = "current" if is_current else ("superseded" if superseded_by else "not_current")
+        attestation_level = (
+            metadata.get("latest_attestation_level")
+            or hit.get("latest_attestation_level")
+            or "none"
+        )
+        attestation_hash = (
+            metadata.get("latest_attestation_hash_short")
+            or hit.get("latest_attestation_hash_short")
+            or (metadata.get("latest_attestation_hash") or "")[:12]
+            or "n/a"
+        )
+        approval_confidence = metadata.get("approval_confidence") or hit.get("approval_confidence") or "unknown"
         summary = (bundle or {}).get("summary") or hit.get("summary") or ""
         summary = _sanitize_internal_leakage_text(summary)
         summary = summary[:340] + ("..." if len(summary) > 340 else "")
@@ -1131,11 +1146,16 @@ def _hermes_artifact_memory_response(request: ChatRequest, founder: bool) -> Cha
         lines.append(f"   - Module: {module_value}")
         lines.append(f"   - Approval: {approval_status}")
         lines.append(f"   - Status: {current_flag}")
+        lines.append(f"   - Attestation Level: {attestation_level}")
+        lines.append(f"   - Approval Confidence: {approval_confidence}")
+        lines.append(f"   - Attestation Hash: {attestation_hash}")
         lines.append(f"   - Updated: {updated_at}")
         lines.append(f"   - Source Agent: {source_agent}")
         lines.append(f"   - Provenance: {_format_provenance_short(provenance)}")
         if approval_status != "approved":
             lines.append("   - Warning: not approved; do not treat as current truth.")
+        if requires_reattestation:
+            lines.append("   - Warning: content changed after approval; re-attestation required.")
         if stale_warning:
             lines.append(f"   - Stale Warning: {stale_warning}")
         if summary:

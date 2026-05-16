@@ -24,12 +24,13 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
             "artifact_type": "html_artifact",
             "content_format": "html",
             "content": "<h1>Workroom</h1><script>alert(1)</script><p>Plan packet.</p>",
-            "module": "workroom",
-            "source_agent": "max",
-            "tags": ["workroom", "plan"],
-            "retrieval_keywords": ["plan packet", "workroom"],
-        },
-    )
+                "module": "workroom",
+                "source_agent": "max",
+                "approval_status": "approved",
+                "tags": ["workroom", "plan"],
+                "retrieval_keywords": ["plan packet", "workroom"],
+            },
+        )
     assert write_res.status_code == 200
     write_data = write_res.json()
     artifact_id = write_data["artifact_id"]
@@ -48,9 +49,12 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
     assert search_res.status_code == 200
     search_data = search_res.json()
     assert search_data["count"] >= 1
-    assert search_data["ranking_version"] == "hermes_artifact_rank_v2"
+    assert search_data["ranking_version"] == "hermes_artifact_rank_v3"
     assert "score" in search_data["results"][0]
     assert "matched_fields" in search_data["results"][0]
+    assert "latest_attestation_level" in search_data["results"][0]
+    assert "latest_attestation_hash_short" in search_data["results"][0]
+    assert "requires_reattestation" in search_data["results"][0]
     assert any(item["id"] == artifact_id for item in search_data["results"])
 
     update_res = client.post(
@@ -62,8 +66,10 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
             "actor_type": "founder",
             "actor_label": "Founder QA",
             "actor_source": "verified_session",
+            "actor_session_id": "founder-session-api",
             "approval_method": "api",
             "approval_confidence": "verified_session",
+            "attestation_level": "founder_attested",
             "actor_note": "api status approval test",
         },
     )
@@ -74,10 +80,16 @@ def test_artifact_api_write_search_get_status_export(monkeypatch, tmp_path):
     assert payload["approval_actor_source"] == "verified_session"
     assert payload["approval_method"] == "api"
     assert payload["approval_confidence"] == "verified_session"
+    assert payload["latest_attestation_level"] == "founder_attested"
+    assert payload["latest_attestation_hash"]
+    assert payload["latest_attestation_hash_short"]
+    assert payload["is_current"] is True
+    assert payload["requires_reattestation"] is False
     history = payload.get("approval_history") or []
     assert history[-1]["approval_actor_type"] == "founder"
     assert history[-1]["approval_actor_label"] == "Founder QA"
     assert history[-1]["approval_confidence"] == "verified_session"
+    assert history[-1]["attestation_hash"]
 
     export_res = client.get(f"/api/v1/hermes/artifacts/{artifact_id}/export?export_format=json")
     assert export_res.status_code == 200
@@ -98,6 +110,7 @@ def test_artifact_api_supersede(monkeypatch, tmp_path):
             "content": "# v1",
             "module": "archiveforge",
             "source_agent": "hermes",
+            "approval_status": "approved",
         },
     )
     new_res = client.post(
@@ -109,6 +122,7 @@ def test_artifact_api_supersede(monkeypatch, tmp_path):
             "content": "# v2",
             "module": "archiveforge",
             "source_agent": "hermes",
+            "approval_status": "approved",
         },
     )
     old_id = old_res.json()["artifact_id"]

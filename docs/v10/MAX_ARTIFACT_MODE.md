@@ -137,9 +137,15 @@ interface Message { ..., artifacts?: MaxArtifact[] }
   - `POST /api/v1/hermes/artifacts/{id}/status`
 - Status updates include approval identity metadata:
   - `approval_actor_id`, `approval_actor_type`, `approval_actor_label`, `approval_actor_source`
+  - `approval_actor_session_id`
   - `approval_method`, `approval_confidence`, `approval_timestamp`, `approval_note`
+- Status updates also create/update attestation metadata:
+  - `latest_attestation_level`
+  - `latest_attestation_hash` / `latest_attestation_hash_short`
+  - `requires_reattestation`
+  - `latest_content_hash`, `latest_metadata_hash`, `latest_version_hash`
 - Local review state and backend persisted status are still distinct; local-only artifacts stay local-only until saved.
-- UI shows persisted vs local-only state, current/superseded status, actor label, and latest status timestamp when available.
+- UI shows persisted vs local-only state, current/superseded status, actor label, approval confidence, attestation level/hash, and re-attestation warnings when available.
 
 ### MAX Memory Retrieval
 
@@ -152,7 +158,7 @@ Policy:
 - defaults: approved + current artifacts
 - stale/superseded artifacts are excluded unless explicitly requested
 - runtime/repo/database/module-doc truth remains higher priority
-- memory-grounded answers include a compact artifact grounding block (title/id/module/status/date/source) and explicitly note that artifact memory is not runtime truth
+- memory-grounded answers include a compact artifact grounding block (title/id/module/status/date/source + attestation level/hash/confidence + re-attestation warning) and explicitly note that artifact memory is not runtime truth
 
 ### Copy/Export
 
@@ -195,6 +201,7 @@ The MAX system prompt instructs:
 - **Model tool use**: When MAX calls a tool instead of responding inline, artifact blocks may not be emitted. Instruct MAX to "reply only with text, do not use any tools" if artifacts are needed.
 - **\<link> sanitizer gap**: Previously, external stylesheet `<link>` tags were not stripped. Fixed in backend `artifact_parser.py` and frontend `artifacts.ts`.
 - **Approval identity**: metadata-backed approval identity exists, but signer-bound/cryptographic approval is not implemented yet.
+- **Signer-bound attestation**: tamper-evident attestation hash chaining is implemented, but cryptographic/legal signing is not.
 
 ---
 

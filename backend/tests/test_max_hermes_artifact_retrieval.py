@@ -83,6 +83,9 @@ def test_hermes_tool_search_and_get_default_to_approved_current(monkeypatch, tmp
     assert all(row["approval_status"] == "approved" for row in rows)
     assert all("score" in row for row in rows)
     assert all("matched_fields" in row for row in rows)
+    assert all("latest_attestation_level" in row for row in rows)
+    assert all("latest_attestation_hash_short" in row for row in rows)
+    assert all("requires_reattestation" in row for row in rows)
 
     search_all = execute_tool(
         {
@@ -106,6 +109,8 @@ def test_hermes_tool_search_and_get_default_to_approved_current(monkeypatch, tmp
     assert get_latest.success is True
     assert get_latest.result["metadata"]["id"] == replacement
     assert get_latest.result["approval_status"] == "approved"
+    assert get_latest.result["latest_attestation_level"]
+    assert "latest_attestation_hash_short" in get_latest.result
 
 
 def test_hermes_write_tool_is_gated(monkeypatch, tmp_path):
@@ -191,11 +196,16 @@ def test_hermes_status_update_writes_actor_metadata(monkeypatch, tmp_path):
     assert history[-1]["approval_actor_source"] == "local_ui"
     assert history[-1]["approval_method"] == "ui"
     assert history[-1]["approval_confidence"] == "local_ui"
+    assert history[-1]["attestation_hash"]
+    assert updated.result.get("latest_attestation_level") == "local_ui"
+    assert updated.result.get("latest_attestation_hash")
 
     bundle = hermes_artifact_get(artifact_id)
     assert bundle is not None
     persisted_history = bundle["metadata"].get("approval_history") or []
     assert persisted_history[-1]["actor_type"] == "founder"
+    assert bundle.get("latest_attestation_level") == "local_ui"
+    assert bundle.get("latest_attestation_hash")
 
 
 def test_router_artifact_memory_response_uses_hermes_tools(monkeypatch, tmp_path):
@@ -239,6 +249,9 @@ def test_router_artifact_memory_response_uses_hermes_tools(monkeypatch, tmp_path
     assert "Artifact memory used (supporting context only" in data["response"]
     assert "Approval: approved" in data["response"]
     assert "Status: current" in data["response"]
+    assert "Attestation Level:" in data["response"]
+    assert "Approval Confidence:" in data["response"]
+    assert "Attestation Hash:" in data["response"]
     assert "Source Agent: hermes" in data["response"]
     assert "Note: This answer is grounded in Hermes artifact memory." in data["response"]
     tools = [row.get("tool") for row in (data.get("tool_results") or [])]

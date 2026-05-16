@@ -1,6 +1,6 @@
 # ADR: Hermes Knowledge Artifact Layer (v10)
 
-Date: 2026-05-15  
+Date: 2026-05-15
 Status: accepted (v10 test lane)
 
 ## Decision
@@ -37,6 +37,7 @@ In scope (this ADR implementation):
 - default approved/current filtering to reduce stale memory use
 - approval identity metadata (actor/source/method/confidence/timestamp/history)
 - ranking/reranking with explicit score and matched field metadata
+- signer-bound approval attestation scaffolding (tamper-evident hash chain; not cryptographic signing)
 
 Out of scope (next phase):
 - signed approval identity model
@@ -45,13 +46,14 @@ Out of scope (next phase):
 
 ## Truth Priority
 
-1. runtime  
-2. repo truth  
-3. database truth  
-4. module docs  
-5. approved artifacts  
-6. session context  
-7. model opinion
+1. runtime
+2. repo truth
+3. database truth
+4. module docs
+5. approved + attested + current artifacts
+6. approved + current artifacts
+7. session context
+8. model opinion
 
 Artifacts must never override levels 1-4.
 
@@ -89,6 +91,24 @@ This removes false freshness mismatch reports that occurred when runtime checks 
 - no form/iframe/object/embed storage in final artifact HTML
 - UI remains sandboxed for HTML preview
 - artifacts are supporting memory only and never override runtime/repo/database/module-doc truth
+
+## Attestation Model Addendum
+
+Attestation levels:
+- `none`
+- `local_ui`
+- `session_verified`
+- `founder_attested`
+- `system_generated`
+- `imported`
+
+Ordering for retrieval/ranking favors:
+1. approved + founder_attested + current
+2. approved + session_verified + current
+3. approved + local_ui + current
+4. approved + system_generated + current
+
+Attestation hashes are deterministic/tamper-evident audit records, not legal signatures.
 
 ## Rollback
 

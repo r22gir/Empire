@@ -59,8 +59,10 @@ class ArtifactUpdateStatusRequest(BaseModel):
     actor_type: Optional[str] = None
     actor_label: Optional[str] = None
     actor_source: Optional[str] = None
+    actor_session_id: Optional[str] = None
     approval_method: Optional[str] = None
     approval_confidence: Optional[str] = None
+    attestation_level: Optional[str] = None
     actor_note: Optional[str] = None
 
 
@@ -72,8 +74,10 @@ class ArtifactSupersedeRequest(BaseModel):
     actor_type: Optional[str] = None
     actor_label: Optional[str] = None
     actor_source: Optional[str] = None
+    actor_session_id: Optional[str] = None
     approval_method: Optional[str] = None
     approval_confidence: Optional[str] = None
+    attestation_level: Optional[str] = None
 
 
 @router.get("/status")
@@ -132,8 +136,10 @@ def artifact_supersede(req: ArtifactSupersedeRequest):
             actor_type=req.actor_type,
             actor_label=req.actor_label,
             actor_source=req.actor_source,
+            actor_session_id=req.actor_session_id,
             approval_method=req.approval_method,
             approval_confidence=req.approval_confidence,
+            attestation_level=req.attestation_level,
         )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -161,8 +167,10 @@ def artifact_update_status(artifact_id: str, req: ArtifactUpdateStatusRequest):
             actor_type=req.actor_type,
             actor_label=req.actor_label,
             actor_source=req.actor_source,
+            actor_session_id=req.actor_session_id,
             approval_method=req.approval_method,
             approval_confidence=req.approval_confidence,
+            attestation_level=req.attestation_level,
             actor_note=req.actor_note,
         )
     except FileNotFoundError as exc:

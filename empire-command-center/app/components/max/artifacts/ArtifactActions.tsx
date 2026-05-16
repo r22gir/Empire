@@ -46,6 +46,10 @@ export function ArtifactActions({
     approvalActorLabel?: string;
     approvalActorType?: string;
     approvalConfidence?: string;
+    attestationLevel?: string;
+    attestationHash?: string;
+    requiresReattestation?: boolean;
+    latestContentHash?: string;
   } | null>(null);
 
   const isApproved = displayMode === 'approved';
@@ -67,19 +71,19 @@ export function ArtifactActions({
     return typeof id === 'string' && id.trim() ? id.trim() : '';
   }, [artifact.metadata]);
 
-  const readPersistedMap = React.useCallback((): Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string }> => {
+  const readPersistedMap = React.useCallback((): Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string; attestationLevel?: string; attestationHash?: string; requiresReattestation?: boolean; latestContentHash?: string }> => {
     if (typeof window === 'undefined') return {};
     try {
       const raw = window.localStorage.getItem(HERMES_ARTIFACT_STATE_KEY);
       if (!raw) return {};
       const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed as Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string }> : {};
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string; attestationLevel?: string; attestationHash?: string; requiresReattestation?: boolean; latestContentHash?: string }> : {};
     } catch {
       return {};
     }
   }, []);
 
-  const writePersistedMap = React.useCallback((nextMap: Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string }>) => {
+  const writePersistedMap = React.useCallback((nextMap: Record<string, { artifactId: string; approvalStatus?: string; updatedAt?: string; approvalTimestamp?: string; isCurrent?: boolean; supersededBy?: string | null; approvalActorLabel?: string; approvalActorType?: string; approvalConfidence?: string; attestationLevel?: string; attestationHash?: string; requiresReattestation?: boolean; latestContentHash?: string }>) => {
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(HERMES_ARTIFACT_STATE_KEY, JSON.stringify(nextMap));
@@ -99,6 +103,10 @@ export function ArtifactActions({
       approvalActorLabel?: string;
       approvalActorType?: string;
       approvalConfidence?: string;
+      attestationLevel?: string;
+      attestationHash?: string;
+      requiresReattestation?: boolean;
+      latestContentHash?: string;
     },
   ) => {
     const map = readPersistedMap();
@@ -112,6 +120,10 @@ export function ArtifactActions({
       approvalActorLabel: extra?.approvalActorLabel,
       approvalActorType: extra?.approvalActorType,
       approvalConfidence: extra?.approvalConfidence,
+      attestationLevel: extra?.attestationLevel,
+      attestationHash: extra?.attestationHash,
+      requiresReattestation: extra?.requiresReattestation,
+      latestContentHash: extra?.latestContentHash,
     };
     writePersistedMap(map);
     setPersistedBackendStatus({
@@ -124,6 +136,10 @@ export function ArtifactActions({
       approvalActorLabel: extra?.approvalActorLabel,
       approvalActorType: extra?.approvalActorType,
       approvalConfidence: extra?.approvalConfidence,
+      attestationLevel: extra?.attestationLevel,
+      attestationHash: extra?.attestationHash,
+      requiresReattestation: extra?.requiresReattestation,
+      latestContentHash: extra?.latestContentHash,
     });
   }, [artifact.id, readPersistedMap, writePersistedMap]);
 
@@ -148,6 +164,10 @@ export function ArtifactActions({
         approvalActorLabel: saved.approvalActorLabel,
         approvalActorType: saved.approvalActorType,
         approvalConfidence: saved.approvalConfidence,
+        attestationLevel: saved.attestationLevel,
+        attestationHash: saved.attestationHash,
+        requiresReattestation: saved.requiresReattestation,
+        latestContentHash: saved.latestContentHash,
       });
     }
   }, [artifact.id, persistedFromMetadata, readPersistedMap]);
@@ -161,6 +181,7 @@ export function ArtifactActions({
         const metadata = data?.metadata || {};
         const history = Array.isArray(metadata.approval_history) ? metadata.approval_history : [];
         const last = history.length > 0 ? history[history.length - 1] : {};
+        const attestationHash = String(metadata.latest_attestation_hash_short || metadata.latest_attestation_hash || '').trim();
         rememberPersistedState(
           artifactId,
           String(metadata.approval_status || persistedBackendStatus?.approvalStatus || 'draft'),
@@ -172,6 +193,10 @@ export function ArtifactActions({
             approvalActorLabel: String(metadata.approval_actor_label || last?.approval_actor_label || ''),
             approvalActorType: String(metadata.approval_actor_type || last?.approval_actor_type || ''),
             approvalConfidence: String(metadata.approval_confidence || last?.approval_confidence || ''),
+            attestationLevel: String(metadata.latest_attestation_level || 'none'),
+            attestationHash,
+            requiresReattestation: Boolean(data?.requires_reattestation || metadata.requires_reattestation),
+            latestContentHash: String(metadata.latest_content_hash || ''),
           },
         );
       } catch {
@@ -197,6 +222,7 @@ export function ArtifactActions({
           actor_source: 'local_ui',
           approval_method: 'ui',
           approval_confidence: 'local_ui',
+          attestation_level: 'local_ui',
           actor_note: 'artifact_viewer_review_action',
         }),
       });
@@ -216,6 +242,10 @@ export function ArtifactActions({
           approvalActorLabel: String(data.approval_actor_label || ''),
           approvalActorType: String(data.approval_actor_type || ''),
           approvalConfidence: String(data.approval_confidence || ''),
+          attestationLevel: String(data.latest_attestation_level || 'none'),
+          attestationHash: String(data.latest_attestation_hash_short || data.latest_attestation_hash || ''),
+          requiresReattestation: Boolean(data.requires_reattestation),
+          latestContentHash: String(data.latest_content_hash || ''),
         },
       );
     } catch (err) {
@@ -329,6 +359,16 @@ export function ArtifactActions({
                 superseded_by={persistedBackendStatus.supersededBy}
               </span>
             )}
+            {persistedBackendStatus.attestationLevel && (
+              <span style={{ fontSize: 10, color: '#a78bfa' }}>
+                attestation={persistedBackendStatus.attestationLevel}
+              </span>
+            )}
+            {persistedBackendStatus.attestationHash && (
+              <span style={{ fontSize: 10, color: '#cbd5e1' }}>
+                hash={persistedBackendStatus.attestationHash}
+              </span>
+            )}
           </div>
           <div style={{ fontSize: 10, color: '#64748b' }}>
             {persistedBackendStatus.approvalActorLabel
@@ -342,7 +382,13 @@ export function ArtifactActions({
               : persistedBackendStatus.updatedAt
                 ? `, updated_at=${persistedBackendStatus.updatedAt}`
                 : ''}
+            {persistedBackendStatus.requiresReattestation ? ', requires_reattestation=true' : ''}
           </div>
+          {persistedBackendStatus.requiresReattestation && (
+            <div style={{ fontSize: 10, color: '#f59e0b' }}>
+              Content changed after prior approval. Re-attestation required before treating this as current.
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>
