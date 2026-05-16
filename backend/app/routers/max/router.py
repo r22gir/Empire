@@ -835,6 +835,33 @@ OPENCLAW_GATE_MARKERS = (
     "openclaw health",
     "open claw health",
 )
+SUPERVISED_REPAIR_COMMAND_MARKERS = (
+    "supervised v10 self-repair mode",
+    "supervised repair mode",
+    "execution/supervision command",
+    "execution supervision command",
+    "run v10 supervised repair",
+    "supervised repair",
+)
+SUPERVISED_REPAIR_PREFLIGHT_MARKERS = (
+    "preflight only",
+    "run preflight only",
+    "preflight",
+)
+SUPERVISED_REPAIR_ENDPOINT_MARKERS = (
+    "verify v10 lane",
+    "check /api/v1/max/status",
+    "check /api/v1/git",
+    "check hermes artifact layer status",
+    "check /api/v1/hermes/artifacts/status",
+)
+SUPERVISED_REPAIR_SAFETY_MARKERS = (
+    "do not touch stable/main",
+    "do not use empire-module-knowledge",
+    "do not answer with openclaw documentation",
+    "create one bounded task",
+    "wait for founder approval",
+)
 EMAIL_SEND_TRUTH_PATTERNS = (
     r"^\s*send to my email\s*$",
     r"^\s*send this to my email\s*$",
@@ -885,6 +912,191 @@ def _prefer_archiveforge_over_drawing(message: str | None) -> bool:
 def _is_openclaw_gate_request(message: str | None) -> bool:
     text = (message or "").lower().strip()
     return any(marker in text for marker in OPENCLAW_GATE_MARKERS)
+
+
+def _is_supervised_v10_repair_preflight_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    supervision_signal = any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS)
+    preflight_signal = any(marker in text for marker in SUPERVISED_REPAIR_PREFLIGHT_MARKERS)
+    endpoint_signal = any(marker in text for marker in SUPERVISED_REPAIR_ENDPOINT_MARKERS)
+    safety_signal = any(marker in text for marker in SUPERVISED_REPAIR_SAFETY_MARKERS)
+    if not supervision_signal and not preflight_signal:
+        return False
+    if preflight_signal and (supervision_signal or endpoint_signal or safety_signal):
+        return True
+    if supervision_signal and (endpoint_signal or safety_signal):
+        return True
+    return False
+
+
+def _collect_inprocess_max_status_snapshot() -> dict[str, Any]:
+    from app.services.max.hermes_artifact_layer import get_hermes_artifact_layer_status
+    from app.services.max.openclaw_gate import check_openclaw_gate
+    from app.services.max.runtime_truth_check import _git_commit
+
+    current_commit = _git_commit()
+    lane = os.getenv("EMPIRE_LANE", "unknown")
+    backend_port_raw = os.getenv("EMPIRE_BACKEND_PORT", "").strip()
+    frontend_port_raw = os.getenv("EMPIRE_FRONTEND_EXPECTED_PORT", "").strip()
+    backend_port = int(backend_port_raw) if backend_port_raw.isdigit() else None
+    frontend_port = int(frontend_port_raw) if frontend_port_raw.isdigit() else None
+    return {
+        "status": "ok",
+        "current_commit": current_commit,
+        "runtime_lane": {
+            "lane": lane,
+            "branch": current_commit.get("branch"),
+            "backend_port": backend_port,
+            "frontend_expected_port": frontend_port,
+            "worktree": current_commit.get("worktree_path") or str(Path.cwd()),
+            "source_path_used": current_commit.get("source_path_used"),
+        },
+        "hermes_artifact_layer": get_hermes_artifact_layer_status(),
+        "openclaw_gate": check_openclaw_gate().to_dict(),
+    }
+
+
+def _collect_inprocess_git_status_snapshot() -> dict[str, Any]:
+    from app.services.max.lane_runtime_metadata import get_lane_git_metadata
+    from app.services.max.startup_health import read_startup_health_record
+
+    meta = get_lane_git_metadata()
+    startup = read_startup_health_record() or {}
+    return {
+        "status": "ok",
+        "lane": meta.get("lane"),
+        "worktree_path": meta.get("worktree_path"),
+        "backend_cwd": meta.get("backend_cwd"),
+        "source_path_used": meta.get("source_path_used"),
+        "expected_worktree_path": meta.get("expected_worktree_path"),
+        "current_commit": {
+            "branch": meta.get("branch") or "unknown",
+            "hash": meta.get("commit") or "",
+            "message": meta.get("message") or "",
+        },
+        "local_commit": meta.get("commit") or "",
+        "startup_commit": startup.get("running_commit_hash"),
+        "public_commit": None,
+        "expected_backend_port": meta.get("expected_backend_port"),
+        "expected_frontend_port": meta.get("expected_frontend_port"),
+        "public_base_url": meta.get("public_base_url"),
+        "uncommitted_count": meta.get("uncommitted_count", 0),
+        "freshness_status": meta.get("freshness_status"),
+        "mismatch_reason": meta.get("mismatch_reason"),
+    }
+
+
+def _collect_inprocess_hermes_artifacts_status_snapshot() -> dict[str, Any]:
+    from app.services.max.hermes_artifact_layer import get_hermes_artifact_layer_status
+
+    return get_hermes_artifact_layer_status()
+
+
+def _build_supervised_v10_repair_preflight_result() -> dict[str, Any]:
+    max_status_data = _collect_inprocess_max_status_snapshot()
+    git_status_data = _collect_inprocess_git_status_snapshot()
+    hermes_status_data = _collect_inprocess_hermes_artifacts_status_snapshot()
+
+    max_status = {
+        "ok": bool(max_status_data.get("status") == "ok"),
+        "status_code": 200,
+        "source": "in-process:/api/v1/max/status",
+        "data": max_status_data,
+    }
+    git_status = {
+        "ok": bool(git_status_data.get("status") == "ok"),
+        "status_code": 200,
+        "source": "in-process:/api/v1/git",
+        "data": git_status_data,
+    }
+    hermes_status = {
+        "ok": bool("enabled" in hermes_status_data),
+        "status_code": 200,
+        "source": "in-process:/api/v1/hermes/artifacts/status",
+        "data": hermes_status_data,
+    }
+
+    max_data = max_status.get("data") or {}
+    git_data = git_status.get("data") or {}
+    hermes_data = hermes_status.get("data") or {}
+
+    runtime_lane = max_data.get("runtime_lane") or {}
+    current_commit = max_data.get("current_commit") or {}
+    git_commit = git_data.get("current_commit") or {}
+
+    lane = runtime_lane.get("lane") or git_data.get("lane") or "unknown"
+    branch = current_commit.get("branch") or git_commit.get("branch") or "unknown"
+    commit = current_commit.get("hash") or git_commit.get("hash") or "unknown"
+    backend_port = runtime_lane.get("backend_port") or git_data.get("expected_backend_port")
+    frontend_port = runtime_lane.get("frontend_expected_port") or git_data.get("expected_frontend_port")
+    git_freshness_status = git_data.get("freshness_status") or "unavailable"
+    hermes_enabled = bool(hermes_data.get("enabled"))
+    openclaw_gate_allowed = bool((max_data.get("openclaw_gate") or {}).get("allowed"))
+
+    safe_to_create_bounded_openclaw_task = bool(
+        max_status.get("ok")
+        and git_status.get("ok")
+        and hermes_status.get("ok")
+        and lane == "v10-test"
+        and branch == "feature/v10.0-test-lane"
+        and int(backend_port or 0) == 8010
+        and int(frontend_port or 0) == 3010
+        and git_freshness_status == "ok"
+        and hermes_enabled
+        and openclaw_gate_allowed
+    )
+
+    return {
+        "lane": lane,
+        "branch": branch,
+        "commit": commit,
+        "backend_port": backend_port,
+        "frontend_port": frontend_port,
+        "git_freshness_status": git_freshness_status,
+        "hermes_artifact_layer_enabled": hermes_enabled,
+        "safe_to_create_bounded_openclaw_task": safe_to_create_bounded_openclaw_task,
+        "note": "no task created yet",
+        "endpoint_checks": {
+            "max_status": max_status,
+            "git_status": git_status,
+            "hermes_artifacts_status": hermes_status,
+        },
+    }
+
+
+def _supervised_v10_repair_preflight_response(request: ChatRequest) -> ChatResponse | None:
+    if not _is_supervised_v10_repair_preflight_request(request.message):
+        return None
+
+    preflight = _build_supervised_v10_repair_preflight_result()
+    response_lines = [
+        "Supervised v10 repair preflight:",
+        f"- lane: {preflight.get('lane')}",
+        f"- branch: {preflight.get('branch')}",
+        f"- commit: {preflight.get('commit')}",
+        f"- backend_port: {preflight.get('backend_port')}",
+        f"- frontend_port: {preflight.get('frontend_port')}",
+        f"- git_freshness_status: {preflight.get('git_freshness_status')}",
+        f"- hermes_artifact_layer_enabled: {preflight.get('hermes_artifact_layer_enabled')}",
+        f"- safe_to_create_bounded_openclaw_task: {preflight.get('safe_to_create_bounded_openclaw_task')}",
+        f"- note: {preflight.get('note')}",
+    ]
+    all_checks_ok = all(
+        bool(check.get("ok")) for check in (preflight.get("endpoint_checks") or {}).values()
+    )
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="supervised-v10-repair-preflight",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "supervised_v10_repair_preflight",
+            "success": all_checks_ok,
+            "result": preflight,
+        }],
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_repair_preflight"),
+    )
 
 
 def _openclaw_gate_response(request: ChatRequest) -> ChatResponse:
@@ -1376,6 +1588,10 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = False) -> ChatResponse | None:
     if not request.desk and not request.image_filename:
+        supervised_preflight_response = _supervised_v10_repair_preflight_response(request)
+        if supervised_preflight_response is not None:
+            return supervised_preflight_response
+
         artifact_memory_response = _hermes_artifact_memory_response(request, founder=founder)
         if artifact_memory_response is not None:
             return artifact_memory_response
