@@ -39,6 +39,13 @@ from app.services.max.runtime_truth_check import (
     run_whats_new_summary,
     format_whats_new_summary,
 )
+from app.services.max.operations_capability_registry import (
+    available_safe_action_labels,
+    get_operations_capability,
+    get_operations_capability_registry_status,
+    list_operations_capabilities,
+    parse_operations_intent,
+)
 from app.services.max.empire_module_knowledge import resolve_empire_module_question
 from app.services.max.live_lookup_router import should_live_lookup, LiveLookupDecision
 from app.services.max.artifact_parser import parse_max_artifact_blocks, ArtifactPayload
@@ -979,7 +986,7 @@ SUPERVISED_OPENCLAW_TASK_ID_PATTERNS = (
 SUPERVISED_REPAIR_TASK_REF_PREFIX = "sv10r_"
 SUPERVISED_REPAIR_TASK_REF_TTL_MINUTES = 90
 SUPERVISED_REPAIR_TASK_REF_APPROVAL_PATTERN = re.compile(
-    r"\bapproved\s+task_ref=([A-Za-z0-9_-]{8,120})\.\s*create\s+exactly\s+one\s+bounded\s+openclaw\s+task\b",
+    r"\bapproved\s+task_ref=([A-Za-z0-9_-]{3,120})\.\s*create\s+exactly\s+one\s+bounded\s+openclaw\s+task\b",
     re.IGNORECASE | re.DOTALL,
 )
 SUPERVISED_REPAIR_SCOPE_TAMPER_MARKERS = (
@@ -1683,6 +1690,78 @@ def _build_supervised_v10_level1_recommended_tasks() -> list[dict[str, Any]]:
             "task_ref_required_for_creation": True,
         },
     ]
+
+
+def _copy_chat_request_with_message(request: ChatRequest, message: str) -> ChatRequest:
+    return request.model_copy(update={"message": message})
+
+
+def _format_openclaw_task_list_response(request: ChatRequest, status_filter: str | None = None) -> ChatResponse:
+    from app.db.database import dict_rows, get_db
+
+    normalized_filter = (status_filter or "active").strip().lower()
+    params: list[Any] = []
+    if normalized_filter == "active":
+        where = "WHERE status IN ('queued', 'running', 'paused')"
+    elif normalized_filter == "recent":
+        where = ""
+    else:
+        where = "WHERE status = ?"
+        params.append(normalized_filter)
+    params.extend([20, 0])
+
+    with get_db() as db:
+        rows = dict_rows(
+            db.execute(
+                f"""
+                SELECT id, title, desk, status, source, priority, created_at, completed_at, error
+                FROM openclaw_tasks
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+        )
+
+    lines = [
+        "OpenClaw task list (read-only):",
+        f"- status_filter: {normalized_filter}",
+        f"- returned: {len(rows)}",
+        "- created_tasks: 0",
+        "- mutated_tasks: 0",
+    ]
+    if rows:
+        for row in rows[:10]:
+            title = str(row.get("title") or "untitled")
+            if len(title) > 110:
+                title = title[:107] + "..."
+            lines.append(
+                f"{row.get('id')}. {title} "
+                f"[status={row.get('status')}, desk={row.get('desk')}, source={row.get('source')}]"
+            )
+    else:
+        lines.append("- No matching OpenClaw tasks found.")
+
+    return ChatResponse(
+        response="\n".join(lines),
+        model_used="supervised-v10-openclaw-task-list",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "supervised_v10_openclaw_task_list",
+            "success": True,
+            "result": {
+                "status_filter": normalized_filter,
+                "tasks": rows,
+                "total": len(rows),
+                "created_tasks": 0,
+                "mutated_tasks": 0,
+                "no_task_creation_performed": True,
+                "no_task_mutation_performed": True,
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_list"),
+    )
 
 
 def _task_payload_from_supervised_recommendation(record: dict[str, Any]) -> dict[str, Any]:
@@ -3088,6 +3167,11 @@ HERMES_ARTIFACT_RETRIEVAL_MARKERS = (
     "compare against plan",
     "artifact memory",
     "hermes memory",
+    "search hermes",
+    "approved context",
+    "approved memory",
+    "use approved memory",
+    "current artifacts",
     "openclaw context",
     "codex context",
 )
@@ -3467,8 +3551,153 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
     )
 
 
+def _operations_missing_capability_response(request: ChatRequest, intent) -> ChatResponse:
+    understood = intent.unsupported_intent or (
+        f"{intent.action or 'unknown'}:{intent.object or 'unknown'}"
+    )
+    safe_actions = ", ".join(available_safe_action_labels())
+    response_text = (
+        f"I understand this as: {understood}.\n"
+        "I do not yet have an approved execution capability for that action.\n"
+        f"Available safe actions are: {safe_actions}.\n"
+        "I can recommend a bounded v10 task to add this capability."
+    )
+    return ChatResponse(
+        response=response_text,
+        model_used="max-operations-capability-missing",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "max_operations_capability_router",
+            "success": False,
+            "error": "missing_approved_capability",
+            "result": {
+                "understood_intent": understood,
+                "action": intent.action,
+                "object": intent.object,
+                "entities": intent.entities,
+                "modifiers": intent.modifiers,
+                "available_safe_actions": available_safe_action_labels(),
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="max_operations_capability_router"),
+    )
+
+
+def _operations_capability_response(request: ChatRequest, founder: bool = False) -> ChatResponse | None:
+    intent = parse_operations_intent(request.message)
+    capability = get_operations_capability(intent.capability_id)
+
+    if intent.unsupported_intent:
+        return _operations_missing_capability_response(request, intent)
+    if not capability:
+        return None
+    if capability.capability_id == "module_knowledge_lookup":
+        return None
+
+    task_id = intent.entities.get("task_id")
+    task_ref = intent.entities.get("task_ref")
+
+    if capability.capability_id == "runtime_lane_verify":
+        canonical = "Run v10 supervised repair PREFLIGHT ONLY."
+        return _supervised_v10_repair_preflight_response(_copy_chat_request_with_message(request, canonical))
+
+    if capability.capability_id == "level1_delegation_sprint":
+        canonical = (
+            "MAX, start Level 1 supervised v10 delegation. First verify v10 lane, git freshness, "
+            "Hermes enabled, inspect queue if supported, confirm task_id=8 is cancelled, then recommend "
+            "exactly 3 bounded v10 tasks. Do not create any tasks."
+        )
+        return _supervised_v10_level1_delegation_sprint_response(
+            _copy_chat_request_with_message(request, canonical),
+            founder=founder,
+        )
+
+    if capability.capability_id == "supervised_repair_recommend_task":
+        canonical = (
+            "MAX, continue supervised v10 self-repair mode. Search Hermes for approved/current v10 repair context. "
+            "Recommend exactly one bounded OpenClaw repair task. Do not create the task yet."
+        )
+        return _supervised_v10_repair_recommend_task_response(
+            _copy_chat_request_with_message(request, canonical),
+            founder=founder,
+        )
+
+    if capability.capability_id == "supervised_openclaw_task_create":
+        if not task_ref:
+            approval_granted = bool(intent.modifiers.get("approval_granted"))
+            failed_gate = "task_ref" if approval_granted else "founder_approval"
+            reason = (
+                "task creation requires a valid task_ref"
+                if approval_granted
+                else "explicit founder approval with task_ref is required"
+            )
+            return ChatResponse(
+                response=(
+                    "Supervised v10 OpenClaw task creation blocked.\n"
+                    f"- failed_gate: {failed_gate}\n"
+                    "- reason: task creation requires `Approved task_ref=<TOKEN>. Create exactly one bounded OpenClaw task.`\n"
+                    "- queued: False"
+                ),
+                model_used="supervised-v10-openclaw-task-create",
+                fallback_used=False,
+                tool_results=[{
+                    "tool": "supervised_v10_openclaw_task_create",
+                    "success": False,
+                    "error": failed_gate,
+                    "result": {
+                        "queued": False,
+                        "failed_gate": failed_gate,
+                        "reason": reason,
+                        "founder_approval_required_before_creation": True,
+                    },
+                }],
+                metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_create"),
+            )
+        return _supervised_v10_openclaw_task_create_response(
+            request,
+            founder=founder,
+        )
+
+    if capability.capability_id == "openclaw_task_inspect":
+        if task_id is None:
+            canonical = "inspect OpenClaw task. do not create a new task."
+        else:
+            canonical = f"MAX, inspect OpenClaw task_id={task_id}. Do not create a new task."
+        return _supervised_v10_openclaw_task_inspect_response(
+            _copy_chat_request_with_message(request, canonical),
+            founder=founder,
+        )
+
+    if capability.capability_id == "openclaw_task_disposition":
+        if task_id is None:
+            canonical = "Cancel OpenClaw task as duplicate validation task."
+        elif intent.modifiers.get("approval_granted"):
+            canonical = f"Approved. Cancel OpenClaw task_id={task_id} as duplicate validation task."
+        else:
+            canonical = f"Cancel OpenClaw task_id={task_id} as duplicate validation task."
+        return _supervised_v10_openclaw_task_disposition_response(
+            _copy_chat_request_with_message(request, canonical),
+            founder=founder,
+        )
+
+    if capability.capability_id == "openclaw_task_list":
+        return _format_openclaw_task_list_response(request, status_filter=intent.entities.get("status_filter"))
+
+    if capability.capability_id == "hermes_artifact_search":
+        return _hermes_artifact_memory_response(request, founder=founder)
+
+    return None
+
+
 def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = False) -> ChatResponse | None:
     if not request.desk and not request.image_filename:
+        if should_run_runtime_truth_check(request.message):
+            return None
+
+        operations_response = _operations_capability_response(request, founder=founder)
+        if operations_response is not None:
+            return operations_response
+
         supervised_create_response = _supervised_v10_openclaw_task_create_response(request, founder=founder)
         if supervised_create_response is not None:
             return supervised_create_response
@@ -3500,9 +3729,6 @@ def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = Fal
         module_response = _empire_module_response(request)
         if module_response is not None:
             return module_response
-
-        if should_run_runtime_truth_check(request.message):
-            return None
 
     if not request.image_filename and _is_provider_identity_request(request.message):
         return _provider_identity_response(request)
@@ -5498,6 +5724,7 @@ async def max_status():
         "startup_health": read_startup_health_record(),
         "hermes_memory_bridge": get_hermes_memory_status(),
         "hermes_artifact_layer": get_hermes_artifact_layer_status(),
+        "operations_capability_registry": get_operations_capability_registry_status(),
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
         "provider_policy": provider_policy,
@@ -5508,6 +5735,16 @@ async def max_status():
             "tts": os.getenv("MAX_ENABLE_MINIMAX_TTS", "false").lower() in ("true", "1", "yes"),
             "stt": os.getenv("MAX_ENABLE_MINIMAX_STT", "false").lower() in ("true", "1", "yes"),
         },
+    }
+
+
+@router.get("/capabilities")
+async def max_capabilities():
+    """v10 MAX operations capability registry."""
+    return {
+        "status": "ok",
+        "operations_capability_registry": get_operations_capability_registry_status(),
+        "capabilities": list_operations_capabilities(),
     }
 
 

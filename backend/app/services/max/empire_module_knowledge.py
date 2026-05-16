@@ -41,6 +41,8 @@ MODULE_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 MODULE_QUESTION_HINTS = (
+    "explain",
+    "tell me about",
     "what",
     "whats",
     "what's",
