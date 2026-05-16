@@ -926,6 +926,33 @@ SUPERVISED_OPENCLAW_TASK_INSPECT_MARKERS = (
     "marked complete",
     "left alone",
 )
+SUPERVISED_OPENCLAW_TASK_DISPOSITION_MARKERS = (
+    "cancel openclaw task",
+    "cancel open claw task",
+    "cancel task_id",
+    "cancel task id",
+    "mark task duplicate",
+    "mark duplicate validation task",
+    "approved cancel task",
+    "task disposition",
+    "do not execute duplicate task",
+    "mark openclaw task",
+    "mark open claw task",
+)
+SUPERVISED_OPENCLAW_TASK_DISPOSITION_APPROVAL_PATTERNS = (
+    re.compile(
+        r"\bapproved\b[\s\S]{0,240}\bcancel(?:l|led|ling)?\b[\s\S]{0,240}\b(openclaw|open claw)\b[\s\S]{0,240}\btask[_\s-]*id\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bfounder\s+approves\b[\s\S]{0,240}\bcancel(?:l|led|ling)?\b[\s\S]{0,240}\btask[_\s-]*id\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bapproved\b[\s\S]{0,240}\bmark\b[\s\S]{0,240}\b(openclaw|open claw)\b[\s\S]{0,240}\btask[_\s-]*id\b[\s\S]{0,240}\b(duplicate|cancelled)\b",
+        re.IGNORECASE,
+    ),
+)
 SUPERVISED_OPENCLAW_TASK_ID_PATTERNS = (
     re.compile(r"\btask[_\s-]*id\s*[:=#]?\s*(\d+)\b", re.IGNORECASE),
     re.compile(r"\btask\s*#\s*(\d+)\b", re.IGNORECASE),
@@ -1300,6 +1327,8 @@ def _is_supervised_v10_openclaw_task_inspect_request(message: str | None) -> boo
     text = (message or "").lower().strip()
     if not text:
         return False
+    if _is_supervised_v10_openclaw_task_disposition_request(text):
+        return False
     if _is_supervised_v10_openclaw_task_create_request(text):
         return False
     if _is_supervised_v10_repair_recommend_request(text):
@@ -1314,6 +1343,32 @@ def _is_supervised_v10_openclaw_task_inspect_request(message: str | None) -> boo
     if task_id is not None and mentions_openclaw and (inspect_signal or read_signal):
         return True
     return bool(mentions_openclaw and mentions_task and (inspect_signal or read_signal))
+
+
+def _is_supervised_v10_openclaw_task_disposition_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    if _is_supervised_v10_openclaw_task_create_request(text):
+        return False
+    if _is_supervised_v10_repair_recommend_request(text):
+        return False
+    if _is_supervised_v10_repair_preflight_request(text):
+        return False
+    mentions_openclaw = ("openclaw" in text) or ("open claw" in text)
+    mentions_task = "task" in text or "task_id" in text or "task id" in text
+    disposition_signal = any(marker in text for marker in SUPERVISED_OPENCLAW_TASK_DISPOSITION_MARKERS)
+    cancel_signal = ("cancel" in text or "cancelled" in text or "cancelling" in text)
+    duplicate_signal = ("duplicate" in text and ("mark" in text or "cancel" in text))
+    has_action_signal = disposition_signal or (cancel_signal and mentions_task) or duplicate_signal
+    return bool(mentions_openclaw and mentions_task and has_action_signal)
+
+
+def _has_supervised_disposition_approval(message: str | None) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in SUPERVISED_OPENCLAW_TASK_DISPOSITION_APPROVAL_PATTERNS)
 
 
 def _is_supervised_v10_repair_preflight_request(message: str | None) -> bool:
@@ -2295,6 +2350,298 @@ def _supervised_v10_openclaw_task_inspect_response(request: ChatRequest, founder
     )
 
 
+def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, founder: bool) -> ChatResponse | None:
+    del founder  # explicit approval phrase gate is enforced in-request for this route
+    if not _is_supervised_v10_openclaw_task_disposition_request(request.message):
+        return None
+
+    task_id = _extract_openclaw_task_id(request.message)
+    approval_granted = _has_supervised_disposition_approval(request.message)
+    duplicate_claimed = "duplicate" in str(request.message or "").lower()
+    requested_action = "cancel"
+
+    if task_id is None:
+        response_lines = [
+            "Supervised v10 OpenClaw task disposition attempted.",
+            "- task_id: none",
+            f"- requested_action: {requested_action}",
+            f"- founder_approval_granted: {approval_granted}",
+            "- failed_gate: missing_task_id",
+            "- reason: no numeric task_id found in request",
+            "- mutated: False",
+            "- note: no task created or executed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-disposition",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_disposition",
+                "success": False,
+                "error": "missing_task_id",
+                "result": {
+                    "task_id": None,
+                    "requested_action": requested_action,
+                    "founder_approval_granted": approval_granted,
+                    "failed_gate": "missing_task_id",
+                    "reason": "no numeric task_id found in request",
+                    "mutated": False,
+                    "created_task": False,
+                    "stable_main_untouched": True,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_disposition"),
+        )
+
+    if not approval_granted:
+        response_lines = [
+            "Supervised v10 OpenClaw task disposition attempted.",
+            f"- task_id: {task_id}",
+            f"- requested_action: {requested_action}",
+            "- founder_approval_granted: False",
+            "- failed_gate: founder_approval",
+            "- reason: explicit founder approval phrase required for disposition mutation",
+            "- mutated: False",
+            "- note: no task created or executed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-disposition",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_disposition",
+                "success": False,
+                "error": "founder_approval",
+                "result": {
+                    "task_id": task_id,
+                    "requested_action": requested_action,
+                    "founder_approval_granted": False,
+                    "failed_gate": "founder_approval",
+                    "reason": "explicit founder approval phrase required for disposition mutation",
+                    "mutated": False,
+                    "created_task": False,
+                    "stable_main_untouched": True,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_disposition"),
+        )
+
+    from app.db.database import dict_row, get_db
+
+    with get_db() as db:
+        task_row = dict_row(db.execute("SELECT * FROM openclaw_tasks WHERE id = ?", (task_id,)).fetchone())
+    if not task_row:
+        response_lines = [
+            "Supervised v10 OpenClaw task disposition attempted.",
+            f"- task_id: {task_id}",
+            f"- requested_action: {requested_action}",
+            "- founder_approval_granted: True",
+            "- failed_gate: task_not_found",
+            f"- reason: task_id={task_id} was not found",
+            "- mutated: False",
+            "- note: no task created or executed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-disposition",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_disposition",
+                "success": False,
+                "error": "task_not_found",
+                "result": {
+                    "task_id": task_id,
+                    "requested_action": requested_action,
+                    "founder_approval_granted": True,
+                    "failed_gate": "task_not_found",
+                    "reason": f"task_id={task_id} was not found",
+                    "mutated": False,
+                    "created_task": False,
+                    "stable_main_untouched": True,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_disposition"),
+        )
+
+    preflight = _build_supervised_v10_repair_preflight_result()
+    description = str(task_row.get("description") or "")
+    payload = _parse_task_payload_from_description(description)
+    scope = str(payload.get("scope") or _task_summary_line(description))
+
+    lane = str(payload.get("lane") or ("v10-test" if "supervised-v10" in str(task_row.get("source") or "") else "unknown"))
+    branch = str(payload.get("branch") or ("feature/v10.0-test-lane" if lane == "v10-test" else "unknown"))
+    worktree = str(payload.get("worktree") or ("/home/rg/empire-repo-v10" if lane == "v10-test" else "unknown"))
+    status = str(task_row.get("status") or "unknown").lower()
+    title = str(task_row.get("title") or "")
+
+    scope_blob = f"{title}\n{scope}\n{description}".lower()
+    task_ref_validation_related = any(
+        marker in scope_blob
+        for marker in (
+            "task_ref handshake",
+            "recommendation-to-create confirmation token",
+            "recommendation to create confirmation token",
+        )
+    )
+    reference_commit = "2140447"
+    reference_commit_reachable = _is_reference_commit_reachable(reference_commit, worktree)
+    duplicate_assessment = "duplicate_validation_task" if (task_ref_validation_related and reference_commit_reachable) else "unknown"
+
+    gate_failures: list[tuple[str, str]] = []
+    if lane != "v10-test":
+        gate_failures.append(("lane", f"task lane is not v10-test: {lane}"))
+    if branch != "feature/v10.0-test-lane":
+        gate_failures.append(("branch", f"task branch is not feature/v10.0-test-lane: {branch}"))
+    if status not in {"queued", "paused"}:
+        gate_failures.append(("status_not_mutable", f"task status not mutable for disposition: {status}"))
+    if not duplicate_claimed and duplicate_assessment != "duplicate_validation_task":
+        gate_failures.append(("duplicate_assessment", "task was not classified as duplicate_validation_task and duplicate was not explicitly requested"))
+    if str(preflight.get("lane") or "") != "v10-test":
+        gate_failures.append(("runtime_lane", f"runtime lane is not v10-test: {preflight.get('lane')}"))
+    if str(preflight.get("branch") or "") != "feature/v10.0-test-lane":
+        gate_failures.append(("runtime_branch", f"runtime branch is not feature/v10.0-test-lane: {preflight.get('branch')}"))
+
+    if gate_failures:
+        failed_gate, reason = gate_failures[0]
+        response_lines = [
+            "Supervised v10 OpenClaw task disposition attempted.",
+            f"- task_id: {task_id}",
+            f"- requested_action: {requested_action}",
+            "- founder_approval_granted: True",
+            f"- previous_status: {status}",
+            "- new_status: none",
+            f"- failed_gate: {failed_gate}",
+            f"- reason: {reason}",
+            f"- duplicate_assessment: {duplicate_assessment}",
+            "- mutated: False",
+            "- note: no task created or executed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-disposition",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_disposition",
+                "success": False,
+                "error": failed_gate,
+                "result": {
+                    "task_id": task_id,
+                    "requested_action": requested_action,
+                    "founder_approval_granted": True,
+                    "failed_gate": failed_gate,
+                    "reason": reason,
+                    "previous_status": status,
+                    "new_status": None,
+                    "mutated": False,
+                    "duplicate_assessment": duplicate_assessment,
+                    "reference_commit": reference_commit,
+                    "reference_commit_reachable": reference_commit_reachable,
+                    "created_task": False,
+                    "stable_main_untouched": True,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_disposition"),
+        )
+
+    reason = (
+        "Cancelled as duplicate validation task; scope matches task_ref handshake validation already present in commit "
+        f"{reference_commit} lineage."
+    )
+    disposition_error = (
+        "Cancelled via supervised-v10-openclaw-task-disposition. "
+        f"Reason: {reason}"
+    )
+    updated = False
+    with get_db() as db:
+        cursor = db.execute(
+            """
+            UPDATE openclaw_tasks
+            SET status = 'cancelled', completed_at = datetime('now'), error = ?
+            WHERE id = ? AND status IN ('queued', 'paused')
+            """,
+            (disposition_error, task_id),
+        )
+        updated = bool(getattr(cursor, "rowcount", 0) == 1)
+
+    if not updated:
+        response_lines = [
+            "Supervised v10 OpenClaw task disposition attempted.",
+            f"- task_id: {task_id}",
+            f"- requested_action: {requested_action}",
+            "- founder_approval_granted: True",
+            f"- previous_status: {status}",
+            "- new_status: none",
+            "- failed_gate: mutation_conflict",
+            "- reason: task row was not updated; status may have changed concurrently",
+            "- mutated: False",
+            "- note: no task created or executed",
+        ]
+        return ChatResponse(
+            response="\n".join(response_lines),
+            model_used="supervised-v10-openclaw-task-disposition",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "supervised_v10_openclaw_task_disposition",
+                "success": False,
+                "error": "mutation_conflict",
+                "result": {
+                    "task_id": task_id,
+                    "requested_action": requested_action,
+                    "founder_approval_granted": True,
+                    "failed_gate": "mutation_conflict",
+                    "reason": "task row was not updated; status may have changed concurrently",
+                    "previous_status": status,
+                    "new_status": None,
+                    "mutated": False,
+                    "created_task": False,
+                    "stable_main_untouched": True,
+                },
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_disposition"),
+        )
+
+    response_lines = [
+        "Supervised v10 OpenClaw task disposition applied.",
+        f"- task_id: {task_id}",
+        f"- requested_action: {requested_action}",
+        "- founder_approval_granted: True",
+        f"- previous_status: {status}",
+        "- new_status: cancelled",
+        f"- duplicate_assessment: {duplicate_assessment}",
+        f"- reason: {reason}",
+        "- mutated: True",
+        "- created_task: False",
+        "- stable_main_untouched: True",
+        "- note: no task created or executed",
+    ]
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="supervised-v10-openclaw-task-disposition",
+        fallback_used=False,
+        tool_results=[{
+            "tool": "supervised_v10_openclaw_task_disposition",
+            "success": True,
+            "result": {
+                "task_id": task_id,
+                "requested_action": requested_action,
+                "founder_approval_granted": True,
+                "failed_gate": None,
+                "reason": reason,
+                "previous_status": status,
+                "new_status": "cancelled",
+                "mutated": True,
+                "duplicate_assessment": duplicate_assessment,
+                "reference_commit": reference_commit,
+                "reference_commit_reachable": reference_commit_reachable,
+                "created_task": False,
+                "stable_main_untouched": True,
+                "preflight": preflight,
+            },
+        }],
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_disposition"),
+    )
+
+
 def _openclaw_gate_response(request: ChatRequest) -> ChatResponse:
     try:
         from app.services.max.openclaw_gate import check_openclaw_gate
@@ -2795,6 +3142,10 @@ def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = Fal
         supervised_preflight_response = _supervised_v10_repair_preflight_response(request)
         if supervised_preflight_response is not None:
             return supervised_preflight_response
+
+        supervised_disposition_response = _supervised_v10_openclaw_task_disposition_response(request, founder=founder)
+        if supervised_disposition_response is not None:
+            return supervised_disposition_response
 
         supervised_inspect_response = _supervised_v10_openclaw_task_inspect_response(request, founder=founder)
         if supervised_inspect_response is not None:
