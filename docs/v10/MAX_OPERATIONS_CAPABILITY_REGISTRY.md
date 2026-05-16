@@ -100,6 +100,8 @@ The `task_ref` must be known, unexpired, unconsumed, lane-bound, branch-bound, a
 
 Disposition requires explicit founder approval and a single task id. Without approval, MAX reports `failed_gate=founder_approval` and does not mutate task state.
 
+Legacy OpenClaw rows may not contain explicit lane metadata because the task table has no lane columns and older queued validation tasks predate the structured payload contract. MAX may infer `v10-test` only for legacy duplicate task_ref-handshake validation tasks with strong evidence: supervised v10 repair title/scope, codedesk source context, queued status, current v10 runtime, and commit `2140447` reachable from the v10 lane. Arbitrary unknown-lane rows remain blocked with `failed_gate=lane`.
+
 ## Safe Fallback
 
 If MAX recognizes an operational request but no approved capability exists, it returns a safe capability-missing response:

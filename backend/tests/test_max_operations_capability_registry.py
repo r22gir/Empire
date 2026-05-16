@@ -75,6 +75,26 @@ def _task_row(task_id=8, status="queued"):
     }
 
 
+def _legacy_task_row(task_id=1, status="queued"):
+    return {
+        "id": task_id,
+        "title": "Supervised v10 repair: enforce recommendation-to-create confirmation token",
+        "description": (
+            "Implement tokenized handoff from supervised recommendation route to task-creation route.\n"
+            "- Add task_ref emission in recommendation output.\n"
+            "- Require matching task_ref in create route.\n"
+            "- Keep v10 lane-only scope and update routing tests."
+        ),
+        "status": status,
+        "source": "max",
+        "created_at": "2026-05-16 02:19:56",
+        "completed_at": None,
+        "error": None,
+        "desk": "codedesk",
+        "priority": 5,
+    }
+
+
 class _FakeCursor:
     def __init__(self, row=None, rows=None, rowcount=0):
         self._row = row
@@ -246,12 +266,17 @@ def test_module_explanation_still_routes_to_module_knowledge(monkeypatch):
 
 def test_openclaw_queue_routes_to_read_only_list(monkeypatch):
     max_router = importlib.import_module("app.routers.max.router")
-    fake_db = _patch_task_db(monkeypatch, rows=[_task_row(status="cancelled"), _task_row(task_id=9, status="queued")])
+    _patch_common(monkeypatch, max_router)
+    fake_db = _patch_task_db(monkeypatch, rows=[_legacy_task_row(task_id=1, status="queued"), _task_row(task_id=9, status="queued")])
     response = _chat(max_router, "Show the OpenClaw queue.")
     assert response.model_used == "supervised-v10-openclaw-task-list"
+    assert "lane_source=inferred_legacy" in response.response
+    assert "duplicate_hint=duplicate_validation_task" in response.response
+    assert "disposition_allowed=True" in response.response
     result = response.tool_results[0]["result"]
     assert result["created_tasks"] == 0
     assert result["mutated_tasks"] == 0
+    assert result["tasks"][0]["lane_source"] == "inferred_legacy"
     assert fake_db.insert_count == 0
     assert fake_db.update_count == 0
 

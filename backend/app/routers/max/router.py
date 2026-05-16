@@ -1304,6 +1304,123 @@ def _task_summary_line(description: str | None) -> str:
     return first
 
 
+def infer_openclaw_task_lane(task: dict[str, Any], preflight: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Infer lane metadata for legacy OpenClaw task rows without weakening gates.
+
+    The openclaw_tasks table has no lane columns. Newer supervised tasks carry
+    lane data in the embedded Task payload. Legacy validation tasks may not, so
+    inference is allowed only for the completed v10 task_ref-handshake duplicate
+    pattern with multiple independent signals.
+    """
+    row = task or {}
+    description = str(row.get("description") or "")
+    payload = _parse_task_payload_from_description(description)
+    explicit_lane = str(payload.get("lane") or "").strip()
+    explicit_branch = str(payload.get("branch") or "").strip()
+    explicit_worktree = str(payload.get("worktree") or "").strip()
+    title = str(row.get("title") or "")
+    source = str(row.get("source") or "")
+    desk = str(row.get("desk") or "")
+    status = str(row.get("status") or "").lower()
+    scope = str(payload.get("scope") or _task_summary_line(description))
+    blob = f"{title}\n{scope}\n{description}\n{source}".lower()
+    reference_commit = "2140447"
+
+    legacy_metadata_missing = not bool(explicit_lane or explicit_branch or explicit_worktree)
+    task_ref_validation_related = any(
+        marker in blob
+        for marker in (
+            "task_ref handshake",
+            "recommendation-to-create confirmation token",
+            "recommendation to create confirmation token",
+        )
+    )
+
+    if explicit_lane:
+        lane = explicit_lane
+        branch = explicit_branch or ("feature/v10.0-test-lane" if lane == "v10-test" else "unknown")
+        worktree = explicit_worktree or ("/home/rg/empire-repo-v10" if lane == "v10-test" else "unknown")
+        return {
+            "inferred_lane": lane,
+            "lane_source": "explicit",
+            "inference_confidence": "explicit",
+            "inference_score": 100,
+            "inference_reasons": ["Task payload includes explicit lane metadata."],
+            "legacy_metadata_missing": False,
+            "branch": branch,
+            "worktree": worktree,
+            "task_ref_validation_related": task_ref_validation_related,
+            "reference_commit": reference_commit,
+            "reference_commit_reachable": _is_reference_commit_reachable(reference_commit, worktree),
+        }
+
+    score = 0
+    reasons: list[str] = []
+    if source == "supervised-v10-openclaw-task-create":
+        score += 30
+        reasons.append("source is supervised-v10-openclaw-task-create")
+    elif source == "max" and "supervised v10 repair" in blob:
+        score += 15
+        reasons.append("legacy MAX-created row contains supervised v10 repair wording")
+    if "supervised v10 repair" in title.lower():
+        score += 20
+        reasons.append("title names supervised v10 repair")
+    if task_ref_validation_related:
+        score += 25
+        reasons.append("title/scope matches task_ref handshake validation")
+    if desk == "codedesk":
+        score += 10
+        reasons.append("desk is codedesk")
+    if status in {"queued", "paused", "running"}:
+        score += 10
+        reasons.append(f"task status is {status}")
+    if "feature/v10.0-test-lane" in blob or "/home/rg/empire-repo-v10" in blob:
+        score += 20
+        reasons.append("description mentions v10 branch/worktree")
+    if "v10 lane-only" in blob or "v10-test" in blob:
+        score += 10
+        reasons.append("description mentions v10-only lane scope")
+    if str((preflight or {}).get("lane") or "") == "v10-test":
+        score += 5
+        reasons.append("current runtime lane is v10-test")
+
+    reference_commit_reachable = _is_reference_commit_reachable(reference_commit, "/home/rg/empire-repo-v10")
+    if reference_commit_reachable:
+        score += 15
+        reasons.append("reference commit 2140447 is reachable from v10 HEAD")
+
+    if task_ref_validation_related and reference_commit_reachable and score >= 70:
+        return {
+            "inferred_lane": "v10-test",
+            "lane_source": "inferred_legacy",
+            "inference_confidence": "high",
+            "inference_score": score,
+            "inference_reasons": reasons,
+            "legacy_metadata_missing": legacy_metadata_missing,
+            "branch": "feature/v10.0-test-lane",
+            "worktree": "/home/rg/empire-repo-v10",
+            "task_ref_validation_related": task_ref_validation_related,
+            "reference_commit": reference_commit,
+            "reference_commit_reachable": reference_commit_reachable,
+        }
+
+    if not reasons:
+        reasons.append("no explicit lane metadata and no supervised v10 duplicate-validation signature")
+    return {
+        "inferred_lane": "unknown",
+        "lane_source": "unknown",
+        "inference_confidence": "low",
+        "inference_score": score,
+        "inference_reasons": reasons,
+        "legacy_metadata_missing": legacy_metadata_missing,
+        "branch": "unknown",
+        "worktree": "unknown",
+        "task_ref_validation_related": task_ref_validation_related,
+        "reference_commit": reference_commit,
+        "reference_commit_reachable": reference_commit_reachable,
+    }
+
+
 def _has_supervised_scope_tamper(
     message: str | None,
     *,
@@ -1569,11 +1686,10 @@ def _collect_supervised_v10_openclaw_task_status(task_id: int) -> dict[str, Any]
             "note": "task not found",
         }
 
-    description = str(row.get("description") or "")
-    payload = _parse_task_payload_from_description(description)
-    lane = str(payload.get("lane") or ("v10-test" if "supervised-v10" in str(row.get("source") or "") else "unknown"))
-    branch = str(payload.get("branch") or ("feature/v10.0-test-lane" if lane == "v10-test" else "unknown"))
-    worktree = str(payload.get("worktree") or ("/home/rg/empire-repo-v10" if lane == "v10-test" else "unknown"))
+    lane_info = infer_openclaw_task_lane(row, _build_supervised_v10_repair_preflight_result())
+    lane = str(lane_info.get("inferred_lane") or "unknown")
+    branch = str(lane_info.get("branch") or "unknown")
+    worktree = str(lane_info.get("worktree") or "unknown")
     return {
         "supported": True,
         "task_id": int(row.get("id") or task_id),
@@ -1583,6 +1699,9 @@ def _collect_supervised_v10_openclaw_task_status(task_id: int) -> dict[str, Any]
         "lane": lane,
         "branch": branch,
         "worktree": worktree,
+        "lane_source": lane_info.get("lane_source"),
+        "legacy_metadata_missing": lane_info.get("legacy_metadata_missing"),
+        "inference_reasons": lane_info.get("inference_reasons"),
         "source": row.get("source"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
@@ -1711,10 +1830,10 @@ def _format_openclaw_task_list_response(request: ChatRequest, status_filter: str
     params.extend([20, 0])
 
     with get_db() as db:
-        rows = dict_rows(
+        raw_rows = dict_rows(
             db.execute(
                 f"""
-                SELECT id, title, desk, status, source, priority, created_at, completed_at, error
+                SELECT id, title, description, desk, status, source, priority, created_at, completed_at, error, commit_hash
                 FROM openclaw_tasks
                 {where}
                 ORDER BY created_at DESC
@@ -1723,6 +1842,47 @@ def _format_openclaw_task_list_response(request: ChatRequest, status_filter: str
                 params,
             ).fetchall()
         )
+
+    preflight = _build_supervised_v10_repair_preflight_result()
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        row = dict(raw)
+        lane_info = infer_openclaw_task_lane(row, preflight)
+        status = str(row.get("status") or "unknown").lower()
+        duplicate_hint = (
+            "duplicate_validation_task"
+            if lane_info.get("task_ref_validation_related") and lane_info.get("reference_commit_reachable")
+            else "unknown"
+        )
+        disposition_allowed = (
+            str(lane_info.get("inferred_lane") or "") == "v10-test"
+            and duplicate_hint == "duplicate_validation_task"
+            and status in {"queued", "paused"}
+        )
+        if lane_info.get("lane_source") == "inferred_legacy" and status != "queued":
+            disposition_allowed = False
+        blocked_reason = "ready_for_approved_duplicate_disposition" if disposition_allowed else "not_safe_for_disposition"
+        if str(lane_info.get("inferred_lane") or "") != "v10-test":
+            blocked_reason = "lane_unknown_or_not_v10"
+        elif duplicate_hint != "duplicate_validation_task":
+            blocked_reason = "not_duplicate_validation_task"
+        elif status not in {"queued", "paused"}:
+            blocked_reason = f"status_not_mutable:{status}"
+        elif lane_info.get("lane_source") == "inferred_legacy" and status != "queued":
+            blocked_reason = f"legacy_inference_requires_queued_status:{status}"
+        row.update(
+            {
+                "lane": lane_info.get("inferred_lane"),
+                "lane_source": lane_info.get("lane_source"),
+                "legacy_metadata_missing": lane_info.get("legacy_metadata_missing"),
+                "inference_confidence": lane_info.get("inference_confidence"),
+                "inference_reasons": lane_info.get("inference_reasons"),
+                "duplicate_hint": duplicate_hint,
+                "disposition_allowed": disposition_allowed,
+                "disposition_reason": blocked_reason,
+            }
+        )
+        rows.append(row)
 
     lines = [
         "OpenClaw task list (read-only):",
@@ -1738,7 +1898,10 @@ def _format_openclaw_task_list_response(request: ChatRequest, status_filter: str
                 title = title[:107] + "..."
             lines.append(
                 f"{row.get('id')}. {title} "
-                f"[status={row.get('status')}, desk={row.get('desk')}, source={row.get('source')}]"
+                f"[status={row.get('status')}, desk={row.get('desk')}, source={row.get('source')}, "
+                f"lane={row.get('lane')}, lane_source={row.get('lane_source')}, "
+                f"duplicate_hint={row.get('duplicate_hint')}, disposition_allowed={row.get('disposition_allowed')}, "
+                f"reason={row.get('disposition_reason')}]"
             )
     else:
         lines.append("- No matching OpenClaw tasks found.")
@@ -2656,24 +2819,17 @@ def _supervised_v10_openclaw_task_inspect_response(request: ChatRequest, founder
     scope = str(payload.get("scope") or _task_summary_line(description))
     required_tests = payload.get("required_tests") if isinstance(payload.get("required_tests"), list) else []
 
-    lane = str(payload.get("lane") or "v10-test")
-    branch = str(payload.get("branch") or "unknown")
-    worktree = str(payload.get("worktree") or "/home/rg/empire-repo-v10")
+    lane_info = infer_openclaw_task_lane(task_row, preflight)
+    lane = str(lane_info.get("inferred_lane") or "unknown")
+    branch = str(lane_info.get("branch") or "unknown")
+    worktree = str(lane_info.get("worktree") or "unknown")
     title = str(task_row.get("title") or "")
     status = str(task_row.get("status") or "unknown").lower()
     source = str(task_row.get("source") or "unknown")
 
-    scope_blob = f"{title}\n{scope}\n{description}".lower()
-    task_ref_validation_related = any(
-        marker in scope_blob
-        for marker in (
-            "task_ref handshake",
-            "recommendation-to-create confirmation token",
-            "recommendation to create confirmation token",
-        )
-    )
-    reference_commit = "2140447"
-    reference_commit_reachable = _is_reference_commit_reachable(reference_commit, worktree)
+    task_ref_validation_related = bool(lane_info.get("task_ref_validation_related"))
+    reference_commit = str(lane_info.get("reference_commit") or "2140447")
+    reference_commit_reachable = bool(lane_info.get("reference_commit_reachable"))
 
     duplicate_assessment = "unknown"
     recommendation = "inspect manually"
@@ -2714,6 +2870,8 @@ def _supervised_v10_openclaw_task_inspect_response(request: ChatRequest, founder
         f"- task_title: {title or 'none'}",
         f"- status: {status}",
         f"- lane: {lane}",
+        f"- lane_source: {lane_info.get('lane_source')}",
+        f"- legacy_metadata_missing: {lane_info.get('legacy_metadata_missing')}",
         f"- branch: {branch}",
         f"- worktree: {worktree}",
         f"- created_at: {task_row.get('created_at') or 'unknown'}",
@@ -2724,6 +2882,7 @@ def _supervised_v10_openclaw_task_inspect_response(request: ChatRequest, founder
         f"- task_commit_hash: {task_row.get('commit_hash') or 'none'}",
         f"- runtime_commit: {preflight.get('commit')}",
         f"- task_ref_handshake_related: {task_ref_validation_related}",
+        f"- inference_reasons: {'; '.join(str(x) for x in (lane_info.get('inference_reasons') or [])) or 'none'}",
         f"- duplicate_assessment: {duplicate_assessment}",
         f"- recommendation: {recommendation}",
         f"- reason: {reason}",
@@ -2735,6 +2894,9 @@ def _supervised_v10_openclaw_task_inspect_response(request: ChatRequest, founder
         "task_title": title,
         "status": status,
         "lane": lane,
+        "lane_source": lane_info.get("lane_source"),
+        "legacy_metadata_missing": lane_info.get("legacy_metadata_missing"),
+        "inference_reasons": lane_info.get("inference_reasons"),
         "branch": branch,
         "worktree": worktree,
         "created_at": task_row.get("created_at"),
@@ -2885,23 +3047,17 @@ def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, fou
     payload = _parse_task_payload_from_description(description)
     scope = str(payload.get("scope") or _task_summary_line(description))
 
-    lane = str(payload.get("lane") or ("v10-test" if "supervised-v10" in str(task_row.get("source") or "") else "unknown"))
-    branch = str(payload.get("branch") or ("feature/v10.0-test-lane" if lane == "v10-test" else "unknown"))
-    worktree = str(payload.get("worktree") or ("/home/rg/empire-repo-v10" if lane == "v10-test" else "unknown"))
+    lane_info = infer_openclaw_task_lane(task_row, preflight)
+    lane = str(lane_info.get("inferred_lane") or "unknown")
+    branch = str(lane_info.get("branch") or "unknown")
+    worktree = str(lane_info.get("worktree") or "unknown")
+    lane_source = str(lane_info.get("lane_source") or "unknown")
     status = str(task_row.get("status") or "unknown").lower()
     title = str(task_row.get("title") or "")
 
-    scope_blob = f"{title}\n{scope}\n{description}".lower()
-    task_ref_validation_related = any(
-        marker in scope_blob
-        for marker in (
-            "task_ref handshake",
-            "recommendation-to-create confirmation token",
-            "recommendation to create confirmation token",
-        )
-    )
-    reference_commit = "2140447"
-    reference_commit_reachable = _is_reference_commit_reachable(reference_commit, worktree)
+    task_ref_validation_related = bool(lane_info.get("task_ref_validation_related"))
+    reference_commit = str(lane_info.get("reference_commit") or "2140447")
+    reference_commit_reachable = bool(lane_info.get("reference_commit_reachable"))
     duplicate_assessment = "duplicate_validation_task" if (task_ref_validation_related and reference_commit_reachable) else "unknown"
 
     gate_failures: list[tuple[str, str]] = []
@@ -2909,9 +3065,13 @@ def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, fou
         gate_failures.append(("lane", f"task lane is not v10-test: {lane}"))
     if branch != "feature/v10.0-test-lane":
         gate_failures.append(("branch", f"task branch is not feature/v10.0-test-lane: {branch}"))
-    if status not in {"queued", "paused"}:
+    if lane_source == "inferred_legacy" and status != "queued":
+        gate_failures.append(("status_not_mutable", f"legacy inferred duplicate tasks must be queued before disposition: {status}"))
+    elif status not in {"queued", "paused"}:
         gate_failures.append(("status_not_mutable", f"task status not mutable for disposition: {status}"))
-    if not duplicate_claimed and duplicate_assessment != "duplicate_validation_task":
+    if lane_source == "inferred_legacy" and duplicate_assessment != "duplicate_validation_task":
+        gate_failures.append(("duplicate_assessment", "legacy lane inference requires duplicate_validation_task classification"))
+    elif not duplicate_claimed and duplicate_assessment != "duplicate_validation_task":
         gate_failures.append(("duplicate_assessment", "task was not classified as duplicate_validation_task and duplicate was not explicitly requested"))
     if str(preflight.get("lane") or "") != "v10-test":
         gate_failures.append(("runtime_lane", f"runtime lane is not v10-test: {preflight.get('lane')}"))
@@ -2927,8 +3087,12 @@ def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, fou
             "- founder_approval_granted: True",
             f"- previous_status: {status}",
             "- new_status: none",
+            f"- lane: {lane}",
+            f"- lane_source: {lane_source}",
+            f"- legacy_metadata_missing: {lane_info.get('legacy_metadata_missing')}",
             f"- failed_gate: {failed_gate}",
             f"- reason: {reason}",
+            f"- inference_reasons: {'; '.join(str(x) for x in (lane_info.get('inference_reasons') or [])) or 'none'}",
             f"- duplicate_assessment: {duplicate_assessment}",
             "- mutated: False",
             "- note: no task created or executed",
@@ -2949,6 +3113,12 @@ def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, fou
                     "reason": reason,
                     "previous_status": status,
                     "new_status": None,
+                    "lane": lane,
+                    "lane_source": lane_source,
+                    "branch": branch,
+                    "worktree": worktree,
+                    "legacy_metadata_missing": lane_info.get("legacy_metadata_missing"),
+                    "inference_reasons": lane_info.get("inference_reasons"),
                     "mutated": False,
                     "duplicate_assessment": duplicate_assessment,
                     "reference_commit": reference_commit,
@@ -3024,6 +3194,10 @@ def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, fou
         "- founder_approval_granted: True",
         f"- previous_status: {status}",
         "- new_status: cancelled",
+        f"- lane: {lane}",
+        f"- lane_source: {lane_source}",
+        f"- legacy_metadata_missing: {lane_info.get('legacy_metadata_missing')}",
+        f"- inference_reasons: {'; '.join(str(x) for x in (lane_info.get('inference_reasons') or [])) or 'none'}",
         f"- duplicate_assessment: {duplicate_assessment}",
         f"- reason: {reason}",
         "- mutated: True",
@@ -3046,6 +3220,12 @@ def _supervised_v10_openclaw_task_disposition_response(request: ChatRequest, fou
                 "reason": reason,
                 "previous_status": status,
                 "new_status": "cancelled",
+                "lane": lane,
+                "lane_source": lane_source,
+                "branch": branch,
+                "worktree": worktree,
+                "legacy_metadata_missing": lane_info.get("legacy_metadata_missing"),
+                "inference_reasons": lane_info.get("inference_reasons"),
                 "mutated": True,
                 "duplicate_assessment": duplicate_assessment,
                 "reference_commit": reference_commit,

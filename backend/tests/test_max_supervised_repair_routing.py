@@ -158,6 +158,39 @@ def _openclaw_task_row(
     }
 
 
+def _legacy_duplicate_task_row(task_id: int = 1, status: str = "queued", source: str = "max") -> dict:
+    return {
+        "id": task_id,
+        "title": "Supervised v10 repair: enforce recommendation-to-create confirmation token",
+        "description": (
+            "Implement tokenized handoff from supervised recommendation route to task-creation route.\n"
+            "- Add task_ref emission in recommendation output.\n"
+            "- Require matching task_ref in create route.\n"
+            "- Keep v10 lane-only scope and update routing tests.\n\n"
+            "## Hermes Support Packet\n"
+            "**Task:** Supervised v10 repair: enforce recommendation-to-create confirmation token\n"
+        ),
+        "status": status,
+        "desk": "codedesk",
+        "source": source,
+        "commit_hash": None,
+        "created_at": "2026-05-16 02:19:56",
+    }
+
+
+def _unknown_lane_arbitrary_task_row(task_id: int = 77, status: str = "queued") -> dict:
+    return {
+        "id": task_id,
+        "title": "Unrelated OpenClaw cleanup task",
+        "description": "Investigate an unrelated queue item with no v10 lane metadata.",
+        "status": status,
+        "desk": "codedesk",
+        "source": "max",
+        "commit_hash": None,
+        "created_at": "2026-05-16 02:19:56",
+    }
+
+
 class _FakeCursor:
     def __init__(self, row, rowcount: int = 0):
         self._row = row
@@ -555,6 +588,120 @@ def test_disposition_rejects_non_v10_task(monkeypatch):
     assert response.model_used == "supervised-v10-openclaw-task-disposition"
     assert "- failed_gate: lane" in response.response
     assert fake_db.update_count == 0
+
+
+def test_unknown_lane_arbitrary_task_cannot_be_cancelled(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _MutableDB(_unknown_lane_arbitrary_task_row(task_id=77, status="queued"))
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(max_router, "_is_reference_commit_reachable", lambda *_args, **_kwargs: True)
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="Approved. Cancel OpenClaw task_id=77 as duplicate validation task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-disposition"
+    assert "- failed_gate: lane" in response.response
+    assert "- lane_source: unknown" in response.response
+    assert fake_db.update_count == 0
+    assert fake_db._row["status"] == "queued"
+
+
+def test_legacy_unknown_lane_duplicate_can_be_cancelled_with_approval(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _MutableDB(_legacy_duplicate_task_row(task_id=1, status="queued"))
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(max_router, "_is_reference_commit_reachable", lambda *_args, **_kwargs: True)
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="Approved. Cancel OpenClaw task_id=1 as duplicate validation task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-disposition"
+    assert "- mutated: True" in response.response
+    assert "- lane_source: inferred_legacy" in response.response
+    assert "- legacy_metadata_missing: True" in response.response
+    result = (response.tool_results[0] or {}).get("result") or {}
+    assert result.get("lane_source") == "inferred_legacy"
+    assert fake_db.update_count == 1
+    assert fake_db._row["status"] == "cancelled"
+
+
+def test_legacy_unknown_lane_duplicate_without_approval_is_blocked(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _MutableDB(_legacy_duplicate_task_row(task_id=1, status="queued"))
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(max_router, "_is_reference_commit_reachable", lambda *_args, **_kwargs: True)
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="Cancel OpenClaw task_id=1 as duplicate validation task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-disposition"
+    assert "- failed_gate: founder_approval" in response.response
+    assert fake_db.update_count == 0
+    assert fake_db._row["status"] == "queued"
+
+
+def test_legacy_unknown_lane_running_duplicate_is_not_cancelled(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    db_module = importlib.import_module("app.db.database")
+    fake_db = _MutableDB(_legacy_duplicate_task_row(task_id=1, status="running"))
+
+    monkeypatch.setattr(db_module, "get_db", lambda: _ReadOnlyDBCtx(fake_db))
+    monkeypatch.setattr(db_module, "dict_row", lambda row: row)
+    monkeypatch.setattr(max_router, "_build_supervised_v10_repair_preflight_result", _preflight_payload)
+    monkeypatch.setattr(max_router, "_is_reference_commit_reachable", lambda *_args, **_kwargs: True)
+
+    response = asyncio.run(
+        max_router.chat_with_max(
+            max_router.ChatRequest(
+                message="Approved. Cancel OpenClaw task_id=1 as duplicate validation task.",
+                history=[],
+                channel="web",
+            ),
+            BackgroundTasks(),
+            Response(),
+        )
+    )
+    assert response.model_used == "supervised-v10-openclaw-task-disposition"
+    assert "- failed_gate: status_not_mutable" in response.response
+    assert "- lane_source: inferred_legacy" in response.response
+    assert fake_db.update_count == 0
+    assert fake_db._row["status"] == "running"
 
 
 def test_recommendation_emits_task_ref_and_stores_pending_recommendation(monkeypatch):
