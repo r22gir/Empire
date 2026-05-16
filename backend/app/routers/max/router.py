@@ -843,10 +843,13 @@ SUPERVISED_REPAIR_COMMAND_MARKERS = (
     "run v10 supervised repair",
     "supervised repair",
 )
-SUPERVISED_REPAIR_PREFLIGHT_MARKERS = (
+SUPERVISED_REPAIR_PREFLIGHT_ONLY_MARKERS = (
     "preflight only",
     "run preflight only",
-    "preflight",
+    "verify lane only",
+    "check status only",
+    "do not search hermes",
+    "do not recommend task",
 )
 SUPERVISED_REPAIR_ENDPOINT_MARKERS = (
     "verify v10 lane",
@@ -861,6 +864,41 @@ SUPERVISED_REPAIR_SAFETY_MARKERS = (
     "do not answer with openclaw documentation",
     "create one bounded task",
     "wait for founder approval",
+)
+SUPERVISED_REPAIR_RECOMMEND_MARKERS = (
+    "continue supervised v10 self-repair mode",
+    "continue supervised repair mode",
+    "search hermes for approved/current",
+    "search hermes for approved current",
+    "recommend exactly one bounded openclaw repair task",
+    "recommend exactly one bounded openclaw task",
+    "recommend exactly one bounded task",
+    "recommend one bounded openclaw repair task",
+    "recommend one bounded openclaw task",
+    "recommend one bounded task",
+    "use the successful preflight result as the safety gate",
+    "use preflight result as the safety gate",
+)
+SUPERVISED_REPAIR_RECOMMEND_HERMES_MARKERS = (
+    "search hermes",
+    "approved/current",
+    "approved current",
+    "artifact memory",
+    "hermes artifact",
+    "v10 repair context",
+)
+SUPERVISED_REPAIR_RECOMMEND_NO_CREATE_MARKERS = (
+    "do not create the task yet",
+    "do not create task yet",
+    "do not create the task",
+    "do not create task",
+    "no task created yet",
+)
+SUPERVISED_REPAIR_TASK_CREATE_MARKERS = (
+    "approved. create exactly one bounded openclaw task",
+    "i approve this task",
+    "proceed with the recommended openclaw task",
+    "founder approves creating this one task",
 )
 EMAIL_SEND_TRUTH_PATTERNS = (
     r"^\s*send to my email\s*$",
@@ -918,17 +956,43 @@ def _is_supervised_v10_repair_preflight_request(message: str | None) -> bool:
     text = (message or "").lower().strip()
     if not text:
         return False
+    if _is_supervised_v10_repair_recommend_request(text):
+        return False
+    if _is_supervised_v10_openclaw_task_create_request(text):
+        return False
     supervision_signal = any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS)
-    preflight_signal = any(marker in text for marker in SUPERVISED_REPAIR_PREFLIGHT_MARKERS)
+    preflight_signal = any(marker in text for marker in SUPERVISED_REPAIR_PREFLIGHT_ONLY_MARKERS)
     endpoint_signal = any(marker in text for marker in SUPERVISED_REPAIR_ENDPOINT_MARKERS)
     safety_signal = any(marker in text for marker in SUPERVISED_REPAIR_SAFETY_MARKERS)
-    if not supervision_signal and not preflight_signal:
+    if not preflight_signal:
         return False
-    if preflight_signal and (supervision_signal or endpoint_signal or safety_signal):
-        return True
-    if supervision_signal and (endpoint_signal or safety_signal):
-        return True
-    return False
+    return bool(supervision_signal or endpoint_signal or safety_signal)
+
+
+def _is_supervised_v10_openclaw_task_create_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    if not any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS) and "openclaw" not in text:
+        return False
+    return any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_MARKERS)
+
+
+def _is_supervised_v10_repair_recommend_request(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    if _is_supervised_v10_openclaw_task_create_request(text):
+        return False
+    supervision_signal = any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS)
+    recommend_signal = any(marker in text for marker in SUPERVISED_REPAIR_RECOMMEND_MARKERS)
+    if not recommend_signal and all(token in text for token in ("recommend", "bounded", "openclaw")):
+        recommend_signal = True
+    hermes_signal = any(marker in text for marker in SUPERVISED_REPAIR_RECOMMEND_HERMES_MARKERS)
+    no_create_signal = any(marker in text for marker in SUPERVISED_REPAIR_RECOMMEND_NO_CREATE_MARKERS)
+    if not supervision_signal or not recommend_signal:
+        return False
+    return bool(hermes_signal or no_create_signal)
 
 
 def _collect_inprocess_max_status_snapshot() -> dict[str, Any]:
@@ -1096,6 +1160,208 @@ def _supervised_v10_repair_preflight_response(request: ChatRequest) -> ChatRespo
             "result": preflight,
         }],
         metadata=_response_metadata(request.channel, skill_used="supervised_v10_repair_preflight"),
+    )
+
+
+def _build_supervised_v10_repair_recommendation(*, founder: bool) -> dict[str, Any]:
+    preflight = _build_supervised_v10_repair_preflight_result()
+    search_query = (
+        "v10 repair OpenClaw MAX Hermes artifact memory runtime truth supervised repair"
+    )
+    search_call = {
+        "tool": "hermes_artifact_search",
+        "query": search_query,
+        "approval_status": "approved",
+        "current_only": True,
+        "include_superseded": False,
+        "limit": 6,
+    }
+    search_result = execute_tool(search_call, founder=founder)
+    tool_results: list[dict[str, Any]] = [search_result.to_dict()]
+    artifacts_used: list[dict[str, Any]] = []
+
+    if search_result.success:
+        for hit in (search_result.result or {}).get("results", []):
+            artifact_id = str(hit.get("id") or "").strip()
+            if not artifact_id:
+                continue
+            get_result = execute_tool({"tool": "hermes_artifact_get", "artifact_id": artifact_id}, founder=founder)
+            tool_results.append(get_result.to_dict())
+            if not get_result.success:
+                continue
+            bundle = get_result.result or {}
+            metadata = bundle.get("metadata") or {}
+            lane = str(metadata.get("lane") or hit.get("lane") or "").strip()
+            approval_status = str(metadata.get("approval_status") or hit.get("approval_status") or "").strip()
+            is_current = bool(bundle.get("is_current"))
+            if approval_status != "approved":
+                continue
+            if not is_current:
+                continue
+            if lane and lane != "v10-test":
+                continue
+            summary = str(bundle.get("summary") or hit.get("summary") or "").strip()
+            artifacts_used.append(
+                {
+                    "id": artifact_id,
+                    "title": hit.get("title") or artifact_id,
+                    "module": metadata.get("module") or hit.get("module") or "system",
+                    "approval_status": approval_status,
+                    "is_current": is_current,
+                    "lane": lane or "v10-test",
+                    "updated_at": metadata.get("updated_at") or metadata.get("created_at") or hit.get("updated_at"),
+                    "summary": summary[:280] + ("..." if len(summary) > 280 else ""),
+                }
+            )
+            if len(artifacts_used) >= 3:
+                break
+
+    recommended_task = {
+        "title": "Supervised v10 repair: enforce recommendation-to-create confirmation token",
+        "scope": (
+            "Add a task_ref handshake so supervised recommendation output produces a single "
+            "bounded token, and the create route requires that exact token before queueing OpenClaw work."
+        ),
+        "why_safe": (
+            "v10-test only routing change; no stable/main paths touched; side effects limited to "
+            "MAX supervised repair handlers and routing tests."
+        ),
+        "likely_files_affected": [
+            "backend/app/routers/max/router.py",
+            "backend/tests/test_max_supervised_repair_routing.py",
+        ],
+        "tests_required": [
+            "pytest backend/tests/test_max_supervised_repair_routing.py -q",
+            "pytest backend/tests/test_max_truth_guardrails.py -q",
+            "pytest backend/tests/test_runtime_git_lane_mapping.py -q",
+        ],
+        "founder_approval_required_before_creation": True,
+    }
+
+    return {
+        "preflight": preflight,
+        "search_query": search_query,
+        "artifacts_used": artifacts_used,
+        "recommended_task": recommended_task,
+        "tool_results": tool_results,
+        "note": "no task created yet",
+    }
+
+
+def _supervised_v10_repair_recommend_task_response(request: ChatRequest, founder: bool) -> ChatResponse | None:
+    if not _is_supervised_v10_repair_recommend_request(request.message):
+        return None
+
+    recommendation = _build_supervised_v10_repair_recommendation(founder=founder)
+    preflight = recommendation.get("preflight") or {}
+    safe_gate = bool(preflight.get("safe_to_create_bounded_openclaw_task"))
+    artifacts_used = recommendation.get("artifacts_used") or []
+    task = recommendation.get("recommended_task") or {}
+    response_lines = [
+        "Supervised v10 repair recommendation (no task created):",
+        f"- lane: {preflight.get('lane')}",
+        f"- branch: {preflight.get('branch')}",
+        f"- commit: {preflight.get('commit')}",
+        f"- backend_port: {preflight.get('backend_port')}",
+        f"- frontend_port: {preflight.get('frontend_port')}",
+        f"- git_freshness_status: {preflight.get('git_freshness_status')}",
+        f"- hermes_artifact_layer_enabled: {preflight.get('hermes_artifact_layer_enabled')}",
+        f"- safety_gate_ok: {safe_gate}",
+        "Hermes approved/current context used:",
+    ]
+    if artifacts_used:
+        for idx, artifact in enumerate(artifacts_used, start=1):
+            response_lines.append(
+                f"{idx}. {artifact.get('title')} ({artifact.get('id')[:12]}) "
+                f"[module={artifact.get('module')}, lane={artifact.get('lane')}, status={artifact.get('approval_status')}/current]"
+            )
+    else:
+        response_lines.append("- No matching approved/current v10 artifacts found; recommendation falls back to runtime-safe defaults.")
+
+    response_lines.extend(
+        [
+            "Recommended bounded OpenClaw repair task:",
+            f"- title: {task.get('title')}",
+            f"- scope: {task.get('scope')}",
+            f"- why_safe: {task.get('why_safe')}",
+            f"- likely_files_affected: {', '.join(task.get('likely_files_affected') or [])}",
+            f"- tests_required: {', '.join(task.get('tests_required') or [])}",
+            f"- founder_approval_required_before_creation: {task.get('founder_approval_required_before_creation')}",
+            "- note: no task created yet",
+        ]
+    )
+
+    return ChatResponse(
+        response="\n".join(response_lines),
+        model_used="supervised-v10-repair-recommend-task",
+        fallback_used=False,
+        tool_results=recommendation.get("tool_results") or [],
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_repair_recommend_task"),
+    )
+
+
+def _supervised_v10_openclaw_task_create_response(request: ChatRequest, founder: bool) -> ChatResponse | None:
+    if not _is_supervised_v10_openclaw_task_create_request(request.message):
+        return None
+
+    preflight = _build_supervised_v10_repair_preflight_result()
+    if not preflight.get("safe_to_create_bounded_openclaw_task"):
+        return ChatResponse(
+            response=(
+                "Supervised v10 OpenClaw task creation blocked.\n"
+                f"- safety_gate_ok: {preflight.get('safe_to_create_bounded_openclaw_task')}\n"
+                f"- lane: {preflight.get('lane')}\n"
+                f"- branch: {preflight.get('branch')}\n"
+                f"- git_freshness_status: {preflight.get('git_freshness_status')}\n"
+                "- no task created"
+            ),
+            model_used="supervised-v10-openclaw-task-create",
+            fallback_used=False,
+            tool_results=[{
+                "tool": "queue_openclaw_task",
+                "success": False,
+                "error": "safety_gate_blocked",
+                "result": {"preflight": preflight},
+            }],
+            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_create"),
+        )
+
+    title = "Supervised v10 repair: enforce recommendation-to-create confirmation token"
+    description = (
+        "Implement tokenized handoff from supervised recommendation route to task-creation route.\n"
+        "- Add task_ref emission in recommendation output.\n"
+        "- Require matching task_ref in create route.\n"
+        "- Keep v10 lane-only scope and update routing tests."
+    )
+    queue_result = execute_tool(
+        {
+            "tool": "queue_openclaw_task",
+            "title": title,
+            "description": description,
+            "desk": "codedesk",
+            "priority": "normal",
+            "target_repo": "~/empire-repo-v10",
+            "target_branch": "feature/v10.0-test-lane",
+            "hermes_support_requested": True,
+        },
+        founder=founder,
+    )
+    queued = bool(queue_result.success)
+    response_text = (
+        "Supervised v10 OpenClaw task creation attempted.\n"
+        f"- lane: {preflight.get('lane')}\n"
+        f"- branch: {preflight.get('branch')}\n"
+        f"- task_title: {title}\n"
+        f"- queued: {queued}\n"
+        f"- founder_approval_required_before_creation: True\n"
+        f"- note: {'task created' if queued else 'task not created'}"
+    )
+    return ChatResponse(
+        response=response_text,
+        model_used="supervised-v10-openclaw-task-create",
+        fallback_used=False,
+        tool_results=[queue_result.to_dict()],
+        metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_create"),
     )
 
 
@@ -1588,6 +1854,14 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 def _maybe_handle_direct_route_request(request: ChatRequest, founder: bool = False) -> ChatResponse | None:
     if not request.desk and not request.image_filename:
+        supervised_create_response = _supervised_v10_openclaw_task_create_response(request, founder=founder)
+        if supervised_create_response is not None:
+            return supervised_create_response
+
+        supervised_recommend_response = _supervised_v10_repair_recommend_task_response(request, founder=founder)
+        if supervised_recommend_response is not None:
+            return supervised_recommend_response
+
         supervised_preflight_response = _supervised_v10_repair_preflight_response(request)
         if supervised_preflight_response is not None:
             return supervised_preflight_response
