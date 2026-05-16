@@ -194,7 +194,7 @@ def test_supervised_recommendation_prompt_routes_to_recommend_task(monkeypatch):
 
 def test_supervised_explicit_approval_routes_to_task_create(monkeypatch):
     max_router = importlib.import_module("app.routers.max.router")
-    queue_calls: list[dict] = []
+    enqueue_calls: list[dict] = []
 
     monkeypatch.setattr(
         max_router,
@@ -202,18 +202,17 @@ def test_supervised_explicit_approval_routes_to_task_create(monkeypatch):
         _preflight_payload,
     )
 
-    def fake_execute_tool(tool_call, founder=False):
-        tool = tool_call.get("tool")
-        if tool == "queue_openclaw_task":
-            queue_calls.append(dict(tool_call))
-            return max_router.ToolResult(
-                tool=tool,
-                success=True,
-                result={"task_id": 4242, "status": "queued"},
-            )
-        return max_router.ToolResult(tool=tool, success=True, result={})
+    def fake_enqueue(payload):
+        enqueue_calls.append(dict(payload))
+        return {
+            "queued": True,
+            "task_id": 4242,
+            "created_count": 1,
+            "payload": payload,
+            "openclaw_gate": {"allowed": True},
+        }
 
-    monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool)
+    monkeypatch.setattr(max_router, "_enqueue_supervised_v10_openclaw_task", fake_enqueue)
 
     request = max_router.ChatRequest(
         message=(
@@ -227,8 +226,104 @@ def test_supervised_explicit_approval_routes_to_task_create(monkeypatch):
 
     assert response.model_used == "supervised-v10-openclaw-task-create"
     assert "- queued: True" in response.response
-    assert len(queue_calls) == 1
-    assert queue_calls[0].get("tool") == "queue_openclaw_task"
+    assert "- founder_approval_required_before_creation: False" in response.response
+    assert "- failed_gate: none" in response.response
+    assert "- task_id: 4242" in response.response
+    assert len(enqueue_calls) == 1
+    assert response.tool_results[0]["result"]["created_count"] == 1
+
+
+def test_supervised_create_missing_approval_returns_founder_gate(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    enqueue_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        max_router,
+        "_build_supervised_v10_repair_preflight_result",
+        _preflight_payload,
+    )
+
+    def fake_enqueue(payload):
+        enqueue_calls.append(dict(payload))
+        return {"queued": True, "task_id": 9999, "created_count": 1}
+
+    monkeypatch.setattr(max_router, "_enqueue_supervised_v10_openclaw_task", fake_enqueue)
+
+    request = max_router.ChatRequest(
+        message=(
+            "Continue supervised v10 self-repair mode. "
+            "Create exactly one bounded OpenClaw task for the recommended task."
+        ),
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "supervised-v10-openclaw-task-create"
+    assert "- queued: False" in response.response
+    assert "- founder_approval_required_before_creation: True" in response.response
+    assert "- failed_gate: founder_approval" in response.response
+    assert len(enqueue_calls) == 0
+
+
+def test_supervised_create_unsafe_lane_returns_lane_failed_gate(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+
+    def unsafe_lane_payload():
+        payload = dict(_preflight_payload())
+        payload["lane"] = "main"
+        return payload
+
+    monkeypatch.setattr(
+        max_router,
+        "_build_supervised_v10_repair_preflight_result",
+        unsafe_lane_payload,
+    )
+
+    request = max_router.ChatRequest(
+        message="Approved. Create exactly one bounded OpenClaw task for the recommended task.",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "supervised-v10-openclaw-task-create"
+    assert "- queued: False" in response.response
+    assert "- founder_approval_required_before_creation: False" in response.response
+    assert "- failed_gate: lane" in response.response
+
+
+def test_supervised_create_queue_failure_reports_specific_gate(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+
+    monkeypatch.setattr(
+        max_router,
+        "_build_supervised_v10_repair_preflight_result",
+        _preflight_payload,
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_enqueue_supervised_v10_openclaw_task",
+        lambda payload: {
+            "queued": False,
+            "failed_gate": "openclaw_gate",
+            "reason": "worker unavailable",
+            "payload": payload,
+        },
+    )
+
+    request = max_router.ChatRequest(
+        message="I approve this task. Create exactly one bounded OpenClaw task now.",
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "supervised-v10-openclaw-task-create"
+    assert "- queued: False" in response.response
+    assert "- founder_approval_required_before_creation: False" in response.response
+    assert "- failed_gate: openclaw_gate" in response.response
+    assert "- reason: worker unavailable" in response.response
 
 
 def test_openclaw_definition_question_still_routes_to_module_knowledge(monkeypatch):
@@ -337,6 +432,7 @@ def test_preflight_only_does_not_create_openclaw_task(monkeypatch):
     max_router = importlib.import_module("app.routers.max.router")
     blocked_tools = {"queue_openclaw_task", "dispatch_to_openclaw", "create_openclaw_task"}
     seen_tools: list[str] = []
+    enqueue_calls: list[dict] = []
 
     monkeypatch.setattr(
         max_router,
@@ -356,6 +452,11 @@ def test_preflight_only_does_not_create_openclaw_task(monkeypatch):
 
     monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool)
     monkeypatch.setattr(max_router.ai_router, "chat", fail_ai_router)
+    monkeypatch.setattr(
+        max_router,
+        "_enqueue_supervised_v10_openclaw_task",
+        lambda payload: enqueue_calls.append(dict(payload)) or {"queued": True, "task_id": 1},
+    )
 
     request = max_router.ChatRequest(
         message=(
@@ -369,3 +470,40 @@ def test_preflight_only_does_not_create_openclaw_task(monkeypatch):
 
     assert response.model_used == "supervised-v10-repair-preflight"
     assert not any(tool in blocked_tools for tool in seen_tools)
+    assert len(enqueue_calls) == 0
+
+
+def test_recommendation_only_does_not_create_openclaw_task(monkeypatch):
+    max_router = importlib.import_module("app.routers.max.router")
+    enqueue_calls: list[dict] = []
+
+    monkeypatch.setattr(
+        max_router,
+        "_build_supervised_v10_repair_preflight_result",
+        _preflight_payload,
+    )
+    monkeypatch.setattr(
+        max_router,
+        "_enqueue_supervised_v10_openclaw_task",
+        lambda payload: enqueue_calls.append(dict(payload)) or {"queued": True, "task_id": 2},
+    )
+
+    def fake_execute_tool(tool_call, founder=False):
+        if tool_call.get("tool") == "hermes_artifact_search":
+            return max_router.ToolResult(tool="hermes_artifact_search", success=True, result={"results": []})
+        return max_router.ToolResult(tool=str(tool_call.get("tool")), success=True, result={})
+
+    monkeypatch.setattr(max_router, "execute_tool", fake_execute_tool)
+
+    request = max_router.ChatRequest(
+        message=(
+            "Continue supervised v10 self-repair mode. Search Hermes for approved/current context. "
+            "Recommend exactly one bounded OpenClaw repair task. Do not create the task yet."
+        ),
+        history=[],
+        channel="web",
+    )
+    response = asyncio.run(max_router.chat_with_max(request, BackgroundTasks(), Response()))
+
+    assert response.model_used == "supervised-v10-repair-recommend-task"
+    assert len(enqueue_calls) == 0

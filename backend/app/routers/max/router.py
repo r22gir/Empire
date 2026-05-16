@@ -899,6 +899,16 @@ SUPERVISED_REPAIR_TASK_CREATE_MARKERS = (
     "i approve this task",
     "proceed with the recommended openclaw task",
     "founder approves creating this one task",
+    "create the bounded v10 openclaw task",
+    "approved create exactly one bounded openclaw task",
+)
+SUPERVISED_REPAIR_TASK_CREATE_REQUEST_MARKERS = (
+    "create exactly one bounded openclaw task",
+    "create one bounded openclaw task",
+    "create the bounded v10 openclaw task",
+    "create bounded openclaw task",
+    "create openclaw task for the recommended task",
+    "create the recommended openclaw task",
 )
 EMAIL_SEND_TRUTH_PATTERNS = (
     r"^\s*send to my email\s*$",
@@ -973,9 +983,19 @@ def _is_supervised_v10_openclaw_task_create_request(message: str | None) -> bool
     text = (message or "").lower().strip()
     if not text:
         return False
-    if not any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS) and "openclaw" not in text:
+    approval_signal = any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_MARKERS)
+    if any(marker in text for marker in SUPERVISED_REPAIR_RECOMMEND_NO_CREATE_MARKERS) and not approval_signal:
         return False
-    return any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_MARKERS)
+    create_signal = any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_REQUEST_MARKERS)
+    if not create_signal:
+        create_signal = bool(
+            "openclaw" in text
+            and "task" in text
+            and "recommended" in text
+            and ("create" in text or "proceed" in text)
+        )
+    supervision_signal = any(marker in text for marker in SUPERVISED_REPAIR_COMMAND_MARKERS) or "supervised" in text
+    return bool(approval_signal or (supervision_signal and create_signal))
 
 
 def _is_supervised_v10_repair_recommend_request(message: str | None) -> bool:
@@ -993,6 +1013,208 @@ def _is_supervised_v10_repair_recommend_request(message: str | None) -> bool:
     if not supervision_signal or not recommend_signal:
         return False
     return bool(hermes_signal or no_create_signal)
+
+
+def _has_supervised_v10_create_approval(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    if not text:
+        return False
+    return any(marker in text for marker in SUPERVISED_REPAIR_TASK_CREATE_MARKERS)
+
+
+def _build_supervised_v10_openclaw_task_payload() -> dict[str, Any]:
+    title = "Supervised v10 repair: enforce recommendation-to-create confirmation token"
+    scope = (
+        "Add a task_ref handshake so supervised recommendation output produces a single bounded token, "
+        "and the create route requires that exact token before queueing OpenClaw work."
+    )
+    return {
+        "title": title,
+        "scope": scope,
+        "lane": "v10-test",
+        "worktree": "/home/rg/empire-repo-v10",
+        "branch": "feature/v10.0-test-lane",
+        "bounded_task": True,
+        "v10_only": True,
+        "allowed_paths": [
+            "/home/rg/empire-repo-v10/backend/app/routers/max/router.py",
+            "/home/rg/empire-repo-v10/backend/tests/test_max_supervised_repair_routing.py",
+        ],
+        "forbidden_paths": [
+            "/home/rg/empire-repo-main",
+            "/home/rg/empire-repo-feature",
+            "/home/rg/empire-repo",
+        ],
+        "required_tests": [
+            "pytest backend/tests/test_max_supervised_repair_routing.py -q",
+            "pytest backend/tests/test_max_truth_guardrails.py -q",
+            "pytest backend/tests/test_runtime_git_lane_mapping.py -q",
+        ],
+        "final_report_required": True,
+        "commit_required": True,
+        "stable_main_untouched_required": True,
+        "promotion_forbidden": True,
+        "founder_approval_source": "supervised-v10-openclaw-task-create",
+        "likely_files_affected": [
+            "backend/app/routers/max/router.py",
+            "backend/tests/test_max_supervised_repair_routing.py",
+        ],
+    }
+
+
+def _evaluate_supervised_v10_create_gates(
+    *,
+    preflight: dict[str, Any],
+    task_payload: dict[str, Any],
+    approval_granted: bool,
+) -> dict[str, Any]:
+    required_tests = task_payload.get("required_tests") or []
+    required_test_set = {
+        "pytest backend/tests/test_max_supervised_repair_routing.py -q",
+        "pytest backend/tests/test_max_truth_guardrails.py -q",
+        "pytest backend/tests/test_runtime_git_lane_mapping.py -q",
+    }
+    gate_checks: list[tuple[str, bool, str]] = [
+        ("founder_approval", approval_granted, "explicit founder approval phrase missing"),
+        ("lane", preflight.get("lane") == "v10-test", f"expected lane v10-test, got {preflight.get('lane')}"),
+        (
+            "branch",
+            preflight.get("branch") == "feature/v10.0-test-lane",
+            f"expected branch feature/v10.0-test-lane, got {preflight.get('branch')}",
+        ),
+        (
+            "git_freshness",
+            preflight.get("git_freshness_status") == "ok",
+            f"expected git freshness ok, got {preflight.get('git_freshness_status')}",
+        ),
+        (
+            "hermes_artifact_layer",
+            bool(preflight.get("hermes_artifact_layer_enabled")),
+            "Hermes artifact layer is not enabled",
+        ),
+        (
+            "preflight_safety_gate",
+            bool(preflight.get("safe_to_create_bounded_openclaw_task")),
+            "preflight safe_to_create_bounded_openclaw_task is false",
+        ),
+        ("bounded_task", bool(task_payload.get("bounded_task")), "task is not marked bounded"),
+        ("v10_only", bool(task_payload.get("v10_only")), "task is not marked v10-only"),
+        (
+            "stable_main_forbidden",
+            "/home/rg/empire-repo-main" in (task_payload.get("forbidden_paths") or [])
+            and "/home/rg/empire-repo-feature" in (task_payload.get("forbidden_paths") or []),
+            "forbidden_paths missing stable/feature protections",
+        ),
+        (
+            "promotion_forbidden",
+            bool(task_payload.get("promotion_forbidden")),
+            "promotion_forbidden flag is false",
+        ),
+        (
+            "required_tests",
+            required_test_set.issubset(set(required_tests)),
+            "required tests are missing from payload",
+        ),
+        (
+            "final_report_required",
+            bool(task_payload.get("final_report_required")),
+            "final_report_required flag is false",
+        ),
+        ("commit_required", bool(task_payload.get("commit_required")), "commit_required flag is false"),
+        (
+            "stable_main_untouched_required",
+            bool(task_payload.get("stable_main_untouched_required")),
+            "stable_main_untouched_required flag is false",
+        ),
+    ]
+    gate_status = {name: ok for name, ok, _ in gate_checks}
+    for name, ok, reason in gate_checks:
+        if not ok:
+            return {
+                "ok": False,
+                "failed_gate": name,
+                "reason": reason,
+                "gate_status": gate_status,
+            }
+    return {
+        "ok": True,
+        "failed_gate": None,
+        "reason": None,
+        "gate_status": gate_status,
+    }
+
+
+def _format_supervised_v10_task_description(task_payload: dict[str, Any]) -> str:
+    lines = [
+        task_payload["scope"],
+        "",
+        "Execution constraints:",
+        "- lane: v10-test only",
+        "- worktree: /home/rg/empire-repo-v10",
+        "- branch: feature/v10.0-test-lane",
+        "- promotion_forbidden: true",
+        "- stable_main_untouched_required: true",
+        "- final_report_required: true",
+        "- commit_required: true",
+        "- required_tests:",
+    ]
+    lines.extend(f"  - {test_cmd}" for test_cmd in task_payload.get("required_tests") or [])
+    lines.append("")
+    lines.append("Task payload:")
+    lines.append(json.dumps(task_payload, indent=2, sort_keys=True))
+    return "\n".join(lines)
+
+
+def _enqueue_supervised_v10_openclaw_task(task_payload: dict[str, Any]) -> dict[str, Any]:
+    from app.db.database import get_db
+    from app.services.max.openclaw_gate import check_openclaw_gate, openclaw_gate_metadata
+
+    gate = check_openclaw_gate(force=True)
+    gate_blob = {**gate.to_dict(), **openclaw_gate_metadata(gate)}
+    if gate.state in {"degraded", "unknown"}:
+        return {
+            "queued": False,
+            "failed_gate": "openclaw_gate",
+            "reason": gate.founder_message,
+            "openclaw_gate": gate_blob,
+        }
+
+    try:
+        description = _format_supervised_v10_task_description(task_payload)
+        with get_db() as db:
+            cursor = db.execute(
+                """INSERT INTO openclaw_tasks
+                   (title, description, desk, priority, source, assigned_to, max_retries, parent_task_id, error)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    task_payload["title"],
+                    description,
+                    "codedesk",
+                    5,
+                    task_payload.get("founder_approval_source") or "supervised-v10-openclaw-task-create",
+                    "openclaw",
+                    2,
+                    None,
+                    None,
+                ),
+            )
+            db.commit()
+            task_id = cursor.lastrowid
+        return {
+            "queued": True,
+            "task_id": task_id,
+            "created_count": 1,
+            "openclaw_gate": gate_blob,
+            "payload": task_payload,
+        }
+    except Exception as exc:
+        return {
+            "queued": False,
+            "failed_gate": "queue_write",
+            "reason": str(exc),
+            "openclaw_gate": gate_blob,
+            "payload": task_payload,
+        }
 
 
 def _collect_inprocess_max_status_snapshot() -> dict[str, Any]:
@@ -1305,62 +1527,64 @@ def _supervised_v10_openclaw_task_create_response(request: ChatRequest, founder:
         return None
 
     preflight = _build_supervised_v10_repair_preflight_result()
-    if not preflight.get("safe_to_create_bounded_openclaw_task"):
-        return ChatResponse(
-            response=(
-                "Supervised v10 OpenClaw task creation blocked.\n"
-                f"- safety_gate_ok: {preflight.get('safe_to_create_bounded_openclaw_task')}\n"
-                f"- lane: {preflight.get('lane')}\n"
-                f"- branch: {preflight.get('branch')}\n"
-                f"- git_freshness_status: {preflight.get('git_freshness_status')}\n"
-                "- no task created"
-            ),
-            model_used="supervised-v10-openclaw-task-create",
-            fallback_used=False,
-            tool_results=[{
-                "tool": "queue_openclaw_task",
-                "success": False,
-                "error": "safety_gate_blocked",
-                "result": {"preflight": preflight},
-            }],
-            metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_create"),
-        )
+    task_payload = _build_supervised_v10_openclaw_task_payload()
+    approval_granted = _has_supervised_v10_create_approval(request.message)
+    gate_eval = _evaluate_supervised_v10_create_gates(
+        preflight=preflight,
+        task_payload=task_payload,
+        approval_granted=approval_granted,
+    )
+    founder_approval_required_before_creation = not approval_granted
+    enqueue_result: dict[str, Any]
+    if gate_eval.get("ok"):
+        enqueue_result = _enqueue_supervised_v10_openclaw_task(task_payload)
+    else:
+        enqueue_result = {
+            "queued": False,
+            "failed_gate": gate_eval.get("failed_gate"),
+            "reason": gate_eval.get("reason"),
+            "payload": task_payload,
+        }
 
-    title = "Supervised v10 repair: enforce recommendation-to-create confirmation token"
-    description = (
-        "Implement tokenized handoff from supervised recommendation route to task-creation route.\n"
-        "- Add task_ref emission in recommendation output.\n"
-        "- Require matching task_ref in create route.\n"
-        "- Keep v10 lane-only scope and update routing tests."
-    )
-    queue_result = execute_tool(
-        {
-            "tool": "queue_openclaw_task",
-            "title": title,
-            "description": description,
-            "desk": "codedesk",
-            "priority": "normal",
-            "target_repo": "~/empire-repo-v10",
-            "target_branch": "feature/v10.0-test-lane",
-            "hermes_support_requested": True,
-        },
-        founder=founder,
-    )
-    queued = bool(queue_result.success)
-    response_text = (
-        "Supervised v10 OpenClaw task creation attempted.\n"
-        f"- lane: {preflight.get('lane')}\n"
-        f"- branch: {preflight.get('branch')}\n"
-        f"- task_title: {title}\n"
-        f"- queued: {queued}\n"
-        f"- founder_approval_required_before_creation: True\n"
-        f"- note: {'task created' if queued else 'task not created'}"
-    )
+    queued = bool(enqueue_result.get("queued"))
+    failed_gate = enqueue_result.get("failed_gate")
+    reason = enqueue_result.get("reason")
+    task_id = enqueue_result.get("task_id")
+    response_lines = [
+        "Supervised v10 OpenClaw task creation attempted.",
+        f"- lane: {preflight.get('lane')}",
+        f"- branch: {preflight.get('branch')}",
+        f"- commit: {preflight.get('commit')}",
+        f"- task_title: {task_payload.get('title')}",
+        f"- queued: {queued}",
+        f"- founder_approval_required_before_creation: {founder_approval_required_before_creation}",
+        f"- failed_gate: {failed_gate or 'none'}",
+        f"- reason: {reason or 'none'}",
+        f"- task_id: {task_id if task_id is not None else 'none'}",
+        f"- note: {'task created' if queued else 'task not created'}",
+    ]
     return ChatResponse(
-        response=response_text,
+        response="\n".join(response_lines),
         model_used="supervised-v10-openclaw-task-create",
         fallback_used=False,
-        tool_results=[queue_result.to_dict()],
+        tool_results=[{
+            "tool": "supervised_v10_openclaw_task_create",
+            "success": queued,
+            "error": None if queued else (reason or failed_gate or "task_not_created"),
+            "result": {
+                "queued": queued,
+                "task_id": task_id,
+                "created_count": int(enqueue_result.get("created_count") or 0),
+                "failed_gate": failed_gate,
+                "reason": reason,
+                "founder_approval_required_before_creation": founder_approval_required_before_creation,
+                "founder_approval_granted": approval_granted,
+                "safety_gates": gate_eval.get("gate_status"),
+                "payload": task_payload,
+                "preflight": preflight,
+                "openclaw_gate": enqueue_result.get("openclaw_gate"),
+            },
+        }],
         metadata=_response_metadata(request.channel, skill_used="supervised_v10_openclaw_task_create"),
     )
 
