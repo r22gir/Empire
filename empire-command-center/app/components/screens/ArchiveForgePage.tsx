@@ -3780,6 +3780,20 @@ function InventorySection() {
           </div>
         </div>
       )}
+      {detailDrawer && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 50, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setDetailDrawer(null)}>
+          <div style={{ width: 'min(820px, 96vw)', height: '100%', background: '#fff', boxShadow: '-12px 0 30px rgba(0,0,0,0.18)', padding: 18, overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18 }}>{detailDrawer.item?.display_title || `Archive #${detailDrawer.item?.id}`}</h3>
+                <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>Item Detail — {detailDrawer.detail?.archive?.tier || ''} tier</div>
+              </div>
+              <button onClick={() => setDetailDrawer(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 8, width: 32, height: 32, cursor: 'pointer' }}><X size={16} /></button>
+            </div>
+            <ItemDetailDrawer detailItem={detailDrawer} onClose={() => setDetailDrawer(null)} onRefresh={() => { setDetailDrawer(null); load(); }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4196,6 +4210,7 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
   );
 }
 
+// eslint-disable-next-line no-unused-vars
 function InfoRow({ label, value, mono }: { label: string; value: string | number | null | undefined; mono?: boolean }) {
   return value !== undefined && value !== null && value !== '' ? (
     <div style={{ display: 'flex', gap: 6 }}>
