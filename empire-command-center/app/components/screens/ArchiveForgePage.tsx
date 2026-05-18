@@ -12,6 +12,7 @@ const API = typeof window !== 'undefined' && window.location.hostname !== 'local
   : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
 
 const AG_API = `${API}/archiveforge`;
+const SUPPORTED_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,22 @@ interface ArchiveItem {
   marketforge_error_message: string;
   created_at: string;
   updated_at: string;
+  archive_id?: number;
+  display_title?: string;
+  short_description?: string;
+  is_life_magazine?: boolean;
+  issue_info_status?: string;
+  ad_opportunity_status?: string;
+  ad_opportunity_ready?: boolean;
+  pricing_status?: string;
+  is_test_record?: boolean;
+  needs_review?: boolean;
+  front_photo_present?: boolean;
+  ad_page_photo_count?: number;
+  verified_ad_count?: number;
+  front_photo_url?: string;
+  thumbnail_url?: string;
+  status_badges?: string[];
 }
 
 interface DraftOutput {
@@ -94,14 +111,266 @@ interface DraftOutput {
   status: string;
 }
 
+interface ListingPacketDraft {
+  draft_id: number;
+  draft_status: string;
+  platform_target: string;
+  title: string;
+  description: string;
+  recommended_price?: number | null;
+  missing_fields?: string[];
+  draft?: {
+    draft_id?: number;
+    draft_status?: string;
+    platform_target?: string;
+    title?: string;
+    recommended_price?: number | null;
+    missing_fields?: string[];
+  };
+}
+
 interface PhotoRecord {
   id: number;
+  photo_id?: number;
   archive_id: number;
   role: string;
   filename: string;
   original_name: string;
   file_path: string;
+  image_path?: string;
+  photo_url?: string;
+  thumbnail_url?: string;
+  mime_type?: string;
+  file_size?: number;
+  file_size_bytes?: number;
+  analysis_status?: string;
   created_at: string;
+}
+
+interface IdentifyAiResult {
+  is_life_magazine?: boolean;
+  confidence?: number;
+  issue_date?: string | null;
+  cover_title?: string | null;
+  visible_text?: string[];
+  subject_description?: string | null;
+  condition_notes?: string | null;
+  tier?: string;
+  pricing_basis?: string | null;
+  recommended_price_range?: { low?: number | null; high?: number | null };
+  evidence_source?: string;
+  reasoning_summary?: string;
+  google_books_candidates?: GoogleBooksCandidate[];
+  selected_google_books_candidate?: GoogleBooksCandidate | null;
+  needs_user_confirmation?: boolean;
+}
+
+interface GoogleBooksCandidate {
+  volume_id?: string;
+  title?: string;
+  publishedDate?: string;
+  publisher?: string;
+  pageCount?: number | null;
+  cover_image_url?: string;
+  preview_link?: string;
+  info_link?: string;
+  web_reader_link?: string;
+  match_confidence?: number;
+  query?: string;
+  lookup_status?: string;
+  cache_hit?: boolean;
+}
+
+interface IdentifyResponse {
+  archive_id: number;
+  photo_id?: number;
+  image_path?: string;
+  file_size_bytes?: number;
+  mime_type?: string;
+  identify_run_id?: string;
+  identified_at?: string;
+  stale_result_used?: boolean;
+  identified: boolean;
+  provider: string;
+  capability: string;
+  image?: {
+    exists?: boolean;
+    readable?: boolean;
+    mime_type?: string;
+    image_path?: string;
+    file_size_bytes?: number;
+    supported_mime_type?: boolean;
+  };
+  ai_result: IdentifyAiResult;
+  google_books_candidates?: GoogleBooksCandidate[];
+  selected_google_books_candidate?: GoogleBooksCandidate | null;
+  needs_user_confirmation?: boolean;
+  archive_updated: boolean;
+}
+
+interface IssueInfoRun {
+  id?: number;
+  run_id?: number;
+  archive_id: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'stale' | 'not_run';
+  front_photo_id?: number | null;
+  image_path?: string;
+  file_size_bytes?: number;
+  mime_type?: string;
+  is_life_magazine?: boolean;
+  confidence?: number;
+  issue_date?: string | null;
+  cover_title?: string | null;
+  detected_subject?: string | null;
+  detected_quote?: string | null;
+  detected_price?: string | null;
+  visible_text?: string[];
+  condition_notes?: string | null;
+  evidence_source?: string;
+  evidence_grade?: string;
+  google_books_candidates?: GoogleBooksCandidate[];
+  selected_google_books_volume_id?: string;
+  selected_google_books_candidate?: GoogleBooksCandidate | null;
+  reference_sources?: Array<Record<string, any>>;
+  conflicts?: Array<Record<string, any>>;
+  dealer_reference?: Record<string, any> | null;
+  needs_user_confirmation?: boolean;
+  ad_opportunity_ready?: boolean;
+  stale_result_used?: boolean;
+  stale_warning?: string;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+interface MatchConfirmation {
+  status: 'pending' | 'confirmed' | 'wrong' | 'manual';
+  source: string;
+  reference_id?: string;
+  reference_url?: string;
+  issue_date?: string | null;
+  cover_title?: string | null;
+  confidence?: number;
+}
+
+interface PricingResult {
+  stage: string;
+  pricing_type: string;
+  true_comps_available: boolean;
+  message: string;
+  rough_comp_min: number;
+  rough_comp_max: number;
+  recommended_price?: number | null;
+  sale_plan?: string;
+  pricing_basis?: string;
+  confidence?: string;
+  warnings?: string[];
+  pricing_summary?: any;
+  comps?: any[];
+  accepted?: boolean;
+}
+
+interface IssueMetadata {
+  id?: number;
+  source_volume_id?: string;
+  issue_title?: string;
+  issue_date?: string;
+  publisher?: string;
+  page_count?: number;
+  description?: string;
+  preview_link?: string;
+  info_link?: string;
+  web_reader_link?: string;
+  cover_image_url?: string;
+  lookup_status?: string;
+  contents_available?: boolean;
+  contents_limitation?: string;
+}
+
+interface GoogleBooksStatus {
+  api_key_configured?: boolean;
+  cooldown_active?: boolean;
+  last_429_at?: string | null;
+  calls_last_hour?: number;
+  calls_today?: number;
+  cache_entries?: number;
+  known_seed_references_available?: boolean;
+}
+
+interface AdOpportunity {
+  id: number;
+  brand?: string;
+  product?: string;
+  category?: string;
+  search_query?: string;
+  evidence_grade?: string;
+  evidence_source?: string;
+  evidence_text?: string;
+  verification_status?: string;
+  estimated_low?: number | null;
+  estimated_high?: number | null;
+  comp_count?: number;
+  sold_comp_count?: number;
+  active_listing_count?: number;
+  value_score?: number;
+  comp_confidence?: string;
+  policy_flags?: string[];
+  recommendation?: string;
+}
+
+interface AdComp {
+  id: number;
+  candidate_id: number;
+  provider?: string;
+  result_type?: string;
+  title?: string;
+  url?: string;
+  price?: number | null;
+  total_price?: number | null;
+  notes?: string;
+}
+
+interface AdCompGroup {
+  candidate: AdOpportunity;
+  comps: AdComp[];
+  summary?: {
+    comp_count?: number;
+    search_link_count?: number;
+    sold_comp_count?: number;
+    active_listing_count?: number;
+    estimated_low?: number | null;
+    estimated_high?: number | null;
+    comp_confidence?: string;
+  };
+}
+
+interface AdRanking {
+  candidate_id: number;
+  brand?: string;
+  product?: string;
+  category?: string;
+  value_score?: number;
+  comp_confidence?: string;
+  comp_count?: number;
+  sold_comp_count?: number;
+  active_listing_count?: number;
+  search_link_count?: number;
+  estimated_low?: number | null;
+  estimated_high?: number | null;
+  verification_status?: string;
+  suggested_action?: string;
+  reasoning_summary?: string;
+  policy_flags?: string[];
+}
+
+interface AdRecommendation {
+  recommendation?: string;
+  whole_magazine_estimate?: { low?: number | null; high?: number | null };
+  verified_ad_estimate?: { low?: number | null; high?: number | null };
+  candidate_ad_estimate?: { low?: number | null; high?: number | null };
+  evidence_grade?: string;
+  reasoning_summary?: string;
+  next_action?: string;
 }
 
 const STATUSES = ["RAW","IDENTIFIED","PHOTOGRAPHED","VALUED","READY_TO_LIST","LISTED","SOLD","HOLD","REBOXED"];
@@ -138,6 +407,75 @@ function fmt(date: string) {
   if (!date) return '—';
   try { return new Date(date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }); }
   catch { return date; }
+}
+
+function StartSection({
+  onStartPhoto,
+  onSearchKnown,
+  creating,
+  error,
+}: {
+  onStartPhoto: () => void;
+  onSearchKnown: () => void;
+  creating: boolean;
+  error: string;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>ArchiveForge LIFE Intake</h2>
+        <p style={{ fontSize: 12, color: '#666', marginTop: 6, maxWidth: 760 }}>
+          Best workflow: take/upload the actual magazine cover first. ArchiveForge will identify the issue, then match it to reference covers.
+        </p>
+      </div>
+
+      {error && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+        <button
+          onClick={onStartPhoto}
+          disabled={creating}
+          style={{
+            textAlign: 'left', background: '#fff', border: '2px solid #06b6d4', borderRadius: 10,
+            padding: 18, cursor: creating ? 'wait' : 'pointer', display: 'flex', gap: 12, alignItems: 'flex-start',
+          }}
+        >
+          <Camera size={22} color="#06b6d4" />
+          <span>
+            <span style={{ display: 'block', fontSize: 16, fontWeight: 800, color: '#1a1a1a' }}>
+              {creating ? 'Creating intake…' : 'Start with Photo'}
+            </span>
+            <span style={{ display: 'block', marginTop: 5, fontSize: 12, color: '#666', lineHeight: 1.4 }}>
+              Capture the front cover first, then run AI identification and confirm the reference match.
+            </span>
+          </span>
+        </button>
+
+        <button
+          onClick={onSearchKnown}
+          style={{
+            textAlign: 'left', background: '#fff', border: '1.5px solid #e5e2dc', borderRadius: 10,
+            padding: 18, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'flex-start',
+          }}
+        >
+          <Search size={22} color="#6b7280" />
+          <span>
+            <span style={{ display: 'block', fontSize: 16, fontWeight: 800, color: '#1a1a1a' }}>
+              Search Known Issue
+            </span>
+            <span style={{ display: 'block', marginTop: 5, fontSize: 12, color: '#666', lineHeight: 1.4 }}>
+              Use date, person, event, or cover subject when the issue is already known.
+            </span>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Section 1: Intake / Search ────────────────────────────────────────────────
@@ -310,6 +648,84 @@ function IntakeSection({ onIdentified }: { onIdentified: (ref: LifeReferenceIssu
         <strong>Reference-only covers</strong> — Google Books or local reference covers help identify the issue.
         They are not listing photos. Upload your actual item photos in Step 3 before listing.
       </div>
+
+      <TextIssueSearch onUseMatch={(match) => onIdentified({
+        id: `dtm-${match.issue_date}`,
+        source: match.source_type,
+        google_books_volume_id: '',
+        date: match.issue_date,
+        volume: null,
+        issue_number: null,
+        cover_subject: match.description,
+        issue_title: 'LIFE',
+        volume_label: '',
+        reference_cover_url: '',
+        rarity_notes: `DTM guide ${match.low || ''}-${match.high || ''}. Reference price guide, not sold comps.`,
+        tier_guidance: 'C',
+        keywords: match.description,
+        match_score: match.match_score,
+      })} />
+    </div>
+  );
+}
+
+function TextIssueSearch({ onUseMatch }: { onUseMatch: (match: any) => void }) {
+  const [query, setQuery] = useState('');
+  const [year, setYear] = useState('');
+  const [matches, setMatches] = useState<any[]>([]);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setMessage('');
+    try {
+      const params = new URLSearchParams({ q: query.trim() });
+      if (year.trim()) params.set('year', year.trim());
+      const res = await fetch(`${AG_API}/life-issues/search?${params.toString()}`);
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.detail || `Search failed with ${res.status}`);
+      setMatches(out.matches || []);
+      setMessage(out.message || '');
+    } catch (exc: any) {
+      setMessage(exc?.message || 'Text issue search failed.');
+      setMatches([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#1a1a1a' }}>Text Search Issue Lookup</div>
+        <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>Search the local LIFE Issue Master by last name, date, keyword, or topic. DTM values are reference-guide values, not sold comps.</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px auto', gap: 8 }}>
+        <input value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} placeholder="Armstrong, Grace Kelly, Grissom, Batman..."
+          style={{ padding: '9px 11px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
+        <input value={year} onChange={e => setYear(e.target.value)} onKeyDown={e => e.key === 'Enter' && search()} placeholder="Year"
+          style={{ padding: '9px 11px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
+        <button onClick={search} disabled={loading} style={{ padding: '9px 12px', background: '#111827', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: loading ? 'wait' : 'pointer' }}>
+          {loading ? 'Searching...' : 'Search LIFE Issues'}
+        </button>
+      </div>
+      {message && <div style={{ fontSize: 11, color: '#92400e', background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 8, padding: 8 }}>{message}</div>}
+      {matches.length > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          {matches.slice(0, 8).map(match => (
+            <div key={`${match.issue_date}-${match.description}`} style={{ display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: 8, alignItems: 'center', padding: 9, border: '1px solid #eee8df', borderRadius: 8, fontSize: 12 }}>
+              <strong>{match.issue_date}</strong>
+              <span>{match.description} <span style={{ color: '#888' }}>guide ${match.low || '—'}-${match.high || '—'}</span></span>
+              <button onClick={() => onUseMatch(match)} style={{ padding: '6px 9px', background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: 7, fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+                Use Selected Match
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
     </div>
   );
 }
@@ -382,16 +798,246 @@ const PHOTO_ROLES = [
   { key: 'label', label: 'Mailing Label', required: false, desc: 'Address label close-up (if present)' },
 ];
 
+function IdentifyResultPanel({
+  result,
+  latestFrontPhotoId,
+  onConfirmIssue,
+}: {
+  result: IdentifyResponse;
+  latestFrontPhotoId?: number | null;
+  onConfirmIssue?: () => void;
+}) {
+  const ai = result.ai_result || {};
+  const range = ai.recommended_price_range || {};
+  const visibleText = Array.isArray(ai.visible_text) ? ai.visible_text : [];
+  const needsRealPhoto = result.image && (!result.image.exists || !result.image.readable || (result.image.file_size_bytes || 0) <= 0);
+  const staleForLatestPhoto = !!latestFrontPhotoId && !!result.photo_id && result.photo_id !== latestFrontPhotoId;
+  const candidates = result.google_books_candidates || ai.google_books_candidates || [];
+  const selectedCandidate = result.selected_google_books_candidate || ai.selected_google_books_candidate || null;
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #dbeafe', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <CheckCircle size={15} color="#2563eb" />
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#1e3a8a' }}>AI Identify Result</div>
+      </div>
+      {needsRealPhoto && (
+        <div style={{ padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 12, color: '#991b1b' }}>
+          This archive needs a real front-cover photo before AI identification can run.
+        </div>
+      )}
+      {staleForLatestPhoto && (
+        <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, fontSize: 12, color: '#9a3412' }}>
+          This result was generated before the latest front-cover upload. Run AI Identify again.
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, fontSize: 12 }}>
+        {[
+          ['archive_id', result.archive_id],
+          ['analyzed_photo_id', result.photo_id || '—'],
+          ['image_path', result.image_path || result.image?.image_path || '—'],
+          ['identify_run_id', result.identify_run_id || '—'],
+          ['identified_at', result.identified_at || '—'],
+          ['image_saved', result.image?.exists ? 'true' : 'false'],
+          ['provider', result.provider],
+          ['capability', result.capability],
+          ['evidence_source', ai.evidence_source],
+          ['is_life_magazine', ai.is_life_magazine === undefined ? '—' : String(ai.is_life_magazine)],
+          ['confidence', ai.confidence === undefined ? '—' : `${Math.round((ai.confidence || 0) * 100)}%`],
+          ['issue_date', ai.issue_date || '—'],
+          ['cover_title', ai.cover_title || '—'],
+          ['subject_description', ai.subject_description || '—'],
+          ['condition_notes', ai.condition_notes || '—'],
+          ['tier', ai.tier || '—'],
+          ['recommended_price_range', range.low || range.high ? `$${range.low || 0}–$${range.high || 0}` : '—'],
+        ].map(([label, value]) => (
+          <div key={label}>
+            <div style={{ fontSize: 10, color: '#888' }}>{label}</div>
+            <div style={{ fontWeight: 600, color: '#1f2937' }}>{value}</div>
+          </div>
+        ))}
+      </div>
+      {visibleText.length > 0 && (
+        <div style={{ fontSize: 12, color: '#374151' }}>
+          <span style={{ color: '#888' }}>visible_text: </span>{visibleText.join(', ')}
+        </div>
+      )}
+      {selectedCandidate && (
+        <div style={{ padding: 10, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 12, color: '#075985' }}>
+          <strong>Google Books candidate:</strong> {selectedCandidate.title || 'LIFE'} {selectedCandidate.publishedDate ? `· ${selectedCandidate.publishedDate}` : ''} {selectedCandidate.volume_id ? `· ${selectedCandidate.volume_id}` : ''} {selectedCandidate.match_confidence !== undefined ? `· ${Math.round((selectedCandidate.match_confidence || 0) * 100)}%` : ''}
+        </div>
+      )}
+      {!selectedCandidate && candidates.length > 0 && (
+        <div style={{ padding: 10, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, color: '#475569' }}>
+          Google Books returned candidate(s), but none were strong enough to auto-select. Confirm manually.
+        </div>
+      )}
+      <div style={{ fontSize: 12, color: '#374151' }}>
+        <span style={{ color: '#888' }}>reasoning_summary: </span>{ai.reasoning_summary || '—'}
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {onConfirmIssue && (
+          <button onClick={onConfirmIssue}
+            style={{ padding: '8px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+            Confirm This Issue
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IssueInfoPanel({
+  issueInfo,
+  latestFrontPhotoId,
+  resolving,
+  manualVolumeId,
+  onManualVolumeId,
+  onResolve,
+  onRerun,
+  onConfirmIssue,
+  onManualCorrection,
+  onLookupManualVolume,
+}: {
+  issueInfo: IssueInfoRun | null;
+  latestFrontPhotoId?: number | null;
+  resolving: boolean;
+  manualVolumeId: string;
+  onManualVolumeId: (value: string) => void;
+  onResolve: () => void;
+  onRerun: () => void;
+  onConfirmIssue: () => void;
+  onManualCorrection: () => void;
+  onLookupManualVolume: () => void;
+}) {
+  const staleForLatestPhoto = !!issueInfo?.front_photo_id && !!latestFrontPhotoId && issueInfo.front_photo_id !== latestFrontPhotoId;
+  const visibleText = Array.isArray(issueInfo?.visible_text) ? issueInfo.visible_text : [];
+  const candidates = issueInfo?.google_books_candidates || [];
+  const selected = issueInfo?.selected_google_books_candidate || candidates.find(c => c.volume_id === issueInfo?.selected_google_books_volume_id) || null;
+  const status = issueInfo?.status || 'not_run';
+  const statusLabel = resolving || status === 'pending' || status === 'running' ? 'Resolving issue information...' : status;
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #bae6fd', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {resolving || status === 'pending' || status === 'running' ? <Loader2 size={15} className="animate-spin" color="#0369a1" /> : <Layers size={15} color="#0369a1" />}
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#075985' }}>Issue Info Resolver</div>
+      </div>
+      <div style={{ fontSize: 12, color: '#155e75' }}>
+        {statusLabel}
+      </div>
+      {(staleForLatestPhoto || issueInfo?.stale_warning) && (
+        <div style={{ padding: 10, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, fontSize: 12, color: '#9a3412' }}>
+          This issue info was generated before the latest front-cover upload. Re-run resolver.
+        </div>
+      )}
+      {issueInfo?.status === 'failed' && (
+        <div style={{ padding: 10, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 12, color: '#991b1b' }}>
+          {issueInfo.error_message || 'Issue resolver failed.'}
+        </div>
+      )}
+      {issueInfo && issueInfo.status !== 'not_run' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, fontSize: 12 }}>
+          {[
+            ['status', issueInfo.status],
+            ['analyzed_photo_id', issueInfo.front_photo_id || '—'],
+            ['image_path', issueInfo.image_path || '—'],
+            ['file_size_bytes', issueInfo.file_size_bytes || 0],
+            ['mime_type', issueInfo.mime_type || '—'],
+            ['is_life_magazine', issueInfo.is_life_magazine === undefined ? '—' : String(issueInfo.is_life_magazine)],
+            ['confidence', issueInfo.confidence === undefined ? '—' : `${Math.round((issueInfo.confidence || 0) * 100)}%`],
+            ['issue_date', issueInfo.issue_date || '—'],
+            ['cover_title', issueInfo.cover_title || '—'],
+            ['detected_subject', issueInfo.detected_subject || '—'],
+            ['detected_quote', issueInfo.detected_quote || '—'],
+            ['detected_price', issueInfo.detected_price || '—'],
+            ['evidence_source', issueInfo.evidence_source || '—'],
+            ['evidence_grade', issueInfo.evidence_grade || '—'],
+            ['needs_user_confirmation', issueInfo.needs_user_confirmation === undefined ? '—' : String(issueInfo.needs_user_confirmation)],
+            ['ad_opportunity_ready', issueInfo.ad_opportunity_ready === undefined ? '—' : String(issueInfo.ad_opportunity_ready)],
+          ].map(([label, value]) => (
+            <div key={label}>
+              <div style={{ fontSize: 10, color: '#888' }}>{label}</div>
+              <div style={{ fontWeight: 600, color: '#1f2937', overflowWrap: 'anywhere' }}>{value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {visibleText.length > 0 && (
+        <div style={{ fontSize: 12, color: '#374151' }}>
+          <span style={{ color: '#888' }}>visible text: </span>{visibleText.join(', ')}
+        </div>
+      )}
+      {selected && (
+        <div style={{ padding: 10, background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 12, color: '#075985' }}>
+          <strong>Google Books candidate:</strong> {selected.title || 'LIFE'} {selected.publishedDate ? `· ${selected.publishedDate}` : ''} {selected.volume_id ? `· ${selected.volume_id}` : ''} {selected.match_confidence !== undefined ? `· ${Math.round((selected.match_confidence || 0) * 100)}%` : ''}
+        </div>
+      )}
+      {(issueInfo?.reference_sources || []).length > 0 && (
+        <div style={{ fontSize: 12, color: '#374151' }}>
+          <span style={{ color: '#888' }}>sources: </span>{(issueInfo?.reference_sources || []).map(src => src.source || src.capability || 'source').join(', ')}
+        </div>
+      )}
+      {(issueInfo?.conflicts || []).length > 0 && (
+        <div style={{ padding: 10, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12, color: '#92400e' }}>
+          Conflicts: {(issueInfo?.conflicts || []).map(c => `${c.volume_id || 'candidate'} ${c.reason || ''}`).join('; ')}
+        </div>
+      )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) auto', gap: 8, alignItems: 'end' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#666', fontWeight: 700 }}>
+          Manual Google Books Volume ID
+          <input value={manualVolumeId} onChange={e => onManualVolumeId(e.target.value)} placeholder="eFYEAAAAMBAJ"
+            style={{ padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
+        </label>
+        <button onClick={onLookupManualVolume} disabled={resolving || !manualVolumeId.trim()}
+          style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #0284c7', background: '#f0f9ff', color: '#075985', fontSize: 12, fontWeight: 800, cursor: resolving || !manualVolumeId.trim() ? 'not-allowed' : 'pointer' }}>
+          Manual Google Books Volume ID
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={onResolve} disabled={resolving}
+          style={{ padding: '8px 12px', background: '#0369a1', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: resolving ? 'not-allowed' : 'pointer' }}>
+          Resolve Issue Info
+        </button>
+        <button onClick={onRerun} disabled={resolving}
+          style={{ padding: '8px 12px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: resolving ? 'not-allowed' : 'pointer' }}>
+          Re-run Resolver on Latest Front Cover
+        </button>
+        <button onClick={onConfirmIssue}
+          style={{ padding: '8px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+          Confirm This Issue
+        </button>
+        <button onClick={onManualCorrection}
+          style={{ padding: '8px 12px', background: '#fff', color: '#374151', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+          Manual Correction
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PhotoSection({
   archiveId,
   refIssue,
+  identifyResult,
+  onIdentifyResult,
+  onConfirmIssue,
 }: {
   archiveId: number | null;
   refIssue: LifeReferenceIssue | null;
+  identifyResult: IdentifyResponse | null;
+  onIdentifyResult: (result: IdentifyResponse | null) => void;
+  onConfirmIssue: () => void;
 }) {
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
   const [uploadingRole, setUploadingRole] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [identifying, setIdentifying] = useState(false);
+  const [identifyError, setIdentifyError] = useState('');
+  const [issueInfo, setIssueInfo] = useState<IssueInfoRun | null>(null);
+  const [issueInfoError, setIssueInfoError] = useState('');
+  const [resolvingIssueInfo, setResolvingIssueInfo] = useState(false);
+  const [manualIssueVolumeId, setManualIssueVolumeId] = useState('');
 
   const loadPhotos = useCallback(async () => {
     if (!archiveId) return;
@@ -402,28 +1048,135 @@ function PhotoSection({
     } catch { /* silent */ }
   }, [archiveId]);
 
-  useEffect(() => { loadPhotos(); }, [loadPhotos]);
+  const loadIssueInfo = useCallback(async (): Promise<IssueInfoRun | null> => {
+    if (!archiveId) return null;
+    try {
+      const r = await fetch(`${AG_API}/${archiveId}/issue-info`);
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setIssueInfo(null);
+        return null;
+      }
+      setIssueInfo(d);
+      return d;
+    } catch {
+      return null;
+    }
+  }, [archiveId]);
+
+  const pollIssueInfo = useCallback(async () => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const current = await loadIssueInfo();
+      if (current && !['pending', 'running'].includes(current.status)) break;
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+  }, [loadIssueInfo]);
+
+  useEffect(() => { loadPhotos(); loadIssueInfo(); }, [loadPhotos, loadIssueInfo]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, role: string) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
-    if (!archiveId) return;
+    if (!files || files.length === 0) {
+      setPhotoError('No file selected.');
+      return;
+    }
+    if (!archiveId) {
+      setPhotoError('Archive record is not ready yet.');
+      return;
+    }
     setUploadingRole(role);
     setPhotoError(null);
-    for (let i = 0; i < files.length; i++) {
-      const formData = new FormData();
-      formData.append('file', files[i]);
-      formData.append('role', role);
-      try {
-        const response = await fetch(`${AG_API}/uploads/${archiveId}`, { method: 'POST', body: formData });
-        if (!response.ok) throw new Error(`Upload failed with ${response.status}`);
-      } catch (exc: any) {
-        setPhotoError(exc?.message || 'Photo upload failed.');
+	    for (let i = 0; i < files.length; i++) {
+      const selectedFile = files[i];
+      if (selectedFile.size <= 0) {
+        setPhotoError('Selected image is empty. Choose a non-empty JPEG, PNG, GIF, or WebP file.');
+        continue;
       }
+      if (selectedFile.type && !SUPPORTED_UPLOAD_MIME_TYPES.has(selectedFile.type)) {
+        setPhotoError('Unsupported image type. Upload a JPEG, PNG, GIF, or WebP file.');
+        continue;
+      }
+	      const formData = new FormData();
+	      formData.append('file', selectedFile);
+	      formData.append('role', role);
+	      try {
+	        const response = await fetch(`${AG_API}/uploads/${archiveId}`, { method: 'POST', body: formData });
+          const data = await response.json().catch(() => ({}));
+	        if (!response.ok) {
+	          let message = `Upload failed with ${response.status}`;
+	          if (data?.detail) message = data.detail;
+	          throw new Error(message);
+	        }
+          if (data?.issue_info && role === 'front') {
+            setIssueInfo({
+              archive_id: archiveId,
+              status: data.issue_info.status || 'pending',
+              front_photo_id: data.issue_info.front_photo_id,
+              run_id: data.issue_info.run_id,
+            });
+          }
+	      } catch (exc: any) {
+	        setPhotoError(exc?.message || 'Photo upload failed.');
+	      }
+		    }
+		    await loadPhotos();
+		    if (role === 'front') {
+          onIdentifyResult(null);
+          await pollIssueInfo();
+        }
+		    setUploadingRole(null);
+		    if (e.target) e.target.value = '';
+		  };
+
+  const runIdentify = async () => {
+    if (!archiveId) return;
+    setIdentifying(true);
+    setIdentifyError('');
+    try {
+      const res = await fetch(`${AG_API}/identify?archive_id=${archiveId}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Identify failed with ${res.status}`);
+      onIdentifyResult(data);
+      await loadIssueInfo();
+    } catch (exc: any) {
+      setIdentifyError(exc?.message || 'AI identification failed.');
+    } finally {
+      setIdentifying(false);
     }
-    await loadPhotos();
-    setUploadingRole(null);
-    if (e.target) e.target.value = '';
+  };
+
+  const resolveIssueInfo = async (forceRefresh = false) => {
+    if (!archiveId) return;
+    setResolvingIssueInfo(true);
+    setIssueInfoError('');
+    try {
+      const suffix = forceRefresh ? '?force_refresh=true' : '';
+      const res = await fetch(`${AG_API}/${archiveId}/resolve-issue-info${suffix}`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Issue resolver failed with ${res.status}`);
+      setIssueInfo(data);
+    } catch (exc: any) {
+      setIssueInfoError(exc?.message || 'Issue resolver failed.');
+    } finally {
+      setResolvingIssueInfo(false);
+    }
+  };
+
+  const lookupManualIssueVolume = async () => {
+    if (!archiveId || !manualIssueVolumeId.trim()) return;
+    setResolvingIssueInfo(true);
+    setIssueInfoError('');
+    try {
+      const params = new URLSearchParams({ volume_id: manualIssueVolumeId.trim() });
+      const res = await fetch(`${AG_API}/${archiveId}/google-books/lookup?${params.toString()}`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Google Books lookup failed with ${res.status}`);
+      await resolveIssueInfo(true);
+    } catch (exc: any) {
+      setIssueInfoError(exc?.message || 'Manual Google Books lookup failed.');
+    } finally {
+      setResolvingIssueInfo(false);
+    }
   };
 
   const handleDelete = async (photoId: number) => {
@@ -433,9 +1186,16 @@ function PhotoSection({
     } catch { /* silent */ }
   };
 
-  const byRole = (role: string) => photos.filter(p => p.role === role);
-  const photoUrl = (photo: PhotoRecord) => `${AG_API}/photo/${photo.id}`;
-  const totalCount = photos.length;
+	  const byRole = (role: string) => photos.filter(p => p.role === role);
+	  const photoUrl = (photo: PhotoRecord) => `${AG_API}/photo/${photo.id}`;
+	  const totalCount = photos.length;
+	  const hasFrontPhoto = byRole('front').length > 0;
+	  const latestFrontPhoto = [...byRole('front')].sort((a, b) => {
+	    const at = new Date(a.created_at || '').getTime() || 0;
+	    const bt = new Date(b.created_at || '').getTime() || 0;
+	    if (bt !== at) return bt - at;
+	    return (b.id || 0) - (a.id || 0);
+	  })[0];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -457,6 +1217,68 @@ function PhotoSection({
           <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
           {photoError}
         </div>
+      )}
+      {identifyError && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          {identifyError}
+        </div>
+      )}
+      {issueInfoError && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          {issueInfoError}
+        </div>
+      )}
+
+      <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ flex: '1 1 260px' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#1a1a1a' }}>AI cover identification</div>
+          <div style={{ fontSize: 12, color: '#666', marginTop: 3 }}>
+            Upload a real front-cover photo first. ArchiveForge sends the actual image to MiniMax Token Plan image understanding.
+          </div>
+        </div>
+        <button
+          onClick={runIdentify}
+          disabled={!archiveId || !hasFrontPhoto || identifying}
+          style={{
+            padding: '9px 14px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 800,
+            background: !archiveId || !hasFrontPhoto ? '#e5e7eb' : '#2563eb',
+            color: '#fff', cursor: !archiveId || !hasFrontPhoto || identifying ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6,
+          }}
+        >
+          {identifying ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+          {identifyResult ? 'Re-run AI Identify on latest front cover' : 'Run AI Identify'}
+        </button>
+        {!hasFrontPhoto && (
+          <div style={{ width: '100%', fontSize: 11, color: '#92400e' }}>
+            This archive needs a real front-cover photo before AI identification can run.
+          </div>
+        )}
+      </div>
+
+      {(hasFrontPhoto || issueInfo) && (
+        <IssueInfoPanel
+          issueInfo={issueInfo}
+          latestFrontPhotoId={latestFrontPhoto?.id || null}
+          resolving={resolvingIssueInfo}
+          manualVolumeId={manualIssueVolumeId}
+          onManualVolumeId={setManualIssueVolumeId}
+          onResolve={() => resolveIssueInfo(false)}
+          onRerun={() => resolveIssueInfo(true)}
+          onConfirmIssue={onConfirmIssue}
+          onManualCorrection={onConfirmIssue}
+          onLookupManualVolume={lookupManualIssueVolume}
+        />
+      )}
+
+      {identifyResult && (
+        <IdentifyResultPanel
+          result={identifyResult}
+          latestFrontPhotoId={latestFrontPhoto?.id || null}
+          onConfirmIssue={onConfirmIssue}
+        />
       )}
 
       {/* Side-by-side: Reference cover | Upload slots */}
@@ -504,7 +1326,7 @@ function PhotoSection({
                       borderRadius: 5, fontSize: 10, fontWeight: 600,
                       cursor: archiveId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 4,
                     }}>
-                      {isUploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />} Upload
+                      {isUploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />} Upload from file
                       <input type="file" accept="image/*" multiple style={{ display: 'none' }} disabled={!archiveId}
                         onChange={e => handleUpload(e, role.key)} />
                     </label>
@@ -513,7 +1335,7 @@ function PhotoSection({
                       borderRadius: 5, fontSize: 10, fontWeight: 600,
                       cursor: archiveId ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 4,
                     }}>
-                      <Camera size={10} /> Camera
+                      <Camera size={10} /> Take photo
                       <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} disabled={!archiveId}
                         onChange={e => handleUpload(e, role.key)} />
                     </label>
@@ -556,6 +1378,819 @@ function PhotoSection({
           </button>
         </div>
       )}
+
+    </div>
+  );
+}
+
+function ConfirmMatchSection({
+  archiveId,
+  refIssue,
+  identifyResult,
+  confirmation,
+  onConfirmed,
+  onSearchAgain,
+  onManual,
+}: {
+  archiveId: number | null;
+  refIssue: LifeReferenceIssue | null;
+  identifyResult: IdentifyResponse | null;
+  confirmation: MatchConfirmation | null;
+  onConfirmed: (confirmation: MatchConfirmation) => void;
+  onSearchAgain: () => void;
+  onManual: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [uploadedFrontPhoto, setUploadedFrontPhoto] = useState<PhotoRecord | null>(null);
+  const ai = identifyResult?.ai_result;
+
+  // Fetch latest front-cover photo for this archive
+  useEffect(() => {
+    if (!archiveId) { setUploadedFrontPhoto(null); return; }
+    let cancelled = false;
+    fetch(`${AG_API}/${archiveId}/photos`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.photos) return;
+        const fronts: PhotoRecord[] = (data.photos.front || []).map((p: PhotoRecord) => ({
+          ...p,
+          id: p.id || p.photo_id,
+        }));
+        if (fronts.length === 0) return;
+        // Latest front photo by created_at, then by id descending
+        const latest = [...fronts].sort((a, b) => {
+          const at = new Date(a.created_at || '').getTime() || 0;
+          const bt = new Date(b.created_at || '').getTime() || 0;
+          if (bt !== at) return bt - at;
+          return (b.id || 0) - (a.id || 0);
+        })[0];
+        if (!cancelled) setUploadedFrontPhoto(latest);
+      })
+      .catch(() => { /* non-critical */ });
+    return () => { cancelled = true; };
+  }, [archiveId]);
+
+  // Fetch dealer reference from issue-info API
+  const [dealerReference, setDealerReference] = useState<Record<string, any> | null>(null);
+  useEffect(() => {
+    if (!archiveId) { setDealerReference(null); return; }
+    let cancelled = false;
+    fetch(`${AG_API}/${archiveId}/issue-info`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled) return;
+        setDealerReference(data?.dealer_reference && typeof data.dealer_reference === 'object' && Object.keys(data.dealer_reference).length > 0 ? data.dealer_reference : null);
+      })
+      .catch(() => { /* non-critical */ });
+    return () => { cancelled = true; };
+  }, [archiveId]);
+
+  // Build reference cover: refIssue → Google Books candidate → dealer reference (fallback)
+  const gbCandidate = identifyResult?.selected_google_books_candidate || ai?.selected_google_books_candidate || null;
+  const referenceCover = refIssue?.reference_cover_url
+    ? { label: 'Reference image — not item photo', source: 'reference_search', volume_id: refIssue.google_books_volume_id || refIssue.id, issue_date: refIssue.date, cover_title: refIssue.cover_subject, cover_image_url: refIssue.reference_cover_url, match_confidence: refIssue.match_score || 0 }
+    : gbCandidate?.cover_image_url
+      ? { label: 'Reference image — not item photo', source: 'google_books', volume_id: gbCandidate.volume_id || '', issue_date: gbCandidate.publishedDate || '', cover_title: gbCandidate.title || '', cover_image_url: gbCandidate.cover_image_url, match_confidence: gbCandidate.match_confidence || 0 }
+      : dealerReference?.source_url
+        ? {
+            label: dealerReference.asking_price
+              ? `Dealer catalog — $${dealerReference.asking_price} asking price (not sold comp evidence)`
+              : 'Dealer catalog reference image — not your item photo',
+            source: 'dealer_reference',
+            volume_id: '',
+            issue_date: dealerReference.issue_date || '',
+            cover_title: dealerReference.title || '',
+            cover_image_url: '',
+            source_url: dealerReference.source_url || '',
+            asking_price: dealerReference.asking_price || null,
+            match_confidence: dealerReference.match_confidence || 0,
+          }
+        : null;
+
+  // Build uploaded cover from latest front photo
+  const uploadedCover = uploadedFrontPhoto ? {
+    label: 'Your uploaded magazine',
+    source: 'uploaded_front_cover',
+    photo_id: uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id,
+    photo_url: uploadedFrontPhoto.photo_url || `${AG_API}/photo/${uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id}`,
+    thumbnail_url: uploadedFrontPhoto.thumbnail_url || `${AG_API}/${archiveId}/photos/${uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id}/thumbnail`,
+    file_size_bytes: uploadedFrontPhoto.file_size_bytes || uploadedFrontPhoto.file_size || 0,
+    mime_type: uploadedFrontPhoto.mime_type || '',
+  } : null;
+
+  const candidate = refIssue ? {
+    source: refIssue.source || 'reference_search',
+    reference_id: refIssue.id,
+    reference_url: refIssue.reference_cover_url,
+    issue_date: refIssue.date,
+    cover_title: refIssue.cover_subject,
+    confidence: refIssue.match_score || 0,
+  } : ai ? {
+    source: ai.evidence_source || 'ai_identify',
+    reference_id: archiveId ? `ai-${archiveId}` : '',
+    reference_url: '',
+    issue_date: ai.issue_date || null,
+    cover_title: ai.cover_title || ai.subject_description || '',
+    confidence: ai.confidence || 0,
+  } : null;
+
+  const confirm = async (mode: 'confirmed' | 'manual') => {
+    if (!archiveId) return;
+    const payload = mode === 'manual' ? {
+      reference_source: 'manual',
+      reference_id: '',
+      reference_url: '',
+      confirmed_issue_date: '',
+      cover_title: 'Manual entry',
+      confidence: 0,
+      source: 'manual',
+      confirmed_by_user: true,
+    } : {
+      reference_source: candidate?.source || '',
+      reference_id: candidate?.reference_id || '',
+      reference_url: candidate?.reference_url || '',
+      confirmed_issue_date: candidate?.issue_date || '',
+      cover_title: candidate?.cover_title || '',
+      confidence: candidate?.confidence || 0,
+      source: candidate?.source || '',
+      confirmed_by_user: true,
+    };
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/confirm-reference`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Confirm failed with ${res.status}`);
+      onConfirmed({
+        status: mode,
+        source: payload.reference_source,
+        reference_id: payload.reference_id,
+        reference_url: payload.reference_url,
+        issue_date: payload.confirmed_issue_date,
+        cover_title: payload.cover_title,
+        confidence: payload.confidence,
+      });
+    } catch (exc: any) {
+      setError(exc?.message || 'Could not confirm reference match.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Confirm Match</h2>
+        <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+          Confirm the AI/reference match before entering final details.
+        </p>
+      </div>
+
+      {error && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          {error}
+        </div>
+      )}
+
+      {candidate ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Side-by-side reference vs uploaded cover */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {/* Reference Cover */}
+            <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Reference Cover</span>
+                {referenceCover?.source === 'google_books' && (
+                  <span style={{ fontSize: 10, padding: '1px 6px', background: '#ecfeff', color: '#155e75', borderRadius: 4, fontWeight: 600 }}>Google Books</span>
+                )}
+                {referenceCover?.source === 'reference_search' && (
+                  <span style={{ fontSize: 10, padding: '1px 6px', background: '#f0fdf4', color: '#166534', borderRadius: 4, fontWeight: 600 }}>Reference</span>
+                )}
+                {referenceCover?.source === 'dealer_reference' && (
+                  <span style={{ fontSize: 10, padding: '1px 6px', background: '#fef3c7', color: '#92400e', borderRadius: 4, fontWeight: 600 }}>Dealer Catalog</span>
+                )}
+              </div>
+              <div style={{ background: '#f9f8f6', borderRadius: 8, border: '1px solid #e5e2dc', minHeight: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                {referenceCover?.cover_image_url ? (
+                  <img
+                    src={referenceCover.cover_image_url}
+                    alt="Reference cover from Google Books or reference database"
+                    style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', borderRadius: 8 }}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 11, color: '#999', textAlign: 'center', padding: 12 }}>No reference image</span>
+                )}
+              </div>
+              {referenceCover && (
+                <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5 }}>
+                  {referenceCover.source === 'dealer_reference' && referenceCover.asking_price && (
+                    <div><span style={{ color: '#92400e' }}>Asking price: </span><span style={{ fontWeight: 700, color: '#92400e' }}>${referenceCover.asking_price}</span></div>
+                  )}
+                  {referenceCover.issue_date && <div><span style={{ color: '#6b7280' }}>Issue date: </span>{referenceCover.issue_date}</div>}
+                  {referenceCover.cover_title && <div><span style={{ color: '#6b7280' }}>Title: </span>{referenceCover.cover_title}</div>}
+                  {referenceCover.source_url && (
+                    <div><span style={{ color: '#6b7280' }}>Source: </span><a href={referenceCover.source_url} target="_blank" rel="noopener noreferrer" style={{ color: '#06b6d4' }}>OriginalLifeMagazines.com</a></div>
+                  )}
+                  {referenceCover.source !== 'dealer_reference' && referenceCover.volume_id && <div><span style={{ color: '#6b7280' }}>Volume ID: </span><span style={{ fontFamily: 'monospace' }}>{referenceCover.volume_id}</span></div>}
+                  {referenceCover.source !== 'dealer_reference' && referenceCover.match_confidence !== undefined && referenceCover.match_confidence > 0 && (
+                    <div><span style={{ color: '#6b7280' }}>Confidence: </span>{Math.round(referenceCover.match_confidence * 100)}%</div>
+                  )}
+                </div>
+              )}
+              {referenceCover?.source === 'dealer_reference' ? (
+                <div style={{ padding: '5px 8px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, fontSize: 10, color: '#92400e', lineHeight: 1.4 }}>
+                  Dealer asking price — not sold comp evidence
+                </div>
+              ) : (
+                <div style={{ padding: '5px 8px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, fontSize: 10, color: '#9a3412', lineHeight: 1.4 }}>
+                  Reference image — not your item photo
+                </div>
+              )}
+            </div>
+
+            {/* Uploaded Cover */}
+            <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>Your Uploaded Cover</span>
+                {uploadedCover && (
+                  <span style={{ fontSize: 10, padding: '1px 6px', background: '#f0fdf4', color: '#166534', borderRadius: 4, fontWeight: 600 }}>Item photo</span>
+                )}
+              </div>
+              <div style={{ background: '#f9f8f6', borderRadius: 8, border: '1px solid #e5e2dc', minHeight: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                {uploadedCover?.thumbnail_url ? (
+                  <img
+                    src={uploadedCover.thumbnail_url}
+                    alt="Your uploaded magazine front cover"
+                    style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', borderRadius: 8 }}
+                    onError={e => { (e.target as HTMLImageElement).src = uploadedCover.photo_url || ''; }}
+                  />
+                ) : uploadedCover?.photo_url ? (
+                  <img
+                    src={uploadedCover.photo_url}
+                    alt="Your uploaded magazine front cover"
+                    style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', borderRadius: 8 }}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 11, color: '#999', textAlign: 'center', padding: 12 }}>No uploaded cover photo</span>
+                )}
+              </div>
+              {uploadedCover && (
+                <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5 }}>
+                  <div><span style={{ color: '#6b7280' }}>photo_id: </span>{uploadedCover.photo_id}</div>
+                  <div><span style={{ color: '#6b7280' }}>file size: </span>{(uploadedCover.file_size_bytes / 1024).toFixed(1)} KB</div>
+                  {uploadedCover.mime_type && <div><span style={{ color: '#6b7280' }}>type: </span>{uploadedCover.mime_type}</div>}
+                  <div style={{ color: '#16a34a', fontWeight: 600 }}>Saved to server</div>
+                </div>
+              )}
+              {!uploadedCover && (
+                <div style={{ padding: '5px 8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, fontSize: 10, color: '#991b1b' }}>
+                  No uploaded cover photo found
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Candidate metadata row */}
+          <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#1a1a1a' }}>{candidate.cover_title || 'Unconfirmed LIFE issue'}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
+              <div><span style={{ color: '#888' }}>Issue date: </span>{candidate.issue_date || '—'}</div>
+              <div><span style={{ color: '#888' }}>Source: </span>{candidate.source || '—'}</div>
+              <div><span style={{ color: '#888' }}>Confidence: </span>{Math.round((candidate.confidence || 0) * 100)}%</div>
+              <div><span style={{ color: '#888' }}>Reference ID: </span>{candidate.reference_id || '—'}</div>
+            </div>
+            {identifyResult && <IdentifyResultPanel result={identifyResult} />}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16, fontSize: 12, color: '#666' }}>
+          No AI/reference candidate is selected yet. Search a known issue or enter details manually.
+        </div>
+      )}
+
+      {confirmation && (
+        <div style={{ padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12, color: '#166534' }}>
+          Match state: {confirmation.status} via {confirmation.source || 'manual'}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button onClick={() => confirm('confirmed')} disabled={!archiveId || !candidate || saving}
+          style={{ padding: '9px 14px', background: !candidate ? '#e5e7eb' : '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: !candidate || saving ? 'not-allowed' : 'pointer' }}>
+          {saving ? 'Saving…' : 'Confirm this match'}
+        </button>
+        <button onClick={onSearchAgain}
+          style={{ padding: '9px 14px', background: '#fff', color: '#155e75', border: '1px solid #06b6d4', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          Wrong match, search again
+        </button>
+        <button onClick={() => { onManual(); confirm('manual'); }}
+          style={{ padding: '9px 14px', background: '#fff', color: '#6b7280', border: '1px solid #d1d5db', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          No match found, enter manually
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
+  const [issueInfo, setIssueInfo] = useState<IssueInfoRun | null>(null);
+  const [metadata, setMetadata] = useState<IssueMetadata | null>(null);
+  const [googleBooksStatus, setGoogleBooksStatus] = useState<GoogleBooksStatus | null>(null);
+  const [candidates, setCandidates] = useState<AdOpportunity[]>([]);
+  const [compGroups, setCompGroups] = useState<AdCompGroup[]>([]);
+  const [ranking, setRanking] = useState<AdRanking[]>([]);
+  const [showCompLinks, setShowCompLinks] = useState(false);
+  const [recommendation, setRecommendation] = useState<AdRecommendation | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const [manualVolumeId, setManualVolumeId] = useState('');
+  const [pageNumber, setPageNumber] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!archiveId) return;
+    try {
+      const [statusRes, issueInfoRes, metadataRes, candidatesRes, recommendationRes] = await Promise.all([
+        fetch(`${AG_API}/google-books/status`),
+        fetch(`${AG_API}/${archiveId}/issue-info`),
+        fetch(`${AG_API}/${archiveId}/google-books/metadata`),
+        fetch(`${AG_API}/${archiveId}/ad-opportunities`),
+        fetch(`${AG_API}/${archiveId}/ad-breakout-recommendation`),
+      ]);
+      if (statusRes.ok) setGoogleBooksStatus(await statusRes.json());
+      if (issueInfoRes.ok) setIssueInfo(await issueInfoRes.json());
+      if (metadataRes.ok) setMetadata((await metadataRes.json()).metadata || null);
+      if (candidatesRes.ok) setCandidates((await candidatesRes.json()).candidates || []);
+      if (recommendationRes.ok) setRecommendation(await recommendationRes.json());
+      const [compsRes, rankingRes] = await Promise.all([
+        fetch(`${AG_API}/${archiveId}/ad-comps`),
+        fetch(`${AG_API}/${archiveId}/ad-priority-ranking`),
+      ]);
+      if (compsRes.ok) setCompGroups((await compsRes.json()).groups || []);
+      if (rankingRes.ok) setRanking((await rankingRes.json()).ranked_candidates || []);
+    } catch {
+      /* no-op; explicit actions surface errors */
+    }
+  }, [archiveId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const lookupGoogleBooks = async () => {
+    if (!archiveId) return;
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const params = new URLSearchParams();
+      if (manualVolumeId.trim()) params.set('volume_id', manualVolumeId.trim());
+      const suffix = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${AG_API}/${archiveId}/google-books/lookup${suffix}`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Google Books lookup failed (${res.status})`);
+      setMetadata(data.metadata || null);
+      setMessage(data.cache_hit ? 'Using cached Google Books issue metadata.' : 'Google Books issue metadata stored.');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Google Books lookup failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const useCachedMetadata = async () => {
+    if (!archiveId) return;
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/google-books/metadata`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `No cached metadata (${res.status})`);
+      setMetadata(data.metadata || null);
+      setMessage('Cached Google Books metadata loaded.');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'No cached Google Books metadata found.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runAdCheck = async () => {
+    if (!archiveId) return;
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ad-opportunity-check`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Ad opportunity check failed (${res.status})`);
+      setCandidates(data.candidates || []);
+      setRecommendation(data.recommendation || null);
+      setMessage(data.unverified_warning || 'Ad opportunity candidates generated.');
+    } catch (e: any) {
+      setError(e?.message || 'Ad opportunity check failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const researchAdComps = async () => {
+    if (!archiveId) return;
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ad-comps/research`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'auto', max_candidates: 5, max_results_per_candidate: 5 }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Ad comp research failed (${res.status})`);
+      setCompGroups((await (await fetch(`${AG_API}/${archiveId}/ad-comps`)).json()).groups || []);
+      setRanking(data.ranked_candidates || []);
+      setMessage(data.note || 'Ad comp research saved.');
+    } catch (e: any) {
+      setError(e?.message || 'Ad comp research failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refreshRanking = async () => {
+    if (!archiveId) return;
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ad-priority-ranking`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Ranking failed (${res.status})`);
+      setRanking(data.ranked_candidates || []);
+      setMessage('Ad photograph priority ranking refreshed.');
+    } catch (e: any) {
+      setError(e?.message || 'Could not refresh ad ranking.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addManualComp = async () => {
+    if (!archiveId) return;
+    const candidateId = selectedCandidateId || candidates[0]?.id;
+    if (!candidateId) {
+      setError('Select an ad candidate before adding a manual comp.');
+      return;
+    }
+    const title = window.prompt('Manual comp title') || '';
+    const url = window.prompt('Manual comp URL') || '';
+    const priceText = window.prompt('Manual comp price, optional') || '';
+    if (!title.trim() && !url.trim()) {
+      setError('Manual comp requires a title or URL.');
+      return;
+    }
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ad-comps/manual`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          candidate_id: candidateId,
+          title,
+          url,
+          price: priceText ? Number(priceText) : null,
+          result_type: 'manual_reference',
+          currency: 'USD',
+          notes: 'Manual founder-entered comp',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Manual comp failed (${res.status})`);
+      setMessage('Manual comp saved.');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Could not save manual comp.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const uploadAdPage = async (file: File | null) => {
+    if (!archiveId || !file) {
+      setError('No ad-page image selected.');
+      return;
+    }
+    if (file.size <= 0) {
+      setError('Selected ad-page image is empty.');
+      return;
+    }
+    if (file.type && !SUPPORTED_UPLOAD_MIME_TYPES.has(file.type)) {
+      setError('Unsupported ad-page image type. Upload JPEG, PNG, GIF, or WebP.');
+      return;
+    }
+    setUploading(true); setError(''); setMessage('');
+    const form = new FormData();
+    form.append('file', file);
+    if (selectedCandidateId) form.append('candidate_id', String(selectedCandidateId));
+    if (pageNumber.trim()) form.append('page_number', pageNumber.trim());
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ad-pages/upload`, { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Ad-page upload failed (${res.status})`);
+      setMessage(`Ad-page photo saved${selectedCandidateId ? ` for candidate #${selectedCandidateId}` : ''}.`);
+    } catch (e: any) {
+      setError(e?.message || 'Ad-page upload failed.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const analyzeAds = async () => {
+    if (!archiveId) return;
+    setAnalyzing(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ads/analyze`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Ad analysis failed (${res.status})`);
+      setMessage(`Analyzed ${data.analyzed?.length || 0} ad-page photo(s). Verified ads are now separated from issue-level candidates.`);
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Ad analysis failed.');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const updateStatus = async (candidateId: number, status: string) => {
+    if (!archiveId) return;
+    const form = new FormData();
+    form.append('verification_status', status);
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/ad-opportunities/${candidateId}`, { method: 'PATCH', body: form });
+      if (!res.ok) throw new Error(`Status update failed (${res.status})`);
+      setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, verification_status: status } : c));
+    } catch (e: any) {
+      setError(e?.message || 'Could not update candidate status.');
+    }
+  };
+
+  const addToPacket = async () => {
+    if (!archiveId) return;
+    setLoading(true); setError(''); setMessage('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/create-listing-draft`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Could not refresh listing draft (${res.status})`);
+      setMessage(`Ad opportunity section will appear in listing packet exports. Draft #${data.draft_id} refreshed.`);
+    } catch (e: any) {
+      setError(e?.message || 'Could not refresh listing draft.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const gradeColor: Record<string, string> = { A: '#16a34a', B: '#2563eb', C: '#f59e0b', D: '#6b7280', F: '#dc2626' };
+  const verifiedCount = candidates.filter(c => c.verification_status === 'verified_in_copy').length;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Ad Opportunity Check</h2>
+        <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+          ArchiveForge can suggest likely ad opportunities from the identified issue, but an ad is only verified when you photograph that ad page.
+        </p>
+      </div>
+
+      {!archiveId && (
+        <div style={{ padding: 12, background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 10, fontSize: 12, color: '#92400e' }}>
+          Save an archive record before running ad checks.
+        </div>
+      )}
+      {googleBooksStatus && !googleBooksStatus.api_key_configured && (
+        <div style={{ padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, fontSize: 12, color: '#92400e' }}>
+          Google Books API key is not configured. Live lookup may be quota-limited. Add GOOGLE_BOOKS_API_KEY server-side for reliable lookups.
+        </div>
+      )}
+      {googleBooksStatus?.cooldown_active && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          Google Books quota is temporarily limited. Using cached or known issue metadata where available.
+        </div>
+      )}
+      {error && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />{error}
+        </div>
+      )}
+      {message && (
+        <div style={{ padding: 12, background: '#ecfeff', border: '1px solid #bae6fd', borderRadius: 10, fontSize: 12, color: '#155e75' }}>
+          {message}
+        </div>
+      )}
+      {issueInfo?.ad_opportunity_ready && candidates.length > 0 && (
+        <div style={{ padding: 12, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, fontSize: 12, color: '#166534' }}>
+          <strong>Ad opportunities ready.</strong> Top candidates to look for: {(ranking.length ? ranking : candidates).slice(0, 4).map((item: any) => item.brand || item.category || item.product || 'candidate').join(', ')}.
+          <div style={{ marginTop: 4, color: '#92400e' }}>
+            These are issue-level leads only. An ad is not verified until you photograph and analyze that ad page.
+          </div>
+        </div>
+      )}
+      {issueInfo?.status === 'completed' && !issueInfo.ad_opportunity_ready && (
+        <div style={{ padding: 12, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, fontSize: 12, color: '#92400e' }}>
+          Issue info is complete, but ad opportunities are not ready for this archive.
+        </div>
+      )}
+
+      <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 1fr) auto', gap: 8, alignItems: 'end' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#666', fontWeight: 700 }}>
+            Manual Google Books Volume ID
+            <input value={manualVolumeId} onChange={e => setManualVolumeId(e.target.value)} placeholder="9kwEAAAAMBAJ"
+              style={{ padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
+          </label>
+          <button onClick={useCachedMetadata} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Use Cached Metadata
+          </button>
+        </div>
+        {googleBooksStatus && (
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: '#666' }}>
+            <span>Key: {googleBooksStatus.api_key_configured ? 'configured' : 'missing'}</span>
+            <span>Cooldown: {googleBooksStatus.cooldown_active ? 'active' : 'off'}</span>
+            <span>Calls last hour: {googleBooksStatus.calls_last_hour ?? 0}</span>
+            <span>Cache entries: {googleBooksStatus.cache_entries ?? 0}</span>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={lookupGoogleBooks} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: 'none', background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} Lookup Google Books Issue
+          </button>
+          <button onClick={runAdCheck} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Run Ad Opportunity Check
+          </button>
+          <button onClick={researchAdComps} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #7c3aed', background: '#f5f3ff', color: '#5b21b6', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Research Ad Comps
+          </button>
+          <button onClick={() => setShowCompLinks(v => !v)} disabled={!archiveId}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontSize: 12, fontWeight: 800, cursor: !archiveId ? 'not-allowed' : 'pointer' }}>
+            View Comp Links
+          </button>
+          <button onClick={addManualComp} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Add Manual Comp
+          </button>
+          <button onClick={refreshRanking} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #0f766e', background: '#f0fdfa', color: '#115e59', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Rank Ads to Photograph
+          </button>
+          <button onClick={refreshRanking} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#f9fafb', color: '#374151', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Refresh Ranking
+          </button>
+          <button onClick={analyzeAds} disabled={!archiveId || analyzing}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #10b981', background: '#ecfdf5', color: '#065f46', fontSize: 12, fontWeight: 800, cursor: !archiveId || analyzing ? 'not-allowed' : 'pointer' }}>
+            {analyzing ? 'Analyzing...' : 'Analyze Uploaded Ad Pages'}
+          </button>
+          <button onClick={addToPacket} disabled={!archiveId || loading}
+            style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontSize: 12, fontWeight: 800, cursor: !archiveId || loading ? 'not-allowed' : 'pointer' }}>
+            Add Ad Opportunities to Listing Packet
+          </button>
+          <button disabled style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#f9fafb', color: '#9ca3af', fontSize: 12, fontWeight: 800, cursor: 'not-allowed' }}>
+            Create Ad Listing Draft - coming next
+          </button>
+        </div>
+
+        <div style={{ padding: 10, border: '1px solid #e5e7eb', background: '#f9fafb', borderRadius: 8, fontSize: 11, color: '#666' }}>
+          No marketplace API credentials configured. ArchiveForge generated research links and manual comp fields instead of live comps.
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#666', fontWeight: 700 }}>
+            Candidate for uploaded page
+            <select value={selectedCandidateId || ''} onChange={e => setSelectedCandidateId(e.target.value ? Number(e.target.value) : null)}
+              style={{ padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }}>
+              <option value="">Unassigned ad page</option>
+              {candidates.map(c => <option key={c.id} value={c.id}>{c.brand || c.category || 'candidate'} {c.product || ''}</option>)}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#666', fontWeight: 700 }}>
+            Page number
+            <input value={pageNumber} onChange={e => setPageNumber(e.target.value)} placeholder="optional"
+              style={{ padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
+          </label>
+          <label style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75', fontSize: 12, fontWeight: 800, cursor: archiveId && !uploading ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Upload size={14} /> Add Ad Page Photo
+            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" style={{ display: 'none' }} disabled={!archiveId || uploading}
+              onChange={e => uploadAdPage(e.target.files?.[0] || null).finally(() => { e.currentTarget.value = ''; })} />
+          </label>
+          <label style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75', fontSize: 12, fontWeight: 800, cursor: archiveId && !uploading ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Camera size={14} /> Take Ad Page Photo
+            <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" style={{ display: 'none' }} disabled={!archiveId || uploading}
+              onChange={e => uploadAdPage(e.target.files?.[0] || null).finally(() => { e.currentTarget.value = ''; })} />
+          </label>
+        </div>
+      </div>
+
+      {metadata && (
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#666', marginBottom: 8 }}>GOOGLE BOOKS ISSUE METADATA</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, fontSize: 12 }}>
+            <div><span style={{ color: '#888' }}>Volume ID: </span>{metadata.source_volume_id || '—'}</div>
+            <div><span style={{ color: '#888' }}>Issue date: </span>{metadata.issue_date || '—'}</div>
+            <div><span style={{ color: '#888' }}>Publisher: </span>{metadata.publisher || '—'}</div>
+            <div><span style={{ color: '#888' }}>Pages: </span>{metadata.page_count || '—'}</div>
+            <div><span style={{ color: '#888' }}>Lookup: </span>{metadata.lookup_status || '—'}</div>
+            <div><span style={{ color: '#888' }}>Contents terms: </span>{metadata.contents_available ? 'available' : 'not available through official API'}</div>
+          </div>
+          {metadata.contents_limitation && <div style={{ marginTop: 8, fontSize: 11, color: '#92400e' }}>{metadata.contents_limitation}</div>}
+        </div>
+      )}
+
+      {recommendation && (
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#666', marginBottom: 8 }}>RECOMMENDATION PANEL</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, fontSize: 12 }}>
+            <div><span style={{ color: '#888' }}>Recommendation: </span><strong>{recommendation.recommendation || 'insufficient_data'}</strong></div>
+            <div><span style={{ color: '#888' }}>Evidence grade: </span>{recommendation.evidence_grade || 'F'}</div>
+            <div><span style={{ color: '#888' }}>Whole magazine: </span>{recommendation.whole_magazine_estimate?.low || recommendation.whole_magazine_estimate?.high ? `$${recommendation.whole_magazine_estimate?.low || 0}-$${recommendation.whole_magazine_estimate?.high || 0}` : '—'}</div>
+            <div><span style={{ color: '#888' }}>Verified ads: </span>{verifiedCount}</div>
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: '#374151' }}>{recommendation.reasoning_summary || 'Insufficient data.'}</div>
+          <div style={{ marginTop: 4, fontSize: 12, color: '#155e75' }}>Next action: {recommendation.next_action || 'manual review'}</div>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+        {candidates.map(candidate => {
+          const rank = ranking.find(r => r.candidate_id === candidate.id);
+          const group = compGroups.find(g => g.candidate?.id === candidate.id);
+          const links = (group?.comps || []).filter(comp => comp.result_type === 'search_link');
+          const actionLabel = (rank?.suggested_action || candidate.recommendation || 'needs_comps').replace(/_/g, ' ');
+          return (
+          <div key={candidate.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: '#1a1a1a' }}>{candidate.brand || candidate.category || 'Ad candidate'}</div>
+                <div style={{ fontSize: 12, color: '#666' }}>{candidate.product || candidate.category || 'possible opportunity'}</div>
+              </div>
+              <span style={{ height: 24, minWidth: 32, borderRadius: 6, background: (gradeColor[candidate.evidence_grade || 'D'] || '#6b7280') + '20', color: gradeColor[candidate.evidence_grade || 'D'] || '#6b7280', fontSize: 11, fontWeight: 900, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                {candidate.evidence_grade || 'D'}
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: candidate.verification_status === 'verified_in_copy' ? '#166534' : '#92400e', background: candidate.verification_status === 'verified_in_copy' ? '#f0fdf4' : '#fffbeb', borderRadius: 6, padding: '5px 7px' }}>
+              {candidate.verification_status || 'unverified'}
+            </div>
+            <div style={{ fontSize: 11, color: '#666' }}>Search: {candidate.search_query || '—'}</div>
+            <div style={{ fontSize: 11, color: '#374151' }}>{candidate.evidence_text || 'Issue-level candidate only.'}</div>
+            {(candidate.policy_flags || []).length > 0 && (
+              <div style={{ fontSize: 11, color: '#991b1b', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 7px' }}>
+                Policy warning: {(candidate.policy_flags || []).join(', ')}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: '#888' }}>
+              Estimate: {candidate.estimated_low || candidate.estimated_high ? `$${candidate.estimated_low || 0}-$${candidate.estimated_high || 0}` : 'Price unavailable until ad is verified or comps are added.'}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: 11, color: '#374151' }}>
+              <div>Value score: <strong>{rank?.value_score ?? candidate.value_score ?? 0}</strong></div>
+              <div>Confidence: <strong>{rank?.comp_confidence || candidate.comp_confidence || 'none'}</strong></div>
+              <div>Comps: {rank?.comp_count ?? candidate.comp_count ?? 0}</div>
+              <div>Active: {rank?.active_listing_count ?? candidate.active_listing_count ?? 0}</div>
+              <div>Sold: {rank?.sold_comp_count ?? candidate.sold_comp_count ?? 0}</div>
+              <div>Action: <strong>{actionLabel}</strong></div>
+            </div>
+            {showCompLinks && links.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
+                {links.slice(0, 3).map(link => (
+                  <a key={link.id} href={link.url || '#'} target="_blank" rel="noreferrer"
+                    style={{ color: '#2563eb', textDecoration: 'none', overflowWrap: 'anywhere' }}>
+                    {link.title || link.provider || 'research link'}
+                  </a>
+                ))}
+              </div>
+            )}
+            {rank?.reasoning_summary && <div style={{ fontSize: 11, color: '#666' }}>{rank.reasoning_summary}</div>}
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 'auto' }}>
+              <button onClick={() => setSelectedCandidateId(candidate.id)} style={{ padding: '5px 7px', border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75', borderRadius: 6, fontSize: 10, fontWeight: 800, cursor: 'pointer' }}>
+                Photograph this ad if present
+              </button>
+              <button onClick={() => updateStatus(candidate.id, 'not_found')} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+                Mark not found
+              </button>
+              <button onClick={() => updateStatus(candidate.id, 'ignored')} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+                Ignore
+              </button>
+              <button disabled style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#f9fafb', color: candidate.verification_status === 'verified_in_copy' ? '#166534' : '#9ca3af', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'not-allowed' }}>
+                Verified in this copy
+              </button>
+            </div>
+          </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -786,24 +2421,6 @@ function ConditionSection({ data, onChange }: { data: Partial<ArchiveItem>; onCh
       </div>
 
       <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Comp Range Min ($)</label>
-            <input type="number" value={data.rough_comp_min || ''} onChange={e => update('rough_comp_min', parseFloat(e.target.value) || 0)}
-              placeholder="0" style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
-          </div>
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Comp Range Max ($)</label>
-            <input type="number" value={data.rough_comp_max || ''} onChange={e => update('rough_comp_max', parseFloat(e.target.value) || 0)}
-              placeholder="0" style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
-          </div>
-        </div>
-        <div>
-          <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Sale Plan</label>
-          <input value={data.sale_plan || ''} onChange={e => update('sale_plan', e.target.value)}
-            placeholder="e.g. list on eBay, list on AbeBooks, hold for convention"
-            style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
-        </div>
         <div style={{ marginTop: 12 }}>
           <label style={{ fontSize: 11, fontWeight: 600, color: '#666', display: 'block', marginBottom: 4 }}>Defects</label>
           <input value={data.defects || ''} onChange={e => update('defects', e.target.value)}
@@ -816,6 +2433,206 @@ function ConditionSection({ data, onChange }: { data: Partial<ArchiveItem>; onCh
             placeholder="Internal notes about this item..."
             style={{ width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13, resize: 'vertical' }} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function PricingSection({
+  data,
+  archiveId,
+  identifyResult,
+  confirmation,
+  onChange,
+}: {
+  data: Partial<ArchiveItem>;
+  archiveId: number | null;
+  identifyResult: IdentifyResponse | null;
+  confirmation: MatchConfirmation | null;
+  onChange: (d: Partial<ArchiveItem>) => void;
+}) {
+  const [early, setEarly] = useState<PricingResult | null>(null);
+  const [finalPricing, setFinalPricing] = useState<PricingResult | null>(null);
+  const [compData, setCompData] = useState<any>(null);
+  const [loadingAction, setLoadingAction] = useState('');
+  const [error, setError] = useState('');
+  const update = (field: keyof ArchiveItem, value: any) => onChange({ ...data, [field]: value });
+  const aiRange = identifyResult?.ai_result?.recommended_price_range || {};
+
+  const callPricing = async (mode: 'estimate' | 'final', acceptFinal = false) => {
+    if (!archiveId) return;
+    setLoadingAction(mode + (acceptFinal ? ':accept' : ''));
+    setError('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/pricing/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rough_comp_min: data.rough_comp_min || 0,
+          rough_comp_max: data.rough_comp_max || 0,
+          sale_plan: data.sale_plan || '',
+          accept_final: acceptFinal,
+        }),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.detail || `Pricing failed with ${res.status}`);
+      if (mode === 'estimate') setEarly(out);
+      else setFinalPricing(out);
+      if (acceptFinal) update('processed_status', 'VALUED');
+    } catch (exc: any) {
+      setError(exc?.message || 'Pricing request failed.');
+    } finally {
+      setLoadingAction('');
+    }
+  };
+
+  const ResultBox = ({ label, result }: { label: string; result: PricingResult | null }) => result ? (
+    <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: 12, fontSize: 12, display: 'grid', gap: 5 }}>
+      <div style={{ fontWeight: 800, color: '#1f2937' }}>{label}</div>
+      <div><span style={{ color: '#888' }}>Type: </span>{result.pricing_type}</div>
+      <div><span style={{ color: '#888' }}>Comp evidence: </span>{result.true_comps_available ? 'stored comps available' : 'needs comps / reference guide only'}</div>
+      <div><span style={{ color: '#888' }}>Confidence: </span>{result.confidence || result.pricing_summary?.confidence || 'none'}</div>
+      <div><span style={{ color: '#888' }}>Manual rough range: </span>${result.rough_comp_min || 0}–${result.rough_comp_max || 0}</div>
+      <div><span style={{ color: '#888' }}>Recommended price: </span>{result.recommended_price ? `$${result.recommended_price}` : '—'}</div>
+      <div style={{ color: '#666' }}>{result.message}</div>
+      {(result.warnings || result.pricing_summary?.warnings || []).map((w: string) => <div key={w} style={{ color: '#92400e' }}>{w}</div>)}
+    </div>
+  ) : null;
+
+  const researchComps = async () => {
+    if (!archiveId) return;
+    setLoadingAction('research-comps');
+    setError('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/comps/research`, { method: 'POST' });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.detail || `Comp research failed with ${res.status}`);
+      setCompData(out);
+      setFinalPricing({ ...(finalPricing || {} as any), ...out.pricing_summary, pricing_summary: out.pricing_summary, stage: 'comp_research', true_comps_available: false, message: out.pricing_summary?.pricing_basis || out.note, rough_comp_min: data.rough_comp_min || 0, rough_comp_max: data.rough_comp_max || 0 });
+    } catch (exc: any) {
+      setError(exc?.message || 'Comp research failed.');
+    } finally {
+      setLoadingAction('');
+    }
+  };
+
+  const calculatePricing = async () => {
+    if (!archiveId) return;
+    setLoadingAction('calculate-pricing');
+    setError('');
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/pricing/calculate`, { method: 'POST' });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.detail || `Pricing calculation failed with ${res.status}`);
+      setFinalPricing({ ...(finalPricing || {} as any), ...out, pricing_summary: out, stage: 'pricing_calculate', true_comps_available: (out.sold_comp_count || out.active_listing_count || out.dealer_listing_count) > 0, message: out.pricing_basis, rough_comp_min: data.rough_comp_min || 0, rough_comp_max: data.rough_comp_max || 0 });
+    } catch (exc: any) {
+      setError(exc?.message || 'Pricing calculation failed.');
+    } finally {
+      setLoadingAction('');
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Pricing & Comps</h2>
+        <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+          Pricing happens after condition. ArchiveForge stores source-labeled comp evidence and keeps DTM guide values separate from current sold comps.
+        </p>
+      </div>
+
+      {error && (
+        <div style={{ padding: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, fontSize: 12, color: '#991b1b' }}>
+          <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Early Estimate</div>
+          <div style={{ fontSize: 12, color: '#666', lineHeight: 1.45 }}>
+            Available after AI identify/reference confirmation. This is preliminary and should not override final condition-based pricing.
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12 }}>
+            <div><span style={{ color: '#888' }}>Match confirmed: </span>{confirmation?.status === 'confirmed' || confirmation?.status === 'manual' ? 'yes' : 'not yet'}</div>
+            <div><span style={{ color: '#888' }}>AI price hint: </span>{aiRange.low || aiRange.high ? `$${aiRange.low || 0}–$${aiRange.high || 0}` : '—'}</div>
+          </div>
+          <button onClick={() => callPricing('estimate')} disabled={!archiveId || loadingAction !== ''}
+            style={{ marginTop: 10, padding: '8px 12px', background: '#eef2ff', color: '#3730a3', border: '1px solid #c7d2fe', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: loadingAction ? 'wait' : 'pointer' }}>
+            {loadingAction === 'estimate' ? 'Running…' : 'Run Early Estimate'}
+          </button>
+        </div>
+
+        <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Final Pricing</div>
+          <div style={{ fontSize: 12, color: '#666', lineHeight: 1.45 }}>
+            Use after condition score, defects, completeness, address-label status, and sale plan are entered.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#666' }}>
+              Comp Range Min ($)
+              <input type="number" value={data.rough_comp_min || ''} onChange={e => update('rough_comp_min', parseFloat(e.target.value) || 0)}
+                placeholder="0" style={{ marginTop: 4, width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
+            </label>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#666' }}>
+              Comp Range Max ($)
+              <input type="number" value={data.rough_comp_max || ''} onChange={e => update('rough_comp_max', parseFloat(e.target.value) || 0)}
+                placeholder="0" style={{ marginTop: 4, width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
+            </label>
+          </div>
+          <label style={{ display: 'block', marginTop: 10, fontSize: 11, fontWeight: 700, color: '#666' }}>
+            Sale Plan
+            <input value={data.sale_plan || ''} onChange={e => update('sale_plan', e.target.value)}
+              placeholder="e.g. list on eBay, list on AbeBooks, hold for convention"
+              style={{ marginTop: 4, width: '100%', padding: '8px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 13 }} />
+          </label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => callPricing('final')} disabled={!archiveId || loadingAction !== ''}
+              style={{ padding: '8px 12px', background: '#fef9ec', color: '#92400e', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: loadingAction ? 'wait' : 'pointer' }}>
+              {loadingAction === 'final' ? 'Running…' : 'Run Final Pricing'}
+            </button>
+            <button onClick={() => callPricing('final', true)} disabled={!archiveId || loadingAction !== ''}
+              style={{ padding: '8px 12px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: loadingAction ? 'wait' : 'pointer' }}>
+              {loadingAction === 'final:accept' ? 'Accepting…' : 'Accept Final Price'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <ResultBox label="Early Estimate Result" result={early} />
+      <ResultBox label="Final Pricing Result" result={finalPricing} />
+
+      <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, display: 'grid', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 800 }}>Magazine Comps</div>
+          <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>
+            DTM guide values are reference-guide values, not current sold comps. Active listings are asking prices, not sold comps.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={researchComps} disabled={!archiveId || loadingAction !== ''} style={{ padding: '8px 12px', background: '#ecfeff', color: '#155e75', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: loadingAction ? 'wait' : 'pointer' }}>
+            {loadingAction === 'research-comps' ? 'Researching...' : 'Research Magazine Comps'}
+          </button>
+          <a href={archiveId ? `${AG_API}/${archiveId}/comps` : '#'} target="_blank" rel="noreferrer" style={{ padding: '8px 12px', background: '#fff', color: '#374151', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, fontWeight: 800, textDecoration: 'none' }}>
+            View Comp Links
+          </a>
+          <button onClick={calculatePricing} disabled={!archiveId || loadingAction !== ''} style={{ padding: '8px 12px', background: '#111827', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: loadingAction ? 'wait' : 'pointer' }}>
+            {loadingAction === 'calculate-pricing' ? 'Calculating...' : 'Calculate Pricing'}
+          </button>
+          <button disabled style={{ padding: '8px 12px', background: '#f3f4f6', color: '#9ca3af', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12, fontWeight: 800 }}>
+            Add Manual Comp
+          </button>
+        </div>
+        {compData?.stored_results?.length > 0 && (
+          <div style={{ display: 'grid', gap: 5, fontSize: 11 }}>
+            {compData.stored_results.slice(0, 8).map((comp: any) => (
+              <div key={`${comp.id}-${comp.url}`} style={{ padding: 8, border: '1px solid #eee8df', borderRadius: 8 }}>
+                <strong>{comp.result_type}</strong> · {comp.title || comp.query} {comp.url ? <a href={comp.url} target="_blank" rel="noreferrer" style={{ marginLeft: 6 }}>open</a> : null}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -984,15 +2801,19 @@ function ReviewPublishSection({ archiveId, refIssue }: {
   const [marketforgeCategoryId, setMarketforgeCategoryId] = useState('');
   const [marketforgeShipsFromZip, setMarketforgeShipsFromZip] = useState('');
   const [savingPublishFields, setSavingPublishFields] = useState(false);
+  const [listingDraft, setListingDraft] = useState<ListingPacketDraft | null>(null);
+  const [draftState, setDraftState] = useState<'idle' | 'creating' | 'success' | 'error'>('idle');
+  const [draftError, setDraftError] = useState('');
 
   const load = useCallback(async () => {
     if (!archiveId) { setLoading(false); return; }
     setLoading(true);
 	    try {
-	      const [archRes, photoRes, publishRes] = await Promise.all([
+	      const [archRes, photoRes, publishRes, listingDraftRes] = await Promise.all([
 	        fetch(`${AG_API}/archives/${archiveId}`),
 	        fetch(`${AG_API}/uploads/${archiveId}`),
 	        fetch(`${AG_API}/publish-status?archive_id=${archiveId}`),
+	        fetch(`${AG_API}/${archiveId}/listing-draft`),
 	      ]);
 	      if (archRes.ok) {
           const archiveItem = await archRes.json();
@@ -1002,6 +2823,12 @@ function ReviewPublishSection({ archiveId, refIssue }: {
         }
 	      if (photoRes.ok) setPhotos((await photoRes.json()).photos || []);
 	      if (publishRes.ok) setPublishStatus(await publishRes.json());
+	      if (listingDraftRes.ok) {
+	        const data = await listingDraftRes.json();
+	        setListingDraft(data.draft || data);
+	      } else if (listingDraftRes.status === 404 || listingDraftRes.status === 409) {
+	        setListingDraft(null);
+	      }
 	    } catch { /* */ }
     setLoading(false);
   }, [archiveId]);
@@ -1022,9 +2849,33 @@ function ReviewPublishSection({ archiveId, refIssue }: {
 	  if (missingRequiredFields.length > 0) validationErrors.push(`Missing required MarketForge fields: ${missingRequiredFields.join(', ')}`);
 	  if (invalidRequiredFields.length > 0) validationErrors.push(`Invalid MarketForge fields: ${invalidRequiredFields.join(', ')}`);
 	  if (!canPublish) validationErrors.push(`Status must be ${validStatuses.join(' or ')} (currently ${item.processed_status || 'unset'})`);
-  if (!hasTitle) validationErrors.push('Listing title is blank — go back to Step 6 and save a draft');
-  if (!hasDescription) validationErrors.push('Listing description is blank — go back to Step 6 and save a draft');
-  if (!hasPhotos) validationErrors.push('No actual listing photos uploaded — go back to Step 3');
+	  if (!hasTitle) validationErrors.push('Listing title is blank — go back to Step 6 and save a draft');
+	  if (!hasDescription) validationErrors.push('Listing description is blank — go back to Step 6 and save a draft');
+	  if (!hasPhotos) validationErrors.push('No actual listing photos uploaded — go back to Step 3');
+
+	  const draftPreview = listingDraft?.draft || listingDraft;
+	  const draftId = listingDraft?.draft_id || draftPreview?.draft_id;
+	  const draftStatus = listingDraft?.draft_status || draftPreview?.draft_status;
+	  const draftTitle = listingDraft?.title || draftPreview?.title || item.listing_title || '';
+	  const draftPrice = listingDraft?.recommended_price ?? draftPreview?.recommended_price ?? null;
+	  const draftMissingFields = listingDraft?.missing_fields || draftPreview?.missing_fields || [];
+
+	  const createListingDraft = async () => {
+	    if (!archiveId) return;
+	    setDraftState('creating');
+	    setDraftError('');
+	    try {
+	      const res = await fetch(`${AG_API}/${archiveId}/create-listing-draft`, { method: 'POST' });
+	      const data = await res.json().catch(() => ({}));
+	      if (!res.ok) throw new Error(data.detail || `Failed to create listing draft (${res.status})`);
+	      setListingDraft(data);
+	      setDraftState('success');
+	      await load();
+	    } catch (e: any) {
+	      setDraftState('error');
+	      setDraftError(e?.message || 'Could not create listing draft');
+	    }
+	  };
 
   const savePublishFields = useCallback(async () => {
     if (!archiveId) return false;
@@ -1105,12 +2956,12 @@ function ReviewPublishSection({ archiveId, refIssue }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Step 7 — Review & Publish</h2>
-        <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-          Review the final listing before pushing to MarketForge. Explicit action required — no auto-publish.
-        </p>
-      </div>
+	      <div>
+	        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Step 7 — Review Listing Draft & Export</h2>
+	        <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
+	          Review the listing draft, create the handoff packet, then export. Publishing remains a separate explicit action.
+	        </p>
+	      </div>
 
       {/* Validation errors */}
       {validationErrors.length > 0 && (
@@ -1156,6 +3007,112 @@ function ReviewPublishSection({ archiveId, refIssue }: {
           )}
         </div>
       )}
+
+      <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#1a1a1a' }}>LISTING DRAFT & HANDOFF PACKET</div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+              Create a listing draft before exporting. Export packet is for manual handoff or outside listing. It does not publish to eBay.
+            </div>
+          </div>
+          <button
+            onClick={createListingDraft}
+            disabled={draftState === 'creating'}
+            style={{
+              padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800,
+              border: '1px solid #06b6d4', background: draftState === 'creating' ? '#e5e7eb' : '#ecfeff',
+              color: draftState === 'creating' ? '#6b7280' : '#155e75',
+              cursor: draftState === 'creating' ? 'wait' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {draftState === 'creating' ? <><Loader2 size={14} className="animate-spin" /> Creating...</> : <><List size={14} /> Create Listing Draft</>}
+          </button>
+        </div>
+
+        {draftState === 'error' && draftError && (
+          <div style={{ padding: '9px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 12, color: '#991b1b' }}>
+            <AlertTriangle size={12} style={{ display: 'inline', marginRight: 4 }} />
+            {draftError}
+          </div>
+        )}
+
+        {draftId ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+            {[
+              ['Draft created', `#${draftId}`],
+              ['Draft status', draftStatus || 'draft'],
+              ['Listing title', draftTitle || '—'],
+              ['Suggested price', draftPrice ? `$${draftPrice}` : '—'],
+            ].map(([label, value]) => (
+              <div key={label} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10 }}>
+                <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', fontWeight: 700 }}>{label}</div>
+                <div style={{ fontSize: 12, color: '#111827', fontWeight: 700, marginTop: 3, wordBreak: 'break-word' }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ padding: '9px 10px', background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 8, fontSize: 12, color: '#92400e' }}>
+            No listing packet draft exists yet. Create the draft after reviewing title, condition, and pricing.
+          </div>
+        )}
+
+        {draftId && (
+          <>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: '#666', marginBottom: 5 }}>MISSING FIELDS CHECKLIST</div>
+              {draftMissingFields.length > 0 ? (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {draftMissingFields.map((field: string) => (
+                    <span key={field} style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 999, padding: '4px 8px' }}>
+                      {field}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#166534' }}><CheckCircle size={12} style={{ display: 'inline', marginRight: 4 }} />No missing fields reported.</div>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 8 }}>
+              <a href={`${AG_API}/${archiveId}/listing-packet.pdf`} target="_blank" rel="noreferrer"
+                style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, border: '1px solid #d1d5db', background: '#fff', color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none' }}>
+                <Download size={14} /> Export Listing Packet PDF
+              </a>
+              <a href={`${AG_API}/${archiveId}/listing-packet.pdf?include_images=true`} target="_blank" rel="noreferrer"
+                style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, border: '1px solid #bae6fd', background: '#ecfeff', color: '#155e75', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none' }}>
+                <Download size={14} /> Export Listing Packet PDF with Photos
+              </a>
+              <a href={`${AG_API}/${archiveId}/listing-packet.csv`} target="_blank" rel="noreferrer"
+                style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, border: '1px solid #d1d5db', background: '#fff', color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none' }}>
+                <Download size={14} /> Export Listing Packet CSV
+              </a>
+              <a href={`${AG_API}/${archiveId}/listing-packet.xlsx`} target="_blank" rel="noreferrer"
+                style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, border: '1px solid #d1d5db', background: '#fff', color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none' }}>
+                <Download size={14} /> Export Listing Packet XLSX
+              </a>
+              <a href={`${AG_API}/${archiveId}/listing-packet.xlsx?include_images=true`} target="_blank" rel="noreferrer"
+                style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, border: '1px solid #bae6fd', background: '#ecfeff', color: '#155e75', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none' }}>
+                <Download size={14} /> Export Listing Packet XLSX with Photos
+              </a>
+              <a href={`${AG_API}/${archiveId}/listing-packet.json`} target="_blank" rel="noreferrer"
+                style={{ padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800, border: '1px solid #d1d5db', background: '#fff', color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none' }}>
+                <Download size={14} /> Export Listing Packet JSON
+              </a>
+            </div>
+          </>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button disabled style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#f9fafb', color: '#9ca3af', fontSize: 12, fontWeight: 700, cursor: 'not-allowed' }}>
+            Send to RelistApp - coming next
+          </button>
+          <button disabled style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#f9fafb', color: '#9ca3af', fontSize: 12, fontWeight: 700, cursor: 'not-allowed' }}>
+            Create eBay Draft - coming next
+          </button>
+        </div>
+      </div>
 
       {/* Two-column layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
@@ -1263,6 +3220,18 @@ function ReviewPublishSection({ archiveId, refIssue }: {
           {/* Publish actions */}
           <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 16 }}>
 	            <div style={{ fontSize: 12, fontWeight: 700, color: '#888', marginBottom: 10 }}>MARKETFORGE PUBLISH STATUS</div>
+            <a
+              href={`${AG_API}/${archiveId}/export.pdf`}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                marginBottom: 10, width: '100%', padding: '10px 12px', borderRadius: 9, fontSize: 12, fontWeight: 800,
+                border: '1px solid #d1d5db', background: '#fff', color: '#374151',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, textDecoration: 'none',
+              }}
+            >
+              <Download size={14} /> Export Item PDF
+            </a>
 	            {publishStatus && (
 	              <div style={{
 	                marginBottom: 10, padding: '9px 10px', borderRadius: 8, fontSize: 11,
@@ -1357,7 +3326,7 @@ function ReviewPublishSection({ archiveId, refIssue }: {
 
 // ── Section 8: Inventory View ─────────────────────────────────────────────────
 
-type SortKey = 'created_at' | 'processed_status' | 'source_box_code' | 'processed_box_code' | 'tier';
+type SortKey = 'created_at' | 'processed_status' | 'source_box_code' | 'processed_box_code' | 'tier' | 'display_title' | 'issue_date';
 
 function InventorySection() {
   const [items, setItems] = useState<ArchiveItem[]>([]);
@@ -1368,6 +3337,10 @@ function InventorySection() {
   const [filterSourceBox, setFilterSourceBox] = useState('all');
   const [filterProcessedBox, setFilterProcessedBox] = useState('all');
   const [filterListingStatus, setFilterListingStatus] = useState('all');
+  const [hideTestRecords, setHideTestRecords] = useState(true);
+  const [showNeedsReviewOnly, setShowNeedsReviewOnly] = useState(false);
+  const [showNonLife, setShowNonLife] = useState(true);
+  const [showAdReadyOnly, setShowAdReadyOnly] = useState(false);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortAsc, setSortAsc] = useState(false);
@@ -1376,6 +3349,8 @@ function InventorySection() {
   const [reboxLocation, setReboxLocation] = useState('');
   const [reboxing, setReboxing] = useState(false);
   const [reboxError, setReboxError] = useState('');
+  const [photoDrawer, setPhotoDrawer] = useState<{ item: ArchiveItem; photos: any } | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1387,7 +3362,7 @@ function InventorySection() {
       const inv = await invRes.json();
       const st = await statsRes.json();
       setItems(inv.items || []);
-      setStats(st);
+      setStats({ ...st, inventory_counters: inv.counters || st.inventory_counters });
     } catch { /* */ }
     setLoading(false);
   }, []);
@@ -1404,8 +3379,13 @@ function InventorySection() {
     if (filterSourceBox !== 'all' && item.source_box_code !== filterSourceBox) return false;
     if (filterProcessedBox !== 'all' && item.processed_box_code !== filterProcessedBox) return false;
     if (filterListingStatus !== 'all' && (item.listing_status || 'none') !== filterListingStatus) return false;
+    if (hideTestRecords && item.is_test_record) return false;
+    if (!showNonLife && item.issue_info_status === 'completed' && !item.is_life_magazine) return false;
+    if (showNeedsReviewOnly && !item.needs_review) return false;
+    if (showAdReadyOnly && !item.ad_opportunity_ready) return false;
     const q = search.toLowerCase();
-    if (q && !item.cover_subject?.toLowerCase().includes(q) && !item.issue_date?.includes(q) && !item.source_box_code?.toLowerCase().includes(q) && !item.processed_box_code?.toLowerCase().includes(q) && !(item.listing_status || '').includes(q)) return false;
+    const haystack = [item.display_title, item.short_description, item.cover_subject, item.issue_date, item.source_box_code, item.processed_box_code, item.listing_status, item.status_badges?.join(' ')].join(' ').toLowerCase();
+    if (q && !haystack.includes(q)) return false;
     return true;
   });
 
@@ -1422,6 +3402,19 @@ function InventorySection() {
   };
 
   const SortIcon = ({ k }: { k: SortKey }) => sortKey === k ? (sortAsc ? ' ↑' : ' ↓') : '';
+
+  const openPhotos = async (item: ArchiveItem) => {
+    setPhotoLoading(true);
+    try {
+      const res = await fetch(`${AG_API}/${item.id}/photos`);
+      const out = await res.json();
+      setPhotoDrawer({ item, photos: out.photos || {} });
+    } catch {
+      setPhotoDrawer({ item, photos: {} });
+    } finally {
+      setPhotoLoading(false);
+    }
+  };
 
   const handleRebox = async (itemId: number) => {
     if (!reboxBox.trim()) { setReboxError('Box code required'); return; }
@@ -1448,13 +3441,15 @@ function InventorySection() {
     setReboxing(false);
   };
 
-  const COLS: { key: keyof ArchiveItem | 'photo_count' | 'archive_location'; label: string; width: number; sortable?: boolean }[] = [
+  const COLS: { key: keyof ArchiveItem | 'photo_count' | 'archive_location' | 'thumbnail_url' | 'status_badges'; label: string; width: number; sortable?: boolean }[] = [
     { key: 'id', label: 'ID', width: 45 },
+    { key: 'thumbnail_url', label: 'Photo', width: 72 },
+    { key: 'display_title', label: 'Title', width: 250, sortable: true },
     { key: 'issue_date', label: 'Date', width: 88 },
-    { key: 'cover_subject', label: 'Cover', width: 170 },
+    { key: 'status_badges', label: 'Badges', width: 170 },
     { key: 'tier', label: 'Tier', width: 48, sortable: true },
-    { key: 'processed_status', label: 'Status', width: 105, sortable: true },
     { key: 'photo_count', label: 'Photos', width: 62 },
+    { key: 'ad_page_photo_count', label: 'Ad Pg', width: 58 },
     { key: 'source_box_code', label: 'Source Box', width: 92, sortable: true },
     { key: 'processed_box_code', label: 'Dest Box', width: 92, sortable: true },
     { key: 'archive_location', label: 'Location', width: 100 },
@@ -1472,18 +3467,37 @@ function InventorySection() {
           <h2 style={{ fontSize: 18, fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Archive Inventory</h2>
           <p style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Physical archive view — source box tracking, status, and reboxing</p>
         </div>
-        <button onClick={load} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <RefreshCw size={12} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <a href={`${AG_API}/inventory/export.csv`} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: '#374151', textDecoration: 'none' }}>
+            <Download size={12} /> Export Inventory CSV
+          </a>
+          <a href={`${AG_API}/inventory/export.csv?include_photos=true`} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: '#374151', textDecoration: 'none' }}>
+            <Download size={12} /> Export Inventory CSV with Photo Links
+          </a>
+          <a href={`${AG_API}/inventory/export.xlsx`} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: '#374151', textDecoration: 'none' }}>
+            <Download size={12} /> Export Inventory XLSX
+          </a>
+          <a href={`${AG_API}/inventory/export.xlsx?include_images=true`} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: '#374151', textDecoration: 'none' }}>
+            <Download size={12} /> Export Inventory XLSX with Thumbnails
+          </a>
+          <button onClick={load} style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <RefreshCw size={12} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Stats row */}
       {stats && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {[
-            { label: 'Total', value: stats.total_items, color: '#1a1a1a' },
-            { label: 'Valued', value: stats.valued_items, color: '#16a34a' },
-            ...Object.entries(stats.by_status || {}).map(([s, c]) => ({ label: s, value: c as number, color: STATUS_COLORS[s] || '#666' })),
+            { label: 'Total', value: stats.inventory_counters?.total_records ?? stats.total_items, color: '#1a1a1a' },
+            { label: 'LIFE', value: stats.inventory_counters?.real_life_identified ?? 0, color: '#3b82f6' },
+            { label: 'Issue Ready', value: stats.inventory_counters?.issue_info_completed ?? 0, color: '#10b981' },
+            { label: 'Ad Ready', value: stats.inventory_counters?.ad_opportunities_ready ?? 0, color: '#06b6d4' },
+            { label: 'Drafts', value: stats.inventory_counters?.listing_draft_saved ?? 0, color: '#f59e0b' },
+            { label: 'Needs Review', value: stats.inventory_counters?.needs_review ?? 0, color: '#ef4444' },
+            { label: 'Test', value: stats.inventory_counters?.test_records ?? 0, color: '#6b7280' },
+            { label: 'Non-LIFE', value: stats.inventory_counters?.non_life ?? 0, color: '#9ca3af' },
           ].map(s => (
             <div key={s.label} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: '10px 14px', minWidth: 80, textAlign: 'center' }}>
               <div style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -1530,8 +3544,12 @@ function InventorySection() {
           <option value="pushed">Published</option>
           <option value="failed">Publish Failed</option>
         </select>
+        <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={hideTestRecords} onChange={e => setHideTestRecords(e.target.checked)} /> Hide test records</label>
+        <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={showNeedsReviewOnly} onChange={e => setShowNeedsReviewOnly(e.target.checked)} /> Show needs review</label>
+        <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={showNonLife} onChange={e => setShowNonLife(e.target.checked)} /> Show non-LIFE</label>
+        <label style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={showAdReadyOnly} onChange={e => setShowAdReadyOnly(e.target.checked)} /> Show ad ready</label>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888' }}>
-          {sorted.length} of {items.length} items
+          Showing {sorted.length} archived items
         </span>
       </div>
 
@@ -1576,7 +3594,24 @@ function InventorySection() {
                       }
                       if (col.key === 'photo_count') {
                         const count = Number(val) || 0;
-                        display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: count > 0 ? '#d1fae5' : '#f3f4f6', color: count > 0 ? '#065f46' : '#9ca3af' }}>{count > 0 ? `📷 ${count}` : '—'}</span>;
+                        display = <span style={{ padding: '2px 7px', borderRadius: 6, fontWeight: 600, fontSize: 10, background: count > 0 ? '#d1fae5' : '#f3f4f6', color: count > 0 ? '#065f46' : '#9ca3af' }}>{count > 0 ? count : '—'}</span>;
+                      }
+                      if (col.key === 'thumbnail_url') {
+                        display = item.thumbnail_url ? (
+                          <button onClick={() => openPhotos(item)} title="View Photos" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}>
+                            <img src={`${API}${item.thumbnail_url.replace('/api/v1', '')}`} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
+                          </button>
+                        ) : <button onClick={() => openPhotos(item)} style={{ border: '1px dashed #d1d5db', background: '#f9fafb', borderRadius: 6, width: 54, height: 40, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>No photo</button>;
+                      }
+                      if (col.key === 'display_title') {
+                        display = <div style={{ maxWidth: 250, whiteSpace: 'normal', lineHeight: 1.25, fontWeight: 700 }}>{item.display_title || item.cover_subject || '—'}<div style={{ fontSize: 10, color: '#888', fontWeight: 400 }}>{item.short_description || ''}</div></div>;
+                      }
+                      if (col.key === 'status_badges') {
+                        display = <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 170 }}>
+                          {(item.status_badges || []).slice(0, 5).map(badge => (
+                            <span key={badge} style={{ padding: '2px 6px', borderRadius: 6, fontSize: 9, fontWeight: 800, background: badge === 'NEEDS REVIEW' ? '#fee2e2' : badge === 'AD READY' ? '#cffafe' : badge === 'TEST' ? '#f3f4f6' : '#e0f2fe', color: badge === 'NEEDS REVIEW' ? '#991b1b' : badge === 'TEST' ? '#6b7280' : '#075985' }}>{badge}</span>
+                          ))}
+                        </div>;
                       }
                       if (col.key === 'condition_score') {
                         display = val ? `${val}/5` : '—';
@@ -1636,7 +3671,13 @@ function InventorySection() {
                           {reboxError && <div style={{ width: '100%', fontSize: 10, color: '#dc2626' }}>{reboxError}</div>}
                         </div>
                       ) : (
-                        <div style={{ display: 'flex', gap: 4 }}>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => openPhotos(item)}
+                            style={{ padding: '3px 8px', background: '#fff', border: '1px solid #bae6fd', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', color: '#155e75', display: 'flex', alignItems: 'center', gap: 3 }}
+                          >
+                            <Eye size={10} /> View Photos
+                          </button>
                           {['PHOTOGRAPHED','VALUED','READY_TO_LIST','LISTED','HOLD'].includes(item.processed_status) && (
                             <button
                               onClick={() => { setReboxItemId(item.id); setReboxBox(item.processed_box_code || ''); setReboxLocation(item.archive_location || ''); setReboxError(''); }}
@@ -1655,28 +3696,85 @@ function InventorySection() {
           </table>
         </div>
       )}
+
+      {photoDrawer && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 50, display: 'flex', justifyContent: 'flex-end' }} onClick={() => setPhotoDrawer(null)}>
+          <div style={{ width: 'min(720px, 96vw)', height: '100%', background: '#fff', boxShadow: '-12px 0 30px rgba(0,0,0,0.18)', padding: 18, overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18 }}>{photoDrawer.item.display_title || `Archive #${photoDrawer.item.id}`}</h3>
+                <div style={{ marginTop: 4, color: '#666', fontSize: 12 }}>
+                  Issue info: {photoDrawer.item.issue_info_status || 'not_run'} · Ad opportunity: {photoDrawer.item.ad_opportunity_ready ? 'ready' : 'not ready'}
+                </div>
+              </div>
+              <button onClick={() => setPhotoDrawer(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 8, width: 32, height: 32, cursor: 'pointer' }}><X size={16} /></button>
+            </div>
+            {photoLoading ? <div style={{ padding: 30, color: '#888' }}>Loading photos...</div> : (
+              <div style={{ display: 'grid', gap: 16, marginTop: 16 }}>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                  {photoDrawer.item.front_photo_present && <span style={{ padding: '2px 7px', borderRadius: 6, background: '#d1fae5', color: '#065f46', fontSize: 10, fontWeight: 800 }}>Front photo present</span>}
+                  {!photoDrawer.photos?.spine?.length && <span style={{ padding: '2px 7px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontSize: 10, fontWeight: 800 }}>Missing spine</span>}
+                  {!photoDrawer.photos?.back?.length && <span style={{ padding: '2px 7px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontSize: 10, fontWeight: 800 }}>Missing back</span>}
+                  {photoDrawer.photos?.defects?.length > 0 && <span style={{ padding: '2px 7px', borderRadius: 6, background: '#fee2e2', color: '#991b1b', fontSize: 10, fontWeight: 800 }}>Has defect photos</span>}
+                  {photoDrawer.photos?.ad_pages?.length > 0 && <span style={{ padding: '2px 7px', borderRadius: 6, background: '#cffafe', color: '#155e75', fontSize: 10, fontWeight: 800 }}>Has ad-page photos</span>}
+                  {photoDrawer.item.verified_ad_count ? <span style={{ padding: '2px 7px', borderRadius: 6, background: '#dcfce7', color: '#166534', fontSize: 10, fontWeight: 800 }}>{photoDrawer.item.verified_ad_count} verified ads</span> : null}
+                </div>
+                {(['front','spine','back','defects','label','ad_pages'] as const).map(role => {
+                  const group = photoDrawer.photos?.[role] || [];
+                  if (!group.length) return null;
+                  return (
+                    <div key={role}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 8 }}>{role.replace('_', ' ').toUpperCase()}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+                        {group.map((p: any) => (
+                          <div key={p.photo_id || p.id} style={{ border: '1px solid #e5e2dc', borderRadius: 8, padding: 8, display: 'grid', gap: 7 }}>
+                            <img src={`${API}${(p.thumbnail_url || p.photo_url || '').replace('/api/v1', '')}`} alt={p.role} style={{ width: '100%', height: 180, objectFit: 'contain', background: '#f9fafb', borderRadius: 6 }} />
+                            <div style={{ fontSize: 10, color: '#666' }}>{p.filename} · {p.file_size || p.file_size_bytes || 0} bytes</div>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              <a href={`${API}${(p.photo_url || '').replace('/api/v1', '')}`} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>Open full image</a>
+                              <a href={`${API}${(p.photo_url || '').replace('/api/v1', '')}`} download style={{ fontSize: 11 }}>Download image</a>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button disabled style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#f3f4f6', color: '#9ca3af', fontSize: 12 }}>Add more photos</button>
+                  <button onClick={async () => { await fetch(`${AG_API}/identify?archive_id=${photoDrawer.item.id}`, { method: 'POST' }); }} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #bae6fd', background: '#ecfeff', color: '#155e75', fontSize: 12, cursor: 'pointer' }}>Re-run AI Identify on front cover</button>
+                  <button onClick={async () => { await fetch(`${AG_API}/${photoDrawer.item.id}/ads/analyze`, { method: 'POST' }); }} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', fontSize: 12, cursor: 'pointer' }}>Analyze uploaded ad pages</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Main ArchiveForgePage ─────────────────────────────────────────────────────
 
-type WizardStep = 'intake' | 'reference' | 'photos' | 'archive' | 'condition' | 'listing' | 'review' | 'inventory';
+type WizardStep = 'start' | 'intake' | 'photos' | 'match' | 'ads' | 'archive' | 'condition' | 'pricing' | 'listing' | 'review' | 'inventory';
 
-const STEP_ORDER: WizardStep[] = ['intake','reference','photos','archive','condition','listing','review','inventory'];
+const STEP_ORDER: WizardStep[] = ['start','intake','photos','match','ads','archive','condition','pricing','listing','review','inventory'];
 const STEP_LABELS: Record<WizardStep, string> = {
-  intake: '1. Identify',
-  reference: '2. Reference',
-  photos: '3. Photos',
-  archive: '4. Archive',
+  start: 'Start',
+  intake: 'Search Issue',
+  photos: '1. Photos',
+  match: '2. Confirm',
+  ads: '3. Ads',
+  archive: '4. Details',
   condition: '5. Condition',
-  listing: '6. Listing',
-  review: '7. Review',
+  pricing: '6. Pricing',
+  listing: '7. Listing',
+  review: '8. Export/Review',
   inventory: 'Inventory',
 };
 
 export default function ArchiveForgePage() {
-  const [step, setStep] = useState<WizardStep>('intake');
+  const [step, setStep] = useState<WizardStep>('start');
   const [refIssue, setRefIssue] = useState<LifeReferenceIssue | null>(null);
   const [archiveData, setArchiveData] = useState<Partial<ArchiveItem>>({
     processed_status: 'RAW',
@@ -1686,63 +3784,90 @@ export default function ArchiveForgePage() {
     actual_listing_images: [],
   });
   const [savedArchiveId, setSavedArchiveId] = useState<number | null>(null);
+  const [identifyResult, setIdentifyResult] = useState<IdentifyResponse | null>(null);
+  const [matchConfirmation, setMatchConfirmation] = useState<MatchConfirmation | null>(null);
+  const [creatingArchive, setCreatingArchive] = useState(false);
+  const [startError, setStartError] = useState('');
 
   const currentStepIdx = STEP_ORDER.indexOf(step);
 
-  const handleIdentified = (ref: LifeReferenceIssue) => {
-    setRefIssue(ref);
-    setArchiveData(prev => ({
-	      ...prev,
-	      reference_issue_id: ref.id,
-	      reference_source: ref.source || '',
-	      google_books_volume_id: ref.google_books_volume_id || '',
-	      issue_title: ref.issue_title || 'LIFE',
-	      volume_label: ref.volume_label || '',
-	      cover_thumbnail_url: ref.cover_thumbnail_url || '',
-	      cover_preview_url: ref.cover_preview_url || '',
-	      search_query_used: ref.search_query_used || '',
-	      match_reason: ref.match_reason || '',
-	      issue_date: ref.date,
-	      volume: ref.volume || undefined,
-	      issue_number: ref.issue_number || undefined,
-	      cover_subject: ref.cover_subject,
-	      reference_cover_url: ref.reference_cover_url,
-      tier: ref.tier_guidance,
-      rough_comp_min: parseFloat(ref.rarity_notes.match(/\$([\d,]+)/)?.[1]?.replace(',','') || '0') || 0,
-      rough_comp_max: parseFloat(ref.rarity_notes.match(/\$([\d,]+)–?\$?([\d,]+)/)?.[2]?.replace(',','') || '0') || 0,
-    }));
-    setStep('reference');
-  };
-
-  // Create archive record (POST) — called when moving from reference → photos
-  const handleArchiveSave = async () => {
-    if (savedArchiveId) return; // already created
+  const createArchive = async (data: Partial<ArchiveItem> = archiveData): Promise<number | null> => {
+    if (savedArchiveId) return savedArchiveId;
+    setCreatingArchive(true);
+    setStartError('');
     try {
       const res = await fetch(`${AG_API}/archives`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...archiveData,
+          ...data,
           actual_listing_images: [],
-          has_address_label: archiveData.has_address_label || false,
-          is_complete: archiveData.is_complete !== false,
+          has_address_label: data.has_address_label || false,
+          is_complete: data.is_complete !== false,
         }),
       });
-      if (res.ok) {
-        const d = await res.json();
-        setSavedArchiveId(d.id);
-      }
-    } catch { /* silent */ }
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.detail || `Archive create failed with ${res.status}`);
+      setSavedArchiveId(out.id);
+      return out.id;
+    } catch (exc: any) {
+      setStartError(exc?.message || 'Could not create archive record.');
+      return null;
+    } finally {
+      setCreatingArchive(false);
+    }
   };
 
-  // Update archive record (PATCH) — called when moving from condition → listing
+  const handleStartWithPhoto = async () => {
+    const nextData = {
+      ...archiveData,
+      issue_title: archiveData.issue_title || 'LIFE Magazine photo-first intake',
+      processed_status: archiveData.processed_status || 'RAW',
+    };
+    setArchiveData(nextData);
+    const id = await createArchive(nextData);
+    if (id) setStep('photos');
+  };
+
+  const handleIdentified = async (ref: LifeReferenceIssue) => {
+    const nextData = {
+      ...archiveData,
+      reference_issue_id: ref.id,
+      reference_source: ref.source || '',
+      google_books_volume_id: ref.google_books_volume_id || '',
+      issue_title: ref.issue_title || 'LIFE',
+      volume_label: ref.volume_label || '',
+      cover_thumbnail_url: ref.cover_thumbnail_url || '',
+      cover_preview_url: ref.cover_preview_url || '',
+      search_query_used: ref.search_query_used || '',
+      match_reason: ref.match_reason || '',
+      issue_date: ref.date,
+      volume: ref.volume || undefined,
+      issue_number: ref.issue_number || undefined,
+      cover_subject: ref.cover_subject,
+      reference_cover_url: ref.reference_cover_url,
+      tier: ref.tier_guidance,
+      rough_comp_min: parseFloat(ref.rarity_notes.match(/\$([\d,]+)/)?.[1]?.replace(',','') || '0') || 0,
+      rough_comp_max: parseFloat(ref.rarity_notes.match(/\$([\d,]+)–?\$?([\d,]+)/)?.[2]?.replace(',','') || '0') || 0,
+    };
+    setRefIssue(ref);
+    setArchiveData(nextData);
+    setMatchConfirmation(null);
+    await createArchive(nextData);
+    setStep('match');
+  };
+
   const handleArchiveUpdate = async () => {
-    if (!savedArchiveId) { await handleArchiveSave(); return; }
+    const archiveId = savedArchiveId || await createArchive();
+    if (!archiveId) return;
     try {
-      await fetch(`${AG_API}/archives/${savedArchiveId}`, {
+      await fetch(`${AG_API}/archives/${archiveId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          issue_date: archiveData.issue_date || '',
+          cover_subject: archiveData.cover_subject || '',
+          reference_cover_url: archiveData.reference_cover_url || '',
           condition_score: archiveData.condition_score,
           has_address_label: archiveData.has_address_label || false,
           is_complete: archiveData.is_complete !== false,
@@ -1762,24 +3887,31 @@ export default function ArchiveForgePage() {
     } catch { /* silent */ }
   };
 
-  const navigate = (direction: 'next' | 'prev') => {
+  const handleMatchConfirmed = (confirmation: MatchConfirmation) => {
+    setMatchConfirmation(confirmation);
+    setArchiveData(prev => ({
+      ...prev,
+      issue_date: confirmation.issue_date || prev.issue_date,
+      cover_subject: confirmation.cover_title || prev.cover_subject,
+      processed_status: prev.processed_status === 'RAW' ? 'IDENTIFIED' : prev.processed_status,
+    }));
+  };
+
+  const navigate = async (direction: 'next' | 'prev') => {
     const idx = currentStepIdx;
     if (direction === 'next' && idx < STEP_ORDER.length - 1) {
-      // Create archive record when entering photos step (needed for uploads)
-      if (step === 'reference') handleArchiveSave();
-      // Persist condition/box data when leaving condition step
-      if (step === 'condition') handleArchiveUpdate();
+      if (['archive', 'condition', 'pricing'].includes(step)) await handleArchiveUpdate();
       setStep(STEP_ORDER[idx + 1]);
     } else if (direction === 'prev' && idx > 0) {
-      // Persist condition/box data before going back
-      if (step === 'listing') handleArchiveUpdate();
+      if (['listing', 'pricing'].includes(step)) await handleArchiveUpdate();
       setStep(STEP_ORDER[idx - 1]);
     }
   };
 
   const canGoNext = () => {
+    if (step === 'start') return false;
     if (step === 'intake') return !!refIssue;
-    if (step === 'reference') return !!refIssue;
+    if (step === 'match') return !!matchConfirmation;
     return true;
   };
 
@@ -1811,11 +3943,50 @@ export default function ArchiveForgePage() {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        {step === 'start' && (
+          <StartSection
+            onStartPhoto={handleStartWithPhoto}
+            onSearchKnown={() => setStep('intake')}
+            creating={creatingArchive}
+            error={startError}
+          />
+        )}
         {step === 'intake' && <IntakeSection onIdentified={handleIdentified} />}
-        {step === 'reference' && refIssue && <ReferenceSection ref_issue={refIssue} />}
-        {step === 'photos' && <PhotoSection archiveId={savedArchiveId} refIssue={refIssue} />}
+        {step === 'photos' && (
+	          <PhotoSection
+	            archiveId={savedArchiveId}
+	            refIssue={refIssue}
+	            identifyResult={identifyResult}
+	            onIdentifyResult={(result) => {
+	              setIdentifyResult(result);
+	              setMatchConfirmation(null);
+	            }}
+	            onConfirmIssue={() => setStep('match')}
+	          />
+        )}
+        {step === 'match' && (
+          <ConfirmMatchSection
+            archiveId={savedArchiveId}
+            refIssue={refIssue}
+            identifyResult={identifyResult}
+            confirmation={matchConfirmation}
+            onConfirmed={handleMatchConfirmed}
+            onSearchAgain={() => setStep('intake')}
+            onManual={() => setMatchConfirmation({ status: 'manual', source: 'manual' })}
+          />
+        )}
+        {step === 'ads' && <AdOpportunitySection archiveId={savedArchiveId} />}
         {step === 'archive' && <ArchiveSection data={archiveData} archiveId={savedArchiveId} onChange={setArchiveData} />}
         {step === 'condition' && <ConditionSection data={archiveData} onChange={setArchiveData} />}
+        {step === 'pricing' && (
+          <PricingSection
+            data={archiveData}
+            archiveId={savedArchiveId}
+            identifyResult={identifyResult}
+            confirmation={matchConfirmation}
+            onChange={setArchiveData}
+          />
+        )}
         {step === 'listing' && (
           <ListingBuilderSection
             data={archiveData}
@@ -1837,9 +4008,9 @@ export default function ArchiveForgePage() {
 
         <div style={{ fontSize: 12, color: '#888' }}>
           {step === 'inventory' ? (
-            <span>Archive inventory — {savedArchiveId ? `last saved as #${savedArchiveId}` : 'no items saved yet'}</span>
+            <span>Archive inventory — showing archived items</span>
           ) : (
-            <span>Step {currentStepIdx + 1} of {STEP_ORDER.length - 1}: {STEP_LABELS[step]}</span>
+            <span>{STEP_LABELS[step]}</span>
           )}
         </div>
 
@@ -1847,10 +4018,10 @@ export default function ArchiveForgePage() {
           <button onClick={() => navigate('next')}
             disabled={!canGoNext() && step !== 'listing'}
             style={{ padding: '9px 20px', background: canGoNext() ? '#06b6d4' : '#e5e2dc', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: canGoNext() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
-            {step === 'condition' ? 'Save & Continue →' : step === 'listing' ? 'Done' : <><ArrowRight size={14} /> Next</>}
+            {step === 'condition' || step === 'pricing' ? 'Save & Continue →' : step === 'listing' ? 'Done' : <><ArrowRight size={14} /> Next</>}
           </button>
         ) : (
-          <button onClick={() => setStep('intake')}
+          <button onClick={() => setStep('start')}
             style={{ padding: '9px 18px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={14} /> New Intake
           </button>
