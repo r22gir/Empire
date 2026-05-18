@@ -4961,6 +4961,44 @@ async def export_listing_packet_pdf(archive_id: int, include_images: bool = Quer
         Spacer(1, 0.15 * inch),
     ]
 
+    # ── Cover image: uploaded front cover → GB reference (labeled) → dealer catalog (labeled) ──
+    front_photo = None
+    for photo in packet.get("photos", []):
+        if str(photo.get("role") or "").lower() in ACTUAL_FRONT_COVER_ROLES:
+            path = Path(photo.get("path") or "")
+            if path.exists() and path.stat().st_size > 0:
+                front_photo = {"type": "uploaded", "path": path, "label": "Uploaded Front Cover"}
+                break
+            elif photo.get("url"):
+                front_photo = {"type": "uploaded", "url": photo["url"], "label": "Uploaded Front Cover"}
+                break
+
+    if not front_photo:
+        gb_cover_url = archive.get("confirmed_reference_url") or archive.get("reference_cover_url") or ""
+        if gb_cover_url:
+            front_photo = {"type": "google_books", "url": gb_cover_url, "label": "Google Books Reference Cover — for identification only, not a sale image"}
+
+    if not front_photo:
+        dealer_ref = packet.get("confirmed_reference_summary") or {}
+        dealer_url = dealer_ref.get("cover_image_url") or dealer_ref.get("image_url") or ""
+        if dealer_url:
+            front_photo = {"type": "dealer", "url": dealer_url, "label": "Dealer Catalog Image — for reference only, confirm condition before listing"}
+
+    if front_photo:
+        story.append(Paragraph("Cover Image", styles["Heading3"]))
+        story.append(p(f"⚠️ {front_photo['label']}"))
+        story.append(Spacer(1, 0.08 * inch))
+        try:
+            if front_photo["type"] == "uploaded" and "path" in front_photo:
+                story.append(Image(str(front_photo["path"]), width=2.5 * inch, height=3.0 * inch, kind="proportional"))
+            elif front_photo.get("url"):
+                story.append(Image(front_photo["url"], width=2.5 * inch, height=3.0 * inch, kind="proportional"))
+            story.append(Spacer(1, 0.12 * inch))
+        except Exception:
+            story.append(p("(cover image could not be embedded)"))
+            story.append(Spacer(1, 0.12 * inch))
+    # ── End cover image ──
+
     rows = [
         ["Archive ID", packet.get("archive_id")],
         ["Draft ID", packet.get("draft_id")],
