@@ -69,6 +69,7 @@ interface ArchiveItem {
   tier: string;
   rough_comp_min: number;
   rough_comp_max: number;
+  final_price: number | null;
   sale_plan: string;
   listing_title: string;
   listing_description: string;
@@ -3472,6 +3473,7 @@ function InventorySection() {
     { key: 'archive_location', label: 'Location', width: 100 },
     { key: 'listing_status', label: 'Listing', width: 88 },
     { key: 'condition_score', label: 'Cond.', width: 50 },
+    { key: 'final_price', label: 'Final Price', width: 80 },
     { key: 'rough_comp_min', label: 'Comp Min', width: 72 },
     { key: 'rough_comp_max', label: 'Comp Max', width: 72 },
     { key: 'created_at', label: 'Added', width: 86, sortable: true },
