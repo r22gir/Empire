@@ -3132,15 +3132,33 @@ async def max_status():
     frontend_port = int(frontend_port_raw) if frontend_port_raw.isdigit() else None
 
     # Provider policy info for transparency
+    minimax_real_call_available = (
+        True
+        if ai_router.last_provider_successes.get("minimax")
+        else False if ai_router.last_provider_errors.get("minimax") else None
+    )
     provider_policy = {
         "primary": str(ai_router.primary_model.value) if ai_router.primary_model else "unknown",
         "minimax_configured": bool(ai_router.minimax_key),
+        "minimax_model": ai_router.minimax_model,
+        "minimax_real_call_available": minimax_real_call_available,
+        "minimax_last_error": ai_router.last_provider_errors.get("minimax"),
+        "minimax_last_success": ai_router.last_provider_successes.get("minimax"),
         "xai_configured": bool(ai_router.xai_key),
         "xai_disabled": ai_router.max_disable_xai,
         "xai_disabled_reason": "credits_unavailable" if ai_router.max_disable_xai else None,
         "ollama_disabled": ai_router.max_disable_ollama,
         "ollama_disabled_reason": "founder_disabled_due_to_stall_suspected" if ai_router.max_disable_ollama else None,
         "max_primary_provider_env": ai_router.max_primary_provider or None,
+        "fallback_possible": any(
+            [
+                bool(ai_router.gemini_key),
+                bool(ai_router.groq_key),
+                bool(ai_router.anthropic_key),
+                bool(ai_router.openai_key),
+            ]
+        ),
+        "last_provider_errors": ai_router.last_provider_errors,
     }
 
     return {
@@ -3323,17 +3341,24 @@ async def orchestration_status():
     xai_key = bool(ai_router.xai_key)
     xai_disabled = ai_router.max_disable_xai
     primary_provider = str(ai_router.primary_model.value) if ai_router.primary_model else "unknown"
+    minimax_real_call_available = (
+        True
+        if ai_router.last_provider_successes.get("minimax")
+        else False if ai_router.last_provider_errors.get("minimax") else None
+    )
     cloud_providers = [
         {
             "id": model["id"],
             "name": model["name"],
-            "configured": bool(model["available"]),
+            "configured": bool(model.get("configured", model["available"])),
+            "available": bool(model["available"]),
             "primary": bool(model.get("primary")),
             "status_source": "env_configured",
             **({"model": model["model"]} if model.get("model") else {}),
             **({"base_url": model["base_url"]} if model.get("base_url") else {}),
             **({"disabled": model.get("disabled")} if model.get("disabled") else {}),
             **({"disabled_reason": model.get("disabled_reason")} if model.get("disabled_reason") else {}),
+            **({"last_error": model.get("last_error")} if model.get("last_error") else {}),
         }
         for model in configured_models
         if model.get("type") == "cloud"
@@ -3363,7 +3388,7 @@ async def orchestration_status():
             "openclaw": "/api/v1/openclaw/tasks",
         },
         "routing": {
-            "normal_web_chat": "simple: MiniMax -> Gemini -> Grok -> Groq -> Sonnet; moderate: MiniMax -> Grok -> Groq -> Sonnet -> Gemini; complex: MiniMax -> Claude Sonnet -> Grok -> GPT-4o -> Groq; critical/code: Claude Opus -> Claude Sonnet",
+            "normal_web_chat": "simple: MiniMax -> Gemini -> Groq -> Sonnet; moderate: MiniMax -> Groq -> Sonnet -> Gemini; complex: MiniMax -> Claude Sonnet -> GPT-4o -> Groq; critical/code: Claude Opus -> Claude Sonnet. xAI/Grok is skipped while MAX_DISABLE_XAI=true.",
             "telegram_chat": "MAX chat with Telegram brevity directive and founder channel persistence",
             "voice_input": "Groq Whisper STT through /api/v1/voice/transcribe; transcribed text enters MAX chat",
             "voice_output": "xAI Grok TTS through /api/v1/max/tts" if not xai_disabled else "MiniMax TTS via /api/v1/max/tts",
@@ -3378,10 +3403,24 @@ async def orchestration_status():
             "provider_policy": {
                 "primary": primary_provider,
                 "minimax_configured": minimax_key,
+                "minimax_model": ai_router.minimax_model,
+                "minimax_real_call_available": minimax_real_call_available,
+                "minimax_last_error": ai_router.last_provider_errors.get("minimax"),
+                "minimax_last_success": ai_router.last_provider_successes.get("minimax"),
                 "xai_configured": xai_key,
                 "xai_disabled": xai_disabled,
                 "xai_disabled_reason": "credits_unavailable" if xai_disabled else None,
-                "fallback_order": "minimax -> grok -> groq -> claude -> gemini" if minimax_key else "grok -> groq -> claude -> gemini",
+                "ollama_disabled": ai_router.max_disable_ollama,
+                "fallback_possible": any(
+                    [
+                        bool(ai_router.gemini_key),
+                        bool(ai_router.groq_key),
+                        bool(ai_router.anthropic_key),
+                        bool(ai_router.openai_key),
+                    ]
+                ),
+                "fallback_order": "minimax -> gemini -> groq -> claude -> openai" if minimax_key else "gemini -> groq -> claude -> openai",
+                "last_provider_errors": ai_router.last_provider_errors,
             },
             "local": [
                 {

@@ -188,6 +188,8 @@ class AIRouter:
         self.max_primary_provider = os.getenv("MAX_PRIMARY_PROVIDER", "").lower()
         self.max_disable_xai = os.getenv("MAX_DISABLE_XAI", "").lower() in ("true", "1", "yes")
         self.max_disable_ollama = os.getenv("MAX_DISABLE_OLLAMA", "").lower() in ("true", "1", "yes")
+        self.last_provider_errors: dict[str, str] = {}
+        self.last_provider_successes: dict[str, str] = {}
         # Priority: MAX_PRIMARY_PROVIDER env overrides default xAI > Claude > Groq chain
         # MiniMax is primary when MAX_PRIMARY_PROVIDER=minimax and key is present
         if self.max_primary_provider == "minimax" and self.minimax_key:
@@ -227,19 +229,65 @@ class AIRouter:
         # Determine xAI available (key present and not disabled via env)
         xai_available = bool(self.xai_key) and not self.max_disable_xai
         return [
-            {"id": "grok", "name": "xAI Grok", "available": xai_available, "configured": bool(self.xai_key), "disabled": self.max_disable_xai, "disabled_reason": "credits_unavailable" if self.max_disable_xai else None, "primary": self.primary_model == AIModel.GROK, "type": "cloud", "model": self.xai_model, "base_url": self.xai_base_url, "status_source": "env_configured"},
-            {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud"},
-            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
-            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "available": bool(self.anthropic_key), "primary": False, "type": "cloud"},
-            {"id": "groq", "name": "Groq Llama 3.3 70B", "available": bool(self.groq_key), "primary": self.primary_model == AIModel.GROQ, "type": "cloud"},
-            {"id": "gemini", "name": "Gemini 2.5 Flash", "available": bool(self.gemini_key), "primary": False, "type": "cloud"},
-            {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
-            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
-            {"id": "gpt-4o", "name": "GPT-4o", "available": bool(self.openai_key), "primary": False, "type": "cloud"},
-            {"id": "minimax", "name": "MiniMax", "available": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url, "status_source": "env_configured"},
+            {"id": "grok", "name": "xAI Grok", "available": xai_available, "configured": bool(self.xai_key), "disabled": self.max_disable_xai, "disabled_reason": "credits_unavailable" if self.max_disable_xai else None, "primary": self.primary_model == AIModel.GROK, "type": "cloud", "model": self.xai_model, "base_url": self.xai_base_url, "status_source": "env_configured", "last_error": self.last_provider_errors.get("grok")},
+            {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "configured": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud", "last_error": self.last_provider_errors.get("claude")},
+            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "available": bool(self.anthropic_key), "configured": bool(self.anthropic_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("claude")},
+            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "available": bool(self.anthropic_key), "configured": bool(self.anthropic_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("claude")},
+            {"id": "groq", "name": "Groq Llama 3.3 70B", "available": bool(self.groq_key), "configured": bool(self.groq_key), "primary": self.primary_model == AIModel.GROQ, "type": "cloud", "last_error": self.last_provider_errors.get("groq")},
+            {"id": "gemini", "name": "Gemini 2.5 Flash", "available": bool(self.gemini_key), "configured": bool(self.gemini_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("gemini")},
+            {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "available": bool(self.openai_key), "configured": bool(self.openai_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("openai")},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "available": bool(self.openai_key), "configured": bool(self.openai_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("openai")},
+            {"id": "gpt-4o", "name": "GPT-4o", "available": bool(self.openai_key), "configured": bool(self.openai_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("openai")},
+            {"id": "minimax", "name": "MiniMax", "available": bool(self.minimax_key) and not self.last_provider_errors.get("minimax"), "configured": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url, "status_source": "env_configured", "last_error": self.last_provider_errors.get("minimax")},
             {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
             {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "disabled": self.max_disable_ollama, "disabled_reason": "founder_disabled_due_to_stall_suspected" if self.max_disable_ollama else None, "type": "local"},
         ]
+
+    def _record_provider_error(self, provider: str, exc: Exception) -> None:
+        self.last_provider_errors[provider] = f"{type(exc).__name__}: {str(exc)[:300]}"
+
+    def _record_provider_success(self, provider: str) -> None:
+        self.last_provider_successes[provider] = "ok"
+        self.last_provider_errors.pop(provider, None)
+
+    def _provider_unavailable_message(self) -> str:
+        reasons = []
+        if self.minimax_key:
+            reasons.append(
+                f"MiniMax failed ({self.last_provider_errors['minimax']})"
+                if self.last_provider_errors.get("minimax")
+                else "MiniMax is configured but did not return a response"
+            )
+        else:
+            reasons.append("MiniMax key is not loaded")
+        if self.max_disable_xai:
+            reasons.append("xAI/Grok is disabled by MAX_DISABLE_XAI=true")
+        elif not self.xai_key:
+            reasons.append("xAI/Grok key is not loaded")
+        if self.max_disable_ollama:
+            reasons.append("Ollama is disabled by MAX_DISABLE_OLLAMA=true")
+        for provider in ("gemini", "groq", "claude", "openai", "openclaw"):
+            if self.last_provider_errors.get(provider):
+                reasons.append(f"{provider} failed ({self.last_provider_errors[provider]})")
+        deduped = list(dict.fromkeys(reasons))
+        return "All AI providers are unavailable: " + "; ".join(deduped) + "."
+
+    def _sanitize_minimax_content(self, text: str) -> str:
+        cleaned = (text or "").strip()
+        if "\n\n" not in cleaned:
+            return cleaned
+        prefix, visible = cleaned.split("\n\n", 1)
+        prefix_l = prefix.lower()
+        reasoning_markers = (
+            "i should respond",
+            "i need to respond",
+            "the user",
+            "simple greeting",
+            "founder",
+        )
+        if any(marker in prefix_l for marker in reasoning_markers):
+            return visible.lstrip()
+        return cleaned
 
     AUDIO_EXTS = {'.m4a', '.mp3', '.wav', '.ogg', '.flac', '.wma', '.aac'}
     TEXT_EXTS = {'.txt', '.md', '.csv', '.json'}
@@ -525,6 +573,7 @@ class AIRouter:
 
         except Exception as e:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
+            self._record_provider_error(provider_type, e)
         return None
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
@@ -630,12 +679,21 @@ class AIRouter:
                 return AIResponse(content=resp, model_used=f"minimax-{self.minimax_model}", fallback_used=False)
             except Exception as e:
                 logger.warning(f"MiniMax failed: {type(e).__name__}: {e}")
+                self._record_provider_error("minimax", e)
                 use_model = AIModel.GROK  # fallback to Grok
 
         # Build ordered provider chain: requested model first, then full fallback
         # Chain: Grok -> Claude -> Groq -> OpenClaw -> Ollama
         all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
-        providers = [use_model] + [p for p in all_providers if p != use_model]
+        providers = []
+        for candidate in [use_model] + all_providers:
+            if candidate in providers:
+                continue
+            if candidate == AIModel.GROK and (self.max_disable_xai or not self.xai_key):
+                continue
+            if candidate == AIModel.OLLAMA and self.max_disable_ollama:
+                continue
+            providers.append(candidate)
 
         is_first = True
         for provider in providers:
@@ -651,6 +709,7 @@ class AIRouter:
                     return resp
                 except Exception as e:
                     logger.warning(f"Grok failed: {type(e).__name__}: {e}")
+                    self._record_provider_error("grok", e)
 
             elif provider == AIModel.CLAUDE and self.anthropic_key:
                 try:
@@ -660,6 +719,7 @@ class AIRouter:
                     return AIResponse(content=resp, model_used=claude_model_id, fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Claude failed: {type(e).__name__}: {e}")
+                    self._record_provider_error("claude", e)
 
             elif provider == AIModel.GROQ and self.groq_key:
                 try:
@@ -669,6 +729,7 @@ class AIRouter:
                     return AIResponse(content=resp, model_used="groq-llama-3.3-70b", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Groq failed: {type(e).__name__}: {e}")
+                    self._record_provider_error("groq", e)
 
             elif provider == AIModel.OPENCLAW:
                 try:
@@ -678,6 +739,7 @@ class AIRouter:
                     return AIResponse(content=resp, model_used="openclaw", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"OpenClaw failed: {e}")
+                    self._record_provider_error("openclaw", e)
 
             elif provider == AIModel.OLLAMA:
                 try:
@@ -687,8 +749,9 @@ class AIRouter:
                     return AIResponse(content=resp, model_used="ollama-llama3.1", fallback_used=fallback)
                 except Exception as e:
                     logger.warning(f"Ollama failed: {e}")
+                    self._record_provider_error("ollama", e)
 
-        return AIResponse(content="All AI providers are unavailable.", model_used="none", fallback_used=True)
+        return AIResponse(content=self._provider_unavailable_message(), model_used="none", fallback_used=True)
 
     # ── Streaming chat ──────────────────────────────────────────────────
 
@@ -780,8 +843,21 @@ class AIRouter:
                         self._log_chat_cost(full_messages, "".join(collected), oai_model, feature, business, tenant_id)
                         return
 
+                    elif provider_type == "minimax":
+                        if image_path:
+                            logger.info("[MAX] Skipping MiniMax for vision task (image not supported)")
+                            raise Exception("MiniMax vision not supported")
+                        logger.info(f"[MAX] Streaming via MiniMax ({self.minimax_model}){' (fallback)' if fallback else ''}")
+                        collected = []
+                        async for chunk in self._minimax_chat_stream(full_messages, image_path=None):
+                            collected.append(chunk)
+                            yield chunk, self.minimax_model
+                        self._log_chat_cost(full_messages, "".join(collected), self.minimax_model, feature, business, tenant_id)
+                        return
+
                 except Exception as e:
                     logger.warning(f"{provider_type} stream failed: {type(e).__name__}: {e}")
+                    self._record_provider_error(provider_type, e)
 
             # If tiered chain exhausted, fall through to legacy chain
             logger.warning("[MAX] Tiered stream chain exhausted, falling through to legacy chain")
@@ -834,11 +910,20 @@ class AIRouter:
                 return
             except Exception as e:
                 logger.warning(f"MiniMax stream failed: {type(e).__name__}: {e}")
+                self._record_provider_error("minimax", e)
                 use_model = AIModel.GROK
 
         # Build ordered provider chain: requested model first, then full fallback
         all_providers = [AIModel.GROK, AIModel.CLAUDE, AIModel.GROQ, AIModel.OPENCLAW, AIModel.OLLAMA]
-        providers = [use_model] + [p for p in all_providers if p != use_model]
+        providers = []
+        for candidate in [use_model] + all_providers:
+            if candidate in providers:
+                continue
+            if candidate == AIModel.GROK and (self.max_disable_xai or not self.xai_key):
+                continue
+            if candidate == AIModel.OLLAMA and self.max_disable_ollama:
+                continue
+            providers.append(candidate)
 
         for provider in providers:
             if provider == AIModel.GROK and self.xai_key:
@@ -852,6 +937,7 @@ class AIRouter:
                     return
                 except Exception as e:
                     logger.warning(f"Grok stream failed: {e}")
+                    self._record_provider_error("grok", e)
 
             elif provider == AIModel.CLAUDE and self.anthropic_key:
                 try:
@@ -864,6 +950,7 @@ class AIRouter:
                     return
                 except Exception as e:
                     logger.warning(f"Claude stream failed: {e}")
+                    self._record_provider_error("claude", e)
 
             elif provider == AIModel.GROQ and self.groq_key:
                 try:
@@ -876,6 +963,7 @@ class AIRouter:
                     return
                 except Exception as e:
                     logger.warning(f"Groq stream failed: {e}")
+                    self._record_provider_error("groq", e)
 
             elif provider == AIModel.OPENCLAW:
                 try:
@@ -886,6 +974,7 @@ class AIRouter:
                     return
                 except Exception as e:
                     logger.warning(f"OpenClaw stream failed: {e}")
+                    self._record_provider_error("openclaw", e)
 
             elif provider == AIModel.OLLAMA:
                 try:
@@ -898,8 +987,9 @@ class AIRouter:
                     return
                 except Exception as e:
                     logger.warning(f"Ollama stream failed: {e}")
+                    self._record_provider_error("ollama", e)
 
-        yield "All AI providers are unavailable.", "error"
+        yield self._provider_unavailable_message(), "error"
 
     # ── xAI Grok (OpenAI-compatible API) ──────────────────────────────
 
@@ -1007,7 +1097,7 @@ class AIRouter:
                         continue
                     data_str = line[6:].strip()
                     if data_str == "[DONE]":
-                        return
+                        break
                     try:
                         data = json.loads(data_str)
                     except json.JSONDecodeError:
@@ -1222,7 +1312,8 @@ class AIRouter:
             )
             if resp.status_code != 200:
                 raise Exception(f"MiniMax HTTP {resp.status_code}: {resp.text[:200]}")
-            return resp.json()["choices"][0]["message"]["content"]
+            self._record_provider_success("minimax")
+            return self._sanitize_minimax_content(resp.json()["choices"][0]["message"]["content"])
 
     async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         """Stream chat via MiniMax M1 API."""
@@ -1237,6 +1328,8 @@ class AIRouter:
                 if response.status_code != 200:
                     error_body = await response.aread()
                     raise Exception(f"MiniMax HTTP {response.status_code}: {error_body.decode()[:200]}")
+                self._record_provider_success("minimax")
+                collected = []
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
@@ -1250,7 +1343,10 @@ class AIRouter:
                     delta = data.get("choices", [{}])[0].get("delta", {})
                     text = delta.get("content", "")
                     if text:
-                        yield text
+                        collected.append(text)
+                cleaned = self._sanitize_minimax_content("".join(collected))
+                if cleaned:
+                    yield cleaned
 
     # ── OpenClaw ──────────────────────────────────────────────────────
 

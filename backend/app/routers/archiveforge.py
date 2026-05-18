@@ -1209,6 +1209,41 @@ def _init_tables():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_archive_magazine_comps_archive_id ON archive_magazine_comps(archive_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_archive_pricing_summary_archive_id ON archive_pricing_summary(archive_id)")
 
+    # ── Lifecycle / Disposition tables ──────────────────────────────────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS archive_item_lifecycle (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            archive_id INTEGER NOT NULL UNIQUE,
+            item_status TEXT NOT NULL DEFAULT 'inventory'
+                CHECK(item_status IN ('inventory','listed','sold','held','broken_for_ads','ads_only','archived','needs_review')),
+            marketplace_status TEXT NOT NULL DEFAULT 'not_listed'
+                CHECK(marketplace_status IN ('not_listed','draft','listed','sold','cancelled')),
+            ad_breakout_status TEXT NOT NULL DEFAULT 'none'
+                CHECK(ad_breakout_status IN ('none','candidate','in_progress','ads_removed','ads_listed','complete')),
+            sold_price REAL,
+            sold_date TEXT,
+            sold_platform TEXT,
+            disposition_notes TEXT DEFAULT '',
+            updated_by TEXT DEFAULT 'system',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS archive_item_lifecycle_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            archive_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            from_status TEXT DEFAULT '',
+            to_status TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (archive_id) REFERENCES ag_archives(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_lifecycle_archive_id ON archive_item_lifecycle(archive_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_lifecycle_events_archive_id ON archive_item_lifecycle_events(archive_id)")
+
     conn.commit()
     conn.close()
     log.info("ArchiveForge tables initialized")
@@ -7828,3 +7863,327 @@ async def get_issue_info_runs(archive_id: int):
             (archive_id,),
         ).fetchall())
     return {"archive_id": archive_id, "runs": [_issue_info_run_response(row) for row in rows], "total": len(rows)}
+
+
+# ── Helpers for detail endpoint ────────────────────────────────────────────────
+
+def _lifecycle_for_archive(archive_id: int) -> Optional[dict]:
+    with get_db() as db:
+        row = db.execute("SELECT * FROM archive_item_lifecycle WHERE archive_id = ?", (archive_id,)).fetchone()
+    return dict_row(row) if row else None
+
+
+def _ad_page_photos_for_archive(archive_id: int) -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT id, archive_id, candidate_id, page_number, filename, original_name,
+                      mime_type, byte_size, analysis_status, analyzed_at, created_at
+               FROM archive_ad_page_photos
+               WHERE archive_id = ?
+               ORDER BY page_number, id""",
+            (archive_id,),
+        ).fetchall()
+    return [dict_row(r) for r in rows if r]
+
+
+def _verified_ads_for_archive(archive_id: int) -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT id, archive_id, candidate_type, brand, product, category,
+                      verification_status, created_at, updated_at
+               FROM archive_ad_opportunities
+               WHERE archive_id = ? AND verification_status = 'verified_in_copy'
+               ORDER BY id""",
+            (archive_id,),
+        ).fetchall()
+    return [dict_row(r) for r in rows if r]
+
+
+def _comps_for_archive(archive_id: int) -> list[dict]:
+    return _list_magazine_comps(archive_id)
+
+
+def _exports_for_archive(archive_id: int) -> dict:
+    base_url = os.getenv("ARCHIVEFORGE_API_BASE_URL", "http://localhost:8000")
+    base = f"{base_url}/api/v1/archiveforge/{archive_id}"
+    return {
+        "pdf_url": f"{base}/listing-packet.pdf",
+        "pdf_with_images_url": f"{base}/listing-packet.pdf?include_images=true",
+        "json_url": f"{base}/listing-packet.json",
+        "xlsx_url": f"{base}/listing-packet.xlsx",
+        "report_pdf_url": f"{base}/listing-packet.pdf",
+        "report_pdf_with_images_url": f"{base}/listing-packet.pdf?include_images=true",
+        "listing_packet_pdf_url": f"{base}/listing-packet.pdf",
+        "listing_packet_pdf_with_images_url": f"{base}/listing-packet.pdf?include_images=true",
+        "listing_packet_json_url": f"{base}/listing-packet.json",
+        "listing_packet_xlsx_url": f"{base}/listing-packet.xlsx",
+    }
+
+
+@router.get("/{archive_id}/detail")
+async def get_archive_detail(archive_id: int):
+    """Return a complete item detail packet for the full record workspace."""
+    archive = _load_archive_or_404(archive_id)
+
+    issue_info = _latest_issue_info_response(archive_id) or {}
+    photos_resp = _photos_grouped_for_archive(archive_id)
+    lifecycle = _lifecycle_for_archive(archive_id) or {}
+    ad_page_photos = _ad_page_photos_for_archive(archive_id)
+    verified_ads = _verified_ads_for_archive(archive_id)
+    comps = _comps_for_archive(archive_id)
+    pricing_summary = _pricing_snapshot(archive, "current")
+    listing_draft = _latest_listing_packet_draft(archive_id)
+    exports = _exports_for_archive(archive_id)
+
+    # LIFE master lookup
+    issue_date = archive.get("issue_date") or ""
+    life_master = None
+    if issue_date:
+        try:
+            with get_db() as db:
+                master_row = db.execute(
+                    """SELECT * FROM archive_life_issue_master
+                       WHERE normalized_date = ? LIMIT 1""",
+                    (issue_date,),
+                ).fetchone()
+            if master_row:
+                life_master = dict_row(master_row)
+        except Exception:
+            pass
+
+    # Reference cover from issue-info selected GB candidate
+    reference_cover = None
+    selected_gb = issue_info.get("selected_google_books_candidate") or {}
+    if selected_gb.get("cover_image_url"):
+        reference_cover = {
+            "source": "google_books",
+            "volume_id": selected_gb.get("volume_id") or "",
+            "title": selected_gb.get("title") or "",
+            "published_date": selected_gb.get("publishedDate") or "",
+            "cover_image_url": selected_gb.get("cover_image_url") or "",
+            "match_confidence": selected_gb.get("match_confidence") or 0,
+            "warning": "Reference image — not your item photo",
+        }
+    elif ref_issue := issue_info.get("reference_issue"):
+        reference_cover = {
+            "source": "reference_search",
+            "volume_id": ref_issue.get("volume_id") or ref_issue.get("id") or "",
+            "title": ref_issue.get("cover_subject") or "",
+            "issue_date": ref_issue.get("date") or "",
+            "cover_image_url": ref_issue.get("reference_cover_url") or "",
+            "match_confidence": ref_issue.get("match_score") or 0,
+            "warning": "Reference image — not your item photo",
+        }
+
+    # Dealer reference (always from issue_info)
+    dealer_ref = issue_info.get("dealer_reference") or {}
+    if dealer_ref and isinstance(dealer_ref, dict) and dealer_ref.get("source"):
+        dealer_reference = {
+            "source": dealer_ref.get("source", ""),
+            "source_name": dealer_ref.get("source_name", ""),
+            "source_url": dealer_ref.get("source_url", ""),
+            "title": dealer_ref.get("title", ""),
+            "issue_date": dealer_ref.get("issue_date", ""),
+            "asking_price": dealer_ref.get("asking_price"),
+            "warning": "Dealer asking price — not sold comp evidence",
+            "match_confidence": dealer_ref.get("match_confidence") or 0,
+        }
+    else:
+        dealer_reference = None
+
+    # Archive-safe display fields (no secrets)
+    archive_display = {
+        "archive_id": archive.get("id"),
+        "display_title": archive.get("display_title") or "",
+        "issue_date": archive.get("issue_date") or "",
+        "status": archive.get("processed_status") or "",
+        "tier": archive.get("tier") or "",
+        "condition_score": archive.get("condition_score") or 0,
+        "complete": bool(archive.get("is_complete")),
+        "address_label": bool(archive.get("has_address_label")),
+        "defects": archive.get("defects") or "",
+        "notes": archive.get("notes") or "",
+        "source_box": archive.get("source_box_code") or "",
+        "dest_box": archive.get("processed_box_code") or "",
+        "location": archive.get("archive_location") or "",
+        "created_at": archive.get("created_at") or "",
+        "updated_at": archive.get("updated_at") or "",
+        "cover_subject": archive.get("cover_subject") or "",
+        "short_description": archive.get("short_description") or "",
+        "reference_source": archive.get("reference_source") or "",
+        "confirmed_reference_source": archive.get("confirmed_reference_source") or "",
+        "confirmed_reference_url": archive.get("confirmed_reference_url") or "",
+        "confirmed_issue_date": archive.get("confirmed_issue_date") or "",
+        "confirmed_cover_title": archive.get("confirmed_cover_title") or "",
+        "listing_status": archive.get("listing_status") or "",
+        "sale_plan": archive.get("sale_plan") or "",
+        "final_price": archive.get("final_price") or "",
+        "rough_comp_min": archive.get("rough_comp_min") or "",
+        "rough_comp_max": archive.get("rough_comp_max") or "",
+    }
+
+    lifecycle_display = {
+        "item_status": lifecycle.get("item_status") or "inventory",
+        "marketplace_status": lifecycle.get("marketplace_status") or "not_listed",
+        "ad_breakout_status": lifecycle.get("ad_breakout_status") or "none",
+        "sold_price": lifecycle.get("sold_price"),
+        "sold_date": lifecycle.get("sold_date"),
+        "sold_platform": lifecycle.get("sold_platform"),
+        "disposition_notes": lifecycle.get("disposition_notes") or "",
+        "updated_by": lifecycle.get("updated_by") or "",
+        "created_at": lifecycle.get("created_at") or "",
+        "updated_at": lifecycle.get("updated_at") or "",
+    }
+
+    return {
+        "archive": archive_display,
+        "issue_info": issue_info,
+        "life_master": life_master,
+        "photos": photos_resp,
+        "reference_cover": reference_cover,
+        "dealer_reference": dealer_reference,
+        "ad_opportunities": _list_ad_opportunities(archive_id),
+        "ad_page_photos": ad_page_photos,
+        "verified_ads": verified_ads,
+        "comps": comps,
+        "pricing_summary": pricing_summary,
+        "listing_draft": listing_draft,
+        "exports": exports,
+        "lifecycle": lifecycle_display,
+    }
+
+
+# ── Safe PATCH endpoint ────────────────────────────────────────────────────────
+
+ALLOWED_ARCHIVE_UPDATE_FIELDS = {
+    "display_title", "issue_date", "cover_subject", "condition_score",
+    "is_complete", "has_address_label", "defects", "notes",
+    "source_box_code", "processed_box_code", "archive_location",
+    "tier", "sale_plan", "rough_comp_min", "rough_comp_max",
+    "final_price", "listing_status", "short_description",
+    "confirmed_reference_source", "confirmed_reference_url",
+    "confirmed_issue_date", "confirmed_cover_title", "confirmed_confidence",
+}
+
+
+class LifecycleUpdateRequest(BaseModel):
+    item_status: Optional[str] = None
+    marketplace_status: Optional[str] = None
+    ad_breakout_status: Optional[str] = None
+    sold_price: Optional[float] = None
+    sold_date: Optional[str] = None
+    sold_platform: Optional[str] = None
+    notes: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+@router.patch("/{archive_id}")
+async def update_archive_item(archive_id: int, req: dict):
+    """Update allowed fields on an archive item. No marketplace writes."""
+    _load_archive_or_404(archive_id)
+
+    # Validate field names
+    updates = {}
+    for key, value in req.items():
+        if key not in ALLOWED_ARCHIVE_UPDATE_FIELDS:
+            raise HTTPException(400, f"Field '{key}' is not allowed to be updated directly.")
+        updates[key] = value
+
+    if not updates:
+        raise HTTPException(400, "No allowed fields provided.")
+
+    set_clauses = [f"{k} = ?" for k in updates]
+    set_clauses.append("updated_at = datetime('now')")
+
+    with get_db() as db:
+        db.execute(
+            f"UPDATE ag_archives SET {', '.join(set_clauses)} WHERE id = ?",
+            (*updates.values(), archive_id),
+        )
+        db.commit()
+
+    return {"archive_id": archive_id, "updated": list(updates.keys())}
+
+
+@router.post("/{archive_id}/lifecycle")
+async def update_lifecycle(archive_id: int, req: LifecycleUpdateRequest):
+    """Update lifecycle/disposition status. Internal tracking only — no marketplace writes."""
+    _load_archive_or_404(archive_id)
+
+    valid_item_statuses = {"inventory", "listed", "sold", "held", "broken_for_ads", "ads_only", "archived", "needs_review"}
+    valid_marketplace_statuses = {"not_listed", "draft", "listed", "sold", "cancelled"}
+    valid_ad_breakout_statuses = {"none", "candidate", "in_progress", "ads_removed", "ads_listed", "complete"}
+
+    # Validate values
+    if req.item_status and req.item_status not in valid_item_statuses:
+        raise HTTPException(400, f"item_status must be one of: {', '.join(sorted(valid_item_statuses))}")
+    if req.marketplace_status and req.marketplace_status not in valid_marketplace_statuses:
+        raise HTTPException(400, f"marketplace_status must be one of: {', '.join(sorted(valid_marketplace_statuses))}")
+    if req.ad_breakout_status and req.ad_breakout_status not in valid_ad_breakout_statuses:
+        raise HTTPException(400, f"ad_breakout_status must be one of: {', '.join(sorted(valid_ad_breakout_statuses))}")
+
+    # Require sold_price + sold_date + sold_platform when marking sold
+    if req.item_status == "sold":
+        if req.sold_price is None and req.sold_date is None:
+            # Allow marking sold without price/date as "unknown" — use nulls
+            pass
+
+    with get_db() as db:
+        existing = db.execute(
+            "SELECT * FROM archive_item_lifecycle WHERE archive_id = ?", (archive_id,)
+        ).fetchone()
+
+        if existing:
+            # Build update
+            set_parts = []
+            params = []
+            for field, value in [
+                ("item_status", req.item_status),
+                ("marketplace_status", req.marketplace_status),
+                ("ad_breakout_status", req.ad_breakout_status),
+                ("sold_price", req.sold_price),
+                ("sold_date", req.sold_date),
+                ("sold_platform", req.sold_platform),
+            ]:
+                if value is not None:
+                    set_parts.append(f"{field} = ?")
+                    params.append(value)
+            if req.notes is not None:
+                set_parts.append("disposition_notes = ?")
+                params.append(req.notes)
+            set_parts.append("updated_at = datetime('now')")
+            params.append(archive_id)
+            db.execute(
+                f"UPDATE archive_item_lifecycle SET {', '.join(set_parts)} WHERE archive_id = ?",
+                params,
+            )
+        else:
+            # Insert new
+            db.execute(
+                """INSERT INTO archive_item_lifecycle
+                   (archive_id, item_status, marketplace_status, ad_breakout_status,
+                    sold_price, sold_date, sold_platform, disposition_notes, updated_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'api')""",
+                (
+                    archive_id,
+                    req.item_status or "inventory",
+                    req.marketplace_status or "not_listed",
+                    req.ad_breakout_status or "none",
+                    req.sold_price,
+                    req.sold_date,
+                    req.sold_platform,
+                    req.notes or "",
+                ),
+            )
+
+        # Log event
+        db.execute(
+            """INSERT INTO archive_item_lifecycle_events
+               (archive_id, event_type, to_status, notes)
+               VALUES (?, ?, ?, ?)""",
+            (archive_id, "lifecycle_update", req.item_status or "inventory", req.notes or ""),
+        )
+        db.commit()
+
+    return {"archive_id": archive_id, "status": "updated"}

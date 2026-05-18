@@ -3,21 +3,21 @@ import ArchiveForgePage from '../components/screens/ArchiveForgePage';
 
 export const metadata: Metadata = {
   title: 'ArchiveForge LIFE Intake',
-  description: 'Direct LIFE magazine intake, cover matching, photo upload, review, and MarketForge publishing.',
+  description: 'Photo-first LIFE magazine intake, AI identification, reference confirmation, pricing, export, and listing.',
   openGraph: {
     title: 'ArchiveForge LIFE Intake',
-    description: 'Find the matching LIFE issue, upload item photos, and publish through ArchiveForge.',
+    description: 'Upload the actual cover first, identify the LIFE issue, confirm the match, and export or list through ArchiveForge.',
     type: 'website',
     url: 'https://studio.empirebox.store/archiveforge-life',
   },
 };
 
 const steps = [
-  'Find matching LIFE issue',
-  'Select cover reference',
-  'Upload item photos',
-  'Enter condition and details',
-  'Review and publish',
+  'Capture actual cover photo',
+  'Run AI identification',
+  'Confirm reference match',
+  'Enter condition and pricing',
+  'Export or list',
 ];
 
 export default function ArchiveForgeLifePublicPage() {
@@ -61,10 +61,10 @@ export default function ArchiveForgeLifePublicPage() {
           </div>
 
           <p style={intro}>
-            Start with a date, event, or person. ArchiveForge will find real LIFE cover references, keep them separate from your uploaded item photos, then guide the listing through review and MarketForge publish.
+            Start with the actual magazine cover. ArchiveForge identifies the issue, keeps reference covers separate from item photos, then guides condition, rough pricing, export, and listing.
           </p>
 
-          <a href="#life-workflow" style={cta}>Start issue lookup</a>
+          <a href="#life-workflow" style={cta}>Start photo intake</a>
 
           <div style={guide} data-af-guide>
             <div style={guideTitle}>Assistant path</div>

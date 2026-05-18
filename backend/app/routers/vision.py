@@ -3,16 +3,20 @@
 Ported from WorkroomForge (port 3001) so all analysis runs through the backend.
 Image generation: Stable Diffusion (Stability AI API or HuggingFace free) → xAI fallback.
 """
-import os, json, re, httpx, asyncio, logging, base64, uuid, time
+import os, json, re, httpx, asyncio, logging, base64, uuid, time, shlex
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 log = logging.getLogger("vision")
 
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
+MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
+MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
+MINIMAX_VISION_MODEL = os.getenv("MINIMAX_VISION_MODEL") or os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+MINIMAX_MCP_COMMAND = os.getenv("MINIMAX_MCP_COMMAND", "/home/rg/bin/minimax-mcp")
 STABILITY_API_KEY = os.getenv("STABILITY_API_KEY", "")
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")  # optional, improves rate limits
 
@@ -21,6 +25,46 @@ VISION_MODEL = "grok-4-fast-non-reasoning"
 # Where generated images are saved for serving
 GENERATED_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "generated"
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _load_runtime_env_if_needed() -> None:
+    """Load the backend runtime env only when service env is missing."""
+    wanted = {
+        "MINIMAX_API_KEY",
+        "MINIMAX_BASE_URL",
+        "MINIMAX_MODEL",
+        "MINIMAX_VISION_MODEL",
+        "MINIMAX_MCP_COMMAND",
+    }
+    if os.getenv("MINIMAX_API_KEY"):
+        return
+    for env_path in (
+        Path("/home/rg/empire-repo/backend/.env"),
+        Path(__file__).resolve().parents[2] / ".env",
+    ):
+        if not env_path.exists():
+            continue
+        try:
+            for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                text = line.strip()
+                if not text or text.startswith("#") or "=" not in text:
+                    continue
+                key, value = text.split("=", 1)
+                key = key.strip()
+                if key not in wanted or os.getenv(key):
+                    continue
+                os.environ[key] = value.strip().strip('"').strip("'")
+        except OSError:
+            continue
+
+
+def _refresh_minimax_settings() -> None:
+    global MINIMAX_API_KEY, MINIMAX_BASE_URL, MINIMAX_VISION_MODEL, MINIMAX_MCP_COMMAND
+    _load_runtime_env_if_needed()
+    MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
+    MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
+    MINIMAX_VISION_MODEL = os.getenv("MINIMAX_VISION_MODEL") or os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
+    MINIMAX_MCP_COMMAND = os.getenv("MINIMAX_MCP_COMMAND", "/home/rg/bin/minimax-mcp")
 
 
 class ImageRequest(BaseModel):
@@ -39,31 +83,217 @@ class ImagineRequest(BaseModel):
 
 # ── Helpers ─────────────────────────────────────────────────
 
-async def call_vision(prompt: str, image: str, max_tokens: int = 4500) -> dict:
-    """Send image + prompt to xAI vision model and parse JSON response."""
-    if not XAI_API_KEY:
-        raise HTTPException(500, "XAI_API_KEY not configured")
-    async with httpx.AsyncClient(timeout=120) as client:
-        res = await client.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": VISION_MODEL,
-                "messages": [{"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": image}},
-                    {"type": "text", "text": prompt},
-                ]}],
-                "max_tokens": max_tokens,
-                "temperature": 0.3,
+def _extract_json_object(text: str) -> dict[str, Any]:
+    match = re.search(r"\{[\s\S]*\}", text or "")
+    if not match:
+        raise HTTPException(500, "Could not parse AI response")
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(500, f"Could not parse AI response JSON: {exc}") from exc
+
+
+async def _mcp_send(proc: asyncio.subprocess.Process, payload: dict[str, Any]) -> None:
+    if proc.stdin is None:
+        raise HTTPException(500, "MiniMax MCP stdin unavailable")
+    proc.stdin.write((json.dumps(payload) + "\n").encode())
+    await proc.stdin.drain()
+
+
+async def _mcp_read_response(proc: asyncio.subprocess.Process, response_id: int, timeout: int = 120) -> dict[str, Any]:
+    if proc.stdout is None:
+        raise HTTPException(500, "MiniMax MCP stdout unavailable")
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise HTTPException(504, "MiniMax MCP timed out")
+        line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
+        if not line:
+            raise HTTPException(500, "MiniMax MCP exited before responding")
+        raw = line.decode(errors="replace").strip()
+        if not raw:
+            continue
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            log.debug("Ignoring non-JSON MiniMax MCP output")
+            continue
+        if msg.get("id") == response_id:
+            return msg
+
+
+def _mcp_text_from_result(result: Any) -> str:
+    if isinstance(result, dict):
+        if result.get("type") == "text" and result.get("text"):
+            return str(result["text"])
+        structured = result.get("structuredContent")
+        if structured:
+            if isinstance(structured, dict) and structured.get("type") == "text" and structured.get("text"):
+                return str(structured["text"])
+            if isinstance(structured, dict) and structured.get("text"):
+                return str(structured["text"])
+            if isinstance(structured, list):
+                parts = []
+                for item in structured:
+                    if isinstance(item, dict) and item.get("text"):
+                        parts.append(str(item["text"]))
+                if parts:
+                    return "\n".join(parts)
+            return json.dumps(structured)
+        content = result.get("content")
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text" and item.get("text"):
+                        parts.append(str(item["text"]))
+                    elif item.get("text"):
+                        parts.append(str(item["text"]))
+            if parts:
+                return "\n".join(parts)
+        if isinstance(content, str):
+            return content
+    return json.dumps(result)
+
+
+async def call_minimax_image_understanding(prompt: str, image_url: str, max_tokens: int = 4500) -> dict[str, Any]:
+    """Call MiniMax Token Plan MCP understand_image with a local file path or URL."""
+    _refresh_minimax_settings()
+    if not MINIMAX_API_KEY:
+        raise HTTPException(500, "MiniMax Token Plan key is not configured")
+
+    command = shlex.split(MINIMAX_MCP_COMMAND)
+    if not command:
+        raise HTTPException(500, "MiniMax MCP command is not configured")
+
+    log.info(
+        "provider=minimax_token_plan capability=image_understanding image_source_type=%s",
+        "url" if image_url.startswith(("http://", "https://")) else "local_path",
+    )
+
+    proc = await asyncio.create_subprocess_exec(
+        *command,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        await _mcp_send(proc, {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "empire-archiveforge", "version": "1.0"},
             },
-        )
-    if res.status_code != 200:
-        raise HTTPException(res.status_code, f"Vision API error: {res.text[:500]}")
-    content = res.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-    m = re.search(r"\{[\s\S]*\}", content)
-    if not m:
-        raise HTTPException(500, f"Could not parse AI response")
-    return json.loads(m.group(0))
+        })
+        init_msg = await _mcp_read_response(proc, 1, timeout=30)
+        if init_msg.get("error"):
+            raise HTTPException(500, f"MiniMax MCP initialize failed: {init_msg['error'].get('message', 'unknown error')}")
+
+        await _mcp_send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+        await _mcp_send(proc, {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "understand_image",
+                "arguments": {
+                    "prompt": prompt,
+                    "image_source": image_url,
+                },
+            },
+        })
+        msg = await _mcp_read_response(proc, 2, timeout=120)
+        if msg.get("error"):
+            raise HTTPException(500, f"MiniMax MCP understand_image failed: {msg['error'].get('message', 'unknown error')}")
+        text = _mcp_text_from_result(msg.get("result", {}))
+        parsed = _extract_json_object(text)
+        log.info("provider=minimax_token_plan capability=image_understanding response_status=ok parsed_json_valid=true")
+        return parsed
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("provider=minimax_token_plan capability=image_understanding response_status=error parsed_json_valid=false")
+        raise HTTPException(500, f"MiniMax MCP image understanding failed: {type(exc).__name__}") from exc
+    finally:
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+
+async def call_vision(prompt: str, image: str, max_tokens: int = 4500) -> dict:
+    """Send image + prompt to best available vision model and parse JSON response.
+
+    Priority: MiniMax (local, fast, working) → xAI Grok (paid, credits-limited) → xAI/Grok fallback.
+    """
+    _refresh_minimax_settings()
+
+    # 1. Try MiniMax first (your working API with vision support)
+    if MINIMAX_API_KEY:
+        try:
+            image_url = image
+            # If image is a local file path, encode it as data URI
+            if image.startswith("/") or image.startswith("data:"):
+                image_url = image  # pass through — caller handles encoding
+            elif not image.startswith("http"):
+                image_url = image  # treat as raw path or data URI
+
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{MINIMAX_BASE_URL}/chat/completions",
+                    headers={"Authorization": f"Bearer {MINIMAX_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": MINIMAX_VISION_MODEL,
+                        "messages": [{"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": image_url}},
+                            {"type": "text", "text": prompt},
+                        ]}],
+                        "max_tokens": max_tokens,
+                        "temperature": 0.3,
+                    },
+                )
+            if resp.status_code == 200:
+                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                parsed = _extract_json_object(content)
+                log.info("Vision response via MiniMax")
+                return parsed
+            log.warning(f"MiniMax vision returned {resp.status_code}: {resp.text[:200]}")
+        except Exception as e:
+            log.warning(f"MiniMax vision failed: {type(e).__name__}: {e}")
+
+    # 2. Fall back to xAI Grok if key is available and has credits
+    if XAI_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                res = await client.post(
+                    "https://api.x.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+                    json={
+                        "model": VISION_MODEL,
+                        "messages": [{"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": image}},
+                            {"type": "text", "text": prompt},
+                        ]}],
+                        "max_tokens": max_tokens,
+                        "temperature": 0.3,
+                    },
+                )
+            if res.status_code != 200:
+                raise HTTPException(res.status_code, f"Vision API error: {res.text[:500]}")
+            content = res.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            log.info("Vision response via xAI Grok")
+            return _extract_json_object(content)
+        except Exception as e:
+            log.warning(f"xAI Grok vision failed: {type(e).__name__}: {e}")
+            raise HTTPException(500, f"Vision providers failed: {e}")
+
+    raise HTTPException(500, "No vision provider configured — set MINIMAX_API_KEY")
 
 
 def _save_image_bytes(data: bytes, prefix: str = "gen") -> str:

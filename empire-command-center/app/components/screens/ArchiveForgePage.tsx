@@ -3351,6 +3351,8 @@ function InventorySection() {
   const [reboxError, setReboxError] = useState('');
   const [photoDrawer, setPhotoDrawer] = useState<{ item: ArchiveItem; photos: any } | null>(null);
   const [photoLoading, setPhotoLoading] = useState(false);
+  const [detailDrawer, setDetailDrawer] = useState<any | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -3413,6 +3415,21 @@ function InventorySection() {
       setPhotoDrawer({ item, photos: {} });
     } finally {
       setPhotoLoading(false);
+    }
+  };
+
+  const openDetail = async (item: ArchiveItem) => {
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`${AG_API}/${item.id}/detail`);
+      if (res.ok) {
+        const data = await res.json();
+        setDetailDrawer({ item, detail: data });
+      }
+    } catch {
+      // non-critical
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -3598,13 +3615,20 @@ function InventorySection() {
                       }
                       if (col.key === 'thumbnail_url') {
                         display = item.thumbnail_url ? (
-                          <button onClick={() => openPhotos(item)} title="View Photos" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}>
+                          <button onClick={() => openDetail(item)} title="Open Record" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}>
                             <img src={`${API}${item.thumbnail_url.replace('/api/v1', '')}`} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
                           </button>
-                        ) : <button onClick={() => openPhotos(item)} style={{ border: '1px dashed #d1d5db', background: '#f9fafb', borderRadius: 6, width: 54, height: 40, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>No photo</button>;
+                        ) : <button onClick={() => openDetail(item)} title="Open Record" style={{ border: '1px dashed #d1d5db', background: '#f9fafb', borderRadius: 6, width: 54, height: 40, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>No photo</button>;
                       }
                       if (col.key === 'display_title') {
-                        display = <div style={{ maxWidth: 250, whiteSpace: 'normal', lineHeight: 1.25, fontWeight: 700 }}>{item.display_title || item.cover_subject || '—'}<div style={{ fontSize: 10, color: '#888', fontWeight: 400 }}>{item.short_description || ''}</div></div>;
+                        display = (
+                          <div style={{ maxWidth: 250, whiteSpace: 'normal', lineHeight: 1.25 }}>
+                            <button onClick={() => openDetail(item)} title="Open Record" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', textAlign: 'left', fontWeight: 700, color: '#06b6d4', textDecoration: 'underline', textDecorationStyle: 'dotted' }}>
+                              {item.display_title || item.cover_subject || '—'}
+                            </button>
+                            <div style={{ fontSize: 10, color: '#888', fontWeight: 400 }}>{item.short_description || ''}</div>
+                          </div>
+                        );
                       }
                       if (col.key === 'status_badges') {
                         display = <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 170 }}>
@@ -3672,6 +3696,12 @@ function InventorySection() {
                         </div>
                       ) : (
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => openDetail(item)}
+                            style={{ padding: '3px 8px', background: '#06b6d4', border: 'none', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', gap: 3 }}
+                          >
+                            <Archive size={10} /> Open Record
+                          </button>
                           <button
                             onClick={() => openPhotos(item)}
                             style={{ padding: '3px 8px', background: '#fff', border: '1px solid #bae6fd', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', color: '#155e75', display: 'flex', alignItems: 'center', gap: 3 }}
@@ -3750,6 +3780,437 @@ function InventorySection() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Item Detail Drawer ────────────────────────────────────────────────────────
+
+type DetailTab = 'photos' | 'reference' | 'issue_info' | 'condition' | 'ads' | 'pricing' | 'listing' | 'lifecycle';
+
+function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any; onClose: () => void; onRefresh: () => void }) {
+  const [tab, setTab] = useState<DetailTab>('photos');
+  const [editing, setEditing] = useState(false);
+  const [editData, setEditData] = useState<Record<string, any>>({});
+  const [saving, setSaving] = useState(false);
+  const [lifecycleMsg, setLifecycleMsg] = useState('');
+  const [lifecycleOp, setLifecycleOp] = useState(false);
+  const d = detailItem?.detail || {};
+  const arch = d.archive || {};
+  const lc = d.lifecycle || {};
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${AG_API}/${arch.archive_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editData),
+      });
+      if (res.ok) { setEditing(false); onRefresh(); }
+    } finally { setSaving(false); }
+  };
+
+  const doLifecycle = async (item_status: string, marketplace_status: string, ad_breakout_status: string, notes: string) => {
+    setLifecycleOp(true);
+    setLifecycleMsg('');
+    try {
+      const res = await fetch(`${AG_API}/${arch.archive_id}/lifecycle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_status, marketplace_status, ad_breakout_status, notes }),
+      });
+      if (res.ok) { setLifecycleMsg('Lifecycle updated.'); onRefresh(); }
+      else { const e = await res.json(); setLifecycleMsg('Error: ' + (e.detail || res.statusText)); }
+    } catch { setLifecycleMsg('Network error.'); }
+    setLifecycleOp(false);
+  };
+
+  const TABS: { key: DetailTab; label: string }[] = [
+    { key: 'photos', label: 'Photos' },
+    { key: 'reference', label: 'Reference' },
+    { key: 'issue_info', label: 'Issue Info' },
+    { key: 'condition', label: 'Condition' },
+    { key: 'ads', label: 'Ad Opportunities' },
+    { key: 'pricing', label: 'Pricing' },
+    { key: 'listing', label: 'Listing' },
+    { key: 'lifecycle', label: 'Lifecycle' },
+  ];
+
+  const EXPORT_URLS = d.exports || {};
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 60, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={onClose}>
+      <div style={{ width: 'min(1100px, 96vw)', height: '92vh', background: '#fff', borderRadius: 16, boxShadow: '0 25px 60px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #e5e2dc', display: 'flex', gap: 14, alignItems: 'center', flexShrink: 0, background: '#fafaf8' }}>
+          {d.photos?.front?.[0]?.thumbnail_url && (
+            <img src={`${API}${d.photos.front[0].thumbnail_url.replace('/api/v1', '')}`} alt="cover" style={{ width: 52, height: 68, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6', flexShrink: 0 }} />
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {arch.display_title || arch.confirmed_cover_title || arch.cover_subject || `Archive #${arch.archive_id}`}
+            </div>
+            <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+              #{arch.archive_id} &nbsp;·&nbsp; {arch.issue_date || '—'} &nbsp;·&nbsp; Tier {arch.tier || '—'} &nbsp;·&nbsp; {arch.status || '—'}
+            </div>
+            <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
+              {arch.complete && <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, background: '#d1fae5', color: '#065f46', fontWeight: 700 }}>Complete</span>}
+              {arch.address_label && <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, background: '#dbeafe', color: '#1e40af', fontWeight: 700 }}>Labeled</span>}
+              {arch.tier && <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, background: '#fef3c7', color: '#92400e', fontWeight: 700 }}>Tier {arch.tier}</span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 }}>
+            {EXPORT_URLS.pdf_url && (
+              <a href={EXPORT_URLS.pdf_url} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: '#374151', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Download size={11} /> Export PDF
+              </a>
+            )}
+            {EXPORT_URLS.pdf_with_images_url && (
+              <a href={EXPORT_URLS.pdf_with_images_url} target="_blank" rel="noreferrer" style={{ padding: '6px 10px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: '#374151', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Download size={11} /> PDF+Photos
+              </a>
+            )}
+            <button onClick={() => setEditing(e => !e)} style={{ padding: '6px 10px', background: editing ? '#06b6d4' : '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: editing ? '#fff' : '#374151', cursor: 'pointer' }}>
+              {editing ? 'Editing...' : 'Edit Record'}
+            </button>
+            <button onClick={onClose} style={{ border: 'none', background: '#f3f4f6', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 2, padding: '8px 16px 0', borderBottom: '1px solid #e5e2dc', flexShrink: 0, overflowX: 'auto', background: '#fafaf8' }}>
+          {TABS.map(t => (
+            <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '5px 12px', borderRadius: '8px 8px 0 0', border: 'none', borderBottom: tab === t.key ? '2px solid #06b6d4' : '2px solid transparent', background: tab === t.key ? '#fff' : 'transparent', color: tab === t.key ? '#06b6d4' : '#888', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          {/* PHOTOS TAB */}
+          {tab === 'photos' && (
+            <div style={{ display: 'grid', gap: 16 }}>
+              {(['front', 'spine', 'back', 'defects', 'label', 'ad_pages'] as const).map(role => {
+                const group: any[] = (d.photos || {})[role] || [];
+                if (!group.length) return null;
+                return (
+                  <div key={role}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 8, textTransform: 'capitalize' }}>{role.replace('_', ' ')} ({group.length})</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+                      {group.map((p: any) => (
+                        <div key={p.id || p.photo_id} style={{ border: '1px solid #e5e2dc', borderRadius: 8, padding: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <img src={`${API}${(p.thumbnail_url || p.photo_url || '').replace('/api/v1', '')}`} alt={p.role} style={{ width: '100%', height: 180, objectFit: 'contain', background: '#f9fafb', borderRadius: 6 }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          <div style={{ fontSize: 10, color: '#666' }}>{p.filename || p.original_name || `photo_${p.id || p.photo_id}`}</div>
+                          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                            <a href={`${API}${(p.photo_url || '').replace('/api/v1', '')}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#06b6d4' }}>Open full image</a>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {Object.values(d.photos || {}).every((g: any) => !g.length) && (
+                <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>No photos uploaded.</div>
+              )}
+            </div>
+          )}
+
+          {/* REFERENCE TAB */}
+          {tab === 'reference' && (
+            <div style={{ display: 'grid', gap: 16 }}>
+              {/* Google Books reference */}
+              {d.reference_cover && (
+                <div style={{ border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 10 }}>Google Books Reference</div>
+                  <div style={{ display: 'flex', gap: 14 }}>
+                    {d.reference_cover.cover_image_url && (
+                      <img src={d.reference_cover.cover_image_url} alt="Google Books reference" style={{ width: 120, height: 160, objectFit: 'contain', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f9fafb' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                    )}
+                    <div style={{ flex: 1, fontSize: 11, color: '#666', display: 'grid', gap: 4 }}>
+                      <div><span style={{ color: '#888' }}>Volume ID: </span><span style={{ fontFamily: 'monospace' }}>{d.reference_cover.volume_id}</span></div>
+                      <div><span style={{ color: '#888' }}>Issue date: </span>{d.reference_cover.published_date || d.reference_cover.issue_date || '—'}</div>
+                      <div><span style={{ color: '#888' }}>Title: </span>{d.reference_cover.title || '—'}</div>
+                      <div><span style={{ color: '#888' }}>Confidence: </span>{d.reference_cover.match_confidence ? `${Math.round(d.reference_cover.match_confidence * 100)}%` : '—'}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, padding: '5px 8px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 6, fontSize: 10, color: '#9a3412' }}>Reference image — not your item photo</div>
+                </div>
+              )}
+              {/* Dealer reference */}
+              {d.dealer_reference && (
+                <div style={{ border: '1px solid #fcd34d', borderRadius: 12, padding: 14, background: '#fffbeb' }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#92400e', marginBottom: 10 }}>Dealer Catalog Reference</div>
+                  <div style={{ fontSize: 11, color: '#666', display: 'grid', gap: 4 }}>
+                    <div><span style={{ color: '#888' }}>Source: </span><a href={d.dealer_reference.source_url} target="_blank" rel="noreferrer" style={{ color: '#06b6d4' }}>OriginalLifeMagazines.com</a></div>
+                    <div><span style={{ color: '#888' }}>Issue date: </span>{d.dealer_reference.issue_date || '—'}</div>
+                    <div><span style={{ color: '#888' }}>Title: </span>{d.dealer_reference.title || '—'}</div>
+                    {d.dealer_reference.asking_price && (
+                      <div><span style={{ color: '#92400e', fontWeight: 700 }}>Asking price: ${d.dealer_reference.asking_price}</span></div>
+                    )}
+                    <div><span style={{ color: '#888' }}>Confidence: </span>{d.dealer_reference.match_confidence ? `${Math.round(d.dealer_reference.match_confidence * 100)}%` : '—'}</div>
+                  </div>
+                  <div style={{ marginTop: 8, padding: '5px 8px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6, fontSize: 10, color: '#92400e' }}>Dealer asking price — not sold comp evidence</div>
+                </div>
+              )}
+              {!d.reference_cover && !d.dealer_reference && (
+                <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>No reference images available.</div>
+              )}
+            </div>
+          )}
+
+          {/* ISSUE INFO TAB */}
+          {tab === 'issue_info' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              {d.issue_info?.status && d.issue_info.status !== 'not_run' ? (
+                <>
+                  <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
+                    <InfoRow label="Status" value={d.issue_info.status} />
+                    <InfoRow label="Confidence" value={d.issue_info.confidence ? `${Math.round(d.issue_info.confidence * 100)}%` : '—'} />
+                    <InfoRow label="Issue date" value={d.issue_info.issue_date || '—'} />
+                    <InfoRow label="Cover title" value={d.issue_info.cover_title || '—'} />
+                    <InfoRow label="Detected subject" value={d.issue_info.detected_subject || '—'} />
+                    <InfoRow label="Evidence grade" value={d.issue_info.evidence_grade || '—'} />
+                    <InfoRow label="Google Books ID" value={d.issue_info.selected_google_books_volume_id || '—'} mono />
+                    <InfoRow label="Evidence source" value={d.issue_info.evidence_source || '—'} />
+                  </div>
+                  {d.issue_info.visible_text?.length > 0 && (
+                    <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#374151', marginBottom: 8 }}>Visible Text ({d.issue_info.visible_text.length} items)</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {(d.issue_info.visible_text as string[]).map((t, i) => (
+                          <span key={i} style={{ padding: '2px 8px', background: '#f3f4f6', borderRadius: 4, fontSize: 11, fontFamily: 'monospace' }}>{t}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {d.issue_info.stale_warning && (
+                    <div style={{ padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 11, color: '#92400e' }}>{d.issue_info.stale_warning}</div>
+                  )}
+                  {d.life_master && (
+                    <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: '#374151', marginBottom: 8 }}>LIFE Issue Master</div>
+                      <div style={{ fontSize: 11, color: '#666', display: 'grid', gap: 4 }}>
+                        <InfoRow label="Date" value={d.life_master.normalized_date || '—'} />
+                        <InfoRow label="Subject" value={d.life_master.cover_subject || d.life_master.description || '—'} />
+                        <InfoRow label="Sources" value={d.life_master.source_count || '—'} />
+                        <InfoRow label="DTM Low/High" value={d.life_master.dtmagazine_low && d.life_master.dtmagazine_high ? `$${d.life_master.dtmagazine_low} – $${d.life_master.dtmagazine_high}` : '—'} />
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>Issue Info Resolver not run.</div>
+              )}
+            </div>
+          )}
+
+          {/* CONDITION TAB */}
+          {tab === 'condition' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, fontSize: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <InfoRow label="Condition Score" value={arch.condition_score ? `${arch.condition_score}/5` : '—'} />
+                  <InfoRow label="Complete" value={arch.complete ? 'Yes' : 'No'} />
+                  <InfoRow label="Address Label" value={arch.address_label ? 'Present' : 'None'} />
+                  <InfoRow label="Defects" value={arch.defects || 'None noted'} />
+                </div>
+              </div>
+              {arch.notes && (
+                <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#374151', marginBottom: 6 }}>Notes</div>
+                  <div style={{ fontSize: 11, color: '#666', whiteSpace: 'pre-wrap' }}>{arch.notes}</div>
+                </div>
+              )}
+              {d.issue_info?.condition_notes && (
+                <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: '#374151', marginBottom: 6 }}>AI Condition Notes</div>
+                  <div style={{ fontSize: 11, color: '#666', whiteSpace: 'pre-wrap' }}>{d.issue_info.condition_notes}</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ADS TAB */}
+          {tab === 'ads' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <div style={{ padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 11, color: '#92400e' }}>
+                Ads are unverified until photographed in this physical copy.
+              </div>
+              {(d.ad_opportunities || []).length > 0 ? (
+                (d.ad_opportunities as any[]).map((opp: any) => (
+                  <div key={opp.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 12, fontSize: 11, display: 'grid', gap: 4 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12 }}>{opp.brand || opp.candidate_type || 'Unknown'}</div>
+                    <div style={{ color: '#666' }}>{opp.product || opp.category || '—'}</div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10, background: opp.verification_status === 'verified_in_copy' ? '#d1fae5' : '#f3f4f6', color: opp.verification_status === 'verified_in_copy' ? '#065f46' : '#888' }}>{opp.verification_status || 'unknown'}</span>
+                      {opp.estimated_low && opp.estimated_high && <span style={{ color: '#666' }}>${opp.estimated_low}–${opp.estimated_high}</span>}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>No ad opportunities found.</div>
+              )}
+              {d.ad_page_photos?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 8 }}>Ad Page Photos ({d.ad_page_photos.length})</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
+                    {(d.ad_page_photos as any[]).map((p: any) => (
+                      <div key={p.id} style={{ border: '1px solid #e5e2dc', borderRadius: 6, padding: 6, textAlign: 'center' }}>
+                        <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>{p.page_number || p.filename}</div>
+                        <div style={{ fontSize: 10, color: '#666' }}>{p.analysis_status || '—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PRICING TAB */}
+          {tab === 'pricing' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, fontSize: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 10 }}>Pricing Summary</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <InfoRow label="Comp Min" value={arch.rough_comp_min ? `$${arch.rough_comp_min}` : '—'} />
+                  <InfoRow label="Comp Max" value={arch.rough_comp_max ? `$${arch.rough_comp_max}` : '—'} />
+                  <InfoRow label="Final Price" value={arch.final_price ? `$${arch.final_price}` : '—'} />
+                  <InfoRow label="Pricing Type" value={d.pricing_summary?.pricing_type || '—'} />
+                  <InfoRow label="True Comps" value={d.pricing_summary?.true_comps_available ? 'Available' : 'Not available'} />
+                </div>
+                {d.life_master && d.life_master.dtmagazine_low && (
+                  <div style={{ marginTop: 10, padding: '8px 10px', background: '#f0fdf4', borderRadius: 8, fontSize: 11 }}>
+                    <span style={{ color: '#166534' }}>DTM Reference: </span>
+                    ${d.life_master.dtmagazine_low}–${d.life_master.dtmagazine_high} (avg ${d.life_master.dtmagazine_average})
+                  </div>
+                )}
+              </div>
+              {(d.comps || []).length > 0 && (
+                <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 8 }}>Comps ({d.comps.length})</div>
+                  {(d.comps as any[]).slice(0, 10).map((c: any, i: number) => (
+                    <div key={i} style={{ fontSize: 11, color: '#666', padding: '4px 0', borderBottom: '1px solid #f0f0f0', display: 'grid', gridTemplateColumns: '1fr auto', gap: 8 }}>
+                      <span>{c.title || c.source || 'Comp'}</span>
+                      <span style={{ fontWeight: 600 }}>{c.sold_price || c.asking_price ? `$${c.sold_price || c.asking_price}` : '—'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* LISTING TAB */}
+          {tab === 'listing' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {EXPORT_URLS.pdf_url && <a href={EXPORT_URLS.pdf_url} target="_blank" rel="noreferrer" style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: '#374151', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}><Download size={11} /> Report PDF</a>}
+                {EXPORT_URLS.pdf_with_images_url && <a href={EXPORT_URLS.pdf_with_images_url} target="_blank" rel="noreferrer" style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: '#374151', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}><Download size={11} /> Report PDF+Photos</a>}
+                {EXPORT_URLS.listing_packet_json_url && <a href={EXPORT_URLS.listing_packet_json_url} target="_blank" rel="noreferrer" style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: '#374151', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}><Download size={11} /> JSON</a>}
+                {EXPORT_URLS.listing_packet_xlsx_url && <a href={EXPORT_URLS.listing_packet_xlsx_url} target="_blank" rel="noreferrer" style={{ padding: '7px 12px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: '#374151', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}><Download size={11} /> XLSX</a>}
+              </div>
+              {d.listing_draft ? (
+                <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, fontSize: 12 }}>
+                  <div style={{ fontWeight: 800, color: '#374151', marginBottom: 8 }}>{d.listing_draft.listing_title || 'Untitled Draft'}</div>
+                  {d.listing_draft.listing_description && (
+                    <div style={{ fontSize: 11, color: '#666', whiteSpace: 'pre-wrap', marginTop: 8 }}>{d.listing_draft.listing_description}</div>
+                  )}
+                  <div style={{ marginTop: 8, fontSize: 11, color: '#888' }}>Draft ID: {d.listing_draft.draft_id || d.listing_draft.id || '—'} · Status: {arch.listing_status || '—'}</div>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#888', padding: 30 }}>No listing draft saved.</div>
+              )}
+              <div style={{ padding: '8px 12px', background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 8, fontSize: 11, color: '#92400e' }}>
+                Internal listing draft — does not publish to eBay or any marketplace.
+              </div>
+            </div>
+          )}
+
+          {/* LIFECYCLE TAB */}
+          {tab === 'lifecycle' && (
+            <div style={{ display: 'grid', gap: 14 }}>
+              {/* Status badges */}
+              <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14, fontSize: 12, display: 'grid', gap: 8 }}>
+                <div style={{ fontWeight: 800, color: '#374151', marginBottom: 4 }}>Current Status</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <InfoRow label="Item Status" value={lc.item_status || 'inventory'} />
+                  <InfoRow label="Marketplace" value={lc.marketplace_status || 'not_listed'} />
+                  <InfoRow label="Ad Breakout" value={lc.ad_breakout_status || 'none'} />
+                  <InfoRow label="Sold Price" value={lc.sold_price ? `$${lc.sold_price}` : '—'} />
+                  <InfoRow label="Sold Date" value={lc.sold_date || '—'} />
+                  <InfoRow label="Sold Platform" value={lc.sold_platform || '—'} />
+                </div>
+                {lc.disposition_notes && (
+                  <div style={{ fontSize: 11, color: '#666', marginTop: 4, whiteSpace: 'pre-wrap' }}>Notes: {lc.disposition_notes}</div>
+                )}
+              </div>
+              {lifecycleMsg && <div style={{ padding: '6px 10px', background: lifecycleMsg.startsWith('Error') ? '#fee2e2' : '#d1fae5', borderRadius: 8, fontSize: 11, color: lifecycleMsg.startsWith('Error') ? '#991b1b' : '#065f46' }}>{lifecycleMsg}</div>}
+              <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#374151', marginBottom: 8 }}>Quick Actions</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 11 }}>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('held', 'draft', 'none', 'Held intact')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Hold Intact</button>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('listed', 'draft', 'none', 'Marked as listed')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Mark Listed</button>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('sold', 'sold', 'none', 'Marked sold')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fff', color: '#991b1b', cursor: 'pointer', fontSize: 11 }}>Mark Sold</button>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('broken_for_ads', 'not_listed', 'in_progress', 'Broken out for ads')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Broken for Ads</button>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('ads_only', 'not_listed', 'ads_listed', 'Used for ads only')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Ads Only</button>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('needs_review', 'not_listed', 'none', 'Flagged for review')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fff', color: '#991b1b', cursor: 'pointer', fontSize: 11 }}>Needs Review</button>
+                </div>
+                <div style={{ marginTop: 8, padding: '6px 8px', background: '#fef3c7', borderRadius: 6, fontSize: 10, color: '#92400e' }}>
+                  These actions update internal ArchiveForge status only — they do not publish or update any marketplace.
+                </div>
+              </div>
+              {editing && (
+                <div style={{ background: '#fff', border: '1px solid #06b6d4', borderRadius: 12, padding: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 10 }}>Edit Record</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 11 }}>
+                    <EditField label="Display Title" field="display_title" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Issue Date" field="issue_date" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Condition (1-5)" field="condition_score" arch={arch} editData={editData} setEditData={setEditData} type="number" />
+                    <EditField label="Tier (A/B/C)" field="tier" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Defects" field="defects" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Comp Min ($)" field="rough_comp_min" arch={arch} editData={editData} setEditData={setEditData} type="number" />
+                    <EditField label="Comp Max ($)" field="rough_comp_max" arch={arch} editData={editData} setEditData={setEditData} type="number" />
+                    <EditField label="Final Price ($)" field="final_price" arch={arch} editData={editData} setEditData={setEditData} type="number" />
+                    <EditField label="Source Box" field="source_box_code" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Dest Box" field="processed_box_code" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Location" field="archive_location" arch={arch} editData={editData} setEditData={setEditData} />
+                    <EditField label="Sale Plan" field="sale_plan" arch={arch} editData={editData} setEditData={setEditData} />
+                    <div style={{ gridColumn: '1/-1' }}>
+                      <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>Notes</div>
+                      <textarea value={editData.notes ?? arch.notes ?? ''} onChange={e => setEditData(ed => ({ ...ed, notes: e.target.value }))} rows={2} style={{ width: '100%', padding: 6, border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 11, resize: 'vertical', fontFamily: 'inherit' }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button onClick={saveEdit} disabled={saving} style={{ padding: '6px 14px', background: '#06b6d4', border: 'none', borderRadius: 8, color: '#fff', fontSize: 12, fontWeight: 600, cursor: saving ? 'wait' : 'pointer' }}>{saving ? 'Saving...' : 'Save Changes'}</button>
+                    <button onClick={() => setEditing(false)} style={{ padding: '6px 14px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, color: '#888', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value, mono }: { label: string; value: string | number | null | undefined; mono?: boolean }) {
+  return value !== undefined && value !== null && value !== '' ? (
+    <div style={{ display: 'flex', gap: 6 }}>
+      <span style={{ color: '#888', minWidth: 90 }}>{label}:</span>
+      <span style={{ color: '#1a1a1a', fontFamily: mono ? 'monospace' : 'inherit', fontWeight: 500 }}>{value}</span>
+    </div>
+  ) : null;
+}
+
+function EditField({ label, field, arch, editData, setEditData, type }: { label: string; field: string; arch: any; editData: any; setEditData: any; type?: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: '#888', marginBottom: 3 }}>{label}</div>
+      <input type={type || 'text'} value={editData[field] ?? arch[field] ?? ''} onChange={e => setEditData((ed: Record<string, any>) => ({ ...ed, [field]: type === 'number' ? (e.target.value ? parseFloat(e.target.value) : null) : e.target.value }))}
+        style={{ width: '100%', padding: '5px 8px', border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 11 }} />
     </div>
   );
 }

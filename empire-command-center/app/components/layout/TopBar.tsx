@@ -5,10 +5,11 @@ import { API } from '../../lib/api';
 import LanguageSwitcher from '../LanguageSwitcher';
 
 const MODELS = [
-  { id: 'grok-3-fast', label: 'xAI Grok', desc: 'Primary · Fast', color: '#b8960c' },
+  { id: 'minimax', label: 'MiniMax', desc: 'Primary · Text/chat', color: '#b8960c' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Anthropic · Balanced', color: '#7c3aed' },
   { id: 'claude-opus-4-6', label: 'Claude Opus', desc: 'Anthropic · Advanced', color: '#9333ea' },
   { id: 'groq', label: 'Groq Llama 3.3', desc: 'Groq · 70B · Ultra-fast', color: '#f97316' },
+  { id: 'grok-3-fast', label: 'xAI Grok', desc: 'Disabled by policy', color: '#777' },
   { id: 'llama3.1:8b', label: 'Llama 3.1 (Ollama)', desc: 'Local · 8B', color: '#06b6d4' },
   { id: 'auto', label: 'Auto', desc: 'Best available', color: '#22c55e' },
 ];
@@ -49,7 +50,7 @@ interface Props {
 export default function TopBar({ onQuickSwitch, onClientView, onNavigate, services }: Props) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('grok-3-fast');
+  const [selectedModel, setSelectedModel] = useState('minimax');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
   const modelRef = useRef<HTMLDivElement>(null);
