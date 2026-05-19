@@ -773,7 +773,7 @@ async def _search_google_books_api(query_used: str, query_date: Optional[datetim
             caller="reference_search",
         )
         return [], blocked_status
-    params = {"q": query_used, "printType": "magazines", "maxResults": 10}
+    params = {"q": query_used, "maxResults": 10}
     if GOOGLE_BOOKS_API_KEY:
         params["key"] = GOOGLE_BOOKS_API_KEY
     try:
@@ -2614,7 +2614,7 @@ async def _search_google_books_metadata(query: str, archive_id: Optional[int] = 
     if not allowed:
         _record_external_api_call("google_books", "volume_search", archive_id, "", 0, blocked_status, False, caller)
         return None, blocked_status
-    params = {"q": query, "printType": "magazines", "maxResults": 5}
+    params = {"q": query, "maxResults": 5}
     if GOOGLE_BOOKS_API_KEY:
         params["key"] = GOOGLE_BOOKS_API_KEY
     try:
