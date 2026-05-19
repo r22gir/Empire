@@ -12,7 +12,7 @@ Scope:
 This router uses its own prefixed tables (ag_*) in the shared SQLite DB.
 All sample/reference data is local fixture — no live external dependencies.
 """
-from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Form, BackgroundTasks, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from typing import Optional, List, Any
@@ -377,6 +377,283 @@ def _date_distance_days(candidate: str, target: Optional[datetime]) -> int:
 
 def _google_books_cover_url(volume_id: str) -> str:
     return f"https://books.google.com/books/content?id={volume_id}&printsec=frontcover&img=1&zoom=1&edge=curl"
+
+
+# ── Internet Archive Helpers ─────────────────────────────────────────────────
+
+IA_BASE_URL = "https://archive.org"
+IA_METADATA_URL = "https://archive.org/metadata"
+
+# Google-scanned LIFE magazines follow: bub_gb_ + Google Books volume ID
+# e.g. Jj8EAAAAMBAJ → bub_gb_Jj8EAAAAMBAJ
+def _internet_archive_id_from_google_volume_id(volume_id: str) -> str:
+    """Derive IA identifier from a Google Books volume ID (LIFE magazine scans)."""
+    if not volume_id or len(volume_id) < 4:
+        return ""
+    return f"bub_gb_{volume_id}"
+
+
+def _internet_archive_url(ia_id: str) -> str:
+    return f"{IA_BASE_URL}/details/{ia_id}" if ia_id else ""
+
+
+def _internet_archive_cover_url(ia_id: str) -> str:
+    return f"{IA_BASE_URL}/services/img/{ia_id}" if ia_id else ""
+
+
+def _internet_archive_pdf_url(ia_id: str) -> str:
+    return f"{IA_BASE_URL}/download/{ia_id}/{ia_id}.pdf" if ia_id else ""
+
+
+def _internet_archive_ocr_url(ia_id: str) -> str:
+    return f"{IA_BASE_URL}/download/{ia_id}/{ia_id}_djvu.txt" if ia_id else ""
+
+
+def _internet_archive_jp2_zip_url(ia_id: str) -> str:
+    return f"{IA_BASE_URL}/download/{ia_id}/{ia_id}_jp2.zip" if ia_id else ""
+
+
+def _internet_archive_thumbnail_url(ia_id: str) -> str:
+    return f"{IA_BASE_URL}/services/img/{ia_id}" if ia_id else ""
+
+
+async def _fetch_ia_file_list(ia_id: str) -> Optional[list]:
+    """Fetch the IA item file manifest (files list) from the metadata endpoint.
+    Returns list of file dicts or None on failure."""
+    if not ia_id:
+        return None
+    url = f"{IA_METADATA_URL}/{ia_id}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            res = await client.get(url)
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        # IA metadata endpoint returns {"metadata": {...}, "files": [...]} when item exists
+        # but returns {} for missing/deleted items — distinguish by checking for files key
+        if "files" not in data and "metadata" not in data:
+            return None
+        files = data.get("files", [])
+        # Also check if it's a valid item by verifying at least one file exists
+        if not files and data.get("metadata", {}).get("identifier") != ia_id:
+            return None
+        return files
+    except Exception:
+        return None
+
+
+async def _try_fetch_ocr_fallback(ia_id: str) -> tuple[Optional[str], str]:
+    """Try to fetch OCR text from available IA file formats.
+    Tries in order: _djvu.txt (best) → _abbyy.gz parsed → _djvu.xml parsed.
+    Returns (text or None, source_tag)."""
+    files = await _fetch_ia_file_list(ia_id)
+    if not files:
+        return None, "metadata_fetch_failed"
+
+    # Check what files are actually available
+    has_djvu_txt = any(f.get("name", "").endswith("_djvu.txt") for f in files)
+    has_abbyy = any(f.get("name", "").endswith("_abbyy.gz") for f in files)
+    has_djvu_xml = any(f.get("name", "").endswith("_djvu.xml") for f in files)
+
+    # 1. Try djvu.txt (plain text, most reliable for ad extraction)
+    if has_djvu_txt:
+        url = f"{IA_BASE_URL}/download/{ia_id}/{ia_id}_djvu.txt"
+        try:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                res = await client.get(url)
+            if res.status_code == 200 and res.text.strip():
+                return res.text, "djvu.txt"
+        except Exception:
+            pass
+
+    # 2. Try abbyy.gz (compressed XML — parse text blocks from XML)
+    if has_abbyy:
+        url = f"{IA_BASE_URL}/download/{ia_id}/{ia_id}_abbyy.gz"
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                res = await client.get(url, headers={"Accept-Encoding": "gzip"})
+            if res.status_code == 200:
+                try:
+                    import gzip
+                    text = gzip.decompress(res.content).decode("utf-8", errors="ignore")
+                    # Extract text from ABBYY XML blocks
+                    extracted_lines: list[str] = []
+                    # Parse <charParams> elements to reconstruct words/lines
+                    # Simpler: extract content between <text> tags
+                    import re as _re
+                    text_blocks = _re.findall(r"<block blockType=\"Text\"[^>]*>(.*?)</block>", text, _re.DOTALL)
+                    for block in text_blocks:
+                        # Get paragraph text
+                        paragraphs = _re.findall(r"<par[^>]*>(.*?)</par>", block, _re.DOTALL)
+                        for par in paragraphs:
+                            lines = _re.findall(r"<line[^>]*>(.*?)</line>", par, _re.DOTALL)
+                            for line in lines:
+                                chars = _re.findall(r'<charParams[^>]*>([^<]+)</charParams>', line)
+                                if chars:
+                                    word = "".join(chars).strip()
+                                    if word:
+                                        extracted_lines.append(word)
+                    if extracted_lines:
+                        return "\n".join(extracted_lines), "abbyy.gz"
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    # 3. Try djvu.xml (structured XML — extract text between page markers)
+    if has_djvu_xml:
+        url = f"{IA_BASE_URL}/download/{ia_id}/{ia_id}_djvu.xml"
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                res = await client.get(url)
+            if res.status_code == 200:
+                import re as _re
+                text = res.text
+                # Extract text blocks between page tags or paragraphs
+                blocks = _re.findall(r"<BLOCK[^>]*type=\"TEXT\"[^>]*>(.*?)</BLOCK>", text, _re.DOTALL | _re.IGNORECASE)
+                if not blocks:
+                    # Try alternative djvu xml structure
+                    blocks = _re.findall(r"<text>(.*?)</text>", text, _re.DOTALL)
+                lines: list[str] = []
+                for block in blocks:
+                    words = _re.findall(r'>([^<]+)<', block)
+                    sentence = " ".join(w.strip() for w in words if w.strip())
+                    if sentence:
+                        lines.append(sentence)
+                if lines:
+                    return "\n".join(lines), "djvu.xml"
+        except Exception:
+            pass
+
+    return None, "no_ocr_file_available"
+
+
+async def _fetch_internet_archive_metadata(ia_id: str) -> Optional[dict]:
+    """Fetch IA item metadata for enrichment. Returns dict with metadata or None on failure."""
+    if not ia_id:
+        return None
+    url = f"{IA_METADATA_URL}/{ia_id}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.get(url)
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        meta = data.get("metadata") or {}
+        files = data.get("files") or []
+        # Extract page count and key file info
+        imagecount = meta.get("imagecount", "")
+        year = meta.get("year", "")
+        date_str = meta.get("date", "")
+        scanner = meta.get("scanner", "")
+        # Find key file sizes
+        jp2_size = next((f.get("size", "") for f in files if f.get("name", "").endswith("_jp2.zip")), "")
+        pdf_size = next((f.get("size", "") for f in files if f.get("name", "").endswith(".pdf")), "")
+        ocr_size = next((f.get("size", "") for f in files if f.get("name", "").endswith("_djvu.txt")), "")
+        return {
+            "internet_archive_id": ia_id,
+            "internet_archive_url": _internet_archive_url(ia_id),
+            "internet_archive_cover_url": _internet_archive_cover_url(ia_id),
+            "internet_archive_thumbnail_url": _internet_archive_thumbnail_url(ia_id),
+            "internet_archive_pdf_url": _internet_archive_pdf_url(ia_id),
+            "internet_archive_ocr_url": _internet_archive_ocr_url(ia_id),
+            "internet_archive_jp2_zip_url": _internet_archive_jp2_zip_url(ia_id),
+            "ia_page_count": int(imagecount) if str(imagecount).isdigit() else None,
+            "ia_year": year,
+            "ia_scan_date": date_str,
+            "ia_scanner": scanner,
+            "ia_jp2_size_mb": round(int(jp2_size) / 1024 / 1024, 1) if jp2_size.isdigit() else None,
+            "ia_pdf_size_mb": round(int(pdf_size) / 1024 / 1024, 1) if pdf_size.isdigit() else None,
+            "ia_has_ocr": bool(ocr_size),
+            "ia_has_jp2": bool(jp2_size),
+            "ia_has_pdf": bool(pdf_size),
+        }
+    except Exception:
+        return None
+
+
+def _enrich_with_internet_archive(issue: dict) -> dict:
+    """Add IA fields to a reference issue if the Google Books volume ID maps to an IA item."""
+    volume_id = issue.get("google_books_volume_id", "")
+    if not volume_id:
+        return issue
+    ia_id = _internet_archive_id_from_google_volume_id(volume_id)
+    if not ia_id:
+        return issue
+    enriched = dict(issue)
+    enriched["internet_archive_id"] = ia_id
+    enriched["internet_archive_url"] = _internet_archive_url(ia_id)
+    enriched["internet_archive_cover_url"] = _internet_archive_cover_url(ia_id)
+    enriched["internet_archive_thumbnail_url"] = _internet_archive_thumbnail_url(ia_id)
+    enriched["internet_archive_pdf_url"] = _internet_archive_pdf_url(ia_id)
+    enriched["internet_archive_ocr_url"] = _internet_archive_ocr_url(ia_id)
+    enriched["internet_archive_jp2_zip_url"] = _internet_archive_jp2_zip_url(ia_id)
+    enriched["ia_source"] = "internet_archive"
+    return enriched
+
+
+# ── Ad Page Extraction ───────────────────────────────────────────────────────
+
+async def _extract_ia_ad_pages(ia_id: str, max_pages: int = 10) -> dict:
+    """Fetch IA OCR text and extract ad-like pages by scanning for product/coupon patterns.
+    Tries multiple OCR formats via _try_fetch_ocr_fallback — gracefully degrades
+    when the primary djvu.txt is unavailable (503, not yet processed, etc.)."""
+    text, ocr_source = await _try_fetch_ocr_fallback(ia_id)
+    if not text:
+        # Check which files ARE available so we can give a useful status message
+        files = await _fetch_ia_file_list(ia_id)
+        available_formats = []
+        if files:
+            if any(f.get("name", "").endswith("_djvu.txt") for f in files): available_formats.append("djvu.txt")
+            if any(f.get("name", "").endswith("_abbyy.gz") for f in files): available_formats.append("abbyy.gz")
+            if any(f.get("name", "").endswith("_djvu.xml") for f in files): available_formats.append("djvu.xml")
+        return {
+            "ia_id": ia_id,
+            "error": f"OCR unavailable ({ocr_source})",
+            "ad_pages": [],
+            "ocr_source": ocr_source,
+            "available_ocr_formats": available_formats,
+            "fallback_note": "IA item exists but full-text OCR not yet processed. Upload your own ad-page photos instead.",
+        }
+
+    # Split by page markers (blank lines with just a page number or form feed)
+    pages: list[dict] = []
+    page_blocks = re.split(r"\n{3,}", text)
+    ad_indicators = [
+        "price", "sale", "特價", "coupon", "discount", "offer", "save $", "$",
+        "free", "buy", "send for", "mail this", "call", "write to",
+        "department", "store", "shop", "campus", "mail order",
+    ]
+    for i, block in enumerate(page_blocks):
+        block_lower = block.lower()
+        # Skip very short or very long blocks (likely article text, not ads)
+        lines = [l.strip() for l in block.strip().split("\n") if l.strip()]
+        if len(lines) < 3 or len(lines) > 40:
+            continue
+        # Score for ad content
+        score = sum(1 for indicator in ad_indicators if indicator in block_lower)
+        if score < 2:
+            continue
+        # Extract lines that look like product/price
+        product_lines = [
+            line.strip() for line in lines
+            if any(c.isdigit() for c in line) or any(w in line.lower() for w in ["$", "sale", "save", "offer", "特", "coupon"])
+        ]
+        pages.append({
+            "page_number": i + 1,
+            "ad_score": score,
+            "sample_lines": product_lines[:8],
+            "preview": block[:500],
+        })
+
+    pages.sort(key=lambda p: p["ad_score"], reverse=True)
+    return {
+        "ia_id": ia_id,
+        "total_ad_pages_detected": len(pages),
+        "ad_pages": pages[:max_pages],
+        "ocr_length_chars": len(text),
+        "ocr_source": ocr_source,  # which format we actually used
+    }
 
 
 def _reference_search_text(issue: dict) -> str:
@@ -1087,6 +1364,8 @@ def _init_tables():
         "cover_preview_url": "TEXT DEFAULT ''",
         "search_query_used": "TEXT DEFAULT ''",
         "match_reason": "TEXT DEFAULT ''",
+        "display_title": "TEXT DEFAULT ''",
+        "short_description": "TEXT DEFAULT ''",
         "issue_date": "TEXT",
         "volume": "INTEGER",
         "issue_number": "INTEGER",
@@ -1148,6 +1427,10 @@ def _init_tables():
         "filename": "TEXT NOT NULL DEFAULT ''",
         "original_name": "TEXT DEFAULT ''",
         "file_path": "TEXT NOT NULL DEFAULT ''",
+        "is_primary": "INTEGER DEFAULT 0",
+        "active": "INTEGER DEFAULT 1",
+        "notes": "TEXT DEFAULT ''",
+        "removed_at": "TEXT DEFAULT ''",
         "created_at": "TEXT DEFAULT ''",
     }
     for column, definition in photo_columns.items():
@@ -1157,6 +1440,8 @@ def _init_tables():
         "value_score": "REAL DEFAULT 0",
         "comp_confidence": "TEXT DEFAULT 'none'",
         "last_comp_checked_at": "TEXT DEFAULT ''",
+        "user_notes": "TEXT DEFAULT ''",
+        "priority": "INTEGER DEFAULT 0",
     }
     for column, definition in ad_opportunity_columns.items():
         ensure_column("archive_ad_opportunities", column, definition)
@@ -1410,6 +1695,34 @@ class ManualIssueSourceRequest(BaseModel):
     notes: str = ""
 
 
+class AdOpportunityUpdateRequest(BaseModel):
+    verification_status: Optional[str] = None
+    suggested_action: Optional[str] = None
+    user_notes: Optional[str] = None
+    priority: Optional[int] = None
+    admin_override: bool = False
+
+    model_config = {"extra": "forbid"}
+
+
+class PhotoUpdateRequest(BaseModel):
+    is_primary: Optional[bool] = None
+    active: Optional[bool] = None
+    role: Optional[str] = None
+    notes: Optional[str] = None
+
+    model_config = {"extra": "forbid"}
+
+
+class DescriptionGenerateRequest(BaseModel):
+    style: str = "concise"
+    include_condition: bool = True
+    include_ad_notes: bool = True
+    include_pricing_warning: bool = False
+
+    model_config = {"extra": "forbid"}
+
+
 # ── Reference Data Endpoints ──────────────────────────────────────────────────
 
 @router.get("/reference")
@@ -1494,16 +1807,90 @@ async def search_life_cover_reference(
                 results.append(issue)
                 seen.add(key)
 
+    # Enrich every result that maps to an Internet Archive item with IA links and metadata
+    for result in results:
+        if result.get("google_books_volume_id"):
+            result.update(_enrich_with_internet_archive(result))
+
     results.sort(key=lambda item: item.get("match_score", 0), reverse=True)
     return {
         "results": results[:limit],
         "query": {"date": date, "keyword": keyword, "query_used": query_used},
         "source_status": api_status,
         "truth_note": "Google Books covers are reference-only. Upload actual item photos before listing.",
+        "internet_archive_note": "IA links open the full digitized issue — use OCR ad content as secondary provenance, not as your listing photos.",
     }
 
 
-@router.get("/publish-status")
+# ── Internet Archive Reference Endpoints ──────────────────────────────────────
+
+@router.get("/reference/all")
+async def list_all_reference_issues():
+    """List all LIFE reference issues with IA links where available. For admin/debug use."""
+    enriched = []
+    for ref in LIFE_REFERENCE_ISSUES:
+        issue = dict(ref)
+        if ref.get("google_books_volume_id"):
+            issue.update(_enrich_with_internet_archive(ref))
+        enriched.append(issue)
+    return {"issues": enriched, "total": len(LIFE_REFERENCE_ISSUES)}
+
+
+@router.get("/reference/ia/{ia_id}/metadata")
+async def get_ia_metadata(ia_id: str):
+    """Fetch Internet Archive item metadata for a LIFE magazine issue.
+    Use IA identifier directly (e.g. bub_gb_Jj8EAAAAMBAJ)."""
+    meta = await _fetch_internet_archive_metadata(ia_id)
+    if meta is None:
+        raise HTTPException(404, f"Internet Archive item '{ia_id}' not found or IA metadata fetch failed")
+    return meta
+
+
+@router.get("/reference/ia/{ia_id}/ad-preview")
+async def get_ia_ad_preview(ia_id: str, limit: int = Query(10, ge=1, le=30)):
+    """Extract ad pages from an Internet Archive LIFE magazine by scanning OCR text.
+    Tries djvu.txt → abbyy.gz → djvu.xml as fallbacks.
+    Returns top-scoring ad pages with product lines and pricing snippets.
+    Gracefully returns a degraded response (no ads, with status) when OCR is unavailable."""
+    ad_data = await _extract_ia_ad_pages(ia_id, max_pages=limit)
+    meta = await _fetch_internet_archive_metadata(ia_id)
+    # Always return 200 — even if OCR failed, we give a useful degraded response
+    return {
+        "ia_id": ia_id,
+        "internet_archive_url": _internet_archive_url(ia_id),
+        "internet_archive_pdf_url": _internet_archive_pdf_url(ia_id),
+        "internet_archive_thumbnail_url": _internet_archive_thumbnail_url(ia_id),
+        "ia_metadata": meta,
+        "ad_extraction": ad_data,
+    }
+
+
+@router.get("/reference/ia/{ia_id}/ocr-preview")
+async def get_ia_ocr_preview(ia_id: str, chars: int = Query(2000, ge=200, le=10000)):
+    """Return the first N characters of IA OCR text (tries djvu.txt → abbyy.gz → djvu.xml).
+    Useful for quick ad/content sampling before downloading the full OCR."""
+    text, ocr_source = await _try_fetch_ocr_fallback(ia_id)
+    if not text:
+        files = await _fetch_ia_file_list(ia_id)
+        available = []
+        if files:
+            if any(f.get("name", "").endswith("_djvu.txt") for f in files): available.append("djvu.txt")
+            if any(f.get("name", "").endswith("_abbyy.gz") for f in files): available.append("abbyy.gz")
+            if any(f.get("name", "").endswith("_djvu.xml") for f in files): available.append("djvu.xml")
+        raise HTTPException(
+            503,
+            f"IA OCR unavailable for '{ia_id}' (source: {ocr_source}). "
+            f"Available OCR formats on IA: {available or 'none yet processed'}. "
+            "Upload your own ad-page photos for this issue.",
+        )
+    return {
+        "ia_id": ia_id,
+        "internet_archive_url": _internet_archive_url(ia_id),
+        "ocr_preview": text[:chars],
+        "ocr_total_chars": len(text),
+        "ocr_source": ocr_source,
+        "truncated": len(text) > chars,
+    }
 async def archiveforge_publish_status(archive_id: Optional[int] = Query(None, ge=1)):
     """Truthful status for ArchiveForge → MarketForge publishing."""
     archive = None
@@ -2397,7 +2784,30 @@ def _ad_opportunity_row_to_dict(row: dict) -> dict:
         d[key] = _num_or_none_for_packet(d.get(key))
     d["value_score"] = round(_num_or_zero(d.get("value_score")), 1)
     d["comp_confidence"] = d.get("comp_confidence") or "none"
+    d["suggested_action"] = d.get("recommendation") or ""
+    d["uploaded_photo_count"] = _ad_page_photo_count_for_candidate(
+        int(d.get("archive_id") or 0),
+        int(d.get("id") or 0),
+    )
+    d["analyzed_photo_count"] = _ad_page_photo_count_for_candidate(
+        int(d.get("archive_id") or 0),
+        int(d.get("id") or 0),
+        analyzed_only=True,
+    )
     return d
+
+
+def _ad_page_photo_count_for_candidate(archive_id: int, candidate_id: int, analyzed_only: bool = False) -> int:
+    if not archive_id or not candidate_id:
+        return 0
+    clause = "AND analyzed_at IS NOT NULL AND analyzed_at != ''" if analyzed_only else ""
+    with get_db() as db:
+        row = db.execute(
+            f"""SELECT COUNT(*) FROM archive_ad_page_photos
+                WHERE archive_id = ? AND candidate_id = ? {clause}""",
+            (archive_id, candidate_id),
+        ).fetchone()
+    return int(row[0] if row else 0)
 
 
 def _list_ad_opportunities(archive_id: int) -> list[dict]:
@@ -3229,22 +3639,90 @@ async def get_ad_opportunities(archive_id: int):
 
 
 @router.patch("/{archive_id}/ad-opportunities/{opportunity_id}")
-async def update_ad_opportunity_status(archive_id: int, opportunity_id: int, verification_status: str = Form(...)):
-    """Update a candidate status from the UI without deleting candidate history."""
-    allowed = {"possible_opportunity", "unverified", "not_found", "ignored", "verified_in_copy", "likely_in_issue"}
-    if verification_status not in allowed:
-        raise HTTPException(400, f"verification_status must be one of: {', '.join(sorted(allowed))}")
+async def update_ad_opportunity_status(archive_id: int, opportunity_id: int, request: Request):
+    """Update candidate status/action from the UI without deleting history or faking verification."""
     _load_archive_or_404(archive_id)
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        payload = await request.json()
+    else:
+        form = await request.form()
+        payload = dict(form)
+
+    req = AdOpportunityUpdateRequest(**payload)
+    allowed_statuses = {
+        "possible_opportunity", "photograph_if_seen", "pending_photo",
+        "uploaded_photo_pending_analysis", "verified_in_copy", "not_found",
+        "ignored", "rejected", "manual_review", "unverified", "likely_in_issue",
+    }
+    allowed_actions = {"photograph_first", "photograph_if_seen", "needs_comps", "manual_review", "ignore", "not_found"}
+
+    verification_status = req.verification_status
+    suggested_action = req.suggested_action
+    if verification_status and verification_status not in allowed_statuses:
+        raise HTTPException(400, f"verification_status must be one of: {', '.join(sorted(allowed_statuses))}")
+    if suggested_action and suggested_action not in allowed_actions:
+        raise HTTPException(400, f"suggested_action must be one of: {', '.join(sorted(allowed_actions))}")
+
     with get_db() as db:
-        affected = db.execute(
-            """UPDATE archive_ad_opportunities
-               SET verification_status = ?, updated_at = datetime('now')
-               WHERE id = ? AND archive_id = ?""",
-            (verification_status, opportunity_id, archive_id),
-        ).rowcount
-    if not affected:
+        candidate = db.execute(
+            "SELECT * FROM archive_ad_opportunities WHERE id = ? AND archive_id = ?",
+            (opportunity_id, archive_id),
+        ).fetchone()
+    if not candidate:
         raise HTTPException(404, "Ad opportunity not found")
-    return {"archive_id": archive_id, "opportunity_id": opportunity_id, "verification_status": verification_status}
+
+    if verification_status == "verified_in_copy" and not req.admin_override:
+        with get_db() as db:
+            verified = db.execute(
+                """SELECT id FROM archive_ads
+                   WHERE archive_id = ? AND candidate_id = ? AND verification_status = 'verified_in_copy'
+                   LIMIT 1""",
+                (archive_id, opportunity_id),
+            ).fetchone()
+        if not verified:
+            raise HTTPException(400, "Upload and analyze an ad-page photo before verifying this candidate.")
+
+    set_parts = []
+    params: list[Any] = []
+    if verification_status:
+        set_parts.append("verification_status = ?")
+        params.append(verification_status)
+    if suggested_action:
+        set_parts.append("recommendation = ?")
+        params.append(suggested_action)
+    if req.user_notes is not None:
+        set_parts.append("user_notes = ?")
+        params.append(str(req.user_notes)[:1000])
+    if req.priority is not None:
+        set_parts.append("priority = ?")
+        params.append(max(0, min(int(req.priority), 100)))
+    if not set_parts:
+        raise HTTPException(400, "No candidate fields provided.")
+    set_parts.append("updated_at = datetime('now')")
+    params.extend([opportunity_id, archive_id])
+    with get_db() as db:
+        db.execute(
+            f"""UPDATE archive_ad_opportunities
+                SET {', '.join(set_parts)}
+                WHERE id = ? AND archive_id = ?""",
+            params,
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM archive_ad_opportunities WHERE id = ? AND archive_id = ?",
+            (opportunity_id, archive_id),
+        ).fetchone()
+    updated = _ad_opportunity_row_to_dict(dict_row(row))
+    return {
+        "archive_id": archive_id,
+        "candidate_id": opportunity_id,
+        "opportunity_id": opportunity_id,
+        "status": "updated",
+        "verification_status": updated.get("verification_status"),
+        "suggested_action": updated.get("suggested_action") or updated.get("recommendation"),
+        "candidate": updated,
+    }
 
 
 @router.get("/{archive_id}/ad-breakout-recommendation")
@@ -3432,6 +3910,19 @@ async def upload_ad_page_photo(
                    VALUES (?,?,?,?,?,?,?,?)""",
                 (archive_id, candidate_id, page_number, unique_name, original_name, str(file_path), supported_mime_type, byte_size),
             )
+            if candidate_id:
+                db.execute(
+                    """UPDATE archive_ad_opportunities
+                       SET verification_status = 'uploaded_photo_pending_analysis',
+                           recommendation = 'manual_review',
+                           user_notes = CASE
+                               WHEN COALESCE(user_notes, '') = '' THEN 'Ad-page photo uploaded; pending analysis.'
+                               ELSE user_notes || '; Ad-page photo uploaded; pending analysis.'
+                           END,
+                           updated_at = datetime('now')
+                       WHERE id = ? AND archive_id = ?""",
+                    (candidate_id, archive_id),
+                )
             db.commit()
             photo_id = cur.lastrowid
     except Exception:
@@ -3491,6 +3982,54 @@ async def get_ad_page_photo(archive_id: int, photo_id: int):
     return dict(row)
 
 
+def _load_scoped_ad_page_photo_path(archive_id: int, photo_id: int) -> tuple[dict, Path, str]:
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM archive_ad_page_photos WHERE archive_id = ? AND id = ?",
+            (archive_id, photo_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Ad page photo not found")
+    photo = dict_row(row)
+    path = _safe_upload_path(photo.get("file_path"))
+    if not path:
+        raise HTTPException(400, "Invalid ad-page photo path")
+    if not path.exists() or path.stat().st_size <= 0:
+        raise HTTPException(404, "Ad-page photo file not found on disk")
+    mime_type = photo.get("mime_type") or mimetypes.guess_type(str(path))[0] or ""
+    if mime_type not in SUPPORTED_IMAGE_MIME_TYPES:
+        raise HTTPException(415, "Unsupported image type")
+    return photo, path, mime_type
+
+
+@router.get("/{archive_id}/ad-page-photos/{photo_id}/image")
+async def serve_ad_page_photo_image(archive_id: int, photo_id: int):
+    """Serve an uploaded ad-page photo from the managed ArchiveForge upload directory."""
+    _, path, mime_type = _load_scoped_ad_page_photo_path(archive_id, photo_id)
+    return FileResponse(str(path), media_type=mime_type)
+
+
+@router.get("/{archive_id}/ad-page-photos/{photo_id}/thumbnail")
+async def serve_ad_page_photo_thumbnail(archive_id: int, photo_id: int, width: int = Query(240, ge=48, le=640)):
+    """Serve or create a bounded thumbnail for an uploaded ad-page photo."""
+    _, path, mime_type = _load_scoped_ad_page_photo_path(archive_id, photo_id)
+    if mime_type == "image/gif":
+        return FileResponse(str(path), media_type=mime_type)
+    thumb_path = THUMBNAILS_DIR / f"{archive_id}_ad_{photo_id}_{width}{Path(path).suffix.lower() or '.jpg'}"
+    if not thumb_path.exists() or thumb_path.stat().st_mtime < path.stat().st_mtime:
+        try:
+            from PIL import Image as PILImage
+            with PILImage.open(path) as image:
+                image.thumbnail((width, width * 2))
+                if image.mode not in ("RGB", "RGBA"):
+                    image = image.convert("RGB")
+                save_format = "PNG" if thumb_path.suffix.lower() == ".png" else "JPEG"
+                image.save(thumb_path, format=save_format, quality=82)
+        except Exception:
+            return FileResponse(str(path), media_type=mime_type)
+    return FileResponse(str(thumb_path), media_type=mimetypes.guess_type(str(thumb_path))[0] or "image/jpeg")
+
+
 @router.get("/{archive_id}/candidates")
 async def list_candidates(archive_id: int):
     """Alias for ad-opportunities — returns all ad opportunity candidates for an archive."""
@@ -3547,11 +4086,19 @@ def _normalize_ad_analysis(raw: dict) -> list[dict]:
             policy_flags = [policy_flags]
         confidence = _num_or_none(ad.get("confidence")) or 0
         confidence = max(0.0, min(1.0, confidence))
+        brand = ad.get("brand")
+        product = ad.get("product")
+        category = ad.get("category")
+        text_blob = " ".join(str(v) for v in visible_text).lower()
+        non_ad_marker = any(marker in text_blob for marker in ("test ad page", "not a real advertisement", "upload smoke test"))
+        has_identified_ad = bool(str(brand or product or category or "").strip()) and not non_ad_marker
         grade = ad.get("evidence_grade") if ad.get("evidence_grade") in {"A", "B", "C", "D", "F"} else ("A" if confidence >= 0.65 else "B")
+        if not has_identified_ad:
+            grade = "F"
         normalized.append({
-            "brand": ad.get("brand"),
-            "product": ad.get("product"),
-            "category": ad.get("category"),
+            "brand": brand,
+            "product": product,
+            "category": category,
             "visible_text": [str(v)[:200] for v in visible_text[:20]],
             "full_page": bool(ad.get("full_page")),
             "color": bool(ad.get("color")),
@@ -3561,11 +4108,34 @@ def _normalize_ad_analysis(raw: dict) -> list[dict]:
             "collector_keywords": ad.get("collector_keywords") if isinstance(ad.get("collector_keywords"), list) else [],
             "confidence": confidence,
             "evidence_grade": grade,
-            "verification_status": "verified_in_copy",
-            "recommendation": ad.get("recommendation") or ("manual_review" if policy_flags else "keep_with_magazine"),
+            "verification_status": "verified_in_copy" if has_identified_ad else "not_found",
+            "recommendation": ad.get("recommendation") or ("manual_review" if policy_flags else "keep_with_magazine" if has_identified_ad else "not_worth_listing"),
             "reasoning_summary": (ad.get("reasoning_summary") or "Verified from uploaded ad-page photo.")[:500],
         })
     return normalized
+
+
+def _ad_analysis_matches_candidate(ad: dict, candidate: dict) -> bool:
+    haystack = " ".join(
+        str(value or "")
+        for value in [
+            ad.get("brand"),
+            ad.get("product"),
+            ad.get("category"),
+            ad.get("subject_description"),
+            " ".join(ad.get("visible_text") or []),
+            " ".join(ad.get("collector_keywords") or []),
+        ]
+    ).lower()
+    needles = [
+        candidate.get("brand"),
+        candidate.get("product"),
+        candidate.get("category"),
+    ]
+    needles = [str(n or "").lower().strip() for n in needles if str(n or "").strip()]
+    if not needles:
+        return bool(ad.get("confidence", 0) >= 0.75)
+    return any(needle in haystack for needle in needles)
 
 
 AD_ANALYSIS_PROMPT = """
@@ -3674,22 +4244,42 @@ async def analyze_uploaded_ad_pages(archive_id: int):
                             json.dumps(ad.get("collector_keywords") or []),
                             ad.get("confidence") or 0,
                             ad.get("evidence_grade") or "B",
-                            "verified_in_copy",
+                            ad.get("verification_status") or "manual_review",
                             ad.get("recommendation") or "keep_with_magazine",
                             ad.get("reasoning_summary") or "",
                             json.dumps(ad),
                         ),
                     )
-                # Link candidate if one was specified
                 if row.get("candidate_id"):
-                    db.execute(
-                        """UPDATE archive_ad_opportunities
-                           SET verification_status = 'verified_in_copy',
-                               evidence_grade = 'A',
-                               updated_at = datetime('now')
-                           WHERE id = ?""",
-                        (row["candidate_id"],),
-                    )
+                    candidate_row = db.execute(
+                        "SELECT * FROM archive_ad_opportunities WHERE id = ? AND archive_id = ?",
+                        (row["candidate_id"], archive_id),
+                    ).fetchone()
+                    candidate = dict_row(candidate_row) if candidate_row else {}
+                    matched = any(_ad_analysis_matches_candidate(ad, candidate) for ad in ads)
+                    if matched:
+                        db.execute(
+                            """UPDATE archive_ad_opportunities
+                               SET verification_status = 'verified_in_copy',
+                                   evidence_grade = 'A',
+                                   recommendation = 'manual_review',
+                                   updated_at = datetime('now')
+                               WHERE id = ?""",
+                            (row["candidate_id"],),
+                        )
+                    else:
+                        db.execute(
+                            """UPDATE archive_ad_opportunities
+                               SET verification_status = 'manual_review',
+                                   recommendation = 'manual_review',
+                                   user_notes = CASE
+                                       WHEN COALESCE(user_notes, '') = '' THEN 'Ad-page analysis found ad content, but it did not clearly match the selected candidate.'
+                                       ELSE user_notes || '; Ad-page analysis found ad content, but it did not clearly match the selected candidate.'
+                                   END,
+                                   updated_at = datetime('now')
+                               WHERE id = ?""",
+                            (row["candidate_id"],),
+                        )
             else:
                 db.execute(
                     """UPDATE archive_ad_page_photos
@@ -3698,6 +4288,19 @@ async def analyze_uploaded_ad_pages(archive_id: int):
                        WHERE id = ?""",
                     (json.dumps({"ads": [], "note": "No ad detected in uploaded image."}), row["id"]),
                 )
+                if row.get("candidate_id"):
+                    db.execute(
+                        """UPDATE archive_ad_opportunities
+                           SET verification_status = 'manual_review',
+                               recommendation = 'manual_review',
+                               user_notes = CASE
+                                   WHEN COALESCE(user_notes, '') = '' THEN 'Uploaded ad-page photo analyzed, but no ad was detected.'
+                                   ELSE user_notes || '; Uploaded ad-page photo analyzed, but no ad was detected.'
+                               END,
+                               updated_at = datetime('now')
+                           WHERE id = ?""",
+                        (row["candidate_id"],),
+                    )
             db.commit()
         analyzed.append({"photo_id": row["id"], "ads": ads, "status": "analyzed_ads_found" if ads else "analyzed_no_ads"})
 
@@ -4350,8 +4953,8 @@ def _photo_manifest_for_archive(archive_id: int) -> list[dict]:
     with get_db() as db:
         rows = dict_rows(db.execute(
             """SELECT * FROM ag_archive_photos
-               WHERE archive_id = ?
-               ORDER BY role = 'front' DESC, id ASC""",
+               WHERE archive_id = ? AND COALESCE(active, 1) != 0
+               ORDER BY role = 'front' DESC, is_primary DESC, id DESC""",
             (archive_id,),
         ).fetchall())
 
@@ -4571,6 +5174,8 @@ def _packet_from_draft(archive: dict, draft: dict) -> dict:
     issue_sources = _issue_master_sources(int(issue_master.get("id"))) if issue_master and issue_master.get("id") else []
     magazine_comps = _list_magazine_comps(archive["id"])
     pricing_summary = _pricing_summary_for_archive(archive["id"]) or _calculate_magazine_pricing(archive["id"], persist=False)
+    lifecycle = _lifecycle_for_archive(archive["id"]) or {}
+    current_recommended_price = _recommended_price_for_archive(archive) or draft.get("recommended_price") or None
     issue_date = reference.get("confirmed_issue_date") or _issue_date_for_listing(archive)
     cover_subject = reference.get("cover_title") or _cover_subject_for_listing(archive)
     condition_summary = f"{draft.get('condition_label') or _condition_label(archive.get('condition_score') or 0)}"
@@ -4582,7 +5187,7 @@ def _packet_from_draft(archive: dict, draft: dict) -> dict:
         "suggested_ebay_description": draft.get("description") or "",
         "suggested_category_text": draft.get("category") or "Collectibles > Paper > Magazines > LIFE",
         "suggested_condition": condition_summary,
-        "suggested_price": draft.get("recommended_price") or None,
+        "suggested_price": current_recommended_price,
         "photo_list": photo_list,
         "item_specifics": {
             "Publication": "LIFE",
@@ -4616,7 +5221,7 @@ def _packet_from_draft(archive: dict, draft: dict) -> dict:
         "photos": photo_list,
         "photo_manifest": photos,
         "suggested_category": draft.get("category") or "Collectibles > Paper > Magazines > LIFE",
-        "suggested_price": draft.get("recommended_price") or None,
+        "suggested_price": current_recommended_price,
         "price_low": draft.get("price_low") or None,
         "price_high": draft.get("price_high") or None,
         "pricing_basis": archive.get("pricing_basis") or "manual_rough_estimate",
@@ -4633,6 +5238,15 @@ def _packet_from_draft(archive: dict, draft: dict) -> dict:
         "life_issue_sources": issue_sources,
         "pricing_summary": pricing_summary,
         "magazine_comps": magazine_comps,
+        "lifecycle": {
+            "item_status": lifecycle.get("item_status") or "inventory",
+            "marketplace_status": lifecycle.get("marketplace_status") or "not_listed",
+            "ad_breakout_status": lifecycle.get("ad_breakout_status") or "none",
+            "sold_price": lifecycle.get("sold_price"),
+            "sold_date": lifecycle.get("sold_date") or "",
+            "sold_platform": lifecycle.get("sold_platform") or "",
+            "disposition_notes": lifecycle.get("disposition_notes") or "",
+        },
         "ad_opportunity_check": ad_section,
         "uploaded_ad_page_photos": _ad_page_photos_for_packet(archive["id"]),
         "analyzed_ads": _analyzed_ads_for_packet(archive["id"]),
@@ -4999,6 +5613,7 @@ async def export_listing_packet_pdf(archive_id: int, include_images: bool = Quer
             story.append(Spacer(1, 0.12 * inch))
     # ── End cover image ──
 
+    lifecycle = packet.get("lifecycle") or {}
     rows = [
         ["Archive ID", packet.get("archive_id")],
         ["Draft ID", packet.get("draft_id")],
@@ -5015,6 +5630,10 @@ async def export_listing_packet_pdf(archive_id: int, include_images: bool = Quer
         ["Address Label", packet.get("address_label_status")],
         ["Completeness", packet.get("completeness_status")],
         ["Sale Plan", packet.get("sale_plan")],
+        ["Lifecycle Status", lifecycle.get("item_status") or "inventory"],
+        ["Marketplace Status", lifecycle.get("marketplace_status") or "not_listed"],
+        ["Ad Breakout Status", lifecycle.get("ad_breakout_status") or "none"],
+        ["Sold Price/Date", f"{lifecycle.get('sold_price') or ''} / {lifecycle.get('sold_date') or ''}"],
         ["Inventory Location", packet.get("inventory_location")],
         ["SKU", packet.get("sku")],
     ]
@@ -5222,6 +5841,14 @@ def _thumbnail_url_for(archive_id: Any, photo_id: Any) -> str:
     return f"/api/v1/archiveforge/{archive_id}/photos/{photo_id}/thumbnail" if archive_id and photo_id else ""
 
 
+def _ad_page_photo_url_for(archive_id: Any, photo_id: Any) -> str:
+    return f"/api/v1/archiveforge/{archive_id}/ad-page-photos/{photo_id}/image" if archive_id and photo_id else ""
+
+
+def _ad_page_thumbnail_url_for(archive_id: Any, photo_id: Any) -> str:
+    return f"/api/v1/archiveforge/{archive_id}/ad-page-photos/{photo_id}/thumbnail" if archive_id and photo_id else ""
+
+
 def _photo_record_to_response(row: dict, archive_id: Optional[int] = None, role_override: str = "") -> dict:
     d = dict(row)
     photo_id = d.get("id") or d.get("photo_id")
@@ -5231,6 +5858,9 @@ def _photo_record_to_response(row: dict, archive_id: Optional[int] = None, role_
     file_size = path.stat().st_size if exists else int(d.get("byte_size") or 0)
     mime_type = d.get("mime_type") or (mimetypes.guess_type(str(path))[0] if path else "") or ""
     role = role_override or d.get("role") or "photo"
+    is_ad_page = role_override == "ad_page"
+    photo_url = _ad_page_photo_url_for(archive_id, photo_id) if is_ad_page else _scoped_photo_url_for(archive_id, photo_id)
+    thumbnail_url = _ad_page_thumbnail_url_for(archive_id, photo_id) if is_ad_page else _thumbnail_url_for(archive_id, photo_id)
     return {
         "photo_id": photo_id,
         "id": photo_id,
@@ -5243,19 +5873,21 @@ def _photo_record_to_response(row: dict, archive_id: Optional[int] = None, role_
         "file_size": file_size,
         "file_size_bytes": file_size,
         "created_at": d.get("created_at") or "",
-        "photo_url": _scoped_photo_url_for(archive_id, photo_id),
-        "url": _scoped_photo_url_for(archive_id, photo_id),
-        "thumbnail_url": _thumbnail_url_for(archive_id, photo_id),
+        "photo_url": photo_url,
+        "url": photo_url,
+        "thumbnail_url": thumbnail_url,
         "legacy_url": _photo_url_for(photo_id),
         "exists": exists,
-        "is_primary": role.lower() in ACTUAL_FRONT_COVER_ROLES,
+        "active": bool(d.get("active", 1)),
+        "is_primary": bool(d.get("is_primary")) or role.lower() in ACTUAL_FRONT_COVER_ROLES,
+        "notes": d.get("notes") or "",
         "analysis_status": d.get("analysis_status") or ("analyzed" if d.get("analyzed_at") else "not_analyzed"),
     }
 
 
 def _photo_counts_for_archive(archive_id: int) -> dict:
     with get_db() as db:
-        photos = dict_rows(db.execute("SELECT * FROM ag_archive_photos WHERE archive_id = ?", (archive_id,)).fetchall())
+        photos = dict_rows(db.execute("SELECT * FROM ag_archive_photos WHERE archive_id = ? AND COALESCE(active, 1) != 0", (archive_id,)).fetchall())
         ad_pages = dict_rows(db.execute("SELECT * FROM archive_ad_page_photos WHERE archive_id = ?", (archive_id,)).fetchall())
         verified = db.execute(
             "SELECT COUNT(*) FROM archive_ad_opportunities WHERE archive_id = ? AND verification_status = 'verified_in_copy'",
@@ -5279,7 +5911,9 @@ def _photo_counts_for_archive(archive_id: int) -> dict:
 def _photos_grouped_for_archive(archive_id: int) -> dict:
     with get_db() as db:
         item_photos = dict_rows(db.execute(
-            "SELECT * FROM ag_archive_photos WHERE archive_id = ? ORDER BY role = 'front' DESC, id ASC",
+            """SELECT * FROM ag_archive_photos
+               WHERE archive_id = ? AND COALESCE(active, 1) != 0
+               ORDER BY role = 'front' DESC, is_primary DESC, id DESC""",
             (archive_id,),
         ).fetchall())
         ad_page_photos = dict_rows(db.execute(
@@ -6106,7 +6740,9 @@ async def export_item_pdf(archive_id: int, include_images: bool = Query(False)):
     archive = _load_archive_or_404(archive_id)
     with get_db() as db:
         photos = dict_rows(db.execute(
-            "SELECT * FROM ag_archive_photos WHERE archive_id = ? ORDER BY role = 'front' DESC, id ASC",
+            """SELECT * FROM ag_archive_photos
+               WHERE archive_id = ? AND COALESCE(active, 1) != 0
+               ORDER BY role = 'front' DESC, is_primary DESC, id DESC""",
             (archive_id,),
         ).fetchall())
 
@@ -6497,9 +7133,16 @@ async def upload_photo(
         file_path.write_bytes(contents)
 
         with get_db() as db:
+            if (role or "").strip().lower() in ACTUAL_FRONT_COVER_ROLES:
+                db.execute(
+                    """UPDATE ag_archive_photos
+                       SET is_primary = 0
+                       WHERE archive_id = ? AND lower(role) IN ('front', 'front_cover', 'cover')""",
+                    (archive_id,),
+                )
             cur = db.execute(
-                "INSERT INTO ag_archive_photos (archive_id, role, filename, original_name, file_path) VALUES (?,?,?,?,?)",
-                (archive_id, role, unique_name, original_name, str(file_path)),
+                "INSERT INTO ag_archive_photos (archive_id, role, filename, original_name, file_path, is_primary, active) VALUES (?,?,?,?,?,?,1)",
+                (archive_id, role, unique_name, original_name, str(file_path), 1 if (role or "").strip().lower() in ACTUAL_FRONT_COVER_ROLES else 0),
             )
             db.commit()
             photo_id = cur.lastrowid
@@ -6558,6 +7201,66 @@ async def get_archive_photo_metadata(archive_id: int, photo_id: int):
     if not row:
         raise HTTPException(404, "Photo not found")
     return _photo_record_to_response(dict_row(row), archive_id)
+
+
+@router.patch("/{archive_id}/photos/{photo_id}")
+async def update_archive_photo_metadata(archive_id: int, photo_id: int, req: PhotoUpdateRequest):
+    """Update safe photo metadata. This never deletes the original file."""
+    _load_archive_or_404(archive_id)
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM ag_archive_photos WHERE archive_id = ? AND id = ?",
+            (archive_id, photo_id),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Photo not found")
+
+    updates: dict[str, Any] = {}
+    if req.role is not None:
+        role = re.sub(r"[^A-Za-z0-9_-]+", "_", req.role).strip("_")[:40] or "photo"
+        updates["role"] = role
+    if req.notes is not None:
+        updates["notes"] = req.notes[:1000]
+    if req.active is not None:
+        updates["active"] = 1 if req.active else 0
+        if not req.active:
+            updates["removed_at"] = datetime.now().isoformat()
+    if req.is_primary is not None:
+        updates["is_primary"] = 1 if req.is_primary else 0
+
+    if not updates:
+        raise HTTPException(400, "No photo fields provided.")
+
+    with get_db() as db:
+        if req.is_primary:
+            role_for_primary = updates.get("role") or dict_row(row).get("role") or "photo"
+            db.execute(
+                """UPDATE ag_archive_photos
+                   SET is_primary = 0
+                   WHERE archive_id = ? AND lower(role) = lower(?) AND id != ?""",
+                (archive_id, role_for_primary, photo_id),
+            )
+        set_clause = ", ".join(f"{key} = ?" for key in updates)
+        db.execute(
+            f"UPDATE ag_archive_photos SET {set_clause} WHERE archive_id = ? AND id = ?",
+            (*updates.values(), archive_id, photo_id),
+        )
+        db.commit()
+        updated = db.execute(
+            "SELECT * FROM ag_archive_photos WHERE archive_id = ? AND id = ?",
+            (archive_id, photo_id),
+        ).fetchone()
+    return {"archive_id": archive_id, "photo": _photo_record_to_response(dict_row(updated), archive_id), "status": "updated"}
+
+
+@router.post("/{archive_id}/photos/{photo_id}/remove")
+async def soft_remove_archive_photo(archive_id: int, photo_id: int):
+    """Soft-remove a photo from active record views without deleting the file."""
+    return await update_archive_photo_metadata(
+        archive_id,
+        photo_id,
+        PhotoUpdateRequest(active=False, notes="Soft-removed from active ArchiveForge record."),
+    )
 
 
 def _load_scoped_photo_path(archive_id: int, photo_id: int) -> tuple[dict, Path, str]:
@@ -6944,7 +7647,8 @@ def get_latest_actual_front_cover_photo(archive_id: int) -> tuple[dict, dict]:
         rows = dict_rows(db.execute(
             """SELECT * FROM ag_archive_photos
                WHERE archive_id = ? AND lower(role) IN ('front', 'front_cover', 'cover')
-               ORDER BY datetime(created_at) DESC, id DESC""",
+                 AND COALESCE(active, 1) != 0
+               ORDER BY is_primary DESC, datetime(created_at) DESC, id DESC""",
             (archive_id,),
         ).fetchall())
 
@@ -7911,6 +8615,19 @@ def _lifecycle_for_archive(archive_id: int) -> Optional[dict]:
     return dict_row(row) if row else None
 
 
+def _lifecycle_events_for_archive(archive_id: int, limit: int = 10) -> list[dict]:
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT id, archive_id, event_type, from_status, to_status, notes, created_at
+               FROM archive_item_lifecycle_events
+               WHERE archive_id = ?
+               ORDER BY datetime(created_at) DESC, id DESC
+               LIMIT ?""",
+            (archive_id, limit),
+        ).fetchall()
+    return [dict_row(r) for r in rows if r]
+
+
 def _ad_page_photos_for_archive(archive_id: int) -> list[dict]:
     with get_db() as db:
         rows = db.execute(
@@ -8054,6 +8771,8 @@ async def get_archive_detail(archive_id: int):
         "confirmed_issue_date": archive.get("confirmed_issue_date") or "",
         "confirmed_cover_title": archive.get("confirmed_cover_title") or "",
         "listing_status": archive.get("listing_status") or "",
+        "listing_title": archive.get("listing_title") or "",
+        "listing_description": archive.get("listing_description") or "",
         "sale_plan": archive.get("sale_plan") or "",
         "final_price": archive.get("final_price") or "",
         "rough_comp_min": archive.get("rough_comp_min") or "",
@@ -8088,6 +8807,94 @@ async def get_archive_detail(archive_id: int):
         "listing_draft": listing_draft,
         "exports": exports,
         "lifecycle": lifecycle_display,
+        "lifecycle_events": _lifecycle_events_for_archive(archive_id),
+    }
+
+
+@router.post("/{archive_id}/description/generate")
+async def generate_archive_description(archive_id: int, req: DescriptionGenerateRequest):
+    """Generate deterministic editable title/description suggestions from stored ArchiveForge evidence."""
+    archive = _load_archive_or_404(archive_id)
+    issue_info = _latest_issue_info_response(archive_id) or {}
+    issue_master = _issue_master_for_archive(archive_id) or {}
+    pricing_summary = _pricing_summary_for_archive(archive_id) or _calculate_magazine_pricing(archive_id, persist=False)
+    ad_candidates = _list_ad_opportunities(archive_id)
+    verified_ads = [c for c in ad_candidates if c.get("verification_status") == "verified_in_copy"]
+    style = (req.style or "concise").strip().lower()
+
+    issue_date = archive.get("issue_date") or issue_info.get("issue_date") or issue_master.get("normalized_date") or ""
+    subject = (
+        archive.get("confirmed_cover_title")
+        or archive.get("cover_subject")
+        or issue_master.get("dtmagazine_description")
+        or issue_info.get("cover_title")
+        or issue_info.get("detected_subject")
+        or "vintage issue"
+    )
+    condition = _condition_label(archive.get("condition_score") or 0)
+    defects = archive.get("defects") or ""
+    title = f"LIFE Magazine {issue_date} - {subject}".strip(" -")
+    if len(title) > 80:
+        title = title[:77].rstrip() + "..."
+
+    warnings = [
+        "Generated from stored ArchiveForge evidence; review before saving.",
+        "Unverified ad opportunities are not described as present in the physical copy.",
+    ]
+    if pricing_summary.get("pricing_type") == "reference_price_guide":
+        warnings.append("DTM guide values are reference-guide values, not sold comps.")
+
+    condition_sentence = ""
+    if req.include_condition:
+        condition_sentence = f"Condition: {condition}."
+        if defects:
+            condition_sentence += f" Noted wear/defects: {defects}."
+
+    ad_sentence = ""
+    if req.include_ad_notes and verified_ads:
+        ad_sentence = "Verified photographed ads: " + "; ".join(
+            " ".join(x for x in [ad.get("brand") or "", ad.get("product") or ad.get("category") or ""] if x).strip()
+            for ad in verified_ads[:5]
+        ) + "."
+    elif req.include_ad_notes and ad_candidates:
+        ad_sentence = "Issue-level ad opportunities exist, but ads are unverified until ad-page photos are uploaded and analyzed."
+
+    if style in {"ebay", "premium"}:
+        short = f"Vintage LIFE Magazine issue from {issue_date or 'the LIFE weekly run'} featuring {subject}."
+        body = (
+            f"{title}\n\n"
+            f"Original vintage LIFE Magazine issue. Cover subject: {subject}. "
+            f"Issue date: {issue_date or 'unconfirmed'}. {condition_sentence} "
+            f"{ad_sentence}\n\n"
+            "This is an internal ArchiveForge listing draft. Confirm condition, completeness, shipping details, and final price before publishing outside EmpireBox."
+        )
+    elif style == "collector":
+        short = f"Collector catalog record for LIFE {issue_date}: {subject}."
+        body = (
+            f"Publication: LIFE Magazine\nIssue date: {issue_date or 'unconfirmed'}\n"
+            f"Cover/subject: {subject}\n{condition_sentence}\n{ad_sentence}"
+        )
+    elif style == "condition":
+        short = f"LIFE {issue_date} condition note: {condition}."
+        body = f"{title}\n\n{condition_sentence or 'Condition not yet scored.'} Additional photos should be reviewed before final listing."
+    elif style == "ad_opportunity":
+        short = f"LIFE {issue_date} with ad-opportunity review pending."
+        body = f"{title}\n\n{ad_sentence or 'No ad opportunity check has been verified yet.'} Do not list individual ads until photographed and analyzed."
+    else:
+        short = f"LIFE Magazine - {subject} - {issue_date}".strip(" -")
+        body = f"{short}. {condition_sentence} {ad_sentence}".strip()
+
+    if req.include_pricing_warning:
+        body += "\n\nPricing note: final price must be owner/operator accepted. Reference guide and dealer asking prices are not sold comps."
+
+    return {
+        "archive_id": archive_id,
+        "style": style,
+        "title": title,
+        "short_description": short[:500],
+        "listing_description": body[:5000],
+        "warnings": warnings,
+        "source": "deterministic_template",
     }
 
 
@@ -8099,6 +8906,7 @@ ALLOWED_ARCHIVE_UPDATE_FIELDS = {
     "source_box_code", "processed_box_code", "archive_location",
     "tier", "sale_plan", "rough_comp_min", "rough_comp_max",
     "final_price", "listing_status", "short_description",
+    "listing_title", "listing_description",
     "confirmed_reference_source", "confirmed_reference_url",
     "confirmed_issue_date", "confirmed_cover_title", "confirmed_confidence",
 }
@@ -8139,6 +8947,29 @@ async def update_archive_item(archive_id: int, req: dict):
             f"UPDATE ag_archives SET {', '.join(set_clauses)} WHERE id = ?",
             (*updates.values(), archive_id),
         )
+        if "listing_title" in updates or "listing_description" in updates:
+            latest_draft = db.execute(
+                """SELECT id FROM archive_listing_drafts
+                   WHERE archive_id = ?
+                   ORDER BY datetime(created_at) DESC, id DESC
+                   LIMIT 1""",
+                (archive_id,),
+            ).fetchone()
+            if latest_draft:
+                draft_sets = []
+                draft_params = []
+                if "listing_title" in updates:
+                    draft_sets.append("title = ?")
+                    draft_params.append(updates["listing_title"] or "")
+                if "listing_description" in updates:
+                    draft_sets.append("description = ?")
+                    draft_params.append(updates["listing_description"] or "")
+                draft_sets.append("updated_at = datetime('now')")
+                draft_params.append(latest_draft[0])
+                db.execute(
+                    f"UPDATE archive_listing_drafts SET {', '.join(draft_sets)} WHERE id = ?",
+                    draft_params,
+                )
         db.commit()
 
     return {"archive_id": archive_id, "updated": list(updates.keys())}

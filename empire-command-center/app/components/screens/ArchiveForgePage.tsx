@@ -145,6 +145,8 @@ interface PhotoRecord {
   file_size?: number;
   file_size_bytes?: number;
   analysis_status?: string;
+  candidate_id?: number | null;
+  page_number?: string;
   created_at: string;
 }
 
@@ -317,6 +319,11 @@ interface AdOpportunity {
   comp_confidence?: string;
   policy_flags?: string[];
   recommendation?: string;
+  suggested_action?: string;
+  user_notes?: string;
+  priority?: number;
+  uploaded_photo_count?: number;
+  analyzed_photo_count?: number;
 }
 
 interface AdComp {
@@ -1706,6 +1713,7 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
   const [metadata, setMetadata] = useState<IssueMetadata | null>(null);
   const [googleBooksStatus, setGoogleBooksStatus] = useState<GoogleBooksStatus | null>(null);
   const [candidates, setCandidates] = useState<AdOpportunity[]>([]);
+  const [adPhotos, setAdPhotos] = useState<PhotoRecord[]>([]);
   const [compGroups, setCompGroups] = useState<AdCompGroup[]>([]);
   const [ranking, setRanking] = useState<AdRanking[]>([]);
   const [showCompLinks, setShowCompLinks] = useState(false);
@@ -1714,6 +1722,7 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
   const [analyzing, setAnalyzing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+  const [adPhotoUploadOpen, setAdPhotoUploadOpen] = useState(false);
   const [manualVolumeId, setManualVolumeId] = useState('');
   const [pageNumber, setPageNumber] = useState('');
   const [message, setMessage] = useState('');
@@ -1722,18 +1731,20 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
   const load = useCallback(async () => {
     if (!archiveId) return;
     try {
-      const [statusRes, issueInfoRes, metadataRes, candidatesRes, recommendationRes] = await Promise.all([
+      const [statusRes, issueInfoRes, metadataRes, candidatesRes, recommendationRes, adPhotosRes] = await Promise.all([
         fetch(`${AG_API}/google-books/status`),
         fetch(`${AG_API}/${archiveId}/issue-info`),
         fetch(`${AG_API}/${archiveId}/google-books/metadata`),
         fetch(`${AG_API}/${archiveId}/ad-opportunities`),
         fetch(`${AG_API}/${archiveId}/ad-breakout-recommendation`),
+        fetch(`${AG_API}/${archiveId}/ad-page-photos`),
       ]);
       if (statusRes.ok) setGoogleBooksStatus(await statusRes.json());
       if (issueInfoRes.ok) setIssueInfo(await issueInfoRes.json());
       if (metadataRes.ok) setMetadata((await metadataRes.json()).metadata || null);
       if (candidatesRes.ok) setCandidates((await candidatesRes.json()).candidates || []);
       if (recommendationRes.ok) setRecommendation(await recommendationRes.json());
+      if (adPhotosRes.ok) setAdPhotos((await adPhotosRes.json()).photos || []);
       const [compsRes, rankingRes] = await Promise.all([
         fetch(`${AG_API}/${archiveId}/ad-comps`),
         fetch(`${AG_API}/${archiveId}/ad-priority-ranking`),
@@ -1900,7 +1911,8 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
       const res = await fetch(`${AG_API}/${archiveId}/ad-pages/upload`, { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || `Ad-page upload failed (${res.status})`);
-      setMessage(`Ad-page photo saved${selectedCandidateId ? ` for candidate #${selectedCandidateId}` : ''}.`);
+      setMessage(`Ad-page photo saved${selectedCandidateId ? ` for candidate #${selectedCandidateId}` : ''}. Analyze uploaded ad pages to verify.`);
+      await load();
     } catch (e: any) {
       setError(e?.message || 'Ad-page upload failed.');
     } finally {
@@ -1924,14 +1936,20 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
     }
   };
 
-  const updateStatus = async (candidateId: number, status: string) => {
+  const updateStatus = async (candidateId: number, status: string, suggestedAction = '', userNotes = '') => {
     if (!archiveId) return;
-    const form = new FormData();
-    form.append('verification_status', status);
+    setError(''); setMessage('');
     try {
-      const res = await fetch(`${AG_API}/${archiveId}/ad-opportunities/${candidateId}`, { method: 'PATCH', body: form });
-      if (!res.ok) throw new Error(`Status update failed (${res.status})`);
-      setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, verification_status: status } : c));
+      const res = await fetch(`${AG_API}/${archiveId}/ad-opportunities/${candidateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verification_status: status, suggested_action: suggestedAction || undefined, user_notes: userNotes || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Status update failed (${res.status})`);
+      setCandidates(prev => prev.map(c => c.id === candidateId ? { ...c, ...(data.candidate || {}), verification_status: status } : c));
+      setMessage(`Candidate #${candidateId} marked ${status.replace(/_/g, ' ')}.`);
+      await load();
     } catch (e: any) {
       setError(e?.message || 'Could not update candidate status.');
     }
@@ -1954,6 +1972,8 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
 
   const gradeColor: Record<string, string> = { A: '#16a34a', B: '#2563eb', C: '#f59e0b', D: '#6b7280', F: '#dc2626' };
   const verifiedCount = candidates.filter(c => c.verification_status === 'verified_in_copy').length;
+  const selectedCandidate = selectedCandidateId ? candidates.find(c => c.id === selectedCandidateId) || null : null;
+  const photosByCandidate = (candidateId: number) => adPhotos.filter(photo => Number((photo as any).candidate_id || 0) === candidateId);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -2069,7 +2089,16 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
           No marketplace API credentials configured. ArchiveForge generated research links and manual comp fields instead of live comps.
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+        {adPhotoUploadOpen && (
+          <div style={{ border: '1px solid #06b6d4', background: '#f0fdff', borderRadius: 10, padding: 12, display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#155e75' }}>Upload/photo page for candidate: {selectedCandidate?.brand || selectedCandidate?.category || selectedCandidate?.product || 'Unassigned'}</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>Upload does not verify the ad. Run analysis after upload.</div>
+              </div>
+              <button onClick={() => setAdPhotoUploadOpen(false)} style={{ border: '1px solid #bae6fd', background: '#fff', color: '#155e75', borderRadius: 8, padding: '5px 8px', fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11, color: '#666', fontWeight: 700 }}>
             Candidate for uploaded page
             <select value={selectedCandidateId || ''} onChange={e => setSelectedCandidateId(e.target.value ? Number(e.target.value) : null)}
@@ -2093,7 +2122,19 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
             <input type="file" accept="image/jpeg,image/png,image/gif,image/webp" capture="environment" style={{ display: 'none' }} disabled={!archiveId || uploading}
               onChange={e => uploadAdPage(e.target.files?.[0] || null).finally(() => { e.currentTarget.value = ''; })} />
           </label>
+            </div>
+            {selectedCandidateId && photosByCandidate(selectedCandidateId).length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {photosByCandidate(selectedCandidateId).map(photo => (
+                  <div key={photo.id || photo.photo_id} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: 6, borderRadius: 8, background: '#fff', border: '1px solid #bae6fd' }}>
+                    {photo.thumbnail_url && <img src={`${API}${photo.thumbnail_url.replace('/api/v1', '')}`} alt="uploaded ad page" style={{ width: 42, height: 54, objectFit: 'cover', borderRadius: 5 }} />}
+                    <div style={{ fontSize: 10, color: '#475569' }}>Photo #{photo.id || photo.photo_id}<br />{photo.analysis_status || 'pending'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
         </div>
+        )}
       </div>
 
       {metadata && (
@@ -2131,8 +2172,11 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
           const group = compGroups.find(g => g.candidate?.id === candidate.id);
           const links = (group?.comps || []).filter(comp => comp.result_type === 'search_link');
           const actionLabel = (rank?.suggested_action || candidate.recommendation || 'needs_comps').replace(/_/g, ' ');
+          const candidatePhotos = photosByCandidate(candidate.id);
+          const inactive = ['ignored', 'not_found', 'rejected'].includes(candidate.verification_status || '');
+          const verified = candidate.verification_status === 'verified_in_copy';
           return (
-          <div key={candidate.id} style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div key={candidate.id} style={{ background: inactive ? '#f9fafb' : '#fff', opacity: inactive ? 0.68 : 1, border: verified ? '1px solid #86efac' : '1px solid #e5e2dc', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 800, color: '#1a1a1a' }}>{candidate.brand || candidate.category || 'Ad candidate'}</div>
@@ -2143,7 +2187,7 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
               </span>
             </div>
             <div style={{ fontSize: 11, color: candidate.verification_status === 'verified_in_copy' ? '#166534' : '#92400e', background: candidate.verification_status === 'verified_in_copy' ? '#f0fdf4' : '#fffbeb', borderRadius: 6, padding: '5px 7px' }}>
-              {candidate.verification_status || 'unverified'}
+              {candidate.verification_status || 'unverified'} · uploaded photos: {candidatePhotos.length || candidate.uploaded_photo_count || 0} · analyzed: {candidate.analyzed_photo_count || candidatePhotos.filter(p => p.analysis_status && p.analysis_status !== 'pending').length || 0}
             </div>
             <div style={{ fontSize: 11, color: '#666' }}>Search: {candidate.search_query || '—'}</div>
             <div style={{ fontSize: 11, color: '#374151' }}>{candidate.evidence_text || 'Issue-level candidate only.'}</div>
@@ -2174,18 +2218,28 @@ function AdOpportunitySection({ archiveId }: { archiveId: number | null }) {
               </div>
             )}
             {rank?.reasoning_summary && <div style={{ fontSize: 11, color: '#666' }}>{rank.reasoning_summary}</div>}
+            {candidatePhotos.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {candidatePhotos.slice(0, 4).map(photo => (
+                  <div key={photo.id || photo.photo_id} title={photo.analysis_status || 'pending'} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: 4, border: '1px solid #e5e7eb', borderRadius: 7, background: '#fff' }}>
+                    {photo.thumbnail_url && <img src={`${API}${photo.thumbnail_url.replace('/api/v1', '')}`} alt="ad page" style={{ width: 34, height: 44, objectFit: 'cover', borderRadius: 4 }} />}
+                    <span style={{ fontSize: 9, color: '#64748b' }}>{photo.analysis_status || 'pending'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 'auto' }}>
-              <button onClick={() => setSelectedCandidateId(candidate.id)} style={{ padding: '5px 7px', border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75', borderRadius: 6, fontSize: 10, fontWeight: 800, cursor: 'pointer' }}>
+              <button disabled={inactive || verified} onClick={() => { setSelectedCandidateId(candidate.id); setAdPhotoUploadOpen(true); setMessage(`Ready to upload ad-page photo for ${candidate.brand || candidate.category || 'candidate #' + candidate.id}.`); }} style={{ padding: '5px 7px', border: '1px solid #06b6d4', background: inactive || verified ? '#f3f4f6' : '#ecfeff', color: inactive || verified ? '#9ca3af' : '#155e75', borderRadius: 6, fontSize: 10, fontWeight: 800, cursor: inactive || verified ? 'not-allowed' : 'pointer' }}>
                 Photograph this ad if present
               </button>
-              <button onClick={() => updateStatus(candidate.id, 'not_found')} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+              <button disabled={verified} onClick={() => updateStatus(candidate.id, 'not_found', 'not_found', 'User reviewed issue and did not find this ad.')} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#fff', color: verified ? '#9ca3af' : '#6b7280', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: verified ? 'not-allowed' : 'pointer' }}>
                 Mark not found
               </button>
-              <button onClick={() => updateStatus(candidate.id, 'ignored')} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>
+              <button disabled={verified} onClick={() => updateStatus(candidate.id, 'ignored', 'ignore', 'User ignored this issue-level candidate.')} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#fff', color: verified ? '#9ca3af' : '#6b7280', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: verified ? 'not-allowed' : 'pointer' }}>
                 Ignore
               </button>
-              <button disabled style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: '#f9fafb', color: candidate.verification_status === 'verified_in_copy' ? '#166534' : '#9ca3af', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'not-allowed' }}>
-                Verified in this copy
+              <button disabled title={verified ? 'Verified by uploaded ad-page analysis.' : 'Upload and analyze an ad-page photo before verifying.'} style={{ padding: '5px 7px', border: '1px solid #e5e7eb', background: verified ? '#f0fdf4' : '#f9fafb', color: verified ? '#166534' : '#9ca3af', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'not-allowed' }}>
+                {verified ? 'Verified in this copy' : 'Verify after analysis'}
               </button>
             </div>
           </div>
@@ -3434,6 +3488,21 @@ function InventorySection() {
     }
   };
 
+  const refreshOpenDetail = async () => {
+    await load();
+    const archiveId = detailDrawer?.item?.id || detailDrawer?.detail?.archive?.archive_id;
+    if (!archiveId) return;
+    try {
+      const res = await fetch(`${AG_API}/${archiveId}/detail`);
+      if (res.ok) {
+        const data = await res.json();
+        setDetailDrawer((prev: any) => prev ? { ...prev, detail: data, item: { ...prev.item, ...(data.archive || {}) } } : prev);
+      }
+    } catch {
+      // non-critical refresh failure; keep current drawer open
+    }
+  };
+
   const handleRebox = async (itemId: number) => {
     if (!reboxBox.trim()) { setReboxError('Box code required'); return; }
     setReboxing(true);
@@ -3645,6 +3714,9 @@ function InventorySection() {
                       if (col.key === 'rough_comp_min' || col.key === 'rough_comp_max') {
                         display = val ? `$${Number(val).toFixed(0)}` : '—';
                       }
+                      if (col.key === 'final_price') {
+                        display = val ? <span style={{ fontWeight: 800, color: '#166534' }}>${Number(val).toFixed(2)}</span> : '—';
+                      }
                       if (col.key === 'created_at') {
                         display = fmt(val);
                       }
@@ -3792,7 +3864,7 @@ function InventorySection() {
               </div>
               <button onClick={() => setDetailDrawer(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 8, width: 32, height: 32, cursor: 'pointer' }}><X size={16} /></button>
             </div>
-            <ItemDetailDrawer detailItem={detailDrawer} onClose={() => setDetailDrawer(null)} onRefresh={() => { setDetailDrawer(null); load(); }} />
+            <ItemDetailDrawer detailItem={detailDrawer} onClose={() => setDetailDrawer(null)} onRefresh={refreshOpenDetail} />
           </div>
         </div>
       )}
@@ -3804,26 +3876,159 @@ function InventorySection() {
 
 type DetailTab = 'photos' | 'reference' | 'issue_info' | 'condition' | 'ads' | 'pricing' | 'listing' | 'lifecycle';
 
-function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any; onClose: () => void; onRefresh: () => void }) {
+const ITEM_STATUS_OPTIONS = ['inventory', 'held', 'listed', 'sold', 'broken_for_ads', 'ads_only', 'archived', 'needs_review'];
+const MARKETPLACE_STATUS_OPTIONS = ['not_listed', 'draft', 'listed', 'sold', 'cancelled'];
+const AD_BREAKOUT_STATUS_OPTIONS = ['none', 'candidate', 'in_progress', 'ads_removed', 'ads_listed', 'complete'];
+const LISTING_STATUS_OPTIONS = ['no_listing', 'draft_saved', 'ready_to_list', 'listed', 'sold', 'cancelled', 'needs_review'];
+const CONDITION_SCORE_OPTIONS = [
+  { value: '', label: 'Unknown' },
+  { value: '5', label: '5 — Excellent' },
+  { value: '4', label: '4 — Very Good' },
+  { value: '3', label: '3 — Good' },
+  { value: '2', label: '2 — Fair' },
+  { value: '1', label: '1 — Poor' },
+];
+const COMMON_DEFECTS = ['edge wear', 'spine wear', 'cover crease', 'torn cover', 'detached cover', 'missing pages', 'writing/marking', 'mailing label', 'foxing/spots', 'water damage', 'musty odor', 'brittle pages', 'tape/repair', 'other'];
+const ARCHIVE_PATCH_FIELDS = [
+  'display_title', 'short_description', 'issue_date', 'cover_subject', 'notes',
+  'condition_score', 'is_complete', 'has_address_label', 'defects',
+  'rough_comp_min', 'rough_comp_max', 'final_price', 'sale_plan',
+  'source_box_code', 'processed_box_code', 'archive_location', 'tier',
+  'listing_status', 'listing_title', 'listing_description',
+];
+
+const selectStyle: React.CSSProperties = { width: '100%', padding: '6px 8px', border: '1px solid #e5e2dc', borderRadius: 7, fontSize: 11, background: '#fff' };
+const inputStyle: React.CSSProperties = { width: '100%', padding: '6px 8px', border: '1px solid #e5e2dc', borderRadius: 7, fontSize: 11 };
+const editLabelStyle: React.CSSProperties = { fontSize: 10, color: '#6b7280', marginBottom: 4, fontWeight: 700 };
+
+function toNumberOrNull(value: any) {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function appendUniqueText(current: string, next: string) {
+  const value = (current || '').trim();
+  if (!next.trim()) return value;
+  if (value.toLowerCase().includes(next.toLowerCase())) return value;
+  return value ? `${value}; ${next}` : next;
+}
+
+function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any; onClose: () => void; onRefresh: () => void | Promise<void> }) {
   const [tab, setTab] = useState<DetailTab>('photos');
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Record<string, any>>({});
   const [saving, setSaving] = useState(false);
+  const [editMsg, setEditMsg] = useState('');
+  const [quickAction, setQuickAction] = useState('');
+  const [pricingAction, setPricingAction] = useState('');
+  const [selectedAction, setSelectedAction] = useState('');
+  const [selectedActionTab, setSelectedActionTab] = useState('');
+  const [actionPayload, setActionPayload] = useState<Record<string, any>>({});
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [actionSuccess, setActionSuccess] = useState('');
+  const [descriptionStyle, setDescriptionStyle] = useState('concise');
+  const [descriptionSuggestion, setDescriptionSuggestion] = useState<any>(null);
+  const [candidateUploadId, setCandidateUploadId] = useState<number | null>(null);
+  const [photoActionRole, setPhotoActionRole] = useState('front');
   const [lifecycleMsg, setLifecycleMsg] = useState('');
   const [lifecycleOp, setLifecycleOp] = useState(false);
   const d = detailItem?.detail || {};
   const arch = d.archive || {};
   const lc = d.lifecycle || {};
+  const listing = d.listing_draft || {};
+
+  const buildInitialEditData = () => ({
+    display_title: arch.display_title || '',
+    short_description: arch.short_description || '',
+    issue_date: arch.issue_date || '',
+    cover_subject: arch.cover_subject || arch.confirmed_cover_title || '',
+    notes: arch.notes || '',
+    condition_score: arch.condition_score || '',
+    is_complete: !!arch.complete,
+    completeness_status: arch.complete ? 'complete' : 'unknown',
+    has_address_label: !!arch.address_label,
+    address_label_status: arch.address_label ? 'present' : 'none',
+    defects: arch.defects || '',
+    rough_comp_min: arch.rough_comp_min || '',
+    rough_comp_max: arch.rough_comp_max || '',
+    final_price: arch.final_price || '',
+    sale_plan: arch.sale_plan || '',
+    pricing_notes: d.pricing_summary?.pricing_basis || '',
+    source_box_code: arch.source_box || '',
+    processed_box_code: arch.dest_box || '',
+    archive_location: arch.location || '',
+    tier: arch.tier || '',
+    listing_status: arch.listing_status || 'no_listing',
+    listing_title: listing.title || listing.listing_title || arch.listing_title || '',
+    listing_description: listing.description || listing.listing_description || arch.listing_description || '',
+    item_status: lc.item_status || 'inventory',
+    marketplace_status: lc.marketplace_status || 'not_listed',
+    ad_breakout_status: lc.ad_breakout_status || 'none',
+    sold_price: lc.sold_price || '',
+    sold_date: lc.sold_date || '',
+    sold_platform: lc.sold_platform || '',
+    disposition_notes: lc.disposition_notes || '',
+  });
+
+  const beginEditing = () => {
+    setEditData(buildInitialEditData());
+    setEditMsg('');
+    setLifecycleMsg('');
+    setEditing(true);
+  };
 
   const saveEdit = async () => {
+    setEditMsg('');
     setSaving(true);
     try {
+      const patchPayload: Record<string, any> = {};
+      ARCHIVE_PATCH_FIELDS.forEach(field => {
+        if (!(field in editData)) return;
+        let value = editData[field];
+        if (['condition_score', 'rough_comp_min', 'rough_comp_max', 'final_price'].includes(field)) value = toNumberOrNull(value);
+        if (field === 'is_complete' || field === 'has_address_label') value = !!value;
+        patchPayload[field] = value;
+      });
       const res = await fetch(`${AG_API}/${arch.archive_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editData),
+        body: JSON.stringify(patchPayload),
       });
-      if (res.ok) { setEditing(false); onRefresh(); }
+      if (!res.ok) {
+        const out = await res.json().catch(() => ({}));
+        throw new Error(out.detail || `Save failed with HTTP ${res.status}`);
+      }
+
+      const lifecyclePayload: Record<string, any> = {
+        item_status: editData.item_status || 'inventory',
+        marketplace_status: editData.marketplace_status || 'not_listed',
+        ad_breakout_status: editData.ad_breakout_status || 'none',
+        notes: editData.disposition_notes || '',
+      };
+      const soldPrice = toNumberOrNull(editData.sold_price);
+      if (soldPrice !== null) lifecyclePayload.sold_price = soldPrice;
+      if (editData.sold_date) lifecyclePayload.sold_date = editData.sold_date;
+      if (editData.sold_platform) lifecyclePayload.sold_platform = editData.sold_platform;
+      const lifecycleChanged = ['item_status', 'marketplace_status', 'ad_breakout_status', 'sold_price', 'sold_date', 'sold_platform', 'disposition_notes']
+        .some(field => String(editData[field] ?? '') !== String((lc as any)[field] ?? ''));
+      if (lifecycleChanged) {
+        const lcRes = await fetch(`${AG_API}/${arch.archive_id}/lifecycle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(lifecyclePayload),
+        });
+        if (!lcRes.ok) {
+          const out = await lcRes.json().catch(() => ({}));
+          throw new Error(out.detail || `Lifecycle save failed with HTTP ${lcRes.status}`);
+        }
+      }
+      setEditing(false);
+      setEditMsg('Changes saved.');
+      await onRefresh();
+    } catch (exc: any) {
+      setEditMsg(`Error: ${exc?.message || 'Save failed.'}`);
     } finally { setSaving(false); }
   };
 
@@ -3836,10 +4041,300 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ item_status, marketplace_status, ad_breakout_status, notes }),
       });
-      if (res.ok) { setLifecycleMsg('Lifecycle updated.'); onRefresh(); }
+      if (res.ok) { setLifecycleMsg('Lifecycle updated.'); await onRefresh(); }
       else { const e = await res.json(); setLifecycleMsg('Error: ' + (e.detail || res.statusText)); }
     } catch { setLifecycleMsg('Network error.'); }
     setLifecycleOp(false);
+  };
+
+  const patchArchive = async (payload: Record<string, any>, message = 'Record updated.') => {
+    const res = await fetch(`${AG_API}/${arch.archive_id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const out = await res.json().catch(() => ({}));
+      throw new Error(out.detail || `Update failed with HTTP ${res.status}`);
+    }
+    setEditMsg(message);
+    await onRefresh();
+  };
+
+  const acceptSuggestedFinalPrice = async (price: any, sourceLabel: string) => {
+    const value = toNumberOrNull(price);
+    if (value === null) {
+      setEditMsg('Error: No suggested price is available.');
+      return;
+    }
+    if (!window.confirm(`Use $${value.toFixed(2)} as final price? This is an internal ArchiveForge price only.`)) return;
+    try {
+      await patchArchive({ final_price: value, sale_plan: arch.sale_plan || `Owner accepted ${sourceLabel} as internal final price.` }, 'Final price updated.');
+    } catch (exc: any) {
+      setEditMsg(`Error: ${exc?.message || 'Could not update final price.'}`);
+    }
+  };
+
+  const handlePricingAction = (value: string) => {
+    setPricingAction(value);
+    if (!value) return;
+    const dtmAvg = d.life_master?.dtmagazine_average;
+    const roughMin = toNumberOrNull(editData.rough_comp_min ?? arch.rough_comp_min);
+    const roughMax = toNumberOrNull(editData.rough_comp_max ?? arch.rough_comp_max);
+    const manualComp = (d.comps || []).find((c: any) => ['sold_comp', 'manual_reference', 'dealer_asking', 'active_listing'].includes(c.result_type) && (c.price || c.total_price));
+    const dealer = d.dealer_reference?.asking_price;
+    let nextPrice: number | null = null;
+    let note = '';
+    if (value === 'rough') nextPrice = roughMin !== null && roughMax !== null ? Number(((roughMin + roughMax) / 2).toFixed(2)) : roughMin ?? roughMax;
+    if (value === 'dtm') nextPrice = toNumberOrNull(dtmAvg);
+    if (value === 'manual_comp') nextPrice = toNumberOrNull(manualComp?.total_price ?? manualComp?.price);
+    if (value === 'dealer') nextPrice = toNumberOrNull(dealer);
+    if (value === 'needs_comps') {
+      setEditData(ed => ({ ...ed, sale_plan: 'Needs more comps before final pricing.' }));
+      return;
+    }
+    if (value === 'clear') {
+      setEditData(ed => ({ ...ed, final_price: '' }));
+      return;
+    }
+    if (value === 'manual' || value === 'guide_only') return;
+    if (nextPrice === null) {
+      setEditMsg('Error: No usable price found for that source.');
+      return;
+    }
+    if (!window.confirm(`Use $${nextPrice.toFixed(2)} as final price? This is an internal ArchiveForge price only.`)) return;
+    if (value === 'dtm') note = 'DTM reference guide accepted as temporary internal final price.';
+    if (value === 'dealer') note = 'Dealer asking price accepted as internal final price; not sold-comp evidence.';
+    if (value === 'manual_comp') note = 'Manual comp accepted as internal final price.';
+    if (value === 'rough') note = 'Rough estimate accepted as internal final price.';
+    setEditData(ed => ({ ...ed, final_price: nextPrice, pricing_notes: note, sale_plan: ed.sale_plan || note }));
+  };
+
+  const updateDefect = (defect: string, checked: boolean) => {
+    setEditData(ed => {
+      const existing = String(ed.defects || '');
+      const parts = existing.split(';').map(part => part.trim()).filter(Boolean);
+      const next = checked ? [...parts, defect] : parts.filter(part => part.toLowerCase() !== defect.toLowerCase());
+      return { ...ed, defects: Array.from(new Set(next)).join('; ') };
+    });
+  };
+
+  const applyQuickAction = async (action: string) => {
+    setQuickAction('');
+    setEditMsg('');
+    const confirmInternal = (label: string) => window.confirm(`${label}?\n\nThis only updates ArchiveForge internal status. It does not publish or update marketplaces.`);
+    try {
+      if (action === 'needs_review' && confirmInternal('Mark this item needs review')) await doLifecycle('needs_review', 'not_listed', 'none', 'Flagged for review');
+      if (action === 'held' && confirmInternal('Hold this item intact')) await doLifecycle('held', 'not_listed', 'none', 'Held intact');
+      if (action === 'ready_to_list' && confirmInternal('Mark ready to list')) await patchArchive({ listing_status: 'ready_to_list', sale_plan: arch.sale_plan || 'List whole magazine' }, 'Marked ready to list.');
+      if (action === 'draft_saved' && confirmInternal('Mark draft saved')) await patchArchive({ listing_status: 'draft_saved' }, 'Draft status saved.');
+      if (action === 'listed' && confirmInternal('Mark listed internally')) await doLifecycle('listed', 'listed', 'none', 'Marked listed internally');
+      if (action === 'sold' && confirmInternal('Mark sold internally')) {
+        const soldPrice = window.prompt('Sold price, or leave blank if unknown:', String(lc.sold_price || ''));
+        const soldDate = window.prompt('Sold date:', new Date().toISOString().slice(0, 10)) || new Date().toISOString().slice(0, 10);
+        const platform = window.prompt('Sold platform/source:', lc.sold_platform || 'manual') || 'manual';
+        await fetch(`${AG_API}/${arch.archive_id}/lifecycle`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_status: 'sold', marketplace_status: 'sold', ad_breakout_status: lc.ad_breakout_status || 'none', sold_price: toNumberOrNull(soldPrice), sold_date: soldDate, sold_platform: platform, notes: 'Marked sold internally' }),
+        });
+        await onRefresh();
+      }
+      if (action === 'ads_only' && confirmInternal('Use this item for ads only')) await doLifecycle('ads_only', 'not_listed', 'candidate', 'Use for ads only; ads remain unverified until photographed');
+      if (action === 'broken_for_ads' && confirmInternal('Mark broken out for ads')) await doLifecycle('broken_for_ads', 'not_listed', 'ads_removed', 'Broken out for ads; verified ad pages still require photos');
+      if (action === 'test_record' && confirmInternal('Mark as test record')) await patchArchive({ notes: appendUniqueText(arch.notes || '', 'TEST RECORD - exclude from business counts'), listing_status: 'needs_review' }, 'Marked as test record in notes.');
+      if (action === 'archived' && confirmInternal('Mark archived')) await doLifecycle('archived', 'not_listed', 'none', 'Archived internally');
+      if (action === 'request_photos' && confirmInternal('Request more photos')) await patchArchive({ notes: appendUniqueText(arch.notes || '', 'Request more photos: spine/back/defects as needed'), listing_status: 'needs_review' }, 'Photo request noted.');
+      if (action === 'rerun_issue') {
+        await fetch(`${AG_API}/${arch.archive_id}/resolve-issue-info`, { method: 'POST' });
+        setEditMsg('Issue resolver started.');
+        await onRefresh();
+      }
+      if (action === 'rerun_ads') {
+        await fetch(`${AG_API}/${arch.archive_id}/ad-opportunity-check`, { method: 'POST' });
+        setEditMsg('Ad opportunity prep requested.');
+        await onRefresh();
+      }
+      if (action === 'refresh_draft') {
+        await fetch(`${AG_API}/${arch.archive_id}/create-listing-draft`, { method: 'POST' });
+        setEditMsg('Listing draft created/refreshed.');
+        await onRefresh();
+      }
+      if (action === 'export_pdf' && EXPORT_URLS.pdf_with_images_url) window.open(EXPORT_URLS.pdf_with_images_url, '_blank', 'noopener,noreferrer');
+    } catch (exc: any) {
+      setEditMsg(`Error: ${exc?.message || 'Quick action failed.'}`);
+    }
+  };
+
+  const suggestedUpdates = [
+    ...(!d.photos?.spine?.length ? ['Request more photos: spine'] : []),
+    ...(!d.photos?.back?.length ? ['Request more photos: back cover'] : []),
+    ...(d.issue_info?.status === 'completed' && d.issue_info?.ad_opportunity_ready ? ['Photograph top ad candidates'] : []),
+    ...(!(d.pricing_summary?.sold_comp_count > 0) ? ['Research comps or add manual comp'] : []),
+    ...(!arch.final_price ? ['Set final price manually or accept a clearly labeled temporary reference value'] : []),
+    ...(d.dealer_reference ? ['Review dealer asking price; it is not sold-comp evidence'] : []),
+    ...((arch.notes || '').toLowerCase().includes('test') ? ['Keep test record excluded from business counts'] : []),
+  ];
+
+  const tabActionOptions: Record<string, { value: string; label: string }[]> = {
+    photos: [
+      { value: 'add_photo', label: 'Add photo' },
+      { value: 'replace_front', label: 'Replace front cover with better photo' },
+      { value: 'mark_primary', label: 'Mark selected photo as primary' },
+      { value: 'remove_photo', label: 'Remove photo from active record' },
+      { value: 'rerun_identify', label: 'Re-run AI Identify from front photo' },
+      { value: 'export_manifest', label: 'Export photo manifest' },
+    ],
+    issue_info: [
+      { value: 'rerun_issue', label: 'Re-run Issue Resolver' },
+      { value: 'sync_master', label: 'Sync to LIFE Master' },
+      { value: 'generate_description', label: 'Generate description' },
+    ],
+    condition: [
+      { value: 'condition_excellent', label: 'Mark Excellent' },
+      { value: 'condition_very_good', label: 'Mark Very Good' },
+      { value: 'condition_good', label: 'Mark Good' },
+      { value: 'condition_fair', label: 'Mark Fair' },
+      { value: 'condition_poor', label: 'Mark Poor' },
+      { value: 'condition_needs_review', label: 'Mark Needs Review' },
+      { value: 'condition_vintage_wear', label: 'Apply common vintage wear defaults' },
+      { value: 'condition_more_photos', label: 'Request more photos' },
+    ],
+    ads: [
+      { value: 'rerun_ads', label: 'Re-run Ad Opportunity Prep' },
+      { value: 'photograph_candidate', label: 'Photograph selected candidate' },
+      { value: 'analyze_ads', label: 'Analyze uploaded ad pages' },
+      { value: 'candidate_not_found', label: 'Mark candidate not found' },
+      { value: 'candidate_ignore', label: 'Ignore candidate' },
+      { value: 'research_ad_comps', label: 'Research ad comps' },
+    ],
+    pricing: [
+      { value: 'research_magazine_comps', label: 'Research Magazine Comps' },
+      { value: 'calculate_pricing', label: 'Calculate Pricing' },
+      { value: 'set_final_price', label: 'Set Final Price Manually' },
+      { value: 'use_dtm_price', label: 'Use DTM average as temporary internal price' },
+      { value: 'clear_final_price', label: 'Clear Final Price' },
+      { value: 'mark_needs_comps', label: 'Mark Needs Comps' },
+    ],
+    listing: [
+      { value: 'refresh_draft', label: 'Create / Refresh Listing Draft' },
+      { value: 'generate_listing_description', label: 'Generate listing description' },
+      { value: 'short_to_listing', label: 'Use short description as listing description' },
+      { value: 'export_pdf', label: 'Export PDF' },
+      { value: 'export_pdf_photos', label: 'Export PDF with Photos' },
+      { value: 'ready_to_list', label: 'Mark Ready to List' },
+      { value: 'draft_saved', label: 'Mark Draft Saved' },
+    ],
+    lifecycle: [
+      { value: 'held', label: 'Hold intact' },
+      { value: 'ready_to_list', label: 'Mark ready to list' },
+      { value: 'listed', label: 'Mark listed' },
+      { value: 'sold', label: 'Mark sold' },
+      { value: 'ads_only', label: 'Use for ads only' },
+      { value: 'broken_for_ads', label: 'Mark broken out for ads' },
+      { value: 'archived', label: 'Mark archived' },
+      { value: 'needs_review', label: 'Mark needs review' },
+      { value: 'test_record', label: 'Mark test record' },
+    ],
+  };
+
+  const startTabAction = (action: string, actionTab = tab) => {
+    if (!action) return;
+    setSelectedAction(action);
+    setSelectedActionTab(actionTab);
+    setActionPayload({});
+    setActionError('');
+    setActionSuccess('');
+    if (action === 'generate_description' || action === 'generate_listing_description') {
+      setDescriptionStyle(action === 'generate_listing_description' ? 'ebay' : 'concise');
+    }
+  };
+
+  const performContextAction = async () => {
+    if (!selectedAction) return;
+    setActionLoading(true);
+    setActionError('');
+    setActionSuccess('');
+    try {
+      if (selectedAction === 'rerun_identify') await fetch(`${AG_API}/identify?archive_id=${arch.archive_id}`, { method: 'POST' });
+      else if (selectedAction === 'rerun_issue') await fetch(`${AG_API}/${arch.archive_id}/resolve-issue-info`, { method: 'POST' });
+      else if (selectedAction === 'sync_master') await fetch(`${AG_API}/life-issues/${arch.archive_id}/sync-master`, { method: 'POST' });
+      else if (selectedAction === 'rerun_ads') await fetch(`${AG_API}/${arch.archive_id}/ad-opportunity-check`, { method: 'POST' });
+      else if (selectedAction === 'analyze_ads') await fetch(`${AG_API}/${arch.archive_id}/ads/analyze`, { method: 'POST' });
+      else if (selectedAction === 'research_ad_comps') await fetch(`${AG_API}/${arch.archive_id}/ad-comps/research`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'auto' }) });
+      else if (selectedAction === 'research_magazine_comps') await fetch(`${AG_API}/${arch.archive_id}/comps/research`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'auto' }) });
+      else if (selectedAction === 'calculate_pricing') await fetch(`${AG_API}/${arch.archive_id}/pricing/calculate`, { method: 'POST' });
+      else if (selectedAction === 'refresh_draft') await fetch(`${AG_API}/${arch.archive_id}/create-listing-draft`, { method: 'POST' });
+      else if (selectedAction === 'export_pdf' && EXPORT_URLS.pdf_url) window.open(EXPORT_URLS.pdf_url, '_blank', 'noopener,noreferrer');
+      else if (selectedAction === 'export_pdf_photos' && EXPORT_URLS.pdf_with_images_url) window.open(EXPORT_URLS.pdf_with_images_url, '_blank', 'noopener,noreferrer');
+      else if (selectedAction === 'export_manifest') window.open(`${AG_API}/${arch.archive_id}/photos`, '_blank', 'noopener,noreferrer');
+      else if (selectedAction === 'generate_description' || selectedAction === 'generate_listing_description') {
+        const res = await fetch(`${AG_API}/${arch.archive_id}/description/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ style: descriptionStyle, include_condition: true, include_ad_notes: true, include_pricing_warning: selectedAction === 'generate_listing_description' }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Description generation failed.');
+        setDescriptionSuggestion(data);
+        setActionSuccess('Description suggestion generated.');
+        setActionLoading(false);
+        return;
+      } else if (selectedAction.startsWith('condition_')) {
+        const conditionMap: Record<string, any> = {
+          condition_excellent: { condition_score: 5 },
+          condition_very_good: { condition_score: 4 },
+          condition_good: { condition_score: 3 },
+          condition_fair: { condition_score: 2 },
+          condition_poor: { condition_score: 1 },
+          condition_needs_review: { listing_status: 'needs_review', notes: appendUniqueText(arch.notes || '', 'Needs condition review') },
+          condition_vintage_wear: { condition_score: 3, defects: appendUniqueText(arch.defects || '', 'edge wear; spine wear; cover crease'), notes: appendUniqueText(arch.notes || '', 'Typical age wear for vintage magazine') },
+          condition_more_photos: { listing_status: 'needs_review', notes: appendUniqueText(arch.notes || '', 'Needs spine/back/defect photos') },
+        };
+        await patchArchive(conditionMap[selectedAction] || {}, 'Condition updated.');
+      } else if (selectedAction === 'set_final_price') {
+        const price = toNumberOrNull(window.prompt('Internal final price:', String(arch.final_price || '')));
+        if (price === null) throw new Error('Final price required.');
+        await patchArchive({ final_price: price }, 'Final price set.');
+      } else if (selectedAction === 'use_dtm_price') {
+        await patchArchive({ final_price: toNumberOrNull(d.life_master?.dtmagazine_average), sale_plan: arch.sale_plan || 'Owner accepted DTM guide as temporary internal price.' }, 'Final price set from DTM guide.');
+      } else if (selectedAction === 'clear_final_price') {
+        await patchArchive({ final_price: null }, 'Final price cleared.');
+      } else if (selectedAction === 'mark_needs_comps') {
+        await patchArchive({ sale_plan: 'Needs more comps before final pricing.' }, 'Marked needs comps.');
+      } else if (selectedAction === 'short_to_listing') {
+        await patchArchive({ listing_description: arch.short_description || '' }, 'Listing description updated from short description.');
+      } else if (selectedAction === 'ready_to_list') {
+        await patchArchive({ listing_status: 'ready_to_list' }, 'Marked ready to list.');
+      } else if (selectedAction === 'draft_saved') {
+        await patchArchive({ listing_status: 'draft_saved' }, 'Marked draft saved.');
+      } else if (selectedAction === 'photograph_candidate') {
+        setActionSuccess('Use the candidate upload control in the Ad Opportunities tab.');
+        setActionLoading(false);
+        return;
+      } else if (['candidate_not_found', 'candidate_ignore'].includes(selectedAction)) {
+        const cid = Number(actionPayload.candidate_id || candidateUploadId || d.ad_opportunities?.[0]?.id || 0);
+        if (!cid) throw new Error('Select a candidate first.');
+        await fetch(`${AG_API}/${arch.archive_id}/ad-opportunities/${cid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verification_status: selectedAction === 'candidate_not_found' ? 'not_found' : 'ignored', suggested_action: selectedAction === 'candidate_not_found' ? 'not_found' : 'ignore', user_notes: 'Updated from item detail drawer.' }) });
+      } else if (['held', 'listed', 'sold', 'ads_only', 'broken_for_ads', 'archived', 'needs_review', 'test_record'].includes(selectedAction)) {
+        const lifecycleMap: Record<string, [string, string, string, string]> = {
+          held: ['held', 'not_listed', 'none', 'Held intact'],
+          listed: ['listed', 'listed', 'none', 'Marked listed internally'],
+          sold: ['sold', 'sold', 'none', 'Marked sold internally'],
+          ads_only: ['ads_only', 'not_listed', 'candidate', 'Use for ads only'],
+          broken_for_ads: ['broken_for_ads', 'not_listed', 'ads_removed', 'Broken out for ads'],
+          archived: ['archived', 'not_listed', 'none', 'Archived internally'],
+          needs_review: ['needs_review', 'not_listed', 'none', 'Needs review'],
+          test_record: ['needs_review', 'not_listed', 'none', 'Marked test record'],
+        };
+        const [itemStatus, marketplaceStatus, adBreakoutStatus, notes] = lifecycleMap[selectedAction];
+        await fetch(`${AG_API}/${arch.archive_id}/lifecycle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ item_status: itemStatus, marketplace_status: marketplaceStatus, ad_breakout_status: adBreakoutStatus, notes }) });
+        if (selectedAction === 'test_record') await patchArchive({ notes: appendUniqueText(arch.notes || '', 'TEST RECORD - exclude from business counts') }, 'Marked test record.');
+      }
+      setActionSuccess('Action completed.');
+      setSelectedAction('');
+      await onRefresh();
+    } catch (exc: any) {
+      setActionError(exc?.message || 'Action failed.');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const TABS: { key: DetailTab; label: string }[] = [
@@ -3868,7 +4363,7 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
               {arch.display_title || arch.confirmed_cover_title || arch.cover_subject || `Archive #${arch.archive_id}`}
             </div>
             <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-              #{arch.archive_id} &nbsp;·&nbsp; {arch.issue_date || '—'} &nbsp;·&nbsp; Tier {arch.tier || '—'} &nbsp;·&nbsp; {arch.status || '—'}
+              #{arch.archive_id} &nbsp;·&nbsp; {arch.issue_date || '—'} &nbsp;·&nbsp; Tier {arch.tier || '—'} &nbsp;·&nbsp; {arch.status || '—'} &nbsp;·&nbsp; Final Price: {arch.final_price ? `$${Number(arch.final_price).toFixed(2)}` : '—'}
             </div>
             <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
               {arch.complete && <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, background: '#d1fae5', color: '#065f46', fontWeight: 700 }}>Complete</span>}
@@ -3887,7 +4382,25 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
                 <Download size={11} /> PDF+Photos
               </a>
             )}
-            <button onClick={() => setEditing(e => !e)} style={{ padding: '6px 10px', background: editing ? '#06b6d4' : '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: editing ? '#fff' : '#374151', cursor: 'pointer' }}>
+            <select value={quickAction} onChange={e => { const action = e.target.value; setQuickAction(action); if (action) applyQuickAction(action); }} style={{ padding: '6px 9px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 700, color: '#374151', cursor: 'pointer' }} aria-label="Quick Update">
+              <option value="">Quick Update</option>
+              <option value="needs_review">Mark Needs Review</option>
+              <option value="held">Mark Held / Keep Intact</option>
+              <option value="ready_to_list">Mark Ready to List</option>
+              <option value="draft_saved">Mark Draft Saved</option>
+              <option value="listed">Mark Listed</option>
+              <option value="sold">Mark Sold</option>
+              <option value="ads_only">Mark Use for Ads Only</option>
+              <option value="broken_for_ads">Mark Broken Out for Ads</option>
+              <option value="test_record">Mark Test Record</option>
+              <option value="archived">Mark Archived</option>
+              <option value="request_photos">Request More Photos</option>
+              <option value="rerun_issue">Re-run Issue Resolver</option>
+              <option value="rerun_ads">Re-run Ad Opportunity Prep</option>
+              <option value="refresh_draft">Create / Refresh Listing Draft</option>
+              <option value="export_pdf">Export PDF with Photos</option>
+            </select>
+            <button onClick={() => editing ? setEditing(false) : beginEditing()} style={{ padding: '6px 10px', background: editing ? '#06b6d4' : '#fff', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 600, color: editing ? '#fff' : '#374151', cursor: 'pointer' }}>
               {editing ? 'Editing...' : 'Edit Record'}
             </button>
             <button onClick={onClose} style={{ border: 'none', background: '#f3f4f6', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={16} /></button>
@@ -3902,6 +4415,242 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
             </button>
           ))}
         </div>
+
+        {editMsg && (
+          <div style={{ margin: '10px 20px 0', padding: '8px 10px', borderRadius: 8, fontSize: 11, background: editMsg.startsWith('Error') ? '#fee2e2' : '#d1fae5', color: editMsg.startsWith('Error') ? '#991b1b' : '#065f46', flexShrink: 0 }}>
+            {editMsg}
+          </div>
+        )}
+
+        <div style={{ margin: '10px 20px 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
+          <select value="" onChange={e => startTabAction(e.target.value, tab)} style={{ padding: '7px 10px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 11, fontWeight: 800, color: '#374151', background: '#fff' }}>
+            <option value="">{TABS.find(t => t.key === tab)?.label || 'Tab'} Actions</option>
+            {(tabActionOptions[tab] || []).map(action => <option key={action.value} value={action.value}>{action.label}</option>)}
+          </select>
+          {actionSuccess && <span style={{ fontSize: 11, color: '#166534', background: '#dcfce7', borderRadius: 999, padding: '4px 8px' }}>{actionSuccess}</span>}
+          {actionError && <span style={{ fontSize: 11, color: '#991b1b', background: '#fee2e2', borderRadius: 999, padding: '4px 8px' }}>{actionError}</span>}
+        </div>
+
+        {selectedAction && (
+          <div style={{ margin: '10px 20px 0', border: '1px solid #fbbf24', background: '#fffbeb', borderRadius: 10, padding: 12, display: 'grid', gap: 10, flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#92400e' }}>Perform Action: {selectedAction.replace(/_/g, ' ')}</div>
+                <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>This updates ArchiveForge internal records only. It does not publish or update marketplaces.</div>
+              </div>
+              <button onClick={() => { setSelectedAction(''); setActionPayload({}); setActionError(''); }} style={{ border: '1px solid #fcd34d', background: '#fff', color: '#92400e', borderRadius: 8, padding: '5px 9px', fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+            </div>
+            {(selectedAction === 'generate_description' || selectedAction === 'generate_listing_description') && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={descriptionStyle} onChange={e => setDescriptionStyle(e.target.value)} style={selectStyle}>
+                  <option value="concise">concise</option>
+                  <option value="ebay">eBay listing</option>
+                  <option value="collector">collector catalog</option>
+                  <option value="condition">condition-focused</option>
+                  <option value="ad_opportunity">ad-opportunity-focused</option>
+                  <option value="premium">premium sales copy</option>
+                </select>
+              </div>
+            )}
+            {['candidate_not_found', 'candidate_ignore', 'photograph_candidate'].includes(selectedAction) && (
+              <select value={actionPayload.candidate_id || ''} onChange={e => { setActionPayload(p => ({ ...p, candidate_id: e.target.value })); setCandidateUploadId(e.target.value ? Number(e.target.value) : null); }} style={selectStyle}>
+                <option value="">Select ad candidate</option>
+                {(d.ad_opportunities || []).map((candidate: any) => <option key={candidate.id} value={candidate.id}>{candidate.brand || candidate.category || candidate.product || `Candidate #${candidate.id}`}</option>)}
+              </select>
+            )}
+            {['add_photo', 'replace_front', 'photograph_candidate'].includes(selectedAction) && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={selectedAction === 'photograph_candidate' ? 'ad_page' : photoActionRole} disabled={selectedAction === 'photograph_candidate'} onChange={e => setPhotoActionRole(e.target.value)} style={selectStyle}>
+                  <option value="front">front cover</option><option value="spine">spine</option><option value="back">back cover</option><option value="defect">defect</option><option value="label">mailing label</option><option value="ad_page">ad page</option>
+                </select>
+                <label style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+                  Upload / Take Photo
+                  <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={async e => {
+                    const file = e.target.files?.[0];
+                    e.currentTarget.value = '';
+                    if (!file) return;
+                    const form = new FormData();
+                    form.append('file', file);
+                    if (photoActionRole === 'ad_page' || selectedAction === 'photograph_candidate') {
+                      if (candidateUploadId) form.append('candidate_id', String(candidateUploadId));
+                      await fetch(`${AG_API}/${arch.archive_id}/ad-pages/upload`, { method: 'POST', body: form });
+                    } else {
+                      form.append('role', selectedAction === 'replace_front' ? 'front' : photoActionRole);
+                      await fetch(`${AG_API}/uploads/${arch.archive_id}`, { method: 'POST', body: form });
+                    }
+                    setActionSuccess(selectedAction === 'replace_front' ? 'Previous photo preserved; new photo marked primary.' : 'Photo uploaded.');
+                    await onRefresh();
+                  }} />
+                </label>
+              </div>
+            )}
+            {['mark_primary', 'remove_photo'].includes(selectedAction) && (
+              <select value={actionPayload.photo_id || ''} onChange={e => setActionPayload(p => ({ ...p, photo_id: e.target.value }))} style={selectStyle}>
+                <option value="">Select photo</option>
+                {(['front','spine','back','defects','label'] as const).flatMap(role => ((d.photos || {})[role] || []).map((photo: any) => <option key={`${role}-${photo.photo_id || photo.id}`} value={photo.photo_id || photo.id}>{role}: {photo.filename || `photo #${photo.photo_id || photo.id}`}</option>))}
+              </select>
+            )}
+            {descriptionSuggestion && (
+              <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 8, padding: 10, display: 'grid', gap: 6 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: '#92400e' }}>AI Description Suggestions</div>
+                <div style={{ fontSize: 11 }}><strong>Title:</strong> {descriptionSuggestion.title}</div>
+                <div style={{ fontSize: 11 }}><strong>Short:</strong> {descriptionSuggestion.short_description}</div>
+                <textarea readOnly value={descriptionSuggestion.listing_description || ''} rows={4} style={{ ...inputStyle, fontFamily: 'inherit' }} />
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button onClick={() => patchArchive({ short_description: descriptionSuggestion.short_description }, 'Short description updated.')} style={{ padding: '5px 8px', borderRadius: 7, border: '1px solid #86efac', background: '#f0fdf4', color: '#166534', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>Use as Short Description</button>
+                  <button onClick={() => patchArchive({ listing_title: descriptionSuggestion.title, listing_description: descriptionSuggestion.listing_description }, 'Listing description updated.')} style={{ padding: '5px 8px', borderRadius: 7, border: '1px solid #86efac', background: '#f0fdf4', color: '#166534', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>Use as Listing Description</button>
+                  <button onClick={() => navigator.clipboard?.writeText(descriptionSuggestion.listing_description || '')} style={{ padding: '5px 8px', borderRadius: 7, border: '1px solid #d1d5db', background: '#fff', color: '#374151', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>Copy</button>
+                </div>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {['mark_primary', 'remove_photo'].includes(selectedAction) ? (
+                <button disabled={actionLoading || !actionPayload.photo_id} onClick={async () => {
+                  setActionLoading(true); setActionError(''); setActionSuccess('');
+                  try {
+                    const url = selectedAction === 'remove_photo' ? `${AG_API}/${arch.archive_id}/photos/${actionPayload.photo_id}/remove` : `${AG_API}/${arch.archive_id}/photos/${actionPayload.photo_id}`;
+                    await fetch(url, { method: selectedAction === 'remove_photo' ? 'POST' : 'PATCH', headers: selectedAction === 'remove_photo' ? undefined : { 'Content-Type': 'application/json' }, body: selectedAction === 'remove_photo' ? undefined : JSON.stringify({ is_primary: true }) });
+                    setActionSuccess(selectedAction === 'remove_photo' ? 'Photo hidden from active record. Original file preserved.' : 'Photo marked primary.');
+                    setSelectedAction('');
+                    await onRefresh();
+                  } catch (exc: any) { setActionError(exc?.message || 'Photo action failed.'); }
+                  setActionLoading(false);
+                }} style={{ padding: '7px 12px', borderRadius: 8, border: 'none', background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 900, cursor: actionLoading ? 'wait' : 'pointer' }}>Perform Action</button>
+              ) : (
+                <button disabled={actionLoading || ['add_photo','replace_front'].includes(selectedAction)} onClick={performContextAction} style={{ padding: '7px 12px', borderRadius: 8, border: 'none', background: '#f59e0b', color: '#fff', fontSize: 11, fontWeight: 900, cursor: actionLoading ? 'wait' : 'pointer' }}>{actionLoading ? 'Working...' : 'Perform Action'}</button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {editing && (
+          <div style={{ margin: '12px 20px 0', border: '1px solid #06b6d4', borderRadius: 12, background: '#f8feff', padding: 14, flexShrink: 0, maxHeight: '44vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 900, color: '#164e63' }}>Edit Record</div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Internal ArchiveForge updates only. No marketplace publishing or write APIs.</div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={saveEdit} disabled={saving} style={{ padding: '7px 14px', background: '#06b6d4', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: saving ? 'wait' : 'pointer' }}>{saving ? 'Saving...' : 'Save Changes'}</button>
+                <button onClick={() => { setEditing(false); setEditData({}); setEditMsg(''); }} style={{ padding: '7px 14px', background: '#fff', color: '#64748b', border: '1px solid #cbd5e1', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+              </div>
+            </div>
+
+            {suggestedUpdates.length > 0 && (
+              <div style={{ background: '#fff', border: '1px solid #bae6fd', borderRadius: 10, padding: 10, marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: '#155e75', marginBottom: 6 }}>Suggested Updates</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {suggestedUpdates.map(s => <span key={s} style={{ padding: '4px 7px', borderRadius: 999, background: '#ecfeff', color: '#155e75', fontSize: 10, fontWeight: 700 }}>{s}</span>)}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+              <section style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#374151', marginBottom: 10 }}>Basic Info</div>
+                <label style={{ display: 'block', marginBottom: 8 }}><div style={editLabelStyle}>Display title</div><input value={editData.display_title ?? ''} onChange={e => setEditData(ed => ({ ...ed, display_title: e.target.value }))} style={inputStyle} /></label>
+                <label style={{ display: 'block', marginBottom: 8 }}><div style={editLabelStyle}>Short description</div><textarea value={editData.short_description ?? ''} onChange={e => setEditData(ed => ({ ...ed, short_description: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <label><div style={editLabelStyle}>Issue date override</div><input value={editData.issue_date ?? ''} onChange={e => setEditData(ed => ({ ...ed, issue_date: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Cover subject</div><input value={editData.cover_subject ?? ''} onChange={e => setEditData(ed => ({ ...ed, cover_subject: e.target.value }))} style={inputStyle} /></label>
+                </div>
+                <label style={{ display: 'block', marginTop: 8 }}><div style={editLabelStyle}>Notes</div><textarea value={editData.notes ?? ''} onChange={e => setEditData(ed => ({ ...ed, notes: e.target.value }))} rows={3} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></label>
+              </section>
+
+              <section style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#374151', marginBottom: 10 }}>Condition</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <label><div style={editLabelStyle}>Condition score</div><select value={String(editData.condition_score ?? '')} onChange={e => setEditData(ed => ({ ...ed, condition_score: e.target.value }))} style={selectStyle}>{CONDITION_SCORE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
+                  <label><div style={editLabelStyle}>Completeness</div><select value={editData.completeness_status || 'unknown'} onChange={e => {
+                    const val = e.target.value;
+                    setEditData(ed => ({ ...ed, completeness_status: val, is_complete: val === 'complete', defects: ['missing_pages','missing_cover','loose_cover'].includes(val) ? appendUniqueText(ed.defects || '', val.replace('_', ' ')) : ed.defects }));
+                  }} style={selectStyle}>
+                    <option value="complete">Complete</option><option value="missing_pages">Missing pages</option><option value="missing_cover">Missing cover</option><option value="loose_cover">Loose cover</option><option value="unknown">Unknown</option>
+                  </select></label>
+                  <label><div style={editLabelStyle}>Address label</div><select value={editData.address_label_status || 'unknown'} onChange={e => {
+                    const val = e.target.value;
+                    setEditData(ed => ({ ...ed, address_label_status: val, has_address_label: val === 'present', defects: val === 'removed_damage' ? appendUniqueText(ed.defects || '', 'address label removed/damage') : ed.defects }));
+                  }} style={selectStyle}>
+                    <option value="none">No label</option><option value="present">Label present</option><option value="removed_damage">Label removed/damage</option><option value="unknown">Unknown</option>
+                  </select></label>
+                  <label><div style={editLabelStyle}>Tier</div><select value={editData.tier || ''} onChange={e => setEditData(ed => ({ ...ed, tier: e.target.value }))} style={selectStyle}><option value="">Unknown</option><option value="A">A</option><option value="B">B</option><option value="C">C</option></select></label>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <div style={editLabelStyle}>Common defects</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 4 }}>
+                    {COMMON_DEFECTS.map(defect => {
+                      const checked = String(editData.defects || '').toLowerCase().includes(defect.toLowerCase());
+                      return <label key={defect} style={{ fontSize: 10, color: '#374151', display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={checked} onChange={e => updateDefect(defect, e.target.checked)} /> {defect}</label>;
+                    })}
+                  </div>
+                </div>
+                <label style={{ display: 'block', marginTop: 8 }}><div style={editLabelStyle}>Defects / condition notes</div><textarea value={editData.defects ?? ''} onChange={e => setEditData(ed => ({ ...ed, defects: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></label>
+              </section>
+
+              <section style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#374151', marginBottom: 10 }}>Pricing</div>
+                <label style={{ display: 'block', marginBottom: 8 }}><div style={editLabelStyle}>Pricing action</div><select value={pricingAction} onChange={e => handlePricingAction(e.target.value)} style={selectStyle}>
+                  <option value="">Choose pricing action</option>
+                  <option value="guide_only">Keep reference guide price only</option>
+                  <option value="rough">Set final price from rough estimate</option>
+                  <option value="dtm">Set final price from DTM average</option>
+                  <option value="manual_comp">Set final price from manual comp</option>
+                  <option value="dealer">Set final price from dealer asking price</option>
+                  <option value="needs_comps">Mark needs comps</option>
+                  <option value="clear">Clear final price</option>
+                  <option value="manual">Owner manual final price</option>
+                </select></label>
+                <div style={{ padding: '6px 8px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 7, color: '#9a3412', fontSize: 10, marginBottom: 8 }}>
+                  DTM and dealer asking prices are not sold comps. Final price means owner/operator accepted.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  <label><div style={editLabelStyle}>Comp min</div><input type="number" step="0.01" value={editData.rough_comp_min ?? ''} onChange={e => setEditData(ed => ({ ...ed, rough_comp_min: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Comp max</div><input type="number" step="0.01" value={editData.rough_comp_max ?? ''} onChange={e => setEditData(ed => ({ ...ed, rough_comp_max: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Final price</div><input type="number" step="0.01" value={editData.final_price ?? ''} onChange={e => setEditData(ed => ({ ...ed, final_price: e.target.value }))} style={inputStyle} /></label>
+                </div>
+                <label style={{ display: 'block', marginTop: 8 }}><div style={editLabelStyle}>Pricing notes</div><textarea value={editData.pricing_notes ?? ''} onChange={e => setEditData(ed => ({ ...ed, pricing_notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></label>
+              </section>
+
+              <section style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#374151', marginBottom: 10 }}>Inventory / Listing</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <label><div style={editLabelStyle}>Source box</div><input value={editData.source_box_code ?? ''} onChange={e => setEditData(ed => ({ ...ed, source_box_code: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Destination box</div><input value={editData.processed_box_code ?? ''} onChange={e => setEditData(ed => ({ ...ed, processed_box_code: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Archive location</div><input value={editData.archive_location ?? ''} onChange={e => setEditData(ed => ({ ...ed, archive_location: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Listing status</div><select value={editData.listing_status || 'no_listing'} onChange={e => setEditData(ed => ({ ...ed, listing_status: e.target.value }))} style={selectStyle}>{LISTING_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+                </div>
+                <label style={{ display: 'block', marginTop: 8 }}><div style={editLabelStyle}>Sale plan</div><select value={editData.sale_plan || ''} onChange={e => {
+                  const val = e.target.value;
+                  setEditData(ed => ({ ...ed, sale_plan: val, item_status: val === 'Use for ad research only' ? 'ads_only' : val === 'Break out for ads' ? 'broken_for_ads' : val === 'Hold intact' ? 'held' : ed.item_status, ad_breakout_status: val === 'Break out for ads' ? 'in_progress' : val === 'Use for ad research only' ? 'candidate' : ed.ad_breakout_status }));
+                }} style={selectStyle}>
+                  <option value="">Select sale plan</option><option>List whole magazine</option><option>Hold intact</option><option>Use for ad research only</option><option>Break out for ads</option><option>Bundle with similar issues</option><option>Keep for collection/reference</option><option>Needs more comps</option><option>Needs more photos</option><option>Do not sell</option><option>Other/manual</option>
+                </select></label>
+              </section>
+
+              <section style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#374151', marginBottom: 10 }}>Lifecycle / Disposition</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                  <label><div style={editLabelStyle}>Item status</div><select value={editData.item_status || 'inventory'} onChange={e => setEditData(ed => ({ ...ed, item_status: e.target.value }))} style={selectStyle}>{ITEM_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+                  <label><div style={editLabelStyle}>Marketplace status</div><select value={editData.marketplace_status || 'not_listed'} onChange={e => setEditData(ed => ({ ...ed, marketplace_status: e.target.value }))} style={selectStyle}>{MARKETPLACE_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+                  <label><div style={editLabelStyle}>Ad breakout status</div><select value={editData.ad_breakout_status || 'none'} onChange={e => setEditData(ed => ({ ...ed, ad_breakout_status: e.target.value }))} style={selectStyle}>{AD_BREAKOUT_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}</select></label>
+                  <label><div style={editLabelStyle}>Sold price</div><input type="number" step="0.01" value={editData.sold_price ?? ''} onChange={e => setEditData(ed => ({ ...ed, sold_price: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Sold date</div><input type="date" value={editData.sold_date ?? ''} onChange={e => setEditData(ed => ({ ...ed, sold_date: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Sold platform</div><input value={editData.sold_platform ?? ''} onChange={e => setEditData(ed => ({ ...ed, sold_platform: e.target.value }))} style={inputStyle} /></label>
+                </div>
+                <label style={{ display: 'block', marginTop: 8 }}><div style={editLabelStyle}>Disposition notes</div><textarea value={editData.disposition_notes ?? ''} onChange={e => setEditData(ed => ({ ...ed, disposition_notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></label>
+              </section>
+
+              <section style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 10, padding: 12, gridColumn: '1/-1' }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: '#374151', marginBottom: 10 }}>Advanced Edit</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <label><div style={editLabelStyle}>Listing title</div><input value={editData.listing_title ?? ''} onChange={e => setEditData(ed => ({ ...ed, listing_title: e.target.value }))} style={inputStyle} /></label>
+                  <label><div style={editLabelStyle}>Manual eBay handoff notes</div><input value={editData.disposition_notes ?? ''} onChange={e => setEditData(ed => ({ ...ed, disposition_notes: e.target.value }))} style={inputStyle} /></label>
+                </div>
+                <label style={{ display: 'block', marginTop: 8 }}><div style={editLabelStyle}>Listing description</div><textarea value={editData.listing_description ?? ''} onChange={e => setEditData(ed => ({ ...ed, listing_description: e.target.value }))} rows={4} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} /></label>
+              </section>
+            </div>
+          </div>
+        )}
 
         {/* Tab content */}
         <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
@@ -4064,6 +4813,11 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
                       <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 10, background: opp.verification_status === 'verified_in_copy' ? '#d1fae5' : '#f3f4f6', color: opp.verification_status === 'verified_in_copy' ? '#065f46' : '#888' }}>{opp.verification_status || 'unknown'}</span>
                       {opp.estimated_low && opp.estimated_high && <span style={{ color: '#666' }}>${opp.estimated_low}–${opp.estimated_high}</span>}
                     </div>
+                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
+                      <button onClick={() => { setTab('ads'); startTabAction('photograph_candidate', 'ads'); setActionPayload({ candidate_id: opp.id }); setCandidateUploadId(opp.id); }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid #06b6d4', background: '#ecfeff', color: '#155e75', fontSize: 10, fontWeight: 800, cursor: 'pointer' }}>Photograph</button>
+                      <button disabled={opp.verification_status === 'verified_in_copy'} onClick={async () => { await fetch(`${AG_API}/${arch.archive_id}/ad-opportunities/${opp.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verification_status: 'not_found', suggested_action: 'not_found', user_notes: 'Updated from item detail drawer.' }) }); await onRefresh(); }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Mark not found</button>
+                      <button disabled={opp.verification_status === 'verified_in_copy'} onClick={async () => { await fetch(`${AG_API}/${arch.archive_id}/ad-opportunities/${opp.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verification_status: 'ignored', suggested_action: 'ignore', user_notes: 'Updated from item detail drawer.' }) }); await onRefresh(); }} style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}>Ignore</button>
+                    </div>
                   </div>
                 ))
               ) : (
@@ -4103,6 +4857,12 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
                     ${d.life_master.dtmagazine_low}–${d.life_master.dtmagazine_high} (avg ${d.life_master.dtmagazine_average})
                   </div>
                 )}
+                <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button onClick={() => acceptSuggestedFinalPrice(d.pricing_summary?.recommended_price || d.life_master?.dtmagazine_average || arch.rough_comp_max || arch.rough_comp_min, d.pricing_summary?.pricing_type || 'reference value')} style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #86efac', background: '#f0fdf4', color: '#166534', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+                    Accept as Final Price
+                  </button>
+                  <span style={{ fontSize: 10, color: '#92400e' }}>Owner/operator acceptance only. Reference guide and dealer values are not sold comps.</span>
+                </div>
               </div>
               {(d.comps || []).length > 0 && (
                 <div style={{ background: '#fff', border: '1px solid #e5e2dc', borderRadius: 12, padding: 14 }}>
@@ -4167,7 +4927,7 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
                 <div style={{ fontSize: 11, fontWeight: 800, color: '#374151', marginBottom: 8 }}>Quick Actions</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 11 }}>
                   <button disabled={lifecycleOp} onClick={() => doLifecycle('held', 'draft', 'none', 'Held intact')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Hold Intact</button>
-                  <button disabled={lifecycleOp} onClick={() => doLifecycle('listed', 'draft', 'none', 'Marked as listed')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Mark Listed</button>
+                  <button disabled={lifecycleOp} onClick={() => doLifecycle('listed', 'listed', 'none', 'Marked as listed internally')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Mark Listed</button>
                   <button disabled={lifecycleOp} onClick={() => doLifecycle('sold', 'sold', 'none', 'Marked sold')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fff', color: '#991b1b', cursor: 'pointer', fontSize: 11 }}>Mark Sold</button>
                   <button disabled={lifecycleOp} onClick={() => doLifecycle('broken_for_ads', 'not_listed', 'in_progress', 'Broken out for ads')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Broken for Ads</button>
                   <button disabled={lifecycleOp} onClick={() => doLifecycle('ads_only', 'not_listed', 'ads_listed', 'Used for ads only')} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e2dc', background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 11 }}>Ads Only</button>
@@ -4177,33 +4937,6 @@ function ItemDetailDrawer({ detailItem, onClose, onRefresh }: { detailItem: any;
                   These actions update internal ArchiveForge status only — they do not publish or update any marketplace.
                 </div>
               </div>
-              {editing && (
-                <div style={{ background: '#fff', border: '1px solid #06b6d4', borderRadius: 12, padding: 14 }}>
-                  <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', marginBottom: 10 }}>Edit Record</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 11 }}>
-                    <EditField label="Display Title" field="display_title" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Issue Date" field="issue_date" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Condition (1-5)" field="condition_score" arch={arch} editData={editData} setEditData={setEditData} type="number" />
-                    <EditField label="Tier (A/B/C)" field="tier" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Defects" field="defects" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Comp Min ($)" field="rough_comp_min" arch={arch} editData={editData} setEditData={setEditData} type="number" />
-                    <EditField label="Comp Max ($)" field="rough_comp_max" arch={arch} editData={editData} setEditData={setEditData} type="number" />
-                    <EditField label="Final Price ($)" field="final_price" arch={arch} editData={editData} setEditData={setEditData} type="number" />
-                    <EditField label="Source Box" field="source_box_code" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Dest Box" field="processed_box_code" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Location" field="archive_location" arch={arch} editData={editData} setEditData={setEditData} />
-                    <EditField label="Sale Plan" field="sale_plan" arch={arch} editData={editData} setEditData={setEditData} />
-                    <div style={{ gridColumn: '1/-1' }}>
-                      <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>Notes</div>
-                      <textarea value={editData.notes ?? arch.notes ?? ''} onChange={e => setEditData(ed => ({ ...ed, notes: e.target.value }))} rows={2} style={{ width: '100%', padding: 6, border: '1px solid #e5e2dc', borderRadius: 6, fontSize: 11, resize: 'vertical', fontFamily: 'inherit' }} />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button onClick={saveEdit} disabled={saving} style={{ padding: '6px 14px', background: '#06b6d4', border: 'none', borderRadius: 8, color: '#fff', fontSize: 12, fontWeight: 600, cursor: saving ? 'wait' : 'pointer' }}>{saving ? 'Saving...' : 'Save Changes'}</button>
-                    <button onClick={() => setEditing(false)} style={{ padding: '6px 14px', background: '#fff', border: '1px solid #e5e2dc', borderRadius: 8, color: '#888', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
