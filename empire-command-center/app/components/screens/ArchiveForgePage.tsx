@@ -1195,8 +1195,30 @@ function PhotoSection({
   };
 
 	  const byRole = (role: string) => photos.filter(p => p.role === role);
-	  const photoUrl = (photo: PhotoRecord) => `${AG_API}/photo/${photo.id}`;
-	  const totalCount = photos.length;
+  // photoUrl: prefer scoped route (/api/v1/archiveforge/{id}/photos/{pid}/image) over legacy (/api/v1/archiveforge/photo/{pid})
+  // Both work, but scoped is the canonical path with proper Cloudflare routing
+  // The API returns absolute paths like "/api/v1/archiveforge/42/photos/27/image" — strip /api/v1 prefix before prepending AG_API
+  const photoUrl = (photo: PhotoRecord) => {
+    const id = photo.id || photo.photo_id;
+    const rawUrl = (photo as any).url || (photo as any).photo_url;
+    if (rawUrl && rawUrl.startsWith('/api/v1/archiveforge/')) {
+      return `${AG_API}${rawUrl.replace('/api/v1/archiveforge/', '/archiveforge/')}`;
+    }
+    return `${AG_API}/photo/${id}`;
+  };
+  const photoImageUrl = (photo: PhotoRecord) => {
+    const id = photo.id || photo.photo_id;
+    const archive = photo.archive_id || archiveId;
+    if (archive) return `${AG_API}/${archive}/photos/${id}/image`;
+    return `${AG_API}/photo/${id}`;
+  };
+  const photoThumbUrl = (photo: PhotoRecord) => {
+    const id = photo.id || photo.photo_id;
+    const archive = photo.archive_id || archiveId;
+    if (archive) return `${AG_API}/${archive}/photos/${id}/thumbnail`;
+    return `${AG_API}/photo/${id}`;
+  };
+  const totalCount = photos.length;
 	  const hasFrontPhoto = byRole('front').length > 0;
 	  const latestFrontPhoto = [...byRole('front')].sort((a, b) => {
 	    const at = new Date(a.created_at || '').getTime() || 0;
@@ -1358,8 +1380,9 @@ function PhotoSection({
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {rolePhotos.map(photo => (
                       <div key={photo.id} style={{ position: 'relative' }}>
-                        <img src={photoUrl(photo)} alt={role.label}
-                          style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc' }} />
+                        <img src={photoThumbUrl(photo)} alt={role.label}
+                          style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc' }}
+                          onError={e => { (e.target as HTMLImageElement).src = photoUrl(photo); }} />
                         <button onClick={() => handleDelete(photo.id)}
                           style={{ position: 'absolute', top: -5, right: -5, width: 16, height: 16, background: '#ef4444', color: '#fff', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           ×
@@ -1481,7 +1504,7 @@ function ConfirmMatchSection({
     label: 'Your uploaded magazine',
     source: 'uploaded_front_cover',
     photo_id: uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id,
-    photo_url: uploadedFrontPhoto.photo_url || `${AG_API}/photo/${uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id}`,
+    photo_url: uploadedFrontPhoto.photo_url || `${AG_API}/${archiveId}/photos/${uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id}/image`,
     thumbnail_url: uploadedFrontPhoto.thumbnail_url || `${AG_API}/${archiveId}/photos/${uploadedFrontPhoto.id || uploadedFrontPhoto.photo_id}/thumbnail`,
     file_size_bytes: uploadedFrontPhoto.file_size_bytes || uploadedFrontPhoto.file_size || 0,
     mime_type: uploadedFrontPhoto.mime_type || '',
@@ -3687,7 +3710,7 @@ function InventorySection() {
                       if (col.key === 'thumbnail_url') {
                         display = item.thumbnail_url ? (
                           <button onClick={() => openDetail(item)} title="Open Record" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}>
-                            <img src={`${API}${item.thumbnail_url.replace('/api/v1', '')}`} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
+                            <img src={photoThumbUrl(item as any)} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
                           </button>
                         ) : <button onClick={() => openDetail(item)} title="Open Record" style={{ border: '1px dashed #d1d5db', background: '#f9fafb', borderRadius: 6, width: 54, height: 40, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>No photo</button>;
                       }
