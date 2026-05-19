@@ -1877,12 +1877,16 @@ async def get_ia_ocr_preview(ia_id: str, chars: int = Query(2000, ge=200, le=100
             if any(f.get("name", "").endswith("_djvu.txt") for f in files): available.append("djvu.txt")
             if any(f.get("name", "").endswith("_abbyy.gz") for f in files): available.append("abbyy.gz")
             if any(f.get("name", "").endswith("_djvu.xml") for f in files): available.append("djvu.xml")
-        raise HTTPException(
-            503,
-            f"IA OCR unavailable for '{ia_id}' (source: {ocr_source}). "
-            f"Available OCR formats on IA: {available or 'none yet processed'}. "
-            "Upload your own ad-page photos for this issue.",
-        )
+        return {
+            "ia_id": ia_id,
+            "internet_archive_url": _internet_archive_url(ia_id),
+            "ocr_preview": "",
+            "ocr_total_chars": 0,
+            "ocr_source": ocr_source if ocr_source else "unavailable",
+            "available_ocr_formats": available,
+            "truncated": False,
+            "fallback_note": f"OCR unavailable from IA ({ocr_source}). Available OCR formats on IA: {available or ['none yet processed']}. Upload your own ad-page photos for this issue.",
+        }
     return {
         "ia_id": ia_id,
         "internet_archive_url": _internet_archive_url(ia_id),
