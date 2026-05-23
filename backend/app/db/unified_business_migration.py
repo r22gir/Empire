@@ -15,6 +15,7 @@ import os
 import logging
 from datetime import datetime
 from pathlib import Path
+from app.services.data_paths import quotes_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ DB_PATH = os.getenv(
     str(Path(__file__).resolve().parent.parent.parent / "data" / "empire.db")
 )
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+QUOTES_DIR = str(quotes_data_dir())
 
 
 def get_conn():

@@ -18,6 +18,7 @@ from reportlab.platypus import (
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 from app.services.quote_service import get_quote
+from app.services.data_paths import quote_pdf_dir
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +297,7 @@ def generate_quote_pdf(quote_id: str) -> bytes:
     buf.close()
 
     # Save PDF to disk
-    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+    pdf_dir = str(quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote.get('quote_number', quote_id)}.pdf")
     with open(pdf_path, "wb") as f:

@@ -13,6 +13,12 @@ from datetime import datetime, date, timedelta
 
 from app.db.database import get_db, dict_row, dict_rows
 from app.middleware.rate_limiter import limiter
+from app.services.pricing import (
+    PRICING_ENGINE_VERSION,
+    build_design_invoice_source,
+    build_quote_invoice_source,
+    scale_invoice_source,
+)
 
 router = APIRouter(prefix="/finance", tags=["finance"])
 
@@ -180,6 +186,12 @@ def _enrich_invoice(inv: dict) -> dict:
     """Parse JSON fields in an invoice row."""
     if inv:
         inv["line_items"] = json.loads(inv["line_items"]) if inv.get("line_items") else []
+        for key in ("pricing_snapshot_json", "tax_policy_json"):
+            if inv.get(key):
+                try:
+                    inv[key] = json.loads(inv[key])
+                except (TypeError, ValueError):
+                    pass
         customer_name = inv.get("customer_name") or inv.get("client_name")
         if customer_name:
             inv["customer_name"] = customer_name
@@ -522,6 +534,9 @@ def _ensure_finance_extensions(conn):
         "source_type": "TEXT",
         "source_id": "TEXT",
         "invoice_stage": "TEXT",
+        "pricing_snapshot_json": "TEXT",
+        "tax_policy_json": "TEXT",
+        "pricing_engine_version": "TEXT",
     }
     for col, ctype in inv_cols.items():
         parts = ctype.split(" DEFAULT ")
@@ -804,36 +819,7 @@ def _load_composer_source(conn, source_type: str, source_id: str) -> dict:
         if not quote_file.exists():
             raise HTTPException(status_code=404, detail=f"Quote file not found: {source_id}")
         quote = json.loads(quote_file.read_text())
-        line_items = _quote_line_items(quote)
-        subtotal = _to_float(quote.get("subtotal")) or sum(item["total"] for item in line_items)
-        tax_rate = _to_float(quote.get("tax_rate"), 0.06)
-        discount_amount = _to_float(quote.get("discount_amount"))
-        discount_type = quote.get("discount_type", "dollar") or "dollar"
-        tax_amount = _to_float(quote.get("tax_amount"), round(subtotal * tax_rate, 2))
-        total = _to_float(quote.get("total")) or round(
-            subtotal + tax_amount - (round(subtotal * discount_amount / 100, 2) if discount_type == "percent" else discount_amount),
-            2,
-        )
-        return {
-            "source_type": "quote",
-            "source_id": source_id,
-            "quote_id": source_id,
-            "job_id": None,
-            "customer_name": quote.get("customer_name", ""),
-            "customer_email": quote.get("customer_email", ""),
-            "customer_phone": quote.get("customer_phone", ""),
-            "customer_address": quote.get("customer_address", ""),
-            "business_unit": _quote_business_key(quote),
-            "subtotal": subtotal,
-            "tax_rate": tax_rate,
-            "discount_amount": discount_amount,
-            "discount_type": discount_type,
-            "total": total,
-            "deposit_percent": _to_float((quote.get("deposit") or {}).get("deposit_percent"), 50),
-            "line_items": line_items,
-            "notes": quote.get("notes") or quote.get("project_description") or "",
-            "terms": quote.get("terms") or "Net 30",
-        }
+        return build_quote_invoice_source(quote, source_id)
 
     if source_type == "job":
         job = dict_row(conn.execute("SELECT * FROM jobs WHERE id = ?", (source_id,)).fetchone())
@@ -881,36 +867,7 @@ def _load_composer_source(conn, source_type: str, source_id: str) -> dict:
         if not design_file.exists():
             raise HTTPException(status_code=404, detail=f"Design file not found: {source_id}")
         design = json.loads(design_file.read_text())
-        line_items = _design_line_items(design)
-        subtotal = _to_float(design.get("subtotal")) or sum(item["total"] for item in line_items)
-        tax_rate = _to_float(design.get("tax_rate"))
-        discount_amount = _to_float(design.get("discount_amount"))
-        discount_type = design.get("discount_type", "dollar") or "dollar"
-        tax_amount = _to_float(design.get("tax_amount"), round(subtotal * tax_rate, 2))
-        total = _to_float(design.get("total")) or round(
-            subtotal + tax_amount - (round(subtotal * discount_amount / 100, 2) if discount_type == "percent" else discount_amount),
-            2,
-        )
-        return {
-            "source_type": "design",
-            "source_id": source_id,
-            "quote_id": source_id,
-            "job_id": None,
-            "customer_name": design.get("customer_name", ""),
-            "customer_email": design.get("customer_email", ""),
-            "customer_phone": design.get("customer_phone", ""),
-            "customer_address": design.get("customer_address", ""),
-            "business_unit": "woodcraft",
-            "subtotal": subtotal,
-            "tax_rate": tax_rate,
-            "discount_amount": discount_amount,
-            "discount_type": discount_type,
-            "total": total,
-            "deposit_percent": _to_float(design.get("deposit_percent"), 50),
-            "line_items": line_items,
-            "notes": design.get("notes") or design.get("description") or "",
-            "terms": design.get("terms") or "Net 30",
-        }
+        return build_design_invoice_source(design, source_id)
 
     raise HTTPException(status_code=400, detail="source_type must be quote, job, or design")
 
@@ -952,27 +909,18 @@ def _compose_stage_invoice(conn, source: dict, request: InvoiceComposeRequest) -
     if percent <= 0 or percent > 100:
         raise HTTPException(status_code=400, detail="Invoice percent must be greater than 0 and no more than 100")
 
-    factor = percent / 100
-    subtotal = round(_to_float(source["subtotal"]) * factor, 2)
-    tax_rate = _to_float(source["tax_rate"])
-    tax_amount = round(subtotal * tax_rate, 2)
+    scaled_source = scale_invoice_source(source, percent, stage=stage)
+    subtotal = scaled_source["subtotal"]
+    tax_rate = _to_float(scaled_source["tax_rate"])
+    tax_amount = scaled_source["tax_amount"]
     discount_type = source.get("discount_type") or "dollar"
     source_discount = _to_float(source.get("discount_amount"))
-    discount_amount = source_discount if discount_type == "percent" else round(source_discount * factor, 2)
-    applied_discount = round(subtotal * discount_amount / 100, 2) if discount_type == "percent" else discount_amount
-    total = round(subtotal + tax_amount - applied_discount, 2)
+    discount_amount = source_discount if discount_type == "percent" else round(source_discount * (percent / 100), 2)
+    total = scaled_source["total"]
     if request.amount is not None:
         total = round(_to_float(request.amount), 2)
 
-    line_items = []
-    for item in source["line_items"]:
-        item_total = round(_line_amount(item) * factor, 2)
-        line_items.append({
-            "description": f"{stage.title()} {percent:g}% - {item.get('description', 'Item')}",
-            "quantity": item.get("quantity", 1),
-            "unit_price": item_total,
-            "total": item_total,
-        })
+    line_items = scaled_source["line_items"]
 
     default_terms = {
         "deposit": "Deposit due on receipt",
@@ -994,6 +942,8 @@ def _compose_stage_invoice(conn, source: dict, request: InvoiceComposeRequest) -
         "discount_type": discount_type,
         "total": total,
         "line_items": line_items,
+        "tax_policy": scaled_source.get("tax_policy"),
+        "pricing_snapshot_json": scaled_source.get("pricing_snapshot_json"),
         "notes": notes,
         "terms": request.terms or source.get("terms") or default_terms,
         "due_date": request.due_date or (date.today() + timedelta(days=30)).isoformat(),
@@ -1540,12 +1490,14 @@ def compose_invoice(request: Request, payload: InvoiceComposeRequest):
                 tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
                 client_name, client_email, client_phone, client_address, business_unit,
                 deposit_required, deposit_received, discount_amount, discount_type,
-                invoice_date, payment_status, source_type, source_id, invoice_stage)
+                invoice_date, payment_status, source_type, source_id, invoice_stage,
+                pricing_snapshot_json, tax_policy_json, pricing_engine_version)
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, 'draft', ?, ?,
                        ?, ?, 0, ?, ?, ?, ?, ?,
                        ?, ?, ?, ?, ?,
                        ?, 0, ?, ?,
-                       ?, 'unpaid', ?, ?, ?)""",
+                       ?, 'unpaid', ?, ?, ?,
+                       ?, ?, ?)""",
             (
                 inv_number,
                 customer_id,
@@ -1572,6 +1524,9 @@ def compose_invoice(request: Request, payload: InvoiceComposeRequest):
                 source["source_type"],
                 source["source_id"],
                 composed["stage"],
+                json.dumps(composed.get("pricing_snapshot_json"), default=str) if composed.get("pricing_snapshot_json") else None,
+                json.dumps(composed.get("tax_policy"), default=str) if composed.get("tax_policy") else None,
+                PRICING_ENGINE_VERSION,
             ),
         )
 
@@ -1868,90 +1823,25 @@ def create_invoice_from_quote(request: Request, quote_id: str):
     with open(quote_file) as f:
         quote = json.load(f)
 
-    # Extract line items from tiers (furniture quotes), rooms/windows (drapery), or flat line_items
-    line_items = []
-    selected_tier = quote.get("selected_tier") or "A"  # Default to tier A if none selected
-
-    # Strategy 1: Tiered pricing (furniture/upholstery quotes)
-    tiers = quote.get("tiers") or {}
-    tier_data = tiers.get(selected_tier) or tiers.get("A") or tiers.get("B") or tiers.get("C")
-    if tier_data and tier_data.get("items"):
-        for tier_item in tier_data["items"]:
-            for li in tier_item.get("line_items", []):
-                line_items.append({
-                    "description": li.get("description", "Item"),
-                    "quantity": li.get("quantity", 1),
-                    "unit_price": li.get("amount", 0),
-                    "total": li.get("amount", 0),
-                })
-
-    # Strategy 2: Rooms with windows (drapery quotes)
-    if not line_items:
-        for room in (quote.get("rooms") or []):
-            room_name = room.get("name", "Room")
-            for window in room.get("windows", []):
-                item_total = window.get("total") or window.get("price") or 0
-                line_items.append({
-                    "description": f"{room_name} - {window.get('name', 'Window')} - {window.get('treatment_type', 'Treatment')}",
-                    "quantity": 1,
-                    "unit_price": item_total,
-                    "total": item_total,
-                })
-
-    # Strategy 3: Flat line_items array
-    if not line_items:
-        for item in (quote.get("line_items") or []):
-            qty = item.get("quantity", 1)
-            rate = item.get("rate", item.get("unit_price", 0))
-            amt = item.get("amount", qty * rate)
-            line_items.append({
-                "description": item.get("description", "Item"),
-                "quantity": qty,
-                "unit_price": rate,
-                "total": amt,
-            })
-
-    # Calculate subtotal: tier data > quote field > proposal_totals > sum of line items
-    subtotal = 0
-    if tier_data:
-        subtotal = tier_data.get("subtotal", 0) or 0
-    if not subtotal:
-        subtotal = quote.get("subtotal", 0) or 0
-    if not subtotal:
-        proposal_totals = quote.get("proposal_totals", {})
-        if proposal_totals:
-            subtotal = proposal_totals.get("A", 0) or proposal_totals.get("B", 0) or proposal_totals.get("C", 0)
-    if not subtotal:
-        subtotal = sum(item.get("total", 0) for item in line_items)
-
-    tax_rate = quote.get("tax_rate", 0.06)
-
-    customer_name = quote.get("customer_name", "")
-    customer_email = quote.get("customer_email", "")
-    business_unit = _quote_business_key(quote)
+    source = build_quote_invoice_source(quote, quote_id)
+    line_items = source["line_items"]
+    subtotal = source["subtotal"]
+    tax_rate = source["tax_rate"]
+    customer_name = source["customer_name"]
+    customer_email = source["customer_email"]
+    business_unit = source["business_unit"]
 
     with get_db() as conn:
+        _ensure_finance_extensions(conn)
         customer_id = _find_or_create_customer_for_quote(conn, quote, business_unit)
 
         inv_number = _next_invoice_number(conn)
-        tax_amount = round(subtotal * tax_rate, 2)
-        discount_raw = quote.get("discount_amount", 0) or 0
-        discount_type = quote.get("discount_type", "dollar") or "dollar"
-        if discount_type == "percent" and discount_raw > 0:
-            applied_discount = round(subtotal * (discount_raw / 100), 2)
-        else:
-            applied_discount = discount_raw
-        total = round(subtotal + tax_amount - applied_discount, 2)
-        deposit = quote.get("deposit") or {}
-        deposit_required = deposit.get("deposit_amount") or 0
-        if not deposit_required and deposit.get("deposit_percent"):
-            deposit_required = round(total * (deposit.get("deposit_percent") or 0) / 100, 2)
-        deposit_received = (
-            deposit.get("deposit_received")
-            or deposit.get("amount_received")
-            or deposit.get("paid_amount")
-            or 0
-        )
+        tax_amount = source["tax_amount"]
+        discount_raw = source["discount_amount"]
+        discount_type = source["discount_type"]
+        total = source["total"]
+        deposit_required = source["deposit_required"]
+        deposit_received = source["deposit_received"]
 
         from datetime import timedelta
         due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -1962,11 +1852,13 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
                 client_name, client_email, client_phone, client_address,
                 business_unit, deposit_required, deposit_received,
-                discount_amount, discount_type)
+                discount_amount, discount_type, source_type, source_id,
+                pricing_snapshot_json, tax_policy_json, pricing_engine_version)
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, ?,
                        ?, ?, ?, ?,
                        ?, ?, ?,
-                       ?, ?, ?)""",
+                       ?, ?, ?, ?,
+                       ?, ?, ?, ?)""",
             (
                 inv_number,
                 customer_id,
@@ -1977,18 +1869,23 @@ def create_invoice_from_quote(request: Request, quote_id: str):
                 total,
                 total,
                 json.dumps(line_items),
-                quote.get("notes") or f"Generated from quote {quote.get('quote_number', quote_id)}",
-                quote.get("terms") or "Net 30",
+                source.get("notes") or f"Generated from quote {quote.get('quote_number', quote_id)}",
+                source.get("terms") or "Net 30",
                 due,
                 customer_name,
                 customer_email,
-                quote.get("customer_phone", ""),
-                quote.get("customer_address", ""),
+                source.get("customer_phone", ""),
+                source.get("customer_address", ""),
                 business_unit,
                 deposit_required,
                 deposit_received,
                 discount_raw,
                 discount_type,
+                "quote",
+                quote_id,
+                json.dumps(source.get("pricing_snapshot_json"), default=str),
+                json.dumps(source.get("tax_policy"), default=str),
+                PRICING_ENGINE_VERSION,
             )
         )
 

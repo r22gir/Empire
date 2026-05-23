@@ -234,8 +234,9 @@ def create_quote(data: dict) -> dict:
 
             conn.execute("""
                 INSERT INTO quote_line_items (
-                    quote_id, line_number, description, quantity, unit, unit_price, subtotal, category
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    quote_id, line_number, description, quantity, unit, unit_price, subtotal, category,
+                    pricing_snapshot_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
                 li.get('description', ''),
@@ -244,6 +245,8 @@ def create_quote(data: dict) -> dict:
                 rate,
                 li_amount if li_amount else subtotal,
                 li.get('category', 'labor'),
+                json.dumps(li.get('pricing_snapshot_json') or li.get('pricing_snapshot'), default=str)
+                if (li.get('pricing_snapshot_json') or li.get('pricing_snapshot')) else None,
             ))
 
         _recalculate_totals(conn, quote_id, 'api')
@@ -329,8 +332,8 @@ def add_line_item(quote_id: str, data: dict) -> dict:
                 lining_type, lining_cost,
                 labor_description, labor_hours, labor_rate, labor_total,
                 hardware_description, hardware_cost,
-                quantity, unit, unit_price, subtotal, category
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                quantity, unit, unit_price, subtotal, category, pricing_snapshot_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, max_ln + 1,
             data.get('item_type', ''),
@@ -356,6 +359,8 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             rate,
             data.get('amount', subtotal),
             data.get('category', 'labor'),
+            json.dumps(data.get('pricing_snapshot_json') or data.get('pricing_snapshot'), default=str)
+            if (data.get('pricing_snapshot_json') or data.get('pricing_snapshot')) else None,
         ))
 
         _recalculate_totals(conn, quote_id, 'api')
@@ -383,12 +388,16 @@ def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
             'hardware_description', 'hardware_cost',
             'quantity', 'unit', 'unit_price', 'subtotal', 'category',
             'manual_price_override', 'price_is_manual',
+            'pricing_snapshot_json',
         ]
         sets, params = ["updated_at = ?"], [datetime.now().isoformat()]
         for f in updatable:
             if f in data and data[f] is not None:
                 sets.append(f"{f} = ?")
-                params.append(data[f])
+                if f == 'pricing_snapshot_json' and not isinstance(data[f], str):
+                    params.append(json.dumps(data[f], default=str))
+                else:
+                    params.append(data[f])
 
         # Auto-compute subtotal if qty/rate changed
         qty = float(data.get('quantity', existing['quantity'] or 1))

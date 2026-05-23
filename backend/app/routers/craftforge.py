@@ -13,12 +13,18 @@ import uuid
 import os
 import logging
 
+from app.services.data_paths import craftforge_data_dir
+from app.services.pricing import (
+    PRICING_ENGINE_VERSION,
+    build_design_invoice_source,
+)
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["craftforge"])
 
 # ── Data directories ──────────────────────────────────────────
-DATA_DIR = os.path.expanduser("~/empire-repo/backend/data/craftforge")
+DATA_DIR = str(craftforge_data_dir())
 DESIGNS_DIR = os.path.join(DATA_DIR, "designs")
 JOBS_DIR = os.path.join(DATA_DIR, "jobs")
 INVENTORY_DIR = os.path.join(DATA_DIR, "inventory")
@@ -28,6 +34,39 @@ for d in [DESIGNS_DIR, JOBS_DIR, INVENTORY_DIR, TEMPLATES_DIR]:
     os.makedirs(d, exist_ok=True)
 
 COUNTER_FILE = os.path.join(DATA_DIR, "_counter.json")
+
+
+def _safe_alter_invoice(conn, column: str, col_type: str):
+    try:
+        conn.execute(f"ALTER TABLE invoices ADD COLUMN {column} {col_type}")
+    except Exception:
+        pass
+
+
+def _ensure_invoice_snapshot_columns(conn):
+    for column, col_type in {
+        "job_id": "TEXT",
+        "client_name": "TEXT",
+        "client_email": "TEXT",
+        "client_phone": "TEXT",
+        "client_address": "TEXT",
+        "billing_address": "TEXT",
+        "business_unit": "TEXT DEFAULT 'workroom'",
+        "discount_amount": "REAL DEFAULT 0",
+        "discount_type": "TEXT DEFAULT 'dollar'",
+        "deposit_required": "REAL DEFAULT 0",
+        "deposit_received": "REAL DEFAULT 0",
+        "payment_status": "TEXT DEFAULT 'unpaid'",
+        "invoice_date": "TEXT",
+        "sent_date": "TEXT",
+        "source_type": "TEXT",
+        "source_id": "TEXT",
+        "invoice_stage": "TEXT",
+        "pricing_snapshot_json": "TEXT",
+        "tax_policy_json": "TEXT",
+        "pricing_engine_version": "TEXT",
+    }.items():
+        _safe_alter_invoice(conn, column, col_type)
 
 
 def _next_number(prefix: str) -> str:
@@ -1048,60 +1087,20 @@ async def create_invoice_from_design(design_id: str):
     from app.db.database import get_db, dict_row
 
     design = _load(DESIGNS_DIR, design_id)
-
-    # Build line items from both materials and line_items
-    inv_line_items = []
-    for m in (design.get("materials") or []):
-        name = m.get("name", "") if isinstance(m, dict) else ""
-        qty = m.get("quantity", 1) if isinstance(m, dict) else 1
-        cost = m.get("cost_per_unit", 0) if isinstance(m, dict) else 0
-        total_val = qty * cost
-        if name and total_val > 0:
-            inv_line_items.append({
-                "description": name,
-                "quantity": qty,
-                "unit_price": cost,
-                "total": total_val,
-            })
-    for li in (design.get("line_items") or []):
-        desc = li.get("description", "")
-        qty = li.get("quantity", 1)
-        price = li.get("unit_price", 0)
-        total_val = qty * price
-        if desc and total_val > 0:
-            inv_line_items.append({
-                "description": desc,
-                "quantity": qty,
-                "unit_price": price,
-                "total": total_val,
-            })
-
-    # Add labor if set
-    labor = design.get("labor_cost", 0)
-    if labor > 0:
-        inv_line_items.append({"description": "Labor", "quantity": 1, "unit_price": labor, "total": labor})
-
-    # Add overhead if set
-    oh = design.get("overhead", 0)
-    if oh > 0:
-        inv_line_items.append({"description": "Overhead", "quantity": 1, "unit_price": oh, "total": oh})
-
-    # Add CNC time if set
-    cnc_cost = design.get("cnc_time_cost", 0)
-    if cnc_cost > 0:
-        inv_line_items.append({"description": "CNC Machine Time", "quantity": 1, "unit_price": cnc_cost, "total": cnc_cost})
-
-    subtotal = design.get("subtotal", 0)
-    tax_rate = design.get("tax_rate", 0)
-    tax_amount = round(subtotal * tax_rate, 2) if tax_rate > 0 else 0
-    total = design.get("total", 0)
+    source = build_design_invoice_source(design, design_id)
+    inv_line_items = source["line_items"]
+    subtotal = source["subtotal"]
+    tax_rate = source["tax_rate"]
+    tax_amount = source["tax_amount"]
+    total = source["total"]
 
     with get_db() as conn:
+        _ensure_invoice_snapshot_columns(conn)
         customer_id = _find_or_create_woodcraft_customer(conn, design)
-        customer_name = design.get("customer_name", "")
-        customer_email = design.get("customer_email", "")
-        customer_phone = design.get("customer_phone", "")
-        customer_address = design.get("customer_address", "")
+        customer_name = source.get("customer_name", "")
+        customer_email = source.get("customer_email", "")
+        customer_phone = source.get("customer_phone", "")
+        customer_address = source.get("customer_address", "")
 
         # Generate invoice number
         year = datetime.now().year
@@ -1116,20 +1115,21 @@ async def create_invoice_from_design(design_id: str):
             inv_number = f"INV-{year}-001"
 
         due = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
-        discount_amount = design.get("discount_amount", 0) or 0
-        discount_type = design.get("discount_type", "dollar") or "dollar"
-        deposit_percent = design.get("deposit_percent", 0) or 0
-        deposit_required = round(total * (deposit_percent / 100), 2) if deposit_percent > 0 else 0
+        discount_amount = source.get("discount_amount", 0) or 0
+        discount_type = source.get("discount_type", "dollar") or "dollar"
+        deposit_required = source.get("deposit_required", 0) or 0
 
         conn.execute(
             """INSERT INTO invoices
                (id, invoice_number, customer_id, quote_id, status, subtotal, tax_rate,
                 tax_amount, total, amount_paid, balance_due, line_items, notes, terms, due_date,
                 client_name, client_email, client_phone, client_address, business_unit,
-                discount_amount, discount_type, deposit_required, deposit_received)
+                discount_amount, discount_type, deposit_required, deposit_received,
+                source_type, source_id, pricing_snapshot_json, tax_policy_json, pricing_engine_version)
                VALUES (lower(hex(randomblob(8))), ?, ?, ?, 'draft', ?, ?, ?, ?, 0, ?, ?, ?, 'Net 30', ?,
                        ?, ?, ?, ?, 'woodcraft',
-                       ?, ?, ?, 0)""",
+                       ?, ?, ?, 0,
+                       ?, ?, ?, ?, ?)""",
             (
                 inv_number,
                 customer_id,
@@ -1149,12 +1149,23 @@ async def create_invoice_from_design(design_id: str):
                 discount_amount,
                 discount_type,
                 deposit_required,
+                "design",
+                design_id,
+                json.dumps(source.get("pricing_snapshot_json"), default=str),
+                json.dumps(source.get("tax_policy"), default=str),
+                PRICING_ENGINE_VERSION,
             )
         )
 
         inv_row = conn.execute("SELECT * FROM invoices WHERE invoice_number = ?", (inv_number,)).fetchone()
         invoice = dict_row(inv_row)
         invoice["line_items"] = json.loads(invoice["line_items"]) if invoice.get("line_items") else []
+        for key in ("pricing_snapshot_json", "tax_policy_json"):
+            if invoice.get(key):
+                try:
+                    invoice[key] = json.loads(invoice[key])
+                except (TypeError, ValueError):
+                    pass
 
     # Update design status
     design["status"] = "invoiced"

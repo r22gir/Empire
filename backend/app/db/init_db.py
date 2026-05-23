@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS invoices (
     amount_paid REAL DEFAULT 0,
     balance_due REAL DEFAULT 0,
     line_items TEXT, -- JSON array
+    pricing_snapshot_json TEXT,
+    tax_policy_json TEXT,
+    pricing_engine_version TEXT,
     notes TEXT,
     terms TEXT DEFAULT 'Net 30',
     due_date TEXT,

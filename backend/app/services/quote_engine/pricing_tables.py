@@ -186,25 +186,21 @@ def _normalize_item_type(item_type: str) -> str:
     # Cornice variants
     if item_type.startswith("cornice_") or item_type == "cornice":
         return "cornice"
-    # Wall panel → headboard (closest: per-sqft labor)
+    # Wall panels require founder selection; headboard pricing is not equivalent.
     if item_type.startswith("wall_panel_"):
-        return "headboard"
-    # Bedding
+        raise ValueError("wall panel pricing requires an explicit pricing category")
+    # Bedding and table linens require their own category; do not price as pillows.
     if item_type in ("duvet_cover", "coverlet", "quilt", "bed_skirt", "bed_scarf"):
-        return "throw_pillow"
+        raise ValueError("bedding pricing requires an explicit pricing category")
     if item_type in ("pillow_sham", "decorative_pillow"):
         return "throw_pillow"
     if item_type == "bolster":
         return "bolster"
-    # Table linens
     if item_type in ("tablecloth", "table_runner", "placemat", "napkin", "table_skirt"):
-        return "throw_pillow"
-    # 3D scan fallback
+        raise ValueError("table linen pricing requires an explicit pricing category")
     if item_type == "3d_scan":
-        return "sofa_3cushion"
-    # Unknown — log and use accent_chair as safe default
-    logger.warning(f"Unknown item type '{item_type}', falling back to accent_chair")
-    return "accent_chair"
+        raise ValueError("3D scan pricing requires an explicit pricing category")
+    raise ValueError(f"Unknown item type '{item_type}'. Select an explicit pricing category.")
 
 
 def get_labor_cost(item_type: str, dimensions: Optional[Dict[str, float]] = None) -> float:

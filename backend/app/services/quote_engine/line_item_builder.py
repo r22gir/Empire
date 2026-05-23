@@ -78,7 +78,9 @@ def build_line_items(
     fabric_info = FABRIC_GRADES.get(fabric_grade, FABRIC_GRADES["A"])
     lining_info = LINING.get(lining, LINING["standard"])
 
-    item_type = item.get("type", "accent_chair")
+    item_type = item.get("type") or item.get("item_type")
+    if not item_type:
+        raise ValueError("item type is required for pricing")
     item_name = item.get("name", item_type.replace("_", " ").title())
     dims = item.get("dimensions", {})
     qty = item.get("quantity", 1)

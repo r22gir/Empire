@@ -18,13 +18,14 @@ import logging
 
 from app.services.max.response_quality_engine import quality_engine, Channel
 from app.services.business_routing import route_to_for_item_type
+from app.services.data_paths import quote_pdf_dir, quotes_data_dir
 from app.db.database import get_db, dict_row
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+QUOTES_DIR = str(quotes_data_dir())
 os.makedirs(QUOTES_DIR, exist_ok=True)
 
 COUNTER_FILE = os.path.join(QUOTES_DIR, "_counter.json")
@@ -824,7 +825,9 @@ async def create_quote_from_rooms(body: dict):
             height = _parse_dim(dims.get("height", item.get("height", 0)))
             depth = _parse_dim(dims.get("depth", item.get("depth", 0)))
 
-            item_type = item.get("type", "accent_chair")
+            item_type = item.get("type") or item.get("item_type")
+            if not item_type:
+                raise HTTPException(400, "item type is required for pricing")
             quantity = int(item.get("quantity", 1))
             notes = item.get("notes", "")
 
@@ -966,7 +969,10 @@ async def preview_pricing(body: dict):
             opts = {}
             if item.get("cushion_count"):
                 opts["cushion_count"] = item["cushion_count"]
-            yardage = calculate_yardage(item.get("type", "accent_chair"), dims, opts)
+            item_type = item.get("type") or item.get("item_type")
+            if not item_type:
+                raise HTTPException(400, "item type is required for pricing")
+            yardage = calculate_yardage(item_type, dims, opts)
             item["yardage"] = yardage
 
     tiers = generate_tiers(items, location=location, lining_preference=lining)
@@ -1359,7 +1365,7 @@ async def send_quote(quote_id: str, body: Optional[SendQuoteRequest] = None):
         else:
             # Read from saved file
             pdf_path = os.path.join(
-                os.path.expanduser("~/empire-repo/backend/data/quotes/pdf"),
+                str(quote_pdf_dir()),
                 f"{quote['quote_number']}.pdf"
             )
             if os.path.exists(pdf_path):
@@ -3281,7 +3287,7 @@ async def generate_pdf(quote_id: str, skip_verification: bool = False):
         raise HTTPException(500, f"PDF generation failed: {str(e)}")
 
     # Save PDF file
-    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+    pdf_dir = str(quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote['quote_number']}.pdf")
     with open(pdf_path, "wb") as f:
@@ -3321,7 +3327,7 @@ async def download_pdf(quote_id: str):
             raise HTTPException(404, f"Quote {quote_id} not found")
 
     pdf_path = os.path.join(
-        os.path.expanduser("~/empire-repo/backend/data/quotes/pdf"),
+        str(quote_pdf_dir()),
         f"{quote['quote_number']}.pdf",
     )
     if not os.path.exists(pdf_path):

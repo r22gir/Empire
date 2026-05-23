@@ -29,10 +29,11 @@ from .pricing_tables import (
     DEPOSIT_PERCENTAGE,
 )
 from .yardage_calculator import YARDAGE_TABLE, calculate_yardage
+from app.services.data_paths import quotes_data_dir
 
 logger = logging.getLogger(__name__)
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+QUOTES_DIR = str(quotes_data_dir())
 
 # ---------------------------------------------------------------------------
 # Market range table — min/max TOTAL PRICE per item type

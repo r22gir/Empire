@@ -14,10 +14,79 @@ from app.services.pricing_engine import (
     get_labor_rates,
     update_labor_rate,
 )
+from app.services.pricing import (
+    FORMULA_VERSION,
+    PRICING_ENGINE_VERSION,
+    WORKROOM_RATE_TABLE_VERSION,
+    WOODCRAFT_RATE_TABLE_VERSION,
+    PricingInputError,
+    price_woodcraft_item,
+    price_workroom_item,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
+
+
+@router.get("/canonical/status")
+async def canonical_pricing_status():
+    """Canonical deterministic pricing engine status."""
+    return {
+        "status": "available",
+        "pricing_engine_version": PRICING_ENGINE_VERSION,
+        "formula_version": FORMULA_VERSION,
+        "rate_tables": {
+            "workroom": WORKROOM_RATE_TABLE_VERSION,
+            "woodcraft": WOODCRAFT_RATE_TABLE_VERSION,
+        },
+        "business_units": ["workroom", "woodcraft"],
+        "snapshot_based": True,
+        "manual_override_requires_reason": True,
+        "unknown_category_fallback": False,
+    }
+
+
+@router.post("/workroom/calculate")
+async def calculate_workroom_price(body: dict):
+    """Calculate an explainable Empire Workroom pricing snapshot."""
+    try:
+        return price_workroom_item(
+            body.get("product_category") or body.get("item_type"),
+            body.get("pricing_inputs") or body,
+            discount_type=body.get("discount_type", "dollar"),
+            discount_amount=float(body.get("discount_amount", 0) or 0),
+            tax_policy=body.get("tax_policy"),
+            deposit_required=body.get("deposit_required", True),
+            deposit_percent=float(body.get("deposit_percent", 50) or 0),
+            override_amount=body.get("override_amount"),
+            override_reason=body.get("override_reason"),
+            source_quote_id=body.get("source_quote_id"),
+            source_line_item_id=body.get("source_line_item_id"),
+        )
+    except PricingInputError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/woodcraft/calculate")
+async def calculate_woodcraft_price(body: dict):
+    """Calculate an explainable Woodcraft/CraftForge pricing snapshot."""
+    try:
+        return price_woodcraft_item(
+            body.get("product_category") or body.get("category"),
+            body.get("pricing_inputs") or body,
+            discount_type=body.get("discount_type", "dollar"),
+            discount_amount=float(body.get("discount_amount", 0) or 0),
+            tax_policy=body.get("tax_policy"),
+            deposit_required=body.get("deposit_required", True),
+            deposit_percent=float(body.get("deposit_percent", 50) or 0),
+            override_amount=body.get("override_amount"),
+            override_reason=body.get("override_reason"),
+            source_quote_id=body.get("source_quote_id"),
+            source_line_item_id=body.get("source_line_item_id"),
+        )
+    except PricingInputError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/calculate")

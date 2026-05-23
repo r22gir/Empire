@@ -1,9 +1,9 @@
 """
 Quote Intelligence System — Quote Assembler
 
-Orchestrate the full pipeline: yardage → line items → tiers → quote.
+Orchestrate the full pipeline: yardage -> line items -> tiers -> quote.
 Produces a complete quote data structure compatible with the existing
-JSON format in ~/empire-repo/backend/data/quotes/.
+JSON quote format in the canonical backend data directory.
 """
 
 import json
@@ -15,10 +15,11 @@ from typing import Any, Dict, List, Optional
 
 from .tier_generator import generate_tiers
 from .yardage_calculator import calculate_yardage
+from app.services.data_paths import quotes_data_dir
 
 logger = logging.getLogger(__name__)
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+QUOTES_DIR = str(quotes_data_dir())
 
 
 def _next_quote_number() -> str:
@@ -83,8 +84,11 @@ def assemble_quote(
             yardage_opts["cushion_count"] = item["cushion_count"]
         if any("tuft" in f.lower() for f in item.get("special_features", [])):
             yardage_opts["tufted"] = True
+        item_type = item.get("type") or item.get("item_type")
+        if not item_type:
+            raise ValueError("item type is required for pricing")
         yardage_result = calculate_yardage(
-            item.get("type", "accent_chair"),
+            item_type,
             item.get("dimensions", {}),
             yardage_opts,
         )
@@ -194,8 +198,11 @@ def recalculate_quote(quote_id: str) -> Dict[str, Any]:
             yardage_opts["cushion_count"] = item["cushion_count"]
         if any("tuft" in f.lower() for f in item.get("special_features", [])):
             yardage_opts["tufted"] = True
+        item_type = item.get("type") or item.get("item_type")
+        if not item_type:
+            raise ValueError("item type is required for pricing")
         yardage_result = calculate_yardage(
-            item.get("type", "accent_chair"),
+            item_type,
             item.get("dimensions", {}),
             yardage_opts,
         )

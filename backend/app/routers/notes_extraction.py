@@ -17,13 +17,14 @@ from typing import Optional
 
 from app.services.vision.notes_extractor import notes_extractor
 from app.services.vision.diagram_generator import diagram_generator
+from app.services.data_paths import data_root, quotes_data_dir
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quotes", tags=["notes-extraction"])
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
-UPLOADS_DIR = os.path.expanduser("~/empire-repo/backend/data/notes_uploads")
+QUOTES_DIR = str(quotes_data_dir())
+UPLOADS_DIR = str(data_root() / "notes_uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(QUOTES_DIR, exist_ok=True)
 

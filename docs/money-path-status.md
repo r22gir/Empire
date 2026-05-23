@@ -6,6 +6,53 @@
 
 ---
 
+## 2026-05-23 Canonical Pricing Engine Status
+
+**Status:** PASS for backend pricing truth, snapshot preservation, and port 8000 smoke tests. Commit is not yet created; proposed commit is `feat(pricing): add canonical Workroom and Woodcraft pricing snapshots`.
+
+**Purpose:** Empire pricing is now deterministic, explainable, auditable, versioned, and overrideable. AI can classify or suggest, but approved quote/invoice numbers must come from pricing methods, rate/formula versions, explicit inputs, tax policy, deposit policy, and manual overrides with reasons.
+
+**Backend engine:** `backend/app/services/pricing/`
+- `engine.py` calculates canonical Workroom and Woodcraft/CraftForge pricing snapshots.
+- `invoice_snapshots.py` copies approved quote/design pricing snapshots into invoice creation paths without silently recalculating from current rate tables.
+- Versions currently reported by `/api/v1/pricing/canonical/status`: `empire-pricing-engine-v1`, `pricing-formulas-2026.05`, `workroom-rates-2026.05`, `woodcraft-rates-2026.05`.
+
+**Supported Workroom methods:** upholstery, cushions, pillows, drapery/window treatments, fabric/materials, labor, pickup/delivery/install, rush/custom surcharge. Supported formula components include fixed service price, quantity x unit rate, labor hours x rate, fabric yardage, linear foot, square foot, material cost plus markup, minimum charge, and complexity multiplier.
+
+**Supported Woodcraft/CraftForge methods:** sheet goods, board-foot material, CNC/router machine time, design/drawing time, assembly labor, finishing/staining/painting, hardware, delivery/install, waste factor, markup, and complexity multiplier.
+
+**Endpoints added:**
+- `GET /api/v1/pricing/canonical/status`
+- `POST /api/v1/pricing/workroom/calculate`
+- `POST /api/v1/pricing/woodcraft/calculate`
+
+**Snapshot fields:** `business_unit`, `module`, `product_category`, `pricing_method`, `pricing_inputs`, `rate_table_version`, `formula_version`, `calculation_steps`, `calculated_subtotal`, `discount_type`, `discount_amount`, `tax_policy`, `tax_amount`, `deposit_required`, `deposit_amount`, `balance_due`, `override_amount`, `override_reason`, `final_price`, `created_at`, `source_quote_id`, `source_line_item_id`, plus `pricing_engine_version`.
+
+**Quote/design to invoice behavior:** `POST /api/v1/finance/invoices/from-quote/{quote_id}` now uses `build_quote_invoice_source()` and persists invoice-level `pricing_snapshot_json`, `tax_policy_json`, and `pricing_engine_version`. CraftForge `create_invoice_from_design()` now uses `build_design_invoice_source()` and persists the same fields. Line item quantity, unit rate, pricing method, pricing inputs, pricing result, and line-level pricing snapshots are preserved.
+
+**Tax/deposit behavior:** no universal 6% tax is assumed by the canonical engine. Tax is carried as an explicit `tax_policy` object. Existing quote/design tax rates are wrapped as approved source tax policies for backward compatibility. Deposits are deterministic: explicit amount wins, explicit percent calculates against the approved source total, otherwise an existing snapshot deposit amount can be preserved. Manual override requires `override_reason`.
+
+**Safe failure behavior:** unknown product categories return a pricing classification error. Removed unsafe canonical pricing fallbacks such as missing type -> accent chair, wall panel -> headboard, table linen/bedding -> pillow, and 3D scan -> sofa.
+
+**Live status after restart:** stable backend on port 8000 restarted from `/home/rg/empire-repo-main/backend`; `/health`, canonical status, Workroom calculate, Woodcraft calculate, and unknown-category guard all returned expected responses.
+
+**Tests run on 2026-05-23:**
+- `tests/test_canonical_pricing_engine.py -q`: 12 passed.
+- Workroom + Woodcraft lifecycle targeted tests: 2 passed.
+- Backend import compile for pricing/quote/finance/CraftForge files: passed.
+- `npm exec tsc -- --noEmit` in `empire-command-center`: passed.
+- Known unrelated finance UI contract test still fails because the fixture payment date is `2026-04-12` and the runtime MTD window is May 2026.
+
+**Pricing files changed:** pricing package, data path helper, pricing router, finance quote/design invoice paths, CraftForge design invoice path, quote path helpers, quote service snapshot columns, DB invoice snapshot columns, canonical pricing tests, and `empire-command-center/app/pricing/page.tsx` scaffold.
+
+**Remaining P1 limitations:**
+- JSON quote files and SQL `quotes_v2` still coexist and can diverge outside this snapshot-preservation patch.
+- Legacy manual invoice/job invoice paths still carry older tax defaults in places; canonical pricing isolates tax policy but does not fully migrate every legacy path.
+- Pricing Studio is a scaffold, not a full editor.
+- Existing unrelated dirty files in MAX/ArchiveForge/API/LuxeForge need separate review and commit decisions.
+
+---
+
 ## The 10 Steps
 
 | Step | Description | Status | Evidence |

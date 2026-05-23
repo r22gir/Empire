@@ -148,6 +148,7 @@ The **empire-ecosystem-report.md** (March 18, 2026) documented:
 - **Backend**: `backend/app/routers/finance.py`, `customer_mgmt.py`, `inventory.py`, `jobs.py`, `payments.py`, `quotes.py`, `quotes_v2.py`, `expenses.py`
 - **Database**: `empire.db` — 113 customers, 156 inventory items, 51 vendors, 9 invoices
 - **AI integration**: ForgeDesk (Kai), FinanceDesk (Sage), ClientsDesk (Elena)
+- **Pricing truth**: Canonical Pricing Engine v1 added 2026-05-23 for Workroom upholstery, cushions, pillows, drapery/window treatments, materials, labor, delivery/install, rush/custom surcharge, explicit tax policy, manual override reason, and quote-to-invoice snapshot preservation. See `docs/money-path-status.md`.
 - **Gaps**: contacts table unused (customers used instead), access_audit not wired
 
 ### 6. WoodCraft / CraftForge
@@ -155,6 +156,7 @@ The **empire-ecosystem-report.md** (March 18, 2026) documented:
 - **Purpose**: Woodwork & CNC business module
 - **Frontend**: `empire-command-center/app/components/screens/CraftForgePage.tsx` (stub only)
 - **Backend**: `backend/app/routers/craftforge.py` (15+ endpoints)
+- **Pricing truth**: Canonical Pricing Engine v1 added 2026-05-23 for sheet goods, board-foot material, CNC/router time, drawing time, assembly, finishing, hardware, delivery/install, waste/markup/complexity, and design-to-invoice pricing snapshot preservation. See `docs/money-path-status.md`.
 - **Recent**: woodcraft social plan in `docs/social/`
 - **Gaps**: Zero frontend implementation, no product flow
 - **Docs**: `docs/CRAFTFORGE_STATUS_2026-03-08.md`, `docs/CRAFTFORGE_SPEC.md`
@@ -172,6 +174,7 @@ The **empire-ecosystem-report.md** (March 18, 2026) documented:
 - **Purpose**: Full financial pipeline — 3-option proposals, PDF generation, payment tracking
 - **Backend routers**: `finance.py`, `financial.py`, `quotes.py`, `quotes_v2.py`, `payments.py`, `crypto_checkout.py`, `emails.py`, `inbox.py`, `work_orders.py`
 - **MAX integration**: FinanceDesk (Sage) owns invoice/expense/P&L
+- **Pricing truth**: Quote/design invoice creation now persists `pricing_snapshot_json`, `tax_policy_json`, and `pricing_engine_version`; approved pricing snapshots are copied forward instead of silently recalculating in the canonical conversion paths.
 - **Recent**: Founder-priority quote and handoff workflow fix (7acd4ad), quote PDF service
 - **Gaps**: Email sending (SendGrid not configured)
 

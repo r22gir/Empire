@@ -32,10 +32,11 @@ from .pricing_tables import (
     DEPOSIT_PERCENTAGE,
 )
 from .yardage_calculator import calculate_yardage
+from app.services.data_paths import quotes_data_dir
 
 logger = logging.getLogger(__name__)
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+QUOTES_DIR = str(quotes_data_dir())
 os.makedirs(QUOTES_DIR, exist_ok=True)
 
 
@@ -485,7 +486,10 @@ def edit_item_in_pipeline(
                 opts["cushion_count"] = item["cushion_count"]
             if any("tuft" in f.lower() for f in item.get("special_features", [])):
                 opts["tufted"] = True
-            yardage = calculate_yardage(item.get("type", "accent_chair"), dims, opts)
+            item_type = item.get("type") or item.get("item_type")
+            if not item_type:
+                raise ValueError("item type is required for pricing")
+            yardage = calculate_yardage(item_type, dims, opts)
             item["_yardage"] = yardage
             changes.append(f"yardage recalculated: {yardage.get('yards', 0):.1f} yards")
         except Exception as e:
@@ -525,7 +529,9 @@ def promote_quick_to_full(quick_quote_data: Dict[str, Any], customer_name: str) 
     quote_id = uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc).isoformat()
 
-    item_type = quick_quote_data.get("item_type", "accent_chair")
+    item_type = quick_quote_data.get("item_type")
+    if not item_type:
+        raise ValueError("item_type is required to promote a quick quote")
     dims = quick_quote_data.get("dimensions", {})
     quantity = quick_quote_data.get("quantity", 1)
 
@@ -665,7 +671,9 @@ def _phase_2_measurements(quote: Dict[str, Any]) -> Dict[str, Any]:
     total_yardage = 0
     for item in items:
         dims = item.get("dimensions", {})
-        item_type = item.get("type", "accent_chair")
+        item_type = item.get("type") or item.get("item_type")
+        if not item_type:
+            raise ValueError("item type is required for pricing")
         quantity = item.get("quantity", 1)
 
         # Calculate yardage
@@ -741,8 +749,10 @@ def _phase_3_pricing(quote: Dict[str, Any]) -> Dict[str, Any]:
     # No tiers yet — build estimated pricing from item data
     estimated_items = []
     for item in items:
-        item_type = item.get("type", "accent_chair")
-        labor = LABOR_RATES.get(item_type, {"base": 200})
+        item_type = item.get("type") or item.get("item_type")
+        if not item_type or item_type not in LABOR_RATES:
+            raise ValueError(f"explicit labor pricing is required for item type '{item_type}'")
+        labor = LABOR_RATES[item_type]
         base_labor = labor.get("base", 200)
         quantity = item.get("quantity", 1)
 
@@ -783,9 +793,11 @@ def _phase_4_margins(quote: Dict[str, Any]) -> Dict[str, Any]:
     total_material = 0
     total_labor = 0
     for item in items:
-        item_type = item.get("type", "accent_chair")
+        item_type = item.get("type") or item.get("item_type")
+        if not item_type or item_type not in LABOR_RATES:
+            raise ValueError(f"explicit labor pricing is required for item type '{item_type}'")
         quantity = item.get("quantity", 1)
-        labor_data = LABOR_RATES.get(item_type, {"base": 200})
+        labor_data = LABOR_RATES[item_type]
         total_labor += labor_data.get("base", 200) * quantity
 
         yardage_info = item.get("yardage", item.get("_yardage", {}))

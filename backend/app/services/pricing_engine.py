@@ -284,8 +284,10 @@ def calculate_upholstery_yardage(
     Banquettes: 2 + 1.5/linear_foot.
     Pattern repeat adds ~15% waste.
     """
-    base = UPHOLSTERY_BASE_YARDS.get(piece_type, UPHOLSTERY_BASE_YARDS["default"])
-    per_cushion = YARDS_PER_CUSHION.get(piece_type, YARDS_PER_CUSHION["default"])
+    if piece_type not in UPHOLSTERY_BASE_YARDS or piece_type == "default":
+        raise ValueError(f"Unknown upholstery piece_type '{piece_type}'. Select an explicit product category.")
+    base = UPHOLSTERY_BASE_YARDS[piece_type]
+    per_cushion = YARDS_PER_CUSHION.get(piece_type, 0)
 
     if piece_type == "banquette" and linear_feet > 0:
         total_yards = base + (1.5 * linear_feet)
@@ -379,6 +381,8 @@ def calculate_full_price(
     elif item_type in ("upholstery", "reupholstery", "sofa", "chair", "loveseat",
                        "accent_chair", "wing_chair", "sectional", "ottoman", "bench",
                        "banquette", "headboard", "dining_chair", "bar_stool", "chaise"):
+        if item_type in {"upholstery", "reupholstery"} and piece_type == "accent_chair":
+            raise ValueError("piece_type is required for upholstery pricing")
         uph_type = piece_type if piece_type != "accent_chair" else item_type
         yardage_result = calculate_upholstery_yardage(
             piece_type=uph_type, cushion_count=cushion_count,
@@ -403,10 +407,7 @@ def calculate_full_price(
             labor_rate = DEFAULT_LABOR_RATES["upholstery"]
 
     else:
-        # Generic item — use provided values
-        if labor_rate is None:
-            labor_rate = DEFAULT_LABOR_RATES.get("drapery_sewing", 45)
-        labor_hours = 2
+        raise ValueError(f"Unknown item_type '{item_type}'. Select an explicit pricing category.")
 
     # ── Cost breakdown ──
     fabric_total = round(yardage * fabric_price_per_yard, 2)
