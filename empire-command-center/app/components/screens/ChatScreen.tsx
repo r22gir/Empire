@@ -746,6 +746,40 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               if (tr.tool === 'sketch_to_drawing' && tr.success && tr.result?.svg) {
                 return <InlineDrawing key={j} result={tr.result} />;
               }
+              {/* MiniMax multimodal tool results */}
+              if (tr.success && tr.result) {
+                const imageUrl = tr.result.image_url || tr.result.audio_url || tr.result.video_url;
+                const imageUrls = tr.result.image_urls || (Array.isArray(tr.result.images) ? tr.result.images.map((i: any) => i.image_url || i.url) : []);
+                if (imageUrl || imageUrls.length > 0) {
+                  return (
+                    <div key={j} style={{ marginTop: 8, borderRadius: 10, overflow: 'hidden', maxWidth: 480 }}>
+                      {imageUrls.slice(0, 4).map((url: string, k: number) => (
+                        <img key={k} src={url} alt="Generated" style={{ width: '100%', display: 'block', marginBottom: 4, borderRadius: 8 }} />
+                      ))}
+                      {imageUrl && !imageUrls.length && (
+                        <img src={imageUrl} alt="Generated" style={{ width: '100%', borderRadius: 8 }} />
+                      )}
+                    </div>
+                  );
+                }
+                const audioUrl = tr.result.audio_url;
+                if (audioUrl) {
+                  return (
+                    <div key={j} style={{ marginTop: 8 }}>
+                      <audio controls src={audioUrl} style={{ width: '100%' }} />
+                    </div>
+                  );
+                }
+                const designBrief = tr.result.design_brief;
+                if (designBrief) {
+                  return (
+                    <div key={j} style={{ marginTop: 8, padding: '10px 14px', background: '#f8f5ff', borderRadius: 8, fontSize: 12, borderLeft: '3px solid #8B5CF6', maxWidth: 480 }}>
+                      <div style={{ fontWeight: 600, color: '#8B5CF6', marginBottom: 4 }}>Design Brief</div>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#333' }}>{designBrief}</div>
+                    </div>
+                  );
+                }
+              }
               return null;
             })}
           </div>

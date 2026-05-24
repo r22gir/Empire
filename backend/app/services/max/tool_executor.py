@@ -4962,3 +4962,248 @@ def _search_conversations(params: dict, desk: Optional[str] = None) -> ToolResul
         "count": len(results),
         "results": results,
     })
+
+
+# ── MINIMAX MULTIMODAL TOOLS ────────────────────────────────────────
+
+async def _minimax_text_to_image_async(params: dict) -> ToolResult:
+    """minimax_text_to_image — generate images via MiniMax image-01."""
+    from app.services.max.minimax_tools import minimax_text_to_image as _mm_t2i
+    result = await _mm_t2i(
+        prompt=params.get("prompt", ""),
+        aspect_ratio=params.get("aspect_ratio", "1:1"),
+        n=min(int(params.get("n", 1)), 4),
+        prompt_optimizer=params.get("prompt_optimizer", True),
+        model=params.get("model", ""),
+    )
+    return ToolResult(
+        tool="minimax_text_to_image",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("minimax_text_to_image")
+def _minimax_text_to_image(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate images via MiniMax image-01. Params: prompt, aspect_ratio (1:1/16:9/9:16), n (1-4), prompt_optimizer, model."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _minimax_text_to_image_async(params))
+                return future.result(timeout=180)
+        else:
+            return asyncio.run(_minimax_text_to_image_async(params))
+    except Exception as e:
+        logger.error(f"minimax_text_to_image failed: {e}")
+        return ToolResult(tool="minimax_text_to_image", success=False, error=str(e)[:300])
+
+
+async def _minimax_image_to_image_async(params: dict) -> ToolResult:
+    """minimax_image_to_image — transform image via MiniMax."""
+    from app.services.max.minimax_tools import minimax_image_to_image as _mm_i2i
+    result = await _mm_i2i(
+        image=params.get("image", ""),
+        prompt=params.get("prompt", ""),
+        model=params.get("model", ""),
+        strength=float(params.get("strength", 0.7)),
+    )
+    return ToolResult(
+        tool="minimax_image_to_image",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("minimax_image_to_image")
+def _minimax_image_to_image(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Transform an image via MiniMax. Params: image (URL/base64/path), prompt, strength (0.0-1.0), model."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _minimax_image_to_image_async(params))
+                return future.result(timeout=180)
+        else:
+            return asyncio.run(_minimax_image_to_image_async(params))
+    except Exception as e:
+        logger.error(f"minimax_image_to_image failed: {e}")
+        return ToolResult(tool="minimax_image_to_image", success=False, error=str(e)[:300])
+
+
+async def _minimax_understand_image_async(params: dict) -> ToolResult:
+    """minimax_understand_image — analyze image via MiniMax vision."""
+    from app.services.max.minimax_tools import minimax_understand_image as _mm_ui
+    result = await _mm_ui(
+        image=params.get("image", ""),
+        prompt=params.get("prompt", "Describe what you see in this image in detail."),
+        model=params.get("model", ""),
+    )
+    return ToolResult(
+        tool="minimax_understand_image",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("minimax_understand_image")
+def _minimax_understand_image(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Analyze an image via MiniMax vision. Params: image (URL/base64/path), prompt, model."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _minimax_understand_image_async(params))
+                return future.result(timeout=120)
+        else:
+            return asyncio.run(_minimax_understand_image_async(params))
+    except Exception as e:
+        logger.error(f"minimax_understand_image failed: {e}")
+        return ToolResult(tool="minimax_understand_image", success=False, error=str(e)[:300])
+
+
+async def _minimax_tts_async(params: dict) -> ToolResult:
+    """minimax_tts — generate speech via MiniMax TTS."""
+    from app.services.max.minimax_tools import minimax_tts as _mm_tts
+    result = await _mm_tts(
+        text=params.get("text", ""),
+        voice_id=params.get("voice_id", "male-qn-qingque"),
+        speed=float(params.get("speed", 1.0)),
+        output_format=params.get("output_format", "mp3"),
+    )
+    return ToolResult(
+        tool="minimax_tts",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("minimax_tts")
+def _minimax_tts(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate speech audio via MiniMax TTS. Params: text, voice_id, speed (0.5-2.0), output_format (mp3/wav)."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _minimax_tts_async(params))
+                return future.result(timeout=120)
+        else:
+            return asyncio.run(_minimax_tts_async(params))
+    except Exception as e:
+        logger.error(f"minimax_tts failed: {e}")
+        return ToolResult(tool="minimax_tts", success=False, error=str(e)[:300])
+
+
+async def _minimax_music_async(params: dict) -> ToolResult:
+    """minimax_music_generate — generate music via MiniMax."""
+    from app.services.max.minimax_tools import minimax_music_generate as _mm_music
+    result = await _mm_music(
+        prompt=params.get("prompt", ""),
+        duration=int(params.get("duration", 30)),
+    )
+    return ToolResult(
+        tool="minimax_music_generate",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("minimax_music_generate")
+def _minimax_music_generate(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate music via MiniMax. Params: prompt, duration (seconds, max 180)."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _minimax_music_async(params))
+                return future.result(timeout=180)
+        else:
+            return asyncio.run(_minimax_music_async(params))
+    except Exception as e:
+        logger.error(f"minimax_music_generate failed: {e}")
+        return ToolResult(tool="minimax_music_generate", success=False, error=str(e)[:300])
+
+
+async def _minimax_video_async(params: dict) -> ToolResult:
+    """minimax_video_generate — generate video via MiniMax (gated)."""
+    from app.services.max.minimax_tools import minimax_video_generate as _mm_vid
+    result = await _mm_vid(
+        prompt=params.get("prompt", ""),
+        duration=int(params.get("duration", 5)),
+    )
+    return ToolResult(
+        tool="minimax_video_generate",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("minimax_video_generate")
+def _minimax_video_generate(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Generate video via MiniMax (requires MINIMAX_VIDEO_ENABLED=1). Params: prompt, duration (seconds)."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _minimax_video_async(params))
+                return future.result(timeout=240)
+        else:
+            return asyncio.run(_minimax_video_async(params))
+    except Exception as e:
+        logger.error(f"minimax_video_generate failed: {e}")
+        return ToolResult(tool="minimax_video_generate", success=False, error=str(e)[:300])
+
+
+async def _max_room_redesign_async(params: dict) -> ToolResult:
+    """max_room_redesign — high-level room redesign."""
+    from app.services.max.minimax_tools import max_room_redesign as _mm_room
+    result = await _mm_room(
+        image=params.get("image", ""),
+        treatment_type=params.get("treatment_type", ""),
+        style=params.get("style", "modern luxury"),
+        fabric_notes=params.get("fabric_notes", ""),
+        preserve_geometry=bool(params.get("preserve_geometry", True)),
+        num_variations=min(int(params.get("num_variations", 1)), 2),
+    )
+    return ToolResult(
+        tool="max_room_redesign",
+        success=result.get("success", False),
+        result=result.get("data"),
+        error=result.get("error"),
+    )
+
+
+@tool("max_room_redesign")
+def _max_room_redesign(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Room/window redesign via MiniMax image-to-image. Params: image, treatment_type, style, fabric_notes, preserve_geometry, num_variations."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _max_room_redesign_async(params))
+                return future.result(timeout=240)
+        else:
+            return asyncio.run(_max_room_redesign_async(params))
+    except Exception as e:
+        logger.error(f"max_room_redesign failed: {e}")
+        return ToolResult(tool="max_room_redesign", success=False, error=str(e)[:300])
