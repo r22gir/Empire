@@ -150,6 +150,19 @@ interface PhotoRecord {
   created_at: string;
 }
 
+function archivePhotoThumbUrl(photo: {
+  thumbnail_url?: string | null;
+  photo_url?: string | null;
+  id?: string | number | null;
+  photo_id?: string | number | null;
+}, archiveId?: string | number | null): string {
+  if (photo.thumbnail_url) return `${API}${photo.thumbnail_url.replace('/api/v1', '')}`;
+  const photoId = photo.id || photo.photo_id;
+  if (archiveId && photoId) return `${AG_API}/${archiveId}/photos/${photoId}/thumbnail`;
+  if (photo.photo_url) return `${API}${photo.photo_url.replace('/api/v1', '')}`;
+  return '';
+}
+
 interface IdentifyAiResult {
   is_life_magazine?: boolean;
   confidence?: number;
@@ -3710,7 +3723,7 @@ function InventorySection() {
                       if (col.key === 'thumbnail_url') {
                         display = item.thumbnail_url ? (
                           <button onClick={() => openDetail(item)} title="Open Record" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}>
-                            <img src={photoThumbUrl(item as any)} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
+                            <img src={archivePhotoThumbUrl(item as any, item.id)} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
                           </button>
                         ) : <button onClick={() => openDetail(item)} title="Open Record" style={{ border: '1px dashed #d1d5db', background: '#f9fafb', borderRadius: 6, width: 54, height: 40, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>No photo</button>;
                       }
