@@ -29,6 +29,8 @@ MAX_EMAIL_ENV_NAMES = [
     "MAX_EMAIL",
     "FOUNDER_EMAIL",
     "FOUNDER_EMAILS",
+    "GMAIL_TOKEN_PATH",
+    "GMAIL_CREDENTIALS_PATH",
     "SENDGRID_API_KEY",
     "SENDGRID_FROM_EMAIL",
     "SMTP_HOST",
@@ -154,16 +156,22 @@ def _env_bool(name: str) -> bool:
 
 def _outbound_email_config() -> dict[str, Any]:
     sendgrid = _env_bool("SENDGRID_API_KEY")
+    sendgrid_from = _env_bool("SENDGRID_FROM_EMAIL")
     smtp_user = _env_bool("SMTP_USER")
     smtp_password = _env_bool("SMTP_PASSWORD")
     smtp_host = _env_bool("SMTP_HOST")
     smtp_from = _env_bool("SMTP_FROM")
+    smtp_from_name = _env_bool("SMTP_FROM_NAME")
     smtp_configured_for_max = bool(smtp_user and smtp_password)
     smtp_configured_for_business_sender = bool(smtp_host and smtp_user and smtp_password and smtp_from)
     return {
         "sendgrid_configured": sendgrid,
+        "sendgrid_from_configured": sendgrid_from,
         "smtp_configured_for_max": smtp_configured_for_max,
         "smtp_configured_for_business_sender": smtp_configured_for_business_sender,
+        "smtp_from_configured": smtp_from,
+        "smtp_from_name_configured": smtp_from_name,
+        "max_from_identity_configured": bool(sendgrid_from or smtp_from or smtp_user),
         "max_email_configured": bool(sendgrid or smtp_configured_for_max),
         "expected_env_names": [
             "SENDGRID_API_KEY",
@@ -179,54 +187,70 @@ def _outbound_email_config() -> dict[str, Any]:
 
 
 def _env_example_coverage() -> dict[str, bool]:
-    path = CANONICAL_REPO / ".env.example"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except Exception:
-        text = ""
+    texts = []
+    for path in (CANONICAL_REPO / ".env.example", CANONICAL_BACKEND / ".env.example"):
+        try:
+            texts.append(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    text = "\n".join(texts)
     return {name: name in text for name in MAX_EMAIL_ENV_NAMES}
 
 
 def _gmail_paths() -> dict[str, Any]:
+    token_env = os.getenv("GMAIL_TOKEN_PATH")
+    credentials_env = os.getenv("GMAIL_CREDENTIALS_PATH")
+    token_path = Path(token_env).expanduser() if token_env else CANONICAL_BACKEND / "token.json"
+    credentials_path = Path(credentials_env).expanduser() if credentials_env else CANONICAL_BACKEND / "credentials.json"
     return {
         "canonical_token_exists": _exists(CANONICAL_BACKEND / "token.json"),
         "canonical_credentials_exists": _exists(CANONICAL_BACKEND / "credentials.json"),
         "legacy_token_exists": _exists(LEGACY_BACKEND / "token.json"),
         "legacy_credentials_exists": _exists(LEGACY_BACKEND / "credentials.json"),
-        "token_path_configurable": False,
-        "token_path_source": "app.services.max.gmail_reader:TOKEN_FILE backend-relative constant",
+        "configured_token_exists": _exists(token_path),
+        "configured_credentials_exists": _exists(credentials_path),
+        "token_path_configurable": True,
+        "token_path_source": "GMAIL_TOKEN_PATH" if token_env else "canonical backend token.json",
+        "credentials_path_source": "GMAIL_CREDENTIALS_PATH" if credentials_env else "canonical backend credentials.json",
+        "token_path_kind": _safe_path_kind(token_path),
+        "credentials_path_kind": _safe_path_kind(credentials_path),
+        "token_env_configured": bool(token_env),
+        "credentials_env_configured": bool(credentials_env),
         "token_contents_read": False,
         "legacy_token_auto_used": False,
     }
 
 
 def _gmail_reader_status(paths: dict[str, Any]) -> dict[str, Any]:
-    if not paths["canonical_token_exists"]:
+    if not paths["configured_token_exists"]:
         return _layer(
             "backend_gmail_oauth_read_access",
             STATUS_VERIFIED_BROKEN,
             evidence=[
-                "Canonical backend token.json is missing.",
-                "Gmail reader uses canonical-backend-relative TOKEN_FILE.",
+                "Configured Gmail token file is missing.",
+                f"Gmail token path source: {paths['token_path_source']}.",
                 "Legacy token presence is detected but not copied or used automatically.",
             ],
-            next_action="Run Gmail OAuth for the canonical backend or explicitly approve a credential migration plan.",
+            next_action="Run Gmail OAuth for the canonical backend or set GMAIL_TOKEN_PATH to an approved token file.",
             last_error_category="gmail_token_missing",
             details=paths,
         )
-    if not paths["canonical_credentials_exists"]:
+    if not paths["configured_credentials_exists"]:
         return _layer(
             "backend_gmail_oauth_read_access",
             STATUS_PARTIAL,
-            evidence=["Canonical token.json exists, but canonical credentials.json is missing."],
-            next_action="Verify Gmail OAuth credentials and run the inbox endpoint.",
+            evidence=[
+                "Configured Gmail token exists, but configured credentials.json is missing.",
+                "Read access may work with an existing token, but reauthorization setup is incomplete.",
+            ],
+            next_action="Set GMAIL_CREDENTIALS_PATH or place credentials.json in the canonical backend before reauth.",
             last_error_category="gmail_credentials_missing",
             details=paths,
         )
     return _layer(
         "backend_gmail_oauth_read_access",
         STATUS_UNVERIFIED,
-        evidence=["Canonical Gmail OAuth files exist. This status endpoint does not call Gmail live."],
+        evidence=["Configured Gmail OAuth files exist. This status endpoint does not call Gmail live."],
         next_action="Run /api/v1/max/gmail/inbox to verify read access.",
         details=paths,
     )
@@ -456,7 +480,9 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
             STATUS_PARTIAL if outbound["max_email_configured"] else STATUS_VERIFIED_BROKEN,
             evidence=[
                 f"SendGrid configured: {outbound['sendgrid_configured']}",
+                f"SendGrid from identity configured: {outbound['sendgrid_from_configured']}",
                 f"SMTP configured for MAX: {outbound['smtp_configured_for_max']}",
+                f"MAX from identity configured: {outbound['max_from_identity_configured']}",
             ],
             next_action=(
                 "Run a founder-approved live outbound test; do not claim delivery until the send tool returns success."
@@ -506,7 +532,7 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         last_error_category="backend_gmail_and_outbound_not_ready",
         evidence=[
             "DNS MX can be ready while backend Gmail/SendGrid remains broken.",
-            "Canonical Gmail OAuth files are missing." if not paths["canonical_token_exists"] else "Canonical Gmail token exists.",
+            "Configured Gmail OAuth token is missing." if not paths["configured_token_exists"] else "Configured Gmail token exists.",
             "Outbound MAX email runtime is configured." if outbound["max_email_configured"] else "Outbound MAX email runtime is not configured.",
             "Inbound webhook logs/classifies but does not reply." if webhook["exists"] else "Inbound webhook not found.",
         ],

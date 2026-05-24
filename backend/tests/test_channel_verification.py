@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.channels import status as channel_status
+from app.services.max import gmail_reader
 
 
 client = TestClient(app)
@@ -28,6 +29,8 @@ def test_channel_status_endpoint_exists():
 
 
 def test_email_dns_layer_is_separate_from_backend_gmail_status(monkeypatch, tmp_path):
+    monkeypatch.delenv("GMAIL_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("GMAIL_CREDENTIALS_PATH", raising=False)
     monkeypatch.setattr(channel_status, "CANONICAL_BACKEND", tmp_path / "main-backend")
     monkeypatch.setattr(channel_status, "LEGACY_BACKEND", tmp_path / "legacy-backend")
     monkeypatch.setattr(
@@ -56,6 +59,8 @@ def test_email_dns_layer_is_separate_from_backend_gmail_status(monkeypatch, tmp_
 
 
 def test_missing_canonical_gmail_token_returns_verified_broken(monkeypatch, tmp_path):
+    monkeypatch.delenv("GMAIL_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("GMAIL_CREDENTIALS_PATH", raising=False)
     legacy_backend = tmp_path / "legacy" / "backend"
     legacy_backend.mkdir(parents=True)
     (legacy_backend / "token.json").write_text("not-read")
@@ -68,24 +73,96 @@ def test_missing_canonical_gmail_token_returns_verified_broken(monkeypatch, tmp_
 
     assert paths["canonical_token_exists"] is False
     assert paths["legacy_token_exists"] is True
+    assert paths["token_path_configurable"] is True
+    assert paths["token_path_source"] == "canonical backend token.json"
     assert paths["legacy_token_auto_used"] is False
     assert paths["token_contents_read"] is False
     assert layer["status"] == "verified_broken"
     assert layer["last_error_category"] == "gmail_token_missing"
 
 
+def test_gmail_token_paths_are_runtime_configurable_without_reading_secrets(monkeypatch, tmp_path):
+    token_path = tmp_path / "runtime-token.json"
+    credentials_path = tmp_path / "runtime-credentials.json"
+    token_path.write_text("token-secret-that-must-not-appear")
+    credentials_path.write_text("credential-secret-that-must-not-appear")
+    monkeypatch.setenv("GMAIL_TOKEN_PATH", str(token_path))
+    monkeypatch.setenv("GMAIL_CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setattr(channel_status, "CANONICAL_BACKEND", tmp_path / "main" / "backend")
+    monkeypatch.setattr(channel_status, "LEGACY_BACKEND", tmp_path / "legacy" / "backend")
+
+    paths = channel_status._gmail_paths()
+    layer = channel_status._gmail_reader_status(paths)
+    rendered = json.dumps({"paths": paths, "layer": layer})
+
+    assert paths["token_path_configurable"] is True
+    assert paths["token_env_configured"] is True
+    assert paths["credentials_env_configured"] is True
+    assert paths["configured_token_exists"] is True
+    assert paths["configured_credentials_exists"] is True
+    assert paths["legacy_token_auto_used"] is False
+    assert paths["token_contents_read"] is False
+    assert layer["status"] == "unverified"
+    assert "token-secret-that-must-not-appear" not in rendered
+    assert "credential-secret-that-must-not-appear" not in rendered
+
+
+def test_gmail_reader_uses_runtime_oauth_path_env_names(monkeypatch, tmp_path):
+    token_path = tmp_path / "token.json"
+    credentials_path = tmp_path / "credentials.json"
+    token_path.write_text("token-content-not-read")
+    credentials_path.write_text("credential-content-not-read")
+    monkeypatch.setenv("GMAIL_TOKEN_PATH", str(token_path))
+    monkeypatch.setenv("GMAIL_CREDENTIALS_PATH", str(credentials_path))
+
+    paths = gmail_reader.get_oauth_paths()
+    rendered = json.dumps(paths, default=str)
+
+    assert paths["token_path"] == token_path
+    assert paths["credentials_path"] == credentials_path
+    assert paths["token_path_source"] == "GMAIL_TOKEN_PATH"
+    assert paths["credentials_path_source"] == "GMAIL_CREDENTIALS_PATH"
+    assert paths["token_exists"] is True
+    assert paths["credentials_exists"] is True
+    assert "token-content-not-read" not in rendered
+    assert "credential-content-not-read" not in rendered
+
+
 def test_missing_sendgrid_smtp_returns_broken_outbound(monkeypatch):
-    for name in ("SENDGRID_API_KEY", "SMTP_USER", "SMTP_PASSWORD", "SMTP_HOST", "SMTP_FROM"):
+    for name in ("SENDGRID_API_KEY", "SENDGRID_FROM_EMAIL", "SMTP_USER", "SMTP_PASSWORD", "SMTP_HOST", "SMTP_FROM"):
         monkeypatch.delenv(name, raising=False)
 
     outbound = channel_status._outbound_email_config()
 
     assert outbound["sendgrid_configured"] is False
+    assert outbound["sendgrid_from_configured"] is False
     assert outbound["smtp_configured_for_max"] is False
+    assert outbound["max_from_identity_configured"] is False
     assert outbound["max_email_configured"] is False
 
 
+def test_sendgrid_configured_does_not_mark_live_outbound_verified(monkeypatch):
+    monkeypatch.setenv("SENDGRID_API_KEY", "SG.secret-value-that-must-not-leak")
+    monkeypatch.setenv("SENDGRID_FROM_EMAIL", "max@empirebox.store")
+    for name in ("SMTP_USER", "SMTP_PASSWORD", "SMTP_HOST", "SMTP_FROM"):
+        monkeypatch.delenv(name, raising=False)
+
+    outbound = channel_status._outbound_email_config()
+    email_channel, layers = channel_status._email_status()
+    outbound_layer = next(layer for layer in layers if layer["name"] == "sendgrid_smtp_outbound")
+
+    assert outbound["sendgrid_configured"] is True
+    assert outbound["sendgrid_from_configured"] is True
+    assert outbound["max_from_identity_configured"] is True
+    assert outbound["max_email_configured"] is True
+    assert outbound_layer["status"] == "partial"
+    assert email_channel["outbound_configured"] is True
+    assert email_channel["outbound_verified"] is False
+
+
 def test_webhook_only_intake_does_not_mark_reply_loop_working(monkeypatch, tmp_path):
+    monkeypatch.delenv("GMAIL_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("GMAIL_CREDENTIALS_PATH", raising=False)
     monkeypatch.setattr(channel_status, "CANONICAL_BACKEND", tmp_path / "main" / "backend")
     monkeypatch.setattr(channel_status, "LEGACY_BACKEND", tmp_path / "legacy" / "backend")
 
@@ -195,6 +272,8 @@ def test_channel_dry_run_does_not_send_live_messages():
 
 
 def test_legacy_token_path_detected_but_not_auto_used(monkeypatch, tmp_path):
+    monkeypatch.delenv("GMAIL_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("GMAIL_CREDENTIALS_PATH", raising=False)
     canonical_backend = tmp_path / "canonical" / "backend"
     legacy_backend = tmp_path / "legacy" / "backend"
     legacy_backend.mkdir(parents=True)

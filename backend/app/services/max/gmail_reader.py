@@ -1,8 +1,8 @@
 """Gmail read-only inbox reader via OAuth2.
 
-Uses ~/empire-repo/backend/token.json (created by gmail_auth.py).
-Filters for emails TO max@empirebox.store by default.
-READ ONLY — no delete, no move, no modify.
+Defaults to the canonical backend token/credentials files, but allows runtime
+path overrides through GMAIL_TOKEN_PATH and GMAIL_CREDENTIALS_PATH. This module
+never copies legacy token files and never logs token contents.
 """
 import os
 import logging
@@ -13,13 +13,38 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 
 logger = logging.getLogger("max.gmail_reader")
 
-TOKEN_FILE = Path(__file__).resolve().parents[3] / "token.json"
-CREDS_FILE = Path(__file__).resolve().parents[3] / "credentials.json"
+DEFAULT_TOKEN_FILE = Path(__file__).resolve().parents[3] / "token.json"
+DEFAULT_CREDS_FILE = Path(__file__).resolve().parents[3] / "credentials.json"
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 # Global timeout for all Gmail HTTP calls (seconds)
 _GMAIL_TIMEOUT = 10
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gmail")
+
+
+def _configured_path(env_name: str, default_path: Path) -> Path:
+    value = os.getenv(env_name)
+    if value:
+        return Path(value).expanduser()
+    return default_path
+
+
+def get_oauth_paths() -> dict:
+    """Return non-secret Gmail OAuth path metadata for status endpoints."""
+    token_env = bool(os.getenv("GMAIL_TOKEN_PATH"))
+    credentials_env = bool(os.getenv("GMAIL_CREDENTIALS_PATH"))
+    token_path = _configured_path("GMAIL_TOKEN_PATH", DEFAULT_TOKEN_FILE)
+    credentials_path = _configured_path("GMAIL_CREDENTIALS_PATH", DEFAULT_CREDS_FILE)
+    return {
+        "token_path": token_path,
+        "credentials_path": credentials_path,
+        "token_path_source": "GMAIL_TOKEN_PATH" if token_env else "canonical backend token.json",
+        "credentials_path_source": "GMAIL_CREDENTIALS_PATH" if credentials_env else "canonical backend credentials.json",
+        "token_env_configured": token_env,
+        "credentials_env_configured": credentials_env,
+        "token_exists": token_path.exists(),
+        "credentials_exists": credentials_path.exists(),
+    }
 
 
 def _get_service():
@@ -30,16 +55,18 @@ def _get_service():
     from google_auth_httplib2 import AuthorizedHttp
     import httplib2
 
-    if not TOKEN_FILE.exists():
+    paths = get_oauth_paths()
+    token_file = paths["token_path"]
+    if not paths["token_exists"]:
         raise RuntimeError(
-            f"Gmail token not found at {TOKEN_FILE}. "
-            "Run: cd ~/empire-repo/backend && python3 gmail_auth.py"
+            f"Gmail token not found ({paths['token_path_source']}). "
+            "Run Gmail OAuth for the canonical backend or set GMAIL_TOKEN_PATH."
         )
 
-    creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+    creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        TOKEN_FILE.write_text(creds.to_json())
+        token_file.write_text(creds.to_json())
 
     # Build with a timeout-aware http transport
     http = httplib2.Http(timeout=_GMAIL_TIMEOUT)
