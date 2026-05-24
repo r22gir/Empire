@@ -1,5 +1,5 @@
 """
-RecoveryForge API — status, start, stop for the Layer 3 image classifier.
+RecoveryForge API — status, start, stop, and MiniMax-powered image analysis.
 Reads progress from /data/images/ollama_progress.json.
 """
 import json
@@ -8,16 +8,22 @@ import subprocess
 import logging
 import hashlib
 import shutil
+import asyncio
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-router = APIRouter()
+from app.services.max.recoveryforge_quota import check_quota, consume_quota, quota_allow_new
+from app.services.max.recoveryforge_analyzer import analyze_image
+
 logger = logging.getLogger("recovery")
+
+router = APIRouter()
 
 PROGRESS_FILE = "/data/images/ollama_progress.json"
 INDEX_FILE = "/data/images/presorted_inventory.json"
@@ -81,6 +87,11 @@ def _public_image_item(img: dict[str, Any]) -> dict[str, Any]:
         "date_taken": img.get("date_taken"),
         "folder_path": img.get("folder_path"),
         "image_url": f"/api/v1/recovery/image/{filename}" if filename else None,
+        "minimax_analysis": img.get("minimax_analysis") or None,
+        "analysis_stale": bool(img.get("minimax_analysis", {}).get("stale", False)),
+        "analysis_provider": img.get("minimax_analysis", {}).get("provider") or img.get("classified_by") or None,
+        "analysis_confidence": img.get("minimax_analysis", {}).get("analysis_confidence") or img.get("confidence"),
+        "needs_manual_review": bool(img.get("minimax_analysis", {}).get("needs_manual_review", False)),
     }
 
 
@@ -170,6 +181,7 @@ async def recovery_status():
         "index_file": INDEX_FILE,
         "progress_file": PROGRESS_FILE,
         "classified_dir": CLASSIFIED_DIR,
+        "minimax_quota": check_quota(),
     }
 
 
@@ -279,6 +291,7 @@ async def recovery_image_detail(record_key: str):
             "review_status": img.get("review_status"),
         },
         "ocr_text": img.get("ocr_text") or img.get("ocr") or img.get("extracted_text") or "",
+        "minimax_analysis": img.get("minimax_analysis") or None,
     }
 
 
@@ -367,3 +380,181 @@ async def recovery_stop():
         return {"stopped": True, "exit_code": r.returncode}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── RecoveryForge MiniMax Analysis ────────────────────────────────────────────
+
+class AnalyzeImageRequest(BaseModel):
+    image_key: str
+    restart_analysis: bool = False
+
+
+class BatchAnalyzeRequest(BaseModel):
+    image_keys: list[str]
+    restart_stale: bool = False
+
+
+@router.get("/recovery/quota-status")
+async def recovery_quota_status():
+    """
+    Returns RecoveryForge quota status:
+    - daily_cap: 80
+    - daily_reserved_quota: 20
+    - used_today
+    - remaining_recoveryforge_today
+    - cap_reached
+    - override_active
+    - reset_date
+    """
+    return check_quota()
+
+
+@router.post("/recovery/analyze")
+async def recovery_analyze_single(image_key: str, restart_analysis: bool = False):
+    """
+    Analyze a single image using MiniMax vision.
+
+    If restart_analysis=False and the image already has a MiniMax analysis
+    that is not stale, returns the existing result.
+    If restart_analysis=True, marks prior analysis stale and re-runs.
+    """
+    data = _load_image_index()
+    img = _find_image(data, image_key)
+
+    if not img:
+        raise HTTPException(status_code=404, detail=f"Image not found: {image_key}")
+
+    existing = img.get("minimax_analysis") or {}
+    if not restart_analysis and existing.get("analysis_status") == "success" and not existing.get("stale"):
+        return {"status": "existing", "analysis": existing}
+
+    if not quota_allow_new():
+        quota = check_quota()
+        return {
+            "status": "cap_reached",
+            "message": f"RecoveryForge daily cap reached. {quota['daily_reserved_quota']} images reserved. Resets at {quota['reset_date']}.",
+            "quota": quota,
+        }
+
+    path = img.get("classified_path") or img.get("path", "")
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=400, detail=f"Image file not found for {image_key}")
+
+    if restart_analysis and existing.get("analysis_status") == "success":
+        existing["stale"] = True
+        existing["superseded_at"] = datetime.now(timezone.utc).isoformat()
+        img["minimax_analysis"] = existing
+        _save_image_index(data)
+
+    result = await analyze_image(image_key, path)
+    img["minimax_analysis"] = result
+    _save_image_index(data)
+
+    return {"status": "analyzed", "analysis": result}
+
+
+@router.post("/recovery/batch-analyze")
+async def recovery_batch_analyze(image_keys: list[str], restart_stale: bool = False):
+    """
+    Batch analyze multiple images via MiniMax vision.
+    Respects the 80/day RecoveryForge cap and leaves 20 reserved.
+    """
+    quota_status = check_quota()
+    available = quota_status["remaining_recoveryforge_today"]
+
+    if not restart_stale and not quota_allow_new():
+        return {
+            "status": "cap_reached_before_start",
+            "started": 0,
+            "skipped": len(image_keys),
+            "quota": quota_status,
+        }
+
+    data = _load_image_index()
+    started = 0
+    skipped = 0
+    results = []
+
+    for key in image_keys:
+        img = _find_image(data, key)
+        if not img:
+            skipped += 1
+            continue
+
+        existing = img.get("minimax_analysis") or {}
+        if not restart_stale and existing.get("analysis_status") == "success" and not existing.get("stale"):
+            skipped += 1
+            results.append({"image_key": key, "status": "existing"})
+            continue
+
+        if started >= available and not os.environ.get("RECOVERYFORGE_ALLOW_QUOTA_OVERRIDE", "").strip() == "1":
+            skipped += 1
+            results.append({"image_key": key, "status": "cap_reached"})
+            continue
+
+        if restart_stale and existing.get("analysis_status") == "success":
+            existing["stale"] = True
+            existing["superseded_at"] = datetime.now(timezone.utc).isoformat()
+            img["minimax_analysis"] = existing
+
+        path = img.get("classified_path") or img.get("path", "")
+        if not path or not os.path.exists(path):
+            skipped += 1
+            results.append({"image_key": key, "status": "file_not_found"})
+            continue
+
+        result = await analyze_image(key, path)
+        img["minimax_analysis"] = result
+        started += 1
+        results.append({"image_key": key, "status": result["analysis_status"], "result": result})
+
+    _save_image_index(data)
+
+    return {
+        "started": started,
+        "skipped": skipped,
+        "quota": check_quota(),
+        "results": results,
+    }
+
+
+@router.post("/recovery/mark-stale")
+async def recovery_mark_stale(image_keys: list[str]):
+    """
+    Mark prior Ollama/MiniMax analysis as stale/superseded for re-analysis.
+    Does NOT delete original files. Only marks the analysis record.
+    """
+    data = _load_image_index()
+    marked = 0
+    for key in image_keys:
+        img = _find_image(data, key)
+        if not img:
+            continue
+        analysis = img.get("minimax_analysis") or img.get("analysis") or {}
+        if analysis.get("analysis_status") == "success":
+            analysis["stale"] = True
+            analysis["superseded_at"] = datetime.now(timezone.utc).isoformat()
+            img["minimax_analysis"] = analysis
+            marked += 1
+    _save_image_index(data)
+    return {"marked_stale": marked, "total_requested": len(image_keys)}
+
+
+@router.post("/recovery/clear-stale")
+async def recovery_clear_stale(image_keys: list[str]):
+    """
+    Clear stale analysis flags from image records.
+    """
+    data = _load_image_index()
+    cleared = 0
+    for key in image_keys:
+        img = _find_image(data, key)
+        if not img:
+            continue
+        analysis = img.get("minimax_analysis") or {}
+        if analysis.get("stale"):
+            analysis["stale"] = False
+            img["minimax_analysis"] = analysis
+            cleared += 1
+    _save_image_index(data)
+    return {"cleared_stale": cleared, "total_requested": len(image_keys)}

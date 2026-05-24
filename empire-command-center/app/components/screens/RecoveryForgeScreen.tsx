@@ -3,6 +3,38 @@ import { useState, useEffect, useCallback } from 'react';
 import { HardDrive, Play, Square, RefreshCw, Loader2, Search, ChevronLeft, ChevronRight, Check, X } from 'lucide-react';
 import { API } from '../../lib/api';
 
+interface MiniMaxAnalysis {
+  analysis_status: string;
+  provider: string;
+  model: string;
+  timestamp: string;
+  stale: boolean;
+  description: string;
+  tags: string[];
+  personal_work_classification: {
+    classification: string;
+    confidence: number;
+    reason: string;
+  };
+  business_route: string;
+  action_recommendation: string;
+  image_quality_score: number;
+  analysis_confidence: number;
+  needs_manual_review: boolean;
+  reason_for_manual_review: string | null;
+}
+
+interface MiniMaxQuotaStatus {
+  daily_cap: number;
+  daily_reserved_quota: number;
+  used_today: number;
+  remaining_recoveryforge_today: number;
+  cap_reached: boolean;
+  override_active: boolean;
+  reset_date: string;
+  server_date: string;
+}
+
 interface RecoveryStatus {
   total_images: number;
   processed: number;
@@ -13,6 +45,7 @@ interface RecoveryStatus {
   index_file?: string;
   progress_file?: string;
   classified_dir?: string;
+  minimax_quota?: MiniMaxQuotaStatus;
 }
 
 interface RecoveryImage {
@@ -34,6 +67,11 @@ interface RecoveryImage {
   classified_path?: string;
   social_path?: string;
   path?: string;
+  minimax_analysis?: MiniMaxAnalysis;
+  analysis_stale?: boolean;
+  analysis_provider?: string;
+  analysis_confidence?: number;
+  needs_manual_review?: boolean;
 }
 
 interface ImageDetail {
@@ -41,6 +79,7 @@ interface ImageDetail {
   raw_metadata: Record<string, unknown>;
   tags: Record<string, unknown>;
   ocr_text?: string;
+  minimax_analysis?: MiniMaxAnalysis;
 }
 
 const BUSINESS_FILTERS = ['all', 'empire-workroom', 'woodcraft', 'general'];
@@ -218,6 +257,17 @@ export default function RecoveryForgeScreen() {
               </span>
               <span>{status.processed.toLocaleString()} / {status.total_images.toLocaleString()} images ({status.percentage}%)</span>
             </div>
+            {status.minimax_quota && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#888', padding: '4px 10px', background: status.minimax_quota.cap_reached ? '#fef2f2' : '#f0f9ff', borderRadius: 8, border: '1px solid', borderColor: status.minimax_quota.cap_reached ? '#fecaca' : '#bae6fd' }}>
+                <span style={{ fontWeight: 700 }}>MiniMax:</span>
+                <span>{status.minimax_quota.used_today}/{status.minimax_quota.daily_cap}</span>
+                <span style={{ color: '#999' }}>|</span>
+                <span>Reserved: {status.minimax_quota.daily_reserved_quota}</span>
+                <span style={{ color: '#999' }}>|</span>
+                <span>{status.minimax_quota.remaining_recoveryforge_today} left</span>
+                {status.minimax_quota.cap_reached && <span style={{ color: '#dc2626', fontWeight: 700 }}>CAP REACHED</span>}
+              </div>
+            )}
             <button onClick={() => handleAction(status.running ? 'stop' : 'start')} disabled={actionLoading} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, border: 'none', background: status.running ? '#dc2626' : '#16a34a', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, minHeight: 44 }}>
               {actionLoading ? <Loader2 size={14} className="animate-spin" /> : status.running ? <Square size={14} /> : <Play size={14} />}
               {status.running ? 'Stop' : 'Start'}
@@ -357,6 +407,73 @@ export default function RecoveryForgeScreen() {
                   </div>
                   <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>Reclassify updates the JSON index and safely copies to the selected classified bucket when supported. It does not delete the old source file.</div>
                 </div>
+
+                {selected.minimax_analysis && (
+                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #ece8e0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 900 }}>MiniMax Analysis</div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {selected.minimax_analysis.stale && (
+                          <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 6, background: '#fef3c7', color: '#92400e', fontWeight: 800 }}>STALE</span>
+                        )}
+                        <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 6, background: '#f0f9ff', color: '#0369a1', fontWeight: 700 }}>
+                          {selected.minimax_analysis.model}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 10, color: '#666', lineHeight: 1.5, marginBottom: 8, padding: 8, background: '#faf9f7', borderRadius: 6, border: '1px solid #ece8e0' }}>
+                      {selected.minimax_analysis.description || 'No description generated.'}
+                    </div>
+
+                    {selected.minimax_analysis.tags && selected.minimax_analysis.tags.length > 0 && (
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+                        {selected.minimax_analysis.tags.map(tag => (
+                          <span key={tag} style={{ fontSize: 9, padding: '2px 7px', borderRadius: 6, background: '#f5f3ef', color: '#666', border: '1px solid #e5e2dc' }}>{tag}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {selected.minimax_analysis.personal_work_classification && (
+                      <div style={{ fontSize: 10, marginBottom: 4 }}>
+                        <span style={{ color: '#888', fontWeight: 700 }}>Personal/Work: </span>
+                        <span style={{ fontWeight: 800, color: selected.minimax_analysis.personal_work_classification.classification === 'work_related' ? '#16a34a' : selected.minimax_analysis.personal_work_classification.classification === 'personal' ? '#7c3aed' : '#d97706' }}>
+                          {selected.minimax_analysis.personal_work_classification.classification}
+                        </span>
+                        <span style={{ color: '#aaa', marginLeft: 6 }}>{Math.round(selected.minimax_analysis.personal_work_classification.confidence * 100)}%</span>
+                      </div>
+                    )}
+
+                    {selected.minimax_analysis.business_route && (
+                      <div style={{ fontSize: 10, marginBottom: 4 }}>
+                        <span style={{ color: '#888', fontWeight: 700 }}>Routes to: </span>
+                        <span style={{ fontWeight: 800, color: '#b8960c' }}>{selected.minimax_analysis.business_route}</span>
+                      </div>
+                    )}
+
+                    {selected.minimax_analysis.action_recommendation && (
+                      <div style={{ fontSize: 10, marginBottom: 4 }}>
+                        <span style={{ color: '#888', fontWeight: 700 }}>Action: </span>
+                        <span style={{ fontWeight: 700, color: '#374151' }}>{selected.minimax_analysis.action_recommendation}</span>
+                      </div>
+                    )}
+
+                    {selected.minimax_analysis.image_quality_score != null && (
+                      <div style={{ fontSize: 10, marginBottom: 4 }}>
+                        <span style={{ color: '#888', fontWeight: 700 }}>Quality: </span>
+                        <span style={{ fontWeight: 800, color: selected.minimax_analysis.image_quality_score < 6 ? '#dc2626' : '#16a34a' }}>
+                          {selected.minimax_analysis.image_quality_score}/10
+                        </span>
+                      </div>
+                    )}
+
+                    {selected.minimax_analysis.needs_manual_review && (
+                      <div style={{ marginTop: 6, padding: 6, background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca', fontSize: 10, color: '#dc2626' }}>
+                        Needs manual review{selected.minimax_analysis.reason_for_manual_review ? `: ${selected.minimax_analysis.reason_for_manual_review}` : ''}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #ece8e0' }}>
                   <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Raw Metadata JSON</div>
