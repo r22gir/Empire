@@ -1,0 +1,718 @@
+"""Layered, non-secret channel verification for MAX communication surfaces."""
+from __future__ import annotations
+
+import inspect
+import json
+import os
+import socket
+import sqlite3
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+STATUS_VERIFIED_WORKING = "verified_working"
+STATUS_PARTIAL = "partial"
+STATUS_VERIFIED_BROKEN = "verified_broken"
+STATUS_UNVERIFIED = "unverified"
+STATUS_DISABLED = "disabled"
+STATUS_PLANNED = "planned"
+
+CANONICAL_REPO = Path("/home/rg/empire-repo-main")
+LEGACY_REPO = Path("/home/rg/empire-repo")
+CANONICAL_BACKEND = CANONICAL_REPO / "backend"
+LEGACY_BACKEND = LEGACY_REPO / "backend"
+DOMAIN = "empirebox.store"
+
+MAX_EMAIL_ENV_NAMES = [
+    "MAX_EMAIL",
+    "FOUNDER_EMAIL",
+    "FOUNDER_EMAILS",
+    "SENDGRID_API_KEY",
+    "SENDGRID_FROM_EMAIL",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_FROM",
+    "SMTP_FROM_NAME",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_FOUNDER_CHAT_ID",
+]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except Exception:
+        return False
+
+
+def _safe_path_kind(path: Path | str | None) -> str:
+    if not path:
+        return "unknown"
+    try:
+        resolved = Path(path).expanduser().resolve()
+        if resolved.is_relative_to(CANONICAL_REPO.resolve()):
+            return "canonical"
+        if resolved.is_relative_to(LEGACY_REPO.resolve()):
+            return "legacy"
+    except Exception:
+        return "unknown"
+    return "external"
+
+
+def _layer(
+    name: str,
+    status: str,
+    *,
+    evidence: list[str] | None = None,
+    next_action: str = "",
+    last_error_category: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "status": status,
+        "evidence": evidence or [],
+        "next_required_action": next_action,
+        "last_error_category": last_error_category,
+        "details": details or {},
+    }
+
+
+def _channel(
+    *,
+    key: str,
+    name: str,
+    status: str,
+    inbound_configured: bool,
+    inbound_verified: bool,
+    outbound_configured: bool,
+    outbound_verified: bool,
+    max_processing_connected: bool,
+    reply_loop_verified: bool,
+    ledger_logging_status: str,
+    last_known_activity_timestamp: str | None,
+    last_error_category: str | None,
+    evidence: list[str],
+    next_required_action: str,
+    safe_to_live_test: bool,
+    live_test_required: bool,
+    layers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "channel_name": name,
+        "status": status,
+        "inbound_configured": inbound_configured,
+        "inbound_verified": inbound_verified,
+        "outbound_configured": outbound_configured,
+        "outbound_verified": outbound_verified,
+        "max_processing_connected": max_processing_connected,
+        "reply_loop_verified": reply_loop_verified,
+        "ledger_logging_status": ledger_logging_status,
+        "last_known_activity_timestamp": last_known_activity_timestamp,
+        "last_error_category": last_error_category,
+        "evidence": evidence,
+        "next_required_action": next_required_action,
+        "safe_to_live_test": safe_to_live_test,
+        "live_test_required": live_test_required,
+        "layers": layers or [],
+    }
+
+
+def _dig_mx(domain: str = DOMAIN) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["dig", "+short", "MX", domain],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        records = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        cloudflare_records = [line for line in records if "mx.cloudflare.net" in line.lower()]
+        return {
+            "records": records,
+            "cloudflare_records": cloudflare_records,
+            "status": STATUS_VERIFIED_WORKING if len(cloudflare_records) >= 3 else STATUS_UNVERIFIED,
+            "error": None if result.returncode == 0 else (result.stderr or "").strip()[:180],
+        }
+    except Exception as exc:
+        return {"records": [], "cloudflare_records": [], "status": STATUS_UNVERIFIED, "error": type(exc).__name__}
+
+
+def _env_bool(name: str) -> bool:
+    return bool(os.getenv(name))
+
+
+def _outbound_email_config() -> dict[str, Any]:
+    sendgrid = _env_bool("SENDGRID_API_KEY")
+    smtp_user = _env_bool("SMTP_USER")
+    smtp_password = _env_bool("SMTP_PASSWORD")
+    smtp_host = _env_bool("SMTP_HOST")
+    smtp_from = _env_bool("SMTP_FROM")
+    smtp_configured_for_max = bool(smtp_user and smtp_password)
+    smtp_configured_for_business_sender = bool(smtp_host and smtp_user and smtp_password and smtp_from)
+    return {
+        "sendgrid_configured": sendgrid,
+        "smtp_configured_for_max": smtp_configured_for_max,
+        "smtp_configured_for_business_sender": smtp_configured_for_business_sender,
+        "max_email_configured": bool(sendgrid or smtp_configured_for_max),
+        "expected_env_names": [
+            "SENDGRID_API_KEY",
+            "SENDGRID_FROM_EMAIL",
+            "SMTP_HOST",
+            "SMTP_PORT",
+            "SMTP_USER",
+            "SMTP_PASSWORD",
+            "SMTP_FROM",
+            "SMTP_FROM_NAME",
+        ],
+    }
+
+
+def _env_example_coverage() -> dict[str, bool]:
+    path = CANONICAL_REPO / ".env.example"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        text = ""
+    return {name: name in text for name in MAX_EMAIL_ENV_NAMES}
+
+
+def _gmail_paths() -> dict[str, Any]:
+    return {
+        "canonical_token_exists": _exists(CANONICAL_BACKEND / "token.json"),
+        "canonical_credentials_exists": _exists(CANONICAL_BACKEND / "credentials.json"),
+        "legacy_token_exists": _exists(LEGACY_BACKEND / "token.json"),
+        "legacy_credentials_exists": _exists(LEGACY_BACKEND / "credentials.json"),
+        "token_path_configurable": False,
+        "token_path_source": "app.services.max.gmail_reader:TOKEN_FILE backend-relative constant",
+        "token_contents_read": False,
+        "legacy_token_auto_used": False,
+    }
+
+
+def _gmail_reader_status(paths: dict[str, Any]) -> dict[str, Any]:
+    if not paths["canonical_token_exists"]:
+        return _layer(
+            "backend_gmail_oauth_read_access",
+            STATUS_VERIFIED_BROKEN,
+            evidence=[
+                "Canonical backend token.json is missing.",
+                "Gmail reader uses canonical-backend-relative TOKEN_FILE.",
+                "Legacy token presence is detected but not copied or used automatically.",
+            ],
+            next_action="Run Gmail OAuth for the canonical backend or explicitly approve a credential migration plan.",
+            last_error_category="gmail_token_missing",
+            details=paths,
+        )
+    if not paths["canonical_credentials_exists"]:
+        return _layer(
+            "backend_gmail_oauth_read_access",
+            STATUS_PARTIAL,
+            evidence=["Canonical token.json exists, but canonical credentials.json is missing."],
+            next_action="Verify Gmail OAuth credentials and run the inbox endpoint.",
+            last_error_category="gmail_credentials_missing",
+            details=paths,
+        )
+    return _layer(
+        "backend_gmail_oauth_read_access",
+        STATUS_UNVERIFIED,
+        evidence=["Canonical Gmail OAuth files exist. This status endpoint does not call Gmail live."],
+        next_action="Run /api/v1/max/gmail/inbox to verify read access.",
+        details=paths,
+    )
+
+
+def _unified_store_info() -> dict[str, Any]:
+    try:
+        from app.services.max.unified_message_store import unified_store
+
+        db_path = Path(unified_store.db_path)
+    except Exception:
+        db_path = LEGACY_BACKEND / "data" / "brain" / "unified_messages.db"
+    exists = _exists(db_path)
+    return {
+        "db_path": str(db_path),
+        "path_kind": _safe_path_kind(db_path),
+        "exists": exists,
+    }
+
+
+def _latest_channel_activity(channel: str) -> dict[str, Any]:
+    info = _unified_store_info()
+    if not info["exists"]:
+        return {**info, "count": 0, "latest_created_at": None, "directions": {}}
+    try:
+        conn = sqlite3.connect(info["db_path"])
+        cur = conn.cursor()
+        rows = cur.execute(
+            "SELECT direction, COUNT(*), MAX(created_at) FROM unified_messages WHERE channel = ? GROUP BY direction",
+            (channel,),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        return {**info, "count": 0, "latest_created_at": None, "directions": {}, "error": type(exc).__name__}
+
+    directions: dict[str, dict[str, Any]] = {}
+    total = 0
+    latest: str | None = None
+    for direction, count, created_at in rows:
+        key = str(direction or "unknown")
+        total += int(count or 0)
+        directions[key] = {"count": int(count or 0), "latest_created_at": created_at}
+        if created_at and (latest is None or str(created_at) > latest):
+            latest = str(created_at)
+    return {**info, "count": total, "latest_created_at": latest, "directions": directions}
+
+
+def _email_webhook_analysis() -> dict[str, Any]:
+    try:
+        from app.routers import webhooks
+
+        source = inspect.getsource(webhooks.handle_inbound_email)
+        classify_source = inspect.getsource(webhooks.classify_max_email)
+    except Exception as exc:
+        return {
+            "exists": False,
+            "classifies": False,
+            "stores_thread_ids": False,
+            "calls_max": False,
+            "sends_reply": False,
+            "error": type(exc).__name__,
+        }
+    return {
+        "exists": True,
+        "classifies": "classify_max_email" in source and "classification" in classify_source,
+        "stores_thread_ids": "thread_id" in source and "source_message_id" in source,
+        "calls_max": "/api/v1/max/chat" in source or "ChatRequest" in source,
+        "sends_reply": "EmailService" in source or "send_email" in source,
+        "returns_received": '"status": "received"' in source or "'status': 'received'" in source,
+    }
+
+
+def _telegram_status() -> dict[str, Any]:
+    try:
+        from app.services.max.telegram_bot import TelegramBot, _TELEGRAM_CHAT_DIR
+
+        bot = TelegramBot()
+        history_exists = _exists(_TELEGRAM_CHAT_DIR)
+        history_count = len(list(_TELEGRAM_CHAT_DIR.glob("*.json"))) if history_exists else 0
+        source = inspect.getsource(bot._chat_with_max)
+        webhook_source = inspect.getsource(bot.process_webhook_update)
+        return {
+            "configured": bool(bot.is_configured),
+            "bot_token_set": bool(bot.bot_token),
+            "founder_chat_id_set": bool(bot.founder_chat_id),
+            "history_dir_exists": history_exists,
+            "history_file_count": history_count,
+            "history_path_kind": _safe_path_kind(_TELEGRAM_CHAT_DIR),
+            "max_route_connected": "/api/v1/max/chat" in source,
+            "webhook_processor_exists": "process_webhook_update" in webhook_source,
+            "send_function_exists": hasattr(bot, "send_message"),
+            "live_send_tested_by_verifier": False,
+        }
+    except Exception as exc:
+        return {
+            "configured": False,
+            "bot_token_set": False,
+            "founder_chat_id_set": False,
+            "history_dir_exists": False,
+            "history_file_count": 0,
+            "max_route_connected": False,
+            "webhook_processor_exists": False,
+            "send_function_exists": False,
+            "live_send_tested_by_verifier": False,
+            "error": type(exc).__name__,
+        }
+
+
+def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _hermes_artifact_status() -> dict[str, Any]:
+    try:
+        from app.services.max.hermes_memory import memory_root
+    except Exception:
+        root = Path.home() / "empire-box-memory"
+    else:
+        root = memory_root()
+    artifacts = {
+        "memory_root_exists": _exists(root),
+        "context_exists": _exists(root / "CONTEXT.md"),
+        "memory_exists": _exists(root / "MEMORY.md"),
+        "user_exists": _exists(root / "USER.md"),
+        "browser_actions_dir_exists": _exists(root / "BROWSER_ACTIONS"),
+        "channel_interfaces_exists": _exists(root / "CHANNELS" / "interfaces.json"),
+    }
+    external_open = _port_open("127.0.0.1", 9119)
+    return {
+        "root": str(root),
+        "root_path_kind": _safe_path_kind(root),
+        "artifacts": artifacts,
+        "internal_artifacts_present": any(artifacts.values()),
+        "external_hermes_port": 9119,
+        "external_hermes_reachable": external_open,
+        "hermes_email_implemented": False,
+        "hermes_role": "supporting_subordinate_to_max",
+    }
+
+
+def _web_chat_status() -> dict[str, Any]:
+    activity = _latest_channel_activity("web_chat")
+    return _channel(
+        key="web_chat",
+        name="MAX Web Chat",
+        status=STATUS_PARTIAL,
+        inbound_configured=True,
+        inbound_verified=bool(activity.get("latest_created_at")),
+        outbound_configured=True,
+        outbound_verified=bool(activity.get("latest_created_at")),
+        max_processing_connected=True,
+        reply_loop_verified=False,
+        ledger_logging_status=STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN,
+        last_known_activity_timestamp=activity.get("latest_created_at"),
+        last_error_category=None,
+        evidence=[
+            "MAX chat router is loaded under /api/v1/max.",
+            "This verifier does not call a live model.",
+            f"Unified message store path is {activity.get('path_kind')}.",
+        ],
+        next_required_action="Run an explicit harmless web chat live test if founder approves model usage.",
+        safe_to_live_test=True,
+        live_test_required=True,
+        layers=[
+            _layer("web_route", STATUS_PARTIAL, evidence=["/api/v1/max/status and chat routes are present."], next_action="Live chat test required for verified_working."),
+            _layer("ledger_logging", STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN, evidence=[f"web_chat rows: {activity.get('count', 0)}"], next_action="Canonicalize ledger path if needed.", details=activity),
+        ],
+    )
+
+
+def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    mx = _dig_mx()
+    paths = _gmail_paths()
+    gmail_layer = _gmail_reader_status(paths)
+    outbound = _outbound_email_config()
+    webhook = _email_webhook_analysis()
+    activity = _latest_channel_activity("email")
+    env_example = _env_example_coverage()
+
+    layers = [
+        _layer(
+            "dns_mx_readiness",
+            mx["status"],
+            evidence=mx["cloudflare_records"] or mx["records"] or ["No MX records detected by dig."],
+            next_action="Keep DNS as-is if Cloudflare Email Routing remains intended.",
+            last_error_category="dns_lookup_error" if mx.get("error") else None,
+            details={"domain": DOMAIN, "record_count": len(mx["records"])},
+        ),
+        _layer(
+            "cloudflare_email_routing_rule",
+            STATUS_UNVERIFIED,
+            evidence=["DNS MX records do not prove max@empirebox.store has an active Cloudflare routing rule."],
+            next_action="Manually verify Cloudflare Email Routing custom address max@empirebox.store and destination rule.",
+        ),
+        _layer(
+            "destination_gmail_delivery",
+            STATUS_UNVERIFIED,
+            evidence=["No live message delivery test was sent by this verifier."],
+            next_action="After Cloudflare route verification, send a founder-approved test email and confirm Gmail receipt.",
+        ),
+        gmail_layer,
+        _layer(
+            "inbound_webhook_or_poller_intake",
+            STATUS_PARTIAL if webhook["exists"] else STATUS_VERIFIED_BROKEN,
+            evidence=[
+                "Inbound webhook exists." if webhook["exists"] else "Inbound webhook not found.",
+                "Webhook classifies/logs email." if webhook.get("classifies") else "Webhook classifier not detected.",
+                "Webhook stores thread/message IDs." if webhook.get("stores_thread_ids") else "Thread/message ID storage not detected.",
+            ],
+            next_action="Add a no-send dry-run and then a gated live intake test.",
+            last_error_category=webhook.get("error"),
+            details=webhook,
+        ),
+        _layer(
+            "max_response_generation",
+            STATUS_VERIFIED_BROKEN,
+            evidence=["Inbound email webhook does not call MAX chat." if not webhook.get("calls_max") else "Webhook MAX call detected."],
+            next_action="Wire a dry-run MAX request builder before enabling real email replies.",
+            last_error_category="max_email_loop_missing" if not webhook.get("calls_max") else None,
+        ),
+        _layer(
+            "sendgrid_smtp_outbound",
+            STATUS_PARTIAL if outbound["max_email_configured"] else STATUS_VERIFIED_BROKEN,
+            evidence=[
+                f"SendGrid configured: {outbound['sendgrid_configured']}",
+                f"SMTP configured for MAX: {outbound['smtp_configured_for_max']}",
+            ],
+            next_action=(
+                "Run a founder-approved live outbound test; do not claim delivery until the send tool returns success."
+                if outbound["max_email_configured"]
+                else "Configure SendGrid or SMTP in backend runtime, then run a founder-approved live outbound test."
+            ),
+            last_error_category=None if outbound["max_email_configured"] else "outbound_email_not_configured",
+            details={**outbound, "env_example_documents": env_example},
+        ),
+        _layer(
+            "reply_threading",
+            STATUS_VERIFIED_BROKEN,
+            evidence=["No In-Reply-To/References reply path is implemented in the inbound email loop."],
+            next_action="Preserve Message-Id/thread_id and add reply headers in the email reply service.",
+            last_error_category="reply_threading_missing",
+        ),
+        _layer(
+            "ledger_memory_logging",
+            STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN,
+            evidence=[
+                f"Email ledger rows: {activity.get('count', 0)}",
+                f"Unified message store path kind: {activity.get('path_kind')}",
+            ],
+            next_action="Move/canonicalize the unified message store only after founder approval.",
+            details=activity,
+        ),
+        _layer(
+            "ui_visibility",
+            STATUS_PARTIAL,
+            evidence=["Channel Verification Center exposes email layers via /api/v1/channels/status."],
+            next_action="Use /channels in Command Center for operator visibility.",
+        ),
+    ]
+
+    email_channel = _channel(
+        key="email",
+        name="Email / Gmail / Cloudflare Email Routing / SendGrid",
+        status=STATUS_PARTIAL,
+        inbound_configured=bool(mx["cloudflare_records"] or webhook["exists"]),
+        inbound_verified=False,
+        outbound_configured=bool(outbound["max_email_configured"]),
+        outbound_verified=False,
+        max_processing_connected=bool(webhook.get("calls_max")),
+        reply_loop_verified=False,
+        ledger_logging_status=STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN,
+        last_known_activity_timestamp=activity.get("latest_created_at"),
+        last_error_category="backend_gmail_and_outbound_not_ready",
+        evidence=[
+            "DNS MX can be ready while backend Gmail/SendGrid remains broken.",
+            "Canonical Gmail OAuth files are missing." if not paths["canonical_token_exists"] else "Canonical Gmail token exists.",
+            "Outbound MAX email runtime is configured." if outbound["max_email_configured"] else "Outbound MAX email runtime is not configured.",
+            "Inbound webhook logs/classifies but does not reply." if webhook["exists"] else "Inbound webhook not found.",
+        ],
+        next_required_action="Verify Cloudflare routing manually, then repair canonical Gmail OAuth and outbound email config before live tests.",
+        safe_to_live_test=False,
+        live_test_required=True,
+        layers=layers,
+    )
+    return email_channel, layers
+
+
+def _telegram_channel_status() -> dict[str, Any]:
+    tg = _telegram_status()
+    activity = _latest_channel_activity("telegram")
+    recent = bool(activity.get("latest_created_at"))
+    configured = bool(tg["configured"])
+    layers = [
+        _layer("configured", STATUS_VERIFIED_WORKING if configured else STATUS_VERIFIED_BROKEN, evidence=[f"Telegram configured: {configured}"], next_action="Set bot token and founder chat id if false.", details={k: tg[k] for k in ("bot_token_set", "founder_chat_id_set")}),
+        _layer("inbound_route", STATUS_PARTIAL if tg["webhook_processor_exists"] else STATUS_VERIFIED_BROKEN, evidence=["Telegram webhook processor exists." if tg["webhook_processor_exists"] else "Telegram webhook processor missing."], next_action="Run a founder-approved inbound test message."),
+        _layer("outbound_send_function", STATUS_PARTIAL if tg["send_function_exists"] else STATUS_VERIFIED_BROKEN, evidence=["send_message function exists." if tg["send_function_exists"] else "send_message function missing."], next_action="Run founder-approved live Telegram send test."),
+        _layer("recent_ledger_activity", STATUS_PARTIAL if recent else STATUS_UNVERIFIED, evidence=[f"Telegram ledger rows: {activity.get('count', 0)}", f"Latest: {activity.get('latest_created_at')}"], next_action="Use a live test to verify current send/receive.", details=activity),
+        _layer("max_route_connected", STATUS_PARTIAL if tg["max_route_connected"] else STATUS_VERIFIED_BROKEN, evidence=["Telegram _chat_with_max posts to /api/v1/max/chat." if tg["max_route_connected"] else "MAX chat route not detected."], next_action="Run live Telegram reply test only after approval."),
+        _layer("live_send_test", STATUS_UNVERIFIED, evidence=["This verifier did not send a Telegram message."], next_action="Call /api/v1/max/telegram/send only after explicit founder approval."),
+    ]
+    return _channel(
+        key="telegram",
+        name="Telegram",
+        status=STATUS_PARTIAL if configured else STATUS_VERIFIED_BROKEN,
+        inbound_configured=configured and tg["webhook_processor_exists"],
+        inbound_verified=recent,
+        outbound_configured=configured and tg["send_function_exists"],
+        outbound_verified=False,
+        max_processing_connected=tg["max_route_connected"],
+        reply_loop_verified=False,
+        ledger_logging_status=STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN,
+        last_known_activity_timestamp=activity.get("latest_created_at"),
+        last_error_category=None if configured else "telegram_not_configured",
+        evidence=[
+            f"Telegram configured: {configured}",
+            f"History directory exists: {tg['history_dir_exists']}",
+            f"Live send tested by verifier: {tg['live_send_tested_by_verifier']}",
+        ],
+        next_required_action="Run a founder-approved live Telegram send/receive smoke test.",
+        safe_to_live_test=configured,
+        live_test_required=True,
+        layers=layers,
+    )
+
+
+def _hermes_channel_status() -> dict[str, Any]:
+    hermes = _hermes_artifact_status()
+    artifacts_present = hermes["internal_artifacts_present"]
+    layers = [
+        _layer(
+            "internal_hermes_artifacts",
+            STATUS_PARTIAL if artifacts_present else STATUS_PLANNED,
+            evidence=[f"{name}: {value}" for name, value in hermes["artifacts"].items()],
+            next_action="Keep Hermes artifacts subordinate to MAX runtime truth.",
+            details={"root": hermes["root"], "root_path_kind": hermes["root_path_kind"]},
+        ),
+        _layer(
+            "external_hermes_process_9119",
+            STATUS_PARTIAL if hermes["external_hermes_reachable"] else STATUS_UNVERIFIED,
+            evidence=[f"127.0.0.1:9119 reachable: {hermes['external_hermes_reachable']}"],
+            next_action="Inspect External Hermes manually before integrating it with MAX.",
+        ),
+        _layer(
+            "hermes_email",
+            STATUS_PLANNED,
+            evidence=["Hermes email channel is not implemented in stable main."],
+            next_action="Keep Hermes email separate from MAX email until explicitly designed.",
+        ),
+        _layer(
+            "max_subordination_policy",
+            STATUS_PARTIAL,
+            evidence=["Hermes is treated as supporting/subordinate context, not MAX's source of truth."],
+            next_action="Do not merge Hermes and MAX email channels blindly.",
+        ),
+    ]
+    return _channel(
+        key="hermes",
+        name="Internal/External Hermes",
+        status=STATUS_PARTIAL if artifacts_present or hermes["external_hermes_reachable"] else STATUS_PLANNED,
+        inbound_configured=artifacts_present,
+        inbound_verified=False,
+        outbound_configured=False,
+        outbound_verified=False,
+        max_processing_connected=artifacts_present,
+        reply_loop_verified=False,
+        ledger_logging_status=STATUS_PARTIAL if artifacts_present else STATUS_PLANNED,
+        last_known_activity_timestamp=None,
+        last_error_category=None,
+        evidence=[
+            f"Internal artifacts present: {artifacts_present}",
+            f"External Hermes 9119 reachable: {hermes['external_hermes_reachable']}",
+            "Hermes email is not implemented.",
+        ],
+        next_required_action="Keep Hermes read-only/supporting until a dedicated integration is approved.",
+        safe_to_live_test=False,
+        live_test_required=False,
+        layers=layers,
+    )
+
+
+def build_channel_status() -> dict[str, Any]:
+    email_channel, email_layers = _email_status()
+    channels = [
+        _web_chat_status(),
+        _telegram_channel_status(),
+        email_channel,
+        _hermes_channel_status(),
+    ]
+    return {
+        "schema_version": 1,
+        "generated_at": _now(),
+        "strict_statuses": [
+            STATUS_VERIFIED_WORKING,
+            STATUS_PARTIAL,
+            STATUS_VERIFIED_BROKEN,
+            STATUS_UNVERIFIED,
+            STATUS_DISABLED,
+            STATUS_PLANNED,
+        ],
+        "channels": channels,
+        "email_layers": email_layers,
+        "prior_work_detected": {
+            "dns_mx": _dig_mx(),
+            "gmail_paths": _gmail_paths(),
+            "outbound_email_config": _outbound_email_config(),
+            "telegram": _telegram_status(),
+            "email_webhook": _email_webhook_analysis(),
+            "unified_message_store": _unified_store_info(),
+            "hermes": _hermes_artifact_status(),
+            "env_example_documents": _env_example_coverage(),
+        },
+        "safety": {
+            "secrets_included": False,
+            "token_contents_read": False,
+            "legacy_tokens_copied_or_moved": False,
+            "live_email_sent": False,
+            "live_telegram_sent": False,
+            "external_hermes_modified": False,
+        },
+    }
+
+
+def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    channel_key = (channel or "").strip().lower().replace("-", "_")
+    payload = payload or {}
+    if channel_key in {"email", "gmail"}:
+        from app.routers.webhooks import classify_max_email
+
+        subject = str(payload.get("subject") or "Dry-run MAX email")
+        body = str(payload.get("body") or payload.get("text") or "Dry-run email body")
+        attachments = payload.get("attachments") or []
+        classification = classify_max_email(subject, body, attachments)
+        return {
+            "channel": "email",
+            "dry_run": True,
+            "live_send_performed": False,
+            "classification": classification,
+            "max_request_payload": {
+                "message": body or subject,
+                "channel": "email",
+                "conversation_id": payload.get("thread_id") or "dry-run-email-thread",
+                "metadata": {
+                    "subject": subject,
+                    "classification": classification["classification"],
+                    "source": "channel_verification_dry_run",
+                },
+            },
+            "reply_payload_preview": {
+                "would_send": False,
+                "provider": "sendgrid_or_smtp",
+                "requires_outbound_config": True,
+                "requires_thread_headers": True,
+            },
+        }
+    if channel_key == "telegram":
+        message = str(payload.get("message") or "Dry-run Telegram message")
+        return {
+            "channel": "telegram",
+            "dry_run": True,
+            "live_send_performed": False,
+            "payload_valid": bool(message.strip()),
+            "would_send": False,
+            "telegram_status": _telegram_status(),
+        }
+    if channel_key in {"web", "web_chat", "max_web_chat"}:
+        return {
+            "channel": "web_chat",
+            "dry_run": True,
+            "live_model_call_performed": False,
+            "route_status": "health/status only",
+            "web_chat_status": _web_chat_status(),
+        }
+    if channel_key == "hermes":
+        return {
+            "channel": "hermes",
+            "dry_run": True,
+            "external_process_modified": False,
+            "artifact_status": _hermes_artifact_status(),
+        }
+    return {
+        "channel": channel or "unknown",
+        "dry_run": True,
+        "error": "Unsupported channel for dry-run verification.",
+        "supported_channels": ["email", "telegram", "web_chat", "hermes"],
+    }
