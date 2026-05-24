@@ -20,6 +20,16 @@ from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_m
 from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
 from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.tool_result_normalizer import (
+    normalize_tool_result_entry as _normalize_tool_result_entry_canonical,
+    normalize_tool_results,
+)
+from app.services.max.runtime_truth_enforcer import (
+    enforce_runtime_truth_response,
+    runtime_truth_failure_message,
+    runtime_truth_failures,
+    should_halt_after_tool_failure,
+)
 from app.services.max.evaluation_service import evaluation_service
 from app.services.max.drawing_intent import build_drawing_handoff
 from app.services.max.grounding_verifier import verify_web_response, log_to_audit
@@ -1196,18 +1206,12 @@ def _gmail_inbox_response(request: ChatRequest) -> ChatResponse:
 
 
 def _normalize_tool_result_entry(item: Any) -> dict[str, Any]:
-    if isinstance(item, dict):
-        return {
-            "tool": item.get("tool"),
-            "success": bool(item.get("success")),
-            "result": item.get("result"),
-            "error": item.get("error"),
-        }
+    entry = _normalize_tool_result_entry_canonical(item)
     return {
-        "tool": getattr(item, "tool", None),
-        "success": bool(getattr(item, "success", False)),
-        "result": getattr(item, "result", None),
-        "error": getattr(item, "error", None),
+        "tool": entry.get("tool"),
+        "success": bool(entry.get("success")),
+        "result": entry.get("result"),
+        "error": entry.get("error"),
     }
 
 
@@ -1292,6 +1296,10 @@ def _apply_gpu_safety_output_guardrail(message: str | None, response_text: str) 
 
 
 def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
+    enforced = enforce_runtime_truth_response(message, response_text, tool_results)
+    if enforced != response_text:
+        return enforced
+
     if _is_unverified_email_send_request(message) and not _has_verified_email_send_result(tool_results):
         return _email_send_boundary_response(ChatRequest(message=message or "", history=[])).response
 
@@ -1914,9 +1922,13 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                     tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
                 result = execute_tool(tc, desk=request.desk, access_context=_ac_context, founder=founder)
-                entry = {"tool": result.tool, "success": result.success, "result": result.result, "error": result.error}
+                entry = _normalize_tool_result_entry(result)
                 round_results.append(entry)
                 tool_results_list.append(entry)
+
+            if should_halt_after_tool_failure(round_results, user_message=request.message):
+                final_content = runtime_truth_failure_message(runtime_truth_failures(round_results, user_message=request.message))
+                break
 
             # Build tool summary and ask AI for follow-up
             tool_summary_parts = []
@@ -1951,6 +1963,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         # Grounding verification: strip hallucinated citations from web-sourced responses
         if tool_results_list:
+            tool_results_list = normalize_tool_results(tool_results_list)
             has_web_tools = any(tr.get("tool") in ("web_search", "web_read") for tr in tool_results_list)
             if has_web_tools:
                 try:
@@ -1984,7 +1997,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             search_result = await asyncio.to_thread(
                 execute_tool, search_tc, desk=request.desk, access_context=_ac_context, founder=founder
             )
-            search_entry = {"tool": "web_search", "success": search_result.success, "result": search_result.result, "error": search_result.error}
+            search_entry = _normalize_tool_result_entry(search_result)
             tool_results_list.append(search_entry)
 
             # Build grounding context and re-query AI with verified data
@@ -2452,13 +2465,19 @@ async def chat_stream(request: ChatRequest):
                         tc = {"tool": "run_desk_task", "title": title, "description": " | ".join(desc_parts), "priority": "normal"}
 
                     result = execute_tool(tc, desk=request.desk, access_context=_stream_ac_context, founder=founder)
-                    round_results.append(result)
-                    tool_results_list.append(result)
-                    yield f"data: {json.dumps({'type': 'tool_result', 'tool': result.tool, 'success': result.success, 'result': result.result, 'error': result.error})}\n\n"
+                    entry = _normalize_tool_result_entry(result)
+                    round_results.append(entry)
+                    tool_results_list.append(entry)
+                    yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
+
+                if should_halt_after_tool_failure(round_results, user_message=request.message):
+                    full_response = runtime_truth_failure_message(runtime_truth_failures(round_results, user_message=request.message))
+                    yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
+                    break
 
                 tool_summary_parts = []
                 for r in round_results:
-                    _r = r if isinstance(r, dict) else r.__dict__
+                    _r = _normalize_tool_result_entry(r)
                     tool_key = _r.get("tool", "?")
                     tool_res = _r.get("result", "")
                     tool_err = _r.get("error", "Unknown")
@@ -2467,7 +2486,7 @@ async def chat_stream(request: ChatRequest):
                     else:
                         tool_summary_parts.append(f"[{tool_key}] Error: {tool_err}")
                 tool_summary = "\n\n".join(tool_summary_parts)
-                round_results_dicts = [r if isinstance(r, dict) else r.__dict__ for r in round_results]
+                round_results_dicts = normalize_tool_results(round_results)
                 if any(r.get("tool") in ACTION_TOOLS and r.get("success") for r in round_results_dicts):
                     tool_summary += (
                         "\n\n[SYSTEM: Task identity rule — if you mention a task/delegation id, "
@@ -2499,6 +2518,10 @@ async def chat_stream(request: ChatRequest):
 
             # Track assistant response — fire-and-forget background tasks
             full_response = _sanitize_internal_leakage_text(full_response)
+            truth_checked_response = _apply_truth_guardrails(request.message, full_response, tool_results_list)
+            if truth_checked_response != full_response:
+                full_response = truth_checked_response
+                yield f"data: {json.dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
             conversation_tracker.add_message(conv_id, "assistant", strip_tool_blocks(full_response))
             asyncio.create_task(_safe_background(
                 conversation_tracker.check_and_summarize(conv_id),
@@ -2511,7 +2534,7 @@ async def chat_stream(request: ChatRequest):
                 unified_store.add_message(
                     conv_id, request.channel or "web", "assistant", strip_tool_blocks(full_response),
                     model=model_used,
-                    tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in tool_results_list] if tool_results_list else None,
+                    tool_results=[{"tool": r.get("tool"), "success": r.get("success")} for r in normalize_tool_results(tool_results_list)] if tool_results_list else None,
                     metadata=_ledger_metadata(request.channel, {"source": "max_stream_response"}),
                 )
             except Exception as _ums_err:
@@ -2548,7 +2571,7 @@ async def chat_stream(request: ChatRequest):
             _grounding_events = []
             if tool_results_list:
                 # Convert result objects to dicts for verify_web_response
-                _tool_dicts = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
+                _tool_dicts = normalize_tool_results(tool_results_list)
                 _has_web = any(td["tool"] in ("web_search", "web_read") for td in _tool_dicts)
                 if _has_web:
                     try:
@@ -2625,7 +2648,7 @@ async def chat_stream(request: ChatRequest):
             _quality_badge = None
             try:
                 from app.services.max.quality_gate import validate_response as _qg_validate, get_quality_badge as _qg_badge
-                _tool_dicts_for_qg = [{"tool": r.get("tool"), "success": r.get("success"), "result": r.get("result"), "error": r.get("error")} for r in tool_results_list] if tool_results_list else []
+                _tool_dicts_for_qg = normalize_tool_results(tool_results_list)
                 _qg_result = _qg_validate(full_response, category=request.desk or "general", tool_results=_tool_dicts_for_qg, model_used=model_used)
                 _quality_badge = _qg_badge(_qg_result)
                 _log_quality_metric(_qg_result, model_used, request.channel or "web")
@@ -2724,9 +2747,15 @@ async def presentation_to_pdf(data: dict):
 
     try:
         pdf_path = _render_presentation_pdf(data)
+        if not pdf_path or not os.path.exists(pdf_path):
+            raise HTTPException(status_code=500, detail="PDF rendering verification failed: file missing")
+        if os.path.getsize(pdf_path) <= 0:
+            raise HTTPException(status_code=500, detail="PDF rendering verification failed: empty file")
         filename = os.path.basename(pdf_path)
         return FileResponse(pdf_path, media_type="application/pdf", filename=filename)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         logger.error(f"Presentation PDF error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2783,18 +2812,26 @@ async def presentation_to_telegram(data: dict):
 
     try:
         pdf_path = _render_presentation_pdf(data)
+        if not pdf_path or not os.path.exists(pdf_path):
+            raise HTTPException(status_code=500, detail="PDF rendering verification failed: file missing")
+        pdf_size = os.path.getsize(pdf_path)
+        if pdf_size <= 0:
+            raise HTTPException(status_code=500, detail="PDF rendering verification failed: empty file")
         # Send via Telegram
         from app.services.max.telegram_bot import TelegramBot
         bot = TelegramBot()
-        telegram_sent = False
-        if bot.is_configured:
-            title = data.get("title", "Presentation")
-            section_count = len(data.get("sections", []))
-            caption = f"\U0001f4ca <b>{title}</b>\n{section_count} sections \u00b7 {data.get('model_used', 'AI')}"
-            await bot.send_document(pdf_path, caption=caption)
-            telegram_sent = True
-        return {"success": True, "pdf_path": pdf_path, "telegram_sent": telegram_sent}
+        if not bot.is_configured:
+            raise HTTPException(status_code=503, detail="Telegram not configured")
+        title = data.get("title", "Presentation")
+        section_count = len(data.get("sections", []))
+        caption = f"\U0001f4ca <b>{title}</b>\n{section_count} sections \u00b7 {data.get('model_used', 'AI')}"
+        telegram_sent = bool(await bot.send_document(pdf_path, caption=caption))
+        if not telegram_sent:
+            raise HTTPException(status_code=502, detail="Telegram document send was not verified")
+        return {"success": True, "pdf_path": pdf_path, "pdf_size_bytes": pdf_size, "telegram_sent": True}
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         logger.error(f"Presentation Telegram error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

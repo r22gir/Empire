@@ -911,8 +911,10 @@ class TelegramBot:
                 file_path = res.get("file_path") or res.get("pdf_path")
                 if file_path and os.path.exists(file_path) and file_path not in sent_files:
                     caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
-                    await self.send_document(file_path, caption=caption, chat_id=chat_id)
-                    sent_files.add(file_path)
+                    if await self.send_document(file_path, caption=caption, chat_id=chat_id):
+                        sent_files.add(file_path)
+                    else:
+                        logger.warning("Telegram document send was not verified: %s", file_path)
                 image_url = res.get("image_url") or res.get("url")
                 if image_url and image_url.startswith("http"):
                     try:
@@ -929,8 +931,10 @@ class TelegramBot:
                 latest_pdf = self._find_latest_pdf()
                 if latest_pdf:
                     logger.info(f"Safety net: sending latest PDF {latest_pdf}")
-                    await self.send_document(latest_pdf, caption=f"📎 {os.path.basename(latest_pdf)}", chat_id=chat_id)
-                    sent_files.add(latest_pdf)
+                    if await self.send_document(latest_pdf, caption=f"📎 {os.path.basename(latest_pdf)}", chat_id=chat_id):
+                        sent_files.add(latest_pdf)
+                    else:
+                        logger.warning("Telegram safety-net PDF send was not verified: %s", latest_pdf)
 
         _auto_save_exchange_to_memory(text, plain_text, source="telegram", chat_id=chat_id or "")
         await self._send_voice_reply(update, plain_text)
@@ -1176,8 +1180,10 @@ class TelegramBot:
                     file_path = res.get("file_path") or res.get("pdf_path")
                     if file_path and os.path.exists(file_path) and file_path not in sent_files:
                         doc_caption = res.get("caption", f"📎 {os.path.basename(file_path)}")
-                        await self.send_document(file_path, caption=doc_caption, chat_id=photo_chat_id)
-                        sent_files.add(file_path)
+                        if await self.send_document(file_path, caption=doc_caption, chat_id=photo_chat_id):
+                            sent_files.add(file_path)
+                        else:
+                            logger.warning("Telegram photo-flow document send was not verified: %s", file_path)
                     image_url = res.get("image_url") or res.get("url")
                     if image_url and isinstance(image_url, str) and image_url.startswith("http"):
                         try:

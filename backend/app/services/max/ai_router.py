@@ -251,26 +251,10 @@ class AIRouter:
         self.last_provider_errors.pop(provider, None)
 
     def _provider_unavailable_message(self) -> str:
-        reasons = []
-        if self.minimax_key:
-            reasons.append(
-                f"MiniMax failed ({self.last_provider_errors['minimax']})"
-                if self.last_provider_errors.get("minimax")
-                else "MiniMax is configured but did not return a response"
-            )
-        else:
-            reasons.append("MiniMax key is not loaded")
-        if self.max_disable_xai:
-            reasons.append("xAI/Grok is disabled by MAX_DISABLE_XAI=true")
-        elif not self.xai_key:
-            reasons.append("xAI/Grok key is not loaded")
-        if self.max_disable_ollama:
-            reasons.append("Ollama is disabled by MAX_DISABLE_OLLAMA=true")
-        for provider in ("gemini", "groq", "claude", "openai", "openclaw"):
-            if self.last_provider_errors.get(provider):
-                reasons.append(f"{provider} failed ({self.last_provider_errors[provider]})")
-        deduped = list(dict.fromkeys(reasons))
-        return "All AI providers are unavailable: " + "; ".join(deduped) + "."
+        return (
+            "I could not complete the AI text-generation step because no configured text provider "
+            "returned a verified response. Provider diagnostics are available in /api/v1/max/status."
+        )
 
     def _sanitize_minimax_content(self, text: str) -> str:
         cleaned = (text or "").strip()

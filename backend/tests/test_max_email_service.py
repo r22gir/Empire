@@ -228,6 +228,49 @@ def test_smtp_reply_to_header_when_configured(monkeypatch, tmp_path):
     assert reply_addr == "max@empirebox.store"
 
 
+def test_email_service_rejects_empty_body_before_send(monkeypatch, tmp_path):
+    store = UnifiedMessageStore(tmp_path / "unified_messages.db")
+    monkeypatch.setattr("app.services.max.unified_message_store.unified_store", store)
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "empirebox2026@gmail.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "fake-password")
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
+
+    svc = EmailService()
+    try:
+        svc.send(to="founder@example.com", subject="Empty", body_html="   ")
+    except ValueError as exc:
+        assert "Email body is empty" in str(exc)
+    else:
+        raise AssertionError("empty email body should fail before send")
+
+
+def test_email_service_rejects_missing_attachment_before_send(monkeypatch, tmp_path):
+    store = UnifiedMessageStore(tmp_path / "unified_messages.db")
+    monkeypatch.setattr("app.services.max.unified_message_store.unified_store", store)
+
+    monkeypatch.setenv("SMTP_HOST", "smtp.gmail.com")
+    monkeypatch.setenv("SMTP_PORT", "587")
+    monkeypatch.setenv("SMTP_USER", "empirebox2026@gmail.com")
+    monkeypatch.setenv("SMTP_PASSWORD", "fake-password")
+    monkeypatch.delenv("SENDGRID_API_KEY", raising=False)
+
+    svc = EmailService()
+    try:
+        svc.send(
+            to="founder@example.com",
+            subject="Missing attachment",
+            body_html="<p>Body</p>",
+            attachments=[str(tmp_path / "missing.pdf")],
+        )
+    except FileNotFoundError as exc:
+        assert "Email attachment not found" in str(exc)
+    else:
+        raise AssertionError("missing attachment should fail before send")
+
+
 def test_no_secrets_in_status_check(monkeypatch, tmp_path):
     """EmailService.is_configured reveals no secret values."""
     store = UnifiedMessageStore(tmp_path / "unified_messages.db")

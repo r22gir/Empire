@@ -73,11 +73,30 @@ class EmailService:
             raise RuntimeError(
                 "Email not configured — set SENDGRID_API_KEY or SMTP_USER/SMTP_PASSWORD env vars"
             )
+        self._verify_send_payload(to, subject, body_html, attachments)
 
         sent = self._send_sendgrid(to, subject, body_html, attachments, cc) if self.sendgrid_key else self._send_smtp(to, subject, body_html, attachments, cc)
         if sent:
             self._write_outbound_ledger(to, subject, body_html, attachments, cc)
         return sent
+
+    def _verify_send_payload(
+        self,
+        to: str,
+        subject: str,
+        body_html: str,
+        attachments: list[str] | None = None,
+    ) -> None:
+        """Fail before provider calls when the message or attachments are not real."""
+        if not str(to or "").strip():
+            raise ValueError("Email recipient is required")
+        if not str(subject or "").strip():
+            raise ValueError("Email subject is required")
+        if not str(body_html or "").strip():
+            raise ValueError("Email body is empty; refusing to report a delivered analysis")
+        missing = [str(path) for path in (attachments or []) if not Path(str(path)).exists()]
+        if missing:
+            raise FileNotFoundError(f"Email attachment not found: {', '.join(missing)}")
 
     def _write_outbound_ledger(
         self,
@@ -137,9 +156,6 @@ class EmailService:
             encoded_attachments = []
             for filepath in (attachments or []):
                 path = Path(filepath)
-                if not path.exists():
-                    logger.warning(f"Attachment not found: {filepath}")
-                    continue
                 encoded_attachments.append({
                     "content": base64.b64encode(path.read_bytes()).decode("ascii"),
                     "filename": path.name,
@@ -195,9 +211,6 @@ class EmailService:
         # Attach files
         for filepath in (attachments or []):
             path = Path(filepath)
-            if not path.exists():
-                logger.warning(f"Attachment not found: {filepath}")
-                continue
             part = MIMEBase("application", "octet-stream")
             part.set_payload(path.read_bytes())
             encoders.encode_base64(part)

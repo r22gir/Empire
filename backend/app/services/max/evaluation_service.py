@@ -14,6 +14,8 @@ import json
 import logging
 import re
 import uuid
+
+from app.services.max.tool_result_normalizer import normalize_tool_results
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -275,10 +277,11 @@ class EvaluationService:
         has_image = 1 if any("image" in t.lower() or "photo" in t.lower() for t in tools_used) else 0
         capability = self.detect_capability_from_message(message, has_image=has_image, tools_used=tools_used)
         provider = self.get_provider(model_used)
-        any_tool_failure = 1 if any(not r.get("success", False) for r in tool_results) else 0
+        normalized_tool_results = normalize_tool_results(tool_results)
+        any_tool_failure = 1 if any(not r.get("success", False) for r in normalized_tool_results) else 0
 
         # Detect implicit signals
-        implicit = self._detect_implicit_signals(message, tool_results)
+        implicit = self._detect_implicit_signals(message, normalized_tool_results)
         user_corrected = 1 if implicit.get("correction", False) else 0
         repeated_ask = 1 if implicit.get("retry", False) else 0
 
@@ -294,7 +297,7 @@ class EvaluationService:
                 """, (
                     response_id, channel, conversation_id or None, intent, capability, has_image,
                     model_used, provider, 1 if fallback_used else 0,
-                    json.dumps(tools_used), json.dumps(tool_results),
+                    json.dumps(tools_used), json.dumps(normalized_tool_results),
                     any_tool_failure, latency_ms, response_length, user_corrected, repeated_ask,
                     json.dumps(implicit), json.dumps(metadata_envelope or {}),
                 ))
@@ -304,7 +307,7 @@ class EvaluationService:
 
                 # Update tool performance
                 for tool_name in tools_used:
-                    self._update_tool_performance(conn, tool_name, capability, tool_results, latency_ms)
+                    self._update_tool_performance(conn, tool_name, capability, normalized_tool_results, latency_ms)
 
             logger.debug(f"[evaluation] Logged response {response_id}: {intent}/{capability} via {provider}")
         except Exception as e:
@@ -406,8 +409,9 @@ class EvaluationService:
     def _update_tool_performance(self, conn, tool_name: str, capability: str, tool_results: list, latency_ms: int):
         """Update tool performance aggregate."""
         # Count this tool's results
-        tool_successes = sum(1 for r in tool_results if r.get("tool") == tool_name and r.get("success"))
-        tool_failures = sum(1 for r in tool_results if r.get("tool") == tool_name and not r.get("success"))
+        normalized_tool_results = normalize_tool_results(tool_results)
+        tool_successes = sum(1 for r in normalized_tool_results if r.get("tool") == tool_name and r.get("success"))
+        tool_failures = sum(1 for r in normalized_tool_results if r.get("tool") == tool_name and not r.get("success"))
 
         row = conn.execute(
             "SELECT total_calls, success_count, failure_count, avg_latency_ms FROM max_tool_performance WHERE tool_name=? AND capability=?",

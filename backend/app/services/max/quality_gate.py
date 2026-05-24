@@ -2,31 +2,21 @@
 Quality Gate — Response validation for MAX.
 Runs checks on every AI response before delivery to ensure accuracy and reliability.
 """
-import logging
 import re
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any, Optional
+
+from app.services.max.tool_result_normalizer import normalize_tool_result_entry
+
+import logging
 
 logger = logging.getLogger("max.quality_gate")
 
 
 def tool_result_to_dict(result: Any) -> dict:
     """Normalize a tool result to a dict, handling ToolResult objects, dicts, and None."""
-    if result is None:
-        return {}
-    if isinstance(result, dict):
-        return result
-    if hasattr(result, "to_dict"):
-        return result.to_dict()
-    if hasattr(result, "model_dump"):
-        return result.model_dump()
-    return {
-        "tool": getattr(result, "tool", None),
-        "success": getattr(result, "success", None),
-        "result": getattr(result, "result", None),
-        "error": getattr(result, "error", None),
-    }
+    return normalize_tool_result_entry(result) if result is not None else {}
 
 # Confidence levels
 VERIFIED = "verified"       # Checked against DB

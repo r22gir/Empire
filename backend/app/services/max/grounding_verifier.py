@@ -7,6 +7,8 @@ import re
 import logging
 from dataclasses import dataclass, field
 
+from app.services.max.tool_result_normalizer import normalize_tool_results
+
 logger = logging.getLogger("max.grounding")
 
 
@@ -100,7 +102,7 @@ def _collect_source_content(tool_results: list[dict]) -> dict[str, str]:
     """Build URL → content map from web_search and web_read results."""
     sources = {}
 
-    for tr in tool_results:
+    for tr in normalize_tool_results(tool_results):
         if not tr.get("success") or not tr.get("result"):
             continue
 

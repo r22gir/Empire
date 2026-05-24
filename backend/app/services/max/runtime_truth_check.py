@@ -57,12 +57,15 @@ INTENT_SIGNALS = [
     "service health",
     "services online",
     "what is online",
+    "what's new max",
+    "whats new max",
+    "what is new max",
 ]
 
 
 def _normalize_intent_text(message: str | None) -> str:
     text = (message or "").lower().strip()
-    text = text.replace("'", "'").replace("`", "'")
+    text = text.replace("’", "'").replace("`", "'")
     text = re.sub(r"\s+", " ", text)
     return text
 
@@ -92,6 +95,8 @@ WHATS_NEW_SIGNALS = [
 
 def should_run_whats_new_summary(message: str | None) -> bool:
     text = _normalize_intent_text(message)
+    if should_run_runtime_truth_check(text):
+        return False
     return any(signal in text for signal in WHATS_NEW_SIGNALS)
 
 
