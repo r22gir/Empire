@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from app.services.max.email_sender_whitelist import authorize_email_sender, sender_whitelist_status
+
 
 STATUS_VERIFIED_WORKING = "verified_working"
 STATUS_PARTIAL = "partial"
@@ -29,6 +31,7 @@ MAX_EMAIL_ENV_NAMES = [
     "MAX_EMAIL",
     "FOUNDER_EMAIL",
     "FOUNDER_EMAILS",
+    "MAX_EMAIL_ALLOWED_SENDERS",
     "GMAIL_TOKEN_PATH",
     "GMAIL_CREDENTIALS_PATH",
     "SENDGRID_API_KEY",
@@ -435,6 +438,17 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     webhook = _email_webhook_analysis()
     activity = _latest_channel_activity("email")
     env_example = _env_example_coverage()
+    whitelist = sender_whitelist_status()
+    if not whitelist["email_sender_whitelist_configured"]:
+        email_last_error = "email_sender_whitelist_missing"
+    elif not paths["configured_token_exists"]:
+        email_last_error = "gmail_token_missing"
+    elif not outbound["max_email_configured"]:
+        email_last_error = "outbound_email_not_configured"
+    elif not webhook.get("calls_max"):
+        email_last_error = "max_email_loop_missing"
+    else:
+        email_last_error = "reply_threading_missing"
 
     layers = [
         _layer(
@@ -463,12 +477,28 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
             STATUS_PARTIAL if webhook["exists"] else STATUS_VERIFIED_BROKEN,
             evidence=[
                 "Inbound webhook exists." if webhook["exists"] else "Inbound webhook not found.",
-                "Webhook classifies/logs email." if webhook.get("classifies") else "Webhook classifier not detected.",
+                "Webhook blocks unauthorized senders and classifies/logs authorized email." if webhook.get("classifies") else "Webhook classifier not detected.",
                 "Webhook stores thread/message IDs." if webhook.get("stores_thread_ids") else "Thread/message ID storage not detected.",
             ],
             next_action="Add a no-send dry-run and then a gated live intake test.",
             last_error_category=webhook.get("error"),
             details=webhook,
+        ),
+        _layer(
+            "sender_whitelist_gate",
+            STATUS_PARTIAL if whitelist["email_sender_whitelist_configured"] else STATUS_VERIFIED_BROKEN,
+            evidence=[
+                f"MAX email sender whitelist configured: {whitelist['email_sender_whitelist_configured']}",
+                f"Allowed sender count: {whitelist['allowed_sender_count']}",
+                "Allowed sender addresses are not exposed by this verifier.",
+            ],
+            next_action=(
+                "Keep MAX_EMAIL_ALLOWED_SENDERS limited to founder-approved sender addresses before enabling live replies."
+                if whitelist["email_sender_whitelist_configured"]
+                else "Set MAX_EMAIL_ALLOWED_SENDERS before any live MAX email reply loop is enabled."
+            ),
+            last_error_category=None if whitelist["email_sender_whitelist_configured"] else "email_sender_whitelist_missing",
+            details=whitelist,
         ),
         _layer(
             "max_response_generation",
@@ -531,18 +561,19 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         reply_loop_verified=False,
         ledger_logging_status=STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN,
         last_known_activity_timestamp=activity.get("latest_created_at"),
-        last_error_category="backend_gmail_and_outbound_not_ready",
+        last_error_category=email_last_error,
         evidence=[
             "DNS MX can be ready while backend Gmail/SendGrid remains broken.",
             "Configured Gmail OAuth token is missing." if not paths["configured_token_exists"] else "Configured Gmail token exists.",
             "Outbound MAX email runtime is configured." if outbound["max_email_configured"] else "Outbound MAX email runtime is not configured.",
-            "Inbound webhook logs/classifies but does not reply." if webhook["exists"] else "Inbound webhook not found.",
+            "Inbound webhook blocks non-whitelisted senders and does not reply." if webhook["exists"] else "Inbound webhook not found.",
         ],
-        next_required_action="Verify Cloudflare routing manually, then repair canonical Gmail OAuth and outbound email config before live tests.",
+        next_required_action="Keep Cloudflare routing manually verified; wire MAX reply generation and reply threading only behind the whitelist gate.",
         safe_to_live_test=False,
         live_test_required=True,
         layers=layers,
     )
+    email_channel.update(whitelist)
     return email_channel, layers
 
 
@@ -664,6 +695,7 @@ def build_channel_status() -> dict[str, Any]:
             "dns_mx": _dig_mx(),
             "gmail_paths": _gmail_paths(),
             "outbound_email_config": _outbound_email_config(),
+            "email_sender_whitelist": sender_whitelist_status(),
             "telegram": _telegram_status(),
             "email_webhook": _email_webhook_analysis(),
             "unified_message_store": _unified_store_info(),
@@ -687,16 +719,15 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
     if channel_key in {"email", "gmail"}:
         from app.routers.webhooks import classify_max_email
 
+        sender = str(payload.get("from") or payload.get("sender") or payload.get("sender_email") or "")
+        authorization = authorize_email_sender(sender)
         subject = str(payload.get("subject") or "Dry-run MAX email")
         body = str(payload.get("body") or payload.get("text") or "Dry-run email body")
         attachments = payload.get("attachments") or []
         classification = classify_max_email(subject, body, attachments)
-        return {
-            "channel": "email",
-            "dry_run": True,
-            "live_send_performed": False,
-            "classification": classification,
-            "max_request_payload": {
+        max_request_payload = None
+        if authorization["sender_authorized"]:
+            max_request_payload = {
                 "message": body or subject,
                 "channel": "email",
                 "conversation_id": payload.get("thread_id") or "dry-run-email-thread",
@@ -704,10 +735,24 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
                     "subject": subject,
                     "classification": classification["classification"],
                     "source": "channel_verification_dry_run",
+                    "sender_authorized": True,
                 },
-            },
+            }
+        return {
+            "channel": "email",
+            "dry_run": True,
+            "live_send_performed": False,
+            "sender_authorized": authorization["sender_authorized"],
+            "blocked_reason": authorization["blocked_reason"],
+            "email_sender_whitelist_configured": authorization["email_sender_whitelist_configured"],
+            "allowed_sender_count": authorization["allowed_sender_count"],
+            "would_call_max": authorization["sender_authorized"],
+            "classification": classification,
+            "max_request_payload": max_request_payload,
             "reply_payload_preview": {
                 "would_send": False,
+                "blocked": not authorization["sender_authorized"],
+                "blocked_reason": authorization["blocked_reason"],
                 "provider": "sendgrid_or_smtp",
                 "requires_outbound_config": True,
                 "requires_thread_headers": True,

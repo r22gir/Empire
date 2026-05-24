@@ -7,6 +7,8 @@ import logging
 import os
 from uuid import uuid4
 
+from app.services.max.email_sender_whitelist import authorize_email_sender
+
 logger = logging.getLogger("empire.webhooks")
 
 router = APIRouter(tags=["Webhooks"])
@@ -64,14 +66,54 @@ async def handle_inbound_email(request: Request):
     attachments = data.get("attachments") or data.get("attachment_refs") or []
     source_message_id = data.get("message_id") or data.get("Message-Id") or data.get("headers", {}).get("Message-Id")
     thread_id = data.get("thread_id") or source_message_id or f"email-{uuid4().hex[:12]}"
-    founder_emails = {
-        e.strip().lower()
-        for e in (os.getenv("FOUNDER_EMAILS") or os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")).split(",")
-        if e.strip()
-    }
-    founder_verified = sender.strip().lower() in founder_emails
-    email_classification = classify_max_email(subject, body, attachments)
+    sender_authorization = authorize_email_sender(sender)
+    founder_verified = bool(sender_authorization["sender_authorized"])
     logger.info(f"Inbound email from {sender}: {subject}")
+
+    if not founder_verified:
+        try:
+            from app.services.max.unified_message_store import unified_store
+            unified_store.add_message(
+                conversation_id=thread_id,
+                channel="email",
+                role="system",
+                content=f"Blocked email intake: {subject}",
+                direction="ignored",
+                sender=sender,
+                recipient=recipient,
+                thread_id=thread_id,
+                source_message_id=source_message_id,
+                subject=subject,
+                attachment_refs=[],
+                summary=f"Blocked email intake: {subject}",
+                founder_verified=False,
+                linked_refs=[{"type": "email_intake_block", "id": sender_authorization["blocked_reason"]}],
+                metadata={
+                    "subject": subject,
+                    "sender": sender,
+                    "recipient": recipient,
+                    "sender_authorized": False,
+                    "blocked_reason": sender_authorization["blocked_reason"],
+                    "attachment_count": len(attachments) if isinstance(attachments, list) else (1 if attachments else 0),
+                    "trust": "blocked_sender",
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"Unified message store blocked-email write failed: {exc}")
+
+        return {
+            "status": "blocked",
+            "sender": sender,
+            "recipient": recipient,
+            "subject": subject,
+            "thread_id": thread_id,
+            "founder_verified": False,
+            "sender_authorized": False,
+            "blocked_reason": sender_authorization["blocked_reason"],
+            "ledger": "unified_messages",
+        }
+
+    email_classification = classify_max_email(subject, body, attachments)
 
     try:
         from app.services.max.unified_message_store import unified_store
@@ -98,7 +140,9 @@ async def handle_inbound_email(request: Request):
                 "classification": email_classification["classification"],
                 "tags": email_classification["tags"],
                 "attachment_count": email_classification["attachment_count"],
-                "trust": "founder_sender_match" if founder_verified else "unverified_sender",
+                "sender_authorized": True,
+                "allowed_sender_count": sender_authorization["allowed_sender_count"],
+                "trust": "founder_sender_match",
             },
         )
     except Exception as exc:
@@ -126,6 +170,7 @@ async def handle_inbound_email(request: Request):
         "subject": subject,
         "thread_id": thread_id,
         "founder_verified": founder_verified,
+        "sender_authorized": True,
         "classification": email_classification["classification"],
         "tags": email_classification["tags"],
         "ledger": "unified_messages",

@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.channels import status as channel_status
 from app.services.max import gmail_reader
+from app.services.max.email_sender_whitelist import authorize_email_sender, sender_whitelist_status
+from app.services.max.unified_message_store import UnifiedMessageStore
 
 
 client = TestClient(app)
@@ -26,6 +28,54 @@ def test_channel_status_endpoint_exists():
     assert data["schema_version"] == 1
     assert {channel["key"] for channel in data["channels"]} >= {"web_chat", "telegram", "email", "hermes"}
     assert data["safety"]["secrets_included"] is False
+
+
+def test_email_sender_whitelist_allows_founder_address(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+
+    authorization = authorize_email_sender("empirebox2026@gmail.com")
+
+    assert authorization["sender_authorized"] is True
+    assert authorization["blocked_reason"] is None
+    assert authorization["allowed_sender_count"] == 2
+
+
+def test_email_sender_whitelist_allows_display_name_sender(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+
+    authorization = authorize_email_sender("Rafael Giraldo <rafa22giraldo@gmail.com>")
+
+    assert authorization["sender_authorized"] is True
+    assert authorization["sender_address"] == "rafa22giraldo@gmail.com"
+
+
+def test_email_sender_whitelist_is_case_insensitive(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+
+    authorization = authorize_email_sender("RAFA22GIRALDO@GMAIL.COM")
+
+    assert authorization["sender_authorized"] is True
+
+
+def test_email_sender_whitelist_blocks_non_founder_sender(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+
+    authorization = authorize_email_sender("Discord <noreply@discord.com>")
+
+    assert authorization["sender_authorized"] is False
+    assert authorization["blocked_reason"] == "non_whitelisted_sender"
+
+
+def test_missing_email_sender_whitelist_blocks_live_reply(monkeypatch):
+    monkeypatch.delenv("MAX_EMAIL_ALLOWED_SENDERS", raising=False)
+
+    authorization = authorize_email_sender("empirebox2026@gmail.com")
+    status = sender_whitelist_status()
+
+    assert status["email_sender_whitelist_configured"] is False
+    assert status["allowed_sender_count"] == 0
+    assert authorization["sender_authorized"] is False
+    assert authorization["blocked_reason"] == "sender_whitelist_missing"
 
 
 def test_email_dns_layer_is_separate_from_backend_gmail_status(monkeypatch, tmp_path):
@@ -247,6 +297,7 @@ def test_no_secrets_appear_in_channel_status_response(monkeypatch):
     monkeypatch.setenv("SENDGRID_API_KEY", "SG.secret-value-that-must-not-leak")
     monkeypatch.setenv("SMTP_PASSWORD", "smtp-password-that-must-not-leak")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token-that-must-not-leak")
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
 
     data = channel_status.build_channel_status()
     rendered = json.dumps(data)
@@ -254,21 +305,104 @@ def test_no_secrets_appear_in_channel_status_response(monkeypatch):
     assert "SG.secret-value-that-must-not-leak" not in rendered
     assert "smtp-password-that-must-not-leak" not in rendered
     assert "telegram-token-that-must-not-leak" not in rendered
+    assert "empirebox2026@gmail.com" not in rendered
+    assert "rafa22giraldo@gmail.com" not in rendered
     assert data["safety"]["secrets_included"] is False
 
 
-def test_channel_dry_run_does_not_send_live_messages():
+def test_channel_status_reports_whitelist_without_exposing_addresses(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+
+    data = channel_status.build_channel_status()
+    email = next(channel for channel in data["channels"] if channel["key"] == "email")
+    rendered = json.dumps(data)
+
+    assert email["email_sender_whitelist_configured"] is True
+    assert email["allowed_sender_count"] == 2
+    assert _layer(data, "sender_whitelist_gate")["status"] == "partial"
+    assert "empirebox2026@gmail.com" not in rendered
+    assert "rafa22giraldo@gmail.com" not in rendered
+
+
+def test_channel_dry_run_does_not_send_live_messages(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
     res = client.post(
         "/api/v1/channels/test/dry-run",
-        json={"channel": "email", "payload": {"subject": "Question", "body": "Can MAX see this?"}},
+        json={
+            "channel": "email",
+            "payload": {
+                "from": "Empire Founder <empirebox2026@gmail.com>",
+                "subject": "Question",
+                "body": "Can MAX see this?",
+            },
+        },
     )
 
     assert res.status_code == 200
     data = res.json()
     assert data["dry_run"] is True
     assert data["live_send_performed"] is False
+    assert data["sender_authorized"] is True
+    assert data["blocked_reason"] is None
     assert data["reply_payload_preview"]["would_send"] is False
     assert data["max_request_payload"]["channel"] == "email"
+
+
+def test_channel_dry_run_reports_blocked_sender(monkeypatch):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+
+    res = client.post(
+        "/api/v1/channels/test/dry-run",
+        json={
+            "channel": "email",
+            "payload": {
+                "from": "Discord <noreply@discord.com>",
+                "subject": "Discord notification",
+                "body": "This should not go to MAX.",
+            },
+        },
+    )
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["dry_run"] is True
+    assert data["live_send_performed"] is False
+    assert data["sender_authorized"] is False
+    assert data["blocked_reason"] == "non_whitelisted_sender"
+    assert data["max_request_payload"] is None
+    assert data["reply_payload_preview"]["would_send"] is False
+    assert data["reply_payload_preview"]["blocked"] is True
+
+
+def test_email_webhook_blocks_non_whitelisted_sender(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+    store = UnifiedMessageStore(tmp_path / "unified_messages.db")
+    monkeypatch.setattr("app.services.max.unified_message_store.unified_store", store)
+
+    res = client.post(
+        "/webhooks/email/inbound",
+        json={
+            "from": "Discord <noreply@discord.com>",
+            "to": "max@empirebox.store",
+            "subject": "Discord notification",
+            "text": "This should be ignored by MAX.",
+            "message_id": "discord-msg-1",
+        },
+    )
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "blocked"
+    assert data["sender_authorized"] is False
+    assert data["blocked_reason"] == "non_whitelisted_sender"
+
+    rows = store.list_memory_bank(channel="email", limit=10)
+    assert len(rows) == 1
+    assert rows[0]["direction"] == "ignored"
+    assert rows[0]["role"] == "system"
+    assert rows[0]["founder_verified"] is False
+    assert rows[0]["metadata"]["blocked_reason"] == "non_whitelisted_sender"
+    assert "This should be ignored by MAX." not in rows[0]["body"]
 
 
 def test_legacy_token_path_detected_but_not_auto_used(monkeypatch, tmp_path):
