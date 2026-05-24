@@ -23,6 +23,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+from email.utils import formataddr
 from pathlib import Path
 
 logger = logging.getLogger("max.email_service")
@@ -181,7 +182,7 @@ class EmailService:
     ) -> bool:
         """Send via SMTP (original method)."""
         msg = MIMEMultipart()
-        msg["From"] = f"{self.from_name} <{self.from_addr}>"
+        msg["From"] = formataddr((self.from_name, self.from_addr))
         msg["To"] = to
         msg["Subject"] = subject
         if self.reply_to:

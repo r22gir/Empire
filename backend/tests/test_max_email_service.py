@@ -1,4 +1,7 @@
 from pathlib import Path
+from email import message_from_string
+from email.header import decode_header, make_header
+from email.utils import parseaddr
 
 from app.services.max.capability_loader import generate_capability_prompt
 from app.services.max.email_service import EmailService
@@ -87,6 +90,14 @@ class FakeSMTPServer:
         pass
 
 
+def _decoded_address(msg_str: str, header_name: str) -> tuple[str, str]:
+    msg = message_from_string(msg_str)
+    header_value = msg[header_name]
+    assert header_value
+    decoded = str(make_header(decode_header(header_value)))
+    return parseaddr(decoded)
+
+
 def test_smtp_uses_smtp_from_when_set(monkeypatch, tmp_path):
     """SMTP From header uses SMTP_FROM when configured, not SMTP_USER."""
     store = UnifiedMessageStore(tmp_path / "unified_messages.db")
@@ -145,16 +156,10 @@ def test_smtp_uses_smtp_from_when_set(monkeypatch, tmp_path):
 
     assert len(sent_records) == 1
     assert sent_records[0]["from"] == "max@empirebox.store"
-    # From header is RFC 2047 encoded; check decoded content contains the alias
-    import email.header
-    msg = sent_records[0]["msg"]
-    from_line = msg.split("From:")[1].split("\n")[0]
-    from_decoded = email.header.decode_header(from_line.strip())[0]
-    from_text = from_decoded[0]
-    if isinstance(from_text, bytes):
-        from_text = from_text.decode("utf-8")
-    assert "max@empirebox.store" in from_text
-    assert "MAX" in from_text
+    assert sent_records[0]["to"] == ["founder@example.com"]
+    from_name, from_addr = _decoded_address(sent_records[0]["msg"], "From")
+    assert from_name == "MAX — Empire AI"
+    assert from_addr == "max@empirebox.store"
 
 
 def test_smtp_reply_to_header_when_configured(monkeypatch, tmp_path):
@@ -215,18 +220,12 @@ def test_smtp_reply_to_header_when_configured(monkeypatch, tmp_path):
 
     assert len(sent_records) == 1
     msg = sent_records[0]
-    # Reply-To header must be present
-    assert "Reply-To:" in msg
-    reply_to_line = msg.split("Reply-To:")[1].split("\n")[0]
-    assert "max@empirebox.store" in reply_to_line
-    # From header should use alias (RFC 2047 encoded)
-    import email.header
-    from_line = msg.split("From:")[1].split("\n")[0]
-    from_decoded = email.header.decode_header(from_line.strip())[0]
-    from_text = from_decoded[0]
-    if isinstance(from_text, bytes):
-        from_text = from_text.decode("utf-8")
-    assert "max@empirebox.store" in from_text
+    from_name, from_addr = _decoded_address(msg, "From")
+    assert from_name == "MAX — Empire AI"
+    assert from_addr == "max@empirebox.store"
+    reply_name, reply_addr = _decoded_address(msg, "Reply-To")
+    assert reply_name == ""
+    assert reply_addr == "max@empirebox.store"
 
 
 def test_no_secrets_in_status_check(monkeypatch, tmp_path):
