@@ -213,7 +213,7 @@ export default function ChannelVerificationPage() {
   const emailLayers = useMemo(() => payload?.email_layers || [], [payload]);
 
   return (
-    <main style={{ minHeight: '100vh', background: '#0b1018', color: '#f7fafc', fontFamily: 'Inter, system-ui, sans-serif' }}>
+    <main data-channel-page style={{ minHeight: '100vh', background: '#0b1018', color: '#f7fafc', fontFamily: 'Inter, system-ui, sans-serif' }}>
       <header style={{ borderBottom: '1px solid #202b3b', background: '#0f1622', padding: '18px 24px' }}>
         <div style={{ maxWidth: 1240, margin: '0 auto', display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
           <div>
@@ -246,7 +246,7 @@ export default function ChannelVerificationPage() {
         </div>
       </header>
 
-      <section style={{ maxWidth: 1240, margin: '0 auto', padding: 24 }}>
+      <section style={{ maxWidth: 1320, margin: '0 auto', padding: '24px 24px 56px' }}>
         {error ? (
           <div style={{ border: '1px solid #8a3134', background: '#351718', borderRadius: 8, padding: 14, color: '#ffb4b4', marginBottom: 16 }}>
             Channel status unavailable: {error}
@@ -264,7 +264,7 @@ export default function ChannelVerificationPage() {
           ) : null}
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 14 }}>
           {(payload?.channels || []).map((channel) => (
             <ChannelCard key={channel.key} channel={channel} />
           ))}
@@ -275,7 +275,7 @@ export default function ChannelVerificationPage() {
             <Mail size={19} color="#d7e2f0" />
             <h2 style={{ margin: 0, fontSize: 18 }}>Email Layer Breakdown</h2>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginTop: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 12, marginTop: 14 }}>
             {emailLayers.map((layer) => (
               <div key={layer.name} style={{ borderTop: '1px solid #243043', paddingTop: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
