@@ -39,6 +39,7 @@ MAX_EMAIL_ENV_NAMES = [
     "SMTP_PASSWORD",
     "SMTP_FROM",
     "SMTP_FROM_NAME",
+    "SMTP_REPLY_TO",
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_FOUNDER_CHAT_ID",
 ]
@@ -171,6 +172,7 @@ def _outbound_email_config() -> dict[str, Any]:
         "smtp_configured_for_business_sender": smtp_configured_for_business_sender,
         "smtp_from_configured": smtp_from,
         "smtp_from_name_configured": smtp_from_name,
+        "smtp_reply_to_configured": _env_bool("SMTP_REPLY_TO"),
         "max_from_identity_configured": bool(sendgrid_from or smtp_from or smtp_user),
         "max_email_configured": bool(sendgrid or smtp_configured_for_max),
         "expected_env_names": [

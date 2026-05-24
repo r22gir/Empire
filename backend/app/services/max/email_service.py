@@ -9,9 +9,12 @@ SendGrid env vars:
 SMTP env vars (fallback):
   SMTP_HOST       — SMTP server (default: smtp.gmail.com)
   SMTP_PORT       — SMTP port (default: 587 for STARTTLS)
-  SMTP_USER       — login email address
+  SMTP_USER       — login email address (authenticated Gmail account)
   SMTP_PASSWORD   — app password (NOT regular password)
+  SMTP_FROM       — sender address for From/Reply-To headers and envelope
+                    (only needed if different from SMTP_USER, e.g. max@empirebox.store alias)
   SMTP_FROM_NAME  — sender display name (default: "MAX — Empire AI")
+  SMTP_REPLY_TO   — Reply-To header address (default: same as SMTP_FROM if set)
 """
 import os
 import smtplib
@@ -37,6 +40,9 @@ class EmailService:
         self.user = os.environ.get("SMTP_USER", "")
         self.password = os.environ.get("SMTP_PASSWORD", "")
         self.from_name = os.environ.get("SMTP_FROM_NAME", "MAX — Empire AI")
+        # Explicit sender address (allows Gmail send-as alias, e.g. max@empirebox.store)
+        self.from_addr = os.environ.get("SMTP_FROM", "") or self.user
+        self.reply_to = os.environ.get("SMTP_REPLY_TO", "") or self.from_addr
 
     @property
     def is_configured(self) -> bool:
@@ -175,9 +181,11 @@ class EmailService:
     ) -> bool:
         """Send via SMTP (original method)."""
         msg = MIMEMultipart()
-        msg["From"] = f"{self.from_name} <{self.user}>"
+        msg["From"] = f"{self.from_name} <{self.from_addr}>"
         msg["To"] = to
         msg["Subject"] = subject
+        if self.reply_to:
+            msg["Reply-To"] = self.reply_to
         if cc:
             msg["Cc"] = cc
 
@@ -208,7 +216,7 @@ class EmailService:
                 server.starttls()
                 server.ehlo()
                 server.login(self.user, self.password)
-                server.sendmail(self.user, recipients, msg.as_string())
+                server.sendmail(self.from_addr, recipients, msg.as_string())
             logger.info(f"Email sent via SMTP to {to} — subject: {subject}")
             return True
         except Exception as e:
