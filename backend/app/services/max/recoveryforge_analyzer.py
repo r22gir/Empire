@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .minimax_tools import minimax_understand_image
-from .recoveryforge_quota import consume_quota, quota_allow_new, check_quota
+from .recoveryforge_quota import consume_quota, quota_allow_new, check_quota, WINDOW_HOURS
 
 # Analysis result schema keys
 CLASSIFICATION_OPTIONS = {"personal", "work_related", "mixed", "unknown"}
@@ -34,15 +34,16 @@ def _default_analysis_result(image_key: str, error: str) -> dict[str, Any]:
         "image_key": image_key,
         "analysis_status": "failed",
         "provider": "minimax",
-        "model": "image-01",
+        "transport": "mmx_cli",
+        "model": "mmx_vision",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "error": error,
         "stale": False,
         "description": None,
-        "tags": [],
+        "tags": ["vision-failed"] if "vision" in error.lower() else [],
         "personal_work_classification": None,
-        "business_route": None,
-        "action_recommendation": None,
+        "business_route": "unknown-work",
+        "action_recommendation": "needs_manual_review",
         "image_quality_score": None,
         "analysis_confidence": None,
         "needs_manual_review": True,
@@ -72,21 +73,29 @@ async def analyze_image(image_key: str, image_path: str) -> dict[str, Any]:
             f"Next window resets at {quota_status['reset_window_hint']}."
         )
 
-    # Call MiniMax vision
-    result = await minimax_understand_image(image_path=image_path)
+    # Call mmx vision CLI — MiniMax-M2.7 /chat/completions does not support image input
+    result = await minimax_understand_image(
+        image=image_path,
+        prompt="Describe this image in detail. Include: main subject, visible condition, materials/colors/textures, setting/background, any notable defects or damage, and usefulness for business archive, quote, or personal organization. Note any readable text or labels.",
+    )
 
     if not result["success"]:
-        consume_quota(image_key, "image-01", success=False, error=result.get("error", "unknown"))
+        consume_quota(image_key, "mmx_vision", success=False, error=result.get("error", "unknown"))
         return _default_analysis_result(image_key, result.get("error", "provider call failed"))
 
-    # Parse MiniMax response into structured analysis
-    raw = result.get("data", {}).get("description", "") or result.get("data", {}).get("text", "")
+    # Extract description text from mmx CLI response
+    raw = result.get("data", {}).get("summary", "") or result.get("data", {}).get("full_response", "")
 
-    # Build structured result from MiniMax response
+    # If summary is empty/blank, the vision call didn't produce usable content
+    if not raw or not raw.strip():
+        consume_quota(image_key, "mmx_vision", success=False, error="empty description from mmx vision")
+        return _default_analysis_result(image_key, "MiniMax mmx vision returned empty description for this image")
+
+    # Build structured result from mmx vision response
     analysis = _build_structured_analysis(image_key, raw, result.get("data", {}))
 
-    # Mark quota consumed
-    consume_quota(image_key, "image-01", success=True)
+    # Mark quota consumed — mmx CLI counts as one provider call
+    consume_quota(image_key, "mmx_vision", success=True)
 
     return analysis
 
@@ -175,7 +184,8 @@ def _build_structured_analysis(image_key: str, description: str, raw_data: dict[
         "image_key": image_key,
         "analysis_status": "success",
         "provider": "minimax",
-        "model": "image-01",
+        "transport": "mmx_cli",
+        "model": "mmx_vision",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "stale": False,
         "description": description,

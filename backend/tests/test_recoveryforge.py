@@ -225,7 +225,8 @@ def test_analysis_result_has_required_schema_fields():
         assert field in result, f"Missing field: {field}"
 
     assert result["provider"] == "minimax"
-    assert result["model"] == "image-01"
+    assert result["model"] == "mmx_vision"
+    assert result["transport"] == "mmx_cli"
     assert result["analysis_status"] == "success"
     assert result["stale"] is False
 

@@ -82,7 +82,7 @@ def test_save_bytes_creates_file(tmp_path):
 
 
 def test_minimax_tools_status_returns_all_tools():
-    """minimax_tools_status returns per-tool availability."""
+    """minimax_tools_status returns per-tool availability with correct quota buckets."""
     import os
     # Ensure MINIMAX_API_KEY is not set for this test
     old_key = os.environ.pop("MINIMAX_API_KEY", "")
@@ -93,15 +93,37 @@ def test_minimax_tools_status_returns_all_tools():
 
     assert "tools" in status
     tools = status["tools"]
-    expected_tools = ["text_to_image", "image_to_image", "image_understanding",
-                     "tts", "music", "video", "web_search"]
+    # New tool names with quota bucket schema
+    expected_tools = [
+        "text_generation",
+        "image_understanding",
+        "web_search",
+        "image_generation",
+        "image_to_image",
+        "tts",
+        "lyrics_generation",
+        "music_generation",
+        "video_generation",
+    ]
     for t in expected_tools:
         assert t in tools, f"{t} missing from status"
-        assert "available" in tools[t]
+        assert "configured" in tools[t]
+        assert "transport" in tools[t]
+        assert "quota_bucket" in tools[t]
         assert "reason" in tools[t]
+        # image_understanding uses cli_available/live_available, others use available
+        if t == "image_understanding":
+            assert "cli_available" in tools[t], f"{t} missing cli_available"
+            assert "live_available" in tools[t], f"{t} missing live_available"
+            assert "last_probe_status" in tools[t]
+            assert "last_error_category" in tools[t]
+        else:
+            assert "available" in tools[t], f"{t} missing available"
 
-    # video should be unavailable (disabled by default)
-    assert tools["video"]["available"] is False
+    # image_understanding requires mmx CLI, not just API key
+    img_und = tools["image_understanding"]
+    # video is disabled by default
+    assert tools["video_generation"]["available"] is False
 
     os.environ["MINIMAX_API_KEY"] = old_key
 
@@ -150,6 +172,20 @@ def test_minimax_text_to_image_no_key(monkeypatch):
     result = asyncio.run(minimax_text_to_image(prompt="a beautiful room"))
     assert result["success"] is False
     assert result["error"]  # error must be present
+
+
+def test_mmx_subprocess_env_preserves_runtime_minimax_key(monkeypatch):
+    """mmx CLI calls inherit backend runtime auth instead of relying on ~/.mmx only."""
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
+
+    from app.services.max import minimax_tools
+
+    env = minimax_tools._mmx_subprocess_env()
+
+    assert env["MINIMAX_API_KEY"] == "test-minimax-key"
+    assert env["MINIMAX_BASE_URL"] == "https://api.minimax.io/v1"
+    assert env["PATH"]
 
 
 def test_tool_names_registered_in_executor():

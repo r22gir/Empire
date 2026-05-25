@@ -12,6 +12,7 @@ import uuid
 import base64
 import logging
 import asyncio
+import subprocess
 from pathlib import Path
 from typing import Optional, Any
 
@@ -27,6 +28,127 @@ MINIMAX_IMAGE_MODEL = os.getenv("MINIMAX_IMAGE_MODEL", "image-01")
 MINIMAX_TTS_MODEL = os.getenv("MINIMAX_TTS_MODEL", "speech-01")
 MINIMAX_MUSIC_MODEL = os.getenv("MINIMAX_MUSIC_MODEL", "music-01")
 MINIMAX_VIDEO_ENABLED = os.getenv("MINIMAX_VIDEO_ENABLED", "0") == "1"
+
+# ── mmx CLI ──────────────────────────────────────────────────────────────────
+
+MMX_CLI_PATH = os.getenv("MINIMAX_CLI_PATH", "/home/rg/.local/bin/mmx")
+MMX_VISION_TIMEOUT = 60  # seconds
+
+# Live MCP error tracking — updated after each actual vision call
+# Do not run live probes on status calls
+_mcp_last_probe_status: str = "not_probed"
+_mcp_last_error_category: str | None = None
+_mcp_last_error_message: str | None = None
+_mcp_last_probe_at: str | None = None
+
+# Phrases that indicate the vision model returned a "no image" placeholder
+_NO_IMAGE_PHRASES = frozenset([
+    "no image provided",
+    "i cannot see the image",
+    "i can't see the image",
+    "no image was uploaded",
+    "please provide an image",
+    "unable to view",
+    "as an ai text model",
+    "i do not have access to the image",
+    "i am unable to see the image",
+    "cannot see the image",
+    "don't have access to the image",
+    "do not have access to the image",
+])
+
+
+def _mmx_cli_available() -> tuple[bool, str]:
+    """
+    Check if mmx CLI is installed and responds to --version.
+
+    Returns:
+        (True, path) if available
+        (False, reason) if not
+    """
+    path = MMX_CLI_PATH
+    if not os.path.exists(path):
+        # Fall back to PATH lookup
+        for d in os.environ.get("PATH", "").split(os.pathsep):
+            candidate = os.path.join(d, "mmx")
+            if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+                path = candidate
+                break
+        else:
+            return False, "mmx not found in PATH or at MINIMAX_CLI_PATH"
+
+    if not os.access(path, os.X_OK):
+        return False, f"mmx at {path} is not executable"
+
+    # Quick version check
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5)
+        if r.returncode != 0:
+            return False, f"mmx --version returned {r.returncode}"
+    except subprocess.TimeoutExpired:
+        return False, "mmx --version timed out"
+    except Exception as e:
+        return False, f"mmx --version error: {e}"
+
+    return True, path
+
+
+def _mmx_subprocess_env() -> dict[str, str]:
+    """Return the environment for mmx CLI calls without dropping runtime auth."""
+    env = os.environ.copy()
+    env["PATH"] = env.get("PATH") or "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    return env
+
+
+def _strip_think_blocks(text: str) -> str:
+    """Strip <think>...</think> and similar chain-of-thought artifacts from text."""
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    text = re.sub(r"<!--\s*撮要.*?-->", "", text, flags=re.DOTALL)
+    return text.strip()
+
+
+def _classify_mcp_error(error: str) -> str:
+    """Classify an MCP error string into a known category."""
+    if not error:
+        return "unknown_error"
+    err_lower = error.lower()
+    if "usage limit exceeded" in err_lower:
+        return "usage_limit_exceeded"
+    if "no image provided" in err_lower or "cannot see the image" in err_lower:
+        return "vision_input_not_received"
+    if "timeout" in err_lower:
+        return "timeout"
+    if "not found" in err_lower or "file not found" in err_lower:
+        return "file_not_found"
+    if "unauthorized" in err_lower or "invalid api key" in err_lower:
+        return "auth_error"
+    if "rate limit" in err_lower:
+        return "rate_limited"
+    return "unknown_error"
+
+
+def _redact_error_message(msg: str) -> str:
+    """Redact secrets from error messages."""
+    if not msg:
+        return ""
+    msg = re.sub(r"sk-[A-Za-z0-9]{20,}", "[KEY_REDACTED]", msg)
+    msg = re.sub(r"[A-Za-z0-9+/]{40,}={0,2}", "[TOKEN_REDACTED]", msg)
+    return msg
+
+
+def _update_mcp_probe_status(success: bool, error: str | None) -> None:
+    """Update the live MCP probe tracker after an actual vision call. No live probing on status."""
+    global _mcp_last_probe_status, _mcp_last_error_category, _mcp_last_error_message, _mcp_last_probe_at
+    from datetime import datetime, timezone
+    _mcp_last_probe_at = datetime.now(timezone.utc).isoformat()
+    if success:
+        _mcp_last_probe_status = "success"
+        _mcp_last_error_category = None
+        _mcp_last_error_message = None
+    else:
+        _mcp_last_probe_status = _classify_mcp_error(error or "")
+        _mcp_last_error_category = _mcp_last_probe_status
+        _mcp_last_error_message = _redact_error_message(error) if error else None
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
@@ -339,93 +461,127 @@ async def minimax_understand_image(
     model: str = "",
 ) -> dict[str, Any]:
     """
-    Analyze an image using MiniMax vision capability.
+    Analyze an image using MiniMax vision via mmx CLI.
+
+    Transport: mmx vision describe (NOT /chat/completions with image blocks).
+    MiniMax-M2.7 text model silently ignores image input on /chat/completions.
 
     Inputs:
-        image: URL, base64 data URI, or local path
-        prompt: custom prompt overriding default description
-        model: vision model override
+        image: local path (must exist and be a valid image file)
+        prompt: description prompt
+        model: ignored for CLI transport (present for API compatibility)
 
     Returns runtime-truth envelope with:
-        success: bool
+        success: bool — True only if mmx CLI succeeded and output is image-specific
         summary: overall description
         notable_details: list of observations
         confidence: high/medium/low
         provider: minimax
+        transport: mmx_cli
+        tool: mmx vision describe
+
+    NOTE: Does NOT run live probes on status calls. Status reflects the result
+    of the last actual analyze_image call only.
     """
-    _load_runtime_env()
-    api_key = os.getenv("MINIMAX_API_KEY", "") or MINIMAX_API_KEY
-    if not api_key:
-        return _build_result(False, "minimax_understand_image", error="MINIMAX_API_KEY not set")
+    # Check mmx CLI availability
+    mmx_ok, cli_path_or_reason = _mmx_cli_available()
+    if not mmx_ok:
+        _update_mcp_probe_status(False, f"mmx CLI unavailable: {cli_path_or_reason}")
+        return _build_result(False, "minimax_understand_image",
+                             error=f"mmx CLI unavailable: {cli_path_or_reason}")
 
-    model = model or os.getenv("MINIMAX_VISION_MODEL", os.getenv("MINIMAX_MODEL", "MiniMax-M2.7"))
-    base_url = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
+    p = Path(image)
+    if not p.exists() or not p.is_file():
+        _update_mcp_probe_status(False, f"Image file not found: {image}")
+        return _build_result(False, "minimax_understand_image",
+                             error=f"Image file not found: {image}")
 
-    # Build image content
-    image_content: Optional[dict] = None
-    if image.startswith("data:"):
-        b64 = image.split(",", 1)[1]
-        image_content = {"type": "base64", "data": b64}
-    elif image.startswith("http://") or image.startswith("https://"):
-        image_content = {"type": "url", "url": image}
-    else:
-        p = Path(image)
-        if p.exists() and p.is_file():
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            image_content = {"type": "base64", "data": b64}
+    # Verify it's a real image by checking extension
+    valid_exts = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+    if p.suffix.lower() not in valid_exts:
+        _update_mcp_probe_status(False, f"Unsupported image extension: {p.suffix}")
+        return _build_result(False, "minimax_understand_image",
+                             error=f"Unsupported image extension: {p.suffix}")
 
-    if not image_content:
-        return _build_result(False, "minimax_understand_image", model=model,
-                             error=f"Cannot resolve image: {image}")
-
-    messages = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt[:2000]},
-                {"type": "image", **image_content},
-            ],
-        }
+    cmd = [
+        cli_path_or_reason, "vision", "describe",
+        "--image", str(p.resolve()),
+        "--prompt", prompt[:2000],
+        "--output", "json",
     ]
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": model, "messages": messages, "max_tokens": 4096},
-            )
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=MMX_VISION_TIMEOUT,
+            cwd=str(p.parent),
+            env=_mmx_subprocess_env(),
+        )
+    except subprocess.TimeoutExpired:
+        _update_mcp_probe_status(False, f"mmx vision describe timed out after {MMX_VISION_TIMEOUT}s")
+        return _build_result(False, "minimax_understand_image",
+                             error=f"mmx vision describe timed out after {MMX_VISION_TIMEOUT}s")
     except Exception as e:
-        return _build_result(False, "minimax_understand_image", model=model,
-                             error=f"{type(e).__name__}: {e}")
+        _update_mcp_probe_status(False, f"mmx vision subprocess error: {type(e).__name__}: {e}")
+        return _build_result(False, "minimax_understand_image",
+                             error=f"mmx vision subprocess error: {type(e).__name__}: {e}")
 
-    if resp.status_code != 200:
-        return _build_result(False, "minimax_understand_image", model=model,
-                             error=f"MiniMax HTTP {resp.status_code}: {resp.text[:300]}")
+    if result.returncode != 0:
+        err_msg = f"mmx vision describe failed (code {result.returncode}): {result.stderr[:200]}"
+        _update_mcp_probe_status(False, err_msg)
+        return _build_result(False, "minimax_understand_image", error=err_msg)
 
+    # Parse JSON output
     try:
-        content = resp.json()["choices"][0]["message"]["content"]
-    except Exception:
-        return _build_result(False, "minimax_understand_image", model=model,
-                             error="Could not parse response")
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        err_msg = f"mmx vision invalid JSON output: {result.stdout[:200]}"
+        _update_mcp_probe_status(False, err_msg)
+        return _build_result(False, "minimax_understand_image", error=err_msg)
+
+    description = data.get("content", "") or data.get("description", "") or data.get("response", "")
+    description = _strip_think_blocks(description)
+
+    # Quality guardrails — check for no-image placeholder responses
+    desc_lower = description.lower()
+    for phrase in _NO_IMAGE_PHRASES:
+        if phrase in desc_lower:
+            err_msg = f"Vision output indicates image not received: '{phrase}'"
+            _update_mcp_probe_status(False, err_msg)
+            return _build_result(False, "minimax_understand_image",
+                                 model="mmx_vision",
+                                 error=err_msg)
+
+    if not description or len(description) < 10:
+        err_msg = "mmx vision returned empty/too-short description"
+        _update_mcp_probe_status(False, err_msg)
+        return _build_result(False, "minimax_understand_image",
+                             error=err_msg)
 
     # Try to parse structured response
     try:
-        parsed = json.loads(content)
-        summary = parsed.get("summary", content[:500])
+        parsed = json.loads(description)
+        summary = parsed.get("summary", description[:500])
         notable_details = parsed.get("notable_details", [])
         confidence = parsed.get("confidence", "medium")
     except Exception:
-        summary = content[:500]
+        summary = description[:500]
         notable_details = []
         confidence = "medium"
 
-    return _build_result(True, "minimax_understand_image", model=model, data={
-        "summary": summary,
-        "notable_details": notable_details,
-        "confidence": confidence,
-        "full_response": content,
-    })
+    _update_mcp_probe_status(True, None)
+    return _build_result(True, "minimax_understand_image",
+                         model="mmx_vision",
+                         data={
+                             "summary": summary,
+                             "notable_details": notable_details,
+                             "confidence": confidence,
+                             "full_response": description,
+                             "transport": "mmx_cli",
+                             "tool": "mmx vision describe",
+                         })
 
 
 # ── TTS ───────────────────────────────────────────────────────────────────────
@@ -847,47 +1003,102 @@ def minimax_tools_status() -> dict[str, Any]:
     api_key = os.getenv("MINIMAX_API_KEY", "") or MINIMAX_API_KEY
 
     has_key = bool(api_key)
+    mmx_ok, mmx_path_or_reason = _mmx_cli_available()
     has_mcp = os.path.exists(os.getenv("MINIMAX_MCP_COMMAND", "/home/rg/bin/minimax-mcp"))
+
+    # image_understanding uses mmx CLI, not chat/completions — key alone is insufficient
+    img_understood_available = mmx_ok
+    img_understood_reason = "" if mmx_ok else mmx_path_or_reason
 
     return {
         "minimax_configured": has_key,
         "minimax_api_key_set": has_key,
         "minimax_mcp_available": has_mcp,
         "minimax_video_enabled": MINIMAX_VIDEO_ENABLED,
+        "minimax_mmx_cli_available": mmx_ok,
+        "minimax_mmx_cli_path": mmx_path_or_reason if mmx_ok else "",
         "tools": {
-            "text_to_image": {
+            "text_generation": {
+                "configured": has_key,
                 "available": has_key,
+                "transport": "api",
+                "quota_bucket": "text_generation",
+                "model": os.getenv("MINIMAX_MODEL", "MiniMax-M2.7"),
+                "endpoint": f"{MINIMAX_BASE_URL}/chat/completions",
+                "reason": "" if has_key else "MINIMAX_API_KEY not set",
+            },
+            "image_understanding": {
+                "configured": mmx_ok,
+                "cli_available": mmx_ok,
+                "live_available": _mcp_last_probe_status if _mcp_last_probe_status != "not_probed" else None,
+                "transport": "mmx_cli",
+                "quota_bucket": "mcp_understand_image",
+                "model": "mmx_vision",
+                "reason": img_understood_reason,
+                "last_probe_status": _mcp_last_probe_status,
+                "last_error_category": _mcp_last_error_category,
+                "last_error_message": _mcp_last_error_message,
+                "last_probe_at": _mcp_last_probe_at,
+            },
+            "web_search": {
+                "configured": has_mcp,
+                "available": has_mcp,
+                "transport": "mcp_cli",
+                "quota_bucket": "mcp_web_search",
+                "reason": "MINIMAX_MCP not configured" if not has_mcp else ("MINIMAX_API_KEY not set" if not has_key else ""),
+            },
+            "image_generation": {
+                "configured": has_key,
+                "available": has_key,
+                "transport": "api",
+                "quota_bucket": "image_generation",
+                "daily_limit": 100,
                 "model": os.getenv("MINIMAX_IMAGE_MODEL", "image-01"),
                 "reason": "" if has_key else "MINIMAX_API_KEY not set",
             },
             "image_to_image": {
+                "configured": has_key,
                 "available": has_key,
+                "transport": "api",
+                "quota_bucket": "image_generation",
                 "model": os.getenv("MINIMAX_IMAGE_MODEL", "image-01"),
                 "reason": "" if has_key else "MINIMAX_API_KEY not set",
             },
-            "image_understanding": {
-                "available": has_key,
-                "model": os.getenv("MINIMAX_VISION_MODEL", os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")),
-                "reason": "" if has_key else "MINIMAX_API_KEY not set",
-            },
             "tts": {
+                "configured": has_key,
                 "available": has_key,
+                "transport": "api",
+                "quota_bucket": "speech_generation",
+                "daily_limit": 9000,
                 "model": os.getenv("MINIMAX_TTS_MODEL", "speech-01"),
                 "reason": "" if has_key else "MINIMAX_API_KEY not set",
             },
-            "music": {
+            "lyrics_generation": {
+                "configured": has_key,
                 "available": has_key,
+                "transport": "api",
+                "quota_bucket": "lyrics_generation",
+                "daily_limit": 100,
                 "model": os.getenv("MINIMAX_MUSIC_MODEL", "music-01"),
                 "reason": "" if has_key else "MINIMAX_API_KEY not set",
             },
-            "video": {
+            "music_generation": {
+                "configured": has_key,
+                "available": has_key,
+                "transport": "api",
+                "quota_bucket": "music_generation",
+                "daily_limit": 100,
+                "model": os.getenv("MINIMAX_MUSIC_MODEL", "music-01"),
+                "reason": "" if has_key else "MINIMAX_API_KEY not set",
+            },
+            "video_generation": {
+                "configured": has_key and MINIMAX_VIDEO_ENABLED,
                 "available": has_key and MINIMAX_VIDEO_ENABLED,
+                "gated": not MINIMAX_VIDEO_ENABLED,
+                "transport": "api",
+                "quota_bucket": "video",
                 "model": "video-01",
                 "reason": "disabled" if has_key and not MINIMAX_VIDEO_ENABLED else ("MINIMAX_API_KEY not set" if not has_key else ""),
-            },
-            "web_search": {
-                "available": has_key and has_mcp,
-                "reason": "MINIMAX_MCP not configured" if not has_mcp else ("MINIMAX_API_KEY not set" if not has_key else ""),
             },
         },
     }

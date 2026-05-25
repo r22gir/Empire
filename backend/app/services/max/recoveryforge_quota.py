@@ -32,6 +32,12 @@ OVERRIDE_ENV = "RECOVERYFORGE_ALLOW_QUOTA_OVERRIDE"
 # Window duration in hours
 WINDOW_HOURS = 5
 
+# ── Live MCP error tracking (no live probing — set after actual calls) ─────────
+
+_mcp_last_error_category: str | None = None
+_mcp_last_error_message: str | None = None
+_mcp_last_error_at: str | None = None
+
 
 def _window_key() -> str:
     """Return current 5-hour window identifier (YYYY-MM-DD-HH)."""
@@ -127,6 +133,9 @@ def check_quota() -> dict[str, Any]:
         cap_reached: bool
         override_enabled: bool
         reset_window_hint: str
+        provider_calls_current_window: int
+        usable_analyses_current_window: int
+        failed_vision_calls_current_window: int
     """
     today = _today()
     window_key = _window_key()
@@ -149,10 +158,17 @@ def check_quota() -> dict[str, Any]:
     # Reserve is WINDOW_RESERVE=1500 general-use requests preserved per window
     cap_reached = (window_available == 0 and daily_remaining == 0) and not override
 
+    # Count provider calls (all live calls made) vs usable analyses (successful + descriptive)
+    analyses = window_entry.get("analyses", [])
+    provider_calls = len(analyses)
+    usable_analyses = sum(1 for a in analyses if a["status"] == "success")
+    failed_vision = sum(1 for a in analyses if a["status"] == "failed")
+
     reset_hint = window_end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     return {
         "recoveryforge_vision_bucket": "mcp_understand_image",
+        "recoveryforge_vision_transport": "mmx_cli",
         "recoveryforge_window_cap": WINDOW_CAP,
         "recoveryforge_daily_soft_cap": DAILY_SOFT_CAP,
         "current_window_used_by_recoveryforge": window_used,
@@ -171,7 +187,33 @@ def check_quota() -> dict[str, Any]:
         "window_start_utc": window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "server_date": today,
         "quota_file": QUOTA_FILE,
+        "provider_calls_current_window": provider_calls,
+        "usable_analyses_current_window": usable_analyses,
+        "failed_vision_calls_current_window": failed_vision,
+        "mcp_live_status": _mcp_last_error_category or "not_probed",
+        "mcp_last_error_category": _mcp_last_error_category,
+        "mcp_last_error_message": _redact_error_message(_mcp_last_error_message),
+        "mcp_last_error_at": _mcp_last_error_at,
     }
+
+
+def _redact_error_message(msg: str | None) -> str | None:
+    """Redact secrets from error messages — keeps category, removes key values."""
+    if not msg:
+        return None
+    # Remove anything that looks like an API key
+    import re
+    msg = re.sub(r"sk-[A-Za-z0-9]{20,}", "[KEY_REDACTED]", msg)
+    msg = re.sub(r"[A-Za-z0-9+/]{40,}={0,2}", "[TOKEN_REDACTED]", msg)
+    return msg
+
+
+def _update_mcp_error(category: str | None, message: str | None) -> None:
+    """Update the in-process MCP error tracker after a live call."""
+    global _mcp_last_error_category, _mcp_last_error_message, _mcp_last_error_at
+    _mcp_last_error_category = category
+    _mcp_last_error_message = message
+    _mcp_last_error_at = datetime.now(timezone.utc).isoformat() if category else None
 
 
 def consume_quota(image_key: str, model: str, success: bool, error: str | None = None) -> None:
@@ -183,6 +225,30 @@ def consume_quota(image_key: str, model: str, success: bool, error: str | None =
     Image Generation quota is never consumed by RecoveryForge batch classification.
     """
     _record_usage(image_key, model, "success" if success else "failed", error)
+    # Track MCP live error category after each call
+    if not success and error:
+        category = _classify_mcp_error(error)
+        _update_mcp_error(category, error)
+
+
+def _classify_mcp_error(error: str) -> str:
+    """Classify MCP error into a known category for status reporting."""
+    if not error:
+        return "unknown_error"
+    err_lower = error.lower()
+    if "usage limit exceeded" in err_lower:
+        return "usage_limit_exceeded"
+    if "no image provided" in err_lower or "cannot see the image" in err_lower:
+        return "vision_input_not_received"
+    if "timeout" in err_lower:
+        return "timeout"
+    if "not found" in err_lower or "file not found" in err_lower:
+        return "file_not_found"
+    if "unauthorized" in err_lower or "invalid api key" in err_lower:
+        return "auth_error"
+    if "rate limit" in err_lower:
+        return "rate_limited"
+    return "unknown_error"
 
 
 def quota_allow_new() -> bool:
