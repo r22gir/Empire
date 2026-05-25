@@ -11,6 +11,7 @@ type ChannelLayer = {
   evidence: string[];
   next_required_action: string;
   last_error_category?: string | null;
+  details?: Record<string, any>;
 };
 
 type ChannelStatus = {
@@ -106,6 +107,15 @@ function BoolMark({ value, label }: { value: boolean; label: string }) {
 function ChannelCard({ channel }: { channel: ChannelStatus }) {
   const Icon = channelIcons[channel.key as keyof typeof channelIcons] || ShieldCheck;
   const topLayers = channel.layers.slice(0, 5);
+  const hermesEmailLayer = channel.key === 'hermes'
+    ? channel.layers.find((layer) => layer.name === 'hermes_email')
+    : undefined;
+  const hermesProcessLayer = channel.key === 'hermes'
+    ? channel.layers.find((layer) => layer.name === 'external_hermes_process_9119')
+    : undefined;
+  const hermesTelegramLayer = channel.key === 'hermes'
+    ? channel.layers.find((layer) => layer.name === 'external_hermes_telegram')
+    : undefined;
 
   return (
     <article style={{
@@ -174,6 +184,39 @@ function ChannelCard({ channel }: { channel: ChannelStatus }) {
           ))}
         </div>
       </div>
+
+      {channel.key === 'hermes' ? (
+        <div style={{ borderTop: '1px solid #243043', paddingTop: 12 }}>
+          <span style={{ color: '#9daabd', fontSize: 12, fontWeight: 800, textTransform: 'uppercase' }}>External Hermes Detail</span>
+          <div style={{ display: 'grid', gap: 8, marginTop: 9 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'center' }}>
+              <span style={{ color: '#d8dee9', fontSize: 13 }}>External dashboard</span>
+              <StatusPill status={hermesProcessLayer?.status || 'unverified'} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'center' }}>
+              <span style={{ color: '#d8dee9', fontSize: 13 }}>Gateway</span>
+              <StatusPill status={hermesProcessLayer?.details?.gateway_running ? 'partial' : 'unverified'} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'center' }}>
+              <span style={{ color: '#d8dee9', fontSize: 13 }}>Telegram</span>
+              <StatusPill status={hermesTelegramLayer?.status || 'unverified'} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 10, alignItems: 'center' }}>
+              <span style={{ color: '#d8dee9', fontSize: 13 }}>Hermes Email</span>
+              <StatusPill status={hermesEmailLayer?.details?.status === 'not_configured' ? 'planned' : (hermesEmailLayer?.status || 'planned')} />
+            </div>
+            <div style={{ border: '1px solid #334155', borderRadius: 8, background: '#0d1420', padding: 10 }}>
+              <div style={{ color: '#f7fafc', fontSize: 13, fontWeight: 800 }}>Hermes Email: Not configured</div>
+              <div style={{ color: '#aeb9c8', fontSize: 12, marginTop: 5 }}>
+                Target: {hermesEmailLayer?.details?.target_address || 'hermes@empirebox.store'}
+              </div>
+              <div style={{ color: '#aeb9c8', fontSize: 12, marginTop: 5, lineHeight: 1.45 }}>
+                External Hermes dashboard/gateway can be running while Hermes email is still not configured.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 'auto', borderTop: '1px solid #243043', paddingTop: 12 }}>
         <p style={{ margin: 0, color: '#f0d58d', fontSize: 13, lineHeight: 1.45 }}>{channel.next_required_action}</p>

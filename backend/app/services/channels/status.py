@@ -7,6 +7,7 @@ import os
 import socket
 import sqlite3
 import subprocess
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,9 @@ LEGACY_REPO = Path("/home/rg/empire-repo")
 CANONICAL_BACKEND = CANONICAL_REPO / "backend"
 LEGACY_BACKEND = LEGACY_REPO / "backend"
 DOMAIN = "empirebox.store"
+HERMES_HOME = Path.home() / ".hermes"
+HERMES_EMAIL_TARGET = "hermes@empirebox.store"
+HERMES_DASHBOARD_URL = "http://127.0.0.1:9119/api/status"
 
 MAX_EMAIL_ENV_NAMES = [
     "MAX_EMAIL",
@@ -364,6 +368,115 @@ def _telegram_status() -> dict[str, Any]:
         }
 
 
+def _safe_json_file(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _hermes_api_status() -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen(HERMES_DASHBOARD_URL, timeout=1.5) as response:
+            data = json.loads(response.read(200_000).decode("utf-8", errors="replace"))
+    except Exception as exc:
+        return {
+            "reachable": False,
+            "version": None,
+            "gateway_running": False,
+            "gateway_state": None,
+            "gateway_pid_present": False,
+            "api_server_connected": False,
+            "telegram_connected": False,
+            "email_connected": False,
+            "error": type(exc).__name__,
+        }
+
+    platforms = data.get("gateway_platforms") if isinstance(data, dict) else {}
+    if not isinstance(platforms, dict):
+        platforms = {}
+    return {
+        "reachable": True,
+        "version": data.get("version"),
+        "gateway_running": bool(data.get("gateway_running")),
+        "gateway_state": data.get("gateway_state"),
+        "gateway_pid_present": bool(data.get("gateway_pid")),
+        "api_server_connected": (platforms.get("api_server") or {}).get("state") == "connected",
+        "telegram_connected": (platforms.get("telegram") or {}).get("state") == "connected",
+        "email_connected": (platforms.get("email") or {}).get("state") == "connected",
+        "platforms": sorted(platforms.keys()),
+        "error": None,
+    }
+
+
+def _hermes_channel_directory_status() -> dict[str, Any]:
+    directory_path = HERMES_HOME / "channel_directory.json"
+    data = _safe_json_file(directory_path)
+    platforms = data.get("platforms") if isinstance(data, dict) else {}
+    if not isinstance(platforms, dict):
+        platforms = {}
+    email_targets = platforms.get("email")
+    telegram_targets = platforms.get("telegram")
+    email_count = len(email_targets) if isinstance(email_targets, list) else 0
+    telegram_count = len(telegram_targets) if isinstance(telegram_targets, list) else 0
+    return {
+        "path_exists": _exists(directory_path),
+        "path_kind": _safe_path_kind(directory_path),
+        "platform_keys": sorted(platforms.keys()),
+        "email_platform_present": "email" in platforms,
+        "email_target_count": email_count,
+        "telegram_target_count": telegram_count,
+        "updated_at": data.get("updated_at") if isinstance(data, dict) else None,
+    }
+
+
+def _hermes_email_env_status() -> dict[str, Any]:
+    env_path = HERMES_HOME / ".env"
+    keys = {
+        "EMAIL_ADDRESS",
+        "EMAIL_PASSWORD",
+        "EMAIL_IMAP_HOST",
+        "EMAIL_IMAP_PORT",
+        "EMAIL_SMTP_HOST",
+        "EMAIL_SMTP_PORT",
+        "EMAIL_ALLOWED_USERS",
+        "EMAIL_HOME_ADDRESS",
+        "SMTP_HOST",
+        "SMTP_PORT",
+        "SMTP_USER",
+        "SMTP_PASSWORD",
+        "SMTP_FROM",
+        "SENDGRID_API_KEY",
+        "GMAIL_TOKEN_PATH",
+        "GMAIL_CREDENTIALS_PATH",
+    }
+    active_keys: list[str] = []
+    mentions_email_examples = False
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#"):
+                if any(name in stripped for name in keys):
+                    mentions_email_examples = True
+                continue
+            key = stripped.split("=", 1)[0].strip() if "=" in stripped else stripped.split(":", 1)[0].strip()
+            if key in keys:
+                active_keys.append(key)
+    except Exception:
+        pass
+    return {
+        "env_path_exists": _exists(env_path),
+        "env_path_kind": _safe_path_kind(env_path),
+        "active_email_key_count": len(active_keys),
+        "active_email_keys": sorted(active_keys),
+        "commented_email_examples_present": mentions_email_examples,
+        "values_read": False,
+    }
+
+
 def _port_open(host: str, port: int, timeout: float = 0.5) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -388,6 +501,14 @@ def _hermes_artifact_status() -> dict[str, Any]:
         "channel_interfaces_exists": _exists(root / "CHANNELS" / "interfaces.json"),
     }
     external_open = _port_open("127.0.0.1", 9119)
+    api_status = _hermes_api_status()
+    channel_directory = _hermes_channel_directory_status()
+    email_env = _hermes_email_env_status()
+    email_configured = bool(
+        api_status.get("email_connected")
+        or channel_directory.get("email_target_count", 0) > 0
+        or email_env.get("active_email_key_count", 0) > 0
+    )
     return {
         "root": str(root),
         "root_path_kind": _safe_path_kind(root),
@@ -395,7 +516,19 @@ def _hermes_artifact_status() -> dict[str, Any]:
         "internal_artifacts_present": any(artifacts.values()),
         "external_hermes_port": 9119,
         "external_hermes_reachable": external_open,
-        "hermes_email_implemented": False,
+        "external_hermes_dashboard_url": "127.0.0.1:9119",
+        "external_hermes_api": api_status,
+        "external_hermes_gateway_running": bool(api_status.get("gateway_running")),
+        "external_hermes_telegram_connected": bool(api_status.get("telegram_connected")),
+        "channel_directory": channel_directory,
+        "email_env": email_env,
+        "hermes_email_target": HERMES_EMAIL_TARGET,
+        "hermes_email_status": "configured_unverified" if email_configured else "not_configured",
+        "hermes_email_implemented": email_configured,
+        "hermes_email_inbound_configured": email_configured,
+        "hermes_email_outbound_configured": email_configured,
+        "hermes_email_reply_loop_verified": False,
+        "hermes_email_dry_run_available": False,
         "hermes_role": "supporting_subordinate_to_max",
     }
 
@@ -618,6 +751,9 @@ def _telegram_channel_status() -> dict[str, Any]:
 def _hermes_channel_status() -> dict[str, Any]:
     hermes = _hermes_artifact_status()
     artifacts_present = hermes["internal_artifacts_present"]
+    external_running = bool(hermes["external_hermes_reachable"] or hermes.get("external_hermes_gateway_running"))
+    telegram_connected = bool(hermes.get("external_hermes_telegram_connected"))
+    hermes_email_configured = bool(hermes.get("hermes_email_inbound_configured") or hermes.get("hermes_email_outbound_configured"))
     layers = [
         _layer(
             "internal_hermes_artifacts",
@@ -628,15 +764,55 @@ def _hermes_channel_status() -> dict[str, Any]:
         ),
         _layer(
             "external_hermes_process_9119",
-            STATUS_PARTIAL if hermes["external_hermes_reachable"] else STATUS_UNVERIFIED,
-            evidence=[f"127.0.0.1:9119 reachable: {hermes['external_hermes_reachable']}"],
-            next_action="Inspect External Hermes manually before integrating it with MAX.",
+            STATUS_PARTIAL if external_running else STATUS_UNVERIFIED,
+            evidence=[
+                "External Hermes dashboard/gateway is running." if external_running else "External Hermes dashboard/gateway was not reachable.",
+                f"Dashboard port 9119 reachable: {hermes['external_hermes_reachable']}",
+                f"Gateway running: {hermes.get('external_hermes_gateway_running')}",
+                f"Hermes version: {(hermes.get('external_hermes_api') or {}).get('version') or 'unknown'}",
+            ],
+            next_action="Keep External Hermes read-only until a dedicated MAX integration is approved.",
+            details={
+                "port": 9119,
+                "dashboard": "127.0.0.1:9119",
+                "gateway_running": hermes.get("external_hermes_gateway_running"),
+                "api_server_connected": (hermes.get("external_hermes_api") or {}).get("api_server_connected"),
+            },
+        ),
+        _layer(
+            "external_hermes_telegram",
+            STATUS_PARTIAL if telegram_connected else STATUS_UNVERIFIED,
+            evidence=[
+                "Hermes Telegram is connected." if telegram_connected else "Hermes Telegram is not verified connected.",
+                f"Channel directory Telegram targets: {(hermes.get('channel_directory') or {}).get('telegram_target_count', 0)}",
+            ],
+            next_action="Do not infer Hermes email status from Hermes Telegram connectivity.",
+            details={
+                "telegram_connected": telegram_connected,
+                "telegram_target_count": (hermes.get("channel_directory") or {}).get("telegram_target_count", 0),
+            },
         ),
         _layer(
             "hermes_email",
-            STATUS_PLANNED,
-            evidence=["Hermes email channel is not implemented in stable main."],
-            next_action="Keep Hermes email separate from MAX email until explicitly designed.",
+            STATUS_PARTIAL if hermes_email_configured else STATUS_PLANNED,
+            evidence=[
+                f"Hermes email target {HERMES_EMAIL_TARGET} is intended but not configured in the external Hermes runtime." if not hermes_email_configured else f"Hermes email target {HERMES_EMAIL_TARGET} has config indicators but is not verified.",
+                f"Hermes channel_directory email target count: {(hermes.get('channel_directory') or {}).get('email_target_count', 0)}",
+                f"Active Hermes email runtime key count: {(hermes.get('email_env') or {}).get('active_email_key_count', 0)}",
+                "No Hermes email dry-run is available.",
+            ],
+            next_action="Configure Cloudflare route, destination inbox, IMAP/SMTP or approved bridge, then run dry-run before live test.",
+            last_error_category=None if hermes_email_configured else "external_hermes_email_not_configured",
+            details={
+                "target_address": HERMES_EMAIL_TARGET,
+                "status": hermes.get("hermes_email_status"),
+                "inbound_configured": hermes.get("hermes_email_inbound_configured"),
+                "outbound_configured": hermes.get("hermes_email_outbound_configured"),
+                "reply_loop_verified": hermes.get("hermes_email_reply_loop_verified"),
+                "dry_run_available": hermes.get("hermes_email_dry_run_available"),
+                "channel_directory_email_target_count": (hermes.get("channel_directory") or {}).get("email_target_count", 0),
+                "active_email_key_count": (hermes.get("email_env") or {}).get("active_email_key_count", 0),
+            },
         ),
         _layer(
             "max_subordination_policy",
@@ -648,8 +824,8 @@ def _hermes_channel_status() -> dict[str, Any]:
     return _channel(
         key="hermes",
         name="Internal/External Hermes",
-        status=STATUS_PARTIAL if artifacts_present or hermes["external_hermes_reachable"] else STATUS_PLANNED,
-        inbound_configured=artifacts_present,
+        status=STATUS_PARTIAL if artifacts_present or external_running else STATUS_PLANNED,
+        inbound_configured=bool(artifacts_present or external_running),
         inbound_verified=False,
         outbound_configured=False,
         outbound_verified=False,
@@ -660,10 +836,12 @@ def _hermes_channel_status() -> dict[str, Any]:
         last_error_category=None,
         evidence=[
             f"Internal artifacts present: {artifacts_present}",
-            f"External Hermes 9119 reachable: {hermes['external_hermes_reachable']}",
-            "Hermes email is not implemented.",
+            "External Hermes dashboard/gateway is running." if external_running else "External Hermes dashboard/gateway is not verified running.",
+            "Hermes Telegram is connected." if telegram_connected else "Hermes Telegram is not verified connected.",
+            f"Hermes Email: Not configured for {HERMES_EMAIL_TARGET}." if not hermes_email_configured else f"Hermes Email: Configured indicators found for {HERMES_EMAIL_TARGET}, not verified.",
+            "No Hermes email target appears in the external Hermes channel directory." if not hermes_email_configured else "Hermes email requires live/dry-run verification before use.",
         ],
-        next_required_action="Keep Hermes read-only/supporting until a dedicated integration is approved.",
+        next_required_action="Configure Cloudflare route, destination inbox, IMAP/SMTP or approved bridge, then run dry-run before live test.",
         safe_to_live_test=False,
         live_test_required=False,
         layers=layers,

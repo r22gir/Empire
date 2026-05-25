@@ -281,6 +281,12 @@ def test_hermes_email_returns_planned_not_working(monkeypatch):
             "external_hermes_port": 9119,
             "external_hermes_reachable": False,
             "hermes_email_implemented": False,
+            "hermes_email_target": "hermes@empirebox.store",
+            "hermes_email_status": "not_configured",
+            "hermes_email_inbound_configured": False,
+            "hermes_email_outbound_configured": False,
+            "hermes_email_reply_loop_verified": False,
+            "hermes_email_dry_run_available": False,
             "hermes_role": "supporting_subordinate_to_max",
         },
     )
@@ -289,8 +295,128 @@ def test_hermes_email_returns_planned_not_working(monkeypatch):
     email_layer = next(layer for layer in hermes["layers"] if layer["name"] == "hermes_email")
 
     assert email_layer["status"] == "planned"
+    assert email_layer["details"]["target_address"] == "hermes@empirebox.store"
+    assert email_layer["details"]["status"] == "not_configured"
     assert hermes["reply_loop_verified"] is False
     assert hermes["outbound_verified"] is False
+
+
+def test_hermes_dashboard_running_does_not_imply_email_configured(monkeypatch):
+    monkeypatch.setattr(
+        channel_status,
+        "_hermes_artifact_status",
+        lambda: {
+            "root": "/tmp/empire-box-memory",
+            "root_path_kind": "external",
+            "artifacts": {
+                "memory_root_exists": True,
+                "context_exists": True,
+                "memory_exists": True,
+                "user_exists": False,
+                "browser_actions_dir_exists": True,
+                "channel_interfaces_exists": True,
+            },
+            "internal_artifacts_present": True,
+            "external_hermes_port": 9119,
+            "external_hermes_reachable": True,
+            "external_hermes_gateway_running": True,
+            "external_hermes_telegram_connected": True,
+            "external_hermes_api": {
+                "version": "0.13.0",
+                "gateway_running": True,
+                "api_server_connected": True,
+                "telegram_connected": True,
+                "email_connected": False,
+            },
+            "channel_directory": {
+                "email_platform_present": True,
+                "email_target_count": 0,
+                "telegram_target_count": 1,
+            },
+            "email_env": {
+                "active_email_key_count": 0,
+                "commented_email_examples_present": True,
+                "values_read": False,
+            },
+            "hermes_email_target": "hermes@empirebox.store",
+            "hermes_email_status": "not_configured",
+            "hermes_email_implemented": False,
+            "hermes_email_inbound_configured": False,
+            "hermes_email_outbound_configured": False,
+            "hermes_email_reply_loop_verified": False,
+            "hermes_email_dry_run_available": False,
+            "hermes_role": "supporting_subordinate_to_max",
+        },
+    )
+
+    hermes = channel_status._hermes_channel_status()
+    layers = {layer["name"]: layer for layer in hermes["layers"]}
+
+    assert layers["external_hermes_process_9119"]["status"] == "partial"
+    assert layers["external_hermes_telegram"]["status"] == "partial"
+    assert layers["hermes_email"]["status"] == "planned"
+    assert layers["hermes_email"]["details"]["target_address"] == "hermes@empirebox.store"
+    assert layers["hermes_email"]["details"]["inbound_configured"] is False
+    assert layers["hermes_email"]["details"]["outbound_configured"] is False
+    assert layers["hermes_email"]["details"]["reply_loop_verified"] is False
+    assert layers["hermes_email"]["details"]["dry_run_available"] is False
+    assert "Hermes Email: Not configured" in " ".join(hermes["evidence"])
+
+
+def test_hermes_status_response_does_not_expose_session_tokens(monkeypatch):
+    monkeypatch.setattr(
+        channel_status,
+        "_hermes_api_status",
+        lambda: {
+            "reachable": True,
+            "version": "0.13.0",
+            "gateway_running": True,
+            "gateway_state": "running",
+            "gateway_pid_present": True,
+            "api_server_connected": True,
+            "telegram_connected": True,
+            "email_connected": False,
+            "platforms": ["api_server", "telegram"],
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        channel_status,
+        "_hermes_channel_directory_status",
+        lambda: {
+            "path_exists": True,
+            "path_kind": "external",
+            "platform_keys": ["email", "telegram"],
+            "email_platform_present": True,
+            "email_target_count": 0,
+            "telegram_target_count": 1,
+            "updated_at": "2026-05-25T00:06:50.640687",
+        },
+    )
+    monkeypatch.setattr(
+        channel_status,
+        "_hermes_email_env_status",
+        lambda: {
+            "env_path_exists": True,
+            "env_path_kind": "external",
+            "active_email_key_count": 0,
+            "active_email_keys": [],
+            "commented_email_examples_present": True,
+            "values_read": False,
+        },
+    )
+
+    data = channel_status.build_channel_status()
+    rendered = json.dumps(data)
+    hermes = next(channel for channel in data["channels"] if channel["key"] == "hermes")
+    hermes_email = next(layer for layer in hermes["layers"] if layer["name"] == "hermes_email")
+
+    assert hermes_email["details"]["target_address"] == "hermes@empirebox.store"
+    assert hermes_email["details"]["status"] == "not_configured"
+    assert "session" not in rendered.lower()
+    assert "local_session_token_value" not in rendered
+    assert data["safety"]["live_email_sent"] is False
+    assert data["safety"]["external_hermes_modified"] is False
 
 
 def test_no_secrets_appear_in_channel_status_response(monkeypatch):
