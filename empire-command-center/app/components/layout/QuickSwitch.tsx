@@ -17,6 +17,7 @@ const SECTIONS = [
   { label: 'Telegram', shortcut: 'T', screen: 'telegram', icon: MessageCircle, color: '#2563eb' },
   { label: 'Dev Panel', shortcut: 'X', screen: 'dev', icon: Terminal, color: '#b8960c' },
   { label: 'RecoveryForge', shortcut: 'Y', screen: 'recovery', icon: HardDrive, color: '#b8960c' },
+  { label: 'Pricing Studio', shortcut: 'Z', screen: 'pricing-studio', icon: Scissors, color: '#16a34a' },
   { label: 'RelistApp', shortcut: 'L', screen: 'relist', icon: ShoppingBag, color: '#b8960c' },
 ];
 
@@ -49,7 +50,13 @@ export default function QuickSwitch({ open, onClose, onSelect }: Props) {
   const filtered = SECTIONS.filter(s => s.label.toLowerCase().includes(query.toLowerCase()));
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIdx(i => Math.min(i + 1, filtered.length - 1)); }
+    const shortcut = SECTIONS.find(s => s.shortcut.toLowerCase() === e.key.toLowerCase());
+    if (query.trim() === '' && e.key.length === 1 && shortcut) {
+      e.preventDefault();
+      onSelect(shortcut.screen);
+      onClose();
+    }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIdx(i => Math.min(i + 1, filtered.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusIdx(i => Math.max(i - 1, 0)); }
     else if (e.key === 'Enter' && filtered[focusIdx]) { onSelect(filtered[focusIdx].screen); onClose(); }
   };

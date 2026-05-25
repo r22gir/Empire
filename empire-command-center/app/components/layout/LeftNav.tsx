@@ -1,21 +1,22 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { EcosystemProduct } from '../../lib/types';
+import { EcosystemProduct, ScreenMode } from '../../lib/types';
 import RightPanel from './RightPanel';
 import {
   Crown, Scissors, TreePine, Gem, Share2, Bot, ShieldCheck, Server,
   Cpu, Activity, Coins, Store, Wrench, Headphones, Target, Truck,
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
-  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio,
+  Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
 } from 'lucide-react';
 
 interface NavItem {
-  id: EcosystemProduct;
+  id: string;
   name: string;
   icon: React.ReactNode;
   status: 'active' | 'dev' | 'planned';
   color: string;
+  screen?: ScreenMode;
 }
 
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
@@ -41,6 +42,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { id: 'vision', name: 'AI Vision', icon: <Camera size={16} />, status: 'active', color: '#7c3aed' },
       { id: 'drawings' as any, name: 'Drawing Studio', icon: <PenTool size={16} />, status: 'active', color: '#b8960c' },
+      { id: 'pricing-studio', name: 'Pricing Studio', icon: <DollarSign size={16} />, status: 'active', color: '#16a34a', screen: 'pricing-studio' },
     ],
   },
   {
@@ -82,11 +84,13 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
 
 interface Props {
   activeProduct: EcosystemProduct;
+  activeScreen?: ScreenMode;
   onProductChange: (product: EcosystemProduct) => void;
+  onScreenChange?: (screen: ScreenMode) => void;
   dashboardProps?: any;
 }
 
-export default function LeftNav({ activeProduct, onProductChange, dashboardProps }: Props) {
+export default function LeftNav({ activeProduct, activeScreen, onProductChange, onScreenChange, dashboardProps }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -108,8 +112,12 @@ export default function LeftNav({ activeProduct, onProductChange, dashboardProps
   }, []);
 
   // Close mobile nav on product change
-  const handleProductClick = (product: EcosystemProduct) => {
-    onProductChange(product);
+  const handleNavClick = (item: NavItem) => {
+    if (item.screen) {
+      onScreenChange?.(item.screen);
+    } else {
+      onProductChange(item.id as EcosystemProduct);
+    }
     if (isMobile) setMobileOpen(false);
   };
 
@@ -187,6 +195,7 @@ export default function LeftNav({ activeProduct, onProductChange, dashboardProps
               <div className="flex flex-col" style={{ gap: isCollapsed ? 2 : 3 }}>
                 {section.items.map(item => {
                   const isActive = activeProduct === item.id;
+                  const itemActive = item.screen ? activeScreen === item.screen : isActive;
                   const statusDot = item.status === 'active' ? '#22c55e'
                     : item.status === 'dev' ? '#f59e0b'
                     : '#d1d5db';
@@ -195,28 +204,28 @@ export default function LeftNav({ activeProduct, onProductChange, dashboardProps
                     return (
                       <button
                         key={item.id}
-                        onClick={() => handleProductClick(item.id)}
+                        onClick={() => handleNavClick(item)}
                         className="flex items-center justify-center cursor-pointer transition-all"
                         title={item.name}
                         style={{
                           width: 40,
                           height: 40,
                           borderRadius: 12,
-                          border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                          background: isActive ? '#fdf8eb' : 'transparent',
-                          color: isActive ? '#b8960c' : item.color,
-                          opacity: isActive ? 1 : 0.7,
+                          border: itemActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                          background: itemActive ? '#fdf8eb' : 'transparent',
+                          color: itemActive ? '#b8960c' : item.color,
+                          opacity: itemActive ? 1 : 0.7,
                           alignSelf: 'center',
                           position: 'relative',
                         }}
-                        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.opacity = '1'; } }}
-                        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.opacity = '0.7'; } }}
+                        onMouseEnter={e => { if (!itemActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.opacity = '1'; } }}
+                        onMouseLeave={e => { if (!itemActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.opacity = '0.7'; } }}
                       >
                         {item.icon}
                         <span style={{
                           position: 'absolute', top: 4, right: 4,
                           width: 5, height: 5, borderRadius: '50%',
-                          background: isActive ? '#b8960c' : statusDot,
+                          background: itemActive ? '#b8960c' : statusDot,
                         }} />
                       </button>
                     );
@@ -225,30 +234,30 @@ export default function LeftNav({ activeProduct, onProductChange, dashboardProps
                   return (
                     <button
                       key={item.id}
-                      onClick={() => handleProductClick(item.id)}
+                      onClick={() => handleNavClick(item)}
                       className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
                       style={{
                         padding: '10px 12px',
                         borderRadius: 12,
                         fontSize: 13,
                         minHeight: 44,
-                        border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                        background: isActive ? '#fdf8eb' : 'transparent',
-                        fontWeight: isActive ? 600 : 400,
-                        boxShadow: isActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
+                        border: itemActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                        background: itemActive ? '#fdf8eb' : 'transparent',
+                        fontWeight: itemActive ? 600 : 400,
+                        boxShadow: itemActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
                       }}
-                      onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
-                      onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                      onMouseEnter={e => { if (!itemActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
+                      onMouseLeave={e => { if (!itemActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
                     >
-                      <span className="shrink-0" style={{ color: isActive ? '#b8960c' : item.color, opacity: isActive ? 1 : 0.7 }}>
+                      <span className="shrink-0" style={{ color: itemActive ? '#b8960c' : item.color, opacity: itemActive ? 1 : 0.7 }}>
                         {item.icon}
                       </span>
-                      <span className="flex-1 truncate" style={{ color: isActive ? '#96750a' : '#666' }}>{item.name}</span>
-                      <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? '#b8960c' : statusDot }} />
-                      {item.status === 'dev' && !isActive && (
+                      <span className="flex-1 truncate" style={{ color: itemActive ? '#96750a' : '#666' }}>{item.name}</span>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: itemActive ? '#b8960c' : statusDot }} />
+                      {item.status === 'dev' && !itemActive && (
                         <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
                       )}
-                      {item.status === 'planned' && !isActive && (
+                      {item.status === 'planned' && !itemActive && (
                         <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
                       )}
                     </button>

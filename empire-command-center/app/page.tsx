@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BusinessTab, ScreenMode, EcosystemProduct } from './lib/types';
 import { useChat } from './hooks/useChat';
 import { useSystemData } from './hooks/useSystemData';
@@ -23,6 +23,7 @@ import WorkroomPage from './components/screens/WorkroomPage';
 import CraftForgePage from './components/screens/CraftForgePage';
 import PlatformPage from './components/screens/PlatformPage';
 import PricingPage from './components/screens/PricingPage';
+import PricingStudioScreen from './components/screens/PricingStudioScreen';
 import SocialForgePage from './components/screens/SocialForgePage';
 import LuxeForgePage from './components/screens/LuxeForgePage';
 import LLCFactoryPage from './components/screens/LLCFactoryPage';
@@ -96,6 +97,10 @@ const PRODUCT_TO_TAB: Partial<Record<EcosystemProduct, BusinessTab>> = {
   storefront: 'max',
 };
 
+const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
+  'pricing-studio': 'pricing-studio',
+};
+
 export default function CommandCenter() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
@@ -103,6 +108,7 @@ export default function CommandCenter() {
   const [showQuickSwitch, setShowQuickSwitch] = useState(false);
   const [activeConvId, setActiveConvId] = useState<string | null>(null);
   const [clientView, setClientView] = useState(false);
+  const pendingDeepLinkScreen = useRef<ScreenMode | null>(null);
 
   const chat = useChat();
   const sys = useSystemData();
@@ -122,6 +128,50 @@ export default function CommandCenter() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  useEffect(() => {
+    const applyDeepLink = () => {
+      const params = new URLSearchParams(window.location.search);
+      const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
+      const screen = candidate ? SCREEN_DEEP_LINKS[candidate] : null;
+      if (screen) {
+        pendingDeepLinkScreen.current = screen;
+        setActiveScreen(screen);
+        setActiveSection(null);
+      }
+    };
+
+    applyDeepLink();
+    window.addEventListener('popstate', applyDeepLink);
+    window.addEventListener('hashchange', applyDeepLink);
+    return () => {
+      window.removeEventListener('popstate', applyDeepLink);
+      window.removeEventListener('hashchange', applyDeepLink);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const isPricingStudioLink = url.searchParams.get('screen') === 'pricing-studio' || url.hash === '#pricing-studio';
+
+    if (pendingDeepLinkScreen.current && activeScreen !== pendingDeepLinkScreen.current) {
+      return;
+    }
+    if (pendingDeepLinkScreen.current === activeScreen) {
+      pendingDeepLinkScreen.current = null;
+    }
+
+    if (activeScreen === 'pricing-studio' && url.searchParams.get('screen') !== 'pricing-studio') {
+      url.searchParams.set('screen', 'pricing-studio');
+      url.hash = '';
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    } else if (activeScreen !== 'pricing-studio' && isPricingStudioLink) {
+      url.searchParams.delete('screen');
+      if (url.hash === '#pricing-studio') url.hash = '';
+      window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, [activeScreen]);
 
   const handleProductChange = useCallback((product: EcosystemProduct) => {
     setActiveProduct(product);
@@ -344,6 +394,7 @@ export default function CommandCenter() {
     }
     if (activeScreen === 'business-profile') return <BusinessProfileScreen />;
     if (activeScreen === 'pricing' && activeProduct === 'platform') return <PricingPage />;
+    if (activeScreen === 'pricing-studio') return <PricingStudioScreen />;
     if (activeScreen === 'desks') return <DesksScreen desks={sys.desks} onSendTask={handleSendMessage} />;
     if (activeScreen === 'inbox' || activeScreen === 'mail') return <InboxScreen />;
     if (activeScreen === 'memory-bank') return <MemoryBankScreen />;
@@ -417,7 +468,9 @@ export default function CommandCenter() {
       <div className="flex-1 flex overflow-hidden">
         <LeftNav
           activeProduct={activeProduct}
+          activeScreen={activeScreen}
           onProductChange={handleProductChange}
+          onScreenChange={handleScreenChange}
           dashboardProps={{
             desks: sys.desks,
             briefing: sys.briefing,
