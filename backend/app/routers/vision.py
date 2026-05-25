@@ -1,70 +1,32 @@
 """Vision analysis endpoints — window measurement, mockup design, outline, upholstery.
 
 Ported from WorkroomForge (port 3001) so all analysis runs through the backend.
-Image generation: Stable Diffusion (Stability AI API or HuggingFace free) → xAI fallback.
+Image understanding uses MiniMax Token Plan through the working mmx CLI transport.
+Image generation remains explicit and separate from image-understanding quota.
 """
-import os, json, re, httpx, asyncio, logging, base64, uuid, time, shlex
+import os, json, re, httpx, logging, base64, uuid, time
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Any, Optional
 
+from app.services.data_paths import data_root
+from app.services.max.minimax_tools import minimax_tools_status, minimax_understand_image
+
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 log = logging.getLogger("vision")
 
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
-MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
-MINIMAX_VISION_MODEL = os.getenv("MINIMAX_VISION_MODEL") or os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
-MINIMAX_MCP_COMMAND = os.getenv("MINIMAX_MCP_COMMAND", "/home/rg/bin/minimax-mcp")
 STABILITY_API_KEY = os.getenv("STABILITY_API_KEY", "")
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")  # optional, improves rate limits
 
 VISION_MODEL = "grok-4-fast-non-reasoning"
+VISION_INPUT_DIR = data_root() / "vision_inputs"
+MEASUREMENTS_DIR = data_root() / "measurements"
 
 # Where generated images are saved for serving
 GENERATED_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "generated"
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _load_runtime_env_if_needed() -> None:
-    """Load the backend runtime env only when service env is missing."""
-    wanted = {
-        "MINIMAX_API_KEY",
-        "MINIMAX_BASE_URL",
-        "MINIMAX_MODEL",
-        "MINIMAX_VISION_MODEL",
-        "MINIMAX_MCP_COMMAND",
-    }
-    if os.getenv("MINIMAX_API_KEY"):
-        return
-    for env_path in (
-        Path("/home/rg/empire-repo/backend/.env"),
-        Path(__file__).resolve().parents[2] / ".env",
-    ):
-        if not env_path.exists():
-            continue
-        try:
-            for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-                text = line.strip()
-                if not text or text.startswith("#") or "=" not in text:
-                    continue
-                key, value = text.split("=", 1)
-                key = key.strip()
-                if key not in wanted or os.getenv(key):
-                    continue
-                os.environ[key] = value.strip().strip('"').strip("'")
-        except OSError:
-            continue
-
-
-def _refresh_minimax_settings() -> None:
-    global MINIMAX_API_KEY, MINIMAX_BASE_URL, MINIMAX_VISION_MODEL, MINIMAX_MCP_COMMAND
-    _load_runtime_env_if_needed()
-    MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
-    MINIMAX_BASE_URL = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")
-    MINIMAX_VISION_MODEL = os.getenv("MINIMAX_VISION_MODEL") or os.getenv("MINIMAX_MODEL", "MiniMax-M2.7")
-    MINIMAX_MCP_COMMAND = os.getenv("MINIMAX_MCP_COMMAND", "/home/rg/bin/minimax-mcp")
 
 
 class ImageRequest(BaseModel):
@@ -93,187 +55,165 @@ def _extract_json_object(text: str) -> dict[str, Any]:
         raise HTTPException(500, f"Could not parse AI response JSON: {exc}") from exc
 
 
-async def _mcp_send(proc: asyncio.subprocess.Process, payload: dict[str, Any]) -> None:
-    if proc.stdin is None:
-        raise HTTPException(500, "MiniMax MCP stdin unavailable")
-    proc.stdin.write((json.dumps(payload) + "\n").encode())
-    await proc.stdin.drain()
+def _env_flag(*names: str) -> bool:
+    return any(os.getenv(name, "").lower() in {"1", "true", "yes", "on"} for name in names)
 
 
-async def _mcp_read_response(proc: asyncio.subprocess.Process, response_id: int, timeout: int = 120) -> dict[str, Any]:
-    if proc.stdout is None:
-        raise HTTPException(500, "MiniMax MCP stdout unavailable")
-    deadline = asyncio.get_running_loop().time() + timeout
-    while True:
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise HTTPException(504, "MiniMax MCP timed out")
-        line = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
-        if not line:
-            raise HTTPException(500, "MiniMax MCP exited before responding")
-        raw = line.decode(errors="replace").strip()
-        if not raw:
-            continue
-        try:
-            msg = json.loads(raw)
-        except json.JSONDecodeError:
-            log.debug("Ignoring non-JSON MiniMax MCP output")
-            continue
-        if msg.get("id") == response_id:
-            return msg
+def _xai_vision_allowed() -> bool:
+    xai_key = os.getenv("XAI_API_KEY", "") or os.getenv("GROK_API_KEY", "") or XAI_API_KEY
+    return bool(xai_key) and not _env_flag("MAX_DISABLE_XAI") and _env_flag(
+        "VISION_ENABLE_XAI_FALLBACK",
+        "MAX_ENABLE_XAI_VISION_FALLBACK",
+    )
 
 
-def _mcp_text_from_result(result: Any) -> str:
-    if isinstance(result, dict):
-        if result.get("type") == "text" and result.get("text"):
-            return str(result["text"])
-        structured = result.get("structuredContent")
-        if structured:
-            if isinstance(structured, dict) and structured.get("type") == "text" and structured.get("text"):
-                return str(structured["text"])
-            if isinstance(structured, dict) and structured.get("text"):
-                return str(structured["text"])
-            if isinstance(structured, list):
-                parts = []
-                for item in structured:
-                    if isinstance(item, dict) and item.get("text"):
-                        parts.append(str(item["text"]))
-                if parts:
-                    return "\n".join(parts)
-            return json.dumps(structured)
-        content = result.get("content")
-        if isinstance(content, list):
-            parts = []
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text" and item.get("text"):
-                        parts.append(str(item["text"]))
-                    elif item.get("text"):
-                        parts.append(str(item["text"]))
-            if parts:
-                return "\n".join(parts)
-        if isinstance(content, str):
-            return content
-    return json.dumps(result)
+def _xai_image_generation_allowed() -> bool:
+    xai_key = os.getenv("XAI_API_KEY", "") or os.getenv("GROK_API_KEY", "") or XAI_API_KEY
+    return bool(xai_key) and not _env_flag("MAX_DISABLE_XAI") and _env_flag(
+        "VISION_ENABLE_XAI_IMAGE_GENERATION",
+        "MAX_ENABLE_XAI_IMAGE_GENERATION",
+    )
+
+
+def _decode_image_input(image: str) -> tuple[bytes, str]:
+    text = (image or "").strip()
+    if not text:
+        raise HTTPException(400, "No image provided")
+
+    mime = ""
+    payload = text
+    match = re.match(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.+)$", text, flags=re.DOTALL)
+    if match:
+        mime = match.group(1).lower()
+        payload = match.group(2)
+    elif text.startswith("data:"):
+        raise HTTPException(400, "Unsupported image data URI")
+
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except Exception as exc:
+        raise HTTPException(400, "Image must be a local path or base64 image data") from exc
+    if len(data) < 32:
+        raise HTTPException(400, "Image payload is too small")
+
+    ext = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+        "image/bmp": ".bmp",
+    }.get(mime)
+    if not ext:
+        if data.startswith(b"\xff\xd8"):
+            ext = ".jpg"
+        elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+            ext = ".png"
+        elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+            ext = ".webp"
+        elif data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+            ext = ".gif"
+        elif data.startswith(b"BM"):
+            ext = ".bmp"
+        else:
+            raise HTTPException(400, "Unsupported image payload")
+    return data, ext
+
+
+def _looks_like_base64_payload(text: str) -> bool:
+    compact = "".join(text.split())
+    if len(compact) < 64:
+        return False
+    return bool(re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", compact))
+
+
+def _resolve_generated_image_path(image: str) -> Optional[Path]:
+    prefix = "/api/v1/vision/images/"
+    if not image.startswith(prefix):
+        return None
+    filename = Path(image[len(prefix):]).name
+    return GENERATED_DIR / filename
+
+
+def _materialize_image_input(image: str) -> str:
+    """Return a local image path for mmx CLI without fetching remote URLs."""
+    text = (image or "").strip()
+    if not text:
+        raise HTTPException(400, "No image provided")
+
+    generated_path = _resolve_generated_image_path(text)
+    if generated_path is not None:
+        if generated_path.exists() and generated_path.is_file():
+            return str(generated_path)
+        raise HTTPException(404, "Generated image not found")
+
+    if text.startswith(("http://", "https://")):
+        raise HTTPException(400, "Remote image URLs are not supported by the mmx CLI vision path; upload the image data instead")
+
+    if text.startswith("data:") or _looks_like_base64_payload(text):
+        data, ext = _decode_image_input(text)
+        VISION_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+        path = VISION_INPUT_DIR / f"vision-input-{int(time.time())}-{uuid.uuid4().hex[:8]}{ext}"
+        path.write_bytes(data)
+        return str(path)
+
+    candidate = Path(text).expanduser()
+    if candidate.exists() and candidate.is_file():
+        return str(candidate)
+
+    data, ext = _decode_image_input(text)
+    VISION_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = VISION_INPUT_DIR / f"vision-input-{int(time.time())}-{uuid.uuid4().hex[:8]}{ext}"
+    path.write_bytes(data)
+    return str(path)
+
+
+def _parsed_json_from_minimax_result(result: dict[str, Any]) -> dict[str, Any]:
+    if not result.get("success"):
+        error = result.get("error") or "MiniMax image understanding failed verification"
+        raise HTTPException(502, error)
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    text = data.get("full_response") or data.get("summary") or ""
+    parsed = _extract_json_object(str(text))
+    parsed["_vision_runtime"] = {
+        "provider": "minimax",
+        "transport": "mmx_cli",
+        "quota_bucket": "mcp_understand_image",
+        "model": result.get("model") or "mmx_vision",
+        "image_generation_used": False,
+    }
+    return parsed
 
 
 async def call_minimax_image_understanding(prompt: str, image_url: str, max_tokens: int = 4500) -> dict[str, Any]:
-    """Call MiniMax Token Plan MCP understand_image with a local file path or URL."""
-    _refresh_minimax_settings()
-    if not MINIMAX_API_KEY:
-        raise HTTPException(500, "MiniMax Token Plan key is not configured")
-
-    command = shlex.split(MINIMAX_MCP_COMMAND)
-    if not command:
-        raise HTTPException(500, "MiniMax MCP command is not configured")
-
-    log.info(
-        "provider=minimax_token_plan capability=image_understanding image_source_type=%s",
-        "url" if image_url.startswith(("http://", "https://")) else "local_path",
-    )
-
-    proc = await asyncio.create_subprocess_exec(
-        *command,
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        await _mcp_send(proc, {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "empire-archiveforge", "version": "1.0"},
-            },
-        })
-        init_msg = await _mcp_read_response(proc, 1, timeout=30)
-        if init_msg.get("error"):
-            raise HTTPException(500, f"MiniMax MCP initialize failed: {init_msg['error'].get('message', 'unknown error')}")
-
-        await _mcp_send(proc, {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
-        await _mcp_send(proc, {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "understand_image",
-                "arguments": {
-                    "prompt": prompt,
-                    "image_source": image_url,
-                },
-            },
-        })
-        msg = await _mcp_read_response(proc, 2, timeout=120)
-        if msg.get("error"):
-            raise HTTPException(500, f"MiniMax MCP understand_image failed: {msg['error'].get('message', 'unknown error')}")
-        text = _mcp_text_from_result(msg.get("result", {}))
-        parsed = _extract_json_object(text)
-        log.info("provider=minimax_token_plan capability=image_understanding response_status=ok parsed_json_valid=true")
-        return parsed
-    except HTTPException:
-        raise
-    except Exception as exc:
-        log.warning("provider=minimax_token_plan capability=image_understanding response_status=error parsed_json_valid=false")
-        raise HTTPException(500, f"MiniMax MCP image understanding failed: {type(exc).__name__}") from exc
-    finally:
-        if proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+    """Call MiniMax image understanding through the shared mmx CLI wrapper."""
+    image_path = _materialize_image_input(image_url)
+    result = await minimax_understand_image(image_path, prompt=prompt)
+    parsed = _parsed_json_from_minimax_result(result)
+    log.info("provider=minimax capability=image_understanding transport=mmx_cli response_status=ok parsed_json_valid=true")
+    return parsed
 
 async def call_vision(prompt: str, image: str, max_tokens: int = 4500) -> dict:
     """Send image + prompt to best available vision model and parse JSON response.
 
-    Priority: MiniMax (local, fast, working) → xAI Grok (paid, credits-limited) → xAI/Grok fallback.
+    Priority: MiniMax image understanding through mmx CLI.
+    xAI/Grok fallback is disabled unless explicitly enabled by provider policy.
     """
-    _refresh_minimax_settings()
+    try:
+        return await call_minimax_image_understanding(prompt, image, max_tokens=max_tokens)
+    except HTTPException as exc:
+        log.warning("MiniMax mmx_cli vision failed: %s", exc.detail)
+        if not _xai_vision_allowed():
+            raise
 
-    # 1. Try MiniMax first (your working API with vision support)
-    if MINIMAX_API_KEY:
+    # Explicitly approved fallback only; default provider policy keeps xAI/Grok disabled.
+    if _xai_vision_allowed():
         try:
-            image_url = image
-            # If image is a local file path, encode it as data URI
-            if image.startswith("/") or image.startswith("data:"):
-                image_url = image  # pass through — caller handles encoding
-            elif not image.startswith("http"):
-                image_url = image  # treat as raw path or data URI
-
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{MINIMAX_BASE_URL}/chat/completions",
-                    headers={"Authorization": f"Bearer {MINIMAX_API_KEY}", "Content-Type": "application/json"},
-                    json={
-                        "model": MINIMAX_VISION_MODEL,
-                        "messages": [{"role": "user", "content": [
-                            {"type": "image_url", "image_url": {"url": image_url}},
-                            {"type": "text", "text": prompt},
-                        ]}],
-                        "max_tokens": max_tokens,
-                        "temperature": 0.3,
-                    },
-                )
-            if resp.status_code == 200:
-                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                parsed = _extract_json_object(content)
-                log.info("Vision response via MiniMax")
-                return parsed
-            log.warning(f"MiniMax vision returned {resp.status_code}: {resp.text[:200]}")
-        except Exception as e:
-            log.warning(f"MiniMax vision failed: {type(e).__name__}: {e}")
-
-    # 2. Fall back to xAI Grok if key is available and has credits
-    if XAI_API_KEY:
-        try:
+            xai_key = os.getenv("XAI_API_KEY", "") or os.getenv("GROK_API_KEY", "") or XAI_API_KEY
             async with httpx.AsyncClient(timeout=120) as client:
                 res = await client.post(
                     "https://api.x.ai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"},
                     json={
                         "model": VISION_MODEL,
                         "messages": [{"role": "user", "content": [
@@ -293,7 +233,7 @@ async def call_vision(prompt: str, image: str, max_tokens: int = 4500) -> dict:
             log.warning(f"xAI Grok vision failed: {type(e).__name__}: {e}")
             raise HTTPException(500, f"Vision providers failed: {e}")
 
-    raise HTTPException(500, "No vision provider configured — set MINIMAX_API_KEY")
+    raise HTTPException(503, "No safe image-understanding provider is available")
 
 
 def _save_image_bytes(data: bytes, prefix: str = "gen") -> str:
@@ -369,14 +309,15 @@ async def _sd_together(prompt: str) -> Optional[str]:
 
 async def _xai_imagine(prompt: str) -> Optional[str]:
     """Generate image via xAI (fallback). Returns URL or None."""
-    if not XAI_API_KEY:
+    if not _xai_image_generation_allowed():
         return None
+    xai_key = os.getenv("XAI_API_KEY", "") or os.getenv("GROK_API_KEY", "") or XAI_API_KEY
     for model in ["grok-imagine-image", "grok-2-image-1212"]:
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 res = await client.post(
                     "https://api.x.ai/v1/images/generations",
-                    headers={"Authorization": f"Bearer {XAI_API_KEY}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {xai_key}", "Content-Type": "application/json"},
                     json={"model": model, "prompt": prompt, "n": 1, "response_format": "url"},
                 )
             if res.status_code == 200:
@@ -420,6 +361,45 @@ async def generate_image(prompt: str) -> Optional[str]:
 async def analyze_items(req: AnalyzeItemsRequest):
     """Run AI vision with a custom prompt (used by QIS item analyzer)."""
     return await call_vision(req.prompt, req.image, max_tokens=6000)
+
+
+@router.get("/status")
+async def vision_status():
+    """Report vision transport and quota policy without running live probes."""
+    status = minimax_tools_status()
+    tools = status.get("tools", {})
+    image_understanding = tools.get("image_understanding", {})
+    image_generation = tools.get("image_generation", {})
+    return {
+        "vision_image_understanding": {
+            "configured": bool(image_understanding.get("configured")),
+            "transport": "mmx_cli",
+            "quota_bucket": "mcp_understand_image",
+            "model": image_understanding.get("model") or "mmx_vision",
+            "live_status": image_understanding.get("last_probe_status") or "not_probed",
+            "last_error_category": image_understanding.get("last_error_category"),
+            "last_error_message": image_understanding.get("last_error_message"),
+        },
+        "vision_image_generation": {
+            "configured": bool(
+                STABILITY_API_KEY
+                or os.getenv("TOGETHER_API_KEY")
+                or image_generation.get("configured")
+            ),
+            "transport": "api",
+            "quota_bucket": "image_generation",
+            "minimax_configured": bool(image_generation.get("configured")),
+            "live_generation_allowed": _env_flag("VISION_LIVE_IMAGE_GENERATION_ALLOWED"),
+            "explicit_user_action_required": True,
+        },
+        "provider_policy": {
+            "xai_configured": bool(os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY") or XAI_API_KEY),
+            "xai_vision_fallback_enabled": _xai_vision_allowed(),
+            "xai_image_generation_enabled": _xai_image_generation_allowed(),
+            "ollama_enabled": False,
+        },
+        "secrets_included": False,
+    }
 
 
 # ── /measure — Window photo analysis ───────────────────────
@@ -548,6 +528,11 @@ async def upholstery(req: ImageRequest):
     style = data.get("style", "classic")
     img_prompt = f"Professional before-and-after split image of {ftype} reupholstery. Left: worn {style} {ftype}. Right: same {ftype} beautifully reupholstered in premium fabric, same angle. Studio lighting, interior design magazine quality."
     data["generated_image"] = await generate_image(img_prompt)
+    data["_vision_runtime"] = {
+        **(data.get("_vision_runtime") or {}),
+        "image_generation_requested": True,
+        "image_generation_quota_bucket": "image_generation",
+    }
     return data
 
 
@@ -670,11 +655,16 @@ async def mockup(req: ImageRequest):
             "MOST LUXURIOUS option — visually stunning." if idx == 2 else "",
         ]))
         url = await generate_image(prompt)
-        return {"tier": p.get("tier", "Option"), "url": url} if url else None
+        return {"tier": p.get("tier", "Option"), "url": url, "quota_bucket": "image_generation"} if url else None
 
     tasks = [gen_proposal_image(p, i) for i, p in enumerate(proposals[:3])]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     analysis["generated_images"] = [r for r in results if isinstance(r, dict)]
+    analysis["_vision_runtime"] = {
+        **(analysis.get("_vision_runtime") or {}),
+        "image_generation_requested": True,
+        "image_generation_quota_bucket": "image_generation",
+    }
 
     return analysis
 
@@ -742,7 +732,7 @@ async def imagine(req: ImagineRequest):
     url = await generate_image(req.prompt)
     if not url:
         raise HTTPException(500, "Image generation failed")
-    return {"url": url}
+    return {"url": url, "quota_bucket": "image_generation", "live_generation_requested": True}
 
 
 # ── /images/{filename} — Serve generated images ───────────
@@ -822,7 +812,7 @@ async def measurements_pdf(req: MeasurementsPdfRequest):
     pdf_bytes = WeasyHTML(string=html).write_pdf()
 
     # Save a copy
-    pdf_dir = Path.home() / "empire-repo" / "backend" / "data" / "measurements"
+    pdf_dir = MEASUREMENTS_DIR
     pdf_dir.mkdir(parents=True, exist_ok=True)
     safe_name = re.sub(r'[^\w.-]', '_', req.fileName or 'scan')
     pdf_path = pdf_dir / f"{safe_name}_{int(time.time())}.pdf"
