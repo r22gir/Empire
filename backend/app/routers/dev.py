@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import logging
+from pathlib import Path
 from fastapi import APIRouter
 
 router = APIRouter()
@@ -60,14 +61,27 @@ async def dev_status():
 
 @router.get("/dev/git")
 async def dev_git():
-    """Current git state."""
-    repo = os.path.expanduser("~/empire-repo")
-    result = {}
+    """Current git state — derived from runtime code path, not hardcoded paths."""
+    # Derive repo root from the running router file path:
+    # this file is at .../backend/app/routers/dev.py → 4 levels up = repo root
+    router_file = Path(__file__).resolve()
+    repo_root = str(router_file.parent.parent.parent.parent)
+    backend_cwd = os.getcwd()
+    backend_port = 8000
+
+    result = {
+        "repo_root": repo_root,
+        "backend_cwd": backend_cwd,
+        "router_file": str(router_file),
+        "backend_port": backend_port,
+        "frontend_expected_port": 3005,
+        "source_method": "runtime_path",
+    }
 
     try:
         r = subprocess.run(
             ["git", "branch", "--show-current"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
         )
         result["branch"] = r.stdout.strip()
     except Exception:
@@ -75,25 +89,41 @@ async def dev_git():
 
     try:
         r = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
+        )
+        commit_hash = r.stdout.strip()
+        result["commit_hash"] = commit_hash
+        result["short_commit"] = commit_hash[:7] if commit_hash else ""
+    except Exception:
+        result["commit_hash"] = ""
+        result["short_commit"] = ""
+
+    try:
+        r = subprocess.run(
             ["git", "log", "--oneline", "-1"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
         )
         parts = r.stdout.strip().split(" ", 1)
-        result["last_commit_hash"] = parts[0] if parts else ""
-        result["message"] = parts[1] if len(parts) > 1 else ""
+        result["commit_message"] = parts[1] if len(parts) > 1 else ""
     except Exception:
-        result["last_commit_hash"] = ""
-        result["message"] = ""
+        result["commit_message"] = ""
 
     try:
         r = subprocess.run(
             ["git", "status", "--porcelain"],
-            cwd=repo, capture_output=True, text=True, timeout=5,
+            cwd=repo_root, capture_output=True, text=True, timeout=5,
         )
         lines = [l for l in r.stdout.strip().split("\n") if l.strip()]
         result["uncommitted_count"] = len(lines)
+        result["dirty"] = len(lines) > 0
+        result["dirty_files"] = lines
     except Exception:
         result["uncommitted_count"] = 0
+        result["dirty"] = False
+        result["dirty_files"] = []
+
+    result["runtime_lane"] = "stable/main"
 
     return result
 
