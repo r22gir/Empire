@@ -265,10 +265,12 @@ class AIRouter:
 
     def _sanitize_minimax_content(self, text: str) -> str:
         cleaned = (text or "").strip()
-        if "\n\n" not in cleaned:
-            return cleaned
-        prefix, visible = cleaned.split("\n\n", 1)
-        prefix_l = prefix.lower()
+        cleaned = re.sub(r"<think>[\s\S]*?</think>\s*", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"<thinking>[\s\S]*?</thinking>\s*", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"</?think(?:ing)?>", "", cleaned, flags=re.IGNORECASE).strip()
+        if not cleaned:
+            return ""
+
         reasoning_markers = (
             "i should respond",
             "i need to respond",
@@ -276,8 +278,45 @@ class AIRouter:
             "simple greeting",
             "founder",
         )
-        if any(marker in prefix_l for marker in reasoning_markers):
-            return visible.lstrip()
+        self_talk_patterns = (
+            r"^\s*wait\b\s*[-—:,.].*",
+            r"^\s*actually\b\s*,?.*",
+            r"^\s*let me\b.*",
+            r"^\s*i(?:'ll| will)\s+(?:write|make|answer|respond|summarize|condense|describe)\b.*",
+            r"^\s*key elements from (?:the )?description\s*:?\s*",
+        )
+
+        def _is_self_talk_line(line: str) -> bool:
+            return any(re.match(pattern, line, flags=re.IGNORECASE) for pattern in self_talk_patterns)
+
+        if "\n\n" in cleaned:
+            prefix, visible = cleaned.split("\n\n", 1)
+            prefix_l = prefix.lower()
+            prefix_lines = [line.strip() for line in prefix.splitlines() if line.strip()]
+            if any(marker in prefix_l for marker in reasoning_markers) or (
+                prefix_lines and all(_is_self_talk_line(line) or line.startswith("-") for line in prefix_lines)
+            ):
+                cleaned = visible.lstrip()
+
+        lines = cleaned.splitlines()
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while len([line for line in lines if line.strip()]) > 1 and _is_self_talk_line(lines[0]):
+            lines.pop(0)
+            while lines and not lines[0].strip():
+                lines.pop(0)
+        cleaned = "\n".join(lines).strip()
+
+        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", cleaned) if part.strip()]
+        if len(paragraphs) > 1:
+            filtered = []
+            for paragraph in paragraphs:
+                para_lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+                if para_lines and all(_is_self_talk_line(line) or line.startswith("-") for line in para_lines):
+                    continue
+                filtered.append(paragraph)
+            if filtered:
+                cleaned = "\n\n".join(filtered).strip()
         return cleaned
 
     AUDIO_EXTS = {'.m4a', '.mp3', '.wav', '.ogg', '.flac', '.wma', '.aac'}
@@ -452,6 +491,7 @@ class AIRouter:
             "Transport: mmx_cli\n"
             "Quota bucket: mcp_understand_image\n"
             "Image generation used: false\n"
+            "Instruction: Answer the user directly from the description. Do not narrate your thought process or use self-talk such as Wait, Actually, or Let me.\n"
             f"Description:\n{description}\n\n"
         )
         updated = list(messages)

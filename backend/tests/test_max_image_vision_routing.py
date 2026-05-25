@@ -72,6 +72,7 @@ def test_max_image_input_uses_mmx_vision_context_without_raw_image_payload(monke
     assert "Image understanding via MiniMax mmx_cli" in captured["last_message"]
     assert "A red square with the word TEST" in captured["last_message"]
     assert "Image generation used: false" in captured["last_message"]
+    assert "Answer the user directly" in captured["last_message"]
 
 
 def test_max_image_vision_failure_returns_safe_error(monkeypatch, tmp_path):
@@ -169,6 +170,47 @@ def test_max_stream_image_input_uses_mmx_vision_context(monkeypatch, tmp_path):
     assert "Image understanding via MiniMax mmx_cli" in captured["last_message"]
     assert "A blue sample image" in captured["last_message"]
     assert "Image generation used: false" in captured["last_message"]
+    assert "Answer the user directly" in captured["last_message"]
+
+
+def test_minimax_response_sanitizer_removes_image_self_talk_before_final_answer():
+    from app.services.max.ai_router import AIRouter
+
+    router = AIRouter()
+    raw = (
+        "Wait - there is already text there.\n"
+        "Actually, looking at this more carefully, I should answer plainly.\n"
+        "Let me do that.\n\n"
+        "A bright dining room with a wood table and black-framed windows."
+    )
+
+    cleaned = router._sanitize_minimax_content(raw)
+
+    assert cleaned == "A bright dining room with a wood table and black-framed windows."
+    assert "Wait -" not in cleaned
+    assert "Actually," not in cleaned
+    assert "Let me" not in cleaned
+
+
+def test_minimax_response_sanitizer_preserves_normal_answer():
+    from app.services.max.ai_router import AIRouter
+
+    router = AIRouter()
+    raw = "Actually, the image shows a dining room with black-framed windows."
+
+    assert router._sanitize_minimax_content(raw) == raw
+
+
+def test_minimax_response_sanitizer_strips_think_tags():
+    from app.services.max.ai_router import AIRouter
+
+    router = AIRouter()
+    raw = "<think>I should reason privately.</think>\nThe image shows a dining room."
+
+    cleaned = router._sanitize_minimax_content(raw)
+
+    assert cleaned == "The image shows a dining room."
+    assert "<think>" not in cleaned
 
 
 def test_max_router_accepts_canonical_upload_path(monkeypatch, tmp_path):
