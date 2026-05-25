@@ -4,12 +4,14 @@ import json
 import httpx
 import base64
 import subprocess
+import re
 from enum import Enum
 from dataclasses import dataclass
 from typing import List, Optional, AsyncGenerator, Tuple
 from pathlib import Path
 import logging
 from dotenv import load_dotenv
+from app.services.data_paths import data_root
 
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
@@ -209,7 +211,12 @@ class AIRouter:
         else:
             self.primary_model = AIModel.OLLAMA
         self.system_prompt = get_system_prompt()
-        self.upload_dir = Path.home() / "empire-repo" / "backend" / "data" / "uploads"
+        self.upload_dirs = [
+            data_root() / "uploads",
+            Path.home() / "empire-repo" / "backend" / "data" / "uploads",
+            Path.home() / "empire-repo" / "uploads",
+        ]
+        self.upload_dir = self.upload_dirs[0]
         providers = []
         if self.xai_key: providers.append("Grok")
         if self.anthropic_key: providers.append("Claude")
@@ -278,10 +285,12 @@ class AIRouter:
     CODE_EXTS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.sh', '.yaml', '.yml'}
 
     def _find_file(self, filename: str) -> Optional[Path]:
-        for cat in ['images', 'documents', 'audio', 'other', 'code']:
-            path = self.upload_dir / cat / filename
-            if path.exists():
-                return path
+        safe = Path(filename).name
+        for root in self.upload_dirs:
+            for cat in ['images', 'documents', 'audio', 'other', 'code']:
+                path = root / cat / safe
+                if path.exists() and path.is_file():
+                    return path
         return None
 
     def _find_image(self, filename: str) -> Optional[Path]:
@@ -384,6 +393,70 @@ class AIRouter:
         except Exception as e:
             logger.warning(f"Local Ollama vision triage skipped: {e}")
             return messages
+
+    def _safe_vision_error(self, error: str | None) -> str:
+        text = (error or "MiniMax image understanding failed").strip()
+        text = text.replace(os.getenv("MINIMAX_API_KEY", "") or "\0", "[KEY_REDACTED]")
+        text = re.sub(r"sk-[A-Za-z0-9_-]{8,}", "[KEY_REDACTED]", text)
+        text = re.sub(r"[A-Za-z0-9+/]{40,}={0,2}", "[TOKEN_REDACTED]", text)
+        text = text[:300]
+        return text or "MiniMax image understanding failed"
+
+    async def _prepend_mmx_vision_context(
+        self,
+        messages: List[AIMessage],
+        image_path: Optional[Path],
+        image_filename: str | None = None,
+    ) -> Tuple[List[AIMessage], Optional[str], Optional[dict]]:
+        """Analyze attached images through MiniMax mmx_cli and inject grounded text context.
+
+        MiniMax text/chat remains a text provider. Image understanding belongs to
+        the mmx CLI transport, so downstream chat providers receive a verified
+        description instead of the raw image payload.
+        """
+        if not image_path or not self._is_image(image_path) or not messages:
+            return messages, None, None
+
+        try:
+            from app.services.max.minimax_tools import minimax_understand_image
+
+            result = await minimax_understand_image(
+                str(image_path),
+                prompt=(
+                    "Describe this image for MAX in factual operational terms. "
+                    "Mention visible objects, text, layout, materials, colors, and any business-relevant details. "
+                    "Do not generate a new image."
+                ),
+            )
+        except Exception as exc:
+            return messages, self._safe_vision_error(str(exc)), None
+
+        if not isinstance(result, dict) or not result.get("success"):
+            return messages, self._safe_vision_error((result or {}).get("error") if isinstance(result, dict) else str(result)), result if isinstance(result, dict) else None
+
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        description = (
+            data.get("summary")
+            or data.get("full_response")
+            or data.get("text")
+            or ""
+        )
+        description = str(description).strip()
+        if not description:
+            return messages, "MiniMax image understanding returned no verified description", result
+
+        last = messages[-1]
+        vision_context = (
+            "[Image understanding via MiniMax mmx_cli]\n"
+            f"File: {Path(image_filename or image_path.name).name}\n"
+            "Transport: mmx_cli\n"
+            "Quota bucket: mcp_understand_image\n"
+            "Image generation used: false\n"
+            f"Description:\n{description}\n\n"
+        )
+        updated = list(messages)
+        updated[-1] = AIMessage(role=last.role, content=vision_context + last.content, image_path=None)
+        return updated, None, result
 
     def _encode_image(self, path: Path) -> tuple:
         ext = path.suffix.lower()
@@ -579,11 +652,17 @@ class AIRouter:
                 messages = list(messages)
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
                 local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
-            messages = await self._prepend_local_vision_triage(messages, image_path)
-            if image_path and messages and messages[-1].content.startswith("[Local Ollama vision triage"):
-                local_attachment_answer = messages[-1].content.split("\n\n", 1)[0]
+            if image_path:
+                messages, vision_error, _vision_result = await self._prepend_mmx_vision_context(messages, image_path, image_filename)
+                if vision_error:
+                    return AIResponse(
+                        content=f"I could not analyze the image because MiniMax vision verification failed: {vision_error}",
+                        model_used="mmx-vision",
+                        fallback_used=False,
+                    )
+                image_path = None
             if local_attachment_answer and model is None and not desk:
-                model_used = "ollama-vision" if image_path else "attachment-reader"
+                model_used = "attachment-reader"
                 return AIResponse(content=local_attachment_answer, model_used=model_used, fallback_used=False)
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
@@ -758,11 +837,14 @@ class AIRouter:
                 messages = list(messages)
                 messages[-1] = AIMessage(role=last.role, content=attachment_text + "\n\n" + last.content)
                 local_attachment_answer = f"MAX read the attached file. Extracted context:\n{attachment_text[:1500]}"
-            messages = await self._prepend_local_vision_triage(messages, image_path)
-            if image_path and messages and messages[-1].content.startswith("[Local Ollama vision triage"):
-                local_attachment_answer = messages[-1].content.split("\n\n", 1)[0]
+            if image_path:
+                messages, vision_error, _vision_result = await self._prepend_mmx_vision_context(messages, image_path, image_filename)
+                if vision_error:
+                    yield f"I could not analyze the image because MiniMax vision verification failed: {vision_error}", "mmx-vision"
+                    return
+                image_path = None
             if local_attachment_answer and model is None and not desk:
-                yield local_attachment_answer, ("ollama-vision" if image_path else "attachment-reader")
+                yield local_attachment_answer, "attachment-reader"
                 return
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
@@ -846,7 +928,7 @@ class AIRouter:
             # If tiered chain exhausted, fall through to legacy chain
             logger.warning("[MAX] Tiered stream chain exhausted, falling through to legacy chain")
             if local_attachment_answer:
-                yield local_attachment_answer, ("ollama-vision" if image_path else "attachment-reader")
+                yield local_attachment_answer, "attachment-reader"
                 return
 
         # Legacy fallback chain for desk routing / explicit model requests

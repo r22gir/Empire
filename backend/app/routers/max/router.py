@@ -55,6 +55,7 @@ from app.services.max.brain.brain_config import (
 )
 from app.services.max.token_tracker import token_tracker
 from app.services.max.desks import AIDeskManager, TaskStatus
+from app.services.data_paths import data_root
 from pathlib import Path as _Path
 
 # ── Chat history persistence ─────────────────────────────────────────────────
@@ -1524,11 +1525,13 @@ def _image_upload_path(image_filename: str | None) -> Path | None:
         return None
     safe = Path(image_filename).name
     candidates = [
+        data_root() / "uploads" / "images" / safe,
+        data_root() / "uploads" / safe,
         Path.home() / "empire-repo" / "backend" / "data" / "uploads" / "images" / safe,
         Path.home() / "empire-repo" / "uploads" / "images" / safe,
         Path.home() / "empire-repo" / "backend" / "data" / "uploads" / safe,
     ]
-    return next((path for path in candidates if path.exists()), None)
+    return next((path for path in candidates if path.exists() and path.is_file()), None)
 
 
 def _explicit_no_drawing_router(message: str | None) -> bool:
