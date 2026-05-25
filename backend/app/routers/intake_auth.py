@@ -27,6 +27,8 @@ router = APIRouter(tags=["intake"])
 JWT_SECRET = os.getenv("INTAKE_JWT_SECRET", "empire-intake-secret-change-in-prod")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 72
+CUSTOMER_INTAKE_ROLES = {"client", "designer", "contractor", "installer"}
+INTAKE_ADMIN_ROLES = {"admin", "founder", "operator"}
 
 DB_PATH = os.path.expanduser("~/empire-repo/backend/data/intake.db")
 UPLOADS_DIR = os.path.expanduser("~/empire-repo/backend/data/intake_uploads")
@@ -128,6 +130,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return dict(user)
 
 
+async def require_intake_admin(user=Depends(get_current_user)):
+    role = str(user.get("role") or "").strip().lower()
+    if role not in INTAKE_ADMIN_ROLES:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
 def _next_intake_code() -> str:
     conn = get_db()
     row = conn.execute("SELECT COUNT(*) as c FROM intake_projects").fetchone()
@@ -206,6 +215,9 @@ class AdminUserUpdate(BaseModel):
 @limiter.limit("10/minute")
 @router.post("/signup")
 async def signup(request: Request, req: SignupRequest):
+    role = (req.role or "client").strip().lower()
+    if role not in CUSTOMER_INTAKE_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid intake role")
     conn = get_db()
     existing = conn.execute("SELECT id FROM intake_users WHERE email = ?", (req.email.lower().strip(),)).fetchone()
     if existing:
@@ -216,13 +228,13 @@ async def signup(request: Request, req: SignupRequest):
     password_hash = pwd_context.hash(req.password)
     conn.execute(
         "INSERT INTO intake_users (id, name, email, phone, password_hash, company, role) VALUES (?,?,?,?,?,?,?)",
-        (user_id, req.name.strip(), req.email.lower().strip(), req.phone, password_hash, req.company, req.role),
+        (user_id, req.name.strip(), req.email.lower().strip(), req.phone, password_hash, req.company, role),
     )
     conn.commit()
     conn.close()
 
     token = create_token(user_id, req.email.lower().strip())
-    return {"token": token, "user": {"id": user_id, "name": req.name, "email": req.email, "role": req.role}}
+    return {"token": token, "user": {"id": user_id, "name": req.name, "email": req.email, "role": role}}
 
 
 @limiter.limit("10/minute")
@@ -558,7 +570,7 @@ async def upload_scan(
 # ── Admin endpoints (for Command Center) ─────────────────────
 @limiter.limit("30/minute")
 @router.get("/admin/projects")
-async def admin_list_all_projects(request: Request):
+async def admin_list_all_projects(request: Request, admin=Depends(require_intake_admin)):
     """List all intake projects with user info (for founder dashboard). Excludes soft-deleted."""
     conn = get_db()
     rows = conn.execute("""
@@ -575,7 +587,7 @@ async def admin_list_all_projects(request: Request):
 
 @limiter.limit("30/minute")
 @router.get("/admin/users")
-async def admin_list_all_users(request: Request):
+async def admin_list_all_users(request: Request, admin=Depends(require_intake_admin)):
     """List all registered intake users (for founder dashboard). Excludes soft-deleted."""
     conn = get_db()
     rows = conn.execute(
@@ -587,7 +599,7 @@ async def admin_list_all_users(request: Request):
 
 @limiter.limit("30/minute")
 @router.get("/admin/projects/{project_id}")
-async def admin_get_project(request: Request, project_id: str):
+async def admin_get_project(request: Request, project_id: str, admin=Depends(require_intake_admin)):
     """Get single project with full details (for founder dashboard)."""
     conn = get_db()
     row = conn.execute("""
@@ -605,7 +617,7 @@ async def admin_get_project(request: Request, project_id: str):
 
 @limiter.limit("10/minute")
 @router.put("/admin/users/{user_id}")
-async def admin_update_user(request: Request, user_id: str, update: AdminUserUpdate):
+async def admin_update_user(request: Request, user_id: str, update: AdminUserUpdate, admin=Depends(require_intake_admin)):
     """Admin: update any user's info."""
     conn = get_db()
     row = conn.execute("SELECT id FROM intake_users WHERE id = ?", (user_id,)).fetchone()
@@ -630,7 +642,7 @@ async def admin_update_user(request: Request, user_id: str, update: AdminUserUpd
 
 @limiter.limit("10/minute")
 @router.delete("/admin/users/{user_id}")
-async def admin_delete_user(request: Request, user_id: str):
+async def admin_delete_user(request: Request, user_id: str, admin=Depends(require_intake_admin)):
     """Admin: soft-delete a user and their projects (sets deleted_at timestamp)."""
     conn = get_db()
     row = conn.execute("SELECT id FROM intake_users WHERE id = ? AND deleted_at IS NULL", (user_id,)).fetchone()
@@ -646,7 +658,7 @@ async def admin_delete_user(request: Request, user_id: str):
 
 @limiter.limit("10/minute")
 @router.post("/admin/users/{user_id}/restore")
-async def admin_restore_user(request: Request, user_id: str):
+async def admin_restore_user(request: Request, user_id: str, admin=Depends(require_intake_admin)):
     """Admin: restore a soft-deleted user and all their projects."""
     conn = get_db()
     row = conn.execute("SELECT id FROM intake_users WHERE id = ? AND deleted_at IS NOT NULL", (user_id,)).fetchone()
@@ -662,7 +674,7 @@ async def admin_restore_user(request: Request, user_id: str):
 
 @limiter.limit("10/minute")
 @router.post("/admin/projects/{project_id}/restore")
-async def admin_restore_project(request: Request, project_id: str):
+async def admin_restore_project(request: Request, project_id: str, admin=Depends(require_intake_admin)):
     """Admin: restore a single soft-deleted project."""
     conn = get_db()
     row = conn.execute("SELECT id, user_id FROM intake_projects WHERE id = ? AND deleted_at IS NOT NULL", (project_id,)).fetchone()
@@ -677,7 +689,7 @@ async def admin_restore_project(request: Request, project_id: str):
 
 @limiter.limit("30/minute")
 @router.get("/admin/archived")
-async def admin_list_archived(request: Request):
+async def admin_list_archived(request: Request, admin=Depends(require_intake_admin)):
     """Admin: list all soft-deleted users and their projects."""
     conn = get_db()
     user_rows = conn.execute(
@@ -700,7 +712,7 @@ async def admin_list_archived(request: Request):
 
 @limiter.limit("10/minute")
 @router.post("/admin/projects/{project_id}/to-quote")
-async def convert_to_quote(request: Request, project_id: str):
+async def convert_to_quote(request: Request, project_id: str, admin=Depends(require_intake_admin)):
     """Convert an intake project into an Empire Workroom quote."""
     import importlib
     conn = get_db()
@@ -881,7 +893,7 @@ async def convert_to_quote(request: Request, project_id: str):
 
 @limiter.limit("30/minute")
 @router.get("/admin/projects-with-photos")
-async def admin_projects_with_photos(request: Request):
+async def admin_projects_with_photos(request: Request, admin=Depends(require_intake_admin)):
     """Return intake projects that have photos, for the QuoteBuilder to list."""
     conn = get_db()
     rows = conn.execute("""
