@@ -65,9 +65,11 @@ async def analyze_image(image_key: str, image_path: str) -> dict[str, Any]:
     if not quota_allow_new():
         return _default_analysis_result(
             image_key,
-            f"RecoveryForge daily cap reached ({quota_status['daily_cap']} images). "
-            f"{quota_status['daily_reserved_quota']} images reserved for quotes/work. "
-            f"Resets at {quota_status['reset_date']}."
+            f"RecoveryForge MCP Understand Image window cap reached "
+            f"({quota_status['recoveryforge_window_cap']} analyses per {WINDOW_HOURS}h). "
+            f"Window reserve ({quota_status['current_window_reserved_for_general_use']}) preserved for MAX/general use. "
+            f"Daily soft cap: {quota_status['recoveryforge_daily_soft_cap']}. "
+            f"Next window resets at {quota_status['reset_window_hint']}."
         )
 
     # Call MiniMax vision

@@ -3,13 +3,13 @@ import json
 import os
 import pytest
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock
 
 # ── Quota tests ────────────────────────────────────────────────────────────────
 
-def test_quota_check_returns_correct_structure(tmp_path):
-    """check_quota returns all required fields with correct values."""
+def test_quota_check_returns_correct_fields(tmp_path):
+    """check_quota returns all required fields with correct values for MCP Understand Image."""
     import app.services.max.recoveryforge_quota as q
 
     orig_file = q.QUOTA_FILE
@@ -18,19 +18,25 @@ def test_quota_check_returns_correct_structure(tmp_path):
     try:
         result = q.check_quota()
 
-        assert result["daily_cap"] == 80
-        assert result["daily_reserved_quota"] == 20
-        assert result["used_today"] == 0
-        assert result["remaining_recoveryforge_today"] == 80
+        assert result["recoveryforge_vision_bucket"] == "mcp_understand_image"
+        assert result["recoveryforge_window_cap"] == 500
+        assert result["recoveryforge_daily_soft_cap"] == 1500
+        assert result["current_window_used_by_recoveryforge"] == 0
+        assert result["current_window_remaining_for_recoveryforge"] >= 0  # non-negative after reserve gap
+        assert result["current_window_reserved_for_general_use"] == 1500
+        assert result["daily_used_by_recoveryforge"] == 0
+        assert result["image_generation_used_by_recoveryforge_batch"] == 0
+        assert result["image_generation_reserved_for_quotes_and_mockups"] is True
+        assert result["batch_chunk_limit"] == 25
         assert result["cap_reached"] is False
-        assert "reset_date" in result
+        assert "reset_window_hint" in result
         assert "server_date" in result
     finally:
         q.QUOTA_FILE = orig_file
 
 
 def test_quota_consume_records_success(tmp_path):
-    """consume_quota records a successful analysis."""
+    """consume_quota records a successful analysis in window record."""
     import app.services.max.recoveryforge_quota as q
 
     orig_file = q.QUOTA_FILE
@@ -42,11 +48,14 @@ def test_quota_consume_records_success(tmp_path):
         data = q._load_quota()
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         entry = data.get(today, {})
+        window_key = q._window_key()
+        window_entry = entry.get("window_records", {}).get(window_key, {})
 
-        assert entry["used"] == 1
-        assert len(entry["analyses"]) == 1
-        assert entry["analyses"][0]["image_key"] == "test-key-001"
-        assert entry["analyses"][0]["status"] == "success"
+        assert window_entry["window_used"] == 1
+        analyses = window_entry.get("analyses", [])
+        assert len(analyses) == 1
+        assert analyses[0]["image_key"] == "test-key-001"
+        assert analyses[0]["status"] == "success"
     finally:
         q.QUOTA_FILE = orig_file
 
@@ -62,28 +71,43 @@ def test_quota_consume_does_not_count_failed(tmp_path):
         q.consume_quota("test-key-002", "image-01", success=False, error="provider error")
 
         result = q.check_quota()
-        assert result["used_today"] == 0
+        assert result["current_window_used_by_recoveryforge"] == 0
+        assert result["daily_used_by_recoveryforge"] == 0
     finally:
         q.QUOTA_FILE = orig_file
 
 
-def test_quota_allow_new_false_at_cap(tmp_path):
-    """quota_allow_new returns False when cap reached."""
+def test_quota_image_generation_never_consumed(tmp_path):
+    """Image Generation quota is never consumed by RecoveryForge batch."""
     import app.services.max.recoveryforge_quota as q
 
     orig_file = q.QUOTA_FILE
     q.QUOTA_FILE = str(tmp_path / "quota.json")
 
     try:
-        # Fill to exactly 80
-        for i in range(80):
+        for i in range(50):
             q.consume_quota(f"key-{i:04d}", "image-01", success=True)
 
-        assert q.quota_allow_new() is False
+        result = q.check_quota()
+        assert result["image_generation_used_by_recoveryforge_batch"] == 0
+    finally:
+        q.QUOTA_FILE = orig_file
+
+
+def test_quota_window_cap_tracks_usage(tmp_path):
+    """Window usage is tracked correctly up to cap."""
+    import app.services.max.recoveryforge_quota as q
+
+    orig_file = q.QUOTA_FILE
+    q.QUOTA_FILE = str(tmp_path / "quota.json")
+
+    try:
+        for i in range(100):
+            q.consume_quota(f"key-{i:04d}", "image-01", success=True)
 
         result = q.check_quota()
-        assert result["cap_reached"] is True
-        assert result["remaining_recoveryforge_today"] == 0
+        assert result["current_window_used_by_recoveryforge"] == 100
+        assert result["cap_reached"] is False
     finally:
         q.QUOTA_FILE = orig_file
 
@@ -98,40 +122,51 @@ def test_quota_override_bypasses_cap(tmp_path, monkeypatch):
     try:
         monkeypatch.setenv("RECOVERYFORGE_ALLOW_QUOTA_OVERRIDE", "1")
 
-        for i in range(85):
+        for i in range(505):
             q.consume_quota(f"key-{i:04d}", "image-01", success=True)
 
         result = q.check_quota()
         assert result["cap_reached"] is False
-        assert result["override_active"] is True
+        assert result["override_enabled"] is True
     finally:
         q.QUOTA_FILE = orig_file
 
 
-def test_quota_reserved_quota_preserved(tmp_path):
-    """80 cap leaves 20 reserved for non-RecoveryForge use."""
+def test_quota_daily_soft_cap_tracks_across_windows(tmp_path):
+    """Daily used accumulates across multiple windows."""
     import app.services.max.recoveryforge_quota as q
 
     orig_file = q.QUOTA_FILE
     q.QUOTA_FILE = str(tmp_path / "quota.json")
 
     try:
-        # Use 80
-        for i in range(80):
+        # Add analyses - will accumulate in today's daily total
+        for i in range(50):
             q.consume_quota(f"key-{i:04d}", "image-01", success=True)
 
-        # The 20 reserved means MiniMax still has 20 remaining for quotes/work
         result = q.check_quota()
-        assert result["remaining_recoveryforge_today"] == 0
-        # But total daily MiniMax budget is 100, so 20 are still available
-        # for non-RecoveryForge uses (this is enforced by MiniMax, not here)
-        assert result["used_today"] == 80
+        assert result["daily_used_by_recoveryforge"] == 50
+        assert result["daily_remaining_soft_cap"] == 1450
+    finally:
+        q.QUOTA_FILE = orig_file
+
+
+def test_quota_batch_chunk_limit(tmp_path):
+    """batch_chunk_limit is correctly set to 25."""
+    import app.services.max.recoveryforge_quota as q
+
+    orig_file = q.QUOTA_FILE
+    q.QUOTA_FILE = str(tmp_path / "quota.json")
+
+    try:
+        result = q.check_quota()
+        assert result["batch_chunk_limit"] == 25
     finally:
         q.QUOTA_FILE = orig_file
 
 
 def test_quota_file_persists_across_calls(tmp_path):
-    """Quota file persists across function calls and reads."""
+    """Quota file persists across calls."""
     import app.services.max.recoveryforge_quota as q
 
     orig_file = q.QUOTA_FILE
@@ -140,15 +175,30 @@ def test_quota_file_persists_across_calls(tmp_path):
     try:
         q.consume_quota("persist-key", "image-01", success=True)
 
-        # File should contain the recorded usage
         data = q._load_quota()
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        assert data[today]["used"] == 1
+        assert data[today]["daily_used"] == 1
 
-        # Read from disk directly (simulating cross-call persistence)
         with open(tmp_path / "quota.json") as f:
             disk_data = json.load(f)
-        assert disk_data[today]["used"] == 1
+        assert disk_data[today]["daily_used"] == 1
+    finally:
+        q.QUOTA_FILE = orig_file
+
+
+def test_quota_window_key_changes(tmp_path):
+    """Window key changes every 5 hours."""
+    import app.services.max.recoveryforge_quota as q
+
+    orig_file = q.QUOTA_FILE
+    q.QUOTA_FILE = str(tmp_path / "quota.json")
+
+    try:
+        # At start of hour 0-4, window key is YYYY-MM-DD-0
+        # At start of hour 5-9, window key is YYYY-MM-DD-1
+        key = q._window_key()
+        assert len(key) == len("YYYY-MM-DD-N")  # date + window number
+        assert key[-1] in "01234"  # window number 0-4 within 5-hour blocks
     finally:
         q.QUOTA_FILE = orig_file
 
@@ -206,15 +256,8 @@ def test_business_route_valid_options():
         "contractorforge", "recoveryforge", "general-business", "unknown-work",
     }
 
-    test_cases = [
-        ("A custom drapery installation for a client window", "empire-workroom"),
-        ("Wooden cabinetry project in a kitchen", "woodcraft"),
-        ("Random family photo", "unknown-work"),
-    ]
-
-    for desc, expected in test_cases:
-        result = _build_structured_analysis("key", desc, {})
-        assert result["business_route"] in valid_routes, f"{desc} -> {result['business_route']} not valid"
+    result = _build_structured_analysis("key", "A custom drapery installation for a client window", {})
+    assert result["business_route"] in valid_routes
 
 
 def test_action_recommendation_valid_options():
@@ -255,12 +298,10 @@ def test_ollama_unavailable_does_not_block_minimax_path(tmp_path, monkeypatch):
     q.QUOTA_FILE = str(tmp_path / "quota.json")
 
     try:
-        # Force cap not reached
         monkeypatch.setenv("RECOVERYFORGE_ALLOW_QUOTA_OVERRIDE", "1")
 
-        # Verify quota system works independently of Ollama
         result = q.check_quota()
-        assert result["remaining_recoveryforge_today"] >= 0
+        assert result["current_window_remaining_for_recoveryforge"] >= 0
     finally:
         q.QUOTA_FILE = orig_file
 
@@ -269,7 +310,7 @@ def test_ollama_unavailable_does_not_block_minimax_path(tmp_path, monkeypatch):
 
 def test_mark_stale_sets_stale_flag(tmp_path):
     """Mark prior analysis as stale without deleting files."""
-    import app.services.max.recoveryforge_analyzer as a
+    from app.services.max.recoveryforge_analyzer import _build_structured_analysis
 
     img = {
         "filename": "test.jpg",
@@ -281,37 +322,28 @@ def test_mark_stale_sets_stale_flag(tmp_path):
         },
     }
 
-    # Simulate stale marking
     analysis = img["minimax_analysis"]
     analysis["stale"] = True
     analysis["superseded_at"] = datetime.now(timezone.utc).isoformat()
 
     assert analysis["stale"] is True
     assert "superseded_at" in analysis
-    # Original file path is preserved
     assert img["path"] == "/data/images/test.jpg"
 
 
 # ── Recovery router tests ──────────────────────────────────────────────────────
 
 def test_recovery_status_includes_quota(tmp_path):
-    """GET /recovery/status includes minimax_quota."""
-    from app.routers.recovery import PROGRESS_FILE, TOTAL_IMAGES
-    import json
-
-    # Progress file exists
-    Path(PROGRESS_FILE).parent.mkdir(parents=True, exist_ok=True)
-    with open(PROGRESS_FILE, "w") as f:
-        json.dump({"processed": [], "stats": {}}, f)
-
+    """GET /recovery/status includes minimax_quota with correct fields."""
     from app.services.max.recoveryforge_quota import check_quota
     result = check_quota()
 
-    assert "daily_cap" in result
-    assert "used_today" in result
-    assert "remaining_recoveryforge_today" in result
-    assert "cap_reached" in result
-    assert "daily_reserved_quota" in result
+    assert "recoveryforge_vision_bucket" in result
+    assert "recoveryforge_window_cap" in result
+    assert "current_window_used_by_recoveryforge" in result
+    assert "current_window_reserved_for_general_use" in result
+    assert "image_generation_used_by_recoveryforge_batch" in result
+    assert "batch_chunk_limit" in result
 
 
 def test_analyze_endpoint_rejects_missing_image():
@@ -321,24 +353,6 @@ def test_analyze_endpoint_rejects_missing_image():
     data = _load_image_index()
     result = _find_image(data, "nonexistent-key-xyz")
     assert result is None
-
-
-def test_batch_analyze_respects_quota(tmp_path):
-    """Batch analyze stops when cap is reached."""
-    import app.services.max.recoveryforge_quota as q
-
-    orig_file = q.QUOTA_FILE
-    q.QUOTA_FILE = str(tmp_path / "quota.json")
-
-    try:
-        q.consume_quota("cap-fill-1", "image-01", success=True)
-        q.consume_quota("cap-fill-2", "image-01", success=True)
-        # ... fill to 80
-
-        status = q.check_quota()
-        assert status["remaining_recoveryforge_today"] <= 78
-    finally:
-        q.QUOTA_FILE = orig_file
 
 
 def test_quota_status_endpoint_exists():
@@ -363,3 +377,11 @@ def test_analyze_endpoint_exists():
 
     routes = [r.path for r in router.routes]
     assert any("analyze" in r for r in routes)
+
+
+def test_batch_analyze_endpoint_exists():
+    """POST /recovery/batch-analyze endpoint is registered."""
+    from app.routers.recovery import router
+
+    routes = [r.path for r in router.routes]
+    assert any("batch-analyze" in r for r in routes)

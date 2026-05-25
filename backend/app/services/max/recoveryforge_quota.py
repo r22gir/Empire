@@ -1,24 +1,43 @@
 """
-RecoveryForge Quota Tracker — enforces 80-image/day MiniMax analysis cap.
+RecoveryForge Quota Tracker — enforces MCP Understand Image quota for vision analysis.
 
-Daily cap: 80 images for RecoveryForge batch analysis.
-Reserved: 20 images/day for customer quotes, MAX requests, workroom mockups,
-          founder-directed tasks, and other non-RecoveryForge uses.
+MiniMax Token Plan MCP Understand Image quota:
+- 4,500 requests per 5-hour window (shared with text generation)
+- Hard cap at 500 analyses per 5-hour window for RecoveryForge
+- Soft cap at 1,500 analyses/day for RecoveryForge
+- Reserve 1,500 requests per 5-hour window for general MAX/OpenClaw/work use
 
-Storage: /data/images/recoveryforge_quota.json (date-keyed records)
+RecoveryForge batch classification uses MCP Understand Image only.
+Image Generation quota is NEVER consumed by RecoveryForge batch classification.
+
+Storage: /data/images/recoveryforge_quota.json (date + window-keyed records)
 Override: RECOVERYFORGE_ALLOW_QUOTA_OVERRIDE=1 bypasses cap (founder only).
 """
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
 QUOTA_FILE = "/data/images/recoveryforge_quota.json"
-DAILY_CAP = 80
-RESERVED = 20
+
+# RecoveryForge vision analysis caps
+WINDOW_CAP = 500           # max RecoveryForge analyses per 5-hour window
+DAILY_SOFT_CAP = 1500      # soft cap for RecoveryForge analyses per day
+WINDOW_RESERVE = 1500      # requests reserved for general MAX/OpenClaw/work per window
+BATCH_CHUNK_LIMIT = 25    # max images per batch run by default
 OVERRIDE_ENV = "RECOVERYFORGE_ALLOW_QUOTA_OVERRIDE"
+
+# Window duration in hours
+WINDOW_HOURS = 5
+
+
+def _window_key() -> str:
+    """Return current 5-hour window identifier (YYYY-MM-DD-HH)."""
+    now = datetime.now(timezone.utc)
+    window_num = now.hour // WINDOW_HOURS
+    return f"{now.strftime('%Y-%m-%d')}-{window_num}"
 
 
 def _today() -> str:
@@ -41,58 +60,115 @@ def _save_quota(data: dict[str, dict[str, Any]]) -> None:
         json.dump(data, f, indent=2)
 
 
-def _record_usage(date: str, image_key: str, model: str, status: str, error: str | None = None) -> None:
+def _window_start() -> datetime:
+    """Start of current 5-hour UTC window."""
+    now = datetime.now(timezone.utc)
+    window_num = now.hour // WINDOW_HOURS
+    return now.replace(hour=window_num * WINDOW_HOURS, minute=0, second=0, microsecond=0)
+
+
+def _window_end() -> datetime:
+    """End of current 5-hour UTC window."""
+    return _window_start() + timedelta(hours=WINDOW_HOURS)
+
+
+def _record_usage(image_key: str, model: str, status: str, error: str | None = None) -> None:
     """Record one image analysis in the quota log."""
+    today = _today()
+    window_key = _window_key()
+
     data = _load_quota()
-    if date not in data:
-        data[date] = {"used": 0, "limit": DAILY_CAP, "reserved": RESERVED, "analyses": []}
-    data[date]["analyses"].append({
+    if today not in data:
+        data[today] = {"daily_used": 0, "daily_cap": DAILY_SOFT_CAP, "window_records": {}}
+    if window_key not in data[today]["window_records"]:
+        data[today]["window_records"][window_key] = {"window_used": 0, "window_cap": WINDOW_CAP}
+
+    data[today]["window_records"][window_key]["analyses"] = data[today]["window_records"][window_key].get("analyses", [])
+    data[today]["window_records"][window_key]["analyses"].append({
         "image_key": image_key,
         "model": model,
         "status": status,
         "error": error,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
-    data[date]["used"] = sum(1 for a in data[date]["analyses"] if a["status"] == "success")
+    data[today]["window_records"][window_key]["window_used"] = sum(
+        1 for a in data[today]["window_records"][window_key]["analyses"] if a["status"] == "success"
+    )
+    data[today]["daily_used"] = sum(
+        w.get("window_used", 0)
+        for w in data[today].get("window_records", {}).values()
+    )
     _save_quota(data)
 
 
 def check_quota() -> dict[str, Any]:
     """
-    Returns current quota status for RecoveryForge.
+    Returns current RecoveryForge quota status.
+
+    Tracks MCP Understand Image usage against:
+    - Window cap: 500 analyses per 5-hour window
+    - Daily soft cap: 1,500 analyses per day
+    - Window reserve: 1,500 requests kept free for general MAX/OpenClaw/work use
 
     Returns:
-        daily_cap: 80
-        daily_reserved_quota: 20
-        used_today: int
-        remaining_recoveryforge_today: int
+        recoveryforge_vision_bucket: "mcp_understand_image"
+        recoveryforge_window_cap: 500
+        recoveryforge_daily_soft_cap: 1500
+        current_window_used_by_recoveryforge: int
+        current_window_remaining_for_recoveryforge: int
+        current_window_reserved_for_general_use: 1500
+        daily_used_by_recoveryforge: int
+        daily_remaining_soft_cap: int
+        image_generation_bucket_total: 100
+        image_generation_used_by_recoveryforge_batch: 0 (always 0 — batch uses vision not generation)
+        image_generation_reserved_for_quotes_and_mockups: true
+        recoveryforge_manual_mockup_cap: 5
+        batch_chunk_limit: 25
         cap_reached: bool
-        override_active: bool
-        reset_date: str (midnight UTC tomorrow)
-        server_date: str (current UTC date)
+        override_enabled: bool
+        reset_window_hint: str
     """
     today = _today()
+    window_key = _window_key()
     override = os.environ.get(OVERRIDE_ENV, "").strip() == "1"
+    window_start = _window_start()
+    window_end = _window_end()
 
     data = _load_quota()
-    entry = data.get(today, {"used": 0, "limit": DAILY_CAP, "reserved": RESERVED, "analyses": []})
+    entry = data.get(today, {"daily_used": 0, "window_records": {}})
+    window_entry = entry.get("window_records", {}).get(window_key, {"window_used": 0})
 
-    used = entry.get("used", 0)
-    remaining = max(0, DAILY_CAP - used)
+    window_used = window_entry.get("window_used", 0)
+    # Remaining RecoveryForge capacity in current window (500 cap minus used)
+    window_available = max(0, WINDOW_CAP - window_used)
 
-    tomorrow = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0)
-    from datetime import timedelta
-    tomorrow += timedelta(days=1)
-    reset_date = tomorrow.strftime("%Y-%m-%dT%H:%M:%SZ")
+    daily_used = entry.get("daily_used", 0)
+    daily_remaining = max(0, DAILY_SOFT_CAP - daily_used)
+
+    # Cap is reached when RecoveryForge would have to consume into the reserve
+    # Reserve is WINDOW_RESERVE=1500 general-use requests preserved per window
+    cap_reached = (window_available == 0 and daily_remaining == 0) and not override
+
+    reset_hint = window_end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     return {
-        "daily_cap": DAILY_CAP,
-        "daily_reserved_quota": RESERVED,
-        "used_today": used,
-        "remaining_recoveryforge_today": remaining,
-        "cap_reached": remaining == 0 and not override,
-        "override_active": override,
-        "reset_date": reset_date,
+        "recoveryforge_vision_bucket": "mcp_understand_image",
+        "recoveryforge_window_cap": WINDOW_CAP,
+        "recoveryforge_daily_soft_cap": DAILY_SOFT_CAP,
+        "current_window_used_by_recoveryforge": window_used,
+        "current_window_remaining_for_recoveryforge": window_available,
+        "current_window_reserved_for_general_use": WINDOW_RESERVE,
+        "daily_used_by_recoveryforge": daily_used,
+        "daily_remaining_soft_cap": daily_remaining,
+        "image_generation_bucket_total": 100,
+        "image_generation_used_by_recoveryforge_batch": 0,
+        "image_generation_reserved_for_quotes_and_mockups": True,
+        "recoveryforge_manual_mockup_cap": 5,
+        "batch_chunk_limit": BATCH_CHUNK_LIMIT,
+        "cap_reached": cap_reached,
+        "override_enabled": override,
+        "reset_window_hint": reset_hint,
+        "window_start_utc": window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "server_date": today,
         "quota_file": QUOTA_FILE,
     }
@@ -100,14 +176,16 @@ def check_quota() -> dict[str, Any]:
 
 def consume_quota(image_key: str, model: str, success: bool, error: str | None = None) -> None:
     """
-    Record a completed (or failed) image analysis against the daily quota.
+    Record a completed (or failed) image analysis against the MCP Understand Image quota.
 
-    Only successful analyses count against the 80-image cap.
+    Only successful analyses count against RecoveryForge caps.
+    Failed analyses are recorded but do not consume quota.
+    Image Generation quota is never consumed by RecoveryForge batch classification.
     """
-    _record_usage(_today(), image_key, model, "success" if success else "failed", error)
+    _record_usage(image_key, model, "success" if success else "failed", error)
 
 
 def quota_allow_new() -> bool:
-    """Returns True if a new image analysis is allowed under the quota cap."""
+    """Returns True if a new RecoveryForge image analysis is allowed under window cap."""
     status = check_quota()
     return not status["cap_reached"]

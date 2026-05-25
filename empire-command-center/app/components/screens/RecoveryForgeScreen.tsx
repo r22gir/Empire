@@ -25,13 +25,23 @@ interface MiniMaxAnalysis {
 }
 
 interface MiniMaxQuotaStatus {
-  daily_cap: number;
-  daily_reserved_quota: number;
-  used_today: number;
-  remaining_recoveryforge_today: number;
+  recoveryforge_vision_bucket: string;
+  recoveryforge_window_cap: number;
+  recoveryforge_daily_soft_cap: number;
+  current_window_used_by_recoveryforge: number;
+  current_window_remaining_for_recoveryforge: number;
+  current_window_reserved_for_general_use: number;
+  daily_used_by_recoveryforge: number;
+  daily_remaining_soft_cap: number;
+  image_generation_bucket_total: number;
+  image_generation_used_by_recoveryforge_batch: number;
+  image_generation_reserved_for_quotes_and_mockups: boolean;
+  recoveryforge_manual_mockup_cap: number;
+  batch_chunk_limit: number;
   cap_reached: boolean;
-  override_active: boolean;
-  reset_date: string;
+  override_enabled: boolean;
+  reset_window_hint: string;
+  window_start_utc: string;
   server_date: string;
 }
 
@@ -259,13 +269,18 @@ export default function RecoveryForgeScreen() {
             </div>
             {status.minimax_quota && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#888', padding: '4px 10px', background: status.minimax_quota.cap_reached ? '#fef2f2' : '#f0f9ff', borderRadius: 8, border: '1px solid', borderColor: status.minimax_quota.cap_reached ? '#fecaca' : '#bae6fd' }}>
-                <span style={{ fontWeight: 700 }}>MiniMax:</span>
-                <span>{status.minimax_quota.used_today}/{status.minimax_quota.daily_cap}</span>
+                <span style={{ fontWeight: 700 }}>Vision:</span>
+                <span>{status.minimax_quota.current_window_used_by_recoveryforge}/{status.minimax_quota.recoveryforge_window_cap}</span>
                 <span style={{ color: '#999' }}>|</span>
-                <span>Reserved: {status.minimax_quota.daily_reserved_quota}</span>
+                <span>{status.minimax_quota.current_window_remaining_for_recoveryforge} left</span>
                 <span style={{ color: '#999' }}>|</span>
-                <span>{status.minimax_quota.remaining_recoveryforge_today} left</span>
-                {status.minimax_quota.cap_reached && <span style={{ color: '#dc2626', fontWeight: 700 }}>CAP REACHED</span>}
+                <span style={{ fontWeight: 700 }}>Reserve:</span>
+                <span>{status.minimax_quota.current_window_reserved_for_general_use} general-use</span>
+                <span style={{ color: '#999' }}>|</span>
+                <span style={{ color: status.minimax_quota.image_generation_reserved_for_quotes_and_mockups ? '#16a34a' : '#d97706', fontWeight: 700 }}>
+                  {status.minimax_quota.image_generation_reserved_for_quotes_and_mockups ? 'IMG gen protected' : 'IMG gen exposed'}
+                </span>
+                {status.minimax_quota.cap_reached && <span style={{ color: '#dc2626', fontWeight: 700 }}> CAP REACHED</span>}
               </div>
             )}
             <button onClick={() => handleAction(status.running ? 'stop' : 'start')} disabled={actionLoading} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, border: 'none', background: status.running ? '#dc2626' : '#16a34a', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, minHeight: 44 }}>
