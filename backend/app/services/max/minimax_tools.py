@@ -94,9 +94,16 @@ def _mmx_cli_available() -> tuple[bool, str]:
 
 
 def _mmx_subprocess_env() -> dict[str, str]:
-    """Return the environment for mmx CLI calls without dropping runtime auth."""
+    """Return the environment for native mmx CLI calls without dropping runtime auth.
+
+    EmpireBox's MiniMax chat client can use MINIMAX_BASE_URL values such as
+    https://api.minimax.io/v1. The native mmx CLI builds its own API paths, so
+    passing that backend URL can produce invalid /v1/v1-style requests. Leave
+    the CLI on its native default while preserving auth and process basics.
+    """
     env = os.environ.copy()
     env["PATH"] = env.get("PATH") or "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    env.pop("MINIMAX_BASE_URL", None)
     return env
 
 

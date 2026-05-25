@@ -175,7 +175,7 @@ def test_minimax_text_to_image_no_key(monkeypatch):
 
 
 def test_mmx_subprocess_env_preserves_runtime_minimax_key(monkeypatch):
-    """mmx CLI calls inherit backend runtime auth instead of relying on ~/.mmx only."""
+    """mmx CLI calls inherit auth without inheriting backend API base paths."""
     monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
     monkeypatch.setenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1")
 
@@ -184,8 +184,21 @@ def test_mmx_subprocess_env_preserves_runtime_minimax_key(monkeypatch):
     env = minimax_tools._mmx_subprocess_env()
 
     assert env["MINIMAX_API_KEY"] == "test-minimax-key"
-    assert env["MINIMAX_BASE_URL"] == "https://api.minimax.io/v1"
+    assert "MINIMAX_BASE_URL" not in env
     assert env["PATH"]
+
+
+def test_mmx_subprocess_env_does_not_pass_anthropic_base_url(monkeypatch):
+    """Native mmx must not inherit Anthropic-compatible MiniMax base URLs."""
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    monkeypatch.setenv("MINIMAX_BASE_URL", "https://api.minimax.io/anthropic")
+
+    from app.services.max import minimax_tools
+
+    env = minimax_tools._mmx_subprocess_env()
+
+    assert env["MINIMAX_API_KEY"] == "test-minimax-key"
+    assert "MINIMAX_BASE_URL" not in env
 
 
 def test_tool_names_registered_in_executor():
