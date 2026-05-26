@@ -144,6 +144,33 @@ BUILTIN_BUSINESSES = ["empire-workroom", "woodcraft", "general", "personal", "am
 BUILTIN_CATEGORIES = ["misc", "raw-materials", "finished-products", "tools", "workspace", "inspiration", "reference"]
 
 
+def _is_persisted_analyzed(img: dict[str, Any]) -> bool:
+    """Return True if this record has persisted analysis content from a successful vision run.
+
+    Counts only real analysis products — not memory-only progress, not stale counters,
+    not records with only tag arrays and no description, not pure Ollama errors.
+    """
+    # Has real MiniMax description text (more than placeholder length)
+    desc = img.get("description") or img.get("generated_description") or ""
+    has_description = bool(desc and len(desc) > 50)
+
+    # Has MiniMax analysis result block
+    has_minimax = bool(img.get("minimax_analysis"))
+
+    # Has explicit analyzed_at timestamp
+    has_analyzed_at = bool(img.get("analyzed_at"))
+
+    # Has confidence from successful classification
+    conf = img.get("confidence")
+    has_confidence = conf is not None and float(conf) > 0
+
+    # Classified by MiniMax (not "none", not memory-only)
+    classified = img.get("classified_by", "none")
+    has_classified = classified and classified not in ("none", "")
+
+    return has_description or has_minimax or has_analyzed_at or (has_confidence and has_classified)
+
+
 class CategoryEntry(BaseModel):
     slug: str
     label: str
@@ -468,19 +495,19 @@ def _apply_minimax_analysis(img: dict[str, Any], result: dict[str, Any], analyze
 @router.get("/recovery/status")
 async def recovery_status():
     """Get RecoveryForge classifier status."""
-    processed = 0
+    ollama_processed = 0
     categories = {}
     stats = {}
 
-    # Read progress
+    # Read memory-only Ollama job progress (stale after job ends)
     if os.path.exists(PROGRESS_FILE):
         try:
             with open(PROGRESS_FILE, "r") as f:
-                data = json.load(f)
-            processed_list = data.get("processed", [])
-            processed = len(processed_list)
-            stats = data.get("stats", {})
-            categories = data.get("categories") or {k: v for k, v in stats.items() if k != "processed"}
+                pdata = json.load(f)
+            ollama_list = pdata.get("processed", [])
+            ollama_processed = len(ollama_list)
+            stats = pdata.get("stats", {})
+            categories = pdata.get("categories") or {k: v for k, v in stats.items() if k != "processed"}
         except Exception as e:
             logger.warning(f"Could not read progress file: {e}")
 
@@ -495,11 +522,19 @@ async def recovery_status():
     except Exception:
         pass
 
-    percentage = round((processed / TOTAL_IMAGES) * 100, 1) if TOTAL_IMAGES > 0 else 0
+    # Load persistent index for accurate analyzed count
+    index_data = _load_image_index()
+    all_images = index_data.get("images", [])
+    persisted_analyzed = sum(1 for img in all_images if _is_persisted_analyzed(img))
+    total_indexed = len(all_images)
+
+    # Percentage based on indexed records (not stale Ollama counter)
+    percentage = round((persisted_analyzed / total_indexed) * 100, 1) if total_indexed > 0 else 0
 
     return {
-        "total_images": TOTAL_IMAGES,
-        "processed": processed,
+        "total_images": total_indexed,
+        "processed": ollama_processed,
+        "persisted_analyzed": persisted_analyzed,
         "percentage": percentage,
         "running": running,
         "categories": categories,
@@ -508,6 +543,87 @@ async def recovery_status():
         "progress_file": PROGRESS_FILE,
         "classified_dir": CLASSIFIED_DIR,
         "minimax_quota": check_quota(),
+    }
+
+
+@router.get("/recovery/persistence-audit")
+async def recovery_persistence_audit():
+    """Read-only audit of record persistence truth. No batch analysis."""
+    index_data = _load_image_index()
+    all_images = index_data.get("images", [])
+    total = len(all_images)
+
+    # Count categories
+    persisted_analyzed = 0
+    records_with_description = 0
+    records_with_minimax = 0
+    records_with_analyzed_at = 0
+    records_with_confidence = 0
+    records_with_classified = 0
+    records_with_error = 0
+    records_with_ollama_error = 0
+    needs_reanalysis = 0
+
+    for img in all_images:
+        has_desc = bool(img.get("description") or img.get("generated_description"))
+        if has_desc and len((img.get("description") or img.get("generated_description") or "")) > 50:
+            records_with_description += 1
+        if img.get("minimax_analysis"):
+            records_with_minimax += 1
+        if img.get("analyzed_at"):
+            records_with_analyzed_at += 1
+        conf = img.get("confidence")
+        if conf is not None and float(conf) > 0:
+            records_with_confidence += 1
+        classified = img.get("classified_by")
+        if classified and classified not in ("none", ""):
+            records_with_classified += 1
+
+        if _is_persisted_analyzed(img):
+            persisted_analyzed += 1
+        else:
+            # Not persisted-analyzed
+            last_err = _last_analysis_error(img)
+            if last_err:
+                records_with_error += 1
+                if "ollama" in str(last_err).lower():
+                    records_with_ollama_error += 1
+            # Has a source file path and no error — candidate for reanalysis
+            if img.get("path") or img.get("source_path"):
+                if not last_err:
+                    needs_reanalysis += 1
+
+    # Check stale progress file
+    stale_progress = False
+    progress_count = 0
+    if os.path.exists(PROGRESS_FILE):
+        try:
+            with open(PROGRESS_FILE, "r") as f:
+                pdata = json.load(f)
+            progress_count = len(pdata.get("processed", []))
+            # If stats say needs-ai is still high but persisted_analyzed is very low,
+            # the progress file is stale (memory-only, never persisted to index)
+            needs_ai = pdata.get("stats", {}).get("needs-ai", 0)
+            if needs_ai > 10000 and persisted_analyzed < 10:
+                stale_progress = True
+        except Exception:
+            pass
+
+    return {
+        "total_records": total,
+        "persisted_analyzed_count": persisted_analyzed,
+        "records_with_description": records_with_description,
+        "records_with_minimax_analysis": records_with_minimax,
+        "records_with_analyzed_at": records_with_analyzed_at,
+        "records_with_confidence_score": records_with_confidence,
+        "records_with_classified_by": records_with_classified,
+        "records_with_error": records_with_error,
+        "records_with_ollama_error": records_with_ollama_error,
+        "needs_reanalysis_candidates": needs_reanalysis,
+        "stale_progress_file": stale_progress,
+        "ollama_progress_count": progress_count,
+        "progress_file": PROGRESS_FILE,
+        "index_file": INDEX_FILE,
     }
 
 
@@ -532,7 +648,7 @@ async def recovery_images(
     images = data.get("images", [])
 
     if analyzed_only:
-        images = [img for img in images if img.get("description") or img.get("business") or img.get("category")]
+        images = [img for img in images if _is_persisted_analyzed(img)]
     if business:
         images = [img for img in images if (img.get("business") or img.get("pre_tag")) == business]
     if pre_tag:
@@ -582,7 +698,7 @@ async def recovery_images(
     total = len(images)
     page = images[offset:offset + limit]
     all_images = data.get("images", [])
-    analyzed = [img for img in all_images if img.get("description") or img.get("business") or img.get("category")]
+    analyzed = [img for img in all_images if _is_persisted_analyzed(img)]
     return {
         "total": total,
         "limit": limit,

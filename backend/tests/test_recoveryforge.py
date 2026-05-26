@@ -1035,3 +1035,122 @@ def test_tags_update_404_on_missing_record(tmp_path: Path):
     client = _make_test_client(tmp_path, [])
     resp = client.patch("/recovery/images/nonexistent/tags", json={"object_tags": ["lamp"]})
     assert resp.status_code == 404
+
+
+# ── Persistence truth tests ──────────────────────────────────────────────────────
+
+def test_is_persisted_analyzed_true_for_minimax_record(tmp_path: Path):
+    """Records with real MiniMax description + analysis are detected as persisted analyzed."""
+    from app.routers.recovery import _is_persisted_analyzed
+    img = {
+        "filename": "x.jpg",
+        "description": "A detailed description of a sofa in a living room with velvet fabric.",
+        "minimax_analysis": {"analysis_status": "success", "provider": "minimax"},
+        "analyzed_at": "2026-05-26T10:00:00+00:00",
+        "confidence": 0.85,
+        "classified_by": "minimax-mmx_vision",
+    }
+    assert _is_persisted_analyzed(img) is True
+
+
+def test_is_persisted_analyzed_false_for_untouched_record(tmp_path: Path):
+    """Records with no analysis fields return False."""
+    from app.routers.recovery import _is_persisted_analyzed
+    img = {
+        "filename": "y.jpg",
+        "path": "/some/path/y.jpg",
+        "business": "unknown",
+        "category": "misc",
+        "object_tags": ["sofa"],
+        "material_tags": ["velvet"],
+    }
+    assert _is_persisted_analyzed(img) is False
+
+
+def test_is_persisted_analyzed_false_for_ollama_error_record(tmp_path: Path):
+    """Records with only Ollama error are NOT counted as persisted analyzed."""
+    from app.routers.recovery import _is_persisted_analyzed
+    img = {
+        "filename": "z.jpg",
+        "last_error": "Ollama connection refused",
+        "classified_by": "none",
+        "confidence": None,
+        "description": "",
+    }
+    assert _is_persisted_analyzed(img) is False
+
+
+def test_is_persisted_analyzed_requires_classified_with_confidence(tmp_path: Path):
+    """Confidence alone without classified_by does not count as analyzed."""
+    from app.routers.recovery import _is_persisted_analyzed
+    img = {"filename": "w.jpg", "confidence": 0.75, "classified_by": "none"}
+    assert _is_persisted_analyzed(img) is False
+
+
+def test_analyzed_only_true_filters_correctly_via_helper(tmp_path: Path):
+    """analyzed_only=True returns only records matching _is_persisted_analyzed."""
+    imgs = [
+        {"filename": "a.jpg", "description": "A detailed description of a sofa in a workshop.",
+         "minimax_analysis": {"status": "success"}, "analyzed_at": "2026-05-26T10:00:00+00:00",
+         "confidence": 0.9, "classified_by": "minimax-mmx_vision"},
+        {"filename": "b.jpg", "object_tags": ["sofa"], "material_tags": ["velvet"]},
+        {"filename": "c.jpg", "last_error": "Ollama error", "classified_by": "none"},
+        {"filename": "d.jpg", "business": "unknown", "category": "misc"},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.get("/recovery/images?analyzed_only=true")
+    assert resp.status_code == 200
+    keys = [img["filename"] for img in resp.json()["images"]]
+    assert "a.jpg" in keys
+    # Tags-only, error-only, unknown-only should be excluded
+    assert "b.jpg" not in keys
+    assert "c.jpg" not in keys
+    assert "d.jpg" not in keys
+
+
+def test_status_endpoint_returns_persisted_analyzed_count(tmp_path: Path):
+    """Status endpoint exposes persisted_analyzed (not stale ollama_processed) as primary count."""
+    imgs = [
+        {"filename": "x.jpg", "description": "A detailed description of a sofa for Empire Workroom.",
+         "minimax_analysis": {"status": "success"}, "analyzed_at": "2026-05-26T10:00:00+00:00",
+         "confidence": 0.85, "classified_by": "minimax-mmx_vision"},
+        {"filename": "y.jpg", "object_tags": ["lamp"]},
+        {"filename": "z.jpg", "business": "unknown", "category": "misc"},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.get("/recovery/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    # persisted_analyzed is the canonical count
+    assert "persisted_analyzed" in data
+    assert data["persisted_analyzed"] == 1  # only x.jpg has real analysis
+    # processed is the stale ollama counter from the progress file
+    assert "processed" in data
+    # total_images is indexed total, not hardcoded TOTAL_IMAGES
+    assert data["total_images"] == 3
+
+
+def test_persistence_audit_endpoint_reports_truth(tmp_path: Path):
+    """GET /recovery/persistence-audit returns per-field counts and reanalysis candidates."""
+    imgs = [
+        {"filename": "a.jpg", "description": "A detailed fabric description for upholstery work in a workshop setting with tools and materials.",
+         "minimax_analysis": {"status": "success"}, "analyzed_at": "2026-05-26T10:00:00+00:00",
+         "confidence": 0.85, "classified_by": "minimax-mmx_vision"},
+        {"filename": "b.jpg", "path": str(tmp_path / "b.jpg"), "last_error": "Ollama error"},
+        {"filename": "c.jpg", "path": str(tmp_path / "c.jpg")},
+        {"filename": "d.jpg", "business": "unknown", "category": "misc"},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.get("/recovery/persistence-audit")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_records"] == 4
+    assert data["persisted_analyzed_count"] == 1
+    assert data["records_with_description"] == 1
+    assert data["records_with_minimax_analysis"] == 1
+    assert data["records_with_error"] == 1
+    assert data["records_with_ollama_error"] == 1
+    # b.jpg and c.jpg have path but no error-free analyzed state → reanalysis candidates
+    assert data["needs_reanalysis_candidates"] >= 1
+    assert "progress_file" in data
+    assert "index_file" in data
