@@ -83,8 +83,8 @@ async def analyze_image(image_key: str, image_path: str) -> dict[str, Any]:
         consume_quota(image_key, "mmx_vision", success=False, error=result.get("error", "unknown"))
         return _default_analysis_result(image_key, result.get("error", "provider call failed"))
 
-    # Extract description text from mmx CLI response
-    raw = result.get("data", {}).get("summary", "") or result.get("data", {}).get("full_response", "")
+    # Extract description text from mmx CLI response — prefer full_response (untruncated) over summary
+    raw = result.get("data", {}).get("full_response") or result.get("data", {}).get("summary", "")
 
     # If summary is empty/blank, the vision call didn't produce usable content
     if not raw or not raw.strip():

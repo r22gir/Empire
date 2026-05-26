@@ -570,11 +570,11 @@ async def minimax_understand_image(
     # Try to parse structured response
     try:
         parsed = json.loads(description)
-        summary = parsed.get("summary", description[:500])
+        summary = parsed.get("summary", description)
         notable_details = parsed.get("notable_details", [])
         confidence = parsed.get("confidence", "medium")
     except Exception:
-        summary = description[:500]
+        summary = description
         notable_details = []
         confidence = "medium"
 
