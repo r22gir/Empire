@@ -41,6 +41,10 @@ class RecoveryImageReview(BaseModel):
     copy_to_classified: bool = False
 
 
+class RecoveryImageReanalyzeRequest(BaseModel):
+    force: bool = True
+
+
 def _load_image_index() -> dict[str, Any]:
     for path in (INDEX_FILE, "/data/images/filtered_inventory.json", "/data/images/inventory.json"):
         if os.path.exists(path):
@@ -63,18 +67,99 @@ def _record_key(img: dict[str, Any]) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
+def _path_readable(path: str | None) -> bool:
+    if not path:
+        return False
+    try:
+        p = Path(path)
+        return p.exists() and p.is_file() and os.access(p, os.R_OK)
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _path_status(path: str | None) -> dict[str, Any]:
+    if not path:
+        return {"path": None, "exists": False, "readable": False, "is_file": False, "size_bytes": None}
+    try:
+        p = Path(path)
+        exists = p.exists()
+        is_file = p.is_file() if exists else False
+        readable = bool(is_file and os.access(p, os.R_OK))
+        size = p.stat().st_size if is_file else None
+        return {
+            "path": str(path),
+            "exists": exists,
+            "readable": readable,
+            "is_file": is_file,
+            "size_bytes": size,
+        }
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            "path": str(path),
+            "exists": False,
+            "readable": False,
+            "is_file": False,
+            "size_bytes": None,
+            "error": str(exc),
+        }
+
+
+def _image_path_status(img: dict[str, Any]) -> dict[str, Any]:
+    source_path = img.get("source_path") or img.get("path")
+    return {
+        "source": _path_status(source_path),
+        "classified": _path_status(img.get("classified_path")),
+        "social": _path_status(img.get("social_path")),
+    }
+
+
+def _resolve_reanalysis_path(img: dict[str, Any]) -> tuple[str | None, str | None, dict[str, Any]]:
+    path_status = _image_path_status(img)
+    candidates = (
+        ("source_path", img.get("source_path") or img.get("path")),
+        ("classified_path", img.get("classified_path")),
+        ("social_path", img.get("social_path")),
+    )
+    for source_key, candidate in candidates:
+        if _path_readable(candidate):
+            return str(Path(candidate).resolve()), source_key, path_status
+    return None, None, path_status
+
+
+def _last_analysis_error(img: dict[str, Any]) -> str | None:
+    analysis = img.get("minimax_analysis") or {}
+    if analysis.get("analysis_status") == "failed" and analysis.get("error"):
+        return str(analysis.get("error"))
+    for key in ("last_error", "analysis_error", "error"):
+        if img.get(key):
+            return str(img.get(key))
+    description = str(img.get("description") or "")
+    if description.lower().startswith("ollama error:"):
+        return description
+    return None
+
+
 def _public_image_item(img: dict[str, Any]) -> dict[str, Any]:
     filename = img.get("filename") or Path(str(img.get("path", ""))).name
+    source_path = img.get("source_path") or img.get("path")
+    path_status = _image_path_status(img)
     return {
         "record_key": _record_key(img),
         "filename": filename,
-        "path": img.get("path"),
+        "path": source_path,
+        "source_path": source_path,
+        "source_exists": path_status["source"]["exists"],
+        "source_readable": path_status["source"]["readable"],
         "classified_path": img.get("classified_path"),
+        "classified_exists": path_status["classified"]["exists"],
+        "classified_readable": path_status["classified"]["readable"],
         "social_path": img.get("social_path"),
+        "social_exists": path_status["social"]["exists"],
         "business": img.get("business") or img.get("pre_tag") or "unknown",
         "pre_tag": img.get("pre_tag") or "unknown",
         "category": img.get("category") or img.get("pre_category") or "misc",
-        "description": img.get("description") or "",
+        "description": img.get("description") or img.get("generated_description") or "",
+        "generated_description": img.get("generated_description") or img.get("description") or "",
         "ocr_text": img.get("ocr_text") or img.get("ocr") or img.get("extracted_text") or "",
         "quality": img.get("quality") or "",
         "social_ready": bool(img.get("social_ready")),
@@ -92,6 +177,8 @@ def _public_image_item(img: dict[str, Any]) -> dict[str, Any]:
         "analysis_provider": img.get("minimax_analysis", {}).get("provider") or img.get("classified_by") or None,
         "analysis_confidence": img.get("minimax_analysis", {}).get("analysis_confidence") or img.get("confidence"),
         "needs_manual_review": bool(img.get("minimax_analysis", {}).get("needs_manual_review", False)),
+        "analyzed_at": img.get("analyzed_at") or img.get("minimax_analysis", {}).get("timestamp") or img.get("classified_at"),
+        "last_error": _last_analysis_error(img),
     }
 
 
@@ -137,6 +224,35 @@ def _copy_to_social(img: dict[str, Any]) -> str | None:
     img["reviewed"] = True
     img["review_status"] = "approved"
     return dest
+
+
+def _apply_minimax_analysis(img: dict[str, Any], result: dict[str, Any], analyzed_path: str) -> None:
+    img["minimax_analysis"] = result
+    img["analyzed_at"] = result.get("timestamp") or datetime.now(timezone.utc).isoformat()
+    img["last_analyzed_path"] = analyzed_path
+
+    if result.get("analysis_status") != "success":
+        img["analysis_error"] = result.get("error") or "MiniMax mmx vision analysis failed"
+        return
+
+    description = result.get("description")
+    if description:
+        img["description"] = description
+        img["generated_description"] = description
+
+    route = result.get("business_route")
+    if route and route not in {"unknown-work", "general-business"}:
+        img["business"] = route
+        img["pre_tag"] = route
+
+    confidence = result.get("analysis_confidence")
+    if confidence is not None:
+        img["confidence"] = confidence
+
+    img["classified_by"] = "minimax-mmx_vision"
+    img["classified_at"] = img["analyzed_at"]
+    for key in ("error", "last_error", "analysis_error"):
+        img.pop(key, None)
 
 
 @router.get("/recovery/status")
@@ -292,6 +408,7 @@ async def recovery_image_detail(record_key: str):
         },
         "ocr_text": img.get("ocr_text") or img.get("ocr") or img.get("extracted_text") or "",
         "minimax_analysis": img.get("minimax_analysis") or None,
+        "path_status": _image_path_status(img),
     }
 
 
@@ -322,9 +439,90 @@ async def recovery_review_image(record_key: str, review: RecoveryImageReview):
     return {
         "status": "updated",
         "image": _public_image_item(img),
+        "path_status": _image_path_status(img),
         "classified_path": classified_path,
         "social_path": social_path,
     }
+
+
+@router.post("/recovery/images/{record_key}/reanalyze")
+async def recovery_reanalyze_image(record_key: str, request: RecoveryImageReanalyzeRequest | None = None):
+    """Re-run MiniMax/mmx vision analysis for exactly one selected RecoveryForge image."""
+    data = _load_image_index()
+    img = _find_image(data, record_key)
+    if not img:
+        raise HTTPException(status_code=404, detail=f"RecoveryForge image record not found: {record_key}")
+
+    force = True if request is None else request.force
+    existing = img.get("minimax_analysis") or {}
+    if not force and existing.get("analysis_status") == "success" and not existing.get("stale"):
+        return {
+            "status": "existing",
+            "success": True,
+            "image": _public_image_item(img),
+            "analysis": existing,
+            "path_status": _image_path_status(img),
+        }
+
+    path, path_source, path_status = _resolve_reanalysis_path(img)
+    if not path:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "No readable RecoveryForge image file found for selected record",
+                "record_key": record_key,
+                "path_status": path_status,
+            },
+        )
+
+    if not quota_allow_new():
+        quota = check_quota()
+        return {
+            "status": "cap_reached",
+            "success": False,
+            "message": (
+                f"RecoveryForge MCP Understand Image cap reached. "
+                f"Resets at {quota['reset_window_hint']}."
+            ),
+            "quota": quota,
+            "image": _public_image_item(img),
+            "path_source": path_source,
+            "path_status": path_status,
+        }
+
+    result = await analyze_image(record_key, path)
+    _apply_minimax_analysis(img, result, path)
+    _save_image_index(data)
+
+    return {
+        "status": "reanalyzed" if result.get("analysis_status") == "success" else "analysis_failed",
+        "success": result.get("analysis_status") == "success",
+        "image": _public_image_item(img),
+        "analysis": result,
+        "path_source": path_source,
+        "analyzed_path": path,
+        "path_status": _image_path_status(img),
+    }
+
+
+@router.get("/recovery/images/{record_key}/file")
+async def recovery_image_file(record_key: str, variant: str = Query(default="source", pattern="^(source|classified|social)$")):
+    """Serve the selected RecoveryForge image file variant when the stored path exists."""
+    data = _load_image_index()
+    img = _find_image(data, record_key)
+    if not img:
+        raise HTTPException(status_code=404, detail=f"RecoveryForge image record not found: {record_key}")
+
+    variant_path = {
+        "source": img.get("source_path") or img.get("path"),
+        "classified": img.get("classified_path"),
+        "social": img.get("social_path"),
+    }.get(variant)
+
+    if not _path_readable(variant_path):
+        raise HTTPException(status_code=404, detail=f"RecoveryForge {variant} file not found for {record_key}")
+
+    return FileResponse(str(Path(variant_path).resolve()))
 
 
 @router.get("/recovery/image/{filename}")

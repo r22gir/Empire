@@ -7,6 +7,7 @@ interface MiniMaxAnalysis {
   analysis_status: string;
   provider: string;
   model: string;
+  transport?: string;
   timestamp: string;
   stale: boolean;
   description: string;
@@ -75,13 +76,21 @@ interface RecoveryImage {
   confidence?: number;
   classified_by: string;
   classified_path?: string;
+  classified_exists?: boolean;
+  classified_readable?: boolean;
   social_path?: string;
+  social_exists?: boolean;
   path?: string;
+  source_path?: string;
+  source_exists?: boolean;
+  source_readable?: boolean;
   minimax_analysis?: MiniMaxAnalysis;
   analysis_stale?: boolean;
   analysis_provider?: string;
   analysis_confidence?: number;
   needs_manual_review?: boolean;
+  analyzed_at?: string;
+  last_error?: string;
 }
 
 interface ImageDetail {
@@ -90,6 +99,7 @@ interface ImageDetail {
   tags: Record<string, unknown>;
   ocr_text?: string;
   minimax_analysis?: MiniMaxAnalysis;
+  path_status?: Record<string, { path?: string | null; exists: boolean; readable: boolean; is_file: boolean; size_bytes?: number | null }>;
 }
 
 const BUSINESS_FILTERS = ['all', 'empire-workroom', 'woodcraft', 'general'];
@@ -133,6 +143,8 @@ export default function RecoveryForgeScreen() {
   const [loading, setLoading] = useState(true);
   const [serviceUp, setServiceUp] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [detailActionLoading, setDetailActionLoading] = useState(false);
+  const [detailMessage, setDetailMessage] = useState<string | null>(null);
 
   const apiBase = API.replace('/api/v1', '');
 
@@ -173,6 +185,7 @@ export default function RecoveryForgeScreen() {
 
   const loadDetail = useCallback(async (image: RecoveryImage) => {
     setSelectedLoading(true);
+    setDetailMessage(null);
     try {
       const res = await fetch(`${API}/recovery/images/${image.record_key}`);
       if (res.ok) setSelected(await res.json());
@@ -209,27 +222,60 @@ export default function RecoveryForgeScreen() {
   const reviewSelected = async (review_status: 'approved' | 'rejected' | 'reviewed') => {
     if (!selected) return;
     const image = selected.image;
-    const res = await fetch(`${API}/recovery/images/${image.record_key}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        business: image.business,
-        category: image.category,
-        review_status,
-        social_ready: review_status === 'approved' ? true : image.social_ready,
-        copy_to_classified: true,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      await loadDetail(data.image);
-      await fetchImages();
+    setDetailActionLoading(true);
+    setDetailMessage(null);
+    try {
+      const res = await fetch(`${API}/recovery/images/${image.record_key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          business: image.business,
+          category: image.category,
+          review_status,
+          social_ready: review_status === 'approved' ? true : image.social_ready,
+          copy_to_classified: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        await loadDetail(data.image);
+        await fetchImages();
+        setDetailMessage(`Selected image ${review_status}.`);
+      } else {
+        setDetailMessage(`Review update failed (${res.status}).`);
+      }
+    } finally {
+      setDetailActionLoading(false);
     }
   };
 
   const updateSelected = (key: 'business' | 'category', value: string) => {
     if (!selected) return;
     setSelected({ ...selected, image: { ...selected.image, [key]: value } });
+  };
+
+  const reanalyzeSelected = async () => {
+    if (!selected) return;
+    setDetailActionLoading(true);
+    setDetailMessage('Re-analyzing selected image through MiniMax mmx vision...');
+    try {
+      const res = await fetch(`${API}/recovery/images/${selected.image.record_key}/reanalyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.image) {
+        await loadDetail(data.image);
+        await fetchImages();
+        setDetailMessage(data.success ? 'MiniMax mmx vision re-analysis complete.' : `Re-analysis failed: ${data.analysis?.error || data.message || 'unknown error'}`);
+      } else {
+        const message = typeof data?.detail === 'string' ? data.detail : data?.detail?.error || data?.message || `HTTP ${res.status}`;
+        setDetailMessage(`Re-analysis failed: ${message}`);
+      }
+    } finally {
+      setDetailActionLoading(false);
+    }
   };
 
   if (loading) {
@@ -405,9 +451,24 @@ export default function RecoveryForgeScreen() {
                 })()}
                 <DetailLabel label="Generated description" value={selected.image.description || 'No generated description stored.'} />
                 <DetailLabel label="OCR text" value={selected.ocr_text || 'No OCR text stored in this record.'} />
-                <DetailLabel label="Source path" value={selected.image.path || 'Not stored'} mono />
+                <DetailLabel label="Source path" value={selected.image.source_path || selected.image.path || 'Not stored'} mono />
+                <PathBadge exists={selected.image.source_exists} readable={selected.image.source_readable} />
                 <DetailLabel label="Classified path" value={selected.image.classified_path || 'Not copied to classified bucket'} mono />
+                <PathBadge exists={selected.image.classified_exists} readable={selected.image.classified_readable} />
                 <DetailLabel label="Social path" value={selected.image.social_path || 'Not approved as social asset'} mono />
+                <PathBadge exists={selected.image.social_exists} readable={selected.image.social_exists} />
+                <DetailLabel label="Provider / model" value={`${selected.image.analysis_provider || selected.minimax_analysis?.provider || selected.image.classified_by || 'none'}${selected.minimax_analysis?.model ? ` / ${selected.minimax_analysis.model}` : ''}${selected.minimax_analysis?.transport ? ` / ${selected.minimax_analysis.transport}` : ''}`} />
+                <DetailLabel label="Last analyzed" value={selected.image.analyzed_at || selected.minimax_analysis?.timestamp || 'No analysis timestamp stored.'} />
+                {selected.image.last_error && <DetailLabel label="Last analysis error" value={selected.image.last_error} />}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                  <a href={`${API}/recovery/images/${selected.image.record_key}/file?variant=source`} target="_blank" rel="noreferrer" style={{ ...linkButtonStyle, pointerEvents: selected.image.source_exists ? 'auto' : 'none', opacity: selected.image.source_exists ? 1 : 0.45 }}>Open original</a>
+                  <a href={`${API}/recovery/images/${selected.image.record_key}/file?variant=classified`} target="_blank" rel="noreferrer" style={{ ...linkButtonStyle, pointerEvents: selected.image.classified_exists ? 'auto' : 'none', opacity: selected.image.classified_exists ? 1 : 0.45 }}>Open classified copy</a>
+                </div>
+                {detailMessage && (
+                  <div style={{ marginTop: 10, padding: 8, borderRadius: 8, border: '1px solid #e5e2dc', background: '#faf9f7', fontSize: 11, color: detailMessage.includes('failed') ? '#b91c1c' : '#374151' }}>
+                    {detailMessage}
+                  </div>
+                )}
 
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #ece8e0' }}>
                   <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Review Actions</div>
@@ -416,9 +477,10 @@ export default function RecoveryForgeScreen() {
                       {['empire-workroom', 'woodcraft', 'general', 'personal', 'ambiguous'].map(v => <option key={v} value={v}>{v}</option>)}
                     </select>
                     <input value={selected.image.category || ''} onChange={e => updateSelected('category', e.target.value)} placeholder="category" style={selectStyle} />
-                    <button onClick={() => reviewSelected('approved')} style={{ ...actionButtonStyle, background: '#16a34a', color: '#fff' }}><Check size={13} /> Approve</button>
-                    <button onClick={() => reviewSelected('rejected')} style={{ ...actionButtonStyle, background: '#dc2626', color: '#fff' }}><X size={13} /> Reject</button>
-                    <button onClick={() => reviewSelected('reviewed')} style={{ ...actionButtonStyle, gridColumn: '1 / -1' }}>Mark reviewed / reclassify</button>
+                    <button onClick={reanalyzeSelected} disabled={detailActionLoading} style={{ ...actionButtonStyle, gridColumn: '1 / -1', background: '#1f2937', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><RefreshCw size={13} /> Re-analyze selected</button>
+                    <button onClick={() => reviewSelected('approved')} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#16a34a', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><Check size={13} /> Approve</button>
+                    <button onClick={() => reviewSelected('rejected')} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#dc2626', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><X size={13} /> Reject</button>
+                    <button onClick={() => reviewSelected('reviewed')} disabled={detailActionLoading} style={{ ...actionButtonStyle, gridColumn: '1 / -1', opacity: detailActionLoading ? 0.65 : 1 }}>Save category / reclassify</button>
                   </div>
                   <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>Reclassify updates the JSON index and safely copies to the selected classified bucket when supported. It does not delete the old source file.</div>
                 </div>
@@ -531,6 +593,15 @@ function DetailLabel({ label, value, mono = false }: { label: string; value: str
   );
 }
 
+function PathBadge({ exists, readable }: { exists?: boolean; readable?: boolean }) {
+  const ok = Boolean(exists && readable);
+  return (
+    <div style={{ marginTop: 4, fontSize: 10, fontWeight: 800, color: ok ? '#15803d' : '#b91c1c' }}>
+      {ok ? 'File exists and is readable' : exists ? 'File exists but is not readable' : 'File not found'}
+    </div>
+  );
+}
+
 const selectStyle: React.CSSProperties = {
   padding: '8px 10px',
   border: '1px solid #e5e2dc',
@@ -565,6 +636,20 @@ const actionButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 800,
   cursor: 'pointer',
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: '7px 10px',
+  border: '1px solid #e5e2dc',
+  borderRadius: 8,
+  background: '#fff',
+  color: '#374151',
+  fontSize: 11,
+  fontWeight: 800,
+  textDecoration: 'none',
 };
 
 function tagStyle(background: string, color: string): React.CSSProperties {

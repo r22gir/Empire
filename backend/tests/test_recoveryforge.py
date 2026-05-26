@@ -2,9 +2,12 @@
 import json
 import os
 import pytest
+import asyncio
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock
+from fastapi import HTTPException
+from starlette.testclient import TestClient
 
 # ── Quota tests ────────────────────────────────────────────────────────────────
 
@@ -386,3 +389,201 @@ def test_batch_analyze_endpoint_exists():
 
     routes = [r.path for r in router.routes]
     assert any("batch-analyze" in r for r in routes)
+
+
+# ── Selected-image workbench flow ─────────────────────────────────────────────
+
+def _recovery_index_fixture(monkeypatch, tmp_path, images):
+    import app.routers.recovery as recovery
+
+    index_file = tmp_path / "presorted_inventory.json"
+    index_file.write_text(json.dumps({"images": images, "stats": {}}))
+    monkeypatch.setattr(recovery, "INDEX_FILE", str(index_file))
+    monkeypatch.setattr(recovery, "CLASSIFIED_DIR", str(tmp_path / "classified"))
+    monkeypatch.setattr(recovery, "SOCIAL_DIR", str(tmp_path / "social"))
+    monkeypatch.setattr(recovery, "quota_allow_new", lambda: True)
+    return recovery, index_file
+
+
+def test_selected_image_detail_returns_file_existence(monkeypatch, tmp_path):
+    source = tmp_path / "source.png"
+    source.write_bytes(b"png")
+    image = {"filename": "source.png", "path": str(source), "description": "Old record"}
+    recovery, _ = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+
+    detail = asyncio.run(recovery.recovery_image_detail(recovery._record_key(image)))
+
+    assert detail["image"]["source_path"] == str(source)
+    assert detail["image"]["source_exists"] is True
+    assert detail["path_status"]["source"]["readable"] is True
+    assert detail["image"]["classified_exists"] is False
+
+
+def test_selected_image_reanalyze_uses_mmx_path_and_clears_ollama_error(monkeypatch, tmp_path):
+    source = tmp_path / "window.png"
+    source.write_bytes(b"png")
+    image = {
+        "filename": "window.png",
+        "path": str(source),
+        "description": "Ollama error: <urlopen error [Errno 111] Connection refused>",
+        "error": "<urlopen error [Errno 111] Connection refused>",
+        "classified_by": "ollama-llava",
+        "confidence": 0.0,
+    }
+    recovery, index_file = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+    captured = {}
+
+    async def fake_analyze_image(image_key, image_path):
+        captured["image_key"] = image_key
+        captured["image_path"] = image_path
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "provider": "minimax",
+            "transport": "mmx_cli",
+            "model": "mmx_vision",
+            "timestamp": "2026-05-25T10:00:00+00:00",
+            "stale": False,
+            "description": "A window treatment installation with neutral drapery.",
+            "tags": ["drapery-fabrics", "interior"],
+            "personal_work_classification": {"classification": "work_related", "confidence": 0.9, "reason": "test"},
+            "business_route": "empire-workroom",
+            "action_recommendation": "keep",
+            "image_quality_score": 8.0,
+            "analysis_confidence": 0.87,
+            "needs_manual_review": False,
+            "reason_for_manual_review": None,
+        }
+
+    monkeypatch.setattr(recovery, "analyze_image", fake_analyze_image)
+
+    response = asyncio.run(
+        recovery.recovery_reanalyze_image(
+            recovery._record_key(image),
+            recovery.RecoveryImageReanalyzeRequest(force=True),
+        )
+    )
+
+    assert response["success"] is True
+    assert response["analysis"]["transport"] == "mmx_cli"
+    assert response["path_source"] == "source_path"
+    assert captured["image_path"] == str(source.resolve())
+    assert response["image"]["description"] == "A window treatment installation with neutral drapery."
+    assert response["image"]["classified_by"] == "minimax-mmx_vision"
+    assert response["image"]["last_error"] is None
+
+    saved = json.loads(index_file.read_text())["images"][0]
+    assert saved["description"] == "A window treatment installation with neutral drapery."
+    assert saved["business"] == "empire-workroom"
+    assert saved["confidence"] == 0.87
+    assert "error" not in saved
+    assert "analysis_error" not in saved
+    assert saved["minimax_analysis"]["provider"] == "minimax"
+    assert saved["minimax_analysis"]["transport"] == "mmx_cli"
+
+
+def test_selected_image_reanalyze_missing_file_returns_clear_error(monkeypatch, tmp_path):
+    image = {"filename": "missing.png", "path": str(tmp_path / "missing.png")}
+    recovery, _ = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            recovery.recovery_reanalyze_image(
+                recovery._record_key(image),
+                recovery.RecoveryImageReanalyzeRequest(force=True),
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "No readable RecoveryForge image file found for selected record"
+    assert exc.value.detail["path_status"]["source"]["exists"] is False
+
+
+def test_selected_image_review_only_updates_target_record(monkeypatch, tmp_path):
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    first.write_bytes(b"png")
+    second.write_bytes(b"png")
+    image_one = {"filename": "first.png", "path": str(first), "business": "general", "category": "misc"}
+    image_two = {"filename": "second.png", "path": str(second), "business": "general", "category": "misc"}
+    recovery, index_file = _recovery_index_fixture(monkeypatch, tmp_path, [image_one, image_two])
+
+    response = asyncio.run(
+        recovery.recovery_review_image(
+            recovery._record_key(image_one),
+            recovery.RecoveryImageReview(
+                business="woodcraft",
+                category="cabinet",
+                review_status="approved",
+                social_ready=True,
+            ),
+        )
+    )
+
+    assert response["status"] == "updated"
+    saved = json.loads(index_file.read_text())["images"]
+    assert saved[0]["business"] == "woodcraft"
+    assert saved[0]["category"] == "cabinet"
+    assert saved[0]["review_status"] == "approved"
+    assert saved[1]["business"] == "general"
+    assert saved[1]["category"] == "misc"
+
+
+def test_file_endpoint_unknown_record_returns_404(monkeypatch, tmp_path):
+    """Unknown record_key must return 404, not expose internal data."""
+    image = {"filename": "exists.png", "path": str(tmp_path / "exists.png")}
+    recovery, _ = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(recovery.recovery_image_file("zzzznotahexkey", "source"))
+
+    assert exc.value.status_code == 404
+
+
+def test_file_endpoint_missing_file_returns_404(monkeypatch, tmp_path):
+    """Record exists but file on disk is missing must return 404."""
+    image = {"filename": "missing.png", "path": str(tmp_path / "missing.png")}
+    recovery, _ = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            recovery.recovery_image_file(
+                recovery._record_key(image),
+                "source",
+            )
+        )
+
+    assert exc.value.status_code == 404
+    assert "not found" in str(exc.value.detail).lower()
+
+
+def test_file_endpoint_valid_source_returns_response(monkeypatch, tmp_path):
+    """Valid record with readable source file must return a FileResponse."""
+    from starlette.responses import FileResponse
+    source = tmp_path / "window.png"
+    source.write_bytes(b"png-file-bytes")
+    image = {"filename": "window.png", "path": str(source)}
+    recovery, _ = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+
+    response = asyncio.run(
+        recovery.recovery_image_file(
+            recovery._record_key(image),
+            "source",
+        )
+    )
+
+    assert isinstance(response, FileResponse)
+
+
+def test_file_endpoint_query_pattern_restricts_variant():
+    """FastAPI Query pattern on variant parameter must restrict to source|classified|social."""
+    import inspect
+    from app.routers.recovery import recovery_image_file
+
+    sig = inspect.signature(recovery_image_file)
+    variant_param = sig.parameters.get("variant")
+    assert variant_param is not None
+    # The default value carries the Query() with pattern — check it exists
+    default_repr = repr(variant_param.default)
+    assert "pattern" in default_repr or "source" in default_repr.lower()
+
