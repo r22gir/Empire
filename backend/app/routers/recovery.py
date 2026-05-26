@@ -1153,6 +1153,289 @@ async def recovery_clear_stale(image_keys: list[str]):
     return {"cleared_stale": cleared, "total_requested": len(image_keys)}
 
 
+# ── Controlled Reanalysis Queue ─────────────────────────────────────────────────
+
+QUEUE_FILE = "/data/images/recovery_reanalysis_queue.json"
+ALLOWED_LIMITS = {1, 5, 10, 25, 50, 100}
+
+
+def _load_queue_state() -> dict[str, Any]:
+    if os.path.exists(QUEUE_FILE):
+        try:
+            with open(QUEUE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"running": False, "paused": False}
+
+
+def _save_queue_state(state: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(QUEUE_FILE), exist_ok=True)
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    with open(QUEUE_FILE, "w") as f:
+        json.dump(state, f)
+
+
+def _build_queue_candidates(data: dict[str, Any], filters: dict[str, Any]) -> list[dict[str, Any]]:
+    """Select reanalysis candidates: not scrapped, not persisted analyzed, has readable path."""
+    candidates = []
+    for img in data.get("images", []):
+        # Exclude already persisted analyzed
+        if _is_persisted_analyzed(img):
+            continue
+        # Exclude scrapped
+        if img.get("scrapped") or img.get("soft_deleted"):
+            continue
+        # Require a readable path
+        path = img.get("path") or img.get("source_path") or img.get("classified_path") or ""
+        if not path or not os.path.exists(path):
+            continue
+        # Optional filters
+        if filters.get("category"):
+            cat = img.get("category") or img.get("pre_category") or ""
+            if cat != filters["category"]:
+                continue
+        if filters.get("business"):
+            biz = img.get("business") or img.get("pre_tag") or ""
+            if biz != filters["business"]:
+                continue
+        candidates.append(img)
+    return candidates
+
+
+@router.get("/recovery/reanalysis-queue/status")
+async def reanalysis_queue_status():
+    """Return current reanalysis queue state."""
+    state = _load_queue_state()
+    # Derive current persisted_analyzed from index
+    index_data = _load_image_index()
+    persisted_analyzed = sum(1 for img in index_data["images"] if _is_persisted_analyzed(img))
+    return {
+        **state,
+        "persisted_analyzed": persisted_analyzed,
+        "total_indexed": len(index_data["images"]),
+    }
+
+
+class ReanalysisQueueStartRequest(BaseModel):
+    limit: int = 25
+    dry_run: bool = False
+    filters: dict[str, Any] = {
+        "active_only": True,
+        "exclude_scrapped": True,
+        "persisted_analyzed_only": False,
+        "category": None,
+        "business": None,
+        "tag_category": None,
+        "tag": None,
+    }
+
+
+@router.post("/recovery/reanalysis-queue/start")
+async def reanalysis_queue_start(request: ReanalysisQueueStartRequest):
+    """Start a bounded reanalysis queue. Limits: 1, 5, 10, 25, 50, 100."""
+    # Validate limit
+    if request.limit not in ALLOWED_LIMITS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"limit must be one of {sorted(ALLOWED_LIMITS)}. Got {request.limit}.",
+        )
+
+    # Check current state
+    current = _load_queue_state()
+    if current.get("running") and not current.get("paused"):
+        return {"started": False, "reason": "queue already running", "state": current}
+
+    data = _load_image_index()
+    candidates = _build_queue_candidates(data, request.filters)
+    selected = candidates[: request.limit]
+
+    if not selected:
+        return {"started": False, "reason": "no eligible candidates", "state": _load_queue_state()}
+
+    if request.dry_run:
+        return {
+            "dry_run": True,
+            "candidate_count": len(candidates),
+            "selected_count": len(selected),
+            "selected_keys": [_record_key(img) for img in selected],
+            "filters": request.filters,
+            "message": "dry_run — no images analyzed",
+        }
+
+    record_keys = [_record_key(img) for img in selected]
+    state: dict[str, Any] = {
+        "running": True,
+        "paused": False,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "requested_limit": request.limit,
+        "processed_count": 0,
+        "success_count": 0,
+        "failure_count": 0,
+        "skipped_count": 0,
+        "current_record_key": None,
+        "last_success_record_key": None,
+        "last_error": None,
+        "candidate_count": len(candidates),
+        "completed_record_keys": [],
+        "failed_record_keys": [],
+        "image_generation_used": False,
+        "filters": request.filters,
+    }
+    _save_queue_state(state)
+
+    return {
+        "started": True,
+        "candidate_count": len(candidates),
+        "selected_count": len(selected),
+        "selected_keys": record_keys,
+        "filters": request.filters,
+    }
+
+
+@router.post("/recovery/reanalysis-queue/stop")
+async def reanalysis_queue_stop():
+    """Stop the running queue."""
+    state = _load_queue_state()
+    state["running"] = False
+    state["paused"] = False
+    state["last_error"] = "operator stopped"
+    _save_queue_state(state)
+    return {"stopped": True, "state": state}
+
+
+@router.post("/recovery/reanalysis-queue/pause")
+async def reanalysis_queue_pause():
+    """Pause the running queue."""
+    state = _load_queue_state()
+    if not state.get("running"):
+        return {"paused": False, "reason": "queue not running"}
+    state["paused"] = True
+    _save_queue_state(state)
+    return {"paused": True, "state": state}
+
+
+@router.post("/recovery/reanalysis-queue/resume")
+async def reanalysis_queue_resume():
+    """Resume a paused queue."""
+    state = _load_queue_state()
+    if not state.get("running"):
+        return {"resumed": False, "reason": "queue not running"}
+    if not state.get("paused"):
+        return {"resumed": False, "reason": "queue not paused"}
+    state["paused"] = False
+    _save_queue_state(state)
+    return {"resumed": True, "state": state}
+
+
+@router.post("/recovery/reanalysis-queue/process-next")
+async def reanalysis_queue_process_next():
+    """Process one image from the queue. Called internally or by operator trigger."""
+    state = _load_queue_state()
+    if not state.get("running"):
+        return {"processed": False, "reason": "queue not running"}
+    if state.get("paused"):
+        return {"processed": False, "reason": "queue paused"}
+
+    # Load current index
+    data = _load_image_index()
+    all_images = data.get("images", [])
+
+    # Find next unprocessed record in selected keys
+    completed = set(state.get("completed_record_keys", []))
+    failed = set(state.get("failed_record_keys", []))
+    done_keys = completed | failed
+
+    # Get candidate list for this run's filters
+    filters = state.get("filters", {})
+    candidates = _build_queue_candidates(data, filters)
+
+    # Pick first eligible not already processed
+    chosen = None
+    for img in candidates:
+        key = _record_key(img)
+        if key in done_keys:
+            continue
+        # Skip if already persisted analyzed (could have been analyzed elsewhere)
+        if _is_persisted_analyzed(img):
+            done_keys.add(key)
+            continue
+        chosen = img
+        break
+
+    if not chosen:
+        # No more candidates — queue complete
+        state["running"] = False
+        state["last_error"] = None
+        _save_queue_state(state)
+        return {"processed": False, "reason": "queue complete", "state": state}
+
+    key = _record_key(chosen)
+    state["current_record_key"] = key
+    _save_queue_state(state)
+
+    # Check quota
+    if not quota_allow_new():
+        quota = check_quota()
+        state["last_error"] = "cap_reached"
+        state["failure_count"] += 1
+        state["failed_record_keys"].append(key)
+        state["current_record_key"] = None
+        _save_queue_state(state)
+        return {
+            "processed": False,
+            "record_key": key,
+            "status": "cap_reached",
+            "message": f"Quota cap reached. {quota.get('current_window_remaining_for_recoveryforge', 0)} remaining.",
+            "quota": quota,
+        }
+
+    # Resolve path
+    path = (chosen.get("classified_path") or chosen.get("path") or "") if chosen else ""
+    if not path or not os.path.exists(path):
+        state["last_error"] = f"file_not_found: {path}"
+        state["skipped_count"] += 1
+        state["failed_record_keys"].append(key)
+        state["current_record_key"] = None
+        _save_queue_state(state)
+        return {"processed": False, "record_key": key, "status": "file_not_found"}
+
+    # Call MiniMax
+    result = await analyze_image(key, path)
+    _apply_minimax_analysis(chosen, result, path)
+
+    if result.get("analysis_status") == "success":
+        state["success_count"] += 1
+        state["completed_record_keys"].append(key)
+        state["last_success_record_key"] = key
+        state["last_error"] = None
+    else:
+        err = result.get("error", "unknown")
+        state["failure_count"] += 1
+        state["failed_record_keys"].append(key)
+        state["last_error"] = str(err)[:200]
+
+    state["processed_count"] += 1
+    state["current_record_key"] = None
+    _save_queue_state(state)
+
+    # Persist index after each image
+    _save_image_index(data)
+
+    return {
+        "processed": True,
+        "record_key": key,
+        "filename": chosen.get("filename"),
+        "status": result.get("analysis_status"),
+        "success_count": state["success_count"],
+        "failure_count": state["failure_count"],
+        "skipped_count": state["skipped_count"],
+        "processed_count": state["processed_count"],
+        "image_generation_used": False,
+    }
+
+
 @router.get("/recovery/categories")
 async def recovery_list_categories(kind: str | None = None):
     """

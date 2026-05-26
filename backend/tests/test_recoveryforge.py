@@ -925,6 +925,7 @@ def _make_test_client(tmp_path: Path, imgs: list[dict]):
     with open(idx, "w") as f:
         json.dump({"images": imgs}, f)
     rec.INDEX_FILE = str(idx)
+    rec.QUEUE_FILE = str(tmp_path / "queue.json")
     app = FastAPI()
     app.include_router(rec.router)
     return TestClient(app)
@@ -1154,3 +1155,129 @@ def test_persistence_audit_endpoint_reports_truth(tmp_path: Path):
     assert data["needs_reanalysis_candidates"] >= 1
     assert "progress_file" in data
     assert "index_file" in data
+
+
+# ── Reanalysis queue tests ──────────────────────────────────────────────────────
+
+def test_queue_start_rejects_invalid_limit(tmp_path: Path):
+    """limit must be one of allowed values."""
+    client = _make_test_client(tmp_path, [{"filename": "x.jpg", "path": str(tmp_path / "x.jpg")}])
+    resp = client.post("/recovery/reanalysis-queue/start", json={"limit": 7})  # 7 not allowed
+    assert resp.status_code == 400
+    assert "limit must be one of" in resp.json()["detail"]
+
+
+def test_queue_start_dry_run_returns_candidates_without_analysis(tmp_path: Path):
+    """dry_run=true returns candidate list without calling MiniMax."""
+    # Create actual files so path validation passes
+    (tmp_path / "a.jpg").touch()
+    (tmp_path / "b.jpg").touch()
+    (tmp_path / "c.jpg").touch()
+    imgs = [
+        {"filename": "a.jpg", "path": str(tmp_path / "a.jpg")},
+        {"filename": "b.jpg", "path": str(tmp_path / "b.jpg")},
+        {"filename": "c.jpg", "path": str(tmp_path / "c.jpg")},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.post("/recovery/reanalysis-queue/start", json={"limit": 5, "dry_run": True})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dry_run"] is True
+    assert data["selected_count"] == 3  # only 3 candidates exist, all selected with limit=5
+    assert len(data["selected_keys"]) == 3
+    assert "candidate_count" in data
+    assert "selected_keys" in data
+
+
+def test_queue_start_bounded_selection(tmp_path: Path):
+    """limit is bounded — only up to limit candidates selected."""
+    # Create actual files so path validation passes
+    for c in "abcdefghij":
+        (tmp_path / f"{c}.jpg").touch()
+    imgs = [{"filename": f"{c}.jpg", "path": str(tmp_path / f"{c}.jpg")} for c in "abcdefghij"]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.post("/recovery/reanalysis-queue/start", json={"limit": 5, "dry_run": True})
+    assert resp.status_code == 200
+    assert resp.json()["selected_count"] == 5
+
+
+def test_queue_candidates_exclude_persisted_analyzed(tmp_path: Path):
+    """Records already persisted analyzed are excluded from candidates."""
+    # Create actual files so path validation passes
+    (tmp_path / "a.jpg").touch()
+    (tmp_path / "b.jpg").touch()
+    imgs = [
+        {"filename": "a.jpg", "path": str(tmp_path / "a.jpg"),
+         "description": "A detailed description of a sofa in a workshop with tools and workbench.",
+         "minimax_analysis": {"status": "success"}, "analyzed_at": "2026-05-26T10:00:00+00:00",
+         "confidence": 0.85, "classified_by": "minimax-mmx_vision"},
+        {"filename": "b.jpg", "path": str(tmp_path / "b.jpg")},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.post("/recovery/reanalysis-queue/start", json={"limit": 5, "dry_run": True})
+    assert resp.status_code == 200
+    # a.jpg is already persisted analyzed, only b.jpg should be selected
+    assert resp.json()["selected_count"] == 1
+    assert "a.jpg" not in resp.json()["selected_keys"]
+
+
+def test_queue_candidates_exclude_scrapped(tmp_path: Path):
+    """Scrapped records are excluded from candidates."""
+    # Create actual files so path validation passes
+    (tmp_path / "a.jpg").touch()
+    (tmp_path / "b.jpg").touch()
+    imgs = [
+        {"filename": "a.jpg", "path": str(tmp_path / "a.jpg"), "scrapped": True},
+        {"filename": "b.jpg", "path": str(tmp_path / "b.jpg")},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.post("/recovery/reanalysis-queue/start", json={"limit": 5, "dry_run": True})
+    assert resp.status_code == 200
+    assert resp.json()["selected_count"] == 1
+    assert "a.jpg" not in resp.json()["selected_keys"]
+
+
+def test_queue_status_returns_state(tmp_path: Path):
+    """Queue status endpoint returns current state plus persisted_analyzed."""
+    client = _make_test_client(tmp_path, [{"filename": "x.jpg", "path": str(tmp_path / "x.jpg")}])
+    resp = client.get("/recovery/reanalysis-queue/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "running" in data
+    assert "paused" in data
+    assert "persisted_analyzed" in data
+    assert "total_indexed" in data
+
+
+def test_queue_stop_clears_running(tmp_path: Path):
+    """Stop endpoint sets running=False."""
+    client = _make_test_client(tmp_path, [{"filename": "x.jpg", "path": str(tmp_path / "x.jpg")}])
+    resp = client.post("/recovery/reanalysis-queue/stop", json={})
+    assert resp.status_code == 200
+    assert resp.json()["stopped"] is True
+    assert resp.json()["state"]["running"] is False
+
+
+def test_queue_pause_resume_transitions(tmp_path: Path):
+    """Pause sets paused=True; resume clears it."""
+    # Create actual image files so path validation passes
+    (tmp_path / "x.jpg").touch()
+    client = _make_test_client(tmp_path, [{"filename": "x.jpg", "path": str(tmp_path / "x.jpg")}])
+    # First start the queue
+    client.post("/recovery/reanalysis-queue/start", json={"limit": 1})
+    pause_resp = client.post("/recovery/reanalysis-queue/pause", json={})
+    assert pause_resp.status_code == 200
+    assert pause_resp.json().get("paused") is True
+    resume_resp = client.post("/recovery/reanalysis-queue/resume", json={})
+    assert resume_resp.status_code == 200
+    assert resume_resp.json().get("resumed") is True
+    assert resume_resp.json()["state"]["paused"] is False
+
+
+def test_queue_process_next_requires_running_state(tmp_path: Path):
+    """process-next fails if queue not started."""
+    client = _make_test_client(tmp_path, [{"filename": "x.jpg", "path": str(tmp_path / "x.jpg")}])
+    resp = client.post("/recovery/reanalysis-queue/process-next", json={})
+    assert resp.status_code == 200
+    assert resp.json()["processed"] is False
+    assert resp.json()["reason"] == "queue not running"
