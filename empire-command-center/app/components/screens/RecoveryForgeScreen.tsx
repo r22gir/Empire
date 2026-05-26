@@ -157,7 +157,6 @@ export default function RecoveryForgeScreen() {
   const [limit, setLimit] = useState(72);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [serviceUp, setServiceUp] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailMessage, setDetailMessage] = useState<string | null>(null);
@@ -201,13 +200,6 @@ export default function RecoveryForgeScreen() {
       if (res.ok) setStatus(await res.json());
     } catch {
       // Backend status panel remains best-effort.
-    }
-
-    try {
-      const res = await fetch('http://localhost:3077', { signal: AbortSignal.timeout(3000) });
-      setServiceUp(res.ok || res.status === 404);
-    } catch {
-      setServiceUp(false);
     }
     setLoading(false);
   }, []);
@@ -463,9 +455,9 @@ export default function RecoveryForgeScreen() {
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selected ? 'minmax(0, 1fr) 420px' : '1fr', gap: 0, minHeight: 0, flex: 1 }}>
-        <div style={{ overflowY: 'auto', padding: 18 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: selected ? 'minmax(0, 1fr) minmax(340px, 400px)' : '1fr', gap: 12, minHeight: 0, flex: 1 }}>
+        <div style={{ overflowY: 'auto', padding: 18, minWidth: 0 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
             {[
               ['Analyzed', completeness.analyzed],
               ['Remaining', completeness.remaining],
@@ -556,7 +548,6 @@ export default function RecoveryForgeScreen() {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
             <button onClick={() => setOffset(Math.max(0, offset - limit))} disabled={offset === 0} style={pageButtonStyle}><ChevronLeft size={14} /> Previous</button>
-            <div style={{ fontSize: 11, color: '#777' }}>External UI on port 3077: {serviceUp ? 'reachable' : 'not running'}. This workbench uses the loaded backend router.</div>
             <button onClick={() => setOffset(offset + limit)} disabled={!hasMore} style={pageButtonStyle}>Next <ChevronRight size={14} /></button>
           </div>
         </div>
