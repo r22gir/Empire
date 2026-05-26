@@ -15,6 +15,112 @@ from pathlib import Path
 from typing import Any
 
 import re
+
+# ── Asset Intelligence Tag Dictionary ───────────────────────────────────────
+
+TAG_DICTIONARY: dict[str, str] = {
+    # Objects — furniture
+    "chair": "object", "furniture": "object", "sofa": "object", "couch": "object",
+    "bench": "object", "cushion": "object", "pillow": "object", "table": "object",
+    "desk": "object", "cabinet": "object", "shelf": "object", "shelves": "object",
+    "frame": "object", "mirror": "object", "lamp": "object", "lighting": "object",
+    "bed": "object", "mattress": "object", "dining-table": "object",
+    # Objects — window treatments (workroom core domain)
+    "drapery": "object", "draperies": "object", "curtain": "object", "curtains": "object",
+    "blind": "object", "blinds": "object", "shade": "object", "shades": "object",
+    "window-treatment": "object", "valance": "object", "cornice": "object",
+    "roman-shade": "object", "cellular-shade": "object", "roller-shade": "object",
+    "upholstery": "object", "fabric": "object", "sheer": "object",
+    "curtain-rod": "object", "curtain-track": "object", "bracket": "object",
+    # Materials
+    "wood": "material", "oak": "material", "pine": "material", "walnut": "material",
+    "plywood": "material", "mdf": "material", "veneer": "material",
+    "metal": "material", "steel": "material", "aluminum": "material",
+    "glass": "material", "mirror": "material", "acrylic": "material",
+    "leather": "material", "fabric": "material", "velvet": "material",
+    "linen": "material", "cotton": "material", "silk": "material",
+    "ceramic": "material", "tile": "material", "marble": "material",
+    "granite": "material", "stone": "material", "concrete": "material",
+    "bamboo": "material", "rattan": "material", "wicker": "material",
+    # Rooms
+    "living-room": "room", "living room": "room", "bedroom": "room",
+    "kitchen": "room", "bathroom": "room", "office": "room", "workshop": "room",
+    "workroom": "room", "dining-room": "room", "dining room": "room",
+    "garage": "room", "basement": "room", "nursery": "room", "studio": "room",
+    "garden": "room", "patio": "room", "balcony": "room", "exterior": "room",
+    # People
+    "person": "people", "people": "people", "man": "people", "woman": "people",
+    "male": "people", "female": "people", "child": "people", "group": "people",
+    "professional": "people", "designer": "people", "couple": "people",
+    "family": "people", "portrait": "people",
+    # Pets
+    "dog": "pet", "puppy": "pet", "cat": "pet", "kitten": "pet",
+    "bird": "pet", "fish": "pet", "pet": "pet",
+    # Styles
+    "modern": "style", "contemporary": "style", "traditional": "style",
+    "classic": "style", "vintage": "style", "antique": "style", "retro": "style",
+    "minimalist": "style", "minimal": "style", "scandinavian": "style",
+    "industrial": "style", "rustic": "style", "farmhouse": "style",
+    "bohemian": "style", "boho": "style", "coastal": "style", "beach": "style",
+    "mid-century": "style", "art-deco": "style",
+    # Campaigns
+    "website-gallery": "campaign", "social-ad": "campaign", "social-media": "campaign",
+    "facebook": "campaign", "instagram": "campaign", "pinterest": "campaign",
+    "product-listing": "campaign", "lookbook": "campaign", "catalog": "campaign",
+    "hero-image": "campaign", "banner": "campaign", "before-after": "campaign",
+}
+
+
+def _slugify_tag(value: str) -> str:
+    """Normalize a tag value to a safe lowercase slug."""
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]", "-", value.lower())).strip("-")
+
+
+def _extract_asset_tags(text: str) -> dict[str, list[str]]:
+    """
+    Deterministically extract asset intelligence tags from description text.
+    No AI call — uses substring word-in-dictionary lookup.
+    """
+    lower = text.lower()
+    found: dict[str, set[str]] = {
+        "object_tags": set(),
+        "room_tags": set(),
+        "material_tags": set(),
+        "style_tags": set(),
+        "people_tags": set(),
+        "pet_tags": set(),
+        "campaign_tags": set(),
+        "business_domains": set(),
+        "asset_tags": set(),
+    }
+    for term, kind in TAG_DICTIONARY.items():
+        if term in lower:
+            cat = f"{kind}_tags" if kind != "business_domain" else "business_domains"
+            if cat in found:
+                found[cat].add(term)
+
+    # Post-process: drapery/curtain/blind/shade → window-treatment
+    if found["object_tags"] & {"drapery", "draperies", "curtain", "curtains", "blind", "blinds", "shade", "shades"}:
+        found["object_tags"].add("window-treatment")
+
+    # Post-process: infer business domains
+    workroom_terms = {"drapery", "draperies", "curtain", "curtains", "blind", "blinds", "shade", "shades", "window-treatment", "upholstery", "fabric", "sheer", "valance", "cornice", "roman-shade", "cellular-shade", "roller-shade", "curtain-rod", "curtain-track", "bracket", "cushion", "pillow"}
+    woodcraft_terms = {"wood", "oak", "pine", "walnut", "plywood", "mdf", "veneer", "cabinet", "shelf", "shelves", "table", "desk", "frame", "rattan", "wicker", "bamboo"}
+    if found["object_tags"] & workroom_terms:
+        found["business_domains"].add("empire-workroom")
+    if found["object_tags"] & woodcraft_terms:
+        found["business_domains"].add("woodcraft")
+    if found["campaign_tags"]:
+        found["business_domains"].add("socialforge")
+
+    return {cat: sorted(s) for cat, s in found.items()}
+
+
+def _apply_asset_tags(img: dict[str, Any], text: str) -> None:
+    """Extract and apply asset tag arrays to an image record."""
+    tags = _extract_asset_tags(text)
+    for cat, tag_list in tags.items():
+        img[cat] = tag_list
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -245,6 +351,15 @@ def _public_image_item(img: dict[str, Any]) -> dict[str, Any]:
         "needs_manual_review": bool(img.get("minimax_analysis", {}).get("needs_manual_review", False)),
         "analyzed_at": img.get("analyzed_at") or img.get("minimax_analysis", {}).get("timestamp") or img.get("classified_at"),
         "last_error": _last_analysis_error(img),
+        "object_tags": img.get("object_tags", []),
+        "room_tags": img.get("room_tags", []),
+        "material_tags": img.get("material_tags", []),
+        "style_tags": img.get("style_tags", []),
+        "people_tags": img.get("people_tags", []),
+        "pet_tags": img.get("pet_tags", []),
+        "campaign_tags": img.get("campaign_tags", []),
+        "business_domains": img.get("business_domains", []),
+        "asset_tags": img.get("asset_tags", []),
     }
 
 
@@ -305,6 +420,7 @@ def _apply_minimax_analysis(img: dict[str, Any], result: dict[str, Any], analyze
     if description:
         img["description"] = description
         img["generated_description"] = description
+        _apply_asset_tags(img, description)
 
     route = result.get("business_route")
     if route and route not in {"unknown-work", "general-business"}:
@@ -376,6 +492,8 @@ async def recovery_images(
     status: str | None = None,
     social_ready: bool | None = None,
     min_confidence: float | None = None,
+    tag_category: str | None = None,
+    tag: str | None = None,
     sort: str = "classified_at_desc",
     analyzed_only: bool = True,
     limit: int = Query(default=48, ge=1, le=120),
@@ -411,6 +529,12 @@ async def recovery_images(
         images = [img for img in images if bool(img.get("social_ready")) is social_ready]
     if min_confidence is not None:
         images = [img for img in images if float(img.get("confidence") or 0) >= min_confidence]
+    if tag_category and tag:
+        tag_slug = _slugify_tag(tag)
+        images = [
+            img for img in images
+            if tag_slug in [_slugify_tag(t) for t in img.get(tag_category, [])]
+        ]
     if q:
         needle = q.lower()
         images = [

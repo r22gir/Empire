@@ -838,3 +838,77 @@ def test_scrap_invalid_record_returns_404(monkeypatch, tmp_path):
         ))
     assert exc.value.status_code == 404
 
+
+# ---------------------------------------------------------------------------
+# Phase 2B-A: Deterministic tag extraction tests
+# ---------------------------------------------------------------------------
+
+def test_slugify_tag_basic():
+    """_slugify_tag converts spaces/special chars to hyphens and lowercases."""
+    from app.routers.recovery import _slugify_tag
+    assert _slugify_tag("Hello World!") == "hello-world"
+    assert _slugify_tag("Velvet & Silk") == "velvet-silk"
+    assert _slugify_tag("  Modern  ") == "modern"
+
+
+def test_slugify_tag_special_chars():
+    """_slugify_tag strips non-alphanumeric except hyphens."""
+    from app.routers.recovery import _slugify_tag
+    assert _slugify_tag("Scandinavian Design") == "scandinavian-design"
+    assert _slugify_tag("Upholstery (fabric)") == "upholstery-fabric"
+    assert _slugify_tag("living-room") == "living-room"
+
+
+def test_extract_asset_tags_single_category():
+    """_extract_asset_tags finds object terms in description text."""
+    from app.routers.recovery import _extract_asset_tags
+    tags = _extract_asset_tags("A beautiful velvet sofa with wooden legs")
+    assert "velvet" in tags["material_tags"]
+    assert "sofa" in tags["object_tags"] or "chair" in tags["object_tags"]
+    assert "wood" in tags["material_tags"]
+
+
+def test_extract_asset_tags_business_domain_workroom():
+    """Drapery/curtain/blind/shade terms infer empire-workroom domain."""
+    from app.routers.recovery import _extract_asset_tags
+    tags = _extract_asset_tags("Window treatment with drapery and curtain valance")
+    assert "empire-workroom" in tags["business_domains"]
+    assert "drapery" in tags["object_tags"]
+    assert "window-treatment" in tags["object_tags"]
+
+
+def test_extract_asset_tags_business_domain_woodcraft():
+    """Wood/material terms infer woodcraft domain."""
+    from app.routers.recovery import _extract_asset_tags
+    tags = _extract_asset_tags("Custom oak cabinet with wood grain finish")
+    assert "woodcraft" in tags["business_domains"]
+    assert "oak" in tags["material_tags"]
+
+
+def test_extract_asset_tags_post_process_window_treatment():
+    """Drapery/curtain/blind/shade post-process to window-treatment slug."""
+    from app.routers.recovery import _extract_asset_tags
+    tags = _extract_asset_tags("Sheer curtains and wooden blinds")
+    assert "window-treatment" in tags["object_tags"]
+
+
+def test_apply_asset_tags_writes_all_tag_arrays():
+    """_apply_asset_tags writes all 9 tag arrays onto the image dict."""
+    from app.routers.recovery import _apply_asset_tags
+    img = {}
+    _apply_asset_tags(img, "Modern velvet sofa in a Scandinavian living room with a dog")
+    assert "object_tags" in img
+    assert "material_tags" in img
+    assert "room_tags" in img
+    assert "pet_tags" in img
+    assert "style_tags" in img
+    assert "business_domains" in img
+    assert "asset_tags" in img
+    assert "people_tags" in img
+    assert "campaign_tags" in img
+    assert img["object_tags"] == ["sofa"]
+    assert img["material_tags"] == ["velvet"]
+    assert img["room_tags"] == ["living room"]
+    assert img["pet_tags"] == ["dog"]
+    assert img["style_tags"] == ["modern", "scandinavian"]
+
