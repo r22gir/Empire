@@ -587,3 +587,130 @@ def test_file_endpoint_query_pattern_restricts_variant():
     default_repr = repr(variant_param.default)
     assert "pattern" in default_repr or "source" in default_repr.lower()
 
+
+def _categories_fixture(monkeypatch, tmp_path):
+    import app.routers.recovery as recovery
+    cats_file = tmp_path / "recovery_categories.json"
+    monkeypatch.setattr(recovery, "CATEGORIES_FILE", str(cats_file))
+    return recovery, cats_file
+
+
+def test_list_categories_returns_builtins(monkeypatch, tmp_path):
+    """GET /recovery/categories returns builtin category and business list."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    result = asyncio.run(recovery.recovery_list_categories())
+    assert "categories" in result
+    slugs = [c["slug"] for c in result["categories"]]
+    assert "empire-workroom" in slugs
+    assert "woodcraft" in slugs
+    assert "misc" in slugs
+    # builtin entries have source=builtin
+    builtin = [c for c in result["categories"] if c["source"] == "builtin"]
+    assert len(builtin) >= 6
+
+
+def test_list_categories_filter_by_kind(monkeypatch, tmp_path):
+    """GET /recovery/categories?kind=category returns only categories."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    result = asyncio.run(recovery.recovery_list_categories(kind="category"))
+    for c in result["categories"]:
+        assert c["kind"] == "category"
+
+
+def test_post_category_creates_custom(monkeypatch, tmp_path):
+    """POST /recovery/categories creates a custom category entry."""
+    recovery, cats_file = _categories_fixture(monkeypatch, tmp_path)
+    result = asyncio.run(recovery.recovery_create_category(recovery.CategoryCreate(label="Test Custom Category")))
+    assert result["status"] == "created"
+    assert result["entry"]["slug"] == "test-custom-category"
+    assert result["entry"]["label"] == "Test Custom Category"
+    assert result["entry"]["source"] == "custom"
+    assert cats_file.exists()
+
+
+def test_post_category_rejects_duplicate_case_insensitive(monkeypatch, tmp_path):
+    """Creating a category with the same label (different case) returns 409."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    asyncio.run(recovery.recovery_create_category(recovery.CategoryCreate(label="My Fabric Photos")))
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(recovery.recovery_create_category(recovery.CategoryCreate(label="my fabric photos")))
+    assert exc_info.value.status_code == 409
+
+
+def test_post_category_rejects_empty_label(monkeypatch, tmp_path):
+    """Empty label is rejected with 400."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(recovery.recovery_create_category(recovery.CategoryCreate(label="   ")))
+    assert exc_info.value.status_code == 400
+
+
+def test_post_category_rejects_builtin_slug(monkeypatch, tmp_path):
+    """Creating a category matching a builtin slug returns 409."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(recovery.recovery_create_category(recovery.CategoryCreate(label="misc")))
+    assert exc_info.value.status_code == 409
+
+
+def test_delete_category_removes_custom(monkeypatch, tmp_path):
+    """DELETE /recovery/categories/{slug} removes a custom entry."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    asyncio.run(recovery.recovery_create_category(recovery.CategoryCreate(label="Temporary Tag")))
+    delete_result = asyncio.run(recovery.recovery_delete_category("temporary-tag"))
+    assert delete_result["status"] == "deleted"
+    # verify it's gone
+    result = asyncio.run(recovery.recovery_list_categories())
+    slugs = [c["slug"] for c in result["categories"]]
+    assert "temporary-tag" not in slugs
+
+
+def test_delete_category_forbidden_for_builtin(monkeypatch, tmp_path):
+    """Deleting a builtin category returns 403."""
+    recovery, _ = _categories_fixture(monkeypatch, tmp_path)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(recovery.recovery_delete_category("misc"))
+    assert exc_info.value.status_code == 403
+
+
+def test_review_with_custom_category_preserves_description(monkeypatch, tmp_path):
+    """Reclassifying a selected image with a custom category preserves generated_description."""
+    import app.routers.recovery as recovery_module
+
+    cats_file = tmp_path / "recovery_categories.json"
+    monkeypatch.setattr(recovery_module, "CATEGORIES_FILE", str(cats_file))
+
+    index_file = tmp_path / "presorted_inventory.json"
+    source = tmp_path / "photo.png"
+    source.write_bytes(b"png")
+    image = {
+        "filename": "photo.png",
+        "path": str(source),
+        "business": "empire-workroom",
+        "category": "misc",
+        "generated_description": "A set of curtain fabric samples in neutral tones.",
+        "minimax_analysis": {"description": "A set of curtain fabric samples in neutral tones."},
+    }
+    index_file.write_text(json.dumps({"images": [image], "stats": {}}))
+    monkeypatch.setattr(recovery_module, "INDEX_FILE", str(index_file))
+    monkeypatch.setattr(recovery_module, "CLASSIFIED_DIR", str(tmp_path / "classified"))
+    monkeypatch.setattr(recovery_module, "SOCIAL_DIR", str(tmp_path / "social"))
+    monkeypatch.setattr(recovery_module, "quota_allow_new", lambda: True)
+
+    # Create a custom category
+    asyncio.run(recovery_module.recovery_create_category(recovery_module.CategoryCreate(label="fabric-samples", kind="category")))
+
+    # Reclassify image to custom category
+    record_key = recovery_module._record_key(image)
+    response = asyncio.run(
+        recovery_module.recovery_review_image(
+            record_key,
+            recovery_module.RecoveryImageReview(category="fabric-samples"),
+        )
+    )
+    assert response["status"] == "updated"
+    saved = json.loads(index_file.read_text())["images"][0]
+    assert saved["category"] == "fabric-samples"
+    assert saved["generated_description"] == "A set of curtain fabric samples in neutral tones."
+    assert saved["minimax_analysis"]["description"] == "A set of curtain fabric samples in neutral tones."
+

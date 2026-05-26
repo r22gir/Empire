@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import re
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -30,6 +31,48 @@ INDEX_FILE = "/data/images/presorted_inventory.json"
 CLASSIFIED_DIR = "/data/images/classified"
 SOCIAL_DIR = "/data/images/social-assets"
 TOTAL_IMAGES = 18472  # Known total from the Layer 3 scan
+
+CATEGORIES_FILE = "/data/images/recovery_categories.json"
+
+BUILTIN_BUSINESSES = ["empire-workroom", "woodcraft", "general", "personal", "ambiguous", "unknown"]
+BUILTIN_CATEGORIES = ["misc", "raw-materials", "finished-products", "tools", "workspace", "inspiration", "reference"]
+
+
+class CategoryEntry(BaseModel):
+    slug: str
+    label: str
+    kind: str = "category"  # "category" or "business"
+    source: str = "custom"  # "builtin" or "custom"
+    created_at: str | None = None
+
+
+class CategoryCreate(BaseModel):
+    label: str
+    kind: str = "category"
+
+
+def _load_categories() -> dict[str, Any]:
+    if os.path.exists(CATEGORIES_FILE):
+        try:
+            with open(CATEGORIES_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"custom_categories": [], "custom_businesses": []}
+
+
+def _save_categories(data: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(CATEGORIES_FILE), exist_ok=True)
+    with open(CATEGORIES_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def _slugify(label: str) -> str:
+    return re.sub(r"[^a-z0-9\-]", "-", label.lower()).strip("-")
+
+
+def _normalize_label(label: str) -> str:
+    return re.sub(r"\s+", " ", label.strip())
 
 
 class RecoveryImageReview(BaseModel):
@@ -756,3 +799,92 @@ async def recovery_clear_stale(image_keys: list[str]):
             cleared += 1
     _save_image_index(data)
     return {"cleared_stale": cleared, "total_requested": len(image_keys)}
+
+
+@router.get("/recovery/categories")
+async def recovery_list_categories(kind: str | None = None):
+    """
+    List all categories and businesses (builtin + custom).
+    Optionally filter by kind: 'category' or 'business'.
+    """
+    data = _load_categories()
+    now = datetime.now(timezone.utc).isoformat()
+
+    result = []
+
+    if not kind or kind == "category":
+        for slug in sorted(BUILTIN_CATEGORIES):
+            result.append({"slug": slug, "label": slug, "kind": "category", "source": "builtin", "created_at": None, "usage_count": 0})
+        for entry in data.get("custom_categories", []):
+            result.append({**entry, "source": "custom", "created_at": entry.get("created_at") or now})
+
+    if not kind or kind == "business":
+        for slug in sorted(BUILTIN_BUSINESSES):
+            result.append({"slug": slug, "label": slug, "kind": "business", "source": "builtin", "created_at": None, "usage_count": 0})
+        for entry in data.get("custom_businesses", []):
+            result.append({**entry, "source": "custom", "created_at": entry.get("created_at") or now})
+
+    def sort_key(item):
+        source_order = 0 if item["source"] == "builtin" else 1
+        return (source_order, item["label"].lower())
+    result.sort(key=sort_key)
+
+    return {"categories": result}
+
+
+@router.post("/recovery/categories")
+async def recovery_create_category(create: CategoryCreate):
+    """
+    Add a custom category or business.
+    Rejects duplicates (case-insensitive) and empty/dangerous values.
+    """
+    label = _normalize_label(create.label)
+    if not label:
+        raise HTTPException(status_code=400, detail="Label cannot be empty")
+    if len(label) > 80:
+        raise HTTPException(status_code=400, detail="Label too long (max 80 chars)")
+
+    slug = _slugify(label)
+    if not slug:
+        raise HTTPException(status_code=400, detail="Label must contain alphanumeric characters")
+    if slug in BUILTIN_CATEGORIES or slug in BUILTIN_BUSINESSES:
+        raise HTTPException(status_code=409, detail=f"'{label}' is a builtin and cannot be recreated")
+
+    kind = create.kind or "category"
+    if kind not in ("category", "business"):
+        raise HTTPException(status_code=400, detail="kind must be 'category' or 'business'")
+
+    data = _load_categories()
+    collection = "custom_categories" if kind == "category" else "custom_businesses"
+
+    # Case-insensitive duplicate check
+    for entry in data.get(collection, []):
+        if entry["label"].lower() == label.lower():
+            raise HTTPException(status_code=409, detail=f"'{label}' already exists as a {kind}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    entry = {"slug": slug, "label": label, "kind": kind, "source": "custom", "created_at": now}
+    data.setdefault(collection, []).append(entry)
+    _save_categories(data)
+
+    return {"status": "created", "entry": entry}
+
+
+@router.delete("/recovery/categories/{slug}")
+async def recovery_delete_category(slug: str):
+    """
+    Delete a custom category or business by slug.
+    Only custom (non-builtin) entries can be deleted.
+    """
+    if slug in BUILTIN_CATEGORIES or slug in BUILTIN_BUSINESSES:
+        raise HTTPException(status_code=403, detail="Cannot delete builtin entries")
+
+    data = _load_categories()
+    for collection in ("custom_categories", "custom_businesses"):
+        original = len(data.get(collection, []))
+        data[collection] = [e for e in data.get(collection, []) if e["slug"] != slug]
+        if len(data[collection]) < original:
+            _save_categories(data)
+            return {"status": "deleted", "slug": slug}
+
+    raise HTTPException(status_code=404, detail=f"Category '{slug}' not found")

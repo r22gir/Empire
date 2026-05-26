@@ -145,6 +145,9 @@ export default function RecoveryForgeScreen() {
   const [actionLoading, setActionLoading] = useState(false);
   const [detailActionLoading, setDetailActionLoading] = useState(false);
   const [detailMessage, setDetailMessage] = useState<string | null>(null);
+  const [customCategories, setCustomCategories] = useState<{slug: string; label: string; kind: string; source: string}[]>([]);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   const apiBase = API.replace('/api/v1', '');
 
@@ -194,11 +197,24 @@ export default function RecoveryForgeScreen() {
     }
   }, []);
 
+  const fetchCustomCategories = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/recovery/categories`);
+      if (res.ok) {
+        const data = await res.json();
+        setCustomCategories(data.categories || []);
+      }
+    } catch {
+      // categories load best-effort
+    }
+  }, []);
+
   useEffect(() => {
     fetchStatus();
+    fetchCustomCategories();
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
-  }, [fetchStatus]);
+  }, [fetchStatus, fetchCustomCategories]);
 
   useEffect(() => {
     fetchImages().catch(() => {});
@@ -249,6 +265,31 @@ export default function RecoveryForgeScreen() {
     }
   };
 
+  const createCustomCategory = async () => {
+    const label = newCategoryName.trim();
+    if (!label) return;
+    setDetailActionLoading(true);
+    try {
+      const res = await fetch(`${API}/recovery/categories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label, kind: 'category' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await fetchCustomCategories();
+        setAddingCategory(false);
+        setNewCategoryName('');
+        if (selected) updateSelected('category', data.entry.label);
+        setDetailMessage(`Category '${label}' created and selected.`);
+      } else {
+        setDetailMessage(`Failed to create category: ${typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)}`);
+      }
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
   const updateSelected = (key: 'business' | 'category', value: string) => {
     if (!selected) return;
     setSelected({ ...selected, image: { ...selected.image, [key]: value } });
@@ -287,7 +328,9 @@ export default function RecoveryForgeScreen() {
   }
 
   const shownEnd = Math.min(offset + images.length, imageTotal);
-  const categories = Object.keys(facets.category || {}).sort();
+  const facetCategories = Object.keys(facets.category || {}).sort();
+  const customCategoryLabels = customCategories.filter(c => c.kind === 'category').map(c => c.label);
+  const allCategoryOptions = Array.from(new Set([...facetCategories, ...customCategoryLabels])).sort();
 
   const classifierLabel = (classified_by: string | undefined) => {
     if (!classified_by || classified_by === 'none') return 'Unclassified';
@@ -369,7 +412,7 @@ export default function RecoveryForgeScreen() {
               </select>
               <select value={categoryFilter} onChange={e => resetPaging(() => setCategoryFilter(e.target.value))} style={selectStyle}>
                 <option value="all">All categories</option>
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                {allCategoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <select value={statusFilter} onChange={e => resetPaging(() => setStatusFilter(e.target.value))} style={selectStyle}>
                 {STATUS_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
@@ -476,7 +519,25 @@ export default function RecoveryForgeScreen() {
                     <select value={selected.image.business} onChange={e => updateSelected('business', e.target.value)} style={selectStyle}>
                       {['empire-workroom', 'woodcraft', 'general', 'personal', 'ambiguous'].map(v => <option key={v} value={v}>{v}</option>)}
                     </select>
-                    <input value={selected.image.category || ''} onChange={e => updateSelected('category', e.target.value)} placeholder="category" style={selectStyle} />
+                    {addingCategory ? (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <input
+                          value={newCategoryName}
+                          onChange={e => setNewCategoryName(e.target.value)}
+                          placeholder="new category name"
+                          style={{ ...selectStyle, flex: 1 }}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); createCustomCategory(); } if (e.key === 'Escape') { setAddingCategory(false); setNewCategoryName(''); } }}
+                          autoFocus
+                        />
+                        <button onClick={createCustomCategory} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#16a34a', color: '#fff', whiteSpace: 'nowrap' }}>Add</button>
+                        <button onClick={() => { setAddingCategory(false); setNewCategoryName(''); }} style={{ ...actionButtonStyle }}>✕</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <input value={selected.image.category || ''} onChange={e => updateSelected('category', e.target.value)} placeholder="category" style={{ ...selectStyle, flex: 1 }} />
+                        <button onClick={() => { setAddingCategory(true); setNewCategoryName(''); }} style={{ ...actionButtonStyle, fontSize: 11, padding: '8px 6px' }}>+ Add</button>
+                      </div>
+                    )}
                     <button onClick={reanalyzeSelected} disabled={detailActionLoading} style={{ ...actionButtonStyle, gridColumn: '1 / -1', background: '#1f2937', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><RefreshCw size={13} /> Re-analyze selected</button>
                     <button onClick={() => reviewSelected('approved')} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#16a34a', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><Check size={13} /> Approve</button>
                     <button onClick={() => reviewSelected('rejected')} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#dc2626', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><X size={13} /> Reject</button>
