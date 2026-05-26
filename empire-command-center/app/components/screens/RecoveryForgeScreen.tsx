@@ -73,6 +73,7 @@ interface RecoveryImage {
   in_social: boolean;
   reviewed: boolean;
   review_status: string;
+  scrapped?: boolean;
   confidence?: number;
   classified_by: string;
   classified_path?: string;
@@ -110,6 +111,8 @@ const STATUS_FILTERS = [
   { value: 'low_confidence', label: 'Low confidence' },
   { value: 'reviewed', label: 'Reviewed' },
   { value: 'unreviewed', label: 'Unreviewed' },
+  { value: 'active', label: 'Active only' },
+  { value: 'scrapped', label: 'Scrapped' },
 ];
 
 function confidenceLabel(confidence: number | undefined) {
@@ -148,6 +151,10 @@ export default function RecoveryForgeScreen() {
   const [customCategories, setCustomCategories] = useState<{slug: string; label: string; kind: string; source: string}[]>([]);
   const [addingCategory, setAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [scrapDialogOpen, setScrapDialogOpen] = useState(false);
+  const [scrapMode, setScrapMode] = useState<'soft_delete' | 'delete_classified' | 'delete_all_copies'>('soft_delete');
+  const [scrapReason, setScrapReason] = useState('unrelated');
+  const [scrapConfirmText, setScrapConfirmText] = useState('');
 
   const apiBase = API.replace('/api/v1', '');
 
@@ -284,6 +291,37 @@ export default function RecoveryForgeScreen() {
         setDetailMessage(`Category '${label}' created and selected.`);
       } else {
         setDetailMessage(`Failed to create category: ${typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)}`);
+      }
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
+  const scrapSelected = async () => {
+    if (!selected) return;
+    setDetailActionLoading(true);
+    setDetailMessage(null);
+    try {
+      const payload: Record<string, unknown> = { mode: scrapMode, reason: scrapReason };
+      if (scrapMode === 'delete_all_copies') {
+        payload.confirm = true;
+        payload.confirm_text = scrapConfirmText;
+      }
+      const res = await fetch(`${API}/recovery/images/${selected.image.record_key}/scrap`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'scrapped') {
+        setScrapDialogOpen(false);
+        setScrapConfirmText('');
+        await loadDetail(data.image);
+        await fetchImages();
+        setDetailMessage(`Image scrapped (${scrapMode}).`);
+      } else {
+        const err = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+        setDetailMessage(`Scrap failed: ${err}`);
       }
     } finally {
       setDetailActionLoading(false);
@@ -477,21 +515,16 @@ export default function RecoveryForgeScreen() {
                 {selected.image.image_url && <img src={`${apiBase}${selected.image.image_url}`} alt={selected.image.filename} style={{ width: '100%', maxHeight: 360, objectFit: 'contain', background: '#f5f3ef', borderRadius: 8, border: '1px solid #ece8e0' }} />}
                 <h3 style={{ fontSize: 15, fontWeight: 900, margin: '12px 0 6px', wordBreak: 'break-word' }}>{selected.image.filename}</h3>
                 <TagRow img={selected.image} />
-                {(() => {
-                  const conf = confidenceLabel(selected.image.confidence);
-                  return (
+                {(() => { const c = confidenceLabel(selected.image.confidence); return c ? (
                     <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 10, color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Classifier:</span>
                       <span style={{ fontSize: 11, color: '#333' }}>{classifierLabel(selected.image.classified_by)}</span>
-                      {conf && (
-                        <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 6, background: '#eff6ff', color: conf.color, fontWeight: 800 }}>
-                          {conf.pct}% confidence ({conf.level})
-                        </span>
-                      )}
+                      <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 6, background: '#eff6ff', color: c.color, fontWeight: 800 }}>
+                        {c.pct}% confidence ({c.level})
+                      </span>
                       <span style={{ fontSize: 10, color: '#aaa' }}>{selected.image.reviewed ? '· reviewed' : '· unreviewed'}</span>
                     </div>
-                  );
-                })()}
+                  ) : null; })()}
                 <DetailLabel label="Generated description" value={selected.image.description || 'No generated description stored.'} />
                 <DetailLabel label="OCR text" value={selected.ocr_text || 'No OCR text stored in this record.'} />
                 <DetailLabel label="Source path" value={selected.image.source_path || selected.image.path || 'Not stored'} mono />
@@ -542,6 +575,11 @@ export default function RecoveryForgeScreen() {
                     <button onClick={() => reviewSelected('approved')} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#16a34a', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><Check size={13} /> Approve</button>
                     <button onClick={() => reviewSelected('rejected')} disabled={detailActionLoading} style={{ ...actionButtonStyle, background: '#dc2626', color: '#fff', opacity: detailActionLoading ? 0.65 : 1 }}><X size={13} /> Reject</button>
                     <button onClick={() => reviewSelected('reviewed')} disabled={detailActionLoading} style={{ ...actionButtonStyle, gridColumn: '1 / -1', opacity: detailActionLoading ? 0.65 : 1 }}>Save category / reclassify</button>
+                    {selected.image.scrapped ? (
+                      <div style={{ gridColumn: '1 / -1', padding: '8px 12px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 11, textAlign: 'center' }}>This image is scrapped</div>
+                    ) : (
+                      <button onClick={() => { setScrapDialogOpen(true); }} disabled={detailActionLoading} style={{ ...actionButtonStyle, gridColumn: '1 / -1', color: '#dc2626', opacity: detailActionLoading ? 0.65 : 1 }}>Scrap selected</button>
+                    )}
                   </div>
                   <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>Reclassify updates the JSON index and safely copies to the selected classified bucket when supported. It does not delete the old source file.</div>
                 </div>

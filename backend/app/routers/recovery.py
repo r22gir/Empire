@@ -88,6 +88,29 @@ class RecoveryImageReanalyzeRequest(BaseModel):
     force: bool = True
 
 
+class RecoveryImageScrapRequest(BaseModel):
+    mode: str = "soft_delete"  # "soft_delete" | "delete_classified" | "delete_all_copies"
+    delete_source: bool = False
+    reason: str = "unrelated"
+    confirm: bool = False
+    confirm_text: str = ""
+
+
+def _safe_trash_path(path: str | None) -> str | None:
+    """Compute a trash path for a given file path, under /data/images/trash/recoveryforge/."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        p = Path(path).resolve()
+        base = Path("/data/images/trash/recoveryforge")
+        base.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        trash_name = f"{ts}_{p.name}"
+        return str(base / trash_name)
+    except Exception:
+        return None
+
+
 def _load_image_index() -> dict[str, Any]:
     for path in (INDEX_FILE, "/data/images/filtered_inventory.json", "/data/images/inventory.json"):
         if os.path.exists(path):
@@ -380,6 +403,10 @@ async def recovery_images(
         images = [img for img in images if not img.get("reviewed")]
     elif status == "low_confidence":
         images = [img for img in images if float(img.get("confidence") or 0) < 0.6]
+    elif status == "scrapped":
+        images = [img for img in images if img.get("scrapped")]
+    elif status == "active":
+        images = [img for img in images if not img.get("scrapped")]
     if social_ready is not None:
         images = [img for img in images if bool(img.get("social_ready")) is social_ready]
     if min_confidence is not None:
@@ -888,3 +915,124 @@ async def recovery_delete_category(slug: str):
             return {"status": "deleted", "slug": slug}
 
     raise HTTPException(status_code=404, detail=f"Category '{slug}' not found")
+
+
+@router.post("/recovery/images/{record_key}/scrap")
+async def recovery_scrap_image(record_key: str, scrap: RecoveryImageScrapRequest):
+    """
+    Scrap / soft-delete a RecoveryForge image record.
+
+    Modes:
+    - soft_delete: mark record as scrapped, hide from active list. Files untouched.
+    - delete_classified: mark scrapped + trash classified/social copies. Source untouched.
+    - delete_all_copies: mark scrapped + trash all copies. Requires explicit confirm_text='DELETE'.
+
+    delete_source: if True AND confirm_text='DELETE', also moves source to trash.
+    Never deletes source without explicit confirm_text match.
+    """
+    VALID_MODES = ("soft_delete", "delete_classified", "delete_all_copies")
+    if scrap.mode not in VALID_MODES:
+        raise HTTPException(status_code=400, detail=f"mode must be one of: {', '.join(VALID_MODES)}")
+
+    if scrap.mode == "delete_all_copies" and not scrap.confirm:
+        raise HTTPException(status_code=400, detail="delete_all_copies requires confirm=true")
+    if scrap.delete_source and scrap.confirm_text != "DELETE":
+        raise HTTPException(status_code=400, detail="delete_source requires confirm_text='DELETE'")
+
+    reason = _normalize_label(scrap.reason) or "unrelated"
+    data = _load_image_index()
+    img = _find_image(data, record_key)
+    if not img:
+        raise HTTPException(status_code=404, detail=f"RecoveryForge image record not found: {record_key}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    result = {
+        "record_key": record_key,
+        "mode": scrap.mode,
+        "reason": reason,
+        "source_deleted": False,
+        "source_kept": True,
+        "source_missing": False,
+        "classified_deleted": False,
+        "classified_missing": False,
+        "social_deleted": False,
+        "social_missing": False,
+        "record_status": "scrapped",
+    }
+
+    # --- soft_delete: mark record only ---
+    img["scrapped"] = True
+    img["scrapped_at"] = now
+    img["scrapped_reason"] = reason
+    img["scrapped_mode"] = scrap.mode
+
+    # --- file operations ---
+    source_path = img.get("source_path") or img.get("path")
+    classified_path = img.get("classified_path")
+    social_path = img.get("social_path")
+
+    def _trash_file(path: str | None) -> bool:
+        """Move file to trash, return True if moved or already missing."""
+        if not path:
+            return True  # treat absent as success
+        if not os.path.exists(path):
+            return True
+        trash_dest = _safe_trash_path(path)
+        if not trash_dest:
+            return False
+        try:
+            shutil.move(path, trash_dest)
+            return True
+        except Exception as e:
+            logger.warning(f"Could not trash {path}: {e}")
+            return False
+
+    if scrap.mode in ("delete_classified", "delete_all_copies"):
+        # trash classified copy
+        if classified_path:
+            trashed = _trash_file(classified_path)
+            result["classified_deleted"] = trashed and os.path.exists(classified_path) is False
+            result["classified_missing"] = not classified_path or not os.path.exists(classified_path)
+            if trashed:
+                img["classified_path"] = None
+                img["classified_exists"] = False
+        else:
+            result["classified_missing"] = True
+
+        # trash social copy
+        if social_path:
+            trashed = _trash_file(social_path)
+            result["social_deleted"] = trashed and os.path.exists(social_path) is False
+            result["social_missing"] = not social_path or not os.path.exists(social_path)
+            if trashed:
+                img["social_path"] = None
+                img["social_exists"] = False
+        else:
+            result["social_missing"] = True
+
+    if scrap.mode == "delete_all_copies" and scrap.confirm:
+        if source_path and os.path.exists(source_path):
+            trashed = _trash_file(source_path)
+            result["source_deleted"] = trashed and os.path.exists(source_path) is False
+            result["source_kept"] = not trashed
+            result["source_missing"] = not os.path.exists(source_path)
+            if trashed:
+                img["source_path"] = None
+                img["source_exists"] = False
+                img["path"] = None
+        else:
+            result["source_missing"] = not bool(source_path) or not os.path.exists(source_path)
+            result["source_kept"] = not result["source_missing"] and not result["source_deleted"]
+
+    _save_image_index(data)
+
+    return {
+        "status": "scrapped",
+        "record_key": record_key,
+        "mode": scrap.mode,
+        "reason": reason,
+        "scrapped_at": now,
+        **result,
+        "image": _public_image_item(img),
+        "path_status": _image_path_status(img),
+    }

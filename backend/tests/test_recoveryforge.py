@@ -714,3 +714,127 @@ def test_review_with_custom_category_preserves_description(monkeypatch, tmp_path
     assert saved["generated_description"] == "A set of curtain fabric samples in neutral tones."
     assert saved["minimax_analysis"]["description"] == "A set of curtain fabric samples in neutral tones."
 
+
+def _scrap_fixture(monkeypatch, tmp_path):
+    import app.routers.recovery as recovery
+    cats_file = tmp_path / "recovery_categories.json"
+    monkeypatch.setattr(recovery, "CATEGORIES_FILE", str(cats_file))
+    return recovery
+
+
+def _scrap_index(images, tmp_path, monkeypatch):
+    import app.routers.recovery as recovery
+    index_file = tmp_path / "presorted_inventory.json"
+    monkeypatch.setattr(recovery, "INDEX_FILE", str(index_file))
+    monkeypatch.setattr(recovery, "CLASSIFIED_DIR", str(tmp_path / "classified"))
+    monkeypatch.setattr(recovery, "SOCIAL_DIR", str(tmp_path / "social"))
+    monkeypatch.setattr(recovery, "quota_allow_new", lambda: True)
+    index_file.write_text(json.dumps({"images": images, "stats": {}}))
+    return recovery, index_file
+
+
+def test_scrap_soft_delete_marks_record(monkeypatch, tmp_path):
+    """soft_delete marks the record scrapped without touching files."""
+    recovery, index_file = _scrap_index([
+        {"filename": "photo.png", "path": str(tmp_path / "photo.png"), "business": "general", "category": "misc"}
+    ], tmp_path, monkeypatch)
+
+    record_key = recovery._record_key({"filename": "photo.png", "path": str(tmp_path / "photo.png")})
+    result = asyncio.run(recovery.recovery_scrap_image(
+        record_key,
+        recovery.RecoveryImageScrapRequest(mode="soft_delete", reason="unrelated"),
+    ))
+    assert result["status"] == "scrapped"
+    assert result["mode"] == "soft_delete"
+    assert result["source_kept"] is True
+    assert result["classified_deleted"] is False
+    saved = json.loads(index_file.read_text())["images"][0]
+    assert saved["scrapped"] is True
+    assert saved["scrapped_reason"] == "unrelated"
+    assert "scrapped_at" in saved
+
+
+def test_scrap_soft_delete_hides_from_active_list(monkeypatch, tmp_path):
+    """scrapped records are hidden from active list by default."""
+    recovery, index_file = _scrap_index([
+        {"filename": "keep.png", "path": str(tmp_path / "keep.png"), "business": "general", "category": "misc", "description": "keep"},
+        {"filename": "trash.png", "path": str(tmp_path / "trash.png"), "business": "general", "category": "misc", "description": "trash"},
+    ], tmp_path, monkeypatch)
+
+    # scrap the second record
+    rk = recovery._record_key({"filename": "trash.png", "path": str(tmp_path / "trash.png")})
+    asyncio.run(recovery.recovery_scrap_image(rk, recovery.RecoveryImageScrapRequest(mode="soft_delete")))
+
+    # active list should only show the first
+    result = asyncio.run(recovery.recovery_images(status="active", analyzed_only=False, limit=48, offset=0))
+    keys = [img["record_key"] for img in result["images"]]
+    assert rk not in keys  # scrapped is hidden
+
+    # scrapped filter should show it
+    result2 = asyncio.run(recovery.recovery_images(status="scrapped", analyzed_only=False, limit=48, offset=0))
+    scrapped_keys = [img["record_key"] for img in result2["images"]]
+    assert rk in scrapped_keys
+
+
+def test_scrap_delete_classified_trashes_copies(monkeypatch, tmp_path):
+    """delete_classified moves classified/social copies to trash, keeps source."""
+    classified_dir = tmp_path / "classified" / "general" / "misc"
+    classified_dir.mkdir(parents=True)
+    classified_file = classified_file_path = classified_dir / "photo.png"
+    classified_file.write_bytes(b"classified-img")
+
+    recovery, index_file = _scrap_index([
+        {"filename": "photo.png", "path": str(tmp_path / "source.png"), "classified_path": str(classified_file), "business": "general", "category": "misc", "description": "desc"}
+    ], tmp_path, monkeypatch)
+
+    record_key = recovery._record_key({"filename": "photo.png", "path": str(tmp_path / "source.png")})
+    result = asyncio.run(recovery.recovery_scrap_image(
+        record_key,
+        recovery.RecoveryImageScrapRequest(mode="delete_classified"),
+    ))
+    assert result["status"] == "scrapped"
+    assert result["source_kept"] is True
+    assert result["source_missing"] is False
+    assert classified_file.exists() is False  # moved to trash
+
+
+def test_scrap_delete_all_copies_requires_confirm(monkeypatch, tmp_path):
+    """delete_all_copies without confirm=True returns 400."""
+    recovery, _ = _scrap_index([
+        {"filename": "photo.png", "path": str(tmp_path / "photo.png"), "business": "general", "category": "misc"}
+    ], tmp_path, monkeypatch)
+    record_key = recovery._record_key({"filename": "photo.png", "path": str(tmp_path / "photo.png")})
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(recovery.recovery_scrap_image(
+            record_key,
+            recovery.RecoveryImageScrapRequest(mode="delete_all_copies"),
+        ))
+    assert exc.value.status_code == 400
+
+
+def test_scrap_delete_source_requires_exact_confirm_text(monkeypatch, tmp_path):
+    """delete_source requires confirm_text='DELETE', not just confirm=True."""
+    recovery, _ = _scrap_index([
+        {"filename": "photo.png", "path": str(tmp_path / "photo.png"), "business": "general", "category": "misc"}
+    ], tmp_path, monkeypatch)
+    record_key = recovery._record_key({"filename": "photo.png", "path": str(tmp_path / "photo.png")})
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(recovery.recovery_scrap_image(
+            record_key,
+            recovery.RecoveryImageScrapRequest(mode="soft_delete", delete_source=True, confirm=True, confirm_text="WRONG"),
+        ))
+    assert exc.value.status_code == 400
+
+
+def test_scrap_invalid_record_returns_404(monkeypatch, tmp_path):
+    """Scraping a non-existent record_key returns 404."""
+    recovery, _ = _scrap_index([
+        {"filename": "photo.png", "path": str(tmp_path / "photo.png"), "business": "general", "category": "misc"}
+    ], tmp_path, monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(recovery.recovery_scrap_image(
+            "nonexistent-key",
+            recovery.RecoveryImageScrapRequest(),
+        ))
+    assert exc.value.status_code == 404
+
