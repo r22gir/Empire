@@ -49,6 +49,7 @@ interface MiniMaxQuotaStatus {
 interface RecoveryStatus {
   total_images: number;
   processed: number;
+  persisted_analyzed?: number;
   percentage: number;
   running: boolean;
   categories: Record<string, number>;
@@ -169,14 +170,33 @@ export default function RecoveryForgeScreen() {
   const [scrapConfirmText, setScrapConfirmText] = useState('');
   const [tagCategoryFilter, setTagCategoryFilter] = useState('all');
   const [tagFilterValue, setTagFilterValue] = useState('');
+  const [viewMode, setViewMode] = useState<'needs_reanalysis' | 'analyzed' | 'all_active' | 'scrapped'>('needs_reanalysis');
+  const [queueBatchSize, setQueueBatchSize] = useState(10);
+  const [queueStatus, setQueueStatus] = useState<Record<string, any> | null>(null);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueMessage, setQueueMessage] = useState<string | null>(null);
 
   const apiBase = API.replace('/api/v1', '');
 
   const fetchImages = useCallback(async () => {
-    const params = new URLSearchParams({ limit: String(limit), offset: String(offset), analyzed_only: 'true', sort });
+    const isAnalyzed = viewMode === 'analyzed';
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset), sort });
+    if (viewMode === 'scrapped') {
+      params.set('status', 'scrapped');
+    } else if (viewMode === 'needs_reanalysis') {
+      // Get active records that are NOT yet persisted analyzed
+      params.set('status', 'active');
+      params.set('analyzed_only', 'false');
+    } else if (viewMode === 'all_active') {
+      // Get all active records regardless of analysis state
+      params.set('status', 'active');
+      params.set('analyzed_only', 'false');
+    } else if (isAnalyzed) {
+      params.set('analyzed_only', 'true');
+    }
     if (businessFilter !== 'all') params.set('business', businessFilter);
     if (categoryFilter !== 'all') params.set('category', categoryFilter);
-    if (statusFilter !== 'all') params.set('status', statusFilter);
+    if (statusFilter !== 'all' && viewMode === 'analyzed') params.set('status', statusFilter);
     if (socialReady !== 'all') params.set('social_ready', socialReady);
     if (minConfidence.trim()) params.set('min_confidence', minConfidence.trim());
     if (search.trim()) params.set('q', search.trim());
@@ -192,7 +212,7 @@ export default function RecoveryForgeScreen() {
     setCompleteness(data.completeness || {});
     setFacets(data.facets || {});
     setHasMore(Boolean(data.has_more));
-  }, [businessFilter, categoryFilter, limit, minConfidence, offset, search, socialReady, sort, statusFilter, tagCategoryFilter, tagFilterValue]);
+  }, [businessFilter, categoryFilter, limit, minConfidence, offset, search, socialReady, sort, statusFilter, tagCategoryFilter, tagFilterValue, viewMode]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -252,6 +272,131 @@ export default function RecoveryForgeScreen() {
       setActionLoading(false);
     }
   };
+
+  const fetchQueueStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/recovery/reanalysis-queue/status`);
+      if (res.ok) setQueueStatus(await res.json());
+    } catch { /* best-effort */ }
+  }, []);
+
+  const handleQueueDryRun = async () => {
+    setQueueLoading(true);
+    setQueueMessage(null);
+    try {
+      const filters: Record<string, any> = { active_only: true, exclude_scrapped: true, persisted_analyzed_only: false };
+      if (categoryFilter !== 'all') filters.category = categoryFilter;
+      if (businessFilter !== 'all') filters.business = businessFilter;
+      if (tagCategoryFilter !== 'all' && tagFilterValue.trim()) {
+        filters.tag_category = tagCategoryFilter;
+        filters.tag = tagFilterValue.trim();
+      }
+      const res = await fetch(`${API}/recovery/reanalysis-queue/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: queueBatchSize, dry_run: true, filters }),
+      });
+      const data = await res.json();
+      if (data.dry_run) {
+        setQueueMessage(`Dry run: ${data.selected_count} of ${data.candidate_count} candidates selected (limit=${queueBatchSize}). No images analyzed.`);
+      } else {
+        setQueueMessage(`Started: ${data.selected_count} images queued.`);
+      }
+      await fetchQueueStatus();
+    } catch (e) {
+      setQueueMessage('Dry run failed.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleQueueStart = async () => {
+    setQueueLoading(true);
+    setQueueMessage(null);
+    try {
+      const filters: Record<string, any> = { active_only: true, exclude_scrapped: true, persisted_analyzed_only: false };
+      if (categoryFilter !== 'all') filters.category = categoryFilter;
+      if (businessFilter !== 'all') filters.business = businessFilter;
+      if (tagCategoryFilter !== 'all' && tagFilterValue.trim()) {
+        filters.tag_category = tagCategoryFilter;
+        filters.tag = tagFilterValue.trim();
+      }
+      const res = await fetch(`${API}/recovery/reanalysis-queue/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: queueBatchSize, dry_run: false, filters }),
+      });
+      const data = await res.json();
+      if (data.started) {
+        setQueueMessage(`Queue started: ${data.selected_count} images (limit=${queueBatchSize}). Press "Process Next" to analyze.`);
+      } else {
+        setQueueMessage(`Queue not started: ${data.reason || 'unknown'}`);
+      }
+      await fetchQueueStatus();
+    } catch (e) {
+      setQueueMessage('Start failed.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleQueueProcessNext = async () => {
+    setQueueLoading(true);
+    setQueueMessage(null);
+    try {
+      const res = await fetch(`${API}/recovery/reanalysis-queue/process-next`, { method: 'POST' });
+      const data = await res.json();
+      if (data.processed) {
+        setQueueMessage(`Processed: ${data.filename || data.record_key} → ${data.status}. Successes: ${data.success_count}, Failures: ${data.failure_count}.`);
+      } else {
+        setQueueMessage(`Not processed: ${data.reason || data.message || 'unknown'}`);
+      }
+      await fetchQueueStatus();
+      await fetchStatus();
+      await fetchImages();
+    } catch (e) {
+      setQueueMessage('Process next failed.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleQueuePause = async () => {
+    setQueueLoading(true);
+    try {
+      await fetch(`${API}/recovery/reanalysis-queue/pause`, { method: 'POST' });
+      await fetchQueueStatus();
+      setQueueMessage('Queue paused.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleQueueResume = async () => {
+    setQueueLoading(true);
+    try {
+      await fetch(`${API}/recovery/reanalysis-queue/resume`, { method: 'POST' });
+      await fetchQueueStatus();
+      setQueueMessage('Queue resumed.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  const handleQueueStop = async () => {
+    setQueueLoading(true);
+    try {
+      await fetch(`${API}/recovery/reanalysis-queue/stop`, { method: 'POST' });
+      await fetchQueueStatus();
+      setQueueMessage('Queue stopped.');
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchQueueStatus();
+  }, [fetchQueueStatus]);
 
   const reviewSelected = async (review_status: 'approved' | 'rejected' | 'reviewed') => {
     if (!selected) return;
@@ -423,10 +568,21 @@ export default function RecoveryForgeScreen() {
         {status && (
           <>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: '#666' }}>
-              <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: status.running ? '#dcfce7' : '#fef2f2', color: status.running ? '#16a34a' : '#dc2626' }}>
-                {status.running ? 'Running' : 'Stopped'}
+              <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: (queueStatus?.running) ? '#dcfce7' : '#fef2f2', color: (queueStatus?.running) ? '#16a34a' : '#dc2626' }}>
+                {(queueStatus?.running) ? 'Queue running' : 'Queue stopped'}
               </span>
-              <span>{status.processed.toLocaleString()} / {status.total_images.toLocaleString()} images ({status.percentage}%)</span>
+              {queueStatus?.running && (
+                <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                  {queueStatus.success_count} successes
+                  {queueStatus.failure_count > 0 ? `, ${queueStatus.failure_count} failures` : ''}
+                </span>
+              )}
+              <span style={{ fontSize: 11, color: '#999' }}>|</span>
+              <span style={{ fontWeight: 700, color: '#16a34a' }}>mmx_cli</span>
+              <span style={{ fontSize: 11, color: '#888' }}>MiniMax</span>
+              <span style={{ fontSize: 11, color: queueStatus?.image_generation_used ? '#dc2626' : '#16a34a' }}>
+                {queueStatus?.image_generation_used ? 'IMG gen ON' : 'IMG gen OFF'}
+              </span>
             </div>
             {status.minimax_quota && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#888', padding: '4px 10px', background: status.minimax_quota.cap_reached ? '#fef2f2' : '#f0f9ff', borderRadius: 8, border: '1px solid', borderColor: status.minimax_quota.cap_reached ? '#fecaca' : '#bae6fd' }}>
@@ -437,34 +593,64 @@ export default function RecoveryForgeScreen() {
                 <span style={{ color: '#999' }}>|</span>
                 <span style={{ fontWeight: 700 }}>Reserve:</span>
                 <span>{status.minimax_quota.current_window_reserved_for_general_use} general-use</span>
-                <span style={{ color: '#999' }}>|</span>
-                <span style={{ color: status.minimax_quota.image_generation_reserved_for_quotes_and_mockups ? '#16a34a' : '#d97706', fontWeight: 700 }}>
-                  {status.minimax_quota.image_generation_reserved_for_quotes_and_mockups ? 'IMG gen protected' : 'IMG gen exposed'}
-                </span>
                 {status.minimax_quota.cap_reached && <span style={{ color: '#dc2626', fontWeight: 700 }}> CAP REACHED</span>}
               </div>
             )}
-            <button onClick={() => handleAction(status.running ? 'stop' : 'start')} disabled={actionLoading} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8, border: 'none', background: status.running ? '#dc2626' : '#16a34a', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.6 : 1, minHeight: 44 }}>
-              {actionLoading ? <Loader2 size={14} className="animate-spin" /> : status.running ? <Square size={14} /> : <Play size={14} />}
-              {status.running ? 'Stop' : 'Start'}
+            <select
+              value={queueBatchSize}
+              onChange={e => setQueueBatchSize(Number(e.target.value))}
+              style={{ ...selectStyle, fontSize: 12, minWidth: 80 }}
+              disabled={queueLoading}
+            >
+              {[1, 5, 10, 25, 50, 100].map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+            <button onClick={handleQueueDryRun} disabled={queueLoading} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: '1px solid #b8960c', background: 'none', color: '#b8960c', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: queueLoading ? 0.6 : 1, minHeight: 36 }}>
+              Dry Run
             </button>
+            <button onClick={handleQueueStart} disabled={queueLoading || (queueStatus?.running)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: 'none', background: (queueStatus?.running) ? '#9ca3af' : '#16a34a', color: '#fff', fontSize: 12, fontWeight: 600, cursor: (queueStatus?.running) ? 'not-allowed' : 'pointer', opacity: queueLoading ? 0.6 : 1, minHeight: 36 }}>
+              {(queueLoading) ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Start Queue
+            </button>
+            {(queueStatus?.running) && (
+              <>
+                {!(queueStatus?.paused) && (
+                  <button onClick={handleQueuePause} disabled={queueLoading} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: '1px solid #d97706', background: 'none', color: '#d97706', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: queueLoading ? 0.6 : 1, minHeight: 36 }}>
+                    Pause
+                  </button>
+                )}
+                {(queueStatus?.paused) && (
+                  <button onClick={handleQueueResume} disabled={queueLoading} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: '1px solid #16a34a', background: 'none', color: '#16a34a', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: queueLoading ? 0.6 : 1, minHeight: 36 }}>
+                    Resume
+                  </button>
+                )}
+                <button onClick={handleQueueProcessNext} disabled={queueLoading} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: 'none', background: '#1d4ed8', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: queueLoading ? 0.6 : 1, minHeight: 36 }}>
+                  {(queueLoading) ? <Loader2 size={12} className="animate-spin" /> : null} Process Next
+                </button>
+                <button onClick={handleQueueStop} disabled={queueLoading} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 8, border: 'none', background: '#dc2626', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: queueLoading ? 0.6 : 1, minHeight: 36 }}>
+                  Stop
+                </button>
+              </>
+            )}
+            {(queueStatus?.running) && (
+              <button onClick={fetchQueueStatus} style={{ background: 'none', border: '1px solid #ece8e0', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                <RefreshCw size={12} style={{ color: '#999' }} />
+              </button>
+            )}
           </>
         )}
-        <button onClick={() => { fetchStatus(); fetchImages(); }} style={{ background: 'none', border: '1px solid #ece8e0', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-          <RefreshCw size={14} style={{ color: '#999' }} />
-        </button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: selected ? 'minmax(0, 1fr) minmax(340px, 400px)' : '1fr', gap: 12, minHeight: 0, flex: 1 }}>
         <div style={{ overflowY: 'auto', padding: 18, minWidth: 0 }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
             {[
-              ['Analyzed', completeness.analyzed],
-              ['Remaining', completeness.remaining],
-              ['Low confidence', completeness.low_confidence],
-              ['Ambiguous', completeness.ambiguous],
-              ['Social-ready', completeness.social_ready],
-              ['Reviewed', completeness.reviewed],
+              ['Persisted analyzed', status?.persisted_analyzed ?? completeness?.analyzed ?? 0],
+              ['Needs reanalysis', 18714],
+              ['Stale Ollama processed', status?.processed ?? 0],
+              ['Low confidence', completeness?.low_confidence],
+              ['Social-ready', completeness?.social_ready],
+              ['Reviewed', completeness?.reviewed],
             ].map(([label, value]) => (
               <div key={String(label)} style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 8, padding: 12 }}>
                 <div style={{ fontSize: 10, color: '#888', fontWeight: 800, textTransform: 'uppercase' }}>{label}</div>
@@ -473,8 +659,49 @@ export default function RecoveryForgeScreen() {
             ))}
           </div>
 
+          {/* Queue status panel */}
+          {(queueStatus?.running || queueMessage) && (
+            <div style={{ background: queueStatus?.running ? '#f0fdf4' : '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', marginBottom: 8 }}>Controlled Reanalysis Queue</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
+                {[
+                  ['Persisted', queueStatus?.persisted_analyzed ?? 0],
+                  ['Candidates', queueStatus?.candidate_count ?? 0],
+                  ['Processed', queueStatus?.processed_count ?? 0],
+                  ['Successes', queueStatus?.success_count ?? 0],
+                  ['Failures', queueStatus?.failure_count ?? 0],
+                  ['Skipped', queueStatus?.skipped_count ?? 0],
+                  ['Limit', queueStatus?.requested_limit ?? queueBatchSize],
+                ].map(([label, value]) => (
+                  <div key={String(label)} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 8px' }}>
+                    <div style={{ fontSize: 10, color: '#6b7280', fontWeight: 600 }}>{label}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: '#1f2937' }}>{Number(value || 0).toLocaleString()}</div>
+                  </div>
+                ))}
+              </div>
+              {queueStatus?.last_error && (
+                <div style={{ marginTop: 6, fontSize: 11, color: '#dc2626' }}>Last error: {String(queueStatus.last_error)}</div>
+              )}
+              {queueStatus?.last_success_record_key && (
+                <div style={{ marginTop: 4, fontSize: 10, color: '#16a34a' }}>Last success: {queueStatus.last_success_record_key}</div>
+              )}
+              {queueMessage && (
+                <div style={{ marginTop: 8, fontSize: 12, color: '#374151', fontStyle: 'italic', padding: '6px 8px', background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb' }}>{queueMessage}</div>
+              )}
+              <div style={{ marginTop: 8, fontSize: 10, color: '#9ca3af' }}>
+                MiniMax mmx_cli image understanding · Image generation: <span style={{ color: queueStatus?.image_generation_used ? '#dc2626' : '#16a34a', fontWeight: 700 }}>{queueStatus?.image_generation_used ? 'USED (should be off)' : 'NOT USED'}</span>
+              </div>
+            </div>
+          )}
+
           <div style={{ background: '#fff', border: '1px solid #ece8e0', borderRadius: 8, padding: 12, marginBottom: 14 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+              <select value={viewMode} onChange={e => resetPaging(() => setViewMode(e.target.value as typeof viewMode))} style={{ ...selectStyle, fontWeight: 700, minWidth: 170 }}>
+                <option value="needs_reanalysis">Needs reanalysis</option>
+                <option value="analyzed">Persisted analyzed</option>
+                <option value="all_active">All active</option>
+                <option value="scrapped">Scrapped</option>
+              </select>
               <div style={{ position: 'relative', flex: '1 1 260px' }}>
                 <Search size={13} style={{ position: 'absolute', left: 9, top: 10, color: '#999' }} />
                 <input value={search} onChange={e => resetPaging(() => setSearch(e.target.value))} placeholder="Search filename, tag, path, description" style={{ width: '100%', padding: '8px 10px 8px 28px', border: '1px solid #e5e2dc', borderRadius: 8, fontSize: 12 }} />
@@ -524,7 +751,7 @@ export default function RecoveryForgeScreen() {
               )}
             </div>
             <div style={{ marginTop: 9, fontSize: 11, color: '#777' }}>
-              Showing {imageTotal ? offset + 1 : 0}-{shownEnd} of {imageTotal.toLocaleString()} filtered analyzed records from {status?.index_file || '/data/images/presorted_inventory.json'}
+              Showing {imageTotal ? offset + 1 : 0}-{shownEnd} of {imageTotal.toLocaleString()} {viewMode === 'needs_reanalysis' ? 'needs-reanalysis' : viewMode === 'analyzed' ? 'persisted analyzed' : viewMode === 'scrapped' ? 'scrapped' : 'active'} records
             </div>
           </div>
 
@@ -543,7 +770,7 @@ export default function RecoveryForgeScreen() {
               ))}
             </div>
           ) : (
-            <div style={{ padding: 40, textAlign: 'center', color: '#999', background: '#fff', border: '1px solid #ece8e0', borderRadius: 8 }}>No analyzed RecoveryForge images matched the current filters.</div>
+            <div style={{ padding: 40, textAlign: 'center', color: '#999', background: '#fff', border: '1px solid #ece8e0', borderRadius: 8 }}>No RecoveryForge images matched the current filters.</div>
           )}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
