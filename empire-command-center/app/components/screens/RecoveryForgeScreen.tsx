@@ -92,6 +92,19 @@ interface RecoveryImage {
   needs_manual_review?: boolean;
   analyzed_at?: string;
   last_error?: string;
+  // Phase 2B-A/B tag arrays
+  object_tags?: string[];
+  room_tags?: string[];
+  material_tags?: string[];
+  style_tags?: string[];
+  people_tags?: string[];
+  pet_tags?: string[];
+  campaign_tags?: string[];
+  business_domains?: string[];
+  asset_tags?: string[];
+  tags_manually_edited?: boolean;
+  tags_updated_at?: string;
+  tags_updated_by?: string;
 }
 
 interface ImageDetail {
@@ -155,6 +168,8 @@ export default function RecoveryForgeScreen() {
   const [scrapMode, setScrapMode] = useState<'soft_delete' | 'delete_classified' | 'delete_all_copies'>('soft_delete');
   const [scrapReason, setScrapReason] = useState('unrelated');
   const [scrapConfirmText, setScrapConfirmText] = useState('');
+  const [tagCategoryFilter, setTagCategoryFilter] = useState('all');
+  const [tagFilterValue, setTagFilterValue] = useState('');
 
   const apiBase = API.replace('/api/v1', '');
 
@@ -166,6 +181,10 @@ export default function RecoveryForgeScreen() {
     if (socialReady !== 'all') params.set('social_ready', socialReady);
     if (minConfidence.trim()) params.set('min_confidence', minConfidence.trim());
     if (search.trim()) params.set('q', search.trim());
+    if (tagCategoryFilter !== 'all' && tagFilterValue.trim()) {
+      params.set('tag_category', tagCategoryFilter);
+      params.set('tag', tagFilterValue.trim());
+    }
     const res = await fetch(`${API}/recovery/images?${params.toString()}`);
     if (!res.ok) return;
     const data = await res.json();
@@ -174,7 +193,7 @@ export default function RecoveryForgeScreen() {
     setCompleteness(data.completeness || {});
     setFacets(data.facets || {});
     setHasMore(Boolean(data.has_more));
-  }, [businessFilter, categoryFilter, limit, minConfidence, offset, search, socialReady, sort, statusFilter]);
+  }, [businessFilter, categoryFilter, limit, minConfidence, offset, search, socialReady, sort, statusFilter, tagCategoryFilter, tagFilterValue]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -357,6 +376,29 @@ export default function RecoveryForgeScreen() {
     }
   };
 
+  const saveSelectedTags = async (tagPayload: Record<string, string[]>) => {
+    if (!selected) return;
+    setDetailActionLoading(true);
+    setDetailMessage(null);
+    try {
+      const res = await fetch(`${API}/recovery/images/${selected.image.record_key}/tags`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tagPayload),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.image) {
+        await loadDetail(data.image);
+        setDetailMessage(data.rejected_tags?.length ? `Tags saved. Rejected: ${data.rejected_tags.join(', ')}` : 'Tags saved.');
+      } else {
+        const msg = typeof data?.detail === 'string' ? data.detail : JSON.stringify(data?.detail);
+        setDetailMessage(`Tag save failed: ${msg}`);
+      }
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -470,6 +512,24 @@ export default function RecoveryForgeScreen() {
               <select value={limit} onChange={e => resetPaging(() => setLimit(Number(e.target.value)))} style={selectStyle}>
                 {[36, 72, 120].map(n => <option key={n} value={n}>{n} per page</option>)}
               </select>
+              <select value={tagCategoryFilter} onChange={e => resetPaging(() => setTagCategoryFilter(e.target.value))} style={selectStyle}>
+                <option value="all">Tag: all</option>
+                {['object_tags','room_tags','material_tags','style_tags','people_tags','pet_tags','campaign_tags','business_domains','asset_tags'].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+              {tagCategoryFilter !== 'all' && (
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <input
+                    value={tagFilterValue}
+                    onChange={e => resetPaging(() => setTagFilterValue(e.target.value))}
+                    placeholder="tag value"
+                    style={{ ...selectStyle, width: 110 }}
+                    onKeyDown={e => { if (e.key === 'Escape') { setTagFilterValue(''); setTagCategoryFilter('all'); } }}
+                  />
+                  {tagFilterValue && (
+                    <button onClick={() => resetPaging(() => { setTagFilterValue(''); setTagCategoryFilter('all'); })} style={{ ...actionButtonStyle, fontSize: 10, padding: '8px 6px' }}>✕ clear</button>
+                  )}
+                </div>
+              )}
             </div>
             <div style={{ marginTop: 9, fontSize: 11, color: '#777' }}>
               Showing {imageTotal ? offset + 1 : 0}-{shownEnd} of {imageTotal.toLocaleString()} filtered analyzed records from {status?.index_file || '/data/images/presorted_inventory.json'}
@@ -545,6 +605,14 @@ export default function RecoveryForgeScreen() {
                     {detailMessage}
                   </div>
                 )}
+
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #ece8e0' }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Asset Tags</div>
+                  <AssetTagsPanel img={selected.image} onSave={saveSelectedTags} />
+                  <div style={{ fontSize: 10, color: '#888', marginTop: 4 }}>
+                    {selected.image.tags_manually_edited ? `Manually edited · ${selected.image.tags_updated_at ? new Date(selected.image.tags_updated_at).toLocaleString() : ''}` : 'Tags are auto-extracted from image description and can be manually edited.'}
+                  </div>
+                </div>
 
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #ece8e0' }}>
                   <div style={{ fontSize: 12, fontWeight: 900, marginBottom: 8 }}>Review Actions</div>
@@ -660,6 +728,99 @@ export default function RecoveryForgeScreen() {
           </aside>
         )}
       </div>
+    </div>
+  );
+}
+
+const TAG_CATEGORY_GROUPS: { label: string; key: keyof RecoveryImage; bg: string; color: string }[] = [
+  { label: 'Biz domain', key: 'business_domains', bg: '#fdf8eb', color: '#96750a' },
+  { label: 'Objects',    key: 'object_tags',      bg: '#eff6ff', color: '#1d4ed8' },
+  { label: 'Room',       key: 'room_tags',        bg: '#f0fdf4', color: '#15803d' },
+  { label: 'Material',   key: 'material_tags',    bg: '#fef9e7', color: '#b45309' },
+  { label: 'Style',      key: 'style_tags',        bg: '#fdf2f8', color: '#9d174d' },
+  { label: 'People',    key: 'people_tags',        bg: '#f5f3ff', color: '#6d28d9' },
+  { label: 'Pets',       key: 'pet_tags',          bg: '#ecfdf5', color: '#047857' },
+  { label: 'Campaign',  key: 'campaign_tags',     bg: '#fff7ed', color: '#c2410c' },
+  { label: 'Asset',     key: 'asset_tags',         bg: '#fafafa', color: '#374151' },
+];
+
+function AssetTagsPanel({ img, onSave }: { img: RecoveryImage; onSave: (payload: Record<string, string[]>) => void }) {
+  const [localTags, setLocalTags] = useState<Record<string, string[]>>({});
+  const [newTag, setNewTag] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    // Initialise local tag state from the current image record
+    const initial: Record<string, string[]> = {};
+    for (const g of TAG_CATEGORY_GROUPS) {
+      const arr = img[g.key];
+      initial[g.key] = Array.isArray(arr) ? [...arr] : [];
+    }
+    setLocalTags(initial);
+    setNewTag({});
+  }, [img.record_key]);
+
+  const addTag = (key: string) => {
+    const val = (newTag[key] || '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (!val) return;
+    setLocalTags(prev => ({
+      ...prev,
+      [key]: prev[key] ? [...prev[key], val] : [val],
+    }));
+    setNewTag(prev => ({ ...prev, [key]: '' }));
+  };
+
+  const removeTag = (key: string, idx: number) => {
+    setLocalTags(prev => ({
+      ...prev,
+      [key]: prev[key].filter((_, i) => i !== idx),
+    }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try { await onSave(localTags); } finally { setSaving(false); }
+  };
+
+  const dirty = Object.keys(localTags).some(k =>
+    JSON.stringify(localTags[k]) !== JSON.stringify(Array.isArray(img[k as keyof RecoveryImage]) ? img[k as keyof RecoveryImage] : [])
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {TAG_CATEGORY_GROUPS.map(group => {
+        const tags = localTags[group.key] || [];
+        return (
+          <div key={group.key}>
+            <div style={{ fontSize: 9, color: '#888', fontWeight: 900, textTransform: 'uppercase', marginBottom: 3 }}>
+              {group.label}
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              {tags.length === 0 && (
+                <span style={{ fontSize: 10, color: '#ccc' }}>—</span>
+              )}
+              {tags.map((tag, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, padding: '2px 6px', borderRadius: 6, background: group.bg, color: group.color, border: `1px solid ${group.color}22` }}>
+                  {tag}
+                  <button onClick={() => removeTag(group.key, i)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1, color: group.color, opacity: 0.6, fontSize: 12 }}>✕</button>
+                </span>
+              ))}
+              <input
+                value={newTag[group.key] || ''}
+                onChange={e => setNewTag(prev => ({ ...prev, [group.key]: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(group.key); } }}
+                placeholder="+ add"
+                style={{ width: 60, fontSize: 10, padding: '2px 5px', border: '1px dashed #ccc', borderRadius: 4, outline: 'none' }}
+              />
+            </div>
+          </div>
+        );
+      })}
+      {dirty && (
+        <button onClick={handleSave} disabled={saving} style={{ marginTop: 6, padding: '6px 12px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontSize: 11, fontWeight: 800, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+          {saving ? 'Saving…' : 'Save tags'}
+        </button>
+      )}
     </div>
   );
 }
