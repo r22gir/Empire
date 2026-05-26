@@ -202,6 +202,31 @@ class RecoveryImageScrapRequest(BaseModel):
     confirm_text: str = ""
 
 
+# Valid tag array field names
+TAG_ARRAY_FIELDS: set[str] = {
+    "object_tags", "room_tags", "material_tags", "style_tags",
+    "people_tags", "pet_tags", "campaign_tags", "business_domains", "asset_tags",
+}
+
+# Tags that are never allowed as manual edits (too broad / meaningless)
+TAG_BLOCKLIST: set[str] = {
+    "none", "unknown", "misc", "other", "undefined", "n/a", "-",
+}
+
+
+class RecoveryImageTagsUpdate(BaseModel):
+    """Manual tag edit for one image record. All fields optional — only supplied fields are updated."""
+    object_tags: list[str] | None = None
+    room_tags: list[str] | None = None
+    material_tags: list[str] | None = None
+    style_tags: list[str] | None = None
+    people_tags: list[str] | None = None
+    pet_tags: list[str] | None = None
+    campaign_tags: list[str] | None = None
+    business_domains: list[str] | None = None
+    asset_tags: list[str] | None = None
+
+
 def _safe_trash_path(path: str | None) -> str | None:
     """Compute a trash path for a given file path, under /data/images/trash/recoveryforge/."""
     if not path or not os.path.exists(path):
@@ -360,6 +385,9 @@ def _public_image_item(img: dict[str, Any]) -> dict[str, Any]:
         "campaign_tags": img.get("campaign_tags", []),
         "business_domains": img.get("business_domains", []),
         "asset_tags": img.get("asset_tags", []),
+        "tags_manually_edited": bool(img.get("tags_manually_edited")),
+        "tags_updated_at": img.get("tags_updated_at"),
+        "tags_updated_by": img.get("tags_updated_by"),
     }
 
 
@@ -636,6 +664,63 @@ async def recovery_review_image(record_key: str, review: RecoveryImageReview):
         "path_status": _image_path_status(img),
         "classified_path": classified_path,
         "social_path": social_path,
+    }
+
+
+@router.patch("/recovery/images/{record_key}/tags")
+async def recovery_update_tags(record_key: str, tags_update: RecoveryImageTagsUpdate):
+    """
+    Manually edit structured tag arrays for one RecoveryForge image record.
+    Does NOT run analysis or call image generation.
+    Only supplied fields are updated; all other tags are preserved.
+    """
+    data = _load_image_index()
+    img = _find_image(data, record_key)
+    if not img:
+        raise HTTPException(status_code=404, detail=f"RecoveryForge image record not found: {record_key}")
+
+    # Snapshot provenance fields before any mutation
+    had_manual_tags = bool(img.get("tags_manually_edited"))
+
+    # Build tag update map from supplied fields
+    update_map = tags_update.model_dump(exclude_unset=True)
+    rejected: list[str] = []
+
+    for field, tag_list in update_map.items():
+        if field not in TAG_ARRAY_FIELDS:
+            continue
+
+        # Slugify, de-duplicate, block dangerous tags
+        normalized: list[str] = []
+        for tag in tag_list:
+            slug = _slugify_tag(tag)
+            if slug in TAG_BLOCKLIST:
+                rejected.append(slug)
+                continue
+            if slug and slug not in normalized:
+                normalized.append(slug)
+
+        if normalized:
+            img[field] = normalized
+        elif field in img and tag_list is not None:
+            # Explicit empty list → clear the field
+            img[field] = []
+
+    # Update provenance
+    img["tags_manually_edited"] = True
+    img["tags_updated_at"] = datetime.now(timezone.utc).isoformat()
+    img["tags_updated_by"] = "operator"
+
+    _save_image_index(data)
+
+    return {
+        "status": "tags_updated",
+        "record_key": record_key,
+        "image": _public_image_item(img),
+        "rejected_tags": rejected,
+        "tags_manually_edited": True,
+        "tags_updated_at": img["tags_updated_at"],
+        "tags_updated_by": img["tags_updated_by"],
     }
 
 

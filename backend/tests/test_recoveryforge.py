@@ -912,3 +912,126 @@ def test_apply_asset_tags_writes_all_tag_arrays():
     assert img["pet_tags"] == ["dog"]
     assert img["style_tags"] == ["modern", "scandinavian"]
 
+
+# ---------------------------------------------------------------------------
+# Phase 2B-B: Manual tag editing endpoint tests
+# ---------------------------------------------------------------------------
+
+def _make_test_client(tmp_path: Path, imgs: list[dict]):
+    """Build a TestClient wired to a temporary index via a minimal FastAPI app."""
+    from fastapi import FastAPI
+    import app.routers.recovery as rec
+    idx = tmp_path / "inv.json"
+    with open(idx, "w") as f:
+        json.dump({"images": imgs}, f)
+    rec.INDEX_FILE = str(idx)
+    app = FastAPI()
+    app.include_router(rec.router)
+    return TestClient(app)
+
+
+def test_tags_update_single_record_only(tmp_path: Path):
+    """PATCH /recovery/images/{record_key}/tags updates only the targeted record."""
+    imgs = [
+        {"filename": "a.jpg", "path": str(tmp_path / "a.jpg"), "business": "general", "category": "misc",
+         "object_tags": [], "room_tags": [], "material_tags": [], "style_tags": [],
+         "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []},
+        {"filename": "b.jpg", "path": str(tmp_path / "b.jpg"), "business": "general", "category": "misc",
+         "object_tags": ["sofa"], "room_tags": [], "material_tags": [], "style_tags": [],
+         "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []},
+    ]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/a.jpg/tags", json={"campaign_tags": ["website-gallery"]})
+    assert resp.status_code == 200
+    assert resp.json()["image"]["campaign_tags"] == ["website-gallery"]
+    resp2 = client.get("/recovery/images/b.jpg")
+    assert resp2.json()["image"]["campaign_tags"] == []
+
+
+def test_tags_update_normalizes_slugs(tmp_path: Path):
+    """Submitted tags are slugified and deduplicated."""
+    imgs = [{"filename": "c.jpg", "path": str(tmp_path / "c.jpg"), "business": "general", "category": "misc",
+             "object_tags": [], "room_tags": [], "material_tags": [], "style_tags": [],
+             "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []}]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/c.jpg/tags", json={"style_tags": ["Modern Furniture!", "modern-furniture"]})
+    assert resp.status_code == 200
+    tags = resp.json()["image"]["style_tags"]
+    assert "modern-furniture" in tags
+    assert len(tags) == 1
+
+
+def test_tags_update_rejects_blocked(tmp_path: Path):
+    """Blocked tags are rejected and reported, not stored."""
+    imgs = [{"filename": "d.jpg", "path": str(tmp_path / "d.jpg"), "business": "general", "category": "misc",
+             "object_tags": [], "room_tags": [], "material_tags": [], "style_tags": [],
+             "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []}]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/d.jpg/tags", json={"business_domains": ["none", "unknown"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["rejected_tags"] == ["none", "unknown"]
+    assert "none" not in body["image"]["business_domains"]
+
+
+def test_tags_update_provenance_fields(tmp_path: Path):
+    """Manual edit sets tags_manually_edited, tags_updated_at, tags_updated_by."""
+    imgs = [{"filename": "e.jpg", "path": str(tmp_path / "e.jpg"), "business": "general", "category": "misc",
+             "object_tags": [], "room_tags": [], "material_tags": [], "style_tags": [],
+             "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []}]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/e.jpg/tags", json={"object_tags": ["lamp"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["tags_manually_edited"] is True
+    assert body["tags_updated_at"] is not None
+    assert body["tags_updated_by"] == "operator"
+
+
+def test_tags_update_preserves_description(tmp_path: Path):
+    """PATCH tags does NOT touch generated_description or minimax_analysis."""
+    desc = "A velvet sofa in a modern living room"
+    imgs = [{"filename": "f.jpg", "path": str(tmp_path / "f.jpg"), "business": "general", "category": "misc",
+             "description": desc, "generated_description": desc,
+             "minimax_analysis": {"description": desc, "analysis_status": "success"},
+             "object_tags": [], "room_tags": [], "material_tags": [], "style_tags": [],
+             "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []}]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/f.jpg/tags", json={"campaign_tags": ["social-ad"]})
+    assert resp.status_code == 200
+    body = resp.json()["image"]
+    assert body["description"] == desc
+    assert body["generated_description"] == desc
+    assert body["minimax_analysis"] is not None
+
+
+def test_tags_update_partial_update(tmp_path: Path):
+    """Supplying only one field leaves other tag arrays untouched."""
+    imgs = [{"filename": "g.jpg", "path": str(tmp_path / "g.jpg"), "business": "general", "category": "misc",
+             "object_tags": ["sofa"], "room_tags": ["living-room"], "material_tags": ["velvet"],
+             "style_tags": ["modern"], "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []}]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/g.jpg/tags", json={"campaign_tags": ["website-gallery"]})
+    assert resp.status_code == 200
+    body = resp.json()["image"]
+    assert body["campaign_tags"] == ["website-gallery"]
+    assert body["object_tags"] == ["sofa"]
+    assert body["room_tags"] == ["living-room"]
+
+
+def test_tags_update_empty_list_clears_field(tmp_path: Path):
+    """Explicit empty list clears a tag array."""
+    imgs = [{"filename": "h.jpg", "path": str(tmp_path / "h.jpg"), "business": "general", "category": "misc",
+             "object_tags": ["sofa"], "room_tags": [], "material_tags": [], "style_tags": [],
+             "people_tags": [], "pet_tags": [], "campaign_tags": [], "business_domains": [], "asset_tags": []}]
+    client = _make_test_client(tmp_path, imgs)
+    resp = client.patch("/recovery/images/h.jpg/tags", json={"object_tags": []})
+    assert resp.status_code == 200
+    assert resp.json()["image"]["object_tags"] == []
+
+
+def test_tags_update_404_on_missing_record(tmp_path: Path):
+    """Patching a non-existent record returns 404."""
+    client = _make_test_client(tmp_path, [])
+    resp = client.patch("/recovery/images/nonexistent/tags", json={"object_tags": ["lamp"]})
+    assert resp.status_code == 404
