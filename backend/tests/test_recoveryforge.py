@@ -1203,6 +1203,8 @@ def test_queue_start_bounded_selection(tmp_path: Path):
 
 def test_queue_candidates_exclude_persisted_analyzed(tmp_path: Path):
     """Records already persisted analyzed are excluded from candidates."""
+    import app.routers.recovery as rec
+
     # Create actual files so path validation passes
     (tmp_path / "a.jpg").touch()
     (tmp_path / "b.jpg").touch()
@@ -1218,11 +1220,14 @@ def test_queue_candidates_exclude_persisted_analyzed(tmp_path: Path):
     assert resp.status_code == 200
     # a.jpg is already persisted analyzed, only b.jpg should be selected
     assert resp.json()["selected_count"] == 1
-    assert "a.jpg" not in resp.json()["selected_keys"]
+    assert rec._record_key(imgs[0]) not in resp.json()["selected_keys"]
+    assert rec._record_key(imgs[1]) in resp.json()["selected_keys"]
 
 
 def test_queue_candidates_exclude_scrapped(tmp_path: Path):
     """Scrapped records are excluded from candidates."""
+    import app.routers.recovery as rec
+
     # Create actual files so path validation passes
     (tmp_path / "a.jpg").touch()
     (tmp_path / "b.jpg").touch()
@@ -1234,7 +1239,8 @@ def test_queue_candidates_exclude_scrapped(tmp_path: Path):
     resp = client.post("/recovery/reanalysis-queue/start", json={"limit": 5, "dry_run": True})
     assert resp.status_code == 200
     assert resp.json()["selected_count"] == 1
-    assert "a.jpg" not in resp.json()["selected_keys"]
+    assert rec._record_key(imgs[0]) not in resp.json()["selected_keys"]
+    assert rec._record_key(imgs[1]) in resp.json()["selected_keys"]
 
 
 def test_queue_status_returns_state(tmp_path: Path):
@@ -1281,3 +1287,155 @@ def test_queue_process_next_requires_running_state(tmp_path: Path):
     assert resp.status_code == 200
     assert resp.json()["processed"] is False
     assert resp.json()["reason"] == "queue not running"
+
+
+def test_queue_process_next_persists_success_after_reload(monkeypatch, tmp_path: Path):
+    """A queue success is counted only after analysis fields survive a disk reload."""
+    import app.routers.recovery as rec
+
+    (tmp_path / "done.jpg").touch()
+    (tmp_path / "fresh.jpg").touch()
+    analyzed = {
+        "filename": "done.jpg",
+        "path": str(tmp_path / "done.jpg"),
+        "description": "A detailed description of completed drapery work in a living room with fabric samples.",
+        "generated_description": "A detailed description of completed drapery work in a living room with fabric samples.",
+        "minimax_analysis": {"analysis_status": "success", "description": "already done"},
+        "analyzed_at": "2026-05-26T10:00:00+00:00",
+        "confidence": 0.85,
+        "classified_by": "minimax-mmx_vision",
+    }
+    fresh = {"filename": "fresh.jpg", "path": str(tmp_path / "fresh.jpg")}
+    client = _make_test_client(tmp_path, [analyzed, fresh])
+    monkeypatch.setattr(rec, "quota_allow_new", lambda: True)
+
+    async def fake_analyze_image(image_key, image_path):
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "description": "A modern living room sofa with velvet drapery fabric and curtain hardware for Empire Workroom.",
+            "business_route": "empire-workroom",
+            "analysis_confidence": 0.92,
+        }
+
+    monkeypatch.setattr(rec, "analyze_image", fake_analyze_image)
+
+    before = client.get("/recovery/status").json()["persisted_analyzed"]
+    assert before == 1
+    assert client.post("/recovery/reanalysis-queue/start", json={"limit": 1}).status_code == 200
+
+    resp = client.post("/recovery/reanalysis-queue/process-next", json={})
+    assert resp.status_code == 200
+    result = resp.json()
+    assert result["processed"] is True
+    assert result["status"] == "success"
+    assert result["success"] is True
+    assert result["persisted_verified"] is True
+    assert result["persisted_analyzed_before"] == 1
+    assert result["persisted_analyzed_after"] == 2
+    assert result["success_count"] == 1
+    assert result["failure_count"] == 0
+    assert result["image_generation_used"] is False
+
+    reloaded = json.loads((tmp_path / "inv.json").read_text())
+    saved = next(img for img in reloaded["images"] if img["filename"] == "fresh.jpg")
+    assert saved["description"]
+    assert saved["generated_description"]
+    assert saved["minimax_analysis"]["description"]
+    assert saved["minimax_analysis"]["provider"] == "minimax"
+    assert saved["minimax_analysis"]["transport"] == "mmx_cli"
+    assert saved["minimax_analysis"]["model"] == "mmx_vision"
+    assert saved["analyzed_at"] == "2026-05-27T10:00:00+00:00"
+    assert saved["classified_by"] == "minimax-mmx_vision"
+    assert "sofa" in saved["object_tags"]
+    assert "window-treatment" in saved["object_tags"]
+    assert "velvet" in saved["material_tags"]
+    assert "empire-workroom" in saved["business_domains"]
+    assert rec._is_persisted_analyzed(saved) is True
+
+
+def test_queue_process_next_success_requires_reload_truth(monkeypatch, tmp_path: Path):
+    """If the save writes stale data, the queue records failure instead of success."""
+    import app.routers.recovery as rec
+
+    (tmp_path / "fresh.jpg").touch()
+    fresh = {"filename": "fresh.jpg", "path": str(tmp_path / "fresh.jpg")}
+    client = _make_test_client(tmp_path, [fresh])
+    monkeypatch.setattr(rec, "quota_allow_new", lambda: True)
+
+    async def fake_analyze_image(image_key, image_path):
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "description": "A modern sofa with velvet fabric in a living room for workroom marketing.",
+            "analysis_confidence": 0.91,
+        }
+
+    def save_stale_index(data):
+        (tmp_path / "inv.json").write_text(json.dumps({"images": [fresh]}))
+
+    monkeypatch.setattr(rec, "analyze_image", fake_analyze_image)
+    assert client.post("/recovery/reanalysis-queue/start", json={"limit": 1}).status_code == 200
+    monkeypatch.setattr(rec, "_save_image_index", save_stale_index)
+
+    resp = client.post("/recovery/reanalysis-queue/process-next", json={})
+    assert resp.status_code == 200
+    result = resp.json()
+    assert result["processed"] is True
+    assert result["status"] == "persistence_failed"
+    assert result["success"] is False
+    assert result["persisted_verified"] is False
+    assert result["success_count"] == 0
+    assert result["failure_count"] == 1
+    assert result["persisted_analyzed_before"] == 0
+    assert result["persisted_analyzed_after"] == 0
+
+    queue_state = json.loads((tmp_path / "queue.json").read_text())
+    assert rec._record_key(fresh) in queue_state["failed_record_keys"]
+    assert queue_state["completed_record_keys"] == []
+
+
+def test_queue_process_next_save_failure_is_not_success(monkeypatch, tmp_path: Path):
+    """A disk save exception must not advance success/completed counters."""
+    import app.routers.recovery as rec
+
+    (tmp_path / "fresh.jpg").touch()
+    fresh = {"filename": "fresh.jpg", "path": str(tmp_path / "fresh.jpg")}
+    client = _make_test_client(tmp_path, [fresh])
+    monkeypatch.setattr(rec, "quota_allow_new", lambda: True)
+
+    async def fake_analyze_image(image_key, image_path):
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "description": "A modern sofa with velvet fabric in a living room for workroom marketing.",
+            "analysis_confidence": 0.91,
+        }
+
+    def fail_save(data):
+        raise RuntimeError("disk write failed")
+
+    monkeypatch.setattr(rec, "analyze_image", fake_analyze_image)
+    assert client.post("/recovery/reanalysis-queue/start", json={"limit": 1}).status_code == 200
+    monkeypatch.setattr(rec, "_save_image_index", fail_save)
+
+    resp = client.post("/recovery/reanalysis-queue/process-next", json={})
+    assert resp.status_code == 200
+    result = resp.json()
+    assert result["processed"] is True
+    assert result["status"] == "persistence_failed"
+    assert result["success"] is False
+    assert result["persisted_verified"] is False
+    assert result["success_count"] == 0
+    assert result["failure_count"] == 1
+    assert result["persisted_analyzed_before"] == 0
+    assert result["persisted_analyzed_after"] == 0
+
+    saved = json.loads((tmp_path / "inv.json").read_text())["images"][0]
+    assert "description" not in saved
+    queue_state = json.loads((tmp_path / "queue.json").read_text())
+    assert rec._record_key(fresh) in queue_state["failed_record_keys"]
+    assert queue_state["completed_record_keys"] == []

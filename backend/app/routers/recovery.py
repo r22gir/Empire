@@ -150,15 +150,22 @@ def _is_persisted_analyzed(img: dict[str, Any]) -> bool:
     Counts only real analysis products — not memory-only progress, not stale counters,
     not records with only tag arrays and no description, not pure Ollama errors.
     """
+    analysis = img.get("minimax_analysis") or {}
+    analysis_status = ""
+    if isinstance(analysis, dict):
+        analysis_status = str(analysis.get("analysis_status") or analysis.get("status") or "").lower()
+    analysis_succeeded = analysis_status in {"success", "succeeded", "complete", "completed", "ok"}
+
     # Has real MiniMax description text (more than placeholder length)
     desc = img.get("description") or img.get("generated_description") or ""
-    has_description = bool(desc and len(desc) > 50)
+    desc_is_error = str(desc).lower().startswith("ollama error:")
+    has_description = bool(desc and len(desc) > 50 and not desc_is_error)
 
-    # Has MiniMax analysis result block
-    has_minimax = bool(img.get("minimax_analysis"))
+    # Has successful MiniMax analysis result block
+    has_minimax = bool(isinstance(analysis, dict) and analysis and analysis_succeeded and not analysis.get("error"))
 
-    # Has explicit analyzed_at timestamp
-    has_analyzed_at = bool(img.get("analyzed_at"))
+    # Has explicit analyzed_at timestamp tied to real analysis content
+    has_analyzed_at = bool(img.get("analyzed_at") and (has_description or has_minimax))
 
     # Has confidence from successful classification
     conf = img.get("confidence")
@@ -284,6 +291,10 @@ def _save_image_index(data: dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(INDEX_FILE), exist_ok=True)
     with open(INDEX_FILE, "w") as f:
         json.dump(data, f)
+
+
+def _count_persisted_analyzed(data: dict[str, Any]) -> int:
+    return sum(1 for img in data.get("images", []) if _is_persisted_analyzed(img))
 
 
 def _record_key(img: dict[str, Any]) -> str:
@@ -425,6 +436,29 @@ def _find_image(data: dict[str, Any], record_key: str) -> dict[str, Any] | None:
     return None
 
 
+def _has_durable_analysis_truth(img: dict[str, Any] | None) -> bool:
+    if not img:
+        return False
+    analysis = img.get("minimax_analysis") or {}
+    if not isinstance(analysis, dict):
+        return False
+    description = img.get("description") or img.get("generated_description") or ""
+    return bool(
+        description
+        and analysis.get("description")
+        and img.get("analyzed_at")
+        and img.get("classified_by")
+        and _is_persisted_analyzed(img)
+    )
+
+
+def _save_image_index_and_verify_analysis(data: dict[str, Any], record_key: str) -> tuple[bool, dict[str, Any] | None, int]:
+    _save_image_index(data)
+    reloaded = _load_image_index()
+    reloaded_img = _find_image(reloaded, record_key)
+    return _has_durable_analysis_truth(reloaded_img), reloaded_img, _count_persisted_analyzed(reloaded)
+
+
 def _copy_to_classified(img: dict[str, Any]) -> str | None:
     business = img.get("business") or img.get("pre_tag") or "general"
     category = img.get("category") or img.get("pre_category") or "misc"
@@ -463,6 +497,11 @@ def _copy_to_social(img: dict[str, Any]) -> str | None:
 
 
 def _apply_minimax_analysis(img: dict[str, Any], result: dict[str, Any], analyzed_path: str) -> None:
+    if result.get("analysis_status") == "success":
+        result.setdefault("provider", "minimax")
+        result.setdefault("transport", "mmx_cli")
+        result.setdefault("model", "mmx_vision")
+
     img["minimax_analysis"] = result
     img["analyzed_at"] = result.get("timestamp") or datetime.now(timezone.utc).isoformat()
     img["last_analyzed_path"] = analyzed_path
@@ -1341,6 +1380,7 @@ async def reanalysis_queue_process_next():
     # Load current index
     data = _load_image_index()
     all_images = data.get("images", [])
+    persisted_analyzed_before = _count_persisted_analyzed(data)
 
     # Find next unprocessed record in selected keys
     completed = set(state.get("completed_record_keys", []))
@@ -1406,28 +1446,49 @@ async def reanalysis_queue_process_next():
     _apply_minimax_analysis(chosen, result, path)
 
     if result.get("analysis_status") == "success":
-        state["success_count"] += 1
-        state["completed_record_keys"].append(key)
-        state["last_success_record_key"] = key
-        state["last_error"] = None
+        persisted_verified = False
+        persisted_analyzed_after = persisted_analyzed_before
+        persistence_error = None
+        try:
+            persisted_verified, _, persisted_analyzed_after = _save_image_index_and_verify_analysis(data, key)
+        except Exception as exc:
+            persistence_error = str(exc)[:200]
+
+        if persisted_verified:
+            state["success_count"] += 1
+            state["completed_record_keys"].append(key)
+            state["last_success_record_key"] = key
+            state["last_error"] = None
+        else:
+            state["failure_count"] += 1
+            state["failed_record_keys"].append(key)
+            state["last_error"] = (
+                f"persistence_save_failed: {persistence_error}"
+                if persistence_error
+                else "persistence_not_verified_after_reload"
+            )
     else:
         err = result.get("error", "unknown")
         state["failure_count"] += 1
         state["failed_record_keys"].append(key)
         state["last_error"] = str(err)[:200]
+        _save_image_index(data)
+        persisted_analyzed_after = _count_persisted_analyzed(_load_image_index())
+        persisted_verified = False
 
     state["processed_count"] += 1
     state["current_record_key"] = None
     _save_queue_state(state)
 
-    # Persist index after each image
-    _save_image_index(data)
-
     return {
         "processed": True,
         "record_key": key,
         "filename": chosen.get("filename"),
-        "status": result.get("analysis_status"),
+        "status": result.get("analysis_status") if persisted_verified or result.get("analysis_status") != "success" else "persistence_failed",
+        "success": bool(result.get("analysis_status") == "success" and persisted_verified),
+        "persisted_verified": persisted_verified,
+        "persisted_analyzed_before": persisted_analyzed_before,
+        "persisted_analyzed_after": persisted_analyzed_after,
         "success_count": state["success_count"],
         "failure_count": state["failure_count"],
         "skipped_count": state["skipped_count"],
