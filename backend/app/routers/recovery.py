@@ -139,6 +139,9 @@ SOCIAL_DIR = "/data/images/social-assets"
 TOTAL_IMAGES = 18472  # Known total from the Layer 3 scan
 
 CATEGORIES_FILE = "/data/images/recovery_categories.json"
+ANALYSIS_CACHE_DIR = "/data/images/analysis_cache/recoveryforge"
+VISION_NATIVE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+VISION_CONVERTIBLE_EXTENSIONS = {".bmp", ".tif", ".tiff"}
 
 BUILTIN_BUSINESSES = ["empire-workroom", "woodcraft", "general", "personal", "ambiguous", "unknown"]
 BUILTIN_CATEGORIES = ["misc", "raw-materials", "finished-products", "tools", "workspace", "inspiration", "reference"]
@@ -361,6 +364,59 @@ def _resolve_reanalysis_path(img: dict[str, Any]) -> tuple[str | None, str | Non
     return None, None, path_status
 
 
+def _analysis_cache_path(source_path: str) -> str:
+    source = Path(source_path).resolve()
+    try:
+        stat = source.stat()
+        cache_key_raw = f"{source}|{stat.st_mtime_ns}|{stat.st_size}"
+    except OSError:
+        cache_key_raw = str(source)
+    cache_key = hashlib.sha1(cache_key_raw.encode("utf-8")).hexdigest()[:16]
+    stem = _slugify_tag(source.stem) or "image"
+    return str(Path(ANALYSIS_CACHE_DIR) / f"{stem}-{cache_key}.png")
+
+
+def _prepare_vision_input_path(image_path: str) -> tuple[str, dict[str, Any]]:
+    """Return a mmx_cli-supported image path, converting BMP/TIFF to cached PNG when needed."""
+    source = Path(image_path).resolve()
+    original_ext = source.suffix.lower()
+    metadata: dict[str, Any] = {
+        "vision_input_path": str(source),
+        "original_format": original_ext.lstrip(".") or "unknown",
+    }
+
+    if original_ext in VISION_NATIVE_EXTENSIONS:
+        return str(source), metadata
+
+    if original_ext not in VISION_CONVERTIBLE_EXTENSIONS:
+        supported = ", ".join(sorted(VISION_NATIVE_EXTENSIONS | VISION_CONVERTIBLE_EXTENSIONS))
+        raise ValueError(f"unsupported_image_format:{original_ext or 'none'}; supported: {supported}")
+
+    try:
+        from PIL import Image
+    except Exception as exc:
+        raise RuntimeError("image_conversion_unavailable: Pillow is not available") from exc
+
+    cache_path = Path(_analysis_cache_path(str(source)))
+    os.makedirs(cache_path.parent, exist_ok=True)
+
+    try:
+        with Image.open(source) as image:
+            try:
+                image.seek(0)
+            except EOFError:
+                pass
+            if image.mode not in {"RGB", "RGBA", "L"}:
+                image = image.convert("RGB")
+            image.save(cache_path, format="PNG")
+    except Exception as exc:
+        raise RuntimeError(f"image_conversion_failed:{original_ext or 'unknown'}: {exc}") from exc
+
+    metadata["vision_input_path"] = str(cache_path)
+    metadata["vision_input_converted_from"] = str(source)
+    return str(cache_path), metadata
+
+
 def _last_analysis_error(img: dict[str, Any]) -> str | None:
     analysis = img.get("minimax_analysis") or {}
     if analysis.get("analysis_status") == "failed" and analysis.get("error"):
@@ -413,6 +469,9 @@ def _public_image_item(img: dict[str, Any]) -> dict[str, Any]:
         "analysis_confidence": img.get("minimax_analysis", {}).get("analysis_confidence") or img.get("confidence"),
         "needs_manual_review": bool(img.get("minimax_analysis", {}).get("needs_manual_review", False)),
         "analyzed_at": img.get("analyzed_at") or img.get("minimax_analysis", {}).get("timestamp") or img.get("classified_at"),
+        "vision_input_path": img.get("vision_input_path"),
+        "vision_input_converted_from": img.get("vision_input_converted_from"),
+        "original_format": img.get("original_format"),
         "last_error": _last_analysis_error(img),
         "object_tags": img.get("object_tags", []),
         "room_tags": img.get("room_tags", []),
@@ -496,11 +555,26 @@ def _copy_to_social(img: dict[str, Any]) -> str | None:
     return dest
 
 
-def _apply_minimax_analysis(img: dict[str, Any], result: dict[str, Any], analyzed_path: str) -> None:
+def _apply_minimax_analysis(
+    img: dict[str, Any],
+    result: dict[str, Any],
+    analyzed_path: str,
+    vision_input_metadata: dict[str, Any] | None = None,
+) -> None:
     if result.get("analysis_status") == "success":
         result.setdefault("provider", "minimax")
         result.setdefault("transport", "mmx_cli")
         result.setdefault("model", "mmx_vision")
+
+    metadata = dict(vision_input_metadata or {})
+    metadata.setdefault("vision_input_path", analyzed_path)
+    for key in ("vision_input_path", "vision_input_converted_from", "original_format"):
+        value = metadata.get(key)
+        if value:
+            img[key] = value
+            result.setdefault(key, value)
+        elif key == "vision_input_converted_from":
+            img.pop(key, None)
 
     img["minimax_analysis"] = result
     img["analyzed_at"] = result.get("timestamp") or datetime.now(timezone.utc).isoformat()
@@ -924,8 +998,22 @@ async def recovery_reanalyze_image(record_key: str, request: RecoveryImageReanal
             "path_status": path_status,
         }
 
-    result = await analyze_image(record_key, path)
-    _apply_minimax_analysis(img, result, path)
+    try:
+        vision_path, vision_input_metadata = _prepare_vision_input_path(path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "vision_input_prepare_failed",
+                "message": str(exc),
+                "record_key": record_key,
+                "source_path": path,
+                "path_source": path_source,
+            },
+        )
+
+    result = await analyze_image(record_key, vision_path)
+    _apply_minimax_analysis(img, result, vision_path, vision_input_metadata)
     _save_image_index(data)
 
     return {
@@ -934,7 +1022,9 @@ async def recovery_reanalyze_image(record_key: str, request: RecoveryImageReanal
         "image": _public_image_item(img),
         "analysis": result,
         "path_source": path_source,
-        "analyzed_path": path,
+        "source_path": path,
+        "analyzed_path": vision_path,
+        "vision_input": vision_input_metadata,
         "path_status": _image_path_status(img),
     }
 
@@ -1078,11 +1168,24 @@ async def recovery_analyze_single(image_key: str, restart_analysis: bool = False
         img["minimax_analysis"] = existing
         _save_image_index(data)
 
-    result = await analyze_image(image_key, path)
-    img["minimax_analysis"] = result
+    try:
+        vision_path, vision_input_metadata = _prepare_vision_input_path(path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "vision_input_prepare_failed",
+                "message": str(exc),
+                "image_key": image_key,
+                "source_path": path,
+            },
+        )
+
+    result = await analyze_image(image_key, vision_path)
+    _apply_minimax_analysis(img, result, vision_path, vision_input_metadata)
     _save_image_index(data)
 
-    return {"status": "analyzed", "analysis": result}
+    return {"status": "analyzed", "analysis": result, "source_path": path, "analyzed_path": vision_path, "vision_input": vision_input_metadata}
 
 
 @router.post("/recovery/batch-analyze")
@@ -1135,10 +1238,29 @@ async def recovery_batch_analyze(image_keys: list[str], restart_stale: bool = Fa
             results.append({"image_key": key, "status": "file_not_found"})
             continue
 
-        result = await analyze_image(key, path)
-        img["minimax_analysis"] = result
+        try:
+            vision_path, vision_input_metadata = _prepare_vision_input_path(path)
+        except Exception as exc:
+            skipped += 1
+            results.append({
+                "image_key": key,
+                "status": "vision_input_prepare_failed",
+                "error": str(exc),
+                "source_path": path,
+            })
+            continue
+
+        result = await analyze_image(key, vision_path)
+        _apply_minimax_analysis(img, result, vision_path, vision_input_metadata)
         started += 1
-        results.append({"image_key": key, "status": result["analysis_status"], "result": result})
+        results.append({
+            "image_key": key,
+            "status": result["analysis_status"],
+            "result": result,
+            "source_path": path,
+            "analyzed_path": vision_path,
+            "vision_input": vision_input_metadata,
+        })
 
     _save_image_index(data)
 
@@ -1441,9 +1563,34 @@ async def reanalysis_queue_process_next():
         _save_queue_state(state)
         return {"processed": False, "record_key": key, "status": "file_not_found"}
 
+    try:
+        vision_path, vision_input_metadata = _prepare_vision_input_path(path)
+    except Exception as exc:
+        err = str(exc)[:200]
+        state["last_error"] = f"vision_input_prepare_failed: {err}"
+        state["failure_count"] += 1
+        state["processed_count"] += 1
+        state["failed_record_keys"].append(key)
+        state["current_record_key"] = None
+        _save_queue_state(state)
+        return {
+            "processed": True,
+            "record_key": key,
+            "filename": chosen.get("filename"),
+            "status": "vision_input_prepare_failed",
+            "success": False,
+            "error": err,
+            "source_path": path,
+            "success_count": state["success_count"],
+            "failure_count": state["failure_count"],
+            "skipped_count": state["skipped_count"],
+            "processed_count": state["processed_count"],
+            "image_generation_used": False,
+        }
+
     # Call MiniMax
-    result = await analyze_image(key, path)
-    _apply_minimax_analysis(chosen, result, path)
+    result = await analyze_image(key, vision_path)
+    _apply_minimax_analysis(chosen, result, vision_path, vision_input_metadata)
 
     if result.get("analysis_status") == "success":
         persisted_verified = False
@@ -1489,6 +1636,9 @@ async def reanalysis_queue_process_next():
         "persisted_verified": persisted_verified,
         "persisted_analyzed_before": persisted_analyzed_before,
         "persisted_analyzed_after": persisted_analyzed_after,
+        "source_path": path,
+        "analyzed_path": vision_path,
+        "vision_input": vision_input_metadata,
         "success_count": state["success_count"],
         "failure_count": state["failure_count"],
         "skipped_count": state["skipped_count"],

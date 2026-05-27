@@ -401,6 +401,7 @@ def _recovery_index_fixture(monkeypatch, tmp_path, images):
     monkeypatch.setattr(recovery, "INDEX_FILE", str(index_file))
     monkeypatch.setattr(recovery, "CLASSIFIED_DIR", str(tmp_path / "classified"))
     monkeypatch.setattr(recovery, "SOCIAL_DIR", str(tmp_path / "social"))
+    monkeypatch.setattr(recovery, "ANALYSIS_CACHE_DIR", str(tmp_path / "analysis_cache"))
     monkeypatch.setattr(recovery, "quota_allow_new", lambda: True)
     return recovery, index_file
 
@@ -480,6 +481,137 @@ def test_selected_image_reanalyze_uses_mmx_path_and_clears_ollama_error(monkeypa
     assert "analysis_error" not in saved
     assert saved["minimax_analysis"]["provider"] == "minimax"
     assert saved["minimax_analysis"]["transport"] == "mmx_cli"
+
+
+def test_selected_image_reanalyze_converts_bmp_to_png_for_mmx(monkeypatch, tmp_path):
+    from PIL import Image
+
+    source = tmp_path / "window.bmp"
+    Image.new("RGB", (2, 2), color=(20, 40, 60)).save(source, format="BMP")
+    original_bytes = source.read_bytes()
+    original_stat = source.stat()
+    image = {"filename": "window.bmp", "path": str(source)}
+    recovery, index_file = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+    captured = {}
+
+    async def fake_analyze_image(image_key, image_path):
+        captured["image_key"] = image_key
+        captured["image_path"] = image_path
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "description": "A modern living room sofa with velvet drapery fabric and curtain hardware.",
+            "business_route": "empire-workroom",
+            "analysis_confidence": 0.91,
+        }
+
+    monkeypatch.setattr(recovery, "analyze_image", fake_analyze_image)
+
+    response = asyncio.run(
+        recovery.recovery_reanalyze_image(
+            recovery._record_key(image),
+            recovery.RecoveryImageReanalyzeRequest(force=True),
+        )
+    )
+
+    converted_path = Path(captured["image_path"])
+    assert response["success"] is True
+    assert converted_path.suffix == ".png"
+    assert converted_path.parent == tmp_path / "analysis_cache"
+    assert converted_path.exists()
+    assert response["source_path"] == str(source.resolve())
+    assert response["analyzed_path"] == str(converted_path)
+    assert response["vision_input"]["vision_input_path"] == str(converted_path)
+    assert response["vision_input"]["vision_input_converted_from"] == str(source.resolve())
+    assert response["vision_input"]["original_format"] == "bmp"
+
+    assert source.exists()
+    assert source.read_bytes() == original_bytes
+    assert source.stat().st_size == original_stat.st_size
+
+    saved = json.loads(index_file.read_text())["images"][0]
+    assert saved["path"] == str(source)
+    assert saved["description"]
+    assert saved["generated_description"]
+    assert saved["minimax_analysis"]["description"]
+    assert saved["minimax_analysis"]["vision_input_path"] == str(converted_path)
+    assert saved["minimax_analysis"]["vision_input_converted_from"] == str(source.resolve())
+    assert saved["minimax_analysis"]["original_format"] == "bmp"
+    assert saved["vision_input_path"] == str(converted_path)
+    assert saved["vision_input_converted_from"] == str(source.resolve())
+    assert saved["original_format"] == "bmp"
+    assert saved["analyzed_at"] == "2026-05-27T10:00:00+00:00"
+    assert saved["classified_by"] == "minimax-mmx_vision"
+    assert "sofa" in saved["object_tags"]
+    assert "window-treatment" in saved["object_tags"]
+    assert "velvet" in saved["material_tags"]
+    assert recovery._is_persisted_analyzed(saved) is True
+
+
+@pytest.mark.parametrize("suffix", [".jpg", ".jpeg", ".png", ".webp"])
+def test_selected_image_reanalyze_native_supported_formats_pass_through(monkeypatch, tmp_path, suffix):
+    source = tmp_path / f"native{suffix}"
+    source.write_bytes(b"native image placeholder")
+    image = {"filename": source.name, "path": str(source)}
+    recovery, index_file = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+    captured = {}
+
+    async def fake_analyze_image(image_key, image_path):
+        captured["image_path"] = image_path
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "description": "A modern sofa with velvet fabric in a living room for marketing.",
+            "analysis_confidence": 0.91,
+        }
+
+    monkeypatch.setattr(recovery, "analyze_image", fake_analyze_image)
+
+    response = asyncio.run(
+        recovery.recovery_reanalyze_image(
+            recovery._record_key(image),
+            recovery.RecoveryImageReanalyzeRequest(force=True),
+        )
+    )
+
+    assert response["success"] is True
+    assert captured["image_path"] == str(source.resolve())
+    assert response["analyzed_path"] == str(source.resolve())
+    assert response["vision_input"]["vision_input_path"] == str(source.resolve())
+    assert "vision_input_converted_from" not in response["vision_input"]
+    saved = json.loads(index_file.read_text())["images"][0]
+    assert saved["path"] == str(source)
+    assert saved["vision_input_path"] == str(source.resolve())
+    assert saved["original_format"] == suffix.lstrip(".")
+    assert "vision_input_converted_from" not in saved
+
+
+def test_selected_image_reanalyze_conversion_failure_returns_clean_error(monkeypatch, tmp_path):
+    source = tmp_path / "broken.bmp"
+    source.write_bytes(b"not a bitmap")
+    image = {"filename": "broken.bmp", "path": str(source)}
+    recovery, _ = _recovery_index_fixture(monkeypatch, tmp_path, [image])
+
+    async def fail_if_called(image_key, image_path):
+        raise AssertionError("analyze_image should not be called when conversion fails")
+
+    monkeypatch.setattr(recovery, "analyze_image", fail_if_called)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            recovery.recovery_reanalyze_image(
+                recovery._record_key(image),
+                recovery.RecoveryImageReanalyzeRequest(force=True),
+            )
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail["error"] == "vision_input_prepare_failed"
+    assert "image_conversion_failed" in exc.value.detail["message"]
+    assert exc.value.detail["source_path"] == str(source.resolve())
+    assert source.exists()
 
 
 def test_selected_image_reanalyze_missing_file_returns_clear_error(monkeypatch, tmp_path):
@@ -926,6 +1058,7 @@ def _make_test_client(tmp_path: Path, imgs: list[dict]):
         json.dump({"images": imgs}, f)
     rec.INDEX_FILE = str(idx)
     rec.QUEUE_FILE = str(tmp_path / "queue.json")
+    rec.ANALYSIS_CACHE_DIR = str(tmp_path / "analysis_cache")
     app = FastAPI()
     app.include_router(rec.router)
     return TestClient(app)
@@ -1352,6 +1485,60 @@ def test_queue_process_next_persists_success_after_reload(monkeypatch, tmp_path:
     assert "window-treatment" in saved["object_tags"]
     assert "velvet" in saved["material_tags"]
     assert "empire-workroom" in saved["business_domains"]
+    assert rec._is_persisted_analyzed(saved) is True
+
+
+def test_queue_process_next_converts_bmp_before_mmx(monkeypatch, tmp_path: Path):
+    """Queue processing sends a converted PNG to mmx_cli while preserving the BMP record path."""
+    from PIL import Image
+    import app.routers.recovery as rec
+
+    source = tmp_path / "fresh.bmp"
+    Image.new("RGB", (2, 2), color=(90, 80, 70)).save(source, format="BMP")
+    original_bytes = source.read_bytes()
+    fresh = {"filename": "fresh.bmp", "path": str(source)}
+    client = _make_test_client(tmp_path, [fresh])
+    monkeypatch.setattr(rec, "quota_allow_new", lambda: True)
+    captured = {}
+
+    async def fake_analyze_image(image_key, image_path):
+        captured["image_key"] = image_key
+        captured["image_path"] = image_path
+        return {
+            "image_key": image_key,
+            "analysis_status": "success",
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "description": "A modern living room sofa with velvet drapery fabric and curtain hardware.",
+            "analysis_confidence": 0.91,
+        }
+
+    monkeypatch.setattr(rec, "analyze_image", fake_analyze_image)
+
+    assert client.post("/recovery/reanalysis-queue/start", json={"limit": 1}).status_code == 200
+    resp = client.post("/recovery/reanalysis-queue/process-next", json={})
+    assert resp.status_code == 200
+    result = resp.json()
+    converted_path = Path(captured["image_path"])
+    assert result["success"] is True
+    assert result["persisted_verified"] is True
+    assert result["image_generation_used"] is False
+    assert converted_path.suffix == ".png"
+    assert converted_path.parent == tmp_path / "analysis_cache"
+    assert result["source_path"] == str(source)
+    assert result["analyzed_path"] == str(converted_path)
+    assert result["vision_input"]["vision_input_converted_from"] == str(source.resolve())
+    assert source.exists()
+    assert source.read_bytes() == original_bytes
+
+    saved = json.loads((tmp_path / "inv.json").read_text())["images"][0]
+    assert saved["path"] == str(source)
+    assert saved["vision_input_path"] == str(converted_path)
+    assert saved["vision_input_converted_from"] == str(source.resolve())
+    assert saved["original_format"] == "bmp"
+    assert saved["description"]
+    assert saved["minimax_analysis"]["description"]
+    assert saved["classified_by"] == "minimax-mmx_vision"
+    assert "sofa" in saved["object_tags"]
     assert rec._is_persisted_analyzed(saved) is True
 
 
