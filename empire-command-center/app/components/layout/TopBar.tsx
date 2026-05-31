@@ -1,19 +1,45 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, ChevronDown, ExternalLink, Check } from 'lucide-react';
+import { Bell, ChevronDown, Check } from 'lucide-react';
 import { API } from '../../lib/api';
 import LanguageSwitcher from '../LanguageSwitcher';
 
-const MODELS = [
-  { id: 'minimax', label: 'MiniMax', desc: 'Primary · Text/chat', color: '#b8960c' },
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet', desc: 'Anthropic · Balanced', color: '#7c3aed' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus', desc: 'Anthropic · Advanced', color: '#9333ea' },
-  { id: 'groq', label: 'Groq Llama 3.3', desc: 'Groq · 70B · Ultra-fast', color: '#f97316' },
-  { id: 'grok-3-fast', label: 'xAI Grok', desc: 'Disabled by policy', color: '#777' },
-  { id: 'llama3.1:8b', label: 'Llama 3.1 (Ollama)', desc: 'Local · 8B', color: '#06b6d4' },
-  { id: 'auto', label: 'Auto', desc: 'Best available', color: '#22c55e' },
-];
-const MODEL_LABELS: Record<string, string> = Object.fromEntries(MODELS.map(m => [m.id, m.label]));
+type ProviderRow = {
+  id: string;
+  name: string;
+  provider_canonical?: string;
+  models?: string[];
+  model?: string;
+  available?: boolean;
+  configured?: boolean;
+  disabled?: boolean;
+  disabled_reason?: string | null;
+  selected?: boolean;
+  primary?: boolean;
+  type?: string;
+};
+
+const PROVIDER_COLORS: Record<string, string> = {
+  minimax: '#b8960c',
+  deepseek: '#2563eb',
+  qwen: '#06b6d4',
+  openrouter: '#0ea5e9',
+  groq: '#f97316',
+  claude: '#7c3aed',
+  openai: '#10b981',
+  gemini: '#16a34a',
+  xai: '#ef4444',
+  ollama: '#0f766e',
+  openclaw: '#6b7280',
+};
+
+const DISABLED_REASON_LABELS: Record<string, string> = {
+  missing_key: 'Missing key',
+  disabled_by_kill_switch: 'Kill switch',
+  disabled_by_platformforge: 'Disabled',
+  ai_calls_disabled: 'AI calls off',
+  local_service_unavailable: 'Local service unavailable',
+};
 
 // Map notification sources to navigation targets
 const NOTIF_NAV_MAP: Record<string, { product?: string; screen?: string }> = {
@@ -47,10 +73,13 @@ interface Props {
   services?: any;
 }
 
-export default function TopBar({ onQuickSwitch, onClientView, onNavigate, services }: Props) {
+export default function TopBar({ onQuickSwitch, onClientView, onNavigate }: Props) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('minimax');
+  const [providerRows, setProviderRows] = useState<ProviderRow[]>([]);
+  const [selectedProvider, setSelectedProvider] = useState('minimax');
+  const [selectedModelName, setSelectedModelName] = useState('MiniMax-M2.7');
+  const [switchingProvider, setSwitchingProvider] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
   const modelRef = useRef<HTMLDivElement>(null);
@@ -80,6 +109,56 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, servic
     const iv = setInterval(fetchNotifs, 30000);
     return () => clearInterval(iv);
   }, [fetchNotifs]);
+
+  const fetchRoutingModels = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/max/models`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const models = (data?.models || []) as ProviderRow[];
+      setProviderRows(models);
+      const selected = models.find(m => m.selected || m.primary) || models[0];
+      const state = data?.routing_state || {};
+      if (state?.selected_provider) setSelectedProvider(state.selected_provider);
+      else if (selected?.provider_canonical) setSelectedProvider(selected.provider_canonical);
+      if (state?.selected_model) setSelectedModelName(state.selected_model);
+      else if (selected?.model) setSelectedModelName(selected.model);
+    } catch { /* offline */ }
+  }, []);
+
+  useEffect(() => {
+    fetchRoutingModels();
+    const iv = setInterval(fetchRoutingModels, 45000);
+    return () => clearInterval(iv);
+  }, [fetchRoutingModels]);
+
+  const switchProvider = useCallback(async (provider: ProviderRow) => {
+    if (switchingProvider || provider.disabled || !provider.available) return;
+    setSwitchingProvider(true);
+    try {
+      const targetProvider = provider.provider_canonical || provider.id;
+      const targetModel = provider.model || provider.models?.[0] || '';
+      const res = await fetch(`${API}/max/routing-state`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selected_provider: targetProvider,
+          selected_model: targetModel,
+          updated_by: 'founder_or_system',
+          reason: 'topbar_selector_switch',
+        }),
+      });
+      if (res.ok) {
+        setSelectedProvider(targetProvider);
+        setSelectedModelName(targetModel || selectedModelName);
+        setShowModelPicker(false);
+        await fetchRoutingModels();
+      }
+    } catch { /* offline */ }
+    finally {
+      setSwitchingProvider(false);
+    }
+  }, [fetchRoutingModels, selectedModelName, switchingProvider]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -158,25 +237,45 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate, servic
             onClick={() => setShowModelPicker(!showModelPicker)}
             className="empire-card flex items-center gap-2 !py-2 !px-3 text-[11px] font-bold font-mono"
           >
-            <span className="w-2 h-2 rounded-full" style={{ background: MODELS.find(m => m.id === selectedModel)?.color || '#b8960c' }} />
-            <span style={{ color: MODELS.find(m => m.id === selectedModel)?.color || '#b8960c' }}>
-              {MODEL_LABELS[selectedModel] || selectedModel}
+            <span className="w-2 h-2 rounded-full" style={{ background: PROVIDER_COLORS[selectedProvider] || '#b8960c' }} />
+            <span style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
+              {selectedProvider} · {selectedModelName}
             </span>
             <ChevronDown size={12} className="text-[var(--faint)]" />
           </button>
           {showModelPicker && (
-            <div className="absolute top-[46px] right-0 w-[220px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
-              {MODELS.map(m => (
-                <button key={m.id}
-                  onClick={() => { setSelectedModel(m.id); setShowModelPicker(false); }}
-                  className={`w-full text-left px-3 py-2.5 text-[11px] flex items-center gap-2 transition-colors cursor-pointer ${selectedModel === m.id ? 'bg-[var(--card-bg)]' : 'hover:bg-[var(--hover)]'}`}>
-                  <span className="w-2 h-2 rounded-full" style={{ background: m.color }} />
-                  <div>
-                    <div className="font-bold" style={{ color: m.color }}>{m.label}</div>
-                    <div className="text-[9px] text-[var(--muted)]">{m.desc}</div>
-                  </div>
-                </button>
-              ))}
+            <div className="absolute top-[46px] right-0 w-[320px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
+              {providerRows.map((row) => {
+                const canonical = row.provider_canonical || row.id;
+                const selected = canonical === selectedProvider;
+                const color = PROVIDER_COLORS[canonical] || '#6b7280';
+                const disabledReason = row.disabled_reason ? (DISABLED_REASON_LABELS[row.disabled_reason] || row.disabled_reason) : '';
+                const unavailable = !!row.disabled || !row.available;
+                return (
+                  <button
+                    key={canonical}
+                    onClick={() => switchProvider(row)}
+                    disabled={unavailable || switchingProvider}
+                    className={`w-full text-left px-3 py-2.5 text-[11px] flex items-center gap-2 transition-colors ${selected ? 'bg-[var(--card-bg)]' : 'hover:bg-[var(--hover)]'} ${unavailable ? 'opacity-55 cursor-not-allowed' : 'cursor-pointer'}`}
+                    title={disabledReason || ''}
+                  >
+                    <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold truncate" style={{ color }}>
+                        {row.name || canonical}
+                        {selected ? ' · active' : ''}
+                      </div>
+                      <div className="text-[9px] text-[var(--muted)] truncate">
+                        {row.model || row.models?.[0] || 'model not set'}
+                        {unavailable ? ` · ${disabledReason || 'unavailable'}` : ''}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              {providerRows.length === 0 && (
+                <div className="px-3 py-2 text-[10px] text-[var(--muted)]">No providers loaded</div>
+              )}
             </div>
           )}
         </div>

@@ -17,18 +17,42 @@ interface CostOverview {
   period_days: number;
   total: { input_tokens: number; output_tokens: number; total_tokens: number; cost_usd: number; requests: number };
   today: { input_tokens: number; output_tokens: number; cost_usd: number; requests: number };
-  by_model: { model: string; provider: string; input_tokens: number; output_tokens: number; cost: number; requests: number }[];
+  by_model: {
+    model: string; provider: string; input_tokens: number; output_tokens: number; cost: number; requests: number;
+    estimated_cost?: number; provider_reported_cost?: number; provider_reported_rows?: number; estimated_rows?: number;
+  }[];
   daily: { day: string; input_tokens: number; output_tokens: number; cost: number; requests: number }[];
   budget: { monthly_limit: number; monthly_spent: number; percent_used: number; alert: boolean; auto_switch_to_local: boolean; auto_switch_threshold: number };
+  token_sources?: { provider_reported: number; estimated: number; unknown: number };
 }
 
 interface Transaction {
   id: number; timestamp: string; model: string; provider: string;
   input_tokens: number; output_tokens: number; cost_usd: number;
   endpoint: string; feature: string; business: string; source: string;
+  token_source?: string;
+  estimated_cost?: number;
+  provider_reported_cost?: number;
+  source_module?: string;
+  lane?: string;
+  status?: string;
+  http_status?: number;
+  request_id?: string;
+  attempt_id?: string;
+  is_legacy?: number;
 }
 
 interface BreakdownItem { cost: number; requests: number; input_tokens: number; output_tokens: number; [key: string]: unknown }
+
+interface BleedAlert {
+  kind: string;
+  source_module: string;
+  provider_model: string;
+  lane: string;
+  count: number;
+  last_seen: string;
+  recommended_action: string;
+}
 
 /* ── Model Tier Map ──────────────────────────────────────────── */
 const MODEL_TIERS: Record<string, { tier: string; color: string; bg: string }> = {
@@ -244,6 +268,7 @@ export default function CostTracker() {
   const [tab, setTab] = useState<'overview' | 'breakdown' | 'log'>('overview');
   const [budgetOverride, setBudgetOverride] = useState<number | null>(null);
   const [showBudgetEdit, setShowBudgetEdit] = useState(false);
+  const [bleedAlerts, setBleedAlerts] = useState<BleedAlert[]>([]);
 
   // Load budget from localStorage
   useEffect(() => {
@@ -267,18 +292,20 @@ export default function CostTracker() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ov, tx, prov, feat, biz] = await Promise.all([
+      const [ov, tx, prov, feat, biz, bleed] = await Promise.all([
         safeFetch(`${API}/costs/overview?days=30`),
         safeFetch(`${API}/costs/transactions?limit=100`),
         safeFetch(`${API}/costs/by-provider?days=30`),
         safeFetch(`${API}/costs/by-feature?days=30`),
         safeFetch(`${API}/costs/by-business?days=30`),
+        safeFetch(`${API}/costs/bleed-watch?hours=24`),
       ]);
       setOverview(ov);
       setTransactions(ov?.transactions || tx?.transactions || tx || []);
       setByProvider(prov?.by_provider || []);
       setByFeature(feat?.by_feature || []);
       setByBusiness(biz?.by_business || []);
+      setBleedAlerts(bleed?.alerts || []);
     } catch (e) {
       console.error('Cost data load failed:', e);
     }
@@ -378,6 +405,9 @@ export default function CostTracker() {
   const effectiveAlert = effectivePercent >= (ov.budget.auto_switch_threshold || 90);
   const fmt = (n: number) => n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
   const fmtK = (n: number) => n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n/1000).toFixed(0)}K` : String(n);
+  const tokenSources = ov.token_sources || { provider_reported: 0, estimated: 0, unknown: 0 };
+  const tokenSourceRows = tokenSources.provider_reported + tokenSources.estimated + tokenSources.unknown;
+  const providerReportedPct = tokenSourceRows > 0 ? ((tokenSources.provider_reported / tokenSourceRows) * 100) : 0;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chartData: any[] = stackedTrendData && view === 'daily' ? stackedTrendData : trendData;
@@ -420,12 +450,13 @@ export default function CostTracker() {
           {tab === 'overview' && (
             <>
               {/* KPI Row */}
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
                 <KPI icon={DollarSign} label="Today" value={fmt(ov.today.cost_usd)} sub={`${ov.today.requests} calls`} />
                 <KPI icon={TrendingUp} label="This Month" value={fmt(ov.budget.monthly_spent)} sub={`${effectivePercent.toFixed(1)}% of budget`} alert={effectiveAlert} />
                 <KPI icon={Zap} label="30-Day Total" value={fmt(ov.total.cost_usd)} sub={`${fmtK(ov.total.total_tokens)} tokens`} />
                 <KPI icon={Clock} label="30-Day Calls" value={String(ov.total.requests)} sub={`Avg ${ov.total.requests > 0 ? fmt(ov.total.cost_usd / ov.total.requests) : '$0'}/call`} />
                 <KPI icon={Shield} label="Est. Savings" value={fmt(savings)} sub="vs all-Grok routing" />
+                <KPI icon={Info} label="Provider Reported" value={`${providerReportedPct.toFixed(0)}%`} sub={`${tokenSources.provider_reported} rows provider-reported`} />
               </div>
 
               {/* Budget Gauge */}
@@ -437,6 +468,31 @@ export default function CostTracker() {
                 trendData={trendData}
                 onEditBudget={() => setShowBudgetEdit(true)}
               />
+
+              <div className="empire-card flat" style={{ padding: 16 }}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="section-label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <AlertTriangle size={13} className="text-[#b8960c]" />
+                    Bleed Watch
+                  </div>
+                  <span className={`status-pill ${bleedAlerts.length === 0 ? 'ok' : 'overdue'}`}>{bleedAlerts.length === 0 ? 'CLEAN' : `${bleedAlerts.length} ALERTS`}</span>
+                </div>
+                {bleedAlerts.length === 0 ? (
+                  <div className="text-[11px] text-[#777]">No routing/cost anomalies detected in the last 24 hours.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {bleedAlerts.slice(0, 8).map((a, idx) => (
+                      <div key={idx} className="rounded-xl border border-[#f3d3d3] bg-[#fff7f7] px-3 py-2">
+                        <div className="text-[11px] font-semibold text-[#9f1239]">{a.kind}</div>
+                        <div className="text-[10px] text-[#666]">
+                          {a.provider_model} · lane {a.lane} · {a.count} · {a.source_module}
+                        </div>
+                        <div className="text-[10px] text-[#7f1d1d] mt-1">{a.recommended_action}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* Billing Cutoff Info */}
               <div className="empire-card flat" style={{ padding: 16 }}>
@@ -526,6 +582,7 @@ export default function CostTracker() {
                       <th className="text-center">Tier</th>
                       <th className="text-right">Calls</th>
                       <th className="text-right">Tokens</th>
+                      <th className="text-right">Est / Reported</th>
                       <th className="text-right">Cost</th>
                     </tr></thead>
                     <tbody>
@@ -546,12 +603,15 @@ export default function CostTracker() {
                             <td className="text-center"><TierBadge model={m.model} /></td>
                             <td className="text-right">{m.requests}</td>
                             <td className="text-right">{fmtK(m.input_tokens + m.output_tokens)}</td>
+                            <td className="text-right text-[11px] text-[#666]">
+                              {fmt(m.estimated_cost || 0)} / {fmt(m.provider_reported_cost || 0)}
+                            </td>
                             <td className="text-right font-bold text-[#b8960c]">{fmt(m.cost)}</td>
                           </tr>
                         );
                       })}
                       {ov.by_model.length === 0 && (
-                        <tr><td colSpan={6} className="text-center py-8 text-[#bbb]">No model data yet</td></tr>
+                        <tr><td colSpan={7} className="text-center py-8 text-[#bbb]">No model data yet</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -605,10 +665,12 @@ export default function CostTracker() {
                   <thead className="sticky top-0 bg-[#faf9f7]"><tr>
                     <th className="text-left">Time</th>
                     <th className="text-left">Model</th>
+                    <th className="text-left">Source</th>
                     <th className="text-left">Feature</th>
                     <th className="text-left">Business</th>
                     <th className="text-right">In</th>
                     <th className="text-right">Out</th>
+                    <th className="text-left">Token Src</th>
                     <th className="text-right">Cost</th>
                   </tr></thead>
                   <tbody>
@@ -616,15 +678,17 @@ export default function CostTracker() {
                       <tr key={t.id}>
                         <td className="whitespace-nowrap font-mono text-[#999]" suppressHydrationWarning>{t.timestamp?.slice(5, 16)}</td>
                         <td className="font-mono font-medium text-[#1a1a1a]">{t.model}</td>
+                        <td className="text-[11px]">{t.source_module || t.source || '-'}</td>
                         <td>{t.feature}</td>
                         <td>{t.business}</td>
                         <td className="text-right">{fmtK(t.input_tokens)}</td>
                         <td className="text-right">{fmtK(t.output_tokens)}</td>
+                        <td className="text-[11px]">{t.token_source || 'estimated'}</td>
                         <td className="text-right font-bold text-[#b8960c]">{t.cost_usd > 0 ? fmt(t.cost_usd) : '-'}</td>
                       </tr>
                     ))}
                     {transactions.length === 0 && (
-                      <tr><td colSpan={7} className="text-center py-12 text-[#bbb]">No transactions yet</td></tr>
+                      <tr><td colSpan={9} className="text-center py-12 text-[#bbb]">No transactions yet</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -69,6 +69,13 @@ async def cost_transactions(limit: int = Query(50, ge=1, le=500)):
     return {"transactions": token_tracker.get_recent_transactions(limit)}
 
 
+@router.get("/costs/bleed-watch")
+async def cost_bleed_watch(hours: int = Query(24, ge=1, le=168)):
+    """Detect likely token bleed anomalies."""
+    alerts = token_tracker.get_bleed_watch_alerts(hours=hours)
+    return {"hours": hours, "alerts": alerts, "count": len(alerts)}
+
+
 @router.get("/costs/budget")
 async def cost_budget():
     """Current budget config and usage."""

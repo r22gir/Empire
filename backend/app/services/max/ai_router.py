@@ -5,13 +5,33 @@ import httpx
 import base64
 import subprocess
 import re
+import uuid
 from enum import Enum
 from dataclasses import dataclass
-from typing import List, Optional, AsyncGenerator, Tuple
+from typing import List, Optional, AsyncGenerator, Tuple, Any
 from pathlib import Path
 import logging
 from dotenv import load_dotenv
 from app.services.data_paths import data_root
+from .routing_state import (
+    CANONICAL_PROVIDERS,
+    RoutingState,
+    canonical_provider,
+    env_flag,
+    load_routing_state,
+    provider_effectively_disabled,
+    provider_label,
+    provider_manually_disabled,
+    provider_configured,
+    provider_default_model,
+    provider_disabled,
+    provider_is_cloud,
+    provider_key_env,
+    provider_model_choices,
+    provider_model_env,
+    save_routing_state,
+    update_routing_state,
+)
 
 load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
@@ -23,6 +43,9 @@ class AIModel(Enum):
     CLAUDE_OPUS = "claude-opus-4-6"
     CLAUDE_SONNET = "claude-sonnet-4-6"
     GROQ = "groq"
+    DEEPSEEK = "deepseek"
+    OPENROUTER = "openrouter"
+    QWEN = "qwen"
     OPENCLAW = "openclaw"
     OLLAMA = "ollama-llama"
     GEMINI = "gemini"
@@ -150,6 +173,21 @@ class AIResponse:
     fallback_used: bool = False
     function_calls: Optional[list] = None  # xAI /v1/responses function calls
 
+
+PROVIDER_LABELS: dict[str, str] = {
+    "minimax": "MiniMax",
+    "deepseek": "DeepSeek",
+    "qwen": "Qwen",
+    "openrouter": "OpenRouter",
+    "groq": "Groq",
+    "claude": "Claude",
+    "openai": "OpenAI",
+    "gemini": "Gemini",
+    "xai": "xAI Grok",
+    "ollama": "Ollama",
+    "openclaw": "OpenClaw",
+}
+
 from .system_prompt import get_system_prompt
 from .desk_prompt import get_desk_system_prompt
 from .token_tracker import token_tracker
@@ -176,6 +214,15 @@ class AIRouter:
         self.xai_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY", "")
         self.xai_base_url = os.getenv("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/")
         self.xai_model = os.getenv("XAI_MODEL", "grok-4-fast-non-reasoning")
+        self.deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+        self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+        self.qwen_key = os.getenv("QWEN_API_KEY", "")
+        self.qwen_base_url = os.getenv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").rstrip("/")
+        self.qwen_model = os.getenv("QWEN_MODEL", "qwen-plus")
+        self.openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+        self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+        self.openrouter_model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
         try:
             self.xai_max_tokens = int(os.getenv("XAI_MAX_TOKENS", "8192"))
         except ValueError:
@@ -192,16 +239,17 @@ class AIRouter:
         self.max_disable_ollama = os.getenv("MAX_DISABLE_OLLAMA", "").lower() in ("true", "1", "yes")
         self.last_provider_errors: dict[str, str] = {}
         self.last_provider_successes: dict[str, str] = {}
-        # Priority: MAX_PRIMARY_PROVIDER env overrides default xAI > Claude > Groq chain
-        # MiniMax is primary when MAX_PRIMARY_PROVIDER=minimax and key is present
-        if self.max_primary_provider == "minimax" and self.minimax_key:
+        self.routing_state: RoutingState = load_routing_state()
+        # Primary model is largely legacy/diagnostic now that selector state is authoritative.
+        # Keep xAI first when available to avoid stale env cross-test contamination.
+        if self.xai_key and not self.max_disable_xai:
+            self.primary_model = AIModel.GROK
+        elif self.max_primary_provider == "minimax" and self.minimax_key:
             self.primary_model = AIModel.MINIMAX
         elif self.max_primary_provider == "claude" and self.anthropic_key:
             self.primary_model = AIModel.CLAUDE
         elif self.max_primary_provider == "groq" and self.groq_key:
             self.primary_model = AIModel.GROQ
-        elif self.xai_key and not self.max_disable_xai:
-            self.primary_model = AIModel.GROK
         elif self.anthropic_key:
             self.primary_model = AIModel.CLAUDE
         elif self.groq_key:
@@ -218,11 +266,14 @@ class AIRouter:
         ]
         self.upload_dir = self.upload_dirs[0]
         providers = []
-        if self.xai_key: providers.append("Grok")
+        if self.xai_key: providers.append("xAI")
         if self.anthropic_key: providers.append("Claude")
         if self.groq_key: providers.append("Groq")
         if self.gemini_key: providers.append("Gemini")
         if self.openai_key: providers.append("OpenAI")
+        if self.deepseek_key: providers.append("DeepSeek")
+        if self.qwen_key: providers.append("Qwen")
+        if self.openrouter_key: providers.append("OpenRouter")
         if self.minimax_key: providers.append("MiniMax")
         providers += ["OpenClaw"]
         if not self.max_disable_ollama:
@@ -230,38 +281,277 @@ class AIRouter:
         model_names = {AIModel.GROK: "xAI Grok", AIModel.CLAUDE: "Claude 4.6 Sonnet", AIModel.GROQ: "Groq Llama", AIModel.OLLAMA: "Ollama", AIModel.MINIMAX: "MiniMax"}
         xai_label = "ON" if self.xai_key and not self.max_disable_xai else ("disabled" if self.max_disable_xai else "no_key")
         ollama_label = "disabled" if self.max_disable_ollama else "enabled"
-        print(f"[MAX] Primary: {model_names.get(self.primary_model, str(self.primary_model))} | Providers: {', '.join(providers)} | xAI: {xai_label} | Ollama: {ollama_label}")
+        logger.info(
+            "[MAX] Primary=%s | Providers=%s | xAI=%s | Ollama=%s",
+            model_names.get(self.primary_model, str(self.primary_model)),
+            ", ".join(providers),
+            xai_label,
+            ollama_label,
+        )
+
+    def _refresh_runtime_keys(self) -> None:
+        """Reload key env values so runtime updates are reflected without restart."""
+        self.anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+        self.xai_key = os.getenv("XAI_API_KEY") or os.getenv("GROK_API_KEY", "")
+        self.groq_key = os.getenv("GROQ_API_KEY", "")
+        self.gemini_key = os.getenv("GOOGLE_GEMINI_API_KEY", "")
+        self.openai_key = os.getenv("OPENAI_API_KEY", "")
+        self.minimax_key = os.getenv("MINIMAX_API_KEY", "")
+        self.deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.qwen_key = os.getenv("QWEN_API_KEY", "")
+        self.openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+        self.minimax_model = os.getenv("MINIMAX_MODEL", self.minimax_model or "MiniMax-M2.7")
+        self.xai_model = os.getenv("XAI_MODEL", self.xai_model or "grok-4-fast-non-reasoning")
+        self.deepseek_model = os.getenv("DEEPSEEK_MODEL", self.deepseek_model or "deepseek-chat")
+        self.qwen_model = os.getenv("QWEN_MODEL", self.qwen_model or "qwen-plus")
+        self.openrouter_model = os.getenv("OPENROUTER_MODEL", self.openrouter_model or "openai/gpt-4o-mini")
+
+    def _refresh_routing_state(self) -> RoutingState:
+        self.routing_state = load_routing_state()
+        self._refresh_runtime_keys()
+        return self.routing_state
+
+    def _provider_key_present(self, provider: str) -> bool:
+        canonical = canonical_provider(provider)
+        if canonical == "xai":
+            return bool(self.xai_key)
+        if canonical == "claude":
+            return bool(self.anthropic_key)
+        if canonical == "groq":
+            return bool(self.groq_key)
+        if canonical == "gemini":
+            return bool(self.gemini_key)
+        if canonical == "openai":
+            return bool(self.openai_key)
+        if canonical == "minimax":
+            return bool(self.minimax_key)
+        if canonical == "deepseek":
+            return bool(self.deepseek_key)
+        if canonical == "qwen":
+            return bool(self.qwen_key)
+        if canonical == "openrouter":
+            return bool(self.openrouter_key)
+        return True
+
+    def _provider_disabled_reason(self, provider: str, state: RoutingState | None = None) -> str | None:
+        state = state or self.routing_state
+        canonical = canonical_provider(provider)
+        if not canonical:
+            return "unknown_provider"
+        if provider_manually_disabled(state, canonical):
+            return "disabled_by_platformforge"
+        if provider_disabled(canonical):
+            if canonical == "xai":
+                return "credits_unavailable"
+            if canonical == "ollama":
+                return "founder_disabled_due_to_stall_suspected"
+            return "disabled_by_kill_switch"
+        if state.ai_calls_disabled and provider_is_cloud(canonical):
+            return "ai_calls_disabled"
+        if not self._provider_key_present(canonical) and canonical not in {"ollama", "openclaw"}:
+            return "missing_key"
+        return None
+
+    def _local_provider_online(self, provider: str) -> bool | None:
+        provider = canonical_provider(provider)
+        try:
+            if provider == "openclaw":
+                resp = httpx.get("http://localhost:7878/health", timeout=2.0)
+                return resp.status_code < 500
+            if provider == "ollama":
+                resp = httpx.get("http://localhost:11434/api/tags", timeout=2.0)
+                return resp.status_code < 500
+        except Exception:
+            return False
+        return None
 
     def get_available_models(self):
-        # Determine xAI available (key present and not disabled via env)
-        xai_available = bool(self.xai_key) and not self.max_disable_xai
-        return [
-            {"id": "grok", "name": "xAI Grok", "available": xai_available, "configured": bool(self.xai_key), "disabled": self.max_disable_xai, "disabled_reason": "credits_unavailable" if self.max_disable_xai else None, "primary": self.primary_model == AIModel.GROK, "type": "cloud", "model": self.xai_model, "base_url": self.xai_base_url, "status_source": "env_configured", "last_error": self.last_provider_errors.get("grok")},
-            {"id": "claude", "name": "Claude 4.6 Sonnet", "available": bool(self.anthropic_key), "configured": bool(self.anthropic_key), "primary": self.primary_model == AIModel.CLAUDE, "type": "cloud", "last_error": self.last_provider_errors.get("claude")},
-            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "available": bool(self.anthropic_key), "configured": bool(self.anthropic_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("claude")},
-            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "available": bool(self.anthropic_key), "configured": bool(self.anthropic_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("claude")},
-            {"id": "groq", "name": "Groq Llama 3.3 70B", "available": bool(self.groq_key), "configured": bool(self.groq_key), "primary": self.primary_model == AIModel.GROQ, "type": "cloud", "last_error": self.last_provider_errors.get("groq")},
-            {"id": "gemini", "name": "Gemini 2.5 Flash", "available": bool(self.gemini_key), "configured": bool(self.gemini_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("gemini")},
-            {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "available": bool(self.openai_key), "configured": bool(self.openai_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("openai")},
-            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "available": bool(self.openai_key), "configured": bool(self.openai_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("openai")},
-            {"id": "gpt-4o", "name": "GPT-4o", "available": bool(self.openai_key), "configured": bool(self.openai_key), "primary": False, "type": "cloud", "last_error": self.last_provider_errors.get("openai")},
-            {"id": "minimax", "name": "MiniMax", "available": bool(self.minimax_key) and not self.last_provider_errors.get("minimax"), "configured": bool(self.minimax_key), "primary": self.primary_model == AIModel.MINIMAX, "type": "cloud", "model": self.minimax_model, "base_url": self.minimax_base_url, "status_source": "env_configured", "last_error": self.last_provider_errors.get("minimax")},
-            {"id": "openclaw", "name": "OpenClaw AI", "available": True, "primary": False, "type": "local"},
-            {"id": "ollama-llama", "name": "Ollama LLaMA 3.1", "available": False, "primary": False, "disabled": self.max_disable_ollama, "disabled_reason": "founder_disabled_due_to_stall_suspected" if self.max_disable_ollama else None, "type": "local"},
-        ]
+        state = self._refresh_routing_state()
+        legacy_id_map = {"xai": "grok", "ollama": "ollama-llama"}
+        rows: list[dict[str, Any]] = []
+        for provider in CANONICAL_PROVIDERS:
+            configured = provider_configured(provider) and self._provider_key_present(provider)
+            disabled_reason = self._provider_disabled_reason(provider, state)
+            local_online = self._local_provider_online(provider)
+            if local_online is False and disabled_reason is None and provider in {"openclaw", "ollama"}:
+                disabled_reason = "local_service_unavailable"
+            disabled = disabled_reason is not None
+            models = provider_model_choices(provider)
+            active_model = state.selected_model if state.selected_provider == provider else models[0]
+            base_url = None
+            if provider == "xai":
+                base_url = self.xai_base_url
+            elif provider == "minimax":
+                base_url = self.minimax_base_url
+            elif provider == "deepseek":
+                base_url = self.deepseek_base_url
+            elif provider == "qwen":
+                base_url = self.qwen_base_url
+            elif provider == "openrouter":
+                base_url = self.openrouter_base_url
+            last_error = self.last_provider_errors.get(provider) or self.last_provider_errors.get("grok" if provider == "xai" else provider)
+            last_success = self.last_provider_successes.get(provider) or self.last_provider_successes.get("grok" if provider == "xai" else provider)
+            rows.append(
+                {
+                    "id": legacy_id_map.get(provider, provider),
+                    "name": provider_label(provider),
+                    "provider_canonical": provider,
+                    "models": models,
+                    "model": active_model,
+                    "configured": bool(configured),
+                    "available": bool(configured) and not disabled,
+                    "disabled": disabled,
+                    "disabled_reason": disabled_reason,
+                    "primary": provider == state.selected_provider,
+                    "selected": provider == state.selected_provider,
+                    "type": "cloud" if provider_is_cloud(provider) else "local",
+                    "fallback_eligible": bool(configured) and not disabled,
+                    "status_source": "env_configured",
+                    "last_error": last_error,
+                    "last_success": last_success,
+                    "manual_disabled": provider_manually_disabled(state, provider),
+                    "credential_env": provider_key_env(provider) or None,
+                    "local_online": local_online,
+                    "base_url": base_url,
+                }
+            )
+        return rows
 
     def _record_provider_error(self, provider: str, exc: Exception) -> None:
-        self.last_provider_errors[provider] = f"{type(exc).__name__}: {str(exc)[:300]}"
+        key = canonical_provider(provider) or provider
+        self.last_provider_errors[key] = f"{type(exc).__name__}: {str(exc)[:300]}"
+        if key == "xai":
+            self.last_provider_errors["grok"] = self.last_provider_errors[key]
 
     def _record_provider_success(self, provider: str) -> None:
-        self.last_provider_successes[provider] = "ok"
-        self.last_provider_errors.pop(provider, None)
+        key = canonical_provider(provider) or provider
+        self.last_provider_successes[key] = "ok"
+        self.last_provider_errors.pop(key, None)
+        if key == "xai":
+            self.last_provider_successes["grok"] = "ok"
+            self.last_provider_errors.pop("grok", None)
 
     def _provider_unavailable_message(self) -> str:
         return (
             "I could not complete the AI text-generation step because no configured text provider "
             "returned a verified response. Provider diagnostics are available in /api/v1/max/status."
         )
+
+    def get_routing_state_payload(self) -> dict[str, Any]:
+        state = self._refresh_routing_state()
+        return {
+            **state.as_dict(),
+            "selected_provider_label": provider_label(state.selected_provider),
+            "provider_registry": self.get_available_models(),
+        }
+
+    def set_active_provider_model(
+        self,
+        *,
+        provider: str,
+        model: str | None,
+        updated_by: str = "founder_or_system",
+        reason: str = "manual_selector_switch",
+    ) -> RoutingState:
+        canonical = canonical_provider(provider)
+        if canonical not in CANONICAL_PROVIDERS:
+            raise ValueError(f"Unknown provider: {provider}")
+
+        current = self._refresh_routing_state()
+        disabled_reason = self._provider_disabled_reason(canonical, current)
+        if disabled_reason:
+            raise ValueError(f"Provider '{canonical}' is unavailable: {disabled_reason}")
+
+        selected_model = (model or "").strip()
+        if not selected_model:
+            selected_model = provider_default_model(canonical)
+        if selected_model not in provider_model_choices(canonical):
+            raise ValueError(f"Model '{selected_model}' is not in configured choices for '{canonical}'")
+
+        state = update_routing_state(
+            selected_provider=canonical,
+            selected_model=selected_model,
+            updated_by=updated_by,
+            last_switch_reason=reason,
+        )
+        self.routing_state = state
+        return state
+
+    def set_provider_enabled(
+        self,
+        provider: str,
+        enabled: bool,
+        *,
+        updated_by: str = "founder_or_system",
+        reason: str = "platformforge_toggle",
+    ) -> RoutingState:
+        canonical = canonical_provider(provider)
+        if canonical not in CANONICAL_PROVIDERS:
+            raise ValueError(f"Unknown provider: {provider}")
+        state = self._refresh_routing_state()
+        manual = dict(state.manual_disabled or {})
+        if enabled:
+            manual.pop(canonical, None)
+        else:
+            manual[canonical] = True
+        state = update_routing_state(
+            manual_disabled=manual,
+            updated_by=updated_by,
+            last_switch_reason=f"{reason}:{canonical}:{'enable' if enabled else 'disable'}",
+        )
+        self.routing_state = state
+        return state
+
+    def set_routing_policy(
+        self,
+        *,
+        fallback_enabled: bool | None = None,
+        ai_calls_disabled: bool | None = None,
+        updated_by: str = "founder_or_system",
+        reason: str = "routing_policy_update",
+    ) -> RoutingState:
+        state = update_routing_state(
+            fallback_enabled=fallback_enabled,
+            ai_calls_disabled=ai_calls_disabled,
+            updated_by=updated_by,
+            last_switch_reason=reason,
+        )
+        self.routing_state = state
+        return state
+
+    async def provider_smoke_test(
+        self,
+        *,
+        provider: str,
+        model: str | None = None,
+        prompt: str = "Reply only: deepseek ok",
+        tenant_id: str = "founder",
+    ) -> AIResponse:
+        state = self._refresh_routing_state()
+        canonical = canonical_provider(provider)
+        if canonical not in CANONICAL_PROVIDERS:
+            raise ValueError(f"Unknown provider: {provider}")
+        reason = self._provider_disabled_reason(canonical, state)
+        if reason:
+            raise ValueError(f"Provider '{canonical}' unavailable: {reason}")
+        selected_model = (model or "").strip() or provider_default_model(canonical)
+        messages = [AIMessage(role="system", content=self.system_prompt), AIMessage(role="user", content=prompt)]
+        result = await self._try_provider_chat(
+            canonical,
+            selected_model,
+            messages,
+            [AIMessage(role="user", content=prompt)],
+            None,
+            False,
+            "chat",
+            "platform",
+            tenant_id,
+            tools=None,
+        )
+        if result is None:
+            error_text = self.last_provider_errors.get(canonical) or self.last_provider_errors.get("grok" if canonical == "xai" else canonical)
+            raise RuntimeError(error_text or "provider_smoke_test_failed")
+        return result
 
     def _sanitize_minimax_content(self, text: str) -> str:
         cleaned = (text or "").strip()
@@ -616,6 +906,11 @@ class AIRouter:
 
     async def _try_provider_chat(self, provider_type: str, model_override: Optional[str], full_messages: List[AIMessage], messages: List[AIMessage], image_path: Optional[Path], fallback: bool, feature: str, business: str, tenant_id: str, tools: Optional[list] = None) -> Optional[AIResponse]:
         """Try a single provider for non-streaming chat. Returns AIResponse on success, None on failure."""
+        canonical = canonical_provider(provider_type)
+        if canonical == "xai":
+            provider_type = "grok"
+        else:
+            provider_type = canonical or provider_type
         try:
             if provider_type == "grok":
                 logger.info(f"[MAX] Chat via xAI Grok ({self.xai_model}){' (fallback)' if fallback else ''}")
@@ -650,6 +945,27 @@ class AIRouter:
                 self._log_chat_cost(full_messages, resp, oai_model, feature, business, tenant_id)
                 return AIResponse(content=resp, model_used=oai_model, fallback_used=fallback)
 
+            elif provider_type == "deepseek":
+                ds_model = model_override or self.deepseek_model
+                logger.info(f"[MAX] Chat via DeepSeek ({ds_model}){' (fallback)' if fallback else ''}")
+                resp = await self._deepseek_chat(full_messages, model=ds_model, image_path=image_path)
+                self._log_chat_cost(full_messages, resp, ds_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=ds_model, fallback_used=fallback)
+
+            elif provider_type == "qwen":
+                q_model = model_override or self.qwen_model
+                logger.info(f"[MAX] Chat via Qwen ({q_model}){' (fallback)' if fallback else ''}")
+                resp = await self._qwen_chat(full_messages, model=q_model, image_path=image_path)
+                self._log_chat_cost(full_messages, resp, q_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=q_model, fallback_used=fallback)
+
+            elif provider_type == "openrouter":
+                or_model = model_override or self.openrouter_model
+                logger.info(f"[MAX] Chat via OpenRouter ({or_model}){' (fallback)' if fallback else ''}")
+                resp = await self._openrouter_chat(full_messages, model=or_model, image_path=image_path)
+                self._log_chat_cost(full_messages, resp, or_model, feature, business, tenant_id)
+                return AIResponse(content=resp, model_used=or_model, fallback_used=fallback)
+
             elif provider_type == "openclaw":
                 logger.info(f"[MAX] Chat via OpenClaw{' (fallback)' if fallback else ''}")
                 resp = await self._openclaw_chat(messages)
@@ -670,8 +986,99 @@ class AIRouter:
 
         except Exception as e:
             logger.warning(f"{provider_type} failed: {type(e).__name__}: {e}")
-            self._record_provider_error(provider_type, e)
+            self._record_provider_error(canonical or provider_type, e)
         return None
+
+    @staticmethod
+    def _is_circuit_break_error(error_text: str | None) -> bool:
+        text = (error_text or "").lower()
+        return any(marker in text for marker in (" 401", "http 401", " 403", "http 403", " 429", "http 429", "quota"))
+
+    def _selected_provider_candidates(self, state: RoutingState) -> list[tuple[str, str, bool]]:
+        selected = canonical_provider(state.selected_provider)
+        if selected not in CANONICAL_PROVIDERS:
+            selected = "ollama"
+        selected_model = (state.selected_model or "").strip() or provider_default_model(selected)
+
+        chain: list[tuple[str, str, bool]] = [(selected, selected_model, False)]
+        if not state.fallback_enabled:
+            return chain
+
+        for provider in CANONICAL_PROVIDERS:
+            if provider == selected:
+                continue
+            chain.append((provider, provider_default_model(provider), True))
+        return chain
+
+    async def _chat_via_selected_routing(
+        self,
+        *,
+        full_messages: List[AIMessage],
+        messages: List[AIMessage],
+        image_path: Optional[Path],
+        feature: str,
+        business: str,
+        tenant_id: str,
+        tools: Optional[list] = None,
+    ) -> AIResponse:
+        state = self._refresh_routing_state()
+        candidates = self._selected_provider_candidates(state)
+        attempted: list[str] = []
+        blocked: list[str] = []
+
+        for provider, model_name, fallback in candidates:
+            reason = self._provider_disabled_reason(provider, state)
+            if reason:
+                blocked.append(f"{provider}:{reason}")
+                continue
+
+            attempted.append(provider)
+            result = await self._try_provider_chat(
+                provider,
+                model_name,
+                full_messages,
+                messages,
+                image_path,
+                fallback,
+                feature,
+                business,
+                tenant_id,
+                tools=tools,
+            )
+            if result:
+                self._record_provider_success(provider)
+                return result
+
+            error_text = self.last_provider_errors.get(provider) or self.last_provider_errors.get("grok" if provider == "xai" else provider)
+            if self._is_circuit_break_error(error_text):
+                return AIResponse(
+                    content=(
+                        f"Selected provider '{provider}' failed with a circuit-break error ({error_text or 'auth/quota'}) "
+                        "so routing stopped without fallback. Fix provider auth/quota or switch provider."
+                    ),
+                    model_used=provider,
+                    fallback_used=fallback,
+                )
+            if not state.fallback_enabled:
+                return AIResponse(
+                    content=(
+                        f"Selected provider '{provider}' failed and fallback is disabled. "
+                        "No other provider was called."
+                    ),
+                    model_used=provider,
+                    fallback_used=False,
+                )
+
+        details = ", ".join(blocked) if blocked else "none"
+        return AIResponse(
+            content=(
+                "No available provider could satisfy this request under current routing policy. "
+                f"Attempted: {', '.join(attempted) if attempted else 'none'}. "
+                f"Blocked: {details}."
+            ),
+            model_used="none",
+            fallback_used=bool(state.fallback_enabled and len(attempted) > 1),
+        )
 
     async def chat(self, messages: List[AIMessage], model: Optional[AIModel] = None, image_filename: Optional[str] = None, desk: Optional[str] = None, system_prompt: Optional[str] = None, tenant_id: str = "founder", source: str = "", conversation_id: str = "", tools: Optional[list] = None) -> AIResponse:
         # Per-desk model routing: if no explicit model requested and desk has a preferred model, use it
@@ -706,6 +1113,19 @@ class AIRouter:
                 return AIResponse(content=local_attachment_answer, model_used=model_used, fallback_used=False)
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
+
+        # Canonical selector authority: when no explicit model enum is requested,
+        # route through persisted selected provider/model state.
+        if model is None:
+            return await self._chat_via_selected_routing(
+                full_messages=full_messages,
+                messages=messages,
+                image_path=image_path,
+                feature=feature,
+                business=business,
+                tenant_id=tenant_id,
+                tools=tools,
+            )
 
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
@@ -888,6 +1308,21 @@ class AIRouter:
                 return
 
         full_messages = [AIMessage(role="system", content=prompt)] + list(messages)
+
+        # Keep stream route under the same authoritative selector policy by
+        # resolving the response through canonical non-stream routing first.
+        if model is None:
+            selected = await self._chat_via_selected_routing(
+                full_messages=full_messages,
+                messages=messages,
+                image_path=image_path,
+                feature=feature,
+                business=business,
+                tenant_id=tenant_id,
+                tools=None,
+            )
+            yield selected.content, selected.model_used
+            return
 
         # Complexity-based routing (only when no desk override and no explicit model)
         if model is None and not desk:
@@ -1361,6 +1796,146 @@ class AIRouter:
                         text = "".join(p.get("text", "") for p in parts)
                         if text:
                             yield text
+
+    # ── Generic OpenAI-compatible providers ──────────────────────────
+
+    async def _openai_compatible_chat(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: List[AIMessage],
+        image_path: Optional[Path] = None,
+        timeout: float = 45.0,
+        extra_headers: Optional[dict[str, str]] = None,
+    ) -> str:
+        api_messages = self._prepare_openai_messages(messages, image_path)
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={"model": model, "messages": api_messages, "max_tokens": 4096},
+            )
+            if resp.status_code != 200:
+                raise Exception(f"HTTP {resp.status_code}: {resp.text[:300]}")
+            return resp.json()["choices"][0]["message"]["content"]
+
+    async def _openai_compatible_chat_stream(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model: str,
+        messages: List[AIMessage],
+        image_path: Optional[Path] = None,
+        timeout: float = 45.0,
+        extra_headers: Optional[dict[str, str]] = None,
+    ) -> AsyncGenerator[str, None]:
+        api_messages = self._prepare_openai_messages(messages, image_path)
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        if extra_headers:
+            headers.update(extra_headers)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                "POST",
+                f"{base_url}/chat/completions",
+                headers=headers,
+                json={"model": model, "messages": api_messages, "max_tokens": 4096, "stream": True},
+            ) as response:
+                if response.status_code != 200:
+                    error_body = await response.aread()
+                    raise Exception(f"HTTP {response.status_code}: {error_body.decode()[:300]}")
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        return
+                    try:
+                        data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    delta = data.get("choices", [{}])[0].get("delta", {})
+                    text = delta.get("content", "")
+                    if text:
+                        yield text
+
+    async def _deepseek_chat(self, messages: List[AIMessage], model: str, image_path: Optional[Path] = None) -> str:
+        return await self._openai_compatible_chat(
+            base_url=self.deepseek_base_url,
+            api_key=self.deepseek_key,
+            model=model,
+            messages=messages,
+            image_path=image_path,
+            timeout=60.0,
+        )
+
+    async def _deepseek_chat_stream(self, messages: List[AIMessage], model: str, image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
+        async for chunk in self._openai_compatible_chat_stream(
+            base_url=self.deepseek_base_url,
+            api_key=self.deepseek_key,
+            model=model,
+            messages=messages,
+            image_path=image_path,
+            timeout=60.0,
+        ):
+            yield chunk
+
+    async def _qwen_chat(self, messages: List[AIMessage], model: str, image_path: Optional[Path] = None) -> str:
+        return await self._openai_compatible_chat(
+            base_url=self.qwen_base_url,
+            api_key=self.qwen_key,
+            model=model,
+            messages=messages,
+            image_path=image_path,
+            timeout=60.0,
+        )
+
+    async def _qwen_chat_stream(self, messages: List[AIMessage], model: str, image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
+        async for chunk in self._openai_compatible_chat_stream(
+            base_url=self.qwen_base_url,
+            api_key=self.qwen_key,
+            model=model,
+            messages=messages,
+            image_path=image_path,
+            timeout=60.0,
+        ):
+            yield chunk
+
+    async def _openrouter_chat(self, messages: List[AIMessage], model: str, image_path: Optional[Path] = None) -> str:
+        extra_headers = {
+            "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "https://empirebox.local"),
+            "X-Title": os.getenv("OPENROUTER_TITLE", "EmpireBox MAX"),
+        }
+        return await self._openai_compatible_chat(
+            base_url=self.openrouter_base_url,
+            api_key=self.openrouter_key,
+            model=model,
+            messages=messages,
+            image_path=image_path,
+            timeout=60.0,
+            extra_headers=extra_headers,
+        )
+
+    async def _openrouter_chat_stream(self, messages: List[AIMessage], model: str, image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
+        extra_headers = {
+            "HTTP-Referer": os.getenv("OPENROUTER_REFERER", "https://empirebox.local"),
+            "X-Title": os.getenv("OPENROUTER_TITLE", "EmpireBox MAX"),
+        }
+        async for chunk in self._openai_compatible_chat_stream(
+            base_url=self.openrouter_base_url,
+            api_key=self.openrouter_key,
+            model=model,
+            messages=messages,
+            image_path=image_path,
+            timeout=60.0,
+            extra_headers=extra_headers,
+        ):
+            yield chunk
 
     # ── OpenAI API ────────────────────────────────────────────────────
 

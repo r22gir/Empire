@@ -32,6 +32,7 @@ export default function PlatformPage() {
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [showKeys, setShowKeys] = useState(false);
+  const [busyProvider, setBusyProvider] = useState<string | null>(null);
 
   const safeFetch = useCallback(async (url: string) => {
     try {
@@ -73,6 +74,58 @@ export default function PlatformPage() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
+  const postJson = useCallback(async (url: string, body: any) => {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return r.ok ? await r.json() : null;
+  }, []);
+
+  const setActiveProvider = useCallback(async (row: any) => {
+    const provider = row.provider_canonical || row.id;
+    const model = row.model || row.models?.[0] || '';
+    setBusyProvider(provider);
+    await postJson(`${API}/max/routing-state`, {
+      selected_provider: provider,
+      selected_model: model,
+      updated_by: 'founder_or_system',
+      reason: 'platformforge_set_active',
+    });
+    await fetchAll();
+    setBusyProvider(null);
+  }, [fetchAll, postJson]);
+
+  const toggleProvider = useCallback(async (row: any, enabled: boolean) => {
+    const provider = row.provider_canonical || row.id;
+    setBusyProvider(provider);
+    await postJson(`${API}/max/provider/toggle`, {
+      provider,
+      enabled,
+      updated_by: 'founder_or_system',
+      reason: 'platformforge_toggle',
+    });
+    await fetchAll();
+    setBusyProvider(null);
+  }, [fetchAll, postJson]);
+
+  const testProvider = useCallback(async (row: any) => {
+    const provider = row.provider_canonical || row.id;
+    setBusyProvider(provider);
+    const out = await postJson(`${API}/max/provider/test`, {
+      provider,
+      model: row.model || row.models?.[0] || undefined,
+      prompt: `Reply only: ${provider} ok`,
+    });
+    setBusyProvider(null);
+    if (out?.status === 'ok') {
+      window.alert(`Provider test ok: ${out.provider_used} / ${out.model_used}`);
+    } else {
+      window.alert(`Provider test failed: ${provider}`);
+    }
+  }, [postJson]);
+
   const toggle = (key: string) => setExpanded(p => ({ ...p, [key]: !p[key] }));
 
   const cpu = data.system?.cpu?.percent ?? data.system?.cpu_percent ?? 0;
@@ -85,6 +138,7 @@ export default function PlatformPage() {
 
   // AI models from live data
   const aiModels = data.models?.models || [];
+  const routingState = data.models?.routing_state || {};
 
   // Connectivity from system report
   const connectivity = data.connectivity || [];
@@ -247,23 +301,84 @@ export default function PlatformPage() {
 
       {/* ── AI MODELS ── */}
       <CollapsibleSection title="AI Models & Routing" icon={<Brain size={15} />} iconColor="#7c3aed" expanded={expanded.ai} onToggle={() => toggle('ai')} count={aiModels.length || 5}>
+        <div className="mb-2 text-[11px] text-[#666]">
+          Active: <b>{routingState.selected_provider || '--'}</b> / <b>{routingState.selected_model || '--'}</b> ·
+          fallback <b>{routingState.fallback_enabled ? 'ON' : 'OFF'}</b> ·
+          AI calls <b>{routingState.ai_calls_disabled ? 'DISABLED' : 'ENABLED'}</b>
+        </div>
         <div className="space-y-1.5">
           {aiModels.length > 0 ? aiModels.map((m: any, i: number) => (
-            <div key={i} className="flex items-center justify-between" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>
-              <div>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{m.name}</span>
-                <span style={{ fontSize: 9, color: '#aaa', marginLeft: 8 }}>{m.type || 'cloud'}</span>
-                {m.primary && <span style={{ fontSize: 8, color: '#b8960c', fontWeight: 700, marginLeft: 6, background: '#fdf8eb', padding: '1px 5px', borderRadius: 4 }}>PRIMARY</span>}
+            <div key={i} className="flex items-center justify-between gap-3" style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>
+              <div className="min-w-0">
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{m.name}</span>
+                  <span style={{ fontSize: 9, color: '#aaa', marginLeft: 8 }}>{m.type || 'cloud'}</span>
+                  {m.primary && <span style={{ fontSize: 8, color: '#b8960c', fontWeight: 700, marginLeft: 6, background: '#fdf8eb', padding: '1px 5px', borderRadius: 4 }}>ACTIVE</span>}
+                </div>
+                <div style={{ fontSize: 10, color: '#888', marginTop: 2 }} className="truncate">
+                  {m.model || m.models?.[0] || 'model not set'}
+                  {m.disabled_reason ? ` · ${m.disabled_reason}` : ''}
+                </div>
               </div>
-              <span className={`status-pill ${m.available ? 'ok' : 'overdue'}`}>{m.available ? 'AVAILABLE' : 'UNAVAILABLE'}</span>
+              <div className="flex items-center gap-1.5">
+                <span className={`status-pill ${m.available ? 'ok' : 'overdue'}`}>{m.available ? 'AVAILABLE' : 'UNAVAILABLE'}</span>
+                <button
+                  onClick={() => setActiveProvider(m)}
+                  disabled={!m.available || busyProvider === (m.provider_canonical || m.id)}
+                  className="text-[10px] px-2 py-1 rounded-lg border border-[#ece8e0] bg-white hover:bg-[#f9f8f6] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Set Active
+                </button>
+                <button
+                  onClick={() => testProvider(m)}
+                  disabled={!m.available || busyProvider === (m.provider_canonical || m.id)}
+                  className="text-[10px] px-2 py-1 rounded-lg border border-[#ece8e0] bg-white hover:bg-[#f9f8f6] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Test
+                </button>
+                {m.disabled ? (
+                  <button
+                    onClick={() => toggleProvider(m, true)}
+                    disabled={busyProvider === (m.provider_canonical || m.id)}
+                    className="text-[10px] px-2 py-1 rounded-lg border border-[#ece8e0] bg-white hover:bg-[#f9f8f6] disabled:opacity-50"
+                  >
+                    Enable
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => toggleProvider(m, false)}
+                    disabled={busyProvider === (m.provider_canonical || m.id)}
+                    className="text-[10px] px-2 py-1 rounded-lg border border-[#ece8e0] bg-white hover:bg-[#f9f8f6] disabled:opacity-50"
+                  >
+                    Disable
+                  </button>
+                )}
+              </div>
             </div>
           )) : (
             <div style={{ fontSize: 12, color: '#aaa', padding: 12 }}>Loading models from /max/models...</div>
           )}
         </div>
         <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: '#dbeafe', border: '1px solid #93c5fd' }}>
-          <div className="section-label" style={{ color: '#2563eb', marginBottom: 4 }}>Routing Priority</div>
-          <div style={{ fontSize: 12, color: '#555' }}>xAI Grok → Claude → Groq → OpenClaw → Ollama</div>
+          <div className="section-label" style={{ color: '#2563eb', marginBottom: 4 }}>Routing Policy</div>
+          <div style={{ fontSize: 12, color: '#555' }}>
+            Selected provider/model is authoritative. Fallback only runs when explicitly enabled in routing state.
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={async () => {
+                await postJson(`${API}/max/routing-state`, {
+                  fallback_enabled: !routingState.fallback_enabled,
+                  updated_by: 'founder_or_system',
+                  reason: 'platformforge_fallback_toggle',
+                });
+                await fetchAll();
+              }}
+              className="text-[10px] px-2 py-1 rounded-lg border border-[#bfdbfe] bg-white hover:bg-[#f8fbff]"
+            >
+              {routingState.fallback_enabled ? 'Clear Fallback' : 'Enable Fallback'}
+            </button>
+          </div>
         </div>
       </CollapsibleSection>
 
@@ -300,7 +415,7 @@ export default function PlatformPage() {
             // Determine if likely configured based on live data
             const isSet = k.name === 'TELEGRAM_BOT_TOKEN' ? data.telegram?.bot_token_set
               : k.name === 'TELEGRAM_FOUNDER_CHAT_ID' ? data.telegram?.chat_id_set
-              : k.name === 'XAI_API_KEY' ? aiModels.find((m: any) => m.id === 'grok')?.available
+              : k.name === 'XAI_API_KEY' ? aiModels.find((m: any) => (m.id === 'xai' || m.id === 'grok'))?.available
               : k.name === 'ANTHROPIC_API_KEY' ? aiModels.find((m: any) => m.id === 'claude')?.available
               : k.name === 'GROQ_API_KEY' ? aiModels.find((m: any) => m.id === 'groq')?.available
               : undefined;

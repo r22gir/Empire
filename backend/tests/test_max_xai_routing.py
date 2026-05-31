@@ -2,6 +2,11 @@ from app.services.max.ai_router import AIRouter
 
 
 def test_xai_config_uses_current_model_and_safe_payload(monkeypatch):
+    monkeypatch.delenv("MAX_PRIMARY_PROVIDER", raising=False)
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.setenv("MAX_SELECTED_PROVIDER", "xai")
+    monkeypatch.setenv("MAX_SELECTED_MODEL", "grok-test-model")
+    monkeypatch.setenv("MAX_DISABLE_XAI", "false")
     monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
     monkeypatch.setenv("XAI_BASE_URL", "https://api.x.ai/v1/")
     monkeypatch.setenv("XAI_MODEL", "grok-test-model")
@@ -26,6 +31,11 @@ def test_xai_config_uses_current_model_and_safe_payload(monkeypatch):
 
 
 def test_xai_provider_status_exposes_effective_config(monkeypatch):
+    monkeypatch.delenv("MAX_PRIMARY_PROVIDER", raising=False)
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.setenv("MAX_SELECTED_PROVIDER", "xai")
+    monkeypatch.setenv("MAX_SELECTED_MODEL", "grok-visible-model")
+    monkeypatch.setenv("MAX_DISABLE_XAI", "false")
     monkeypatch.setenv("XAI_API_KEY", "xai-test-key")
     monkeypatch.setenv("XAI_MODEL", "grok-visible-model")
     monkeypatch.setenv("XAI_BASE_URL", "https://api.x.ai/v1")

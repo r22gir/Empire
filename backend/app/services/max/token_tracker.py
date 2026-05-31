@@ -6,8 +6,13 @@ Tracks: provider, model, tokens, cost, feature, business, source.
 """
 import sqlite3
 import logging
+import os
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from app.services.data_paths import data_root
+from app.services.max.routing_state import load_routing_state, provider_disabled
 
 logger = logging.getLogger("max.tokens")
 
@@ -24,9 +29,24 @@ COST_RATES = {
     "claude-haiku-4-5": {"input": 0.80, "output": 4.00},
     # Groq (free tier / very cheap)
     "groq-llama-3.3-70b": {"input": 0.59, "output": 0.79},
+    "llama-3.3-70b-versatile": {"input": 0.59, "output": 0.79},
     "groq-whisper": {"input": 0.0, "output": 0.0},  # free STT
+    # OpenAI / compatible
+    "gpt-4.1-nano": {"input": 0.10, "output": 0.40},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "gpt-4o": {"input": 5.00, "output": 15.00},
+    # DeepSeek / Qwen / OpenRouter defaults (estimated)
+    "deepseek-chat": {"input": 0.27, "output": 1.10},
+    "deepseek-reasoner": {"input": 0.55, "output": 2.19},
+    # DeepSeek V4 (official pricing page; still treated as estimated in UI)
+    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
+    "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
+    "qwen-plus": {"input": 0.40, "output": 1.20},
+    "qwen-max": {"input": 1.20, "output": 3.60},
+    "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
     # Local models (free)
     "ollama-llama3.1": {"input": 0.0, "output": 0.0},
+    "llama3.1:8b": {"input": 0.0, "output": 0.0},
     "ollama-llama": {"input": 0.0, "output": 0.0},
     "openclaw": {"input": 0.0, "output": 0.0},
     "mistral:7b": {"input": 0.0, "output": 0.0},
@@ -59,12 +79,46 @@ BUSINESSES = [
 DEFAULT_MONTHLY_BUDGET = 50.00
 
 
+PROVIDER_ALIASES = {
+    "grok": "xai",
+    "x-ai": "xai",
+    "anthropic": "claude",
+    "google": "gemini",
+    "chatgpt": "openai",
+    "open-ai": "openai",
+    "local": "ollama",
+}
+
+MODEL_PROVIDER_HINTS = {
+    "grok": "xai",
+    "claude": "claude",
+    "gemini": "gemini",
+    "gpt-": "openai",
+    "minimax": "minimax",
+    "deepseek": "deepseek",
+    "qwen": "qwen",
+    "openai/": "openrouter",
+    "llama3.1": "ollama",
+    "openclaw": "openclaw",
+}
+
+MODEL_ALIASES = {
+    "minimax-minimax-m2.7": "MiniMax-M2.7",
+    "minimax-m2.7": "MiniMax-M2.7",
+    "grok-3-fast": "grok-4-fast-non-reasoning",
+    "grok": "grok-4-fast-non-reasoning",
+    "ollama-llama3.1": "llama3.1:8b",
+    "ollama-llama": "llama3.1:8b",
+    "groq-llama-3.3-70b": "llama-3.3-70b-versatile",
+}
+
+
 def _get_db_path() -> str:
     try:
         from app.services.max.brain.brain_config import get_brain_path
         return str(get_brain_path() / "token_usage.db")
     except Exception:
-        fallback = Path.home() / "empire-repo" / "backend" / "data" / "token_usage.db"
+        fallback = data_root() / "token_usage.db"
         fallback.parent.mkdir(parents=True, exist_ok=True)
         return str(fallback)
 
@@ -111,13 +165,46 @@ class TokenTracker:
                 VALUES (1, ?, 0.8, 0, 0.95)
             """, (DEFAULT_MONTHLY_BUDGET,))
             # Safe migration: add columns if missing
-            for col, default in [("feature", "'chat'"), ("business", "'general'"), ("source", "''"), ("tenant_id", "'founder'"), ("desk", "''")]:
+            for col, default in [
+                ("feature", "'chat'"),
+                ("business", "'general'"),
+                ("source", "''"),
+                ("tenant_id", "'founder'"),
+                ("desk", "''"),
+                ("request_id", "''"),
+                ("attempt_id", "''"),
+                ("provider_canonical", "''"),
+                ("model_canonical", "''"),
+                ("raw_provider", "''"),
+                ("raw_model", "''"),
+                ("source_module", "''"),
+                ("route_name", "''"),
+                ("lane", "'stable/main'"),
+                ("status", "'success'"),
+                ("http_status", "0"),
+                ("fallback_of", "''"),
+                ("token_source", "'estimated'"),
+                ("total_tokens", "0"),
+                ("estimated_cost", "0.0"),
+                ("provider_reported_cost", "0.0"),
+                ("is_legacy", "0"),
+            ]:
                 try:
                     conn.execute(f"ALTER TABLE token_usage ADD COLUMN {col} TEXT DEFAULT {default}")
                 except sqlite3.OperationalError:
                     pass  # Column already exists
+            # Fix types for numeric columns if ALTER added them as TEXT in some SQLite builds
+            for col, default in [("http_status", "0"), ("total_tokens", "0"), ("estimated_cost", "0.0"), ("provider_reported_cost", "0.0"), ("is_legacy", "0")]:
+                try:
+                    conn.execute(f"UPDATE token_usage SET {col} = {default} WHERE {col} IS NULL")
+                except Exception:
+                    pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_tenant ON token_usage(tenant_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_token_desk ON token_usage(desk)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_request_id ON token_usage(request_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_attempt_id ON token_usage(attempt_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_provider_canonical ON token_usage(provider_canonical)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_token_model_canonical ON token_usage(model_canonical)")
             conn.commit()
             conn.close()
         except Exception as e:
@@ -129,8 +216,33 @@ class TokenTracker:
         return max(1, len(text) // 4)
 
     @staticmethod
+    def canonical_provider(provider: str | None, model: str | None = None) -> str:
+        raw = (provider or "").strip().lower()
+        if raw in PROVIDER_ALIASES:
+            raw = PROVIDER_ALIASES[raw]
+        if raw:
+            return raw
+        model_l = (model or "").strip().lower()
+        for prefix, canonical in MODEL_PROVIDER_HINTS.items():
+            if prefix in model_l:
+                return canonical
+        return "unknown"
+
+    @staticmethod
+    def canonical_model(model: str | None) -> str:
+        raw = (model or "").strip()
+        if not raw:
+            return "unknown-model"
+        key = raw.lower()
+        if key in MODEL_ALIASES:
+            return MODEL_ALIASES[key]
+        if key.startswith("minimax-") and "m2.7" in key:
+            return "MiniMax-M2.7"
+        return raw
+
+    @staticmethod
     def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-        rates = COST_RATES.get(model, COST_RATES.get("grok"))
+        rates = COST_RATES.get(model)
         if not rates:
             return 0.0
         input_cost = (input_tokens / 1_000_000) * rates["input"]
@@ -149,18 +261,80 @@ class TokenTracker:
         business: str = "general",
         source: str = "",
         tenant_id: str = "founder",
+        request_id: str | None = None,
+        attempt_id: str | None = None,
+        source_module: str = "",
+        route_name: str = "",
+        lane: str | None = None,
+        status: str = "success",
+        http_status: int | None = None,
+        fallback_of: str | None = None,
+        token_source: str = "estimated",
+        provider_reported_cost: float | None = None,
+        raw_provider: str | None = None,
+        raw_model: str | None = None,
+        is_legacy: bool = False,
     ):
-        cost = self.calculate_cost(model, input_tokens, output_tokens)
+        model_canonical = self.canonical_model(model)
+        provider_canonical = self.canonical_provider(provider, model=model_canonical)
+        cost = self.calculate_cost(model_canonical, input_tokens, output_tokens)
+        total_tokens = max(0, int(input_tokens or 0) + int(output_tokens or 0))
+        req_id = request_id or str(uuid.uuid4())
+        att_id = attempt_id or str(uuid.uuid4())
+        lane_name = lane or os.getenv("EMPIRE_LANE", "stable/main")
+        token_source_norm = token_source if token_source in {"provider_reported", "estimated", "unknown"} else "estimated"
+        provider_cost = float(provider_reported_cost) if provider_reported_cost is not None else None
+        final_cost = provider_cost if provider_cost is not None else cost
         try:
             conn = sqlite3.connect(self.db_path)
             conn.execute(
-                """INSERT INTO token_usage (model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id, feature, business, source, tenant_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (model, provider, input_tokens, output_tokens, cost, endpoint, conversation_id, feature, business, source, tenant_id),
+                """INSERT INTO token_usage (
+                       model, provider, input_tokens, output_tokens, cost_usd, endpoint, conversation_id, feature, business, source, tenant_id,
+                       request_id, attempt_id, provider_canonical, model_canonical, raw_provider, raw_model, source_module, route_name, lane,
+                       status, http_status, fallback_of, token_source, total_tokens, estimated_cost, provider_reported_cost, is_legacy
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    model_canonical,
+                    provider_canonical,
+                    int(input_tokens or 0),
+                    int(output_tokens or 0),
+                    float(final_cost or 0.0),
+                    endpoint,
+                    conversation_id,
+                    feature,
+                    business,
+                    source,
+                    tenant_id,
+                    req_id,
+                    att_id,
+                    provider_canonical,
+                    model_canonical,
+                    raw_provider or provider,
+                    raw_model or model,
+                    source_module or source or "unknown",
+                    route_name or endpoint,
+                    lane_name,
+                    status or "success",
+                    int(http_status or 0),
+                    fallback_of or "",
+                    token_source_norm,
+                    total_tokens,
+                    float(cost),
+                    float(provider_cost) if provider_cost is not None else 0.0,
+                    1 if is_legacy else 0,
+                ),
             )
             conn.commit()
             conn.close()
-            logger.debug(f"Cost logged: {model} {feature} ${cost:.4f} [{business}] tenant={tenant_id}")
+            logger.debug(
+                "Cost logged: provider=%s model=%s source=%s token_source=%s est=$%.4f final=$%.4f",
+                provider_canonical,
+                model_canonical,
+                source_module or source or "unknown",
+                token_source_norm,
+                cost,
+                final_cost,
+            )
         except Exception as e:
             logger.warning(f"Failed to log token usage: {e}")
 
@@ -201,10 +375,26 @@ class TokenTracker:
         tenant_id: str = "founder",
     ):
         """Convenience: estimate tokens from text and log."""
-        provider = "local" if model in ("ollama-llama3.1", "ollama-llama", "openclaw", "mistral:7b") else "cloud"
+        provider = self.canonical_provider("", model=model)
         input_tokens = self.estimate_tokens(input_text)
         output_tokens = self.estimate_tokens(output_text)
-        self.log_usage(model, provider, input_tokens, output_tokens, endpoint, conversation_id, feature, business, source, tenant_id)
+        self.log_usage(
+            model,
+            provider,
+            input_tokens,
+            output_tokens,
+            endpoint,
+            conversation_id,
+            feature,
+            business,
+            source,
+            tenant_id,
+            source_module=source or "ai_router",
+            route_name=endpoint,
+            token_source="estimated",
+            raw_provider=provider,
+            raw_model=model,
+        )
 
     def get_stats(self, days: int = 30) -> dict:
         """Get aggregated token usage stats."""
@@ -229,25 +419,36 @@ class TokenTracker:
             total_cost = round(row["total_cost"], 4)
             total_requests = row["total_requests"]
 
-            # Per-model breakdown
+            # Per-model breakdown (canonicalized)
             model_rows = conn.execute(
-                """SELECT model, provider,
+                """SELECT
+                     COALESCE(model_canonical, model) as model_canonical,
+                     COALESCE(provider_canonical, provider) as provider_canonical,
                      SUM(input_tokens) as input_tokens,
                      SUM(output_tokens) as output_tokens,
                      SUM(cost_usd) as cost,
+                     SUM(estimated_cost) as estimated_cost,
+                     SUM(provider_reported_cost) as provider_reported_cost,
+                     SUM(CASE WHEN token_source = 'provider_reported' THEN 1 ELSE 0 END) as provider_reported_rows,
+                     SUM(CASE WHEN token_source = 'estimated' THEN 1 ELSE 0 END) as estimated_rows,
                      COUNT(*) as requests
                    FROM token_usage WHERE timestamp >= ?
-                   GROUP BY model ORDER BY cost DESC""",
+                   GROUP BY COALESCE(model_canonical, model), COALESCE(provider_canonical, provider)
+                   ORDER BY cost DESC""",
                 (since,),
             ).fetchall()
 
             by_model = [
                 {
-                    "model": r["model"],
-                    "provider": r["provider"],
+                    "model": r["model_canonical"],
+                    "provider": r["provider_canonical"],
                     "input_tokens": r["input_tokens"],
                     "output_tokens": r["output_tokens"],
                     "cost": round(r["cost"], 4),
+                    "estimated_cost": round((r["estimated_cost"] or 0), 4),
+                    "provider_reported_cost": round((r["provider_reported_cost"] or 0), 4),
+                    "provider_reported_rows": int(r["provider_reported_rows"] or 0),
+                    "estimated_rows": int(r["estimated_rows"] or 0),
                     "requests": r["requests"],
                 }
                 for r in model_rows
@@ -308,6 +509,15 @@ class TokenTracker:
             budget_used = monthly_cost / monthly_budget if monthly_budget > 0 else 0
             budget_alert = budget_used >= alert_threshold
 
+            token_source_row = conn.execute(
+                """SELECT
+                     SUM(CASE WHEN token_source = 'provider_reported' THEN 1 ELSE 0 END) as provider_reported,
+                     SUM(CASE WHEN token_source = 'estimated' THEN 1 ELSE 0 END) as estimated,
+                     SUM(CASE WHEN token_source = 'unknown' THEN 1 ELSE 0 END) as unknown
+                   FROM token_usage WHERE timestamp >= ?""",
+                (since,),
+            ).fetchone()
+
             conn.close()
 
             return {
@@ -327,6 +537,11 @@ class TokenTracker:
                 },
                 "by_model": by_model,
                 "daily": daily,
+                "token_sources": {
+                    "provider_reported": int(token_source_row["provider_reported"] or 0),
+                    "estimated": int(token_source_row["estimated"] or 0),
+                    "unknown": int(token_source_row["unknown"] or 0),
+                },
                 "budget": {
                     "monthly_limit": monthly_budget,
                     "monthly_spent": monthly_cost,
@@ -344,6 +559,7 @@ class TokenTracker:
                 "today": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0, "requests": 0},
                 "by_model": [],
                 "daily": [],
+                "token_sources": {"provider_reported": 0, "estimated": 0, "unknown": 0},
                 "budget": {
                     "monthly_limit": DEFAULT_MONTHLY_BUDGET,
                     "monthly_spent": 0,
@@ -433,13 +649,13 @@ class TokenTracker:
             conn.row_factory = sqlite3.Row
             since = (datetime.utcnow() - timedelta(days=days)).isoformat()
             rows = conn.execute(
-                """SELECT provider,
+                """SELECT COALESCE(provider_canonical, provider) as provider,
                      SUM(input_tokens) as input_tokens,
                      SUM(output_tokens) as output_tokens,
                      SUM(cost_usd) as cost,
                      COUNT(*) as requests
                    FROM token_usage WHERE timestamp >= ?
-                   GROUP BY provider ORDER BY cost DESC""",
+                   GROUP BY COALESCE(provider_canonical, provider) ORDER BY cost DESC""",
                 (since,),
             ).fetchall()
             conn.close()
@@ -504,8 +720,13 @@ class TokenTracker:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
-                """SELECT id, timestamp, model, provider, input_tokens, output_tokens,
-                     cost_usd, endpoint, feature, business, source
+                """SELECT id, timestamp,
+                     COALESCE(model_canonical, model) as model,
+                     COALESCE(provider_canonical, provider) as provider,
+                     input_tokens, output_tokens,
+                     cost_usd, endpoint, feature, business, source,
+                     request_id, attempt_id, raw_provider, raw_model, source_module, route_name, lane,
+                     status, http_status, fallback_of, token_source, total_tokens, estimated_cost, provider_reported_cost, is_legacy
                    FROM token_usage ORDER BY timestamp DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
@@ -513,6 +734,156 @@ class TokenTracker:
             return [dict(r) for r in rows]
         except Exception as e:
             logger.error(f"get_recent_transactions failed: {e}")
+            return []
+
+    def get_bleed_watch_alerts(self, hours: int = 24) -> list[dict]:
+        """Detect likely token bleed or accounting integrity anomalies."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            since = (datetime.utcnow() - timedelta(hours=max(1, hours))).isoformat()
+            state = load_routing_state()
+            selected_provider = self.canonical_provider(state.selected_provider)
+            alerts: list[dict] = []
+
+            def add_alert(kind: str, provider: str, model: str, lane: str, count: int, last_seen: str, recommendation: str, source_module: str = "unknown"):
+                alerts.append(
+                    {
+                        "kind": kind,
+                        "source_module": source_module,
+                        "provider_model": f"{provider}/{model}",
+                        "lane": lane or "unknown",
+                        "count": int(count or 0),
+                        "last_seen": last_seen,
+                        "recommended_action": recommendation,
+                    }
+                )
+
+            # 401/403/429 bursts
+            for row in conn.execute(
+                """SELECT COALESCE(provider_canonical, provider) as provider, COALESCE(model_canonical, model) as model,
+                          lane, source_module, COUNT(*) as cnt, MAX(timestamp) as last_seen
+                   FROM token_usage
+                   WHERE timestamp >= ? AND http_status IN (401,403,429)
+                   GROUP BY COALESCE(provider_canonical, provider), COALESCE(model_canonical, model), lane, source_module
+                   HAVING COUNT(*) >= 3""",
+                (since,),
+            ).fetchall():
+                add_alert(
+                    "auth_or_quota_burst",
+                    row["provider"],
+                    row["model"],
+                    row["lane"],
+                    row["cnt"],
+                    row["last_seen"],
+                    "Disable provider or fix key/quota immediately. Prevent retries until healthy.",
+                    row["source_module"] or "unknown",
+                )
+
+            # Same request under multiple models
+            for row in conn.execute(
+                """SELECT request_id, COUNT(DISTINCT COALESCE(model_canonical, model)) as model_count,
+                          MAX(timestamp) as last_seen
+                   FROM token_usage
+                   WHERE timestamp >= ? AND request_id != ''
+                   GROUP BY request_id
+                   HAVING COUNT(DISTINCT COALESCE(model_canonical, model)) > 1""",
+                (since,),
+            ).fetchall():
+                add_alert(
+                    "request_multi_model",
+                    "multiple",
+                    row["request_id"],
+                    state.lane,
+                    row["model_count"],
+                    row["last_seen"],
+                    "Verify one-request/one-final-result logging and fallback normalization.",
+                    "token_tracker",
+                )
+
+            # External Hermes / v10 usage crossing into main lane
+            for marker, kind, recommendation in [
+                ("hermes", "external_hermes_usage", "Separate Hermes lane totals from founder stable/main totals."),
+                ("v10", "v10_usage_in_main", "Stop/disable v10 workers or route v10 traffic to isolated lane."),
+            ]:
+                for row in conn.execute(
+                    """SELECT COALESCE(provider_canonical, provider) as provider, COALESCE(model_canonical, model) as model,
+                              lane, source_module, COUNT(*) as cnt, MAX(timestamp) as last_seen
+                       FROM token_usage
+                       WHERE timestamp >= ? AND lower(source_module) LIKE ?
+                       GROUP BY COALESCE(provider_canonical, provider), COALESCE(model_canonical, model), lane, source_module""",
+                    (since, f"%{marker}%"),
+                ).fetchall():
+                    add_alert(kind, row["provider"], row["model"], row["lane"], row["cnt"], row["last_seen"], recommendation, row["source_module"] or "unknown")
+
+            # Autonomous non-user modules consuming tokens
+            for row in conn.execute(
+                """SELECT source_module, COALESCE(provider_canonical, provider) as provider,
+                          COALESCE(model_canonical, model) as model, lane, COUNT(*) as cnt, MAX(timestamp) as last_seen
+                   FROM token_usage
+                   WHERE timestamp >= ?
+                     AND lower(COALESCE(source_module, '')) NOT IN ('ai_router', 'max_chat_response')
+                   GROUP BY source_module, COALESCE(provider_canonical, provider), COALESCE(model_canonical, model), lane
+                   HAVING COUNT(*) >= 2""",
+                (since,),
+            ).fetchall():
+                add_alert(
+                    "autonomous_usage_without_visible_request",
+                    row["provider"],
+                    row["model"],
+                    row["lane"],
+                    row["cnt"],
+                    row["last_seen"],
+                    "Review scheduler/worker source and require explicit founder enable before running.",
+                    row["source_module"] or "unknown",
+                )
+
+            # MiniMax called while non-MiniMax selected
+            if selected_provider != "minimax":
+                row = conn.execute(
+                    """SELECT COUNT(*) as cnt, MAX(timestamp) as last_seen
+                       FROM token_usage
+                       WHERE timestamp >= ? AND COALESCE(provider_canonical, provider) = 'minimax'""",
+                    (since,),
+                ).fetchone()
+                if row and int(row["cnt"] or 0) > 0:
+                    add_alert(
+                        "minimax_called_while_not_selected",
+                        "minimax",
+                        "MiniMax-M2.7",
+                        state.lane,
+                        row["cnt"],
+                        row["last_seen"],
+                        "Audit routing bypass: selected provider is not MiniMax.",
+                        "routing",
+                    )
+
+            # Provider called while kill-switched currently
+            for provider in ("minimax", "deepseek", "claude", "groq", "gemini", "openai", "xai", "ollama", "openrouter", "qwen"):
+                if not provider_disabled(provider):
+                    continue
+                row = conn.execute(
+                    """SELECT COUNT(*) as cnt, MAX(timestamp) as last_seen
+                       FROM token_usage
+                       WHERE timestamp >= ? AND COALESCE(provider_canonical, provider) = ?""",
+                    (since, provider),
+                ).fetchone()
+                if row and int(row["cnt"] or 0) > 0:
+                    add_alert(
+                        "provider_called_while_disabled",
+                        provider,
+                        "any",
+                        state.lane,
+                        row["cnt"],
+                        row["last_seen"],
+                        "Blocked provider still received traffic; inspect bypass path immediately.",
+                        "routing",
+                    )
+
+            conn.close()
+            return alerts
+        except Exception as e:
+            logger.error(f"get_bleed_watch_alerts failed: {e}")
             return []
 
     def update_budget(self, monthly_budget: float = None, alert_threshold: float = None,

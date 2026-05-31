@@ -12,8 +12,10 @@ import os
 import logging
 import re
 import uuid
+import httpx
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
@@ -56,6 +58,7 @@ from app.services.max.brain.brain_config import (
 from app.services.max.token_tracker import token_tracker
 from app.services.max.desks import AIDeskManager, TaskStatus
 from app.services.data_paths import data_root
+from app.services.max.routing_state import canonical_provider
 from pathlib import Path as _Path
 
 # ── Chat history persistence ─────────────────────────────────────────────────
@@ -342,6 +345,28 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     channel: Optional[str] = None  # "telegram", "web", etc.
     chat_id: Optional[str] = None  # Telegram chat ID for founder detection
+
+
+class RoutingStateUpdateRequest(BaseModel):
+    selected_provider: Optional[str] = None
+    selected_model: Optional[str] = None
+    fallback_enabled: Optional[bool] = None
+    ai_calls_disabled: Optional[bool] = None
+    updated_by: str = "founder_or_system"
+    reason: str = "manual_selector_switch"
+
+
+class ProviderToggleRequest(BaseModel):
+    provider: str
+    enabled: bool
+    updated_by: str = "founder_or_system"
+    reason: str = "platformforge_toggle"
+
+
+class ProviderTestRequest(BaseModel):
+    provider: str
+    model: Optional[str] = None
+    prompt: str = "Reply only: deepseek ok"
 
 
 TELEGRAM_DIRECTIVE = (
@@ -1321,6 +1346,286 @@ def _apply_truth_guardrails(message: str | None, response_text: str, tool_result
     return response_text
 
 
+_URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
+_EMPIRE_MODULES = [
+    "MAX",
+    "Empire Workroom",
+    "Woodcraft",
+    "Model Selector / AI Distributor Hub",
+    "Tokens & Costs",
+    "OpenClaw",
+    "Hermes",
+]
+
+
+def _first_url(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = _URL_PATTERN.search(text)
+    return match.group(0).rstrip(").,!?") if match else None
+
+
+def _is_link_intelligence_request(message: str | None) -> bool:
+    text = (message or "").strip()
+    if not text:
+        return False
+    url = _first_url(text)
+    if not url:
+        return False
+    lower = text.lower()
+    if lower == url.lower():
+        return True
+    markers = ("article", "link", "read this", "summar", "what does this mean", "analy", "venturebeat")
+    return any(marker in lower for marker in markers)
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    stripped = (text or "").strip()
+    if not stripped:
+        return None
+    candidates = [stripped]
+    fenced = re.findall(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", stripped, flags=re.IGNORECASE)
+    candidates.extend(fenced)
+    loose = re.findall(r"(\{[\s\S]*\})", stripped)
+    candidates.extend(loose[:1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+    return None
+
+
+def _derive_title_from_article_text(content: str) -> str:
+    for line in content.splitlines():
+        cleaned = line.strip().lstrip("#").strip()
+        if len(cleaned) >= 8 and len(cleaned) <= 180:
+            return cleaned
+    return "Untitled Article"
+
+
+def _heuristic_modules(content: str, url: str) -> list[str]:
+    text = f"{content}\n{url}".lower()
+    modules = ["MAX"]
+    if any(token in text for token in ("token", "cost", "pricing", "quota", "credits")):
+        modules.append("Tokens & Costs")
+    if any(token in text for token in ("provider", "model", "routing", "fallback", "deepseek", "openrouter", "qwen", "groq", "ollama")):
+        modules.append("Model Selector / AI Distributor Hub")
+    if any(token in text for token in ("agent", "automation", "queue", "worker")):
+        modules.append("OpenClaw")
+        modules.append("Hermes")
+    if any(token in text for token in ("wood", "cnc", "shop", "fabrication")):
+        modules.append("Woodcraft")
+    if any(token in text for token in ("quote", "customer", "workroom", "ops")):
+        modules.append("Empire Workroom")
+    ordered = []
+    for module in _EMPIRE_MODULES:
+        if module in modules and module not in ordered:
+            ordered.append(module)
+    return ordered
+
+
+def _persist_link_brief(record: dict[str, Any]) -> str:
+    path = data_root() / "max" / "link_intelligence_briefs.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=True) + "\n")
+    return str(path)
+
+
+async def _fallback_read_article_text(url: str, max_chars: int = 18000) -> tuple[str | None, dict[str, Any]]:
+    mirror_url = f"https://r.jina.ai/{url}"
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(
+                mirror_url,
+                headers={"User-Agent": "EmpireBox-MAX-Link-Intelligence/1.0"},
+            )
+        if resp.status_code >= 400:
+            return None, {"source": "jina_mirror", "url": mirror_url, "status": resp.status_code}
+        raw = (resp.text or "").strip()
+        if not raw:
+            return None, {"source": "jina_mirror", "url": mirror_url, "status": resp.status_code, "error": "empty_body"}
+        title_match = re.search(r"^Title:\s*(.+)$", raw, flags=re.MULTILINE)
+        published_match = re.search(r"^Published Time:\s*(.+)$", raw, flags=re.MULTILINE)
+        if "Markdown Content:" in raw:
+            raw = raw.split("Markdown Content:", 1)[1].strip()
+        return raw[:max_chars], {
+            "source": "jina_mirror",
+            "url": mirror_url,
+            "status": resp.status_code,
+            "title": title_match.group(1).strip() if title_match else "",
+            "published_time": published_match.group(1).strip() if published_match else "",
+        }
+    except Exception as exc:
+        return None, {"source": "jina_mirror", "url": mirror_url, "error": str(exc)[:240]}
+
+
+async def _link_intelligence_response(request: ChatRequest) -> ChatResponse | None:
+    if request.desk or request.image_filename:
+        return None
+    if not _is_link_intelligence_request(request.message):
+        return None
+
+    url = _first_url(request.message)
+    if not url:
+        return None
+
+    read_result = execute_tool({"tool": "web_read", "url": url, "max_chars": 18000})
+    tool_evidence = [read_result.to_dict()]
+    payload = read_result.result or {}
+    content = str(payload.get("content") or "")
+    read_source = "web_read"
+    article_date_hint = ""
+    fallback_meta: dict[str, Any] = {}
+
+    if not read_result.success or not content.strip():
+        fallback_text, fallback_meta = await _fallback_read_article_text(url, max_chars=18000)
+        tool_evidence.append(
+            {
+                "tool": "jina_mirror_read",
+                "success": bool(fallback_text),
+                "result": fallback_meta if fallback_text else None,
+                "error": None if fallback_text else str(fallback_meta.get("error") or fallback_meta.get("status") or "fallback_failed"),
+            }
+        )
+        if not fallback_text:
+            failure_detail = read_result.error or f"HTTP {fallback_meta.get('status')}" or "unknown error"
+            return ChatResponse(
+                response=(
+                    f"I could not read that URL ({url}). "
+                    f"Fetch failed: {failure_detail}. "
+                    "Paste the article text or share a screenshot and I will analyze it from that."
+                ),
+                model_used="link-intelligence-fetch-failed",
+                fallback_used=False,
+                tool_results=tool_evidence,
+                metadata=_response_metadata(request.channel, skill_used="max_link_intelligence"),
+            )
+        payload = {"content": fallback_text}
+        content = fallback_text
+        read_source = "jina_mirror"
+        article_date_hint = str(fallback_meta.get("published_time") or "")
+
+    source_host = urlparse(url).netloc or "unknown-source"
+    reviewed_at = datetime.utcnow().isoformat()
+    title_guess = str(fallback_meta.get("title") or _derive_title_from_article_text(content))
+    module_candidates = _heuristic_modules(content, url)
+
+    analysis_prompt = (
+        "You are MAX link intelligence.\n"
+        "Return JSON only with keys:\n"
+        "summary, key_claims, source, article_date, empirebox_relevance, affected_modules, recommended_actions, involve_codex, involve_openclaw, involve_hermes, autonomy_requires_approval.\n"
+        "Rules:\n"
+        "- key_claims and recommended_actions must be arrays.\n"
+        "- affected_modules must use only this list when relevant: "
+        + ", ".join(_EMPIRE_MODULES)
+        + ".\n"
+        "- If article discusses routing/models, include Model Selector / AI Distributor Hub action.\n"
+        "- If article discusses token economics/cost, include Tokens & Costs and Bleed Watch action.\n"
+        "- autonomy_requires_approval must be true.\n"
+    )
+    user_payload = (
+        f"URL: {url}\n"
+        f"Source host: {source_host}\n"
+        f"Title guess: {title_guess}\n"
+        f"Module hints: {', '.join(module_candidates)}\n\n"
+        f"Article text:\n{content[:18000]}"
+    )
+
+    ai_result = await ai_router.chat(
+        [AIMessage(role="user", content=user_payload)],
+        model=None,
+        desk=None,
+        system_prompt=analysis_prompt,
+        conversation_id=request.conversation_id or "",
+    )
+
+    parsed = _extract_json_object(ai_result.content) or {}
+    summary = str(parsed.get("summary") or title_guess)
+    key_claims = parsed.get("key_claims") if isinstance(parsed.get("key_claims"), list) else []
+    key_claims = [str(item) for item in key_claims][:6]
+    if not key_claims:
+        key_claims = [line.strip("- ").strip() for line in content.splitlines() if line.strip()][:3]
+
+    affected_modules = parsed.get("affected_modules") if isinstance(parsed.get("affected_modules"), list) else module_candidates
+    affected_modules = [m for m in [str(item) for item in affected_modules] if m in _EMPIRE_MODULES]
+    if not affected_modules:
+        affected_modules = module_candidates or ["MAX"]
+
+    recommended_actions = parsed.get("recommended_actions") if isinstance(parsed.get("recommended_actions"), list) else []
+    recommended_actions = [str(item) for item in recommended_actions][:8]
+    if not recommended_actions:
+        recommended_actions = [
+            "Update Model Selector routing policy with article-informed provider priorities.",
+            "Add or tune Tokens & Costs guardrails and Bleed Watch alerts for the impacted provider economics.",
+            "Keep autonomous execution off until founder approves concrete action tasks.",
+        ]
+
+    involve_codex = bool(parsed.get("involve_codex", True))
+    involve_openclaw = bool(parsed.get("involve_openclaw", False))
+    involve_hermes = bool(parsed.get("involve_hermes", False))
+    article_date_raw = str(parsed.get("article_date") or "").strip()
+    if article_date_hint:
+        article_date = article_date_hint
+    elif (not article_date_raw) or article_date_raw.lower() in {"unknown", "n/a", "none"} or article_date_raw.lower().startswith("unknown"):
+        article_date = "unknown"
+    else:
+        article_date = article_date_raw
+    relevance = str(parsed.get("empirebox_relevance") or "Relevant to Empire AI operations and routing policy.")
+    autonomy_requires_approval = bool(parsed.get("autonomy_requires_approval", True))
+
+    brief_record = {
+        "url": url,
+        "title": title_guess,
+        "date_reviewed": reviewed_at,
+        "summary": summary,
+        "module_impact": affected_modules,
+        "recommended_actions": recommended_actions,
+        "implementation_status": "suggested",
+        "source": source_host,
+        "article_date": article_date,
+        "involve_codex": involve_codex,
+        "involve_openclaw": involve_openclaw,
+        "involve_hermes": involve_hermes,
+        "autonomy_requires_approval": autonomy_requires_approval,
+        "read_source": read_source,
+        "fetch_evidence": tool_evidence,
+    }
+    brief_path = _persist_link_brief(brief_record)
+
+    lines = [
+        f"Article: {title_guess}",
+        f"Source/Date: {source_host} / {article_date}",
+        f"Summary: {summary}",
+        "Key claims:",
+    ]
+    lines.extend([f"- {claim}" for claim in key_claims[:5]])
+    lines.append(f"EmpireBox relevance: {relevance}")
+    lines.append("Affected modules:")
+    lines.extend([f"- {module}" for module in affected_modules])
+    lines.append("Recommended action:")
+    lines.extend([f"- {action}" for action in recommended_actions])
+    lines.append(
+        "Involve: "
+        f"Codex={'yes' if involve_codex else 'no'}, "
+        f"OpenClaw={'yes' if involve_openclaw else 'no'}, "
+        f"Hermes={'yes' if involve_hermes else 'no'}"
+    )
+    lines.append(f"Autonomous execution without approval: {'not allowed' if autonomy_requires_approval else 'allowed'}")
+    lines.append(f"Saved brief: {brief_path}")
+
+    return ChatResponse(
+        response="\n".join(lines),
+        model_used=ai_result.model_used or "link-intelligence",
+        fallback_used=bool(ai_result.fallback_used),
+        tool_results=tool_evidence,
+        metadata=_response_metadata(request.channel, skill_used="max_link_intelligence"),
+    )
+
+
 def _is_provider_identity_request(message: str | None) -> bool:
     text = re.sub(r"[^a-z0-9\s?]", " ", (message or "").lower())
     probes = (
@@ -1332,23 +1637,15 @@ def _is_provider_identity_request(message: str | None) -> bool:
 
 
 def _provider_identity_response(request: ChatRequest) -> ChatResponse:
-    primary = str(ai_router.primary_model.value) if ai_router.primary_model else "unknown"
-    if primary == "minimax":
-        model_label = ai_router.minimax_model or "MiniMax-M2.7"
-        lead = f"I'm MAX. My current text/chat model is {model_label}."
-    else:
-        lead = f"I'm MAX. My current text/chat provider is {primary}."
-
-    details: list[str] = []
-    if bool(ai_router.xai_key):
-        if ai_router.max_disable_xai:
-            details.append("xAI is configured but currently disabled (credits_unavailable).")
-        else:
-            details.append("xAI is configured and available.")
-    if ai_router.max_disable_ollama:
-        details.append("Ollama is currently disabled (founder_disabled_due_to_stall_suspected).")
-    else:
-        details.append("Ollama is enabled.")
+    state = ai_router.get_routing_state_payload()
+    lead = (
+        "I'm MAX. "
+        f"Active provider/model: {state.get('selected_provider')} / {state.get('selected_model')}."
+    )
+    details = [
+        f"Fallback enabled: {bool(state.get('fallback_enabled'))}.",
+        f"AI calls disabled: {bool(state.get('ai_calls_disabled'))}.",
+    ]
 
     return ChatResponse(
         response=" ".join([lead, *details]).strip(),
@@ -1569,6 +1866,11 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         hist_safe, _ = check_input(content)
         if not hist_safe:
             return ChatResponse(response=SAFE_REFUSAL, model_used="guardrail", fallback_used=False)
+
+    link_intel = await _link_intelligence_response(request)
+    if link_intel is not None:
+        link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
+        return link_intel
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
@@ -2133,9 +2435,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                     conv_id, request.message, response.content
                 )
 
-        # Log token usage
-        input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
-        token_tracker.log_chat(response.model_used, input_text, final_content, "chat", conv_id)
+        # Token/cost usage is logged once in ai_router to avoid duplicate billing rows.
 
         # Auto-save valuable exchanges to shared memory store (web/CC conversations)
         _channel_source = request.channel or "web"
@@ -2246,6 +2546,11 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'text', 'content': SAFE_REFUSAL})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'model_used': 'guardrail'})}\n\n"
             return StreamingResponse(refusal_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    link_intel = await _link_intelligence_response(request)
+    if link_intel is not None:
+        link_intel.response = sanitize_output(_sanitize_internal_leakage_text(link_intel.response))
+        return _stream_immediate_response(link_intel, request.conversation_id)
 
     direct_route = _maybe_handle_direct_route_request(request)
     if direct_route is not None:
@@ -2557,9 +2862,7 @@ async def chat_stream(request: ChatRequest):
                         "batch learning"
                     ))
 
-            # Log token usage
-            input_text = request.message + "".join(h.get("content", "") for h in request.history[-10:])
-            token_tracker.log_chat(model_used, input_text, full_response, "chat/stream", conv_id)
+            # Token/cost usage is logged once in ai_router to avoid duplicate billing rows.
 
             # Auto-save valuable exchanges to shared memory store (web/CC streaming)
             _stream_channel = request.channel or "web"
@@ -2842,7 +3145,69 @@ async def presentation_to_telegram(data: dict):
 
 @router.get("/models")
 async def get_available_models():
-    return {"models": ai_router.get_available_models()}
+    return {
+        "models": ai_router.get_available_models(),
+        "routing_state": ai_router.get_routing_state_payload(),
+    }
+
+
+@router.get("/routing-state")
+async def get_routing_state():
+    return ai_router.get_routing_state_payload()
+
+
+@router.post("/routing-state")
+async def update_routing_state(request: RoutingStateUpdateRequest):
+    try:
+        if request.selected_provider:
+            ai_router.set_active_provider_model(
+                provider=request.selected_provider,
+                model=request.selected_model,
+                updated_by=request.updated_by,
+                reason=request.reason,
+            )
+        ai_router.set_routing_policy(
+            fallback_enabled=request.fallback_enabled,
+            ai_calls_disabled=request.ai_calls_disabled,
+            updated_by=request.updated_by,
+            reason=request.reason,
+        )
+        return {"status": "updated", **ai_router.get_routing_state_payload()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/provider/toggle")
+async def toggle_provider(request: ProviderToggleRequest):
+    try:
+        ai_router.set_provider_enabled(
+            request.provider,
+            request.enabled,
+            updated_by=request.updated_by,
+            reason=request.reason,
+        )
+        return {"status": "updated", **ai_router.get_routing_state_payload()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/provider/test")
+async def provider_test(request: ProviderTestRequest):
+    try:
+        result = await ai_router.provider_smoke_test(
+            provider=request.provider,
+            model=request.model,
+            prompt=request.prompt,
+        )
+        return {
+            "status": "ok",
+            "provider_used": canonical_provider(request.provider),
+            "model_used": result.model_used,
+            "fallback_used": bool(result.fallback_used),
+            "content": (result.content or "")[:240],
+        }
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/desks")
@@ -2877,7 +3242,18 @@ async def create_task(request: TaskCreateRequest, background_tasks: BackgroundTa
 
 @router.get("/tasks")
 async def get_all_tasks(status: Optional[str] = None, desk_id: Optional[str] = None):
-    task_status = TaskStatus(status) if status else None
+    normalized_status = (status or "").strip().lower()
+    if normalized_status in {"open", "active"}:
+        tasks = [
+            task for task in desk_manager.get_all_tasks(status=None, desk_id=desk_id)
+            if task.get("status") in {"pending", "in_progress", "needs_input"}
+        ]
+        return {"tasks": tasks}
+    try:
+        task_status = TaskStatus(normalized_status) if normalized_status else None
+    except ValueError:
+        allowed = sorted([item.value for item in TaskStatus] + ["active", "open"])
+        raise HTTPException(status_code=400, detail=f"status must be one of: {', '.join(allowed)}")
     tasks = desk_manager.get_all_tasks(status=task_status, desk_id=desk_id)
     return {"tasks": tasks}
 
@@ -3172,34 +3548,18 @@ async def max_status():
     backend_port = int(backend_port_raw) if backend_port_raw.isdigit() else None
     frontend_port = int(frontend_port_raw) if frontend_port_raw.isdigit() else None
 
-    # Provider policy info for transparency
-    minimax_real_call_available = (
-        True
-        if ai_router.last_provider_successes.get("minimax")
-        else False if ai_router.last_provider_errors.get("minimax") else None
-    )
+    routing_state_payload = ai_router.get_routing_state_payload()
     provider_policy = {
-        "primary": str(ai_router.primary_model.value) if ai_router.primary_model else "unknown",
-        "minimax_configured": bool(ai_router.minimax_key),
-        "minimax_model": ai_router.minimax_model,
-        "minimax_real_call_available": minimax_real_call_available,
-        "minimax_last_error": ai_router.last_provider_errors.get("minimax"),
-        "minimax_last_success": ai_router.last_provider_successes.get("minimax"),
-        "xai_configured": bool(ai_router.xai_key),
-        "xai_disabled": ai_router.max_disable_xai,
-        "xai_disabled_reason": "credits_unavailable" if ai_router.max_disable_xai else None,
-        "ollama_disabled": ai_router.max_disable_ollama,
-        "ollama_disabled_reason": "founder_disabled_due_to_stall_suspected" if ai_router.max_disable_ollama else None,
-        "max_primary_provider_env": ai_router.max_primary_provider or None,
-        "fallback_possible": any(
-            [
-                bool(ai_router.gemini_key),
-                bool(ai_router.groq_key),
-                bool(ai_router.anthropic_key),
-                bool(ai_router.openai_key),
-            ]
-        ),
+        "selected_provider": routing_state_payload.get("selected_provider"),
+        "selected_model": routing_state_payload.get("selected_model"),
+        "fallback_enabled": routing_state_payload.get("fallback_enabled"),
+        "ai_calls_disabled": routing_state_payload.get("ai_calls_disabled"),
+        "manual_disabled": routing_state_payload.get("manual_disabled", {}),
+        "updated_at": routing_state_payload.get("updated_at"),
+        "updated_by": routing_state_payload.get("updated_by"),
+        "last_switch_reason": routing_state_payload.get("last_switch_reason"),
         "last_provider_errors": ai_router.last_provider_errors,
+        "last_provider_successes": ai_router.last_provider_successes,
     }
 
     return {
@@ -3228,6 +3588,8 @@ async def max_status():
         "openclaw_gate": check_openclaw_gate().to_dict(),
         "registry_reload_requires_restart": False,
         "provider_policy": provider_policy,
+        "routing_state": routing_state_payload,
+        "providers": {"models": routing_state_payload.get("provider_registry", [])},
         "minimax_tools": minimax_tools_status(),
     }
 
@@ -3377,17 +3739,12 @@ async def orchestration_status():
     except Exception:
         desk_statuses = []
 
-    configured_models = ai_router.get_available_models()
-    # Pass through provider policy flags so status consumers see the full picture
-    minimax_key = bool(ai_router.minimax_key)
-    xai_key = bool(ai_router.xai_key)
-    xai_disabled = ai_router.max_disable_xai
-    primary_provider = str(ai_router.primary_model.value) if ai_router.primary_model else "unknown"
-    minimax_real_call_available = (
-        True
-        if ai_router.last_provider_successes.get("minimax")
-        else False if ai_router.last_provider_errors.get("minimax") else None
-    )
+    routing_state_payload = ai_router.get_routing_state_payload()
+    configured_models = routing_state_payload.get("provider_registry", ai_router.get_available_models())
+    selected_provider = routing_state_payload.get("selected_provider")
+    selected_model = routing_state_payload.get("selected_model")
+    selected_entry = next((m for m in configured_models if m.get("provider_canonical") == selected_provider), None)
+    xai_disabled = bool(next((m.get("disabled") for m in configured_models if m.get("provider_canonical") == "xai"), False))
     cloud_providers = [
         {
             "id": model["id"],
@@ -3395,12 +3752,13 @@ async def orchestration_status():
             "configured": bool(model.get("configured", model["available"])),
             "available": bool(model["available"]),
             "primary": bool(model.get("primary")),
-            "status_source": "env_configured",
+            "status_source": "routing_state",
             **({"model": model["model"]} if model.get("model") else {}),
             **({"base_url": model["base_url"]} if model.get("base_url") else {}),
-            **({"disabled": model.get("disabled")} if model.get("disabled") else {}),
+            **({"disabled": model.get("disabled")} if model.get("disabled") is not None else {}),
             **({"disabled_reason": model.get("disabled_reason")} if model.get("disabled_reason") else {}),
             **({"last_error": model.get("last_error")} if model.get("last_error") else {}),
+            **({"last_success": model.get("last_success")} if model.get("last_success") else {}),
         }
         for model in configured_models
         if model.get("type") == "cloud"
@@ -3430,40 +3788,19 @@ async def orchestration_status():
             "openclaw": "/api/v1/openclaw/tasks",
         },
         "routing": {
-            "normal_web_chat": "simple: MiniMax -> Gemini -> Groq -> Sonnet; moderate: MiniMax -> Groq -> Sonnet -> Gemini; complex: MiniMax -> Claude Sonnet -> GPT-4o -> Groq; critical/code: Claude Opus -> Claude Sonnet. xAI/Grok is skipped while MAX_DISABLE_XAI=true.",
+            "normal_web_chat": "Authoritative selector routing. Selected provider/model is always attempted first; fallback only when explicitly enabled in routing state.",
             "telegram_chat": "MAX chat with Telegram brevity directive and founder channel persistence",
             "voice_input": "Groq Whisper STT through /api/v1/voice/transcribe; transcribed text enters MAX chat",
             "voice_output": "xAI Grok TTS through /api/v1/max/tts" if not xai_disabled else "MiniMax TTS via /api/v1/max/tts",
             "image_analysis": f"local Ollama triage {PRIMARY_VISION_MODEL} -> {FALLBACK_VISION_MODEL}, then MAX cloud routing as needed",
             "document_analysis": "uploaded PDF/text/code content is extracted and prepended to MAX chat context",
-            "desk_delegation": "MAX run_desk_task / ai-desks tasks; CodeForge uses Claude Opus; finance/support/sales/etc. use desk routing",
+            "desk_delegation": "MAX run_desk_task / ai-desks tasks through the same provider-selection authority.",
             "openclaw_execution": "MAX tools can dispatch or queue OpenClaw tasks below desk/MAX control",
-            "provider_policy": f"MAX_PRIMARY_PROVIDER={ai_router.max_primary_provider or 'unset'} MAX_DISABLE_XAI={xai_disabled}",
+            "provider_policy": f"selected_provider={selected_provider} selected_model={selected_model} fallback_enabled={routing_state_payload.get('fallback_enabled')}",
         },
         "providers": {
             "cloud": cloud_providers,
-            "provider_policy": {
-                "primary": primary_provider,
-                "minimax_configured": minimax_key,
-                "minimax_model": ai_router.minimax_model,
-                "minimax_real_call_available": minimax_real_call_available,
-                "minimax_last_error": ai_router.last_provider_errors.get("minimax"),
-                "minimax_last_success": ai_router.last_provider_successes.get("minimax"),
-                "xai_configured": xai_key,
-                "xai_disabled": xai_disabled,
-                "xai_disabled_reason": "credits_unavailable" if xai_disabled else None,
-                "ollama_disabled": ai_router.max_disable_ollama,
-                "fallback_possible": any(
-                    [
-                        bool(ai_router.gemini_key),
-                        bool(ai_router.groq_key),
-                        bool(ai_router.anthropic_key),
-                        bool(ai_router.openai_key),
-                    ]
-                ),
-                "fallback_order": "minimax -> gemini -> groq -> claude -> openai" if minimax_key else "gemini -> groq -> claude -> openai",
-                "last_provider_errors": ai_router.last_provider_errors,
-            },
+            "provider_policy": routing_state_payload,
             "local": [
                 {
                     "id": "ollama",

@@ -18,6 +18,8 @@ os.environ.pop("MAX_DISABLE_OLLAMA", None)
 os.environ.pop("MINIMAX_API_KEY", None)
 os.environ.pop("XAI_API_KEY", None)
 os.environ.pop("OLLAMA_ENABLED", None)
+os.environ.pop("MAX_SELECTED_PROVIDER", None)
+os.environ.pop("MAX_SELECTED_MODEL", None)
 
 
 class TestMiniMaxPrimaryProvider:
@@ -105,6 +107,8 @@ class TestGetAvailableModels:
         os.environ["XAI_API_KEY"] = "xai-key"
         os.environ["MINIMAX_API_KEY"] = "minimax-key"
         os.environ["MAX_PRIMARY_PROVIDER"] = "minimax"
+        os.environ["MAX_SELECTED_PROVIDER"] = "minimax"
+        os.environ["MAX_SELECTED_MODEL"] = "MiniMax-M2.7"
         os.environ["MAX_DISABLE_XAI"] = "true"
 
         import importlib
