@@ -1525,6 +1525,7 @@ async def _link_intelligence_response(request: ChatRequest) -> ChatResponse | No
         + ".\n"
         "- If article discusses routing/models, include Model Selector / AI Distributor Hub action.\n"
         "- If article discusses token economics/cost, include Tokens & Costs and Bleed Watch action.\n"
+        "- For token-economics articles, include guidance to use cheaper high-volume models for background agent loops and reserve premium models for high-risk deterministic tasks.\n"
         "- autonomy_requires_approval must be true.\n"
     )
     user_payload = (
@@ -1556,13 +1557,26 @@ async def _link_intelligence_response(request: ChatRequest) -> ChatResponse | No
         affected_modules = module_candidates or ["MAX"]
 
     recommended_actions = parsed.get("recommended_actions") if isinstance(parsed.get("recommended_actions"), list) else []
-    recommended_actions = [str(item) for item in recommended_actions][:8]
+    recommended_actions = [str(item) for item in recommended_actions]
     if not recommended_actions:
         recommended_actions = [
             "Update Model Selector routing policy with article-informed provider priorities.",
             "Add or tune Tokens & Costs guardrails and Bleed Watch alerts for the impacted provider economics.",
             "Keep autonomous execution off until founder approves concrete action tasks.",
         ]
+    article_lower = content.lower()
+    token_econ_related = any(marker in article_lower for marker in ("token", "pricing", "cost", "price"))
+    if token_econ_related:
+        if not any("high-volume" in action.lower() or "background agent" in action.lower() for action in recommended_actions):
+            recommended_actions.insert(
+                0,
+                "Route background agent loops to cheaper high-volume models through the Model Selector / AI Distributor Hub.",
+            )
+        if not any("premium" in action.lower() or "high-risk deterministic" in action.lower() for action in recommended_actions):
+            recommended_actions.append(
+                "Reserve premium models for high-risk deterministic tasks where reliability and auditability are critical.",
+            )
+    recommended_actions = recommended_actions[:8]
 
     involve_codex = bool(parsed.get("involve_codex", True))
     involve_openclaw = bool(parsed.get("involve_openclaw", False))
