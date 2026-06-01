@@ -62,17 +62,139 @@ INTENT_SIGNALS = [
     "what is new max",
 ]
 
+# Services whose runtime health can be checked.
+# When a message mentions one of these alongside a health verb, it routes to
+# the runtime truth check instead of returning a static doc definition.
+# NOTE: "max" omitted -- too common in ordinary speech; INTENT_SIGNALS covers
+# MAX-specific signals ("is max broken", "is max fixed").
+# NOTE: "email" omitted -- would collide with email send/read router paths.
+HEALTH_TRIGGER_SERVICES: frozenset[str] = frozenset({
+    "openclaw", "open claw",
+    "hermes", "hermes dashboard",
+    "minimax", "mini max",
+    "deepseek", "deep seek",
+    "ollama",
+    "telegram",
+    "backend",
+    "frontend",
+    "recovery forge", "recoveryforge",
+    "archive forge", "archiveforge",
+    "v10",
+    "worker", "workers",
+    "queue",
+    "cron",
+    "provider",
+    "model selector", "model-selector",
+})
+
+# Health-related verbs that indicate a runtime status question when paired with
+# a HEALTH_TRIGGER_SERVICE.
+HEALTH_VERBS: frozenset[str] = frozenset({
+    "online", "offline", "running", "healthy", "working",
+    "down", "up", "reachable", "active", "alive",
+    "available", "responsive", "live",
+})
+
+# Phrases that must route through the dedicated OpenClaw gate check
+# (_is_openclaw_gate_request / _openclaw_gate_response in router.py)
+# rather than the general runtime truth check or module knowledge.
+# Only imperative "check openclaw" is excluded; interrogative "is openclaw healthy"
+# is NOT excluded — the health check catches it and routes to runtime truth
+# (which includes OpenClaw gate state).
+# Matches OPENCLAW_GATE_MARKERS in router.py -- keep in sync.
+_OPENCLAW_GATE_PHRASES: tuple[str, ...] = (
+    "check openclaw", "check open claw",
+)
+
+
+def is_runtime_health_question(message: str | None) -> bool:
+    """Return True if *message* asks whether a specific system is
+    online/offline/running/healthy/working/reachable/etc.
+
+    Detection uses five patterns:
+
+    1. ``is|are [the] <service> <health_verb>``
+       e.g. "Is OpenClaw online?", "Is the backend healthy?"
+    2. ``<service> status`` or ``status of <service>``
+       e.g. "OpenClaw status", "status of Hermes"
+    3. ``check [on] [the] <service>``
+       e.g. "check on the worker"
+    4. ``how is|are [the] <service>``
+       e.g. "how is OpenClaw"
+    5. ``are [the] <serviceA> and <word> <health_verb>``
+       e.g. "Are MiniMax and DeepSeek working?"
+
+    Phrases in ``_OPENCLAW_GATE_PHRASES`` are excluded so they continue to
+    route through the dedicated OpenClaw gate check which returns live
+    runtime evidence from the actual health endpoint.
+    """
+    text = _normalize_intent_text(message)
+    if not text:
+        return False
+
+    # Let dedicated OpenClaw gate handle its own phrasing
+    if any(phrase in text for phrase in _OPENCLAW_GATE_PHRASES):
+        return False
+
+    # Quick pre-filter: must mention at least one trigger service
+    if not any(svc in text for svc in HEALTH_TRIGGER_SERVICES):
+        return False
+
+    # Pattern 1: is|are [the] <service> <health_verb>
+    for svc in HEALTH_TRIGGER_SERVICES:
+        for verb in HEALTH_VERBS:
+            if re.search(
+                rf"\b(?:is|are)\s+(?:the\s+)?{re.escape(svc)}\s+{re.escape(verb)}\b",
+                text,
+            ):
+                return True
+
+    # Pattern 2: <service> status / status of <service>
+    for svc in HEALTH_TRIGGER_SERVICES:
+        if f"{svc} status" in text or f"status of {svc}" in text:
+            return True
+
+    # Pattern 3: check [on] [the] <service>
+    for svc in HEALTH_TRIGGER_SERVICES:
+        if re.search(
+            rf"\bcheck\s+(?:on\s+)?(?:the\s+)?{re.escape(svc)}\b",
+            text,
+        ):
+            return True
+
+    # Pattern 4: how is|are [the] <service>
+    for svc in HEALTH_TRIGGER_SERVICES:
+        if re.search(
+            rf"\bhow\s+(?:is|are)\s+(?:the\s+)?{re.escape(svc)}\b",
+            text,
+        ):
+            return True
+
+    # Pattern 5: are [the] <serviceA> and <word> <health_verb>
+    for svc in HEALTH_TRIGGER_SERVICES:
+        for verb in HEALTH_VERBS:
+            if re.search(
+                rf"\bare\s+(?:the\s+)?{re.escape(svc)}\s+and\s+\w+\s+{re.escape(verb)}\b",
+                text,
+            ):
+                return True
+
+    return False
+
 
 def _normalize_intent_text(message: str | None) -> str:
     text = (message or "").lower().strip()
-    text = text.replace("’", "'").replace("`", "'")
+    text = text.replace("\u2019", "'").replace("`", "'")
     text = re.sub(r"\s+", " ", text)
     return text
 
 
 def should_run_runtime_truth_check(message: str | None) -> bool:
     text = _normalize_intent_text(message)
-    return any(signal in text for signal in INTENT_SIGNALS)
+    if any(signal in text for signal in INTENT_SIGNALS):
+        return True
+    # Also catch ad-hoc health questions about specific services
+    return is_runtime_health_question(message)
 
 
 # Casual "what's new" signals — bounded summary, NOT full runtime truth check

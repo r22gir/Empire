@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
+    is_runtime_health_question,
     should_run_runtime_truth_check,
 )
 from app.services.max.tool_executor import ToolResult, execute_tool
@@ -38,6 +39,107 @@ def test_runtime_truth_intent_signals_are_detected():
         assert should_run_runtime_truth_check(prompt)
 
     assert not should_run_runtime_truth_check("what quotes are due today?")
+
+
+# ---------------------------------------------------------------------------
+# is_runtime_health_question unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_is_runtime_health_question_detects_health_queries():
+    """Health questions about known services should be detected."""
+    prompts = [
+        "Is OpenClaw online right now?",
+        "Is OpenClaw running?",
+        "Is Hermes running?",
+        "Is Hermes dashboard online?",
+        "Are MiniMax and DeepSeek working?",
+        "Is the backend healthy?",
+        "Is RecoveryForge running?",
+        "Is the queue active?",
+        "Is v10 online?",
+        "Is the worker available?",
+        "Is OpenClaw reachable?",
+        "How is OpenClaw?",
+        "check on the worker",
+        "OpenClaw status",
+        "status of Hermes",
+        "Are the workers running?",
+        "Is the queue up?",
+    ]
+    for prompt in prompts:
+        assert is_runtime_health_question(prompt), (
+            f"Expected health detection for: {prompt}"
+        )
+
+
+def test_is_runtime_health_question_rejects_non_health():
+    """Non-health questions should NOT be detected as health questions."""
+    prompts = [
+        "what is ArchiveForge?",
+        "tell me about OpenClaw",
+        "what features does Hermes have?",
+        "what is OpenClaw doing right now?",
+        "define the backend",
+        "when will ArchiveForge publish?",
+        "what's the update on RecoveryForge?",
+    ]
+    for prompt in prompts:
+        assert not is_runtime_health_question(prompt), (
+            f"Expected no health detection for: {prompt}"
+        )
+
+
+def test_is_runtime_health_question_excludes_openclaw_gate_phrases():
+    """Only imperative 'check openclaw' phrases must be excluded from health
+    detection (they route through the dedicated OpenClaw gate).
+    Interrogative phrases like 'is openclaw healthy' are NOT excluded —
+    they route to the runtime truth check which includes OpenClaw gate state."""
+    from app.services.max.runtime_truth_check import is_runtime_health_question
+
+    # Imperative "check openclaw" is excluded (routes to gate)
+    assert not is_runtime_health_question("check openclaw")
+    assert not is_runtime_health_question("check open claw")
+
+    # Interrogative "is openclaw healthy" is NOT excluded (routes to runtime truth)
+    assert is_runtime_health_question("is openclaw healthy")
+    assert is_runtime_health_question("is open claw healthy")
+
+    # "openclaw health" — not matched by any health pattern, returns False
+    # (falls through to gate check in router.py)
+    assert not is_runtime_health_question("openclaw health")
+
+
+def test_is_runtime_health_question_detects_patterns_2_thru_5():
+    """All five detection patterns should fire for their respective prompts."""
+    from app.services.max.runtime_truth_check import is_runtime_health_question
+
+    # Pattern 2: <service> status / status of <service>
+    assert is_runtime_health_question("OpenClaw status")
+    assert is_runtime_health_question("status of Hermes")
+    # Pattern 3: check [on] [the] <service>
+    assert is_runtime_health_question("check worker")
+    assert is_runtime_health_question("check on the queue")
+    # Pattern 4: how is|are [the] <service>
+    assert is_runtime_health_question("how is OpenClaw")
+    assert is_runtime_health_question("how are the workers")
+    # Pattern 5: are [the] <serviceA> and <word> <health_verb>
+    assert is_runtime_health_question("Are MiniMax and DeepSeek working?")
+    assert is_runtime_health_question("are openclaw and hermes running?")
+
+
+def test_should_run_runtime_truth_check_includes_health_questions():
+    """should_run_runtime_truth_check must also catch health questions now
+    that is_runtime_health_question is integrated."""
+    prompts = [
+        "Is OpenClaw online?",
+        "Is Hermes running?",
+        "Is the backend healthy?",
+    ]
+    for prompt in prompts:
+        assert should_run_runtime_truth_check(prompt), (
+            f"Expected runtime truth check for: {prompt}"
+        )
 
 
 def test_runtime_truth_tool_is_callable(monkeypatch):
