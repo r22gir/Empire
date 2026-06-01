@@ -6,6 +6,7 @@ from app.main import app
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
     is_runtime_health_question,
+    run_runtime_truth_check,
     should_run_runtime_truth_check,
 )
 from app.services.max.tool_executor import ToolResult, execute_tool
@@ -335,3 +336,116 @@ def test_self_assessment_invokes_continuity_audit_when_scores_low(monkeypatch):
     assert data["should_run_continuity_audit"] is True
     assert data["skill_used"] == "empire_max_continuity_audit"
     assert "Running a continuity check" in data["message"]
+
+
+# ---------------------------------------------------------------------------
+# Hermes dashboard health-question detection tests
+# ---------------------------------------------------------------------------
+
+
+def test_hermes_dashboard_health_questions_detected():
+    """Hermes dashboard health questions must be detected by
+    is_runtime_health_question so they route to runtime truth check."""
+    prompts = [
+        "Is Hermes dashboard online?",
+        "Is Hermes running?",
+        "Is Hermes dashboard up?",
+        "Hermes dashboard status",
+        "status of Hermes",
+        "how is Hermes?",
+        "check Hermes dashboard",
+        "Is the Hermes dashboard working?",
+    ]
+    for prompt in prompts:
+        assert is_runtime_health_question(prompt), (
+            f"Expected health detection for: {prompt}"
+        )
+
+
+def test_runtime_truth_format_includes_hermes():
+    """Formatted runtime truth response must include Hermes dashboard and
+    Hermes cron lines."""
+    response = format_runtime_truth_check({
+        "mode": "inspect_only",
+        "current_commit": {"hash": "abc1234", "message": "abc1234 test"},
+        "registry": {"registry_version": "v2", "loaded_at": "now", "last_error": None},
+        "openclaw_gate": {"state": "healthy", "allowed": True, "reason": "ok"},
+        "backend_port_8000": {"port": 8000, "port_open": True, "service_active": True, "local_root_status": 200},
+        "backend_port_8010": {"port": 8010, "port_open": False, "service_active": None, "local_root_status": None},
+        "frontend_port_3005": {"port": 3005, "port_open": True, "service_active": True, "local_root_status": 200},
+        "frontend_port_3010": {"port": 3010, "port_open": False, "service_active": None, "local_root_status": None},
+        "hermes_dashboard": {"state": "up", "port": 9119, "port_open": True, "process_detected": True, "tui_gateway_detected": False, "evidence": "port 9119 open, dashboard process detected"},
+        "hermes_cron": {"state": "paused", "jobs_count": 1, "lock_file_present": True},
+        "local_freshness": {"api_git": {}, "api_matches_current_commit": True},
+        "public_freshness": {"api_git": {}, "api_matches_current_commit": True},
+        "restart_required": False,
+        "stale_or_broken": [],
+        "repair_capability": "inspect_only_no_restart",
+    })
+
+    assert "Hermes dashboard (port 9119)" in response
+    assert "state=up" in response
+    assert "process_detected=True" in response
+    assert "evidence=port 9119 open" in response
+    assert "Hermes cron" in response
+    assert "state=paused" in response
+
+
+def test_hermes_dashboard_no_fabricated_stats():
+    """Hermes dashboard section must not contain fabricated PID, latency,
+    memory, database, recall rate, queue depth, or sync claims."""
+    response = format_runtime_truth_check({
+        "mode": "inspect_only",
+        "current_commit": {"hash": "abc1234", "message": "abc1234 test"},
+        "registry": {"registry_version": "v2", "loaded_at": "now", "last_error": None},
+        "openclaw_gate": {"state": "healthy", "allowed": True, "reason": "ok"},
+        "backend_port_8000": {"port": 8000, "port_open": True, "service_active": True, "local_root_status": 200},
+        "backend_port_8010": {"port": 8010, "port_open": False, "service_active": None, "local_root_status": None},
+        "frontend_port_3005": {"port": 3005, "port_open": True, "service_active": True, "local_root_status": 200},
+        "frontend_port_3010": {"port": 3010, "port_open": False, "service_active": None, "local_root_status": None},
+        "hermes_dashboard": {"state": "down", "port": 9119, "port_open": False, "process_detected": False, "evidence": "port 9119 closed"},
+        "hermes_cron": {"state": "paused", "jobs_count": 1, "lock_file_present": True},
+        "local_freshness": {"api_git": {}, "api_matches_current_commit": True},
+        "public_freshness": {"api_git": {}, "api_matches_current_commit": True},
+        "restart_required": False,
+        "stale_or_broken": [],
+        "repair_capability": "inspect_only_no_restart",
+    })
+
+    # Isolate Hermes dashboard line
+    hermes_line = ""
+    for line in response.splitlines():
+        if "Hermes dashboard" in line:
+            hermes_line = line
+            break
+
+    assert hermes_line, "Hermes dashboard line must exist in output"
+    # Must NOT contain fabricated fields in the Hermes section
+    fabricated = ["pid", "PID", "latency", "memory", "database", "recall rate", "queue depth", "sync stats"]
+    for field in fabricated:
+        assert field not in hermes_line, (
+            f"Hermes line must not contain fabricated field: '{field}'"
+        )
+
+
+def test_runtime_truth_run_includes_hermes_fields():
+    """Actual run_runtime_truth_check() result dict must include
+    hermes_dashboard and hermes_cron keys."""
+    result = run_runtime_truth_check(public=False)
+
+    assert "hermes_dashboard" in result
+    assert "hermes_cron" in result
+
+    hd = result["hermes_dashboard"]
+    assert "state" in hd
+    assert hd["state"] in ("up", "down", "unknown")
+    assert hd["port"] == 9119
+    assert "port_open" in hd
+    assert "process_detected" in hd
+    assert "evidence" in hd
+
+    hc = result["hermes_cron"]
+    assert "state" in hc
+    assert hc["state"] in ("running", "paused", "unknown")
+    assert "jobs_count" in hc
+    assert "lock_file_present" in hc

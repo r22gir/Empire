@@ -1,9 +1,11 @@
 """Inspect-only runtime truth checks for MAX live-state claims."""
 from __future__ import annotations
 
+import json
+import os
+import re
 import socket
 import subprocess
-import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -342,6 +344,76 @@ def _http_status(url: str, timeout: float = 4.0) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
+def _check_hermes_dashboard() -> dict[str, Any]:
+    """Inspect Hermes dashboard state read-only.
+
+    Checks port 9119 and process listing for the dashboard --tui and
+    tui_gateway processes.  Never kills, restarts, or starts anything.
+    """
+    port_open = _port_open("127.0.0.1", 9119)
+    proc_result = _run(["ps", "aux"], timeout=5)
+    hermes_proc = False
+    tui_gateway = False
+    if proc_result.get("ok") or proc_result.get("stdout"):
+        stdout = proc_result.get("stdout", "")
+        hermes_proc = "hermes dashboard --tui" in stdout
+        tui_gateway = "tui_gateway" in stdout
+
+    evidence_parts = []
+    if port_open:
+        evidence_parts.append("port 9119 open")
+    else:
+        evidence_parts.append("port 9119 closed")
+    if hermes_proc:
+        evidence_parts.append("dashboard process detected")
+        if tui_gateway:
+            evidence_parts.append("tui gateway active")
+
+    return {
+        "state": "up" if port_open else "down",
+        "port": 9119,
+        "port_open": port_open,
+        "process_detected": hermes_proc,
+        "tui_gateway_detected": tui_gateway,
+        "evidence": ", ".join(evidence_parts) if evidence_parts else "no evidence collected",
+    }
+
+
+def _check_hermes_cron() -> dict[str, Any]:
+    """Inspect Hermes cron state (read-only, never triggers tick/run).
+
+    Checks for the .tick.lock sentinel (present = paused) and reads the
+    jobs.json to count scheduled jobs.
+    """
+    cron_dir = "/home/rg/.hermes/cron"
+    lock_path = os.path.join(cron_dir, ".tick.lock")
+    jobs_path = os.path.join(cron_dir, "jobs.json")
+
+    lock_present = os.path.isfile(lock_path)
+    jobs_count = 0
+
+    if os.path.isfile(jobs_path):
+        try:
+            with open(jobs_path) as f:
+                data = json.load(f)
+                jobs_count = len(data.get("jobs", []))
+        except Exception:
+            pass
+
+    if lock_present:
+        state = "paused"
+    elif jobs_count > 0:
+        state = "running"
+    else:
+        state = "unknown"
+
+    return {
+        "state": state,
+        "jobs_count": jobs_count,
+        "lock_file_present": lock_present,
+    }
+
+
 def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     """Return current runtime status without changing services.
 
@@ -391,6 +463,10 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     public_hash = None
     if public_api_git and isinstance(public_api_git.get("data"), dict):
         public_hash = public_api_git["data"].get("last_commit_hash")
+
+    # Run Hermes inspection (read-only, no cron trigger)
+    hermes_dashboard = _check_hermes_dashboard()
+    hermes_cron = _check_hermes_cron()
 
     stale_or_broken: list[str] = []
     if not backend_service["active"] or not _port_open("127.0.0.1", 8000) or not local_backend_root["ok"]:
@@ -447,6 +523,9 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
             "port_open": _port_open("127.0.0.1", 3010),
             "local_root_status": local_v10_frontend_root.get("status_code"),
         },
+        # Hermes dashboard (read-only check, never triggers cron/restart)
+        "hermes_dashboard": hermes_dashboard,
+        "hermes_cron": hermes_cron,
         "local_freshness": {
             "api_git": local_api_git,
             "api_matches_current_commit": bool(local_hash and local_hash == commit["hash"]),
@@ -547,6 +626,8 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         f"- Local API commit: {local_hash} matches_current={local.get('api_matches_current_commit')}",
         f"- Public API commit: {public_hash} matches_current={public.get('api_matches_current_commit')}",
         f"- Public API root: {(public.get('api_root') or {}).get('status_code')} | Public Studio root: {(public.get('studio_root') or {}).get('status_code')}",
+        f"- Hermes dashboard (port 9119): state={result.get('hermes_dashboard', {}).get('state')} process_detected={result.get('hermes_dashboard', {}).get('process_detected')} evidence={result.get('hermes_dashboard', {}).get('evidence')}",
+        f"- Hermes cron: state={result.get('hermes_cron', {}).get('state')} jobs={result.get('hermes_cron', {}).get('jobs_count')}",
         f"- Restart required by this check: {result.get('restart_required')}",
     ]
     startup_hash = startup.get("running_commit_hash") if isinstance(startup, dict) else None
