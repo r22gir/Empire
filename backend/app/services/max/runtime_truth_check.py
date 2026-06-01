@@ -104,6 +104,15 @@ INTENT_SIGNALS = [
     "drain old queued",
     "drain queue",
     "drain old queue",
+    # Hermes / external Hermes routing signals
+    "external hermes",
+    "hermes telegram",
+    "hermes receiving",
+    "hermes bot",
+    "hermes channel",
+    "hermes status",
+    "hermes gateway",
+    "is hermes",
 ]
 
 # Services whose runtime health can be checked.
@@ -137,6 +146,7 @@ HEALTH_VERBS: frozenset[str] = frozenset({
     "online", "offline", "running", "healthy", "working",
     "down", "up", "reachable", "active", "alive",
     "available", "responsive", "live", "selected",
+    "receiving", "connected", "configured", "sending",
 })
 
 # Phrases that must route through the dedicated OpenClaw gate check

@@ -1065,6 +1065,27 @@ def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
     )
 
 
+# Analysis / priority / opinion markers — questions containing these should NOT
+# be intercepted by empire-module-knowledge (static doc can't answer "what are
+# the top priorities" or "how does this affect X").
+_ANALYSIS_PRIORITY_MARKERS = (
+    "top priority", "priorities", "how does this affect",
+    "how would this affect", "what should", "what would you",
+    "how should", "how would", "what are the most",
+    "what is the most", "what are the top", "what is the top",
+    "compare", "versus", "vs ", "which is better",
+    "recommend", "suggestion", "advice", "opinion",
+    "analyze", "analysis", "evaluate", "assessment",
+)
+
+
+def _is_analysis_or_priority_question(message: str | None) -> bool:
+    """Return True if the message asks for analysis, priorities, or opinions
+    that a static module doc cannot answer."""
+    text = (message or "").lower()
+    return any(marker in text for marker in _ANALYSIS_PRIORITY_MARKERS)
+
+
 def _is_current_events_request(message: str | None) -> bool:
     text = (message or "").lower()
     if not text.strip():
@@ -1678,9 +1699,13 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
         if should_run_runtime_truth_check(request.message):
             return None
 
-        module_response = _empire_module_response(request)
-        if module_response is not None:
-            return module_response
+        # Skip module knowledge for analysis/priority/opinion questions.
+        # Static module docs can't answer "what are the top priorities" or
+        # "how does this affect Workroom" — those need the AI model.
+        if not _is_analysis_or_priority_question(request.message):
+            module_response = _empire_module_response(request)
+            if module_response is not None:
+                return module_response
 
         if _is_current_events_request(request.message):
             return _live_lookup_router_response(request)
