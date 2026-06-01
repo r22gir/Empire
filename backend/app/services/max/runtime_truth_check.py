@@ -62,6 +62,23 @@ INTENT_SIGNALS = [
     "what's new max",
     "whats new max",
     "what is new max",
+    # Model selector / routing state signals
+    "selected provider",
+    "selected model",
+    "model selector",
+    "routing state",
+    "fallback enabled",
+    "provider selected",
+    "provider status",
+    "which provider",
+    "which model",
+    "what provider",
+    "what model",
+    "fallback to",
+    "can you fallback",
+    "is minimax selected",
+    "is mini max selected",
+    "provider policy",
 ]
 
 # Services whose runtime health can be checked.
@@ -94,7 +111,7 @@ HEALTH_TRIGGER_SERVICES: frozenset[str] = frozenset({
 HEALTH_VERBS: frozenset[str] = frozenset({
     "online", "offline", "running", "healthy", "working",
     "down", "up", "reachable", "active", "alive",
-    "available", "responsive", "live",
+    "available", "responsive", "live", "selected",
 })
 
 # Phrases that must route through the dedicated OpenClaw gate check
@@ -414,6 +431,65 @@ def _check_hermes_cron() -> dict[str, Any]:
     }
 
 
+def _fetch_routing_state() -> dict[str, Any]:
+    """Fetch model-selector/provider routing state from the live backend.
+
+    Reads from the local /api/v1/max/routing-state HTTP endpoint so the
+    result reflects the live in-memory state — never fabricated.  Falls
+    back to /api/v1/max/status if the dedicated endpoint is unavailable.
+
+    Returns:
+        dict with selected_provider, selected_model, fallback_enabled,
+        ai_calls_disabled, selected_provider_label, minimax_selected,
+        fallback_eligible_providers (list), and a provider_registry
+        summary.
+    """
+    result = {
+        "selected_provider": None,
+        "selected_model": None,
+        "fallback_enabled": None,
+        "ai_calls_disabled": None,
+        "selected_provider_label": None,
+        "minimax_selected": None,
+        "fallback_eligible_providers": [],
+        "source": None,
+    }
+
+    # Try dedicated routing-state endpoint first
+    routing = _http_json("http://127.0.0.1:8000/api/v1/max/routing-state")
+    if routing.get("ok") and isinstance(routing.get("data"), dict):
+        data = routing["data"]
+        result["selected_provider"] = data.get("selected_provider")
+        result["selected_model"] = data.get("selected_model")
+        result["fallback_enabled"] = data.get("fallback_enabled")
+        result["ai_calls_disabled"] = data.get("ai_calls_disabled")
+        result["selected_provider_label"] = data.get("selected_provider_label")
+        result["source"] = "routing-state"
+        # Build field-level truth
+        result["minimax_selected"] = data.get("selected_provider") == "minimax"
+        # Summarise fallback-eligible providers from the registry
+        registry = data.get("provider_registry") or []
+        result["fallback_eligible_providers"] = [
+            p["id"] for p in registry if p.get("fallback_eligible") and p.get("available")
+        ]
+        return result
+
+    # Fall back to status endpoint
+    status_resp = _http_json("http://127.0.0.1:8000/api/v1/max/status")
+    if status_resp.get("ok") and isinstance(status_resp.get("data"), dict):
+        data = status_resp["data"]
+        pp = data.get("provider_policy") or {}
+        result["selected_provider"] = pp.get("selected_provider")
+        result["selected_model"] = pp.get("selected_model")
+        result["fallback_enabled"] = pp.get("fallback_enabled")
+        result["ai_calls_disabled"] = pp.get("ai_calls_disabled")
+        result["minimax_selected"] = pp.get("selected_provider") == "minimax"
+        result["source"] = "status"
+        return result
+
+    return result
+
+
 def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     """Return current runtime status without changing services.
 
@@ -467,6 +543,9 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
     # Run Hermes inspection (read-only, no cron trigger)
     hermes_dashboard = _check_hermes_dashboard()
     hermes_cron = _check_hermes_cron()
+
+    # Fetch routing state / model selector truth (no AI provider calls)
+    routing_state = _fetch_routing_state()
 
     stale_or_broken: list[str] = []
     if not backend_service["active"] or not _port_open("127.0.0.1", 8000) or not local_backend_root["ok"]:
@@ -526,6 +605,8 @@ def run_runtime_truth_check(public: bool = True) -> dict[str, Any]:
         # Hermes dashboard (read-only check, never triggers cron/restart)
         "hermes_dashboard": hermes_dashboard,
         "hermes_cron": hermes_cron,
+        # Model selector / routing state (HTTP read from live backend)
+        "routing_state": routing_state,
         "local_freshness": {
             "api_git": local_api_git,
             "api_matches_current_commit": bool(local_hash and local_hash == commit["hash"]),
@@ -628,6 +709,12 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         f"- Public API root: {(public.get('api_root') or {}).get('status_code')} | Public Studio root: {(public.get('studio_root') or {}).get('status_code')}",
         f"- Hermes dashboard (port 9119): state={result.get('hermes_dashboard', {}).get('state')} process_detected={result.get('hermes_dashboard', {}).get('process_detected')} evidence={result.get('hermes_dashboard', {}).get('evidence')}",
         f"- Hermes cron: state={result.get('hermes_cron', {}).get('state')} jobs={result.get('hermes_cron', {}).get('jobs_count')}",
+        f"- Selected provider: {result.get('routing_state', {}).get('selected_provider')} ({result.get('routing_state', {}).get('selected_provider_label') or result.get('routing_state', {}).get('selected_provider')})",
+        f"- Selected model: {result.get('routing_state', {}).get('selected_model')}",
+        f"- MiniMax selected: {result.get('routing_state', {}).get('minimax_selected')}",
+        f"- Fallback enabled: {result.get('routing_state', {}).get('fallback_enabled')}",
+        f"- AI calls disabled: {result.get('routing_state', {}).get('ai_calls_disabled')}",
+        f"- Automatic fallback allowed: {bool(result.get('routing_state', {}).get('fallback_enabled')) and bool(result.get('routing_state', {}).get('fallback_eligible_providers'))}",
         f"- Restart required by this check: {result.get('restart_required')}",
     ]
     startup_hash = startup.get("running_commit_hash") if isinstance(startup, dict) else None
