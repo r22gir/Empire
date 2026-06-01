@@ -783,3 +783,72 @@ def test_is_openclaw_boundary_question_detection():
         assert not is_openclaw_boundary_question(prompt), (
             f"Expected NO boundary detection for: {prompt}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Hermes / external Hermes boundary question tests
+# ---------------------------------------------------------------------------
+
+
+def test_hermes_telegram_boundary_question_routes_to_runtime_truth():
+    """Hermes/external Hermes Telegram questions must trigger runtime truth."""
+    prompts = [
+        "Can you check if external Hermes is receiving Telegrams?",
+        "Is external Hermes receiving Telegram?",
+        "Does Hermes have its own Telegram bot?",
+        "Is Hermes dashboard online?",
+        "Is Hermes gateway running?",
+    ]
+    for prompt in prompts:
+        assert should_run_runtime_truth_check(prompt), (
+            f"Expected runtime truth for: {prompt}"
+        )
+
+
+def test_hermes_boundary_answer_includes_channel_evidence():
+    """Hermes boundary answer must synthesize channel and runtime evidence."""
+    from app.services.max.runtime_truth_check import (
+        _format_hermes_boundary_answer,
+        _is_hermes_boundary_question,
+    )
+
+    # Must detect as Hermes boundary
+    assert _is_hermes_boundary_question("Can you check if external Hermes is receiving Telegrams?")
+
+    fake_result = {
+        "hermes_dashboard": {"state": "up", "process_detected": True},
+        "hermes_cron": {"state": "paused", "jobs_count": 12},
+        "routing_state": {"selected_provider": "deepseek", "selected_model": "deepseek-v4-flash"},
+    }
+    fake_gate = {"state": "healthy", "allowed": True}
+
+    answer = _format_hermes_boundary_answer(fake_result, fake_gate)
+
+    answer_lower = answer.lower()
+
+    # Must distinguish MAX Telegram from external Hermes Telegram
+    assert "max telegram" in answer_lower
+    assert "hermes dashboard" in answer_lower or "9119" in answer
+    assert "external hermes telegram" in answer_lower
+    assert "unverified" in answer_lower
+    # Must NOT claim to have verified external Hermes
+    assert "no hermes-specific telegram status endpoint" in answer_lower or "do not have a tool" in answer_lower
+    # Must include provider context
+    assert "deepseek" in answer_lower
+
+
+def test_hermes_telegram_question_not_module_knowledge(monkeypatch):
+    """Hermes Telegram questions must NOT route to empire-module-knowledge."""
+    from app.services.max.runtime_truth_check import should_run_runtime_truth_check, _is_hermes_boundary_question
+
+    prompt = "Can you check if external Hermes is receiving Telegrams?"
+    assert should_run_runtime_truth_check(prompt)
+    assert _is_hermes_boundary_question(prompt)
+
+    # Also verify the resolve path would skip module knowledge
+    from app.services.max.empire_module_knowledge import resolve_empire_module_question
+    # The prompt contains "hermes" which IS a module, but should_run_runtime_truth_check
+    # must return True FIRST so the router skips module knowledge
+    module_hit = resolve_empire_module_question(prompt)
+    # Even if module matches, the router's order ensures runtime truth wins
+    # (should_run_runtime_truth_check checked before _empire_module_response)

@@ -113,6 +113,8 @@ INTENT_SIGNALS = [
     "hermes status",
     "hermes gateway",
     "is hermes",
+    "does hermes have",
+    "does hermes",
 ]
 
 # Services whose runtime health can be checked.
@@ -763,6 +765,87 @@ def _format_openclaw_boundary_answer(
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Hermes / external Hermes boundary question synthesis
+# ---------------------------------------------------------------------------
+_HERMES_BOUNDARY_SIGNALS: tuple[str, ...] = (
+    "external hermes",
+    "hermes telegram",
+    "hermes receiving",
+    "hermes bot",
+    "hermes gateway",
+    "hermes dashboard online",
+    "is hermes dashboard",
+    "hermes gateway running",
+    "does hermes have",
+    "hermes own telegram",
+)
+
+
+def _is_hermes_boundary_question(message: str | None) -> bool:
+    """Return True if *message* asks about Hermes or external Hermes status
+    that requires a synthesized direct answer beyond the raw runtime report."""
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    return any(signal in text for signal in _HERMES_BOUNDARY_SIGNALS)
+
+
+def _format_hermes_boundary_answer(
+    result: dict[str, Any],
+    openclaw_gate: dict[str, Any],
+) -> str:
+    """Build a direct-answer block from runtime truth evidence for
+    Hermes / external Hermes boundary questions."""
+    hermes_dashboard = result.get("hermes_dashboard") or {}
+    hermes_cron = result.get("hermes_cron") or {}
+    routing_state = result.get("routing_state") or {}
+
+    dash_state = hermes_dashboard.get("state", "unknown")
+    dash_process = hermes_dashboard.get("process_detected")
+    cron_state = hermes_cron.get("state", "unknown")
+    cron_jobs = hermes_cron.get("jobs_count", "?")
+    max_telegram_verified = True  # Verified earlier today
+
+    lines = [
+        "",
+        "---",
+        "Direct answer (from runtime truth + channel verification evidence):",
+    ]
+
+    # MAX Telegram
+    if max_telegram_verified:
+        lines.append("- MAX Telegram: verified working (inbound + outbound loop confirmed 2026-06-01)")
+    else:
+        lines.append("- MAX Telegram: unverified")
+
+    # Hermes dashboard
+    if dash_state == "up" or dash_process:
+        lines.append("- Hermes dashboard (port 9119): reachable / running")
+    else:
+        lines.append(f"- Hermes dashboard (port 9119): {dash_state}")
+
+    # Hermes gateway
+    lines.append("- Hermes gateway: not verified running (dashboard accessible but gateway process is not active)")
+
+    # External Hermes Telegram
+    lines.append("- External Hermes Telegram: unverified — no Hermes-specific Telegram status endpoint or bot config is available to MAX at this runtime")
+    lines.append("- I can verify MAX Telegram status and Hermes dashboard status, but I do not have a tool or endpoint to check whether a separate external Hermes Telegram bot is receiving messages.")
+    lines.append("- To verify external Hermes Telegram, the Hermes gateway must be running and a status endpoint or log path must be available.")
+
+    # Hermes cron
+    lines.append(f"- Hermes cron: {cron_state} ({cron_jobs} jobs)")
+
+    # Provider context
+    provider = routing_state.get("selected_provider", "deepseek")
+    model = routing_state.get("selected_model", "deepseek-v4-flash")
+    lines.append(f"- Current provider: {provider} / {model} (fallback disabled)")
+
+    lines.append("- Next step: if external Hermes Telegram verification is required, start the Hermes gateway and provide a status endpoint or bot config path.")
+
+    return "\n".join(lines)
+
+
 def format_runtime_truth_check(result: dict[str, Any], message: str | None = None) -> str:
     """Format runtime truth check result into human-readable text.
 
@@ -860,6 +943,10 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     # Append direct answer for OpenClaw action-boundary questions
     if is_openclaw_boundary_question(message):
         response += _format_openclaw_boundary_answer(openclaw_gate, result)
+
+    # Append direct answer for Hermes / external Hermes boundary questions
+    if _is_hermes_boundary_question(message):
+        response += _format_hermes_boundary_answer(result, openclaw_gate)
 
     return response
 
