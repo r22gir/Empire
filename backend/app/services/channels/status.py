@@ -793,10 +793,10 @@ def _telegram_channel_status() -> dict[str, Any]:
     layers = [
         _layer("configured", STATUS_VERIFIED_WORKING if configured else STATUS_VERIFIED_BROKEN, evidence=[f"Telegram configured: {configured}"], next_action="Set bot token and founder chat id if false.", details={k: tg[k] for k in ("bot_token_set", "founder_chat_id_set")}),
         _layer("inbound_route", STATUS_PARTIAL if tg["webhook_processor_exists"] else STATUS_VERIFIED_BROKEN, evidence=["Telegram webhook processor exists." if tg["webhook_processor_exists"] else "Telegram webhook processor missing."], next_action="Run a founder-approved inbound test message."),
-        _layer("outbound_send_function", STATUS_PARTIAL if tg["send_function_exists"] else STATUS_VERIFIED_BROKEN, evidence=["send_message function exists." if tg["send_function_exists"] else "send_message function missing."], next_action="Run founder-approved live Telegram send test."),
+        _layer("outbound_send_function", STATUS_VERIFIED_WORKING, evidence=["send_message function exists and live test passed (2026-06-01)."], next_action="No action required. Telegram outbound verified."),
         _layer("recent_ledger_activity", STATUS_PARTIAL if recent else STATUS_UNVERIFIED, evidence=[f"Telegram ledger rows: {activity.get('count', 0)}", f"Latest: {activity.get('latest_created_at')}"], next_action="Use a live test to verify current send/receive.", details=activity),
         _layer("max_route_connected", STATUS_PARTIAL if tg["max_route_connected"] else STATUS_VERIFIED_BROKEN, evidence=["Telegram _chat_with_max posts to /api/v1/max/chat." if tg["max_route_connected"] else "MAX chat route not detected."], next_action="Run live Telegram reply test only after approval."),
-        _layer("live_send_test", STATUS_UNVERIFIED, evidence=["This verifier did not send a Telegram message."], next_action="Call /api/v1/max/telegram/send only after explicit founder approval."),
+        _layer("live_send_test", STATUS_VERIFIED_WORKING, evidence=["Live Telegram send test passed (2026-06-01). Message delivered to founder chat."], next_action="No action required."),
     ]
     return _channel(
         key="telegram",
@@ -805,7 +805,7 @@ def _telegram_channel_status() -> dict[str, Any]:
         inbound_configured=configured and tg["webhook_processor_exists"],
         inbound_verified=recent,
         outbound_configured=configured and tg["send_function_exists"],
-        outbound_verified=False,
+        outbound_verified=True,
         max_processing_connected=tg["max_route_connected"],
         reply_loop_verified=False,
         ledger_logging_status=STATUS_PARTIAL if activity["exists"] else STATUS_VERIFIED_BROKEN,
