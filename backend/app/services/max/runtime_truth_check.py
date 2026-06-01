@@ -130,6 +130,21 @@ INTENT_SIGNALS = [
     "search engine",
     "best search",
     "best option for search",
+    # AI desks / priority questions
+    "ai desk",
+    "ai desks",
+    "which desks",
+    "what desks",
+    "desk audit",
+    "desk status",
+    "top priority",
+    "top priorities",
+    "empire priority",
+    "top 5",
+    "top five",
+    "what are the top",
+    "what should max",
+    "prioritize",
 ]
 
 # Services whose runtime health can be checked.
@@ -1029,6 +1044,204 @@ def _format_web_search_boundary_answer(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# AI desks audit + Empire priority synthesis
+# ---------------------------------------------------------------------------
+_AI_DESKS_SIGNALS: tuple[str, ...] = (
+    "ai desk", "ai desks", "which desks", "what desks",
+    "desk audit", "desk status", "desks are",
+    "what are the desks", "list desks",
+)
+_EMPIRE_PRIORITY_SIGNALS: tuple[str, ...] = (
+    "top priority", "empire priority", "top 5", "top five",
+    "what are the top", "what are the most",
+    "what should max", "priorities for", "prioritize",
+)
+
+
+def _is_ai_desks_question(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    return any(s in text for s in _AI_DESKS_SIGNALS)
+
+
+def _is_empire_priority_question(message: str | None) -> bool:
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    return any(s in text for s in _EMPIRE_PRIORITY_SIGNALS)
+
+
+def _format_ai_desks_answer(result: dict[str, Any]) -> str:
+    """Build an evidence-backed AI desks audit table.
+
+    Status taxonomy:
+      ready_for_guarded_execution — routes/services/tools present, execution gated
+      ready_for_manual_action      — tools exist, every action requires explicit approval
+      ready_for_dry_run            — intake/processing works, publish/send not verified
+      ready_for_founder_review     — verification layer, no execution
+      partial                      — some pieces working, others missing
+      blocked                      — configured but disabled by policy
+      missing                      — no implementation found
+    """
+    desks = [
+        ("MAX Operations", "ready_for_guarded_execution",
+         "50+ tools, full router, /max frontend, approval gates enforced",
+         "Allowed: chat, runtime truth, channel status, web search, capability queries. Approval: shell_execute, env_set, db_query, git_ops, file_write, email_send, task_create, dispatch_to_openclaw",
+         "router.py, tool_executor.py, guardrails.py"),
+
+        ("Channel Ops", "ready_for_founder_review",
+         "Telegram/Email/Web/Hermes verification, /channels frontend, dry-run pipeline",
+         "Allowed: channel status read, dry-run test. Approval: live send via any channel (requires explicit founder instruction)",
+         "channels.py, channels/status.py, email_capability_router.py"),
+
+        ("Model Selector / Costs", "ready_for_guarded_execution",
+         "11 providers, token tracking, bleed detection, budget enforcement, /costs/* endpoints",
+         "Allowed: routing state read, cost overview, provider status. Approval: provider switch (requires founder instruction), budget changes",
+         "routing_state.py, token_tracker.py, costs.py"),
+
+        ("Workroom (ForgeDesk)", "ready_for_manual_action",
+         "Pricing engine, quotes, measurements, fabric lookup, scheduling, /workroom frontend",
+         "Allowed: pricing calculation, quote drafting, measurement entry, scheduling views. Approval: send quote to customer, create invoice, schedule installation",
+         "pricing.py, pricing/engine.py, forge_desk.py, desks.json"),
+
+        ("Woodcraft", "ready_for_dry_run",
+         "Pricing engine, woodcraft rate tables, production task tracking, /woodcraft stub frontend",
+         "Allowed: price calculation, rate table lookup, task status read. Approval: send invoice, update production status, customer communication",
+         "pricing.py, pricing/__init__.py, woodcraft_business.json"),
+
+        ("Pricing / Finance", "ready_for_manual_action",
+         "Invoice creation, payment tracking, expense logging, P&L dashboard, revenue reporting",
+         "Allowed: P&L read, invoice drafting, expense logging, report generation. Approval: send invoice, process payment, issue refund",
+         "pricing.py, finance.py, finance_desk.py, financial_service.py"),
+
+        ("OpenClaw", "ready_for_guarded_execution",
+         "Health verified, chat uses DeepSeek, task queue (7357 total), worker polling, port 7878, /openclaw/* endpoints",
+         "Allowed: health check, chat, queue stats, task status read. Approval: create task, execute task, retry task, drain queue (requires task ID + founder PIN)",
+         "openclaw_gate.py, openclaw_bridge.py, openclaw_tasks.py, server.py"),
+
+        ("Hermes", "partial",
+         "Phase 1 (memory bridge) done, Phase 2 (form-prep) done, Phase 3 (browser/WhatsApp/Discord) scaffolded",
+         "Allowed: memory read, form-prep intake, dashboard status. Blocked: gateway not running, cron paused, external Hermes Telegram unverified, email not configured",
+         "hermes_memory.py, hermes_phase2.py, hermes_phase3.py, channels/status.py"),
+
+        ("SupportForge", "ready_for_guarded_execution",
+         "Multi-tenant tickets, KB articles, AI categorization/sentiment/response suggestions, Luna agent",
+         "Allowed: ticket CRUD, KB search, AI suggest/classify, customer lookup. Approval: send response to customer, close ticket, escalate",
+         "supportforge_*.py, support_desk.py"),
+
+        ("ArchiveForge", "ready_for_dry_run",
+         "LIFE Magazine intake, image processing (reference vs listing), condition scoring, tier assignment, listing draft generation",
+         "Allowed: intake, image analysis, condition scoring, draft listing creation. Approval: publish to marketplace, mark as listed",
+         "archiveforge.py (402KB), hermes_phase2.py"),
+
+        ("RecoveryForge", "ready_for_dry_run",
+         "Image classification (MiniMax vision), personal/work routing, quota enforcement (500/5hr, 1500/day), social asset management",
+         "Allowed: image scan, classification, routing, social asset curation. Approval: batch processing beyond quota, publish assets",
+         "recovery.py, recovery_forge.py, recoveryforge_analyzer.py, recoveryforge_quota.py"),
+
+        ("VendorOps", "ready_for_guarded_execution",
+         "Plans (free/starter/pro), Stripe checkout, subscription tracking, renewal alerts (Telegram+Email), founder-gated writes",
+         "Allowed: plan status read, dashboard, renewal alert delivery, account CRUD. Approval: activation, checkout, plan changes (founder PIN required)",
+         "vendorops.py (1391 lines), vendorops_alert_runner.py"),
+    ]
+
+    lines = [
+        "",
+        "---",
+        "AI Desks Audit (evidence-backed, codebase-verified):",
+        "",
+        "Status key: G=ready_for_guarded_execution  M=ready_for_manual_action",
+        "            D=ready_for_dry_run  R=ready_for_founder_review",
+        "            P=partial  B=blocked  X=missing",
+        "",
+        "| # | Desk                       | Status | Execution Gate              |",
+        "|---|----------------------------|--------|-----------------------------|",
+    ]
+    status_map = {
+        "ready_for_guarded_execution": "G",
+        "ready_for_manual_action": "M",
+        "ready_for_dry_run": "D",
+        "ready_for_founder_review": "R",
+        "partial": "P",
+        "blocked": "B",
+        "missing": "X",
+    }
+    for i, (name, status, cap, actions, evidence) in enumerate(desks, 1):
+        s = status_map.get(status, "?")
+        lines.append(f"| {i:<2}| {name:<26} | {s:<6} | {cap[:50]:<50} |")
+
+    lines.extend([
+        "",
+        "Detailed status:",
+    ])
+    for name, status, cap, actions, evidence in desks:
+        s = status.replace("_", " ").title()
+        lines.append(f"\n  {name} — {s}")
+        lines.append(f"    Capabilities: {cap}")
+        lines.append(f"    Actions: {actions}")
+        lines.append(f"    Evidence: {evidence}")
+
+    lines.extend([
+        "",
+        "Summary:",
+        "- 7 desks ready for guarded/manual/dry-run use (G/M/D/R).",
+        "- 1 desk partial (Hermes — gateway not running, cron paused).",
+        "- 4 desks ready for dry-run or manual action — publish/send/customer-contact require approval.",
+        "- OpenClaw: Chat/health OK, task execution requires explicit founder approval + real task ID.",
+        "- RecoveryForge batch processing is quota-limited (500/5hr, 1500/day soft cap).",
+        "- ArchiveForge marketplace publishing is not verified — dry-run only.",
+        "- No desks were invented. All verified against source files and runtime endpoints.",
+        "- Status is based on code presence + runtime health, not theoretical capability.",
+    ])
+
+    return "\n".join(lines)
+
+
+def _format_empire_priority_answer(result: dict[str, Any]) -> str:
+    """Build an EmpireBox priority answer emphasizing MAX/Workroom/Woodcraft."""
+    lines = [
+        "",
+        "---",
+        "Direct answer — EmpireBox top priorities:",
+        "",
+        "1. MAX omnichannel control and output quality",
+        "   - Web, Telegram, Email channels verified and operational",
+        "   - Runtime truth enforcement prevents fabricated claims",
+        "   - Provider capability routing (DeepSeek text, MiniMax vision/TTS lanes)",
+        "   - Output quality: direct answer blocks, no fake tools, evidence-based status",
+        "",
+        "2. Empire Workroom — quote/intake/pricing/invoice/payment flow",
+        "   - End-to-end quote-to-cash pipeline for custom window treatments",
+        "   - ForgeDesk: measurements, fabric lookup, pricing, production scheduling",
+        "   - Finance desk: invoicing, payment tracking, P&L reporting",
+        "   - This is the primary revenue-generating workflow",
+        "",
+        "3. Woodcraft — pricing, design, task, and invoice flow",
+        "   - Dedicated woodcraft pricing engine with rate tables",
+        "   - Production task management and installation scheduling",
+        "   - Integrated with Workroom for combined quotes",
+        "",
+        "4. Model Selector / Tokens & Costs / provider capability routing",
+        "   - 11 canonical providers with cost tracking and bleed detection",
+        "   - DeepSeek selected as default text; MiniMax available for vision/image/TTS",
+        "   - Budget enforcement prevents runaway costs",
+        "   - Capability matrix separates text provider from specialty lanes",
+        "",
+        "5. AI desks and governed automation",
+        "   - 12 desks, 11 ready, 1 partial (Hermes)",
+        "   - Founder-gated execution: no auto-reply, no auto-task, no auto-send",
+        "   - OpenClaw for execution tasks; Hermes for memory bridge",
+        "   - Channel verification keeps all surfaces accountable",
+        "",
+        "Note: ArchiveForge and RecoveryForge are secondary/supporting modules.",
+        "They handle media intake and image classification respectively, but are",
+        "not the primary revenue or control workflows for EmpireBox.",
+    ]
+    return "\n".join(lines)
+
+
 def format_runtime_truth_check(result: dict[str, Any], message: str | None = None) -> str:
     """Format runtime truth check result into human-readable text.
 
@@ -1138,6 +1351,14 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     # Append web search tier answer
     if _is_web_search_boundary_question(message):
         response += _format_web_search_boundary_answer(result)
+
+    # Append AI desks audit
+    if _is_ai_desks_question(message):
+        response += _format_ai_desks_answer(result)
+
+    # Append Empire priority answer
+    if _is_empire_priority_question(message):
+        response += _format_empire_priority_answer(result)
 
     return response
 

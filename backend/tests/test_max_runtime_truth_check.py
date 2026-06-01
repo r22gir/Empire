@@ -983,3 +983,86 @@ def test_web_search_boundary_answer_has_source_policy():
     assert "configured_unverified" in answer_l
     # Must not claim Brave is the best
     assert "adequate" in answer_l or "better" in answer_l or "deep research" in answer_l
+
+
+# ---------------------------------------------------------------------------
+# AI desks + Empire priority tests
+# ---------------------------------------------------------------------------
+
+
+def test_ai_desks_question_routes_to_runtime_truth():
+    """AI desks questions must route to runtime truth."""
+    for prompt in [
+        "Which AI desks are ready, partial, blocked, or missing?",
+        "What desks are available?",
+        "List the AI desks and their status.",
+    ]:
+        assert should_run_runtime_truth_check(prompt), f"Failed: {prompt}"
+
+
+def test_ai_desks_audit_has_all_required():
+    """AI desks audit must include all 12 required desks."""
+    from app.services.max.runtime_truth_check import _format_ai_desks_answer
+
+    answer = _format_ai_desks_answer({})
+    answer_l = answer.lower()
+
+    required = [
+        "max operations", "channel ops", "model selector",
+        "workroom", "woodcraft", "pricing",
+        "openclaw", "hermes", "supportforge",
+        "archiveforge", "recoveryforge", "vendorops",
+    ]
+    for desk in required:
+        assert desk in answer_l, f"Missing desk: {desk}"
+
+    # Hermes must be partial
+    assert "partial" in answer_l
+    # Must use evidence-backed status labels
+    assert "ready_for_guarded_execution" in answer_l or "guarded" in answer_l
+    assert "ready_for_dry_run" in answer_l or "dry" in answer_l
+    assert "ready_for_manual_action" in answer_l or "manual" in answer_l
+
+
+def test_ai_desks_no_invented_desks():
+    """AI desks must not invent desks that don't exist."""
+    from app.services.max.runtime_truth_check import _format_ai_desks_answer
+
+    answer = _format_ai_desks_answer({})
+    answer_l = answer.lower()
+
+    # These should NOT appear as desk names
+    assert "phone desk" not in answer_l
+    assert "sms desk" not in answer_l
+    assert "social media desk" not in answer_l
+    assert "marketing desk" not in answer_l
+    assert "legal desk" not in answer_l
+
+
+def test_empire_priority_routes_to_runtime_truth():
+    """Empire priority questions must route to runtime truth."""
+    for prompt in [
+        "What are the top 5 EmpireBox priorities for MAX, Workroom, and Woodcraft?",
+        "What are the top priorities right now?",
+        "What should MAX prioritize?",
+    ]:
+        assert should_run_runtime_truth_check(prompt), f"Failed: {prompt}"
+
+
+def test_empire_priority_emphasizes_max_workroom_woodcraft():
+    """Empire priority must rank MAX/Workroom/Woodcraft first."""
+    from app.services.max.runtime_truth_check import _format_empire_priority_answer
+
+    answer = _format_empire_priority_answer({})
+    answer_l = answer.lower()
+
+    # These must appear early and prominently
+    assert "max" in answer_l
+    assert "workroom" in answer_l
+    assert "woodcraft" in answer_l
+
+    # ArchiveForge/RecoveryForge must appear only as secondary
+    assert "secondary" in answer_l or "supporting" in answer_l
+
+    # Must have 5 numbered priorities
+    assert "1." in answer and "2." in answer and "3." in answer and "4." in answer and "5." in answer
