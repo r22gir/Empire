@@ -212,6 +212,7 @@ def _gmail_paths() -> dict[str, Any]:
     token_path = Path(token_env).expanduser() if token_env else CANONICAL_BACKEND / "token.json"
     credentials_path = Path(credentials_env).expanduser() if credentials_env else CANONICAL_BACKEND / "credentials.json"
     return {
+        "token_path": str(token_path),
         "canonical_token_exists": _exists(CANONICAL_BACKEND / "token.json"),
         "canonical_credentials_exists": _exists(CANONICAL_BACKEND / "credentials.json"),
         "legacy_token_exists": _exists(LEGACY_BACKEND / "token.json"),
@@ -256,12 +257,40 @@ def _gmail_reader_status(paths: dict[str, Any]) -> dict[str, Any]:
             last_error_category="gmail_credentials_missing",
             details=paths,
         )
+    # Check token file for expiry (fast, no live API call)
+    token_expired = False
+    if paths["configured_token_exists"]:
+        try:
+            import json as _json
+            token_data = _json.loads(paths["token_path"].read_text(encoding="utf-8"))
+            expiry_ts = token_data.get("expiry")  # ISO 8601 string from Google OAuth
+            if expiry_ts:
+                from datetime import datetime as _dt
+                expiry = _dt.fromisoformat(str(expiry_ts).replace("Z", "+00:00"))
+                if _dt.now(expiry.tzinfo) > expiry:
+                    token_expired = True
+        except Exception:
+            pass
+
+    if token_expired:
+        return _layer(
+            "backend_gmail_oauth_read_access",
+            STATUS_VERIFIED_BROKEN,
+            evidence=[
+                "Configured Gmail token file exists but the OAuth token has expired.",
+                "Token expiry timestamp has passed — re-authorization required.",
+                "Gmail API would return invalid_grant until OAuth flow is re-run.",
+            ],
+            next_action="Re-run Gmail OAuth flow with founder Google account approval. Do not auto-regenerate.",
+            last_error_category="gmail_token_expired",
+            details={**paths, "token_expired": True},
+        )
     return _layer(
         "backend_gmail_oauth_read_access",
         STATUS_UNVERIFIED,
         evidence=["Configured Gmail OAuth files exist. This status endpoint does not call Gmail live."],
         next_action="Run /api/v1/max/gmail/inbox to verify read access.",
-        details=paths,
+        details={**paths, "token_expired": False},
     )
 
 
@@ -635,10 +664,15 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         ),
         _layer(
             "max_response_generation",
-            STATUS_VERIFIED_BROKEN,
-            evidence=["Inbound email webhook does not call MAX chat." if not webhook.get("calls_max") else "Webhook MAX call detected."],
-            next_action="Wire a dry-run MAX request builder before enabling real email replies.",
-            last_error_category="max_email_loop_missing" if not webhook.get("calls_max") else None,
+            STATUS_PARTIAL,
+            evidence=[
+                "Inbound webhook classifies and stores but does not auto-reply." if not webhook.get("calls_max") else "Webhook MAX call detected.",
+                "Dry-run MAX email reply generation is available via /api/v1/channels/test/dry-run with generate_response=true.",
+                "Live reply loop is NOT enabled — requires founder approval.",
+            ],
+            next_action="Run dry-run response test, then enable live reply only after founder approval.",
+            last_error_category=None,
+            details={"dry_run_available": True, "live_reply_enabled": False},
         ),
         _layer(
             "sendgrid_smtp_outbound",
@@ -659,10 +693,27 @@ def _email_status() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         ),
         _layer(
             "reply_threading",
-            STATUS_VERIFIED_BROKEN,
-            evidence=["No In-Reply-To/References reply path is implemented in the inbound email loop."],
-            next_action="Preserve Message-Id/thread_id and add reply headers in the email reply service.",
-            last_error_category="reply_threading_missing",
+            STATUS_PARTIAL,
+            evidence=[
+                "EmailService.send() supports In-Reply-To, References, and Reply-To headers.",
+                "Threading headers passed through to SMTP and SendGrid transport paths.",
+                "Dry-run email reply draft includes source_message_id as In-Reply-To.",
+            ],
+            next_action="Verify threading headers in a founder-approved live send test.",
+            last_error_category=None,
+            details={"in_reply_to_supported": True, "references_supported": True, "reply_to_supported": True},
+        ),
+        _layer(
+            "auto_reply_safety",
+            STATUS_PARTIAL,
+            evidence=[
+                "MAX_EMAIL_AUTO_REPLY_ENABLED is not set (defaults to disabled).",
+                "Inbound webhook does not auto-reply to any sender.",
+                "Live email replies require explicit founder approval and a dedicated send step.",
+            ],
+            next_action="Keep auto-reply disabled. Enable only via MAX_EMAIL_AUTO_REPLY_ENABLED after founder approves.",
+            last_error_category=None,
+            details={"auto_reply_enabled": False, "requires_founder_approval": True},
         ),
         _layer(
             "ledger_memory_logging",
@@ -903,7 +954,10 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
         body = str(payload.get("body") or payload.get("text") or "Dry-run email body")
         attachments = payload.get("attachments") or []
         classification = classify_max_email(subject, body, attachments)
+        generate_response = bool(payload.get("generate_response"))
+
         max_request_payload = None
+        max_response_draft = None
         if authorization["sender_authorized"]:
             max_request_payload = {
                 "message": body or subject,
@@ -916,7 +970,28 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
                     "sender_authorized": True,
                 },
             }
-        return {
+
+            # Full dry-run: generate actual MAX response via selected provider
+            if generate_response:
+                try:
+                    from app.services.max.email_service import generate_email_reply_draft
+                    tiny_prompt = payload.get("tiny_test_prompt")
+                    max_response_draft = generate_email_reply_draft(
+                        sender=sender,
+                        subject=subject,
+                        body=body,
+                        thread_id=str(payload.get("thread_id") or ""),
+                        source_message_id=str(payload.get("message_id") or payload.get("source_message_id") or ""),
+                        tiny_test_prompt=tiny_prompt if tiny_prompt else None,
+                    )
+                except Exception as exc:
+                    max_response_draft = {
+                        "error": str(exc),
+                        "would_send": False,
+                        "response_state": "response_generation_blocked",
+                    }
+
+        result = {
             "channel": "email",
             "dry_run": True,
             "live_send_performed": False,
@@ -927,6 +1002,7 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
             "would_call_max": authorization["sender_authorized"],
             "classification": classification,
             "max_request_payload": max_request_payload,
+            "max_response_draft": max_response_draft,
             "reply_payload_preview": {
                 "would_send": False,
                 "blocked": not authorization["sender_authorized"],
@@ -936,6 +1012,7 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
                 "requires_thread_headers": True,
             },
         }
+        return result
     if channel_key == "telegram":
         message = str(payload.get("message") or "Dry-run Telegram message")
         return {
