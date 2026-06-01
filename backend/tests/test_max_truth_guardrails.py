@@ -416,3 +416,145 @@ def test_email_dry_run_blocks_unsupported_provider(monkeypatch):
         assert draft["would_send"] is False
     finally:
         rs.load_routing_state = orig
+
+
+# ---------------------------------------------------------------------------
+# Email capability router tests
+# ---------------------------------------------------------------------------
+
+
+def test_capability_answer_only_for_simple_question():
+    """Simple question from authorized sender → answer_only, allowed_now."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_ANSWER_ONLY
+
+    result = classify_email_capability(
+        sender_authorized=True,
+        subject="Quick question",
+        body="How are my recent eBay orders doing? Any updates?",
+    )
+    assert result["capability_class"] == CAPABILITY_ANSWER_ONLY
+    assert result["allowed_now"] is True
+    assert result["requires_approval"] is False
+    assert result["blocker_reason"] is None
+
+
+def test_capability_runtime_truth_for_health_question():
+    """Health/status question → runtime_truth, allowed_now, tool=empire_runtime_truth_check."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_RUNTIME_TRUTH
+
+    for prompt in [
+        ("Is OpenClaw online?", "Just checking if the service is up"),
+        ("What provider is selected?", "Which AI model is active?"),
+        ("Status check", "What services are online right now?"),
+    ]:
+        result = classify_email_capability(True, prompt[0], prompt[1])
+        assert result["capability_class"] == CAPABILITY_RUNTIME_TRUTH, f"Failed for: {prompt[0]}"
+        assert result["allowed_now"] is True
+        assert result["tool_required"] == "empire_runtime_truth_check"
+        assert result["tool_available"] is True
+
+
+def test_capability_web_search_needed():
+    """Web search request → web_search_needed, requires_approval, tool unavailable."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_WEB_SEARCH
+
+    result = classify_email_capability(
+        True, "Research request", "Can you search the web for current gold prices?"
+    )
+    assert result["capability_class"] == CAPABILITY_WEB_SEARCH
+    assert result["requires_approval"] is True
+    assert result["tool_required"] == "web_search"
+    assert result["tool_available"] is False
+    assert "web_search_not_available" in result["blocker_reason"]
+
+
+def test_capability_empire_action_requires_approval():
+    """Empire action request → empire_action_requires_approval, blocked."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_EMPIRE_ACTION
+
+    for prompt in [
+        ("Create invoice", "Please create an invoice for order #12345"),
+        ("Send quote", "Send the quote to the customer"),
+        ("Workroom order", "Send this to Woodcraft for production"),
+    ]:
+        result = classify_email_capability(True, prompt[0], prompt[1])
+        assert result["capability_class"] == CAPABILITY_EMPIRE_ACTION, f"Failed for: {prompt[0]}"
+        assert result["requires_approval"] is True
+        assert result["tool_available"] is False
+        assert "founder_approval" in result["blocker_reason"]
+
+
+def test_capability_openclaw_task_requires_approval():
+    """OpenClaw task request → openclaw_task_requires_approval, blocked."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_OPENCLAW_TASK
+
+    for prompt in [
+        ("Create OpenClaw task", "Create an OpenClaw task to fix the listing prices"),
+        ("Fix this bug", "Can you fix this bug in the backend?"),
+        ("Run tests", "Please run the test suite"),
+    ]:
+        result = classify_email_capability(True, prompt[0], prompt[1])
+        assert result["capability_class"] == CAPABILITY_OPENCLAW_TASK, f"Failed for: {prompt[0]}"
+        assert result["requires_approval"] is True
+        assert result["tool_required"] == "openclaw_task_dispatch"
+        assert result["tool_available"] is False
+
+
+def test_capability_attachment_analysis_needed():
+    """Attachment mention → attachment_analysis_needed, requires_approval."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_ATTACHMENT
+
+    result = classify_email_capability(
+        True, "Document attached", "I've attached a PDF with the inventory."
+    )
+    assert result["capability_class"] == CAPABILITY_ATTACHMENT
+    assert result["requires_approval"] is True
+    assert result["tool_required"] == "attachment_read"
+
+
+def test_capability_unauthorized_sender_blocked():
+    """Unauthorized sender → unsafe_or_blocked immediately."""
+    from app.services.max.email_capability_router import classify_email_capability, CAPABILITY_UNSAFE
+
+    result = classify_email_capability(
+        sender_authorized=False,
+        subject="Hello",
+        body="Can you help me?",
+    )
+    assert result["capability_class"] == CAPABILITY_UNSAFE
+    assert result["allowed_now"] is False
+    assert result["blocker_reason"] == "sender_not_authorized"
+
+
+def test_capability_included_in_dry_run(monkeypatch):
+    """Dry-run must include capability classification in result."""
+    monkeypatch.setenv("MAX_EMAIL_ALLOWED_SENDERS", "empirebox2026@gmail.com,rafa22giraldo@gmail.com")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+
+    from app.services.max.email_service import generate_email_reply_draft
+
+    draft = generate_email_reply_draft(
+        sender="empirebox2026@gmail.com",
+        subject="Is OpenClaw online?",
+        body="Can you check if OpenClaw is running right now?",
+    )
+    assert "capability" in draft, f"Missing capability key. Keys: {list(draft.keys())}"
+    cap = draft["capability"]
+    assert "capability_class" in cap
+    assert "allowed_now" in cap
+    assert "requires_approval" in cap
+    assert "tool_required" in cap
+    assert "blocker_reason" in cap
+    assert draft["would_send"] is False
+    assert draft["sender_authorized"] is True
+
+
+def test_capability_no_live_send():
+    """All capability classes must have would_send=False."""
+    from app.services.max.email_capability_router import classify_email_capability
+
+    # Regardless of capability class, the classification itself never triggers send
+    for authorized in (True, False):
+        result = classify_email_capability(authorized, "Test", "Test body")
+        assert "would_send" not in result  # send decision is upstream

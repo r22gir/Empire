@@ -346,9 +346,19 @@ def generate_email_reply_draft(
         result["error"] = f"Sender not authorized: {auth['blocked_reason']}"
         return result
 
-    # 2. Classification
+    # 2. Classification (intent tags)
     classification = classify_max_email(subject, body, None)
     result["classification"] = classification
+
+    # 2b. Capability classification (what kind of request, what's allowed)
+    from app.services.max.email_capability_router import classify_email_capability
+    capability = classify_email_capability(
+        sender_authorized=result["sender_authorized"],
+        subject=subject,
+        body=body,
+        has_attachments=False,
+    )
+    result["capability"] = capability
 
     # 3. Read active routing state to determine provider/model.
     #    Never calls internal HTTP — avoids single-worker deadlock.

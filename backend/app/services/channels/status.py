@@ -980,6 +980,19 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
         classification = classify_max_email(subject, body, attachments)
         generate_response = bool(payload.get("generate_response"))
 
+        # Capability classification always runs (fast, deterministic, no API call)
+        capability = None
+        try:
+            from app.services.max.email_capability_router import classify_email_capability
+            capability = classify_email_capability(
+                sender_authorized=authorization["sender_authorized"],
+                subject=subject,
+                body=body,
+                has_attachments=bool(attachments),
+            )
+        except Exception:
+            pass
+
         max_request_payload = None
         max_response_draft = None
         if authorization["sender_authorized"]:
@@ -1027,6 +1040,7 @@ def build_dry_run_result(channel: str, payload: dict[str, Any] | None = None) ->
             "classification": classification,
             "max_request_payload": max_request_payload,
             "max_response_draft": max_response_draft,
+            "capability": capability,
             "reply_payload_preview": {
                 "would_send": False,
                 "blocked": not authorization["sender_authorized"],
