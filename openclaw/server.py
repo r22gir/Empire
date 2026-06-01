@@ -47,6 +47,13 @@ SKILLS_DIR = Path(__file__).parent / "skills"
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
+# DeepSeek (OpenAI-compatible) provider
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1").rstrip("/")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+OPENCLAW_PROVIDER = os.getenv("OPENCLAW_PROVIDER", "deepseek")
+
 MAX_HISTORY_CONTEXT = 8
 
 # ---------------------------------------------------------------------------
@@ -143,6 +150,38 @@ async def _ask_ollama(message: str, history: list[dict], system_prompt: str | No
             return data.get("message", {}).get("content", "No response from model.")
 
 
+async def _ask_deepseek(message: str, history: list[dict], system_prompt: str | None = None) -> str:
+    """Call DeepSeek via OpenAI-compatible /chat/completions endpoint."""
+    if not DEEPSEEK_API_KEY:
+        raise RuntimeError("DEEPSEEK_API_KEY is not set")
+
+    messages = [{"role": "system", "content": system_prompt or SYSTEM_PROMPT}]
+    for h in history[-MAX_HISTORY_CONTEXT:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": h["content"]})
+    messages.append({"role": "user", "content": message})
+
+    payload = {
+        "model": DEEPSEEK_MODEL,
+        "messages": messages,
+        "stream": False,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            f"{DEEPSEEK_BASE_URL}/chat/completions", json=payload, headers=headers
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "No response from model.")
+
+
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
@@ -199,18 +238,25 @@ async def chat(req: ChatRequest):
         )
 
     try:
-        ai_response = await _ask_ollama(augmented_message, req.history, req.system_prompt)
+        if OPENCLAW_PROVIDER == "deepseek":
+            ai_response = await _ask_deepseek(augmented_message, req.history, req.system_prompt)
+            source = "deepseek" if skill_output == "" else "skill+deepseek"
+        else:
+            ai_response = await _ask_ollama(augmented_message, req.history, req.system_prompt)
+            source = "ollama" if skill_output == "" else "skill+ollama"
     except Exception as exc:
-        logger.warning("Ollama unavailable: %s", exc)
+        logger.warning("%s unavailable: %s", OPENCLAW_PROVIDER, exc)
         if skill_output:
             ai_response = skill_output
+            source = "skill-only"
         else:
-            ai_response = "⚠️ AI model (Ollama) is not reachable."
+            ai_response = f"⚠️ AI model ({OPENCLAW_PROVIDER}) is not reachable."
+            source = "error"
 
     return ChatResponse(
         response=ai_response,
         skill_used=skill_name,
-        source="ollama" if skill_output == "" else "skill+ollama",
+        source=source,
     )
 
 
