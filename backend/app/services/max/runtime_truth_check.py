@@ -123,6 +123,13 @@ INTENT_SIGNALS = [
     "handles voice",
     "provider capability",
     "capability lane",
+    # Web search provider questions
+    "web search provider",
+    "what search",
+    "which search",
+    "search engine",
+    "best search",
+    "best option for search",
 ]
 
 # Services whose runtime health can be checked.
@@ -823,39 +830,49 @@ def _format_provider_capability_answer(result: dict[str, Any]) -> str:
     # OpenClaw
     openclaw_state = openclaw_gate.get("state", "unknown")
 
-    # Web search - confirmed operational via Brave/DDG, tool registered
-    web_search_available = True
-
-    # Vision status - check if endpoint exists
-    vision_configured = minimax_configured  # MiniMax handles vision
+    # Vision/TTS
+    vision_configured = minimax_configured
     vision_status = "configured_unverified" if vision_configured else "offline"
+    tts_status = "configured_unverified" if minimax_configured else "offline"
 
-    # TTS
-    tts_configured = minimax_configured
-    tts_status = "configured_unverified" if tts_configured else "offline"
+    # Web search tiers
+    brave_configured = os.getenv("BRAVE_API_KEY", "") != ""
+    tavily_configured = os.getenv("TAVILY_API_KEY", "") != ""
+    serpapi_configured = os.getenv("SERPAPI_API_KEY", "") != ""
+    exa_configured = os.getenv("EXA_API_KEY", "") != ""
+    google_cse_configured = os.getenv("GOOGLE_CSE_API_KEY", "") != ""
 
     lines = [
         "",
         "---",
         "Provider capability matrix (from runtime truth evidence):",
         "",
-        "| Capability Lane        | Provider      | Model              | Status                    |",
-        "|------------------------|---------------|--------------------|---------------------------|",
-        f"| Text / Chat            | {text_provider:<13} | {text_model:<18} | verified_working          |",
-        f"| Vision / Image Understand | MiniMax    | {(os.getenv('MINIMAX_MODEL','MiniMax-M2.7')):<18} | {vision_status:<25} |",
-        f"| Image Generation       | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
-        f"| Image-to-Image         | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
-        f"| Voice / TTS            | MiniMax       | MiniMax-M2.7       | {tts_status:<25} |",
-        f"| Web Search             | Brave/DDG     | n/a                | {'verified_working' if web_search_available else 'unavailable':<25} |",
-        f"| OpenClaw / Execution   | DeepSeek      | deepseek-v4-flash  | {'verified_working' if openclaw_state == 'healthy' else openclaw_state:<25} |",
+        "| Capability Lane           | Provider      | Model              | Status                    |",
+        "|---------------------------|---------------|--------------------|---------------------------|",
+        f"| Text / Chat               | {text_provider:<13} | {text_model:<18} | verified_working          |",
+        f"| Vision / Image Understand | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
+        f"| Image Generation          | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
+        f"| Image-to-Image            | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
+        f"| Voice / TTS               | MiniMax       | MiniMax-M2.7       | {tts_status:<25} |",
+        "",
+        "Web search tiers:",
+        f"| Tier 1 — Default          | Brave Search  | n/a                | {'verified_working' if brave_configured else 'not_configured':<25} |",
+        f"| Tier 2 — Fallback         | DuckDuckGo    | n/a                | verified_working          |",
+        f"| Tier 3 — AI Search        | MiniMax       | MiniMax-M2.7       | configured_unverified     |",
+        f"| Tier 4 — Deep Research     | Tavily/Exa    | n/a                | {'not_configured' if not (tavily_configured or exa_configured) else 'configured_unverified':<25} |",
+        "",
+        f"| OpenClaw / Execution      | DeepSeek      | deepseek-v4-flash  | {'verified_working' if openclaw_state == 'healthy' else openclaw_state:<25} |",
         "",
         "Routing policy:",
         f"- Default text provider: {text_provider} / {text_model}",
         f"- Fallback enabled: {fallback}",
-        "- MiniMax is configured and available for capability-specific lanes (vision, image, TTS).",
-        "- MiniMax is NOT selected as the default text provider.",
-        "- Vision/Image/TTS lanes marked 'configured_unverified' — no live test has been performed.",
-        "- Web search is operational via Brave Search / DuckDuckGo fallback.",
+        "- MiniMax is configured for capability-specific lanes; NOT selected as default text.",
+        "- Vision/Image/TTS lanes: configured_unverified — no live test performed.",
+        "- Web search: Brave (Tier 1) + DDG (Tier 2 fallback) are the verified default pair.",
+        "- MiniMax web search (Tier 3) is configured_unverified until a live source-returning test proves it.",
+        "- Premium/deep research (Tavily, Exa, SerpAPI, Google CSE) are not_configured unless keys exist.",
+        "- Source policy: cite URLs for factual answers; prefer official/primary sources for laws, pricing, APIs, financial/legal/medical/current facts.",
+        "- Do not use AI summary as the sole proof when source URLs are needed.",
         f"- OpenClaw chat provider: DeepSeek (health: {openclaw_state}).",
     ]
 
@@ -939,6 +956,75 @@ def _format_hermes_boundary_answer(
     lines.append(f"- Current provider: {provider} / {model} (fallback disabled)")
 
     lines.append("- Next step: if external Hermes Telegram verification is required, start the Hermes gateway and provide a status endpoint or bot config path.")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Web search tier boundary answer
+# ---------------------------------------------------------------------------
+_WEB_SEARCH_BOUNDARY_SIGNALS: tuple[str, ...] = (
+    "web search provider",
+    "what search",
+    "which search",
+    "search engine",
+    "best search",
+    "best option for search",
+    "what is your search",
+    "how do you search",
+    "search tool",
+)
+
+
+def _is_web_search_boundary_question(message: str | None) -> bool:
+    """Detect questions about what web search provider or engine is in use."""
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    return any(signal in text for signal in _WEB_SEARCH_BOUNDARY_SIGNALS)
+
+
+def _format_web_search_boundary_answer(result: dict[str, Any]) -> str:
+    """Build a tiered web search policy answer."""
+    import os
+    brave = os.getenv("BRAVE_API_KEY", "") != ""
+    tavily = os.getenv("TAVILY_API_KEY", "") != ""
+    exa = os.getenv("EXA_API_KEY", "") != ""
+    serpapi = os.getenv("SERPAPI_API_KEY", "") != ""
+
+    lines = [
+        "",
+        "---",
+        "Direct answer — web search provider policy:",
+        "",
+        "Current search tiers:",
+        f"- Tier 1 (Default): Brave Search — {'verified_working' if brave else 'not_configured'}",
+        "  Brave is the primary web search tool. Returns source URLs with each result.",
+        f"- Tier 2 (Fallback): DuckDuckGo HTML — verified_working",
+        "  Used when Brave returns no results or is unavailable.",
+        "- Tier 3 (AI Search): MiniMax web search — configured_unverified",
+        "  MiniMax may offer web-grounded responses, but has not been live-tested",
+        "  with a source-returning query. Do not claim it works until proven.",
+        "- Tier 4 (Deep Research): Tavily, Exa, SerpAPI, Google CSE",
+        f"  Tavily: {'configured_unverified' if tavily else 'not_configured'}",
+        f"  Exa: {'configured_unverified' if exa else 'not_configured'}",
+        f"  SerpAPI: {'configured_unverified' if serpapi else 'not_configured'}",
+        "  Google CSE: not_configured",
+        "",
+        "Source policy:",
+        "- Cite source URLs for all factual answers.",
+        "- Prefer official/primary sources for laws, pricing, APIs, product specs,",
+        "  and financial/legal/medical/current facts.",
+        "- Do not use an AI summary as the sole proof when source URLs are needed.",
+        "- For high-stakes or current facts, source-backed search is required.",
+        "",
+        "Is it the best option?",
+        "- Brave + DDG is the current verified pair. It is adequate for general queries.",
+        "- For deep research, a premium provider (Tavily/Exa) with source-citing",
+        "  would be better, but those are not configured in this runtime.",
+        "- MiniMax web search may augment results but has not been proven yet.",
+        "- If precise sourcing is required, use Brave and cite the returned URLs.",
+    ]
 
     return "\n".join(lines)
 
@@ -1048,6 +1134,10 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     # Append provider capability matrix for "what handles text/vision/voice..." questions
     if _is_provider_capability_question(message):
         response += _format_provider_capability_answer(result)
+
+    # Append web search tier answer
+    if _is_web_search_boundary_question(message):
+        response += _format_web_search_boundary_answer(result)
 
     return response
 

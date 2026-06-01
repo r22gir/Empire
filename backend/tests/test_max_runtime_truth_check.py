@@ -921,3 +921,65 @@ def test_provider_capability_no_fake_claims():
     assert "configured_unverified" in answer_l
     # OpenClaw CAN say verified_working because gate health was confirmed
     assert "verified_working" in answer_l
+
+
+# ---------------------------------------------------------------------------
+# Web search tier tests
+# ---------------------------------------------------------------------------
+
+
+def test_web_search_question_routes_to_runtime_truth():
+    """Web search provider questions must route to runtime truth."""
+    prompts = [
+        "What web search provider are you using, and is it the best option?",
+        "What search engine does MAX use?",
+        "Which search tool is configured?",
+    ]
+    for prompt in prompts:
+        assert should_run_runtime_truth_check(prompt), f"Failed: {prompt}"
+
+
+def test_web_search_matrix_has_tiers():
+    """Capability matrix must show tiered web search, not just Brave/DDG."""
+    from app.services.max.runtime_truth_check import _format_provider_capability_answer
+
+    fake_result = {
+        "routing_state": {"selected_provider": "deepseek", "selected_model": "deepseek-v4-flash", "fallback_enabled": False},
+        "openclaw_gate": {"state": "healthy"},
+    }
+    answer = _format_provider_capability_answer(fake_result)
+    answer_l = answer.lower()
+
+    assert "tier 1" in answer_l
+    assert "tier 2" in answer_l
+    assert "tier 3" in answer_l
+    assert "tier 4" in answer_l
+    assert "brave search" in answer_l
+    assert "duckduckgo" in answer_l
+    # Must NOT describe Brave/DDG as the "best" or "only" option
+    assert "source policy" in answer_l
+    assert "cite" in answer_l
+
+
+def test_web_search_boundary_answer_has_source_policy():
+    """Web search boundary answer must include source policy and tiers."""
+    from app.services.max.runtime_truth_check import (
+        _format_web_search_boundary_answer,
+        _is_web_search_boundary_question,
+    )
+    assert _is_web_search_boundary_question(
+        "What web search provider are you using, and is it the best option?"
+    )
+    answer = _format_web_search_boundary_answer({})
+    answer_l = answer.lower()
+
+    assert "tier 1" in answer_l
+    assert "tier 3" in answer_l
+    assert "brave" in answer_l
+    assert "source policy" in answer_l
+    assert "cite" in answer_l
+    assert "official" in answer_l
+    # MiniMax search must not be marked verified
+    assert "configured_unverified" in answer_l
+    # Must not claim Brave is the best
+    assert "adequate" in answer_l or "better" in answer_l or "deep research" in answer_l
