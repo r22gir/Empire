@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
+    is_openclaw_boundary_question,
     is_runtime_health_question,
     run_runtime_truth_check,
     should_run_runtime_truth_check,
@@ -551,3 +552,234 @@ def test_routing_state_fields_in_run():
     assert "ai_calls_disabled" in rs
     assert "minimax_selected" in rs
     assert "source" in rs
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw action-boundary question tests
+# ---------------------------------------------------------------------------
+
+
+def test_openclaw_boundary_question_routes_to_runtime_truth():
+    """OpenClaw action-boundary prompts must trigger runtime truth check."""
+    prompts = [
+        "OpenClaw boundary test. Can you create or execute an OpenClaw task right now?",
+        "Can you create an OpenClaw task?",
+        "Can you execute an OpenClaw task?",
+        "Did you create a task?",
+        "Did you execute it?",
+        "Can OpenClaw run tasks right now?",
+    ]
+    for prompt in prompts:
+        assert should_run_runtime_truth_check(prompt), (
+            f"Expected runtime truth check for boundary prompt: {prompt}"
+        )
+
+
+def test_openclaw_boundary_answer_says_no_task_created_without_id():
+    """Boundary answer must say task creation was NOT performed when there is no task ID."""
+    fake_result = {
+        "mode": "inspect_only",
+        "current_commit": {"hash": "abc123", "message": "fix(openclaw): route chat through DeepSeek provider"},
+        "registry": {"registry_version": "v1", "loaded_at": "now", "last_error": None},
+        "openclaw_gate": {
+            "state": "healthy",
+            "allowed": True,
+            "reason": "ok",
+            "worker_heartbeat": {"current_task_id": None, "status": "polling", "fresh": True},
+            "queue_stats": {"total": 7357, "done": 1439, "failed": 5916, "cancelled": 2},
+        },
+        "startup_health": {},
+        "backend_port_8000": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "backend_port_8010": {"port_open": False},
+        "frontend_port_3005": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "frontend_port_3010": {"port_open": False},
+        "local_freshness": {"api_git": {"data": {"last_commit_hash": "abc123"}}, "api_matches_current_commit": True},
+        "public_freshness": {"api_git": {"data": {"last_commit_hash": None}}, "api_matches_current_commit": False, "api_root": {"status_code": 200}, "studio_root": {"status_code": 200}},
+        "hermes_dashboard": {"state": "up", "process_detected": True, "evidence": "port open"},
+        "hermes_cron": {"state": "paused", "jobs_count": 12},
+        "routing_state": {"selected_provider": "deepseek", "selected_provider_label": "DeepSeek", "selected_model": "deepseek-v4-flash", "fallback_enabled": False, "ai_calls_disabled": False, "minimax_selected": False, "fallback_eligible_providers": []},
+        "restart_required": False,
+        "stale_or_broken": [],
+        "repair_capability": "inspect_only_no_restart",
+    }
+
+    response = format_runtime_truth_check(
+        fake_result,
+        message="OpenClaw boundary test. Can you create or execute an OpenClaw task right now?",
+    )
+
+    # Must still include the runtime truth report
+    assert "Runtime truth check completed" in response
+    assert "OpenClaw gate:" in response
+
+    # Direct answer block must be present
+    assert "Direct answer (from runtime truth evidence):" in response
+    assert "OpenClaw health: online / healthy" in response
+    assert "OpenClaw task creation: not performed by this check" in response
+    assert "OpenClaw task execution: not performed by this check" in response
+    assert "Task ID: none" in response
+    assert "Queue drain: not performed by this check" in response
+    assert "Execution evidence: none" in response
+    assert "Next step: explicit founder approval is required before creating or executing a task" in response
+
+
+def test_openclaw_boundary_answer_says_no_execution_without_evidence():
+    """Boundary answer must not claim execution happened when there's no evidence."""
+    fake_result = {
+        "mode": "inspect_only",
+        "current_commit": {"hash": "abc123", "message": "fix"},
+        "registry": {"registry_version": "v1", "loaded_at": "now", "last_error": None},
+        "openclaw_gate": {
+            "state": "healthy",
+            "allowed": True,
+            "reason": "ok",
+            "worker_heartbeat": {"current_task_id": None, "status": "polling", "fresh": True},
+            "queue_stats": {"total": 7357},
+        },
+        "startup_health": {},
+        "backend_port_8000": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "backend_port_8010": {"port_open": False},
+        "frontend_port_3005": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "frontend_port_3010": {"port_open": False},
+        "local_freshness": {"api_git": {"data": {"last_commit_hash": "abc123"}}, "api_matches_current_commit": True},
+        "public_freshness": {"api_git": {"data": {"last_commit_hash": None}}, "api_matches_current_commit": False, "api_root": {"status_code": 200}, "studio_root": {"status_code": 200}},
+        "hermes_dashboard": {"state": "up", "process_detected": True, "evidence": "port open"},
+        "hermes_cron": {"state": "paused", "jobs_count": 12},
+        "routing_state": {"selected_provider": "deepseek", "selected_provider_label": "DeepSeek", "selected_model": "deepseek-v4-flash", "fallback_enabled": False, "ai_calls_disabled": False, "minimax_selected": False, "fallback_eligible_providers": []},
+        "restart_required": False,
+        "stale_or_broken": [],
+        "repair_capability": "inspect_only_no_restart",
+    }
+
+    response = format_runtime_truth_check(
+        fake_result,
+        message="Did you execute the OpenClaw task?",
+    )
+
+    # Must NOT fabricate execution claims
+    assert "OpenClaw task execution: not performed by this check" in response
+    assert "Execution evidence: none" in response
+    assert "Task ID: none" in response
+
+    # Must NOT contain fabricated success language
+    assert "executed successfully" not in response.lower()
+    assert "task was executed" not in response.lower()
+    assert "completed the task" not in response.lower()
+
+
+def test_openclaw_boundary_answer_does_not_drain_queue():
+    """Boundary answer must not claim queue was drained."""
+    fake_result = {
+        "mode": "inspect_only",
+        "current_commit": {"hash": "abc123", "message": "fix"},
+        "registry": {"registry_version": "v1", "loaded_at": "now", "last_error": None},
+        "openclaw_gate": {
+            "state": "healthy",
+            "allowed": True,
+            "reason": "ok",
+            "worker_heartbeat": {"current_task_id": None, "status": "polling", "fresh": True},
+            "queue_stats": {"total": 7357, "done": 1439, "failed": 5916, "cancelled": 2},
+        },
+        "startup_health": {},
+        "backend_port_8000": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "backend_port_8010": {"port_open": False},
+        "frontend_port_3005": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "frontend_port_3010": {"port_open": False},
+        "local_freshness": {"api_git": {"data": {"last_commit_hash": "abc123"}}, "api_matches_current_commit": True},
+        "public_freshness": {"api_git": {"data": {"last_commit_hash": None}}, "api_matches_current_commit": False, "api_root": {"status_code": 200}, "studio_root": {"status_code": 200}},
+        "hermes_dashboard": {"state": "up", "process_detected": True, "evidence": "port open"},
+        "hermes_cron": {"state": "paused", "jobs_count": 12},
+        "routing_state": {"selected_provider": "deepseek", "selected_provider_label": "DeepSeek", "selected_model": "deepseek-v4-flash", "fallback_enabled": False, "ai_calls_disabled": False, "minimax_selected": False, "fallback_eligible_providers": []},
+        "restart_required": False,
+        "stale_or_broken": [],
+        "repair_capability": "inspect_only_no_restart",
+    }
+
+    response = format_runtime_truth_check(
+        fake_result,
+        message="Can you create an OpenClaw task? Do not drain old queued tasks.",
+    )
+
+    # Must explicitly say queue was NOT drained
+    assert "Queue drain: not performed by this check" in response
+    # Must show the actual queue total, not claim 0
+    assert "7357" in response
+
+    # Must NOT claim queue was drained
+    assert "queue drained" not in response.lower()
+    assert "drained queue" not in response.lower()
+
+
+def test_openclaw_boundary_answer_does_not_claim_task_id():
+    """Boundary answer must not fabricate a task ID when none exists."""
+    fake_result = {
+        "mode": "inspect_only",
+        "current_commit": {"hash": "abc123", "message": "fix"},
+        "registry": {"registry_version": "v1", "loaded_at": "now", "last_error": None},
+        "openclaw_gate": {
+            "state": "healthy",
+            "allowed": True,
+            "reason": "ok",
+            "worker_heartbeat": {"current_task_id": None, "status": "polling", "fresh": True},
+            "queue_stats": {"total": 7357},
+        },
+        "startup_health": {},
+        "backend_port_8000": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "backend_port_8010": {"port_open": False},
+        "frontend_port_3005": {"service_active": True, "port_open": True, "local_root_status": 200},
+        "frontend_port_3010": {"port_open": False},
+        "local_freshness": {"api_git": {"data": {"last_commit_hash": "abc123"}}, "api_matches_current_commit": True},
+        "public_freshness": {"api_git": {"data": {"last_commit_hash": None}}, "api_matches_current_commit": False, "api_root": {"status_code": 200}, "studio_root": {"status_code": 200}},
+        "hermes_dashboard": {"state": "up", "process_detected": True, "evidence": "port open"},
+        "hermes_cron": {"state": "paused", "jobs_count": 12},
+        "routing_state": {"selected_provider": "deepseek", "selected_provider_label": "DeepSeek", "selected_model": "deepseek-v4-flash", "fallback_enabled": False, "ai_calls_disabled": False, "minimax_selected": False, "fallback_eligible_providers": []},
+        "restart_required": False,
+        "stale_or_broken": [],
+        "repair_capability": "inspect_only_no_restart",
+    }
+
+    response = format_runtime_truth_check(
+        fake_result,
+        message="Do not claim a task was created unless you return a real task ID.",
+    )
+
+    # Task ID must be "none" — not a fabricated one
+    assert "Task ID: none" in response
+
+    # Must NOT contain a fabricated task ID pattern (hex-like or numeric IDs)
+    # The only "none" reference for task_id should be our explicit statement
+    assert "task_created" not in response.lower()
+
+
+def test_is_openclaw_boundary_question_detection():
+    """Unit test for boundary question detection function."""
+    boundary_prompts = [
+        "OpenClaw boundary test. Can you create or execute an OpenClaw task?",
+        "can you create an openclaw task",
+        "can you execute an openclaw task right now",
+        "did you create a task",
+        "did you execute it",
+        "do not claim execution without a task id",
+        "do not claim a task was created without a real task id",
+        "can openclaw run tasks",
+        "openclaw task creation",
+        "openclaw task execution",
+        "Do not drain old queued tasks",
+        "drain queue",
+    ]
+    for prompt in boundary_prompts:
+        assert is_openclaw_boundary_question(prompt), (
+            f"Expected boundary detection for: {prompt}"
+        )
+
+    non_boundary = [
+        "what services are online",
+        "is the latest code running",
+        "what provider is selected",
+        "hello max",
+        "show me recent sales",
+    ]
+    for prompt in non_boundary:
+        assert not is_openclaw_boundary_question(prompt), (
+            f"Expected NO boundary detection for: {prompt}"
+        )

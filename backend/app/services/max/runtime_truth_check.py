@@ -79,6 +79,31 @@ INTENT_SIGNALS = [
     "is minimax selected",
     "is mini max selected",
     "provider policy",
+    # OpenClaw action-boundary signals
+    "openclaw boundary",
+    "openclaw task",
+    "create an openclaw",
+    "execute an openclaw",
+    "openclaw task creation",
+    "openclaw task execution",
+    "can openclaw create",
+    "can openclaw execute",
+    "can openclaw run",
+    "did you create a task",
+    "did you execute",
+    "task id",
+    "task creation",
+    "task execution",
+    "without a task id",
+    "without task id",
+    "claim a task",
+    "claim execution",
+    "claim task",
+    "do not claim execution",
+    "do not claim a task",
+    "drain old queued",
+    "drain queue",
+    "drain old queue",
 ]
 
 # Services whose runtime health can be checked.
@@ -635,6 +660,99 @@ def _wants_key_only(message: str | None) -> bool:
     )
 
 
+# ---------------------------------------------------------------------------
+# OpenClaw action-boundary question detection and direct answer synthesis
+# ---------------------------------------------------------------------------
+_OPENCLAW_BOUNDARY_SIGNALS: tuple[str, ...] = (
+    "openclaw boundary",
+    "openclaw task",
+    "create an openclaw",
+    "execute an openclaw",
+    "openclaw task creation",
+    "openclaw task execution",
+    "can openclaw create",
+    "can openclaw execute",
+    "can openclaw run",
+    "did you create a task",
+    "did you execute",
+    "task creation",
+    "task execution",
+    "without a task id",
+    "without task id",
+    "claim a task",
+    "claim execution",
+    "claim task",
+    "do not claim execution",
+    "do not claim a task",
+    "drain old queued",
+    "drain queue",
+    "drain old queue",
+)
+
+
+def is_openclaw_boundary_question(message: str | None) -> bool:
+    """Return True if *message* asks about OpenClaw task creation / execution
+    boundaries — questions like 'can you create a task?', 'did you execute it?',
+    'do not claim execution without a task ID'."""
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    for signal in _OPENCLAW_BOUNDARY_SIGNALS:
+        if signal in text:
+            return True
+    # Also catch compound patterns: 'task id' near 'openclaw'
+    if "task id" in text and "openclaw" in text:
+        return True
+    return False
+
+
+def _format_openclaw_boundary_answer(
+    openclaw_gate: dict[str, Any], result: dict[str, Any]
+) -> str:
+    """Build a direct-answer block from runtime truth evidence for
+    OpenClaw action-boundary questions."""
+    state = openclaw_gate.get("state", "unknown")
+    allowed = openclaw_gate.get("allowed", False)
+    worker = openclaw_gate.get("worker_heartbeat") or {}
+    queue_stats = openclaw_gate.get("queue_stats") or {}
+    current_task_id = worker.get("current_task_id") if isinstance(worker, dict) else None
+
+    if state == "healthy":
+        health_line = "OpenClaw health: online / healthy"
+    elif state in ("degraded", "unavailable"):
+        health_line = f"OpenClaw health: {state}"
+    else:
+        health_line = f"OpenClaw health: {state}"
+
+    # Build direct answer from evidence only
+    lines = [
+        "",
+        "---",
+        "Direct answer (from runtime truth evidence):",
+        f"- {health_line}",
+    ]
+
+    if state == "healthy" and allowed:
+        if current_task_id:
+            lines.append(f"- OpenClaw task creation: a task is already running (task_id={current_task_id})")
+        else:
+            lines.append("- OpenClaw task creation: not performed by this check")
+        lines.append("- OpenClaw task execution: not performed by this check")
+    elif state == "healthy" and not allowed:
+        lines.append("- OpenClaw task creation: not available (gate allows=False)")
+        lines.append("- OpenClaw task execution: not available")
+    else:
+        lines.append("- OpenClaw task creation: not available")
+        lines.append("- OpenClaw task execution: not available")
+
+    lines.append(f"- Task ID: {current_task_id or 'none'}")
+    lines.append(f"- Queue drain: not performed by this check (queue total={queue_stats.get('total', '?')})")
+    lines.append("- Execution evidence: none")
+    lines.append("- Next step: explicit founder approval is required before creating or executing a task")
+
+    return "\n".join(lines)
+
+
 def format_runtime_truth_check(result: dict[str, Any], message: str | None = None) -> str:
     """Format runtime truth check result into human-readable text.
 
@@ -726,7 +844,14 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
         lines.append(f"- Stale/broken findings: {', '.join(stale)}")
     else:
         lines.append("- Stale/broken findings: none detected by this inspect-only check")
-    return "\n".join(lines)
+
+    response = "\n".join(lines)
+
+    # Append direct answer for OpenClaw action-boundary questions
+    if is_openclaw_boundary_question(message):
+        response += _format_openclaw_boundary_answer(openclaw_gate, result)
+
+    return response
 
 
 def run_whats_new_summary() -> dict[str, Any]:

@@ -42,7 +42,6 @@ from app.services.max.guardrails import uncertainty_fallback, should_defer_uncer
 from app.services.max.system_prompt import get_compact_system_prompt, get_system_prompt_with_brain, is_ordinary_text_request
 from app.services.max.runtime_truth_check import (
     format_runtime_truth_check,
-    is_runtime_health_question,
     should_run_runtime_truth_check,
     should_run_whats_new_summary,
     run_whats_new_summary,
@@ -1672,19 +1671,16 @@ def _provider_identity_response(request: ChatRequest) -> ChatResponse:
 
 def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | None:
     if not request.desk and not request.image_filename:
-        # Runtime health questions ("Is OpenClaw online?") must route to the
-        # live truth check (async handler at line ~2030), not to module
-        # knowledge which returns a static doc definition.  Check BEFORE
-        # _empire_module_response so the health pattern beats module aliases.
-        if is_runtime_health_question(request.message):
+        # Runtime truth / health / boundary questions must route to the live
+        # truth check (async handler at line ~2030), not to module knowledge
+        # which returns a static doc definition.  Check BEFORE
+        # _empire_module_response so runtime truth beats module aliases.
+        if should_run_runtime_truth_check(request.message):
             return None
 
         module_response = _empire_module_response(request)
         if module_response is not None:
             return module_response
-
-        if should_run_runtime_truth_check(request.message):
-            return None
 
         if _is_current_events_request(request.message):
             return _live_lookup_router_response(request)
