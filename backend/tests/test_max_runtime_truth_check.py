@@ -852,3 +852,72 @@ def test_hermes_telegram_question_not_module_knowledge(monkeypatch):
     module_hit = resolve_empire_module_question(prompt)
     # Even if module matches, the router's order ensures runtime truth wins
     # (should_run_runtime_truth_check checked before _empire_module_response)
+
+
+# ---------------------------------------------------------------------------
+# Provider capability synthesis tests
+# ---------------------------------------------------------------------------
+
+
+def test_provider_capability_question_routes_to_runtime_truth():
+    """Provider capability questions must route to runtime truth."""
+    prompts = [
+        "What provider handles text, vision, voice, image generation, and OpenClaw right now?",
+        "Which provider handles vision and image generation?",
+        "What handles text and web search?",
+    ]
+    for prompt in prompts:
+        assert should_run_runtime_truth_check(prompt), f"Failed: {prompt}"
+
+
+def test_provider_capability_answer_separates_text_from_capabilities():
+    """Provider capability answer must separate DeepSeek text from MiniMax lanes."""
+    from app.services.max.runtime_truth_check import (
+        _is_provider_capability_question,
+        _format_provider_capability_answer,
+    )
+    assert _is_provider_capability_question(
+        "What provider handles text, vision, voice, image generation, and OpenClaw right now?"
+    )
+
+    fake_result = {
+        "routing_state": {
+            "selected_provider": "deepseek",
+            "selected_model": "deepseek-v4-flash",
+            "fallback_enabled": False,
+        },
+        "openclaw_gate": {"state": "healthy", "allowed": True},
+    }
+    answer = _format_provider_capability_answer(fake_result)
+    answer_l = answer.lower()
+
+    assert "deepseek" in answer_l
+    assert "deepseek-v4-flash" in answer_l
+    assert "minimax" in answer_l
+    assert "text" in answer_l
+    assert "vision" in answer_l
+    assert "fallback enabled: false" in answer_l
+    assert "configured_unverified" in answer_l
+    # Must NOT claim vision is offline
+    assert "vision" not in answer_l or "offline" not in answer_l.split("vision")[-1][:200]
+
+
+def test_provider_capability_no_fake_claims():
+    """Provider capability must not fabricate working status without evidence."""
+    from app.services.max.runtime_truth_check import _format_provider_capability_answer
+
+    fake_result = {
+        "routing_state": {
+            "selected_provider": "deepseek",
+            "selected_model": "deepseek-v4-flash",
+            "fallback_enabled": False,
+        },
+        "openclaw_gate": {"state": "healthy"},
+    }
+    answer = _format_provider_capability_answer(fake_result)
+    answer_l = answer.lower()
+
+    # Vision/Image/TTS must NOT say verified_working without live test
+    assert "configured_unverified" in answer_l
+    # OpenClaw CAN say verified_working because gate health was confirmed
+    assert "verified_working" in answer_l

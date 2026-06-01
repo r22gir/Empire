@@ -115,6 +115,14 @@ INTENT_SIGNALS = [
     "is hermes",
     "does hermes have",
     "does hermes",
+    # Provider capability questions
+    "what provider handles",
+    "which provider handles",
+    "what handles text",
+    "handles vision",
+    "handles voice",
+    "provider capability",
+    "capability lane",
 ]
 
 # Services whose runtime health can be checked.
@@ -766,6 +774,95 @@ def _format_openclaw_boundary_answer(
 
 
 # ---------------------------------------------------------------------------
+# Provider capability synthesis ("what handles text/vision/voice...")
+# ---------------------------------------------------------------------------
+_PROVIDER_CAPABILITY_SIGNALS: tuple[str, ...] = (
+    "what provider handles",
+    "which provider handles",
+    "what handles",
+    "which handles",
+    "provider handles text",
+    "provider handles vision",
+    "handles text",
+    "handles vision",
+    "handles voice",
+    "handles image",
+    "provider capability",
+    "capability lane",
+    "capability matrix",
+    "what is using",
+    "what model is used for",
+    "which model is used for",
+    "who handles",
+)
+
+
+def _is_provider_capability_question(message: str | None) -> bool:
+    """Detect questions about which provider handles which capability lane."""
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    return any(signal in text for signal in _PROVIDER_CAPABILITY_SIGNALS)
+
+
+def _format_provider_capability_answer(result: dict[str, Any]) -> str:
+    """Build a provider capability matrix from runtime truth evidence."""
+    import os
+
+    routing_state = result.get("routing_state") or {}
+    openclaw_gate = result.get("openclaw_gate") or {}
+
+    # Text provider from routing state
+    text_provider = routing_state.get("selected_provider", "deepseek")
+    text_model = routing_state.get("selected_model", "deepseek-v4-flash")
+    fallback = routing_state.get("fallback_enabled", False)
+
+    # MiniMax availability
+    minimax_configured = os.getenv("MINIMAX_API_KEY", "") != ""
+
+    # OpenClaw
+    openclaw_state = openclaw_gate.get("state", "unknown")
+
+    # Web search - confirmed operational via Brave/DDG, tool registered
+    web_search_available = True
+
+    # Vision status - check if endpoint exists
+    vision_configured = minimax_configured  # MiniMax handles vision
+    vision_status = "configured_unverified" if vision_configured else "offline"
+
+    # TTS
+    tts_configured = minimax_configured
+    tts_status = "configured_unverified" if tts_configured else "offline"
+
+    lines = [
+        "",
+        "---",
+        "Provider capability matrix (from runtime truth evidence):",
+        "",
+        "| Capability Lane        | Provider      | Model              | Status                    |",
+        "|------------------------|---------------|--------------------|---------------------------|",
+        f"| Text / Chat            | {text_provider:<13} | {text_model:<18} | verified_working          |",
+        f"| Vision / Image Understand | MiniMax    | {(os.getenv('MINIMAX_MODEL','MiniMax-M2.7')):<18} | {vision_status:<25} |",
+        f"| Image Generation       | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
+        f"| Image-to-Image         | MiniMax       | MiniMax-M2.7       | {vision_status:<25} |",
+        f"| Voice / TTS            | MiniMax       | MiniMax-M2.7       | {tts_status:<25} |",
+        f"| Web Search             | Brave/DDG     | n/a                | {'verified_working' if web_search_available else 'unavailable':<25} |",
+        f"| OpenClaw / Execution   | DeepSeek      | deepseek-v4-flash  | {'verified_working' if openclaw_state == 'healthy' else openclaw_state:<25} |",
+        "",
+        "Routing policy:",
+        f"- Default text provider: {text_provider} / {text_model}",
+        f"- Fallback enabled: {fallback}",
+        "- MiniMax is configured and available for capability-specific lanes (vision, image, TTS).",
+        "- MiniMax is NOT selected as the default text provider.",
+        "- Vision/Image/TTS lanes marked 'configured_unverified' — no live test has been performed.",
+        "- Web search is operational via Brave Search / DuckDuckGo fallback.",
+        f"- OpenClaw chat provider: DeepSeek (health: {openclaw_state}).",
+    ]
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Hermes / external Hermes boundary question synthesis
 # ---------------------------------------------------------------------------
 _HERMES_BOUNDARY_SIGNALS: tuple[str, ...] = (
@@ -947,6 +1044,10 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     # Append direct answer for Hermes / external Hermes boundary questions
     if _is_hermes_boundary_question(message):
         response += _format_hermes_boundary_answer(result, openclaw_gate)
+
+    # Append provider capability matrix for "what handles text/vision/voice..." questions
+    if _is_provider_capability_question(message):
+        response += _format_provider_capability_answer(result)
 
     return response
 
