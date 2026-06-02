@@ -46,6 +46,7 @@ from app.services.max.runtime_truth_check import (
     should_run_whats_new_summary,
     run_whats_new_summary,
     format_whats_new_summary,
+    _is_performative_web_search_request,
 )
 from app.services.max.empire_module_knowledge import resolve_empire_module_question
 from app.services.max.ambiguity_gate import build_inventory_clarification, should_clarify_inventory_request
@@ -2177,6 +2178,39 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # via /v1/responses endpoint (function_calls returned alongside or instead of text)
         _tools = get_xai_tool_definitions() if request.image_filename else None
 
+        # Guard: Pre-execute web_search for performative search requests so the AI
+        # cannot fabricate pricing/current facts from training data before seeing results.
+        _pre_search_executed = False
+        _pre_search_entry = None
+        if not request.desk and _is_performative_web_search_request(request.message):
+            logger.info(f"[pre_search_guard] Pre-executing web_search for: {request.message[:80]}")
+            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+            search_result = await asyncio.to_thread(
+                execute_tool, search_tc, desk=request.desk, founder=founder
+            )
+            _pre_search_entry = _normalize_tool_result_entry(search_result)
+            _pre_search_executed = True
+            if search_result.success and search_result.result:
+                tool_summary = (
+                    f"[web_search] Result:\n"
+                    f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                )
+                messages.insert(-1, AIMessage(role="user", content=(
+                    "[SYSTEM: You must answer using only the verified web search data below. "
+                    "Do not fall back to training data. Cite sources from the search results "
+                    "with markdown links: [Title](url). "
+                    "If the search returned no relevant results, say so honestly.]\n\n"
+                    f"{tool_summary}\n\nQuestion: {request.message}"
+                )))
+            else:
+                messages.insert(-1, AIMessage(role="user", content=(
+                    "[SYSTEM: web_search was attempted for this query but returned no results "
+                    "or failed. You must tell the user that web_search is currently unavailable "
+                    "for this query. Do NOT fabricate pricing, current facts, or any data from "
+                    "training data. Say: 'web_search returned no results for this query — I "
+                    "cannot provide current pricing without verified search data.']"
+                )))
+
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
             timeout=45.0,
@@ -2210,7 +2244,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             _ac_context = {"pin": _extracted_pin}
 
         # Multi-turn tool loop: execute tools, feed results back, allow follow-up tools (max 3 rounds)
-        tool_results_list = []
+        tool_results_list = [_pre_search_entry] if _pre_search_entry else []
         final_content = response.content
         loop_messages = list(messages)
         current_response = response
@@ -2753,6 +2787,35 @@ async def chat_stream(request: ChatRequest):
     async def event_generator():
         model_used = "unknown"
         full_response = ""
+        # Guard: Pre-execute web_search for performative search requests before streaming
+        _stream_pre_search_entry = None
+        if not request.desk and _is_performative_web_search_request(request.message):
+            logger.info(f"[pre_search_guard:stream] Pre-executing web_search for: {request.message[:80]}")
+            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+            search_result = await asyncio.to_thread(
+                execute_tool, search_tc, desk=request.desk, founder=founder
+            )
+            _stream_pre_search_entry = _normalize_tool_result_entry(search_result)
+            if search_result.success and search_result.result:
+                tool_summary = (
+                    f"[web_search] Result:\n"
+                    f"{json.dumps(search_result.result, indent=2, default=str)[:4000]}"
+                )
+                messages.insert(-1, AIMessage(role="user", content=(
+                    "[SYSTEM: You must answer using only the verified web search data below. "
+                    "Do not fall back to training data. Cite sources from the search results "
+                    "with markdown links: [Title](url). "
+                    "If the search returned no relevant results, say so honestly.]\n\n"
+                    f"{tool_summary}\n\nQuestion: {request.message}"
+                )))
+            else:
+                messages.insert(-1, AIMessage(role="user", content=(
+                    "[SYSTEM: web_search was attempted for this query but returned no results "
+                    "or failed. You must tell the user that web_search is currently unavailable "
+                    "for this query. Do NOT fabricate pricing, current facts, or any data from "
+                    "training data. Say: 'web_search returned no results for this query — I "
+                    "cannot provide current pricing without verified search data.']"
+                )))
         try:
             async for chunk, m_used in ai_router.chat_stream(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, source=request.channel or "", conversation_id=request.conversation_id or ""):
                 model_used = m_used
@@ -2761,7 +2824,7 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {json.dumps({'type': 'text', 'content': safe_chunk})}\n\n"
 
             # Multi-turn tool loop: execute tools, allow follow-up tools (max 3 rounds)
-            tool_results_list = []
+            tool_results_list = [_stream_pre_search_entry] if _stream_pre_search_entry else []
             loop_messages = list(messages)
             current_text = full_response
 

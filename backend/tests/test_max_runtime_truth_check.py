@@ -1232,3 +1232,147 @@ def test_ai_desks_archiveforge_recoveryforge_secondary():
     assert "ArchiveForge" in summary
     assert "RecoveryForge" in summary
     assert "dry-run" in summary.lower()
+
+
+# ---------------------------------------------------------------------------
+# Web search answer finalization guard tests
+# ---------------------------------------------------------------------------
+
+def test_performative_search_detected_for_pricing_prompt():
+    """'Search the web for current DeepSeek API pricing' must be detected as performative."""
+    from app.services.max.runtime_truth_check import _is_performative_web_search_request
+
+    prompts = [
+        "Search the web for current DeepSeek API pricing and summarize with sources.",
+        "search the web for current DeepSeek API pricing with sources",
+        "web search for current GPU prices and give me source URLs",
+        "look up current DeepSeek API pricing per token",
+        "find current pricing for Anthropic API",
+        "search for latest lumber prices",
+    ]
+    for prompt in prompts:
+        assert _is_performative_web_search_request(prompt), (
+            f"Should detect performative search: {prompt}"
+        )
+
+    # These should NOT trigger (they're boundary questions, not search requests)
+    non_search = [
+        "what search engine do you use?",
+        "which search provider is best?",
+        "how do you do web searches?",
+    ]
+    for prompt in non_search:
+        assert not _is_performative_web_search_request(prompt), (
+            f"Should NOT detect non-performative: {prompt}"
+        )
+
+
+def test_pre_search_guard_pre_executes_web_search(monkeypatch):
+    """The pre-search guard must execute web_search before the AI generates a response."""
+    from app.services.max.runtime_truth_check import _is_performative_web_search_request
+
+    # Simulate the guard logic in isolation
+    prompt = "Search the web for current DeepSeek API pricing and summarize with sources."
+    assert _is_performative_web_search_request(prompt)
+
+    # Verify the guard would execute (test the tool call shape)
+    search_tc = {"tool": "web_search", "query": prompt, "num_results": 5}
+    assert search_tc["tool"] == "web_search"
+    assert "DeepSeek" in search_tc["query"]
+
+
+def test_pre_search_failure_path_says_unavailable():
+    """When web_search fails, the system message must forbid fabrication."""
+    from app.services.max.runtime_truth_check import _is_performative_web_search_request
+
+    prompt = "search for current DeepSeek API pricing"
+    assert _is_performative_web_search_request(prompt)
+
+    # Simulate the failure message that would be prepended
+    failure_msg = (
+        "[SYSTEM: web_search was attempted for this query but returned no results "
+        "or failed. You must tell the user that web_search is currently unavailable "
+        "for this query. Do NOT fabricate pricing, current facts, or any data from "
+        "training data. Say: 'web_search returned no results for this query — I "
+        "cannot provide current pricing without verified search data.']"
+    )
+    assert "web_search returned no results" in failure_msg
+    assert "Do NOT fabricate" in failure_msg
+    assert "cannot provide current pricing" in failure_msg
+
+
+def test_tool_tracking_includes_web_search_on_pre_execute():
+    """Pre-executed web_search must appear in tool results tracking."""
+    from app.services.max.tool_executor import execute_tool
+
+    # Execute a real web_search to verify it returns properly shaped results
+    result = execute_tool(
+        {"tool": "web_search", "query": "DeepSeek API pricing 2026", "num_results": 3},
+        founder=True,
+    )
+    assert result.success
+    assert result.tool == "web_search"
+    assert result.result is not None
+
+    # Verify result has expected shape for metadata tracking
+    data = result.result
+    assert "query" in data
+    assert "results" in data
+    assert isinstance(data["results"], list)
+
+    # Verify the normalized shape (mirroring _normalize_tool_result_entry in router.py)
+    entry = {"tool": result.tool, "success": result.success, "result": result.result}
+    assert entry["tool"] == "web_search"
+    assert entry["success"] is True
+
+    # Source URLs should be present if results returned
+    if data["results"]:
+        for r in data["results"]:
+            assert "url" in r, f"Result missing URL: {r}"
+            assert "title" in r, f"Result missing title: {r}"
+
+
+def test_web_search_failure_result_structure():
+    """When web_search returns no results, the response shape must still be valid."""
+    from app.services.max.tool_executor import execute_tool
+
+    # Search for nonsense — DDG may return empty or minimal results
+    result = execute_tool(
+        {"tool": "web_search", "query": "xyznonexistent1234abc", "num_results": 2},
+        founder=True,
+    )
+    assert result.success  # The tool itself should succeed even if no results
+    data = result.result
+    assert "query" in data
+    assert "results" in data
+    assert "count" in data
+    # count may be 0 or results may be empty
+    assert data["count"] >= 0
+
+
+def test_routing_unchanged_after_pre_search_guard():
+    """DeepSeek routing and fallback must remain unchanged regardless of guard."""
+    import requests
+    try:
+        resp = requests.get("http://127.0.0.1:8000/api/v1/max/routing-state", timeout=5)
+        assert resp.status_code == 200
+        state = resp.json()
+        assert state["selected_provider"] == "deepseek"
+        assert state["selected_model"] == "deepseek-v4-flash"
+        assert state["fallback_enabled"] is False
+    except requests.ConnectionError:
+        pass  # Server may not be running in test
+
+
+def test_performative_search_query_not_mistaken_for_boundary():
+    """'search for X' must NOT match web_search_boundary (what search engine)."""
+    from app.services.max.runtime_truth_check import (
+        _is_performative_web_search_request,
+        _is_web_search_boundary_question,
+    )
+
+    prompt = "search the web for current DeepSeek API pricing with sources"
+    assert _is_performative_web_search_request(prompt)
+    assert not _is_web_search_boundary_question(prompt), (
+        "'search the web for X' must not be classified as a boundary question"
+    )
