@@ -1045,6 +1045,85 @@ def _format_web_search_boundary_answer(result: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Performative web search request detection — "search for X", "look up Y"
+# These are NOT questions about the search tool; they are requests to perform
+# a search. Runtime truth is inspect-only and cannot execute them.
+# ---------------------------------------------------------------------------
+_PERFORMATIVE_WEB_SEARCH_SIGNALS: tuple[str, ...] = (
+    "search for",
+    "search current",
+    "search the web for",
+    "look up",
+    "find pricing",
+    "find current",
+    "web search for",
+    "do a web search",
+    "run a search",
+    "search and return",
+    "search with sources",
+    "google",
+    "search online",
+    "look online for",
+)
+
+
+def _is_performative_web_search_request(message: str | None) -> bool:
+    """Detect requests to actually perform a web search (not questions about search tools)."""
+    text = (message or "").lower().strip()
+    text = text.replace("\u2019", "'").replace("`", "'")
+    text = re.sub(r"\s+", " ", text)
+    if _is_web_search_boundary_question(message):
+        return False
+    return any(signal in text for signal in _PERFORMATIVE_WEB_SEARCH_SIGNALS)
+
+
+# ---------------------------------------------------------------------------
+# Multi-intent decomposition — detect all sub-intents in a combined prompt
+# and track which are answerable from runtime truth vs. need separate routing.
+# ---------------------------------------------------------------------------
+def _detect_sub_intents(message: str | None) -> dict[str, bool]:
+    """Decompose a message into recognized sub-intent categories."""
+    intents: dict[str, bool] = {}
+    intents["provider_capability"] = _is_provider_capability_question(message)
+    intents["ai_desks"] = _is_ai_desks_question(message)
+    intents["empire_priority"] = _is_empire_priority_question(message)
+    intents["hermes_boundary"] = _is_hermes_boundary_question(message)
+    intents["openclaw_boundary"] = is_openclaw_boundary_question(message)
+    intents["web_search_boundary"] = _is_web_search_boundary_question(message)
+    intents["performative_web_search"] = _is_performative_web_search_request(message)
+    intents["runtime_health"] = is_runtime_health_question(message)
+    return intents
+
+
+_RUNTIME_TRUTH_UNEXECUTABLE = {
+    "performative_web_search",
+}
+
+
+def _format_unexecuted_sub_intents(intents: dict[str, bool]) -> str:
+    """Format a notice about sub-intents that runtime truth cannot execute."""
+    unexecuted = [k for k in _RUNTIME_TRUTH_UNEXECUTABLE if intents.get(k)]
+    if not unexecuted:
+        return ""
+    lines = [
+        "",
+        "---",
+        "Unexecuted sub-intents:",
+    ]
+    if intents.get("performative_web_search"):
+        lines.append(
+            "- Web search portion not executed from this runtime truth response."
+        )
+        lines.append(
+            "  Re-issue as a separate prompt to trigger web_search, or ask"
+        )
+        lines.append(
+            '  "what search provider do you use?" for the search tier policy.'
+        )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # AI desks audit + Empire priority synthesis
 # ---------------------------------------------------------------------------
 _AI_DESKS_SIGNALS: tuple[str, ...] = (
@@ -1185,10 +1264,17 @@ def _format_ai_desks_answer(result: dict[str, Any]) -> str:
 
     lines.extend([
         "",
-        "Summary:",
-        "- 7 desks ready for guarded/manual/dry-run use (G/M/D/R).",
-        "- 1 desk partial (Hermes — gateway not running, cron paused).",
-        "- 4 desks ready for dry-run or manual action — publish/send/customer-contact require approval.",
+        "Summary (by evidence-backed operational status):",
+        "- 5 desks ready_for_guarded_execution: MAX Operations, Model Selector/Costs,",
+        "  OpenClaw, SupportForge, VendorOps",
+        "- 1 desk ready_for_founder_review: Channel Ops",
+        "- 2 desks ready_for_manual_action: Workroom (ForgeDesk), Pricing/Finance",
+        "- 3 desks ready_for_dry_run: Woodcraft, ArchiveForge, RecoveryForge",
+        "- 1 desk partial: Hermes (gateway not running, cron paused)",
+        "- 0 desks blocked",
+        "- 0 desks missing",
+        "",
+        "Gates and notes:",
         "- OpenClaw: Chat/health OK, task execution requires explicit founder approval + real task ID.",
         "- RecoveryForge batch processing is quota-limited (500/5hr, 1500/day soft cap).",
         "- ArchiveForge marketplace publishing is not verified — dry-run only.",
@@ -1359,6 +1445,10 @@ def format_runtime_truth_check(result: dict[str, Any], message: str | None = Non
     # Append Empire priority answer
     if _is_empire_priority_question(message):
         response += _format_empire_priority_answer(result)
+
+    # Flag unexecuted sub-intents (e.g. web search requests in combined prompts)
+    sub_intents = _detect_sub_intents(message)
+    response += _format_unexecuted_sub_intents(sub_intents)
 
     return response
 

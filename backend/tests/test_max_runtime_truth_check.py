@@ -1066,3 +1066,169 @@ def test_empire_priority_emphasizes_max_workroom_woodcraft():
 
     # Must have 5 numbered priorities
     assert "1." in answer and "2." in answer and "3." in answer and "4." in answer and "5." in answer
+
+
+# ---------------------------------------------------------------------------
+# Multi-intent decomposition + unexecuted sub-intent flagging
+# ---------------------------------------------------------------------------
+
+def test_combined_prompt_detects_web_search_sub_intent():
+    """Combined prompt with provider+desk+priority+web search must detect all sub-intents."""
+    from app.services.max.runtime_truth_check import (
+        _detect_sub_intents,
+        _is_performative_web_search_request,
+    )
+
+    prompt = (
+        "1. provider capability matrix "
+        "2. AI desks status "
+        "3. top priorities for Empire "
+        "4. external Hermes Telegram "
+        "5. web search for current DeepSeek API pricing with sources"
+    )
+
+    intents = _detect_sub_intents(prompt)
+    assert intents["provider_capability"], "provider_capability not detected"
+    assert intents["ai_desks"], "ai_desks not detected"
+    assert intents["empire_priority"], "empire_priority not detected"
+    assert intents["hermes_boundary"], "hermes_boundary not detected"
+    assert intents["performative_web_search"], "performative_web_search not detected"
+
+    # "web search for X" is a performative request, NOT a boundary question
+    assert not intents["web_search_boundary"], (
+        "'web search for X' should not match web_search_boundary (that's for "
+        "'what search engine do you use?')"
+    )
+
+    # Standalone detection
+    assert _is_performative_web_search_request(
+        "web search for current DeepSeek API pricing with sources"
+    )
+    assert _is_performative_web_search_request("search for latest GPU prices")
+    assert _is_performative_web_search_request("look up current lumber futures")
+    assert _is_performative_web_search_request("find current DeepSeek pricing online")
+
+    # Should NOT match questions about search tools
+    assert not _is_performative_web_search_request("what search engine do you use?")
+    assert not _is_performative_web_search_request("which search provider is best?")
+
+
+def test_runtime_truth_response_flags_unexecuted_web_search():
+    """Runtime truth response must explicitly flag web search as not executed."""
+    from app.services.max.runtime_truth_check import (
+        _detect_sub_intents,
+        _format_unexecuted_sub_intents,
+    )
+
+    # Simulate a combined prompt that has a web search request
+    prompt = (
+        "AI desks audit and priorities and "
+        "search for current DeepSeek API pricing with sources"
+    )
+    intents = _detect_sub_intents(prompt)
+    assert intents["performative_web_search"]
+
+    flag = _format_unexecuted_sub_intents(intents)
+    assert "Web search portion not executed from this runtime truth response" in flag
+    assert "re-issue" in flag.lower() or "separate" in flag.lower()
+
+    # A prompt without web search should produce no flag
+    intents_no_search = _detect_sub_intents("what are the AI desks and top priorities?")
+    assert not intents_no_search.get("performative_web_search")
+    assert _format_unexecuted_sub_intents(intents_no_search) == ""
+
+
+def test_full_format_includes_unexecuted_web_search_flag():
+    """format_runtime_truth_check must append unexecuted sub-intent notice."""
+    result = run_runtime_truth_check(public=False)
+    prompt = (
+        "provider capability matrix, AI desks status, priorities, "
+        "external Hermes Telegram, web search for current DeepSeek API pricing with sources"
+    )
+    formatted = format_runtime_truth_check(result, prompt)
+    assert "Web search portion not executed from this runtime truth response" in formatted
+    assert "Unexecuted sub-intents" in formatted
+
+
+# ---------------------------------------------------------------------------
+# AI desks status wording — no broad "ready"
+# ---------------------------------------------------------------------------
+
+def test_ai_desks_audit_no_broad_ready_language():
+    """AI desks must not use broad 'ready' without a specific status mapping."""
+    from app.services.max.runtime_truth_check import _format_ai_desks_answer
+
+    answer = _format_ai_desks_answer({})
+
+    # Must use the specific status taxonomy
+    assert "ready_for_guarded_execution" in answer
+    assert "ready_for_founder_review" in answer
+    assert "ready_for_manual_action" in answer
+    assert "ready_for_dry_run" in answer
+    assert "partial" in answer
+
+    # The old broad "X desks ready" pattern must not appear
+    import re
+    broad_ready_pattern = re.compile(r"\d+\s+desks?\s+ready\b")
+    matches = broad_ready_pattern.findall(answer)
+    assert not matches, (
+        f"Found broad 'ready' language without specific status mapping: {matches}"
+    )
+
+    # Status key must map to specific statuses only
+    status_key_section = answer.split("Summary")[0]
+    assert "G=ready_for_guarded_execution" in status_key_section
+    assert "X=missing" in status_key_section
+
+
+def test_ai_desks_audit_openclaw_approval_gated():
+    """OpenClaw desk must remain approval-gated in the audit output."""
+    from app.services.max.runtime_truth_check import _format_ai_desks_answer
+
+    answer = _format_ai_desks_answer({})
+
+    # OpenClaw status is ready_for_guarded_execution (shown as G in table,
+    # full status name in detailed section or summary)
+    assert "ready_for_guarded_execution" in answer, (
+        "OpenClaw must appear as ready_for_guarded_execution in audit"
+    )
+
+    # Verify OpenClaw detail section mentions approval gating
+    oc_detailed_start = answer.find("\n  OpenClaw —")
+    assert oc_detailed_start >= 0, "OpenClaw detailed section not found"
+    oc_detailed = answer[oc_detailed_start:oc_detailed_start + 500]
+
+    assert "approval" in oc_detailed.lower()
+    assert "task ID" in oc_detailed or "task execution requires" in oc_detailed or "founder" in oc_detailed.lower()
+
+
+def test_ai_desks_archiveforge_recoveryforge_secondary():
+    """ArchiveForge and RecoveryForge must remain dry-run/secondary in audit."""
+    from app.services.max.runtime_truth_check import _format_ai_desks_answer
+
+    answer = _format_ai_desks_answer({})
+
+    # Both must be ready_for_dry_run (shown as D in table, "Ready For Dry Run" in detail)
+    for desk_name in ["ArchiveForge", "RecoveryForge"]:
+        # Find the detailed section for this desk (title-cased status names)
+        detail_marker = f"\n  {desk_name} —"
+        idx = answer.find(detail_marker)
+        assert idx >= 0, f"{desk_name} detailed section not found"
+        section = answer[idx:idx + 300]
+
+        assert "Ready For Dry Run" in section, (
+            f"{desk_name} should be Ready For Dry Run in detailed section, got: {section[:200]}"
+        )
+
+        # Must NOT be guarded execution
+        assert "Ready For Guarded Execution" not in section, (
+            f"{desk_name} must not be guarded execution"
+        )
+
+    # Summary must mention both as dry-run
+    summary_start = answer.find("Summary")
+    summary = answer[summary_start:] if summary_start >= 0 else answer
+
+    assert "ArchiveForge" in summary
+    assert "RecoveryForge" in summary
+    assert "dry-run" in summary.lower()
