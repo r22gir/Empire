@@ -1100,7 +1100,12 @@ def _is_current_events_request(message: str | None) -> bool:
 
 
 def _live_lookup_router_response(request: ChatRequest) -> ChatResponse:
-    query = (request.message or "").strip()
+    raw_query = (request.message or "").strip()
+    # Carry-forward topic context from prior turns so that short follow-up
+    # questions (e.g. "current elections" after Colombia) keep their anchor.
+    from app.services.max.search_context import build_search_query
+    built = build_search_query(raw_query, history=request.history)
+    query = built["query"]
     result = execute_tool({"tool": "web_search", "query": query, "num_results": 5})
     if not result.success:
         return ChatResponse(
@@ -1731,6 +1736,9 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
     if not request.desk and not request.image_filename and _is_hermes_channel_status_request(request.message):
         return _hermes_channel_status_response(request)
 
+    if not request.desk and not request.image_filename and _is_voice_status_request(request.message):
+        return _voice_status_response(request)
+
     if not request.desk and not request.image_filename and _prefer_archiveforge_over_drawing(request.message) and _is_hermes_prefill_request(request.message):
         return _hermes_prefill_response(request)
 
@@ -2183,8 +2191,15 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         _pre_search_executed = False
         _pre_search_entry = None
         if not request.desk and _is_performative_web_search_request(request.message):
-            logger.info(f"[pre_search_guard] Pre-executing web_search for: {request.message[:80]}")
-            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+            from app.services.max.search_context import build_search_query
+            _built = build_search_query(request.message, history=request.history)
+            _search_query = _built["query"]
+            if _built["context_injected"]:
+                logger.info(
+                    f"[pre_search_guard] Topic context injected: {_built['context_terms']} → query: {_search_query[:120]}"
+                )
+            logger.info(f"[pre_search_guard] Pre-executing web_search for: {_search_query[:80]}")
+            search_tc = {"tool": "web_search", "query": _search_query, "num_results": 5}
             search_result = await asyncio.to_thread(
                 execute_tool, search_tc, desk=request.desk, founder=founder
             )
@@ -2374,9 +2389,16 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Guard: Enforce web_search for factual questions (before quality gate, before model can hallucinate)
         tools_used_names = [r.get("tool") if isinstance(r, dict) else r.tool for r in tool_results_list]
         if is_factual_question(request.message) and "web_search" not in tools_used_names:
-            logger.info(f"[factual_guard] Auto-invoking web_search for factual query: {request.message[:80]}")
+            from app.services.max.search_context import build_search_query
+            _fg_built = build_search_query(request.message, history=request.history)
+            _fg_query = _fg_built["query"]
+            if _fg_built["context_injected"]:
+                logger.info(
+                    f"[factual_guard] Topic context injected: {_fg_built['context_terms']} → query: {_fg_query[:120]}"
+                )
+            logger.info(f"[factual_guard] Auto-invoking web_search for factual query: {_fg_query[:80]}")
             # Execute web_search synchronously via thread pool
-            search_tc = {"tool": "web_search", "query": request.message, "num_results": 5}
+            search_tc = {"tool": "web_search", "query": _fg_query, "num_results": 5}
             search_result = await asyncio.to_thread(
                 execute_tool, search_tc, desk=request.desk, access_context=_ac_context, founder=founder
             )
@@ -2404,6 +2426,26 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # Guard: GPU safety output fail-safe — replace model output recommending risky commands
         final_content = _apply_gpu_safety_output_guardrail(request.message, final_content)
         final_content = _sanitize_internal_leakage_text(final_content)
+
+        # ── Code-mode honesty guardrail ─────────────────────────────────
+        # If MAX's text claims a repo write action (e.g. "I just wrote the
+        # file") without also surfacing a real code-task ID, the file on
+        # disk is unchanged. Flag the response so the founder knows this
+        # was a draft, not a verified change. (Drawn from code_mode_honesty.)
+        try:
+            from app.services.max.code_mode_honesty import check_code_mode_honesty, format_code_mode_banner
+            _cm_check = check_code_mode_honesty(
+                final_content,
+                tool_results=tool_results_list,
+            )
+            if _cm_check["flagged"]:
+                final_content = final_content + format_code_mode_banner(_cm_check)
+                logger.warning(
+                    f"[code_mode_honesty] Flagged unverified write claim: "
+                    f"{_cm_check['matched_claim']!r}"
+                )
+        except Exception as _cm_err:
+            logger.debug(f"Code-mode honesty check failed (non-fatal): {_cm_err}")
 
         # Log to accuracy monitor (all channels, not just web-sourced)
         if qr.issues or not tool_results_list:
@@ -2535,6 +2577,34 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             if quality_suffix:
                 final_content += quality_suffix
             quality_badge = get_quality_badge(quality_result)
+
+            # ── Quality explainability ────────────────────────────────────
+            # Include the reason codes from the underlying
+            # response_quality_engine so the UI can show the founder WHY
+            # a quality issue was flagged (instead of just the generic
+            # "Quality issue detected" label that contradicts MAX's text
+            # response). This closes the loop where the UI says one thing
+            # and MAX's text says another.
+            try:
+                _qr_explain = []
+                for _iss in (qr.issues or []):
+                    _qr_explain.append({
+                        "check": _iss.check,
+                        "severity": _iss.severity.value if hasattr(_iss.severity, "value") else str(_iss.severity),
+                        "message": _iss.message,
+                        "auto_fixed": _iss.auto_fixed,
+                        "fix_description": _iss.fix_description,
+                    })
+                if _qr_explain and isinstance(quality_badge, dict):
+                    quality_badge = {
+                        **quality_badge,
+                        "issues": _qr_explain,
+                        "issue_count": len(_qr_explain),
+                        "checks_performed_count": len(qr.checks_performed),
+                        "blocked": qr.blocked,
+                    }
+            except Exception as _qe:
+                logger.debug(f"Quality explainability enrichment failed (non-fatal): {_qe}")
 
             # Log quality metrics with response time
             _response_time_ms = (_time_mod.time() - _chat_start) * 1000
@@ -4815,3 +4885,117 @@ async def get_evaluation_stats(days: int = Query(default=30, ge=1, le=365)):
         "frustration_hotspots": evaluation_service.get_frustration_hotspots(days=days),
         "recent_evaluations": evaluation_service.get_recent_evaluations(limit=20),
     }
+
+
+@router.get("/voice/status")
+async def get_voice_status():
+    """Canonical voice capability truth for MAX.
+
+    Single source of truth used by both the MAX chat backend and the
+    Empire Command Center UI. UI labels like "Voice STT ready · TTS
+    blocked" and MAX's voice-status answers both read from this endpoint
+    so they cannot disagree.
+
+    Returns 7 fields (the ones the founder asked for) plus
+    last_verified_at and a human-readable summary:
+        telegram_text_send      — can MAX send text to Telegram?
+        telegram_voice_receive  — can MAX receive + transcribe voice?
+        telegram_voice_send     — can MAX reply with a voice note?
+        stt_provider            — which STT provider is configured?
+        tts_provider            — which TTS provider is configured?
+        auto_voice_reply        — is auto-voice-reply enabled end-to-end?
+        last_verified_at        — ISO timestamp of when this was computed
+        evidence                — what runtime checks were run
+        summary                 — short human-readable summary
+    """
+    from app.services.max.voice_capability_truth import get_voice_capability_status
+
+    return get_voice_capability_status()
+
+
+# ── Voice status detection for chat ──────────────────────────────────────────
+# When a founder asks MAX "is voice working?" or "what's the status of TTS?",
+# MAX must answer from the canonical voice truth endpoint, not from inference.
+VOICE_STATUS_REQUEST_MARKERS = (
+    "voice status",
+    "voice capability",
+    "voice ready",
+    "tts status",
+    "stt status",
+    "is tts working",
+    "is stt working",
+    "is voice working",
+    "voice pipeline",
+    "voice working",
+    "tts working",
+    "stt working",
+    "voice configured",
+    "tts configured",
+    "stt configured",
+    "voice blocked",
+    "tts blocked",
+    "stt blocked",
+    "voice missing",
+    "tts missing",
+    "stt missing",
+    "voice check",
+    "check voice",
+    "tts check",
+    "stt check",
+    "voice capability check",
+    "voice status check",
+)
+
+
+def _is_voice_status_request(message: str | None) -> bool:
+    text = (message or "").lower()
+    if not text.strip():
+        return False
+    return any(marker in text for marker in VOICE_STATUS_REQUEST_MARKERS)
+
+
+def _voice_status_response(request: ChatRequest) -> ChatResponse:
+    from app.services.max.voice_capability_truth import get_voice_capability_status
+
+    status = get_voice_capability_status()
+    stt = status["stt_provider"]
+    tts = status["tts_provider"]
+    voice_send = status["telegram_voice_send"]
+    auto = status["auto_voice_reply"]
+
+    if voice_send["verified"]:
+        verdict = "Voice is fully ready."
+    else:
+        bits = []
+        if not stt["verified"]:
+            bits.append("STT is not configured (GROQ_API_KEY missing)")
+        if not tts["verified"]:
+            bits.append("TTS is not configured (XAI_API_KEY missing)")
+        if not auto["auto_voice_reply_enabled"]:
+            bits.append("auto_voice_reply is disabled on the bot")
+        if not bits:
+            bits.append("Voice send pipeline is not configured")
+        verdict = "Voice is NOT fully ready. " + "; ".join(bits) + "."
+
+    provider_line = []
+    if stt["verified"]:
+        provider_line.append(f"STT provider: {stt['provider']}")
+    if tts["verified"]:
+        provider_line.append(f"TTS provider: {tts['provider']}")
+    if not provider_line:
+        provider_line.append("No STT/TTS providers configured.")
+
+    response = (
+        f"{verdict}\n"
+        f"{' · '.join(provider_line)}\n"
+        f"Summary: {status['summary']}\n"
+        f"Last verified: {status['last_verified_at']}"
+    )
+
+    return ChatResponse(
+        response=response,
+        model_used="voice-capability-truth",
+        fallback_used=False,
+        tool_results=[{"tool": "voice_capability_truth", "success": True, "result": status}],
+        metadata=_response_metadata(request.channel, skill_used="voice_capability_truth"),
+    )

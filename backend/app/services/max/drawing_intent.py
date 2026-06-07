@@ -15,7 +15,6 @@ DRAWING_KEYWORDS = (
     "render",
     "sketch",
     "elevation",
-    "plan",
     "isometric",
     "section view",
     "section drawing",
@@ -24,6 +23,22 @@ DRAWING_KEYWORDS = (
     "pdf drawing",
     "bench drawing",
     "cad",
+)
+
+# Drawing-specific multi-token "plan" phrases. Bare "plan" is intentionally NOT
+# in DRAWING_KEYWORDS: it appears in phrases like "plan mode", "make a plan",
+# "Telegram voice pipeline plan", and routes them all to drawing-router.
+DRAWING_PLAN_PHRASES = (
+    "plan view",
+    "plan drawing",
+    "floor plan",
+    "site plan",
+    "plan section",
+    "plan elevation",
+    "in plan",
+    "in elevation",
+    "elevation plan",
+    "section plan",
 )
 
 VIEW_KEYWORDS = {
@@ -99,7 +114,15 @@ def is_drawing_intent(text: str) -> bool:
     """Returns True if text requests a drawing/rendering action.
 
     Negation patterns (not asking you to draw, etc.) suppress drawing intent.
+
+    Note: "plan" is intentionally NOT a bare drawing keyword. The router
+    historically routed "plan mode, propose Telegram voice pipeline" to the
+    drawing handler because the word "plan" appeared anywhere in the message.
+    Now the router requires a strong draw pattern (draw a X, draw me X) OR
+    a drawing-specific multi-token phrase (floor plan, plan view, etc.).
     """
+    if not text:
+        return False
     lowered = text.lower()
 
     # Suppress drawing intent when user explicitly rejects drawing
@@ -124,6 +147,26 @@ def is_drawing_intent(text: str) -> bool:
     if any(neg in lowered for neg in negation_patterns):
         return False
 
+    # Suppress drawing intent when the user is in plan mode / proposal mode.
+    # These phrases describe a planning conversation, not a drawing request.
+    plan_mode_patterns = (
+        "plan mode",
+        "propose a plan",
+        "make a plan",
+        "write a plan",
+        "draft a plan",
+        "planning the",
+        "plan a ",
+        "plans for ",
+        "plan for ",
+        "roadmap",
+        "pipeline plan",
+        "voice pipeline plan",
+        "telegram pipeline plan",
+    )
+    if any(pat in lowered for pat in plan_mode_patterns):
+        return False
+
     # Strong drawing patterns: "draw a <thing>" or "draw me"
     # These are unambiguous — user is requesting creation of something
     strong_draw_patterns = (
@@ -134,6 +177,10 @@ def is_drawing_intent(text: str) -> bool:
         "draw this ",
     )
     if any(pattern in lowered for pattern in strong_draw_patterns):
+        return True
+
+    # Drawing-specific multi-token "plan" phrases. Bare "plan" alone is NOT enough.
+    if any(phrase in lowered for phrase in DRAWING_PLAN_PHRASES):
         return True
 
     return any(keyword in lowered for keyword in DRAWING_KEYWORDS)
