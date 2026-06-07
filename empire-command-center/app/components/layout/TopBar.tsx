@@ -78,7 +78,7 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate }: Prop
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [providerRows, setProviderRows] = useState<ProviderRow[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('minimax');
-  const [selectedModelName, setSelectedModelName] = useState('MiniMax-M2.7');
+  const [selectedModelName, setSelectedModelName] = useState('MiniMax-M3');
   const [switchingProvider, setSwitchingProvider] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -231,20 +231,25 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate }: Prop
 
       {/* Right controls */}
       <div className="flex items-center gap-2 md:gap-3">
-        {/* Model selector — hidden on mobile */}
-        <div ref={modelRef} className="relative hidden md:block">
+        {/* Model selector — visible on all widths (compact on mobile) */}
+        <div ref={modelRef} className="relative">
           <button
             onClick={() => setShowModelPicker(!showModelPicker)}
-            className="empire-card flex items-center gap-2 !py-2 !px-3 text-[11px] font-bold font-mono"
+            className="empire-card flex items-center gap-1.5 md:gap-2 !py-2 !px-2 md:!px-3 text-[11px] font-bold font-mono"
+            aria-label={`Current model: ${selectedProvider} ${selectedModelName}. Click to switch.`}
+            title={`${selectedProvider} · ${selectedModelName}`}
           >
-            <span className="w-2 h-2 rounded-full" style={{ background: PROVIDER_COLORS[selectedProvider] || '#b8960c' }} />
-            <span style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
-              {selectedProvider} · {selectedModelName}
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: PROVIDER_COLORS[selectedProvider] || '#b8960c' }} />
+            <span className="hidden sm:inline" style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
+              {selectedProvider}
             </span>
-            <ChevronDown size={12} className="text-[var(--faint)]" />
+            <span style={{ color: PROVIDER_COLORS[selectedProvider] || '#b8960c' }}>
+              · {selectedModelName}
+            </span>
+            <ChevronDown size={12} className="text-[var(--faint)] shrink-0" />
           </button>
           {showModelPicker && (
-            <div className="absolute top-[46px] right-0 w-[320px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
+            <div className="absolute top-[46px] right-0 w-[calc(100vw-24px)] md:w-[320px] max-w-[380px] bg-[var(--panel)] border border-[var(--border)] rounded-[var(--radius)] shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[200] overflow-hidden py-1">
               {providerRows.map((row) => {
                 const canonical = row.provider_canonical || row.id;
                 const selected = canonical === selectedProvider;
