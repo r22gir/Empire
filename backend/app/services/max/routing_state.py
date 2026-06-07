@@ -51,7 +51,7 @@ PROVIDER_DISPLAY_NAMES: dict[str, str] = {
 }
 
 PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    "minimax": "MiniMax-M2.7",
+    "minimax": "MiniMax-M3",
     "deepseek": "deepseek-v4-flash",
     "qwen": "qwen-plus",
     "openrouter": "openai/gpt-4o-mini",
@@ -119,7 +119,7 @@ CLOUD_PROVIDERS: set[str] = {
 }
 
 KNOWN_MODELS: dict[str, list[str]] = {
-    "minimax": ["MiniMax-M2.7"],
+    "minimax": ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
     "deepseek": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
     "qwen": ["qwen-plus", "qwen-max", "qwen-turbo"],
     "openrouter": ["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"],

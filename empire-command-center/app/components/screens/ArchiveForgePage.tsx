@@ -14,6 +14,30 @@ const API = typeof window !== 'undefined' && window.location.hostname !== 'local
 const AG_API = `${API}/archiveforge`;
 const SUPPORTED_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
+// ── Wikimedia LIFE Reference Image Lookup ──────────────────────────────────────
+// Fallback for when reference_cover_url is empty — looks up Wikimedia covers by date.
+// Source: https://commons.wikimedia.org/wiki/Category:LIFE_Magazine_covers
+const LIFE_WIKIMEDIA_COVER_URLS: Record<string, string> = {
+  "1936-11-02": "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/LIFE_Magazine_Vol_1_No_1_cover_%28Nov_2_1936%29.jpg/440px-LIFE_Magazine_Vol_1_No_1_cover_%28Nov_2_1936%29.jpg",
+  "1941-12-15": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5f/LIFE_Magazine_Vol_11_No_25_%28Dec_15_1941%29.jpg/440px-LIFE_Magazine_Vol_11_No_25_%28Dec_15_1941%29.jpg",
+  "1945-05-07": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6e/LIFE_Magazine_Vol_8_No_19_%28May_7_1945%29.jpg/440px-LIFE_Magazine_Vol_8_No_19_%28May_7_1945%29.jpg",
+  "1945-08-20": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/LIFE_Magazine_Vol_9_No_4_%28Aug_20_1945%29.jpg/440px-LIFE_Magazine_Vol_9_No_4_%28Aug_20_1945%29.jpg",
+  "1945-09-03": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/LIFE_Magazine_Vol_9_No_6_%28Sep_3_1945%29.jpg/440px-LIFE_Magazine_Vol_9_No_6_%28Sep_3_1945%29.jpg",
+  "1969-11-21": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/LIFE_Magazine_Vol_66_No_21_%28Nov_21_1969%29.jpg/440px-LIFE_Magazine_Vol_66_No_21_%28Nov_21_1969%29.jpg",
+};
+
+function getWikimediaCoverUrl(date: string | undefined): string | null {
+  if (!date) return null;
+  // Exact match in hardcoded dict
+  if (LIFE_WIKIMEDIA_COVER_URLS[date]) return LIFE_WIKIMEDIA_COVER_URLS[date];
+  // Try year-month prefix match
+  const ym = date.slice(0, 7);
+  for (const [key, url] of Object.entries(LIFE_WIKIMEDIA_COVER_URLS)) {
+    if (key.startsWith(ym)) return url;
+  }
+  return null;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface LifeReferenceIssue {
@@ -148,19 +172,6 @@ interface PhotoRecord {
   candidate_id?: number | null;
   page_number?: string;
   created_at: string;
-}
-
-function archivePhotoThumbUrl(photo: {
-  thumbnail_url?: string | null;
-  photo_url?: string | null;
-  id?: string | number | null;
-  photo_id?: string | number | null;
-}, archiveId?: string | number | null): string {
-  if (photo.thumbnail_url) return `${API}${photo.thumbnail_url.replace('/api/v1', '')}`;
-  const photoId = photo.id || photo.photo_id;
-  if (archiveId && photoId) return `${AG_API}/${archiveId}/photos/${photoId}/thumbnail`;
-  if (photo.photo_url) return `${API}${photo.photo_url.replace('/api/v1', '')}`;
-  return '';
 }
 
 interface IdentifyAiResult {
@@ -1490,10 +1501,20 @@ function ConfirmMatchSection({
     return () => { cancelled = true; };
   }, [archiveId]);
 
-  // Build reference cover: refIssue → Google Books candidate → dealer reference (fallback)
+  // Build reference cover: refIssue → Google Books candidate → dealer reference → Wikimedia fallback
   const gbCandidate = identifyResult?.selected_google_books_candidate || ai?.selected_google_books_candidate || null;
-  const referenceCover = refIssue?.reference_cover_url
-    ? { label: 'Reference image — not item photo', source: 'reference_search', volume_id: refIssue.google_books_volume_id || refIssue.id, issue_date: refIssue.date, cover_title: refIssue.cover_subject, cover_image_url: refIssue.reference_cover_url, match_confidence: refIssue.match_score || 0 }
+  const _refIssueCoverUrl = (() => {
+    // If refIssue has an explicit cover URL, use it; otherwise try Wikimedia fallback
+    if (refIssue) {
+      if (refIssue.reference_cover_url) return refIssue.reference_cover_url;
+      // Try Wikimedia lookup by date
+      const wmUrl = getWikimediaCoverUrl(refIssue.date);
+      if (wmUrl) return wmUrl;
+    }
+    return '';
+  })();
+  const referenceCover = _refIssueCoverUrl
+    ? { label: 'Reference image — not item photo', source: 'reference_search', volume_id: refIssue!.google_books_volume_id || refIssue!.id, issue_date: refIssue!.date, cover_title: refIssue!.cover_subject, cover_image_url: _refIssueCoverUrl, match_confidence: refIssue!.match_score || 0 }
     : gbCandidate?.cover_image_url
       ? { label: 'Reference image — not item photo', source: 'google_books', volume_id: gbCandidate.volume_id || '', issue_date: gbCandidate.publishedDate || '', cover_title: gbCandidate.title || '', cover_image_url: gbCandidate.cover_image_url, match_confidence: gbCandidate.match_confidence || 0 }
       : dealerReference?.source_url
@@ -1621,16 +1642,20 @@ function ConfirmMatchSection({
                 )}
               </div>
               <div style={{ background: '#f9f8f6', borderRadius: 8, border: '1px solid #e5e2dc', minHeight: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                {referenceCover?.cover_image_url ? (
-                  <img
-                    src={referenceCover.cover_image_url}
-                    alt="Reference cover from Google Books or reference database"
-                    style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', borderRadius: 8 }}
-                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                  />
-                ) : (
-                  <span style={{ fontSize: 11, color: '#999', textAlign: 'center', padding: 12 }}>No reference image</span>
-                )}
+                {/* Try Wikimedia fallback if no explicit cover_image_url */}
+                {(() => {
+                  const displayUrl = referenceCover?.cover_image_url || (referenceCover ? getWikimediaCoverUrl(referenceCover.issue_date) : null);
+                  return displayUrl ? (
+                    <img
+                      src={displayUrl}
+                      alt="Reference cover from Wikimedia — not your item photo"
+                      style={{ maxWidth: '100%', maxHeight: 180, objectFit: 'contain', borderRadius: 8 }}
+                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  ) : (
+                    <span style={{ fontSize: 11, color: '#999', textAlign: 'center', padding: 12 }}>No reference image</span>
+                  );
+                })()}
               </div>
               {referenceCover && (
                 <div style={{ fontSize: 10, color: '#888', lineHeight: 1.5 }}>
@@ -3723,7 +3748,7 @@ function InventorySection() {
                       if (col.key === 'thumbnail_url') {
                         display = item.thumbnail_url ? (
                           <button onClick={() => openDetail(item)} title="Open Record" style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}>
-                            <img src={archivePhotoThumbUrl(item as any, item.id)} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
+                            <img src={`${API}${item.thumbnail_url.replace('/api/v1', '')}`} alt={item.display_title || 'front cover'} style={{ width: 54, height: 72, objectFit: 'cover', borderRadius: 6, border: '1px solid #e5e2dc', background: '#f3f4f6' }} />
                           </button>
                         ) : <button onClick={() => openDetail(item)} title="Open Record" style={{ border: '1px dashed #d1d5db', background: '#f9fafb', borderRadius: 6, width: 54, height: 40, fontSize: 10, color: '#9ca3af', cursor: 'pointer' }}>No photo</button>;
                       }

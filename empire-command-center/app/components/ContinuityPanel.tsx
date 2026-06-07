@@ -51,13 +51,11 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
   const loading = pendingAction !== null;
 
   const load = async (runAudit = true) => {
-    const [statusRes, scoresRes] = await Promise.all([
-      fetch(API + '/max/status', { cache: 'no-store' }),
-      fetch(API + '/max/evaluation/scores?limit=5', { cache: 'no-store' }),
-    ]);
+    const statusRes = await fetch(API + '/max/status', { cache: 'no-store' });
     if (!statusRes.ok) throw new Error('MAX status refresh failed.');
     setStatus(await statusRes.json());
-    if (scoresRes.ok) setScores((await scoresRes.json()).scores || []);
+    const scoresRes = await fetch(API + '/max/evaluation/scores?limit=5', { cache: 'no-store' }).catch(() => null);
+    if (scoresRes?.ok) setScores((await scoresRes.json()).scores || []);
     if (runAudit) {
       const auditRes = await fetch(API + '/max/chat', {
         method: 'POST',
@@ -96,8 +94,9 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
   const registryTone: Tone = !status?.registry?.registry_version || status?.registry?.last_error || status?.registry_reload_requires_restart ? 'bad' : 'ok';
   const scoreTone: Tone = Number(latestScore ?? 1) < 0.6 ? 'warn' : 'ok';
   const registryLabel = registryTone === 'ok' ? 'Registry OK' : `Registry ${status?.registry?.registry_version || 'unknown'}`;
+  const liveTruthFresh = Boolean(currentCommit && startupCommit && currentCommit === startupCommit && status?.registry?.registry_version && !status?.registry?.last_error);
   const handoffLabel = runtime.restart_required === undefined
-    ? 'Handoff unknown'
+    ? liveTruthFresh ? 'Live truth fresh' : 'Handoff unknown'
     : runtime.restart_required
       ? 'Handoff restart needed'
       : 'Handoff fresh';
@@ -236,7 +235,7 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
         {field('current commit', currentCommit)}
         {handoffCommit && field('handoff commit', handoffCommitDiffers ? `${handoffCommit} (stale)` : handoffCommit)}
         {startupCommit && field('startup commit', startupCommitDiffers ? `${startupCommit} (differs from current)` : startupCommit)}
-        {field('handoff truth', runtime.restart_required === undefined ? 'unknown' : runtime.restart_required ? 'restart needed' : 'fresh')}
+        {field('handoff truth', runtime.restart_required === undefined ? liveTruthFresh ? 'live truth fresh' : 'unknown' : runtime.restart_required ? 'restart needed' : 'fresh')}
         {field('5-score trend', avgScore === null ? 'none' : `${avgScore.toFixed(2)} ${avgScore < 0.6 ? 'down' : 'stable'}`)}
         {field('active skills', (status?.active_skill_hooks || []).join(', ') || 'none')}
       </div>

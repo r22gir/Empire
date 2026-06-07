@@ -1,6 +1,15 @@
-export const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+function resolveApiBase(): string {
+  if (typeof window === 'undefined') {
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+  }
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
+    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+  }
+  return 'https://api.empirebox.store/api/v1';
+}
+
+export const API = resolveApiBase();
 
 export const API_BASE = API.replace(/\/api\/v1\/?$/, '');
 
