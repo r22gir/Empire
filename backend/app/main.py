@@ -168,6 +168,11 @@ load_router("app.routers.inventory", "/api/v1", ["inventory"])
 # load_router("app.routers.jobs", "/api/v1", ["jobs"])  # replaced by jobs_unified
 load_router("app.routers.jobs_unified", "/api/v1", ["jobs-unified"])
 
+# Customer Journey Linkage MVP — read-only endpoints
+# (mounted at /api/v1 so the paths /customers/{id}/journey, /quotes/{id}/invoice,
+# /invoices/{id}/quote, /journey/backfill-audit are available)
+load_router("app.routers.journey", "/api/v1", ["journey"])
+
 # LuxeForge FREE — Public intake portal
 load_router("app.routers.intake_auth", "/api/v1/intake", ["intake"])
 

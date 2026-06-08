@@ -33,6 +33,9 @@ npm-debug.log*
 # Local test results
 **/empire_test_results.json
 
+# Customer journey backfill audit (regenerable; tracked in the repo as generator only)
+backend/data/journey_backfill_audit.json
+
 # Max temp files
 /max
 
