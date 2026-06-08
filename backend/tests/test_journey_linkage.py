@@ -283,6 +283,8 @@ def test_run_backfill_audit_returns_audit_dict(in_memory_db):
         assert "anonymous" in tags
         assert "dangling_invoice" in tags
     finally:
+        # Reset env override so subsequent tests see the live DB
+        _reset_db_path_env()
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
@@ -430,3 +432,11 @@ def in_memory_db_path_for(in_memory_con):
     # Use an env override so subsequent _resolve_db_path returns this
     os.environ["EMPIRE_DB_PATH"] = path
     return path
+
+
+def _reset_db_path_env():
+    """Reset EMPIRE_DB_PATH to the live path. Call this at the end of
+    any test that touched the env var so subsequent tests see the
+    real DB.
+    """
+    os.environ.pop("EMPIRE_DB_PATH", None)

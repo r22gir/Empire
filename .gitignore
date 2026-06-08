@@ -36,6 +36,9 @@ npm-debug.log*
 # Customer journey backfill audit (regenerable; tracked in the repo as generator only)
 backend/data/journey_backfill_audit.json
 
+# Customer journey review queue snapshot (regenerable; tracked in the repo as generator only)
+backend/data/journey_review_queue.json
+
 # Max temp files
 /max
 
