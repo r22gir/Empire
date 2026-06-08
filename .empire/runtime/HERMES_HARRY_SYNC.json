@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "pilot_status": "active",
+  "last_checked_at": "2026-06-08T01:04:16.833046+00:00",
+  "canonical_repo": "/home/rg/empire-repo-main",
+  "stale_repo": "/home/rg/empire-repo",
+  "backend_commit": "520188f",
+  "git_head": "520188f",
+  "hermes_desktop": {
+    "version": "Hermes Agent v0.16.0 (2026.6.5) \u00b7 upstream cb83149d\nProject: /home/rg/.hermes/hermes-agent\nPython: 3.11.15\nOpenAI SDK: 2.24.0\nUpdate available: 16 commits behind \u2014 run 'hermes update'",
+    "doctor_clean": false,
+    "doctor_lines": [
+      "",
+      "\u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510",
+      "\u2502                 \ud83e\ude7a Hermes Doctor                        \u2502",
+      "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518",
+      "",
+      "\u25c6 Security Advisories",
+      "  \u2713 No active security advisories",
+      "",
+      "\u25c6 Python Environment",
+      "  \u2713 Python 3.11.15",
+      "  \u2713 Virtual environment active",
+      "  \u2713 Version files consistent (0.16.0)",
+      "",
+      "\u25c6 Required Packages",
+      "  \u2713 OpenAI SDK",
+      "  \u2713 Rich (terminal UI)",
+      "  \u2713 python-dotenv",
+      "  \u2713 PyYAML",
+      "  \u2713 HTTPX",
+      "  \u2713 Croniter (cron expressions) (optional)",
+      "  \u2713 python-telegram-bot (optional)",
+      "  \u2713 discord.py (optional)",
+      "",
+      "\u25c6 Configuration Files",
+      "  \u2713 ~/.hermes/.env file exists",
+      "  \u2713 API key or custom endpoint configured",
+      "  \u2713 ~/.hermes/config.yaml exists",
+      "  \u2713 Config version up to date (v28)",
+      "",
+      "\u25c6 xAI Model Retirement (May 15, 2026)"
+    ]
+  },
+  "harry_opencode": {
+    "service": {
+      "service_running": true,
+      "service_active_word": "active",
+      "last_journal_line": "Jun 07 20:47:45 EmpireDell opencode-remote[2278731]: opencode server listening on http://0.0.0.0:8787"
+    },
+    "db": {
+      "exists": true,
+      "projects": [
+        {
+          "project_id": "b21549d3b294933fa0425f9bf51f2502544c44b1",
+          "worktree": "/home/rg/empire-repo",
+          "vcs": "git",
+          "first_seen": "2026-06-07T20:44:33.632000",
+          "last_seen": "2026-06-07T20:53:10.054000"
+        },
+        {
+          "project_id": "global",
+          "worktree": "/",
+          "vcs": null,
+          "first_seen": "2026-06-07T20:53:09.592000",
+          "last_seen": "2026-06-07T20:53:46.810000"
+        }
+      ],
+      "newest_session_directory": "/home/rg/empire-repo-main",
+      "newest_sessions": [
+        {
+          "id": "ses_15b4e4e1bffeMvlEzjoydEBIdR",
+          "project_id": "b21549d3b294933fa0425f9bf51f2502544c44b1",
+          "directory": "/home/rg/empire-repo-main",
+          "last_updated": "2026-06-07T20:46:12.207000"
+        },
+        {
+          "id": "ses_15b4f5928ffegQxe75nm6NBt0c",
+          "project_id": "b21549d3b294933fa0425f9bf51f2502544c44b1",
+          "directory": "/home/rg/empire-repo-main",
+          "last_updated": "2026-06-07T20:45:06.483000"
+        }
+      ]
+    },
+    "canonical_repo_registered": false
+  },
+  "max_backend": {
+    "healthy": true,
+    "current_commit": "520188f",
+    "runtime_lane": "/home/rg/empire-repo-main/backend",
+    "registry": {
+      "registry_version": "operating-registry-v2",
+      "schema_version": 1,
+      "updated_at": "2026-04-19",
+      "loaded_at": "2026-06-07T22:23:39.589721+00:00",
+      "source": "/home/rg/empire-repo-main/backend/app/services/max/operating_registry.json",
+      "file_sha256": "d8e32e09d2ac3d3203769692bfa22eae39a6f94942a89d1410f0180caa1db091",
+      "last_error": null,
+      "reload_check_interval_seconds": 30
+    },
+    "voice_summary": "Voice capability unknown",
+    "tts_status": "failed",
+    "tts_error_snippet": "xAI TTS API error 429: {\"code\":\"Some resource has been exhausted\",\"error\":\"Your team d10df202-7030-4efc-b97b-7bfca6c023da has either used all available credits or reached its monthly spending limit. T",
+    "stt_status": "ok",
+    "telegram_text_configured": false,
+    "telegram_text_env_keys": [
+      "TELEGRAM_BOT_TOKEN",
+      "FOUNDER_TELEGRAM_CHAT_ID"
+    ]
+  },
+  "blocking_mismatches": [],
+  "non_blocking_mismatches": [
+    "xAI TTS is 429 (monthly credit cap) \u2014 non-blocking now that MiniMax is primary.",
+    "voice_capability_truth env_keys uses legacy var name; canonical is TELEGRAM_FOUNDER_CHAT_ID.",
+    "hermes doctor reports warnings (config version, login, etc.)",
+    "OpenCode project DB has no row with worktree='/home/rg/empire-repo-main'. iPhone UI workspace picker may not list canonical."
+  ],
+  "confirmed_facts": [
+    "Newest Harry session cwd is canonical (/home/rg/empire-repo-main)."
+  ],
+  "inferences": [
+    "Backend runtime commit matches the canonical git HEAD; no restart is needed for in-flight work to take effect."
+  ],
+  "recommended_next_action": "Pilot operational. Resolve non-blocking mismatches opportunistically."
+}

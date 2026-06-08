@@ -40,7 +40,7 @@ _CACHE_TTL_SECONDS = 60.0
 def _check_telegram_text_send() -> dict[str, Any]:
     """Can MAX send a text message to Telegram right now?"""
     bot_token_set = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
-    chat_id_set = bool(os.getenv("FOUNDER_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID"))
+    chat_id_set = bool(os.getenv("TELEGRAM_FOUNDER_CHAT_ID"))
     # The bot is configured if both env vars are set; runtime health is checked
     # by the live getMe probe below.
     configured = bot_token_set and chat_id_set
@@ -49,7 +49,7 @@ def _check_telegram_text_send() -> dict[str, Any]:
         "configured": configured,
         "env_keys": {
             "TELEGRAM_BOT_TOKEN": "set" if bot_token_set else "missing",
-            "FOUNDER_TELEGRAM_CHAT_ID": "set" if chat_id_set else "missing",
+            "TELEGRAM_FOUNDER_CHAT_ID": "set" if chat_id_set else "missing",
         },
         "evidence": "env check",
     }

@@ -82,3 +82,56 @@ def test_voice_receive_requires_stt():
     status = get_voice_capability_status()
     if not status["stt_provider"]["verified"]:
         assert status["telegram_voice_receive"]["verified"] is False
+
+
+def test_env_keys_label_uses_canonical_chat_id_var():
+    """Regression: the env_keys label must use TELEGRAM_FOUNDER_CHAT_ID,
+    not the legacy FOUNDER_TELEGRAM_CHAT_ID or TELEGRAM_CHAT_ID names.
+
+    Both wrong names appeared in an earlier version of the module and made
+    the UI/MAX report "FOUNDER_TELEGRAM_CHAT_ID: missing" even when the
+    canonical env var (TELEGRAM_FOUNDER_CHAT_ID) was set in the env file.
+
+    The check is data-driven: the env_keys dict must contain the canonical
+    key, and the wrong keys must NOT appear in any env_keys label.
+    """
+    invalidate_cache()
+    status = get_voice_capability_status()
+    env_keys = status["telegram_text_send"]["env_keys"]
+    assert "TELEGRAM_FOUNDER_CHAT_ID" in env_keys, (
+        f"env_keys must label the canonical chat-id var: got {list(env_keys.keys())}"
+    )
+    assert "FOUNDER_TELEGRAM_CHAT_ID" not in env_keys
+    assert "TELEGRAM_CHAT_ID" not in env_keys
+    # Same for the nested receive / send checks
+    recv_keys = status["telegram_voice_receive"]["receive_pipeline"]["env_keys"]
+    assert "TELEGRAM_FOUNDER_CHAT_ID" in recv_keys
+    assert "FOUNDER_TELEGRAM_CHAT_ID" not in recv_keys
+    send_keys = status["telegram_voice_send"]["send_pipeline"]["env_keys"]
+    assert "TELEGRAM_FOUNDER_CHAT_ID" in send_keys
+    assert "FOUNDER_TELEGRAM_CHAT_ID" not in send_keys
+
+
+def test_voice_truth_recognizes_actual_canonical_chat_id():
+    """If TELEGRAM_FOUNDER_CHAT_ID is set in the live process env, the
+    truth module must report configured=true, regardless of whether the
+    legacy wrong-named vars are set.
+    """
+    import os
+    # Simulate the canonical env being set
+    saved = os.environ.get("TELEGRAM_FOUNDER_CHAT_ID")
+    os.environ["TELEGRAM_FOUNDER_CHAT_ID"] = "test-canonical-id-123"
+    try:
+        invalidate_cache()
+        status = get_voice_capability_status()
+        # The bot is "configured" iff both token and chat_id are set
+        if status["telegram_text_send"]["env_keys"]["TELEGRAM_BOT_TOKEN"] == "set":
+            assert status["telegram_text_send"]["configured"] is True
+            assert status["telegram_text_send"]["verified"] is True
+            assert status["telegram_text_send"]["env_keys"]["TELEGRAM_FOUNDER_CHAT_ID"] == "set"
+    finally:
+        if saved is None:
+            os.environ.pop("TELEGRAM_FOUNDER_CHAT_ID", None)
+        else:
+            os.environ["TELEGRAM_FOUNDER_CHAT_ID"] = saved
+        invalidate_cache()
