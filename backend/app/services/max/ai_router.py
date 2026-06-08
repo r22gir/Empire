@@ -1982,10 +1982,34 @@ class AIRouter:
 
     # ── MiniMax ───────────────────────────────────────────────────────
 
+    def _minimax_timeout(self) -> float:
+        """Resolve MiniMax chat timeout in seconds from env.
+
+        Order of precedence:
+            MINIMAX_CHAT_TIMEOUT_SECONDS  (provider-specific, recommended)
+            MAX_CHAT_TIMEOUT_SECONDS      (global MAX cap)
+            120.0                         (default, was 45.0 historically)
+
+        Why 120 by default: the previous 45s cap was the documented source
+        of the long-prompt timeout bug (long plans/multi-step requests
+        that need >45s of LLM time were being cut off). 120s covers all
+        realistic single-request latencies from the MiniMax API while
+        still failing fast enough to surface real outages.
+        """
+        raw = os.getenv("MINIMAX_CHAT_TIMEOUT_SECONDS") or os.getenv("MAX_CHAT_TIMEOUT_SECONDS")
+        if raw:
+            try:
+                value = float(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+        return 120.0
+
     async def _minimax_chat(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> str:
         """Chat via MiniMax M1 API."""
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
             resp = await client.post(
                 f"{self.minimax_base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.minimax_key}", "Content-Type": "application/json"},
@@ -1999,7 +2023,7 @@ class AIRouter:
     async def _minimax_chat_stream(self, messages: List[AIMessage], image_path: Optional[Path] = None) -> AsyncGenerator[str, None]:
         """Stream chat via MiniMax M1 API."""
         api_messages = self._prepare_openai_messages(messages, image_path)
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=self._minimax_timeout()) as client:
             async with client.stream(
                 "POST",
                 f"{self.minimax_base_url}/chat/completions",

@@ -66,3 +66,8 @@ uploads/arch_drawings/*.svg
 # Local env backups
 *.env.save
 .env.save
+
+# Hermes <-> Harry sync pilot — track the generator, not the snapshots
+/.empire/runtime/HERMES_HARRY_SYNC.json
+/.empire/runtime/HERMES_HARRY_SYNC.html
+/HERMES-HARRY-HANDOFF.md

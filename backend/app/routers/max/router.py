@@ -183,9 +183,42 @@ def _runtime_truth_tool_payload() -> dict:
     return {"tool": "empire_runtime_truth_check", "public": True}
 
 
-def _response_metadata(channel: str | None, skill_used: str | None = None) -> dict:
+def _resolve_max_chat_timeout() -> float:
+    """Resolve the MAX chat timeout (seconds) from env.
+
+    Order of precedence:
+        MAX_CHAT_TIMEOUT_SECONDS       (global MAX cap, recommended)
+        MINIMAX_CHAT_TIMEOUT_SECONDS   (provider-specific override)
+        120.0                          (default, was 45.0 historically)
+
+    The previous 45s cap was the documented source of the long-prompt
+    timeout bug: long plans and multi-step prompts that need >45s of
+    LLM time were cut off and surfaced as ``model_used='timeout'``
+    with ``fallback_used=True`` (the latter being a lie — no fallback
+    was attempted). 120s covers all realistic single-request latencies
+    from the MiniMax API while still failing fast enough to surface
+    real outages.
+    """
+    for var in ("MAX_CHAT_TIMEOUT_SECONDS", "MINIMAX_CHAT_TIMEOUT_SECONDS"):
+        raw = os.getenv(var)
+        if raw:
+            try:
+                value = float(raw)
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
+    return 120.0
+
+
+def _response_metadata(channel: str | None, skill_used: str | None = None, extra: dict | None = None) -> dict:
     from app.services.max.surface_identity import build_response_metadata
-    return build_response_metadata(channel, skill_used=skill_used)
+    base = build_response_metadata(channel, skill_used=skill_used)
+    if extra:
+        merged = dict(base or {})
+        merged.update(extra)
+        return merged
+    return base
 
 
 def _ledger_metadata(channel: str | None, extra: dict | None = None) -> dict:
@@ -2228,7 +2261,7 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
 
         response = await asyncio.wait_for(
             ai_router.chat(messages, model=model, image_filename=request.image_filename, desk=request.desk, system_prompt=enriched_prompt, conversation_id=request.conversation_id or "", tools=_tools),
-            timeout=45.0,
+            timeout=_resolve_max_chat_timeout(),
         )
 
         # Resolve access control user
@@ -2645,13 +2678,25 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         http_response.headers["Pragma"] = "no-cache"
         return resp
     except asyncio.TimeoutError:
-        logger.error("Chat request timed out after 45s")
+        # The 45s / configured cap was hit. Be truthful: the primary
+        # provider didn't fall back — it just didn't respond in time.
+        # ``fallback_used=False`` here is important: previously this
+        # returned ``True`` and made the UI say "a fallback model
+        # answered", which is a lie. ``model_used='timeout'`` is the
+        # only honest signal, and ``metadata.timeout`` distinguishes
+        # this from a regular empty AIResponse.
+        timeout_secs = _resolve_max_chat_timeout()
+        logger.error(f"Chat request timed out after {timeout_secs:.0f}s (MAX_CHAT_TIMEOUT_SECONDS)")
         return ChatResponse(
-            response="Request timed out after 45 seconds. The AI provider may be slow or unreachable. Please try again.",
+            response=(
+                f"Request timed out after {timeout_secs:.0f} seconds. The AI provider may be slow or "
+                f"unreachable. If you need a longer cap, raise MAX_CHAT_TIMEOUT_SECONDS or "
+                f"MINIMAX_CHAT_TIMEOUT_SECONDS. Please try again."
+            ),
             model_used="timeout",
-            fallback_used=True,
+            fallback_used=False,  # truthful: no fallback model was used
             response_id=_response_id,
-            metadata=_response_metadata(request.channel),
+            metadata=_response_metadata(request.channel, extra={"timeout_seconds": timeout_secs, "timeout_reason": "max_chat_cap"}),
         )
     except Exception as e:
         logger.error(f"Chat error: {e}")
