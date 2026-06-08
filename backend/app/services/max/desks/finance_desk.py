@@ -20,6 +20,9 @@ class FinanceDesk(BaseDesk):
     desk_id = "finance"
     desk_name = "FinanceDesk"
     agent_name = "Sage"
+    # Pilot: Sage (finance) uses DeepSeek v4-flash as scout, MiniMax-M3 as final.
+    # Deterministic Python math runs first; scout sanity-checks; M3 finalizes.
+    scout_policy = None
     desk_description = (
         "Manages business finances: invoice creation, payment tracking, expense logging, "
         "P&L summaries, subscription management, and profitability analysis. "
@@ -38,6 +41,8 @@ class FinanceDesk(BaseDesk):
 
     def __init__(self):
         super().__init__()
+        from app.services.max.scout_routing import get_desk_scout_policy
+        self.scout_policy = get_desk_scout_policy(self.desk_id)
         self.invoices: list[dict] = []
         self.expenses: list[dict] = []
         self.payments: list[dict] = []

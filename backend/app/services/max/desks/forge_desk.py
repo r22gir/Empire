@@ -20,6 +20,18 @@ class ForgeDesk(BaseDesk):
     desk_id = "forge"
     desk_name = "ForgeDesk (WorkroomForge)"
     agent_name = "Kai"
+    # Pilot: Kai (forge) uses a scout (DeepSeek v4-flash) for first-pass
+    # inspection and MiniMax-M3 as the final synthesis. The policy is
+    # loaded in __init__ so desks that don't import the pilot module
+    # are unaffected.
+    scout_policy = None
+
+    def __init__(self):
+        super().__init__()
+        from app.services.max.scout_routing import get_desk_scout_policy
+        self.scout_policy = get_desk_scout_policy(self.desk_id)
+        self.pending_followups: list[dict] = []
+        self.pending_reminders: list[dict] = []
     desk_description = (
         "Handles WorkroomForge operations: quote generation, customer follow-up, "
         "appointment scheduling, measurement tracking, and production coordination. "
@@ -47,11 +59,6 @@ class ForgeDesk(BaseDesk):
     FABRIC_MARKUP = biz.fabric_markup
     LABOR_RATE = biz.labor_rate
     DC_TAX_RATE = biz.tax_rate
-
-    def __init__(self):
-        super().__init__()
-        self.pending_followups: list[dict] = []
-        self.pending_reminders: list[dict] = []
 
     async def _handle_task(self, task: DeskTask) -> DeskTask:
         """Route task to the appropriate handler based on content."""

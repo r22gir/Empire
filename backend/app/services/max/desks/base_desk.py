@@ -69,6 +69,31 @@ class BaseDesk(ABC):
     capabilities: list[str] = []
     preferred_model: str = "grok"  # default; desks override for cost-optimized routing
 
+    # ── Scout + final model routing (pilot) ─────────────────────────
+    # The scout policy is a class-level reference. Subclasses can
+    # override it to opt into the pilot. The policy is read-only at
+    # the class level so it can be inspected without instantiating.
+    scout_policy: Optional[object] = None  # DeskScoutPolicy or None
+
+    @property
+    def is_pilot_desk(self) -> bool:
+        """True if this desk has a registered scout policy (pilot)."""
+        if self.scout_policy is None:
+            return False
+        return getattr(self.scout_policy, "desk_id", None) == self.desk_id
+
+    def assert_no_restricted_action(self, action: str) -> None:
+        """Raise if this desk attempts a restricted action.
+
+        Restricted actions (commit_code, push_code, send_customer_message,
+        send_invoice, create_invoice, create_payment, approve_money,
+        approve_legal_text, approve_pricing, deploy) require explicit
+        founder approval. This guard is called by the desk's own code
+        path before any such action is taken.
+        """
+        from app.services.max.scout_routing import assert_action_allowed
+        assert_action_allowed(self.desk_id, action)
+
     def __init__(self):
         self.active_tasks: list[DeskTask] = []
         self.completed_tasks: list[DeskTask] = []

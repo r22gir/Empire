@@ -13,6 +13,8 @@ class ClientsDesk(BaseDesk):
     desk_id = "clients"
     desk_name = "ClientsDesk"
     agent_name = "Elena"
+    # Pilot: Elena (clients) uses Gemini 2.5 Flash as scout, MiniMax-M3 as final.
+    scout_policy = None
     desk_description = (
         "Manages client relationships: contact records, property addresses, past orders, "
         "fabric/style preferences, communication history. Prepares for meetings, drafts "
@@ -30,6 +32,8 @@ class ClientsDesk(BaseDesk):
 
     def __init__(self):
         super().__init__()
+        from app.services.max.scout_routing import get_desk_scout_policy
+        self.scout_policy = get_desk_scout_policy(self.desk_id)
         self.recent_lookups: list[dict] = []
 
     async def _handle_task(self, task: DeskTask) -> DeskTask:

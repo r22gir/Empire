@@ -3436,6 +3436,42 @@ async def get_all_desks():
     return {"desks": desk_manager.get_all_desks()}
 
 
+@router.get("/desks/desk-routing-policies")
+async def get_desk_routing_policies():
+    """Return the scout+final model routing policy for every pilot desk.
+
+    The pilot covers Kai (forge), Aria (sales), Sage (finance), Elena (clients).
+    Other desks return is_pilot=False. The response is intentionally
+    read-only: it never carries a key, secret, or trigger capability.
+    """
+    from app.services.max.scout_routing import (
+        all_pilot_policies, is_pilot_desk, get_desk_scout_policy,
+    )
+    # Surface the 4 pilot desks explicitly, even if their classes are
+    # not yet instantiated.
+    policies = [p.to_dict() for p in all_pilot_policies()]
+
+    # Also list every registered desk in desk_manager, so the UI can
+    # render the full set with pilot markers.
+    desk_manager.initialize()
+    all_desks = desk_manager.get_all_desks()
+    for d in all_desks:
+        did = d.get("id")
+        policy = get_desk_scout_policy(did) if did else None
+        d["is_pilot"] = bool(policy)
+        d["scout_model"] = policy.scout_model if policy else None
+        d["final_model"] = policy.final_model if policy else None
+        d["founder_approval_required"] = policy.founder_approval_required if policy else None
+
+    return {
+        "pilot_desks": policies,
+        "all_desks": all_desks,
+        "pilot_enabled_flag": (
+            __import__("os").getenv("DESK_SCOUT_PILOT_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        ),
+    }
+
+
 @router.get("/desks/status")
 async def get_desk_statuses():
     """Get status of all AI desks (ForgeDesk, MarketDesk, SocialDesk, SupportDesk).

@@ -18,6 +18,8 @@ class SalesDesk(BaseDesk):
     desk_id = "sales"
     desk_name = "SalesDesk"
     agent_name = "Aria"
+    # Pilot: Aria (sales) uses Gemini 2.5 Flash as scout, MiniMax-M3 as final.
+    scout_policy = None
     desk_description = (
         "Manages the sales pipeline: lead capture, qualification and scoring, "
         "follow-ups, proposals, consultations, deposit collection, and referral tracking. "
@@ -42,6 +44,8 @@ class SalesDesk(BaseDesk):
 
     def __init__(self):
         super().__init__()
+        from app.services.max.scout_routing import get_desk_scout_policy
+        self.scout_policy = get_desk_scout_policy(self.desk_id)
         self.pipeline: list[dict] = []
         self.pending_followups: list[dict] = []
 
