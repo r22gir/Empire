@@ -1,0 +1,68 @@
+[
+  {
+    "id": "pkg_starter",
+    "display_name": "Empire Starter",
+    "description": "Workroom + WoodCraft core + ForgeCRM + Tokens. The entry tier for solo operators.",
+    "monthly_price_usd": 29,
+    "annual_price_usd": 290,
+    "is_custom": false,
+    "is_internal": false,
+    "is_active": true,
+    "positioning": "Useful trial for solo operators starting to systematize workroom or woodcraft work."
+  },
+  {
+    "id": "pkg_growth",
+    "display_name": "Empire Growth",
+    "description": "Starter + Drawing Studio + SocialForge + LeadForge + MarketForge. For businesses scaling outreach and quoting.",
+    "monthly_price_usd": 79,
+    "annual_price_usd": 790,
+    "is_custom": false,
+    "is_internal": false,
+    "is_active": true,
+    "positioning": "For businesses scaling outreach, social presence, and quoting pipelines."
+  },
+  {
+    "id": "pkg_empire",
+    "display_name": "Empire",
+    "description": "Growth + ApostApp + VendorOps + SupportForge + ArchiveForge + ContractorForge. The full platform.",
+    "monthly_price_usd": 199,
+    "annual_price_usd": 1990,
+    "is_custom": false,
+    "is_internal": false,
+    "is_active": true,
+    "positioning": "Full Empire platform: sales + operations + support + customer-facing modules."
+  },
+  {
+    "id": "pkg_custom",
+    "display_name": "Custom Build",
+    "description": "Hand-priced bundle. No standard price; per contract.",
+    "monthly_price_usd": 0,
+    "annual_price_usd": 0,
+    "is_custom": true,
+    "is_internal": false,
+    "is_active": true,
+    "positioning": "Per-contract hand-priced bundle. The price row is intentionally 0; the real price is in the contract."
+  },
+  {
+    "id": "pkg_apostille_only",
+    "display_name": "Apostille-only",
+    "description": "ApostApp + VendorOps only. The DMV market entry tier. Founder-mediated in v1.",
+    "monthly_price_usd": 49,
+    "annual_price_usd": 490,
+    "is_custom": false,
+    "is_internal": false,
+    "is_active": true,
+    "positioning": "DMV market entry: a paying customer on the Apostille funnel without the full platform."
+  },
+  {
+    "id": "pkg_founder",
+    "display_name": "Founder / Internal",
+    "description": "The founder's own business. Never sold. Same query path as customer packages; hidden from pricing by is_internal=TRUE.",
+    "monthly_price_usd": 0,
+    "annual_price_usd": 0,
+    "is_custom": false,
+    "is_internal": true,
+    "is_active": true,
+    "positioning": "Founder's own business. Never sold. is_internal=TRUE hides it from the pricing page."
+  }
+]

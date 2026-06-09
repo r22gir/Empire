@@ -1,0 +1,1596 @@
+[
+  {
+    "package_id": "pkg_starter",
+    "module_id": "max",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "max",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "max",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "max",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "max",
+    "access_level": "preview",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "max",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "owners_desk",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "owners_desk",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "owners_desk",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "owners_desk",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "owners_desk",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "owners_desk",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "max_avatar",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "max_avatar",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "max_avatar",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "max_avatar",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "max_avatar",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "max_avatar",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "workroom",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "workroom",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "workroom",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "workroom",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "workroom",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "workroom",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "woodcraft",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "woodcraft",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "woodcraft",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "woodcraft",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "woodcraft",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "woodcraft",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "storefront_forge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "storefront_forge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "storefront_forge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "storefront_forge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "storefront_forge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "storefront_forge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "constructionforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "constructionforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "constructionforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "constructionforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "constructionforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "constructionforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "luxeforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "luxeforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "luxeforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "luxeforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "luxeforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "luxeforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "llcfactory",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "llcfactory",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "llcfactory",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "llcfactory",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "llcfactory",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "llcfactory",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "apostapp",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "apostapp",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "apostapp",
+    "access_level": "founder_only",
+    "limits": {
+      "monthly_orders": -1
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "apostapp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "apostapp",
+    "access_level": "founder_only",
+    "limits": {
+      "monthly_orders": 50
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "apostapp",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "forgecrm",
+    "access_level": "standard",
+    "limits": {
+      "contacts": 500
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "forgecrm",
+    "access_level": "standard",
+    "limits": {
+      "contacts": 5000
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "forgecrm",
+    "access_level": "standard",
+    "limits": {
+      "contacts": -1
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "forgecrm",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "forgecrm",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "forgecrm",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "relistapp",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "relistapp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "relistapp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "relistapp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "relistapp",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "relistapp",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "transcriptforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "transcriptforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "transcriptforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "transcriptforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "transcriptforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "transcriptforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "empireassist",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "empireassist",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "empireassist",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "empireassist",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "empireassist",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "empireassist",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "empirepay",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "empirepay",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "empirepay",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "empirepay",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "empirepay",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "empirepay",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "amp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "amp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "amp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "amp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "amp",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "amp",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "ai_vision",
+    "access_level": "standard",
+    "limits": {
+      "images_per_month": 50
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "ai_vision",
+    "access_level": "standard",
+    "limits": {
+      "images_per_month": 500
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "ai_vision",
+    "access_level": "standard",
+    "limits": {
+      "images_per_month": -1
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "ai_vision",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "ai_vision",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "ai_vision",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "drawing_studio",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "drawing_studio",
+    "access_level": "standard",
+    "limits": {
+      "drawings_per_month": 25
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "drawing_studio",
+    "access_level": "standard",
+    "limits": {
+      "drawings_per_month": -1
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "drawing_studio",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "drawing_studio",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "drawing_studio",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "pricing_studio",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "pricing_studio",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "pricing_studio",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "pricing_studio",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "pricing_studio",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "pricing_studio",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "socialforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "socialforge",
+    "access_level": "standard",
+    "limits": {
+      "posts_per_month": 100
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "socialforge",
+    "access_level": "standard",
+    "limits": {
+      "posts_per_month": -1
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "socialforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "socialforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "socialforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "openclaw",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "openclaw",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "openclaw",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "openclaw",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "openclaw",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "openclaw",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "vendorops",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "vendorops",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "vendorops",
+    "access_level": "standard",
+    "limits": {
+      "vendors": -1
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "vendorops",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "vendorops",
+    "access_level": "standard",
+    "limits": {
+      "vendors": 10
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "vendorops",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "recoveryforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "recoveryforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "recoveryforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "recoveryforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "recoveryforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "recoveryforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "marketforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "marketforge",
+    "access_level": "standard",
+    "limits": {
+      "listings": 200
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "marketforge",
+    "access_level": "standard",
+    "limits": {
+      "listings": -1
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "marketforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "marketforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "marketforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "contractorforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "contractorforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "contractorforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "contractorforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "contractorforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "contractorforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "supportforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "supportforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "supportforge",
+    "access_level": "standard",
+    "limits": {
+      "agents": 5
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "supportforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "supportforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "supportforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "leadforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "leadforge",
+    "access_level": "standard",
+    "limits": {
+      "leads_per_month": 250
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "leadforge",
+    "access_level": "standard",
+    "limits": {
+      "leads_per_month": -1
+    },
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "leadforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "leadforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "leadforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "shipforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "shipforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "shipforge",
+    "access_level": "standard",
+    "limits": {
+      "labels_per_month": 100
+    },
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "shipforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "shipforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "shipforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": true
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "archiveforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "archiveforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "archiveforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "archiveforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "archiveforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "archiveforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "vetforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "vetforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "vetforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "vetforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "vetforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "vetforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "petforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "petforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "petforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "petforge",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "petforge",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "petforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "platformforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "platformforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "platformforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "platformforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "platformforge",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "platformforge",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "hardware",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "hardware",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "hardware",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "hardware",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "hardware",
+    "access_level": "none",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "hardware",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "system",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "system",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "system",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "system",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "system",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "system",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "tokens_costs",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "tokens_costs",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "tokens_costs",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "tokens_costs",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "tokens_costs",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "tokens_costs",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "notifications",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "notifications",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "notifications",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "notifications",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "notifications",
+    "access_level": "standard",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "notifications",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_starter",
+    "module_id": "max_continuity",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_growth",
+    "module_id": "max_continuity",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_empire",
+    "module_id": "max_continuity",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_custom",
+    "module_id": "max_continuity",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_apostille_only",
+    "module_id": "max_continuity",
+    "access_level": "founder_only",
+    "limits": null,
+    "requires_approval": false
+  },
+  {
+    "package_id": "pkg_founder",
+    "module_id": "max_continuity",
+    "access_level": "full",
+    "limits": null,
+    "requires_approval": false
+  }
+]

@@ -104,6 +104,10 @@ load_router("app.routers.relistapp", "/api/v1", ["relistapp"])
 load_router("app.routers.archiveforge", "/api/v1", ["archiveforge"])
 load_router("app.routers.relist", "/api/v1", ["relist"])
 load_router("app.routers.vendorops", "/api/v1", ["vendorops"])
+
+# BusinessOps Foundation (Phase 1, 2026-06-09) — read-only admin API
+# Source of truth: REPORT-businessops-tenantops-design.md
+load_router("app.routers.businessops", "/api/v1", ["businessops"])
 load_router("app.routers.presentations", "/api/v1", ["presentations"])
 load_router("app.routers.messages", "/messages", ["messages"])
 load_router("app.routers.marketplaces", "/marketplaces", ["marketplaces"])

@@ -111,6 +111,31 @@ except ImportError:
     DecisionContext = None
     DisruptionEvent = None
 
+# BusinessOps Foundation models (Phase 1, 2026-06-09)
+# Source of truth: REPORT-businessops-tenantops-design.md
+try:
+    from app.models.business import (
+        Business,
+        BusinessProfile,
+        Package,
+        BusinessSubscription,
+        ModuleEntitlement,
+        ProvisioningChecklist,
+        BusinessUser,
+        BusinessIntegration,
+        BusinessAuditEvent,
+    )
+except ImportError:
+    Business = None
+    BusinessProfile = None
+    Package = None
+    BusinessSubscription = None
+    ModuleEntitlement = None
+    ProvisioningChecklist = None
+    BusinessUser = None
+    BusinessIntegration = None
+    BusinessAuditEvent = None
+
 __all__ = [
     # Core models
     "License",
@@ -144,5 +169,15 @@ __all__ = [
     "ChatSession",
     "ChatMessage",
     "DecisionContext",
-    "DisruptionEvent"
+    "DisruptionEvent",
+    # BusinessOps Foundation
+    "Business",
+    "BusinessProfile",
+    "Package",
+    "BusinessSubscription",
+    "ModuleEntitlement",
+    "ProvisioningChecklist",
+    "BusinessUser",
+    "BusinessIntegration",
+    "BusinessAuditEvent",
 ]
