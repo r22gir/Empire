@@ -7,7 +7,9 @@ interface Props {
   services?: any;
 }
 
-const SERVICES = ['backend', 'db', 'grok', 'claude', 'ollama', 'tg'];
+// Founder-facing services only. `db`, `grok`, `claude` are not live-polled by useSystemData
+// (they always rendered amber), so they were dropped. Add real probes here if they become live.
+const SERVICES = ['backend', 'ollama', 'tg'];
 
 interface NewsItem {
   title: string;
@@ -68,16 +70,9 @@ export default function BottomBar({ services }: Props) {
       .catch(() => {});
   }, []);
 
-  const defaultNews: NewsItem[] = [
-    { title: 'AI photo analysis now live in Workroom', source: 'Empire', url: '#', category: 'update' },
-    { title: 'Telegram bot integration complete', source: 'Empire', url: '#', category: 'feature' },
-    { title: 'New quote builder with vision AI', source: 'WorkroomForge', url: '#', category: 'feature' },
-    { title: 'Token cost tracking dashboard available', source: 'Empire', url: '#', category: 'system' },
-    { title: 'WoodCraft design pipeline active', source: 'WoodCraft', url: '#', category: 'update' },
-    { title: 'Customer intake portal deployed', source: 'Empire', url: '#', category: 'feature' },
-  ];
-
-  const displayNews = news.length > 0 ? news : defaultNews;
+  // News ticker is hidden in Founder-facing UI: the hardcoded defaults were stale fiction,
+  // and live notifications should reach Founder via the TopBar bell. See REPORT-command-center-widget-audit.md.
+  const displayNews: NewsItem[] = [];
 
   return (
     <div className="shrink-0">
@@ -122,38 +117,43 @@ export default function BottomBar({ services }: Props) {
 
         <div className="w-px h-4 bg-[#444] shrink-0" />
 
-        {/* Scrolling ticker */}
-        <div className="flex-1 overflow-hidden relative">
-          <div className="ticker-scroll flex items-center gap-6 whitespace-nowrap">
-            {displayNews.map((item, i) => (
-              <a key={i}
-                href={item.url !== '#' ? item.url : undefined}
-                target={item.url !== '#' ? '_blank' : undefined}
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-[10px] text-[#aaa] hover:text-[#ddd] font-mono cursor-pointer transition-colors"
-                onClick={item.url === '#' ? (e) => { e.preventDefault(); setExpanded(!expanded); } : undefined}
-              >
-                <span className="text-[#b8960c] font-bold">●</span>
-                {item.title}
-                <span className="text-[#555]">({item.source})</span>
-              </a>
-            ))}
-            {/* Duplicate for seamless loop */}
-            {displayNews.map((item, i) => (
-              <a key={`dup-${i}`}
-                href={item.url !== '#' ? item.url : undefined}
-                target={item.url !== '#' ? '_blank' : undefined}
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-[10px] text-[#aaa] hover:text-[#ddd] font-mono cursor-pointer transition-colors"
-                onClick={item.url === '#' ? (e) => { e.preventDefault(); setExpanded(!expanded); } : undefined}
-              >
-                <span className="text-[#b8960c] font-bold">●</span>
-                {item.title}
-                <span className="text-[#555]">({item.source})</span>
-              </a>
-            ))}
+        {/* Ticker hidden when displayNews is empty. Live notifications reach Founder via TopBar. */}
+        {displayNews.length > 0 && (
+          <div className="flex-1 overflow-hidden relative">
+            <div className="ticker-scroll flex items-center gap-6 whitespace-nowrap">
+              {displayNews.map((item, i) => (
+                <a key={i}
+                  href={item.url !== '#' ? item.url : undefined}
+                  target={item.url !== '#' ? '_blank' : undefined}
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[10px] text-[#aaa] hover:text-[#ddd] font-mono cursor-pointer transition-colors"
+                  onClick={item.url === '#' ? (e) => { e.preventDefault(); setExpanded(!expanded); } : undefined}
+                >
+                  <span className="text-[#b8960c] font-bold">●</span>
+                  {item.title}
+                  <span className="text-[#555]">({item.source})</span>
+                </a>
+              ))}
+              {/* Duplicate for seamless loop */}
+              {displayNews.map((item, i) => (
+                <a key={`dup-${i}`}
+                  href={item.url !== '#' ? item.url : undefined}
+                  target={item.url !== '#' ? '_blank' : undefined}
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[10px] text-[#aaa] hover:text-[#ddd] font-mono cursor-pointer transition-colors"
+                  onClick={item.url === '#' ? (e) => { e.preventDefault(); setExpanded(!expanded); } : undefined}
+                >
+                  <span className="text-[#b8960c] font-bold">●</span>
+                  {item.title}
+                  <span className="text-[#555]">({item.source})</span>
+                </a>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* If ticker is hidden, fill the space so Ollama toggle stays right-aligned. */}
+        {displayNews.length === 0 && <div className="flex-1" />}
 
         <div className="w-px h-4 bg-[#444] shrink-0" />
 
@@ -178,14 +178,16 @@ export default function BottomBar({ services }: Props) {
 
         <div className="w-px h-4 bg-[#444] shrink-0" />
 
-        {/* News expand toggle */}
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1 text-[10px] text-[#666] hover:text-[#aaa] font-mono cursor-pointer whitespace-nowrap transition-colors"
-        >
-          <Newspaper size={10} />
-          {expanded ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
-        </button>
+        {/* News expand toggle hidden when there is no news to expand. */}
+        {displayNews.length > 0 && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-[10px] text-[#666] hover:text-[#aaa] font-mono cursor-pointer whitespace-nowrap transition-colors"
+          >
+            <Newspaper size={10} />
+            {expanded ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+          </button>
+        )}
 
         {/* Time */}
         <div className="text-[10px] text-[#666] font-mono whitespace-nowrap" suppressHydrationWarning>

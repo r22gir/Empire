@@ -100,7 +100,7 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
     : runtime.restart_required
       ? 'Handoff restart needed'
       : 'Handoff fresh';
-  const compactHandoffLabel = handoffCommitDiffers
+  const compactHandoffLabel = handoffCommitDiffers && runtime.restart_required
     ? `Handoff stale ${handoffCommit}`
     : handoffLabel;
 
@@ -179,9 +179,10 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
         <Pill label={`OpenClaw ${gate.state || 'unknown'}`} tone={gateTone} />
         <Pill label={compactHandoffLabel} tone={staleCommitWarning || runtime.restart_required ? 'warn' : runtime.restart_required === undefined ? 'neutral' : 'ok'} />
         <Pill label={`Worker ${heartbeat.state || 'unknown'}${Number.isFinite(heartbeat.age_seconds) ? ` ${heartbeat.age_seconds}s` : ''}`} tone={heartbeatTone} />
-        {lastCheckedAt && <Pill label={`Checked ${lastCheckedAt}`} tone="neutral" />}
         {startupCommitDiffers && <Pill label={`Startup ${startupCommit} differs`} tone="warn" />}
-        {staleCommitWarning && currentCommit && (
+        {/* "Live truth wins." is engineering telemetry — hidden from compact Founder view.
+            (Same warning remains visible in the full panel below for debug use.) */}
+        {false && staleCommitWarning && currentCommit && (
           <span style={{ color: '#92400e', fontSize: 11, fontWeight: 800 }}>
             Live truth wins.
           </span>

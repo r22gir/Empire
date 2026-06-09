@@ -413,9 +413,6 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
       : maxStatus ? 'Voice partial' : 'Voice checking';
   const openClawOnline = !!maxStatus?.capabilities?.openclaw_delegation;
   const openClawQueueTotal = maxStatus?.providers?.local?.find((p: any) => p.id === 'openclaw')?.queue_stats?.total;
-  const codeModeLabel = maxStatus?.code_mode?.available
-    ? `Code Mode ${maxStatus.code_mode.executor || 'CodeForge'}`
-    : 'Code Mode unavailable';
   const selfHealLabel = maxStatus?.self_heal?.full_autonomous_repair_verified
     ? 'Self-heal autonomous'
     : 'Self-heal guided';
@@ -512,16 +509,22 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
             overflowX: 'auto',
           }}
         >
-          <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap' }}>
-            Founder {'>'} MAX
-          </span>
-          <StatusChip label={primaryModel} tone="dark" />
+          {/* Truthful chip row — see REPORT-command-center-widget-audit.md */}
+          {/* TopBar model picker is the single source of truth for provider/model. */}
+          {/* Local-vision label only renders when local vision is online; cloud vision via mmx still works. */}
+          {localVision?.online && (
+            <StatusChip label={localVisionLabel} tone="ok" />
+          )}
           <StatusChip label={textRoutingLabel} tone={textRoutingFallback ? 'warn' : 'ok'} />
-          <StatusChip label={localVisionLabel} tone={localVision?.online ? 'ok' : 'warn'} />
           <StatusChip label={voiceLabel} tone={maxStatus?.voice?.tts?.last_status === 'failed' ? 'warn' : maxStatus.capabilities?.voice_input ? 'ok' : 'warn'} />
-          <StatusChip label={`OpenClaw ${openClawOnline ? 'online' : 'offline'}${Number.isFinite(openClawQueueTotal) ? ` · ${openClawQueueTotal} tasks` : ''}`} tone={openClawOnline ? 'ok' : 'warn'} />
-          <StatusChip label={codeModeLabel} tone={maxStatus?.code_mode?.available ? 'ok' : 'warn'} />
-          <StatusChip label={selfHealLabel} tone="warn" />
+          <StatusChip
+            label={`OpenClaw ${openClawOnline ? 'online' : 'offline'}${Number.isFinite(openClawQueueTotal) && openClawQueueTotal > 0 ? ` · ${openClawQueueTotal} queued` : ''}`}
+            tone={!openClawOnline ? 'warn' : (Number.isFinite(openClawQueueTotal) && openClawQueueTotal > 0) ? 'warn' : 'ok'}
+          />
+          {/* Self-heal chip only shown on warn state, not on a healthy system. */}
+          {!maxStatus?.self_heal?.full_autonomous_repair_verified && maxStatus?.self_heal?.warning && (
+            <StatusChip label={selfHealLabel} tone="warn" />
+          )}
           <button
             data-testid="max-desks-status-button"
             onClick={() => onScreenChange?.('desks')}
@@ -537,7 +540,7 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
               cursor: 'pointer',
             }}
           >
-            {maxStatus.desks?.count || 0} desks subordinate
+            {maxStatus.desks?.count || 0} desks
           </button>
           <button
             data-testid="max-memory-bank-button"
@@ -573,24 +576,8 @@ export default function ChatScreen({ messages, isStreaming, streamingContent, st
           >
             RelistApp
           </button>
-          <a
-            data-testid="max-public-page-link"
-            href="/max"
-            style={{
-              border: '1px solid #d8d3cb',
-              background: '#fff',
-              borderRadius: 8,
-              padding: '3px 8px',
-              fontSize: 11,
-              fontWeight: 700,
-              color: 'var(--text)',
-              whiteSpace: 'nowrap',
-              textDecoration: 'none',
-            }}
-          >
-            Public MAX
-          </a>
-          <StatusChip label="Upload image/doc" tone="ok" />
+          {/* Upload is via the paperclip icon below; chip removed (was a fake non-clickable). */}
+          {/* Public MAX marketing link moved out of status row; see System Details / TopBar help. */}
         </div>
       )}
 
