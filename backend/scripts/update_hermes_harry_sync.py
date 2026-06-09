@@ -13,10 +13,12 @@ Run from the canonical repo root:
 What it does:
     1. Probes opencode-remote.service, MAX backend, Hermes gateway,
        git state, opencode DB.
-    2. Computes blocking / non-blocking mismatches.
-    3. Writes the JSON sidecar atomically.
-    4. Renders the HTML view from the same data.
-    5. Renders the Markdown fallback at the repo root.
+    2. Probes allow-listed HTML files for size, secrets, privacy markers,
+       staleness; summarizes visible text into hermes_desktop.html_context.
+    3. Computes blocking / non-blocking mismatches.
+    4. Writes the JSON sidecar atomically.
+    5. Renders the HTML view from the same data.
+    6. Renders the Markdown fallback at the repo root.
 
 What it does NOT do:
     - Touch .opencode/config.json
@@ -24,14 +26,18 @@ What it does NOT do:
     - Read auth.json contents or print any secret
     - Restart any service
     - Edit source code
+    - Inject HTML into Hermes or Harry prompts (Phase 1 is producer-only)
 """
 import datetime as _dt
+import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 
 # ── Constants ─────────────────────────────────────────────────────────────
@@ -50,6 +56,41 @@ OPENCODE_LOCAL = "http://127.0.0.1:8787/"
 OPENCODE_TS = "http://100.110.233.75:8787/"
 HERMES_VERSION_CMD = ["hermes", "--version"]
 HERMES_DOCTOR_CMD = ["hermes", "doctor"]
+
+# ── HTML context probe (Phase 1) ────────────────────────────────────────
+# Allow-list of HTML files safe to summarize into the sync JSON. The probe
+# is the producer; no Hermes or Harry code path consumes this block yet.
+# The default allow-list is the sync dashboard itself, which is generated
+# from the JSON dict and is therefore guaranteed free of secrets.
+HTML_CONTEXT_ALLOW_LIST = [
+    str(RUNTIME_DIR / "HERMES_HARRY_SYNC.html"),
+]
+HTML_CONTEXT_MAX_BYTES = 200_000          # skip files larger than this
+HTML_CONTEXT_MAX_SUMMARY_CHARS = 4000     # hard cap on extracted text
+HTML_CONTEXT_STALE_AFTER_SECONDS = 6 * 3600  # tag files older than 6h
+HTML_CONTEXT_PREVIEW_CHARS = 600         # shown in the JSON's "summary_preview"
+
+# Substrings whose presence in raw HTML (case-insensitive) means reject.
+# Compiled once at import for speed.
+HTML_CONTEXT_SECRET_PATTERNS = [
+    r"authorization:\s*[a-z0-9]",
+    r"\bbearer\s+[a-z0-9._-]{8,}",
+    r"\bapi[_-]?key\s*[=:]\s*['\"]?[a-z0-9._-]{6,}",
+    r"\bFOUNDER_PIN\b",
+    r"\bsk-[a-z0-9]{16,}\b",
+    r"\bAKIA[0-9A-Z]{8,}\b",        # AWS access key
+    r"\bghp_[a-z0-9]{20,}\b",        # GitHub PAT
+    r"\bxai-[a-z0-9]{20,}\b",
+    r"\bAIZA[0-9A-Z]{16,}\b",        # GCP service account
+]
+HTML_CONTEXT_SECRET_RE = re.compile("|".join(HTML_CONTEXT_SECRET_PATTERNS), re.IGNORECASE)
+
+# Markers that explicitly opt a file out of context loading.
+HTML_CONTEXT_PRIVACY_RE = re.compile(
+    r"<!--\s*DO-NOT-LOAD\s*-->"
+    r"|<meta\s+name=[\"']hermes-privacy[\"']\s+content=[\"']private[\"']",
+    re.IGNORECASE,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -88,6 +129,16 @@ def _atomic_write(path: Path, content: str) -> None:
         except Exception:
             pass
         raise
+
+
+def _esc(s) -> str:
+    """Tiny HTML escaper used by both the row helper and render_html."""
+    return (
+        (str(s) if s is not None else "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 # ── Probe functions ───────────────────────────────────────────────────────
@@ -233,6 +284,202 @@ def probe_max_backend() -> dict:
     return result
 
 
+# ── HTML context probe (Phase 1) ────────────────────────────────────────
+# A stdlib-only HTML text extractor and a safe per-file summarizer. The
+# probe is *only* a producer: it writes summary data into the JSON; no
+# Hermes or Harry code path consumes the result. Default-off for any
+# future ingestion (the Founder must opt in via Phase 2).
+
+class _VisibleTextExtractor(HTMLParser):
+    """Strip <script>, <style>, <noscript>; collect visible text + meta tags.
+
+    Stdlib HTMLParser only — no third-party deps. Keeps the script runnable
+    in any Python 3.4+ environment.
+    """
+
+    _SKIP_TAGS = {"script", "style", "noscript", "template"}
+    _META_TAGS = {"title", "meta"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._skip_depth = 0
+        self._chunks = []
+        self._meta = {}
+
+    # Element lifecycle
+    def handle_starttag(self, tag, attrs):
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+            return
+        if tag == "meta":
+            attr_dict = dict(attrs)
+            name = (attr_dict.get("name") or attr_dict.get("property") or "").lower()
+            content = attr_dict.get("content", "")
+            if name and content:
+                self._meta[name] = content
+        if tag in self._META_TAGS and tag != "meta":
+            # title and similar are picked up by handle_data when the
+            # end-tag fires; nothing to do here.
+            pass
+
+    def handle_endtag(self, tag):
+        if tag in self._SKIP_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth > 0:
+            return
+        text = data.strip()
+        if text:
+            self._chunks.append(text)
+
+    @property
+    def text(self) -> str:
+        raw = " ".join(self._chunks)
+        # Collapse whitespace runs to a single space.
+        return re.sub(r"\s+", " ", raw).strip()
+
+
+def _html_secret_hits(raw: str) -> list[str]:
+    """Return a list of substrings (≤40 chars) that matched a secret pattern.
+
+    Returns up to 3 hits, each redacted to a safe preview so a leaked
+    pattern doesn't end up in the JSON either.
+    """
+    hits: list[str] = []
+    for m in HTML_CONTEXT_SECRET_RE.finditer(raw):
+        start, end = m.span()
+        snippet = raw[max(0, start - 8):min(len(raw), end + 8)]
+        redacted = re.sub(r"[A-Za-z0-9]{6,}", lambda mm: mm.group(0)[:3] + "***", snippet)
+        hits.append(redacted[:60])
+        if len(hits) >= 3:
+            break
+    return hits
+
+
+def probe_html_context(allow_list: list[str] | None = None) -> dict:
+    """Summarize each allow-listed HTML file. Producer only — never read back.
+
+    Returns a dict with shape:
+        {
+          "enabled": True,
+          "files_checked": int,
+          "files_loaded":  int,
+          "files_rejected": int,
+          "warnings": [str, ...],
+          "files": [ { path, mtime, age_seconds, stale, bytes_in,
+                        bytes_out, sha256, verdict, summary_preview }, ... ]
+        }
+    """
+    allow_list = list(allow_list or HTML_CONTEXT_ALLOW_LIST)
+    now = _dt.datetime.now(_dt.timezone.utc)
+
+    files_out: list[dict] = []
+    warnings: list[str] = []
+    n_loaded = 0
+    n_rejected = 0
+
+    for raw_path in allow_list:
+        path = Path(raw_path)
+        entry: dict = {
+            "path": str(path),
+            "mtime": None,
+            "age_seconds": None,
+            "stale": None,
+            "bytes_in": 0,
+            "bytes_out": 0,
+            "sha256": "",
+            "verdict": "missing",
+            "summary_preview": "",
+        }
+
+        if not path.is_file():
+            entry["verdict"] = "missing"
+            files_out.append(entry)
+            continue
+
+        try:
+            stat = path.stat()
+            entry["bytes_in"] = stat.st_size
+            entry["mtime"] = _dt.datetime.fromtimestamp(stat.st_mtime, tz=_dt.timezone.utc).isoformat()
+            entry["age_seconds"] = max(0, int((now.timestamp() - stat.st_mtime)))
+            entry["stale"] = entry["age_seconds"] > HTML_CONTEXT_STALE_AFTER_SECONDS
+        except Exception as e:
+            entry["verdict"] = f"stat_error: {e}"
+            n_rejected += 1
+            files_out.append(entry)
+            continue
+
+        if entry["bytes_in"] > HTML_CONTEXT_MAX_BYTES:
+            entry["verdict"] = f"too_large: {entry['bytes_in']} > {HTML_CONTEXT_MAX_BYTES}"
+            n_rejected += 1
+            warnings.append(f"{path}: too large ({entry['bytes_in']} bytes)")
+            files_out.append(entry)
+            continue
+
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            entry["verdict"] = f"read_error: {e}"
+            n_rejected += 1
+            files_out.append(entry)
+            continue
+
+        # Hash for tamper-detection (no crypto guarantee, just a stable id).
+        entry["sha256"] = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()
+
+        # Privacy markers first — they beat secrets because they're an
+        # explicit opt-out by the author.
+        if HTML_CONTEXT_PRIVACY_RE.search(raw):
+            entry["verdict"] = "privacy_marked"
+            n_rejected += 1
+            files_out.append(entry)
+            continue
+
+        # Secret pattern scan against the raw HTML (before stripping tags).
+        secret_hits = _html_secret_hits(raw)
+        if secret_hits:
+            entry["verdict"] = f"secret_detected: {len(secret_hits)} hit(s)"
+            entry["summary_preview"] = ""
+            n_rejected += 1
+            warnings.append(f"{path}: secret pattern(s) detected — rejected")
+            files_out.append(entry)
+            continue
+
+        # Extract visible text via stdlib HTMLParser.
+        try:
+            parser = _VisibleTextExtractor()
+            parser.feed(raw)
+            parser.close()
+            text = parser.text
+        except Exception as e:
+            entry["verdict"] = f"parse_error: {e}"
+            n_rejected += 1
+            files_out.append(entry)
+            continue
+
+        # Cap output size and stash a short preview.
+        if len(text) > HTML_CONTEXT_MAX_SUMMARY_CHARS:
+            entry["verdict"] = "ok_truncated"
+            text = text[:HTML_CONTEXT_MAX_SUMMARY_CHARS]
+        else:
+            entry["verdict"] = "ok"
+
+        entry["bytes_out"] = len(text.encode("utf-8"))
+        entry["summary_preview"] = text[:HTML_CONTEXT_PREVIEW_CHARS]
+        n_loaded += 1
+        files_out.append(entry)
+
+    return {
+        "enabled": True,
+        "files_checked": len(allow_list),
+        "files_loaded": n_loaded,
+        "files_rejected": n_rejected,
+        "warnings": warnings,
+        "files": files_out,
+    }
+
+
 # ── Build the JSON truth ─────────────────────────────────────────────────
 
 def build_sync_json() -> dict:
@@ -245,6 +492,7 @@ def build_sync_json() -> dict:
     oc_db = probe_opencode_db()
     hermes = probe_hermes()
     max_be = probe_max_backend()
+    html_ctx = probe_html_context()
 
     # ── Decisions: blocking vs non-blocking ────────────────────────────
 
@@ -337,6 +585,7 @@ def build_sync_json() -> dict:
             "version": hermes.get("version"),
             "doctor_clean": hermes.get("doctor_clean"),
             "doctor_lines": hermes.get("doctor_lines", []),
+            "html_context": html_ctx,
         },
         "harry_opencode": {
             "service": oc_proc,
@@ -370,6 +619,34 @@ def build_sync_json() -> dict:
 
 # ── Render the HTML ───────────────────────────────────────────────────────
 
+def _render_html_context_row(html_ctx: dict) -> str:
+    """Compact HTML rendering of the html_context probe result (one <td>)."""
+    if not html_ctx:
+        return "<em>not run</em>"
+    if not html_ctx.get("enabled"):
+        return "<em>disabled</em>"
+    checked = html_ctx.get("files_checked", 0)
+    loaded = html_ctx.get("files_loaded", 0)
+    rejected = html_ctx.get("files_rejected", 0)
+    parts = [f"{loaded}/{checked} loaded", f"{rejected} rejected"]
+    warnings = html_ctx.get("warnings") or []
+    if warnings:
+        parts.append(f"<span class='status-warn'>{len(warnings)} warning(s)</span>")
+    files = html_ctx.get("files") or []
+    if files:
+        bullet = "<br>".join(
+            f"<code>{_esc(f.get('path', '').split('/')[-1])}</code>: "
+            f"{_esc(f.get('verdict', '?'))} "
+            f"({_esc(f.get('age_seconds', 0))}s, "
+            f"in={_esc(f.get('bytes_in', 0))}B, "
+            f"out={_esc(f.get('bytes_out', 0))}B"
+            f"{', STALE' if f.get('stale') else ''})"
+            for f in files
+        )
+        return " · ".join(parts) + "<br>" + bullet
+    return " · ".join(parts)
+
+
 def render_html(sync: dict) -> str:
     """Render the HTML view from the JSON dict. Single source of truth."""
     last = sync.get("last_checked_at", "")
@@ -394,9 +671,6 @@ def render_html(sync: dict) -> str:
     hermes = sync.get("hermes_desktop", {})
     harry = sync.get("harry_opencode", {})
     max_be = sync.get("max_backend", {})
-
-    def _esc(s):
-        return (str(s) if s is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     projects_rows = "".join(
         f"<tr><td><code>{_esc(p.get('project_id', ''))}</code></td><td><code>{_esc(p.get('worktree', ''))}</code></td></tr>"
@@ -456,6 +730,7 @@ Pilot status: <code>{_esc(pilot)}</code>
 <table>
 <tr><th>Version</th><td><code>{_esc(hermes.get('version', 'unknown'))}</code></td></tr>
 <tr><th>Doctor</th><td>{"clean" if hermes.get('doctor_clean') else "warnings present"}</td></tr>
+<tr><th>HTML context probe</th><td>{_render_html_context_row(hermes.get('html_context', {}))}</td></tr>
 </table>
 </div>
 
@@ -550,6 +825,11 @@ def render_markdown(sync: dict) -> str:
 
     block_md = "\n".join(f"1. {b}" for b in blocking) or "_(none)_"
     non_md = "\n".join(f"- {nb}" for nb in non_blocking) or "_(none)_"
+    html_ctx_md = sync.get("hermes_desktop", {}).get("html_context", {}) or {}
+    html_ctx_line = (
+        f"- HTML context probe: `{html_ctx_md.get('files_loaded', 0)}/{html_ctx_md.get('files_checked', 0)}` loaded, "
+        f"`{html_ctx_md.get('files_rejected', 0)}` rejected"
+    )
 
     return f"""# Hermes ↔ Harry Handoff
 
@@ -560,6 +840,7 @@ _Last checked: `{last}`. Pilot status: **{pilot}**._
 - Canonical repo: `{canonical}` @ `{head}`
 - Backend current_commit: `{max_commit}`
 - Newest Harry session: `{sync.get('harry_opencode', {}).get('db', {}).get('newest_session_directory', '(none)')}`
+{html_ctx_line}
 
 ## Blocking Mismatches
 {block_md}
