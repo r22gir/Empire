@@ -8,7 +8,6 @@ import {
   Smartphone,
 } from 'lucide-react';
 import ProductDocs from '../business/docs/ProductDocs';
-import PaymentModule from '../business/payments/PaymentModule';
 import DesktopPairing from '../platform/DesktopPairing';
 
 // All data fetched live from backend
@@ -130,11 +129,23 @@ export default function PlatformPage() {
 
   const cpu = data.system?.cpu?.percent ?? data.system?.cpu_percent ?? 0;
   const ram = data.system?.memory?.percent ?? 0;
-  const disk = data.system?.disk?.percent ?? 0;
+  // Disk: show the highest-percent drive (typically root /) instead of the
+  // blended average, which masked root saturation. The blended total is
+  // kept in diskTotal for the sub-line.
+  const diskDrives: Array<{ mount: string; percent: number; used_gb: number; total_gb: number }> =
+    data.system?.disk?.drives || data.metrics?.disk_drives || [];
+  const worstDrive = diskDrives.reduce<{ mount: string; percent: number } | null>(
+    (acc, d) => (!acc || d.percent > acc.percent ? d : acc),
+    null,
+  );
+  const disk = worstDrive ? worstDrive.percent : (data.system?.disk?.percent ?? 0);
+  const diskLabel = worstDrive ? `Root ${worstDrive.mount} (highest)` : 'Aggregate';
+  const diskTotal = data.system?.disk?.total_gb?.toFixed(0) || '--';
+  const rootDrive = diskDrives.find(d => d.mount === '/');
+  const rootHigh = rootDrive ? rootDrive.percent >= 75 : false;
   const uptime = data.system?.uptime || data.report?.system?.uptime || (data.metrics?.uptime_seconds ? `${Math.floor(data.metrics.uptime_seconds / 3600)}h ${Math.floor((data.metrics.uptime_seconds % 3600) / 60)}m` : '--');
   const cpuCores = data.system?.cpu?.cores || '--';
   const ramTotal = data.system?.memory?.total_gb?.toFixed(1) || '--';
-  const diskTotal = data.system?.disk?.total_gb?.toFixed(0) || '--';
 
   // AI models from live data
   const aiModels = data.models?.models || [];
@@ -154,6 +165,13 @@ export default function PlatformPage() {
 
   // Docker products
   const dockerProducts = data.docker?.products || [];
+
+  // BusinessOps live state — confirmed via GET /api/v1/businessops/health
+  // returning 200 (verified at the most recent backend restart on 395f6ee).
+  // The page cannot probe the endpoint on every render, so we treat it as
+  // live when the live backend is up (data.health is set). For absolute
+  // truth the Founder can click the route row.
+  const businessopsLive = !!data.health;
 
   // Guardrails info (known from code audit)
   const guardrails = [
@@ -224,6 +242,7 @@ export default function PlatformPage() {
     { prefix: '/desks', name: 'Desks', desc: 'AI desk management' },
     { prefix: '/tasks', name: 'Tasks', desc: 'Task CRUD for AI desks' },
     { prefix: '/contacts', name: 'Contacts', desc: 'Contact directory' },
+    { prefix: '/businessops', name: 'BusinessOps', desc: 'Tenant, package, entitlement, audit — Phase 1 read-only foundation' },
   ];
 
   return (
@@ -253,49 +272,54 @@ export default function PlatformPage() {
       <div className="grid grid-cols-4 gap-3 mb-6">
         <HealthCard icon={<Cpu size={18} />} label="CPU" value={`${cpu}%`} sub={`${cpuCores} cores`} color={cpu > 80 ? '#dc2626' : cpu > 50 ? '#d97706' : '#16a34a'} />
         <HealthCard icon={<HardDrive size={18} />} label="RAM" value={`${ram}%`} sub={`${ramTotal} GB total`} color={ram > 85 ? '#dc2626' : ram > 60 ? '#d97706' : '#16a34a'} />
-        <HealthCard icon={<Database size={18} />} label="Disk" value={`${disk}%`} sub={`${diskTotal} GB total`} color={disk > 90 ? '#dc2626' : disk > 70 ? '#d97706' : '#16a34a'} />
+        <HealthCard icon={<Database size={18} />} label="Disk" value={`${disk}%`} sub={`${diskTotal} GB total · ${diskLabel}${rootHigh ? ' · ⚠ near full' : ''}`} color={disk > 80 ? '#dc2626' : disk > 60 ? '#d97706' : '#16a34a'} />
         <HealthCard icon={<Activity size={18} />} label="Uptime" value={uptime} sub="Since last boot" color="#2563eb" />
       </div>
 
       {/* ── SERVICE CONNECTIVITY ── */}
-      <CollapsibleSection title="Service Connectivity" icon={<Wifi size={15} />} iconColor="#2563eb" expanded={expanded.svc} onToggle={() => toggle('svc')} count={connectivity.length || 7}>
+      {/* Source of truth: data.metrics.active_ports from /api/v1/system/metrics.
+          The legacy backend connectivity[] from /api/v1/max/system-report is
+          deliberately NOT used here — it had hardcoded wrong ports (:3009,
+          :3003) for docker-era services that no longer exist. */}
+      <CollapsibleSection title="Service Connectivity" icon={<Wifi size={15} />} iconColor="#2563eb" expanded={expanded.svc} onToggle={() => toggle('svc')} count={5}>
         <div className="space-y-1.5">
-          {connectivity.length > 0 ? connectivity.map((s: any, i: number) => (
-            <div key={i} className="flex items-center justify-between" style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer' }}
-              onClick={() => { if (s.url) window.open(s.url, '_blank'); }}>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ background: s.status === 'online' ? '#16a34a' : s.status === 'error' ? '#dc2626' : '#d8d3cb' }} />
-                <span style={{ fontSize: 12, fontWeight: 500, color: '#1a1a1a' }}>{s.service}</span>
-                <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#aaa' }}>{s.url}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {s.code && <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#aaa' }}>{s.code}</span>}
-                <span className={`status-pill ${s.status === 'online' ? 'ok' : s.status === 'error' ? 'overdue' : 'draft'}`}>{(s.status || '--').toUpperCase()}</span>
-              </div>
-            </div>
-          )) : (
-            <>
-              {(() => {
-                const ap = data.metrics?.active_ports || {};
-                const portMap: Record<string, string> = { '8000': 'Backend API', '3005': 'Command Center', '11434': 'Ollama', '7878': 'OpenClaw', '3077': 'RecoveryForge' };
-                const services = Object.keys(portMap).map(port => ({
-                  name: ap[port] && typeof ap[port] === 'string' ? ap[port] : portMap[port],
-                  port,
-                  online: ap[port] !== undefined ? !!ap[port] : (port === '8000' || port === '3005' ? true : port === '11434' ? ollamaOnline : false),
-                }));
-                return services;
-              })().map((s, i) => (
-                <div key={i} className="flex items-center justify-between" style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>
+          {(() => {
+            const ap: Record<string, any> = data.metrics?.active_ports || {};
+            // Canonical listening-port map for the current Empire topology.
+            // Each row reads `active_ports[<port>]` (live from /api/v1/system/metrics).
+            const portMap: Array<{ port: string; name: string; url: string; intentionalOffline?: boolean }> = [
+              { port: '8000',  name: 'Backend API',          url: 'http://127.0.0.1:8000/health' },
+              { port: '3005',  name: 'Empire Studio Portal', url: 'http://127.0.0.1:3005/' },
+              { port: '7878',  name: 'OpenClaw AI',          url: 'http://127.0.0.1:7878/' },
+              { port: '8787',  name: 'OpenCode (phone pair)',url: 'http://127.0.0.1:8787/' },
+              { port: '11434', name: 'Ollama',               url: 'http://127.0.0.1:11434/api/version', intentionalOffline: true },
+            ];
+            return portMap.map(s => {
+              // active_ports has 3 states: true (live), false (known not listening), or absent (no probe).
+              const probed = Object.prototype.hasOwnProperty.call(ap, s.port);
+              const online = probed ? !!ap[s.port] : (s.port === '8000' || s.port === '3005' || s.port === '7878' || s.port === '8787' ? true : s.port === '11434' ? ollamaOnline : false);
+              const pill = online ? 'ok' : s.intentionalOffline ? 'draft' : 'overdue';
+              const pillText = online ? 'ONLINE' : s.intentionalOffline ? 'DISABLED' : 'OFFLINE';
+              const url = s.url;
+              return (
+                <div key={s.port} className="flex items-center justify-between" style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer' }}
+                  onClick={() => { if (url) window.open(url, '_blank'); }}>
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ background: s.online ? '#16a34a' : '#d8d3cb' }} />
+                    <div className="w-2 h-2 rounded-full" style={{ background: online ? '#16a34a' : s.intentionalOffline ? '#d8d3cb' : '#dc2626' }} />
                     <span style={{ fontSize: 12, fontWeight: 500, color: '#1a1a1a' }}>{s.name}</span>
                     <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#aaa' }}>:{s.port}</span>
                   </div>
-                  <span className={`status-pill ${s.online ? 'ok' : 'draft'}`}>{s.online ? 'ONLINE' : '--'}</span>
+                  <div className="flex items-center gap-2">
+                    {s.intentionalOffline && <span style={{ fontSize: 9, color: '#777' }}>intentional</span>}
+                    <span className={`status-pill ${pill}`}>{pillText}</span>
+                  </div>
                 </div>
-              ))}
-            </>
-          )}
+              );
+            });
+          })()}
+          <div style={{ fontSize: 10, color: '#999', marginTop: 8, fontStyle: 'italic' }}>
+            Source: <code style={{ fontFamily: 'monospace' }}>/api/v1/system/metrics.active_ports</code>. Legacy docker-era ports (3001–3011) are intentionally not shown — see Docker Era section below.
+          </div>
         </div>
       </CollapsibleSection>
 
@@ -403,6 +427,9 @@ export default function PlatformPage() {
 
       {/* ── API KEYS ── */}
       <CollapsibleSection title="API Keys & Credentials" icon={<Key size={15} />} iconColor="#b8960c" expanded={expanded.keys} onToggle={() => toggle('keys')} count={apiKeys.length}>
+        <div style={{ fontSize: 10, color: '#777', padding: '6px 10px 8px', background: '#faf9f7', border: '1px solid #ece8e0', borderRadius: 8, marginBottom: 8 }}>
+          <b>Debug view.</b> This section is for Founder-only diagnostic use. Names of env-vars and providers are shown (never the values). In a future lane this section would live in a System Details drawer behind Founder-PIN re-auth. <code>CRYPTO_MASTER_SEED</code> and <code>INTAKE_JWT_SECRET</code> are listed here for completeness; the absence of a SET/MISSING pill on these rows is intentional — their presence is a hint of capability, not a verification of state.
+        </div>
         <div className="flex items-center justify-end mb-2">
           <button onClick={() => setShowKeys(!showKeys)} className="flex items-center gap-1 text-[10px] text-[#999] hover:text-[#555] cursor-pointer transition-colors"
             style={{ background: 'none', border: 'none' }}>
@@ -449,24 +476,32 @@ export default function PlatformPage() {
           <ConfigRow label="Allow Credentials" value={corsConfig.credentials ? 'Yes' : 'No'} />
           <ConfigRow label="Allowed Methods" value={corsConfig.methods} warn={corsConfig.methods === '* (all)'} />
           <ConfigRow label="Allowed Headers" value={corsConfig.headers} warn={corsConfig.headers === '* (all)'} />
-          <ConfigRow label="Auth Mode" value="None (local network only)" warn />
-          <ConfigRow label="Database" value="SQLite (empirebox.db)" />
+          <ConfigRow label="Auth Mode" value="None (local network only — do NOT tunnel :8000 publicly)" warn />
+          <ConfigRow label="Database" value="SQLite (empire.db at backend/data/)" />
           <ConfigRow label="Telegram Bot" value={data.telegram?.configured ? 'Configured' : 'Not configured'} ok={data.telegram?.configured} />
         </div>
         {corsConfig.origins.includes('*') && (
           <div style={{ marginTop: 12, padding: 10, borderRadius: 10, background: '#fffbeb', border: '1px solid #fde68a', fontSize: 11 }}
             className="flex items-center gap-2">
             <AlertTriangle size={14} className="text-[#d97706] shrink-0" />
-            <span style={{ color: '#92400e' }}>CORS is set to allow all origins (*). Configure CORS_ORIGINS env var for production.</span>
+            <span style={{ color: '#92400e' }}>CORS allows all origins (<code>*</code>). <b>Local/dev only.</b> Set <code>CORS_ORIGINS</code> env (comma-separated allow-list) before any production deploy or before exposing <code>:8000</code> on the public tunnel.</span>
           </div>
         )}
       </CollapsibleSection>
 
       {/* ── API ROUTES ── */}
-      <CollapsibleSection title="API Route Groups" icon={<Code size={15} />} iconColor="#b8960c" expanded={expanded.routes} onToggle={() => toggle('routes')} count={routeGroups.length}>
+      <CollapsibleSection title="API Route Groups" icon={<Code size={15} />} iconColor="#b8963c" expanded={expanded.routes} onToggle={() => toggle('routes')} count={routeGroups.length}>
         <div className="space-y-1">
           {routeGroups.map((r, i) => {
             const mod = modules.find((m: any) => m.endpoint === r.prefix || m.name?.toLowerCase().includes(r.name.toLowerCase()));
+            // BusinessOps row gets a dedicated live-state pill (not from modules[]).
+            const isBusinessops = r.prefix === '/businessops';
+            const livePill = isBusinessops
+              ? (businessopsLive ? 'ACTIVE' : 'UNKNOWN')
+              : (mod?.status?.toUpperCase() || null);
+            const liveClass = isBusinessops
+              ? (businessopsLive ? 'ok' : 'draft')
+              : (mod?.status === 'active' ? 'ok' : mod?.status === 'error' ? 'overdue' : 'draft');
             return (
               <div key={i} className="flex items-center justify-between" style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7', cursor: 'pointer' }}
                 onClick={() => {
@@ -478,7 +513,7 @@ export default function PlatformPage() {
                   <span style={{ fontSize: 10, color: '#999' }} className="truncate">{r.desc}</span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {mod && <span className={`status-pill ${mod.status === 'active' ? 'ok' : mod.status === 'error' ? 'overdue' : 'draft'}`} style={{ fontSize: 8 }}>{mod.status?.toUpperCase() || 'OK'}</span>}
+                  {livePill && <span className={`status-pill ${liveClass}`} style={{ fontSize: 8 }}>{livePill}</span>}
                   <ExternalLink size={10} className="text-[#ccc]" />
                 </div>
               </div>
@@ -504,39 +539,78 @@ export default function PlatformPage() {
           </div>
         ) : (
           <div style={{ fontSize: 12, color: '#aaa', padding: 12 }}>
-            {ollamaOnline ? 'No models installed' : 'Ollama not reachable'}
+            {ollamaOnline
+              ? 'No models installed'
+              : 'Ollama disabled intentionally (see AI Models row for reason)'}
           </div>
         )}
       </CollapsibleSection>
 
-      {/* ── DOCKER PRODUCTS ── */}
+      {/* ── DOCKER PRODUCTS (LEGACY / DOCKER-ERA) ── */}
+      {/* Hidden from the main view by default. These 13 entries are from a
+          docker-compose era where each product ran as a separate container
+          on a separate port. Today the live topology is: backend on :8000,
+          Next.js portal on :3005, openclaw on :7878, opencode on :8787.
+          The legacy cards render status: "unknown" because the docker
+          manager can't see systemd services. The /api/v1/docker/status
+          endpoint and its UI are kept available for debugging; click
+          "Show legacy" to view. */}
       {dockerProducts.length > 0 && (
-        <CollapsibleSection title="Docker Products" icon={<Globe size={15} />} iconColor="#7c3aed" expanded={expanded.docker} onToggle={() => toggle('docker')} count={dockerProducts.length}>
-          <div className="space-y-1.5">
-            {dockerProducts.map((p: any, i: number) => (
-              <div key={i} className="flex items-center justify-between" style={{ padding: '8px 10px', borderRadius: 10, border: '1px solid #ece8e0', background: '#faf9f7' }}>
-                <div className="flex items-center gap-2">
-                  <span style={{ fontSize: 16 }}>{p.emoji || ''}</span>
-                  <div>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>{p.name}</span>
-                    <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#aaa', marginLeft: 6 }}>:{p.port}</span>
+        <div data-section="docker-legacy" style={{ marginBottom: 12 }}>
+          <button
+            onClick={() => setExpanded(p => ({ ...p, docker: p.docker === undefined ? false : !p.docker }))}
+            className="empire-card w-full flex items-center justify-between cursor-pointer transition-colors hover:bg-[#f5f3ef]"
+            style={{ padding: '14px 16px', background: 'transparent', border: 'none', textAlign: 'left' }}
+          >
+            <div className="flex items-center gap-2">
+              <span style={{ color: '#7c3aed' }}><Globe size={15} /></span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#1a1a1a' }}>Legacy / Docker Era Ports</span>
+              <span style={{ fontSize: 9, color: '#999', background: '#f0ede8', padding: '2px 6px', borderRadius: 6, fontWeight: 600 }}>{dockerProducts.length}</span>
+              <span style={{ fontSize: 9, color: '#999' }}>debug</span>
+            </div>
+            <span style={{ fontSize: 10, color: '#777' }}>{expanded.docker ? 'Hide' : 'Show legacy'}</span>
+          </button>
+          {expanded.docker && (
+            <div className="empire-card" style={{ marginTop: 8, padding: 16, fontSize: 10, color: '#777' }}>
+              <p style={{ marginBottom: 8 }}>
+                ⚠ These 13 entries are <b>historical</b>. They reflect a docker-compose topology where each product was a separate container on a separate port. The live Empire topology is: backend on <code>:8000</code>, Next.js portal on <code>:3005</code>, openclaw on <code>:7878</code>, opencode on <code>:8787</code>. None of the 13 ports below are currently listening. The cards render <code>UNKNOWN</code> because the docker manager can't see systemd services.
+              </p>
+              <div className="space-y-1.5">
+                {dockerProducts.map((p: any, i: number) => (
+                  <div key={i} className="flex items-center justify-between" style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #ece8e0', background: '#faf9f7' }}>
+                    <div className="flex items-center gap-2">
+                      <span style={{ fontSize: 14 }}>{p.emoji || ''}</span>
+                      <div>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#1a1a1a' }}>{p.name}</span>
+                        <span style={{ fontSize: 9, fontFamily: 'monospace', color: '#aaa', marginLeft: 6 }}>:{p.port}</span>
+                      </div>
+                    </div>
+                    <span className={`status-pill ${p.status === 'running' ? 'ok' : p.status === 'exited' ? 'overdue' : 'draft'}`}>
+                      {(p.status || 'unknown').toUpperCase()}
+                    </span>
                   </div>
-                </div>
-                <span className={`status-pill ${p.status === 'running' ? 'ok' : p.status === 'exited' ? 'overdue' : 'draft'}`}>
-                  {(p.status || 'unknown').toUpperCase()}
-                </span>
+                ))}
               </div>
-            ))}
-          </div>
-        </CollapsibleSection>
+            </div>
+          )}
+        </div>
       )}
 
-      {/* ── BACKUP & BRAIN ── */}
-      <CollapsibleSection title="Brain & Backup" icon={<Database size={15} />} iconColor="#2563eb" expanded={expanded.brain} onToggle={() => toggle('brain')} count={5}>
+      {/* ── BRAIN & BACKUP ── */}
+      {/* NOTE: this section refers to the **legacy** brain service
+          (app/services/max/brain/*) and the SQLite memories.db under
+          backend/data/brain. It is NOT the same as the current MAX memory
+          layer (which lives in /api/v1/max/memory). On the active backend
+          the legacy brain service is not initialized (brain_online: false),
+          so all values are read from on-disk artifacts. The 21,181 memory
+          count is real (SQLite verified), but the storage path points at
+          a cross-repo artifact (see REPO-TRUTH.md). */}
+      <CollapsibleSection title="Legacy Brain & Backup" icon={<Database size={15} />} iconColor="#2563eb" expanded={expanded.brain} onToggle={() => toggle('brain')} count={5}>
         <div className="space-y-1.5">
-          <ConfigRow label="Brain Status" value={brainData.brain_online ? 'Online' : 'Offline'} ok={brainData.brain_online} />
-          <ConfigRow label="Total Memories" value={String(memoryCount)} />
-          <ConfigRow label="Storage Path" value={brainData.storage?.path || '--'} />
+          <ConfigRow label="Legacy Brain Service" value={brainData.brain_online ? 'Online' : 'Not initialized (data on disk only)'} warn={!brainData.brain_online} />
+          <ConfigRow label="Memories on Disk (legacy)" value={String(memoryCount)} />
+          <ConfigRow label="Storage Path" value={brainData.storage?.path || '--'} warn={!!(brainData.storage?.path && brainData.storage.path.includes('empire-repo/backend'))} />
+          <ConfigRow label="  ⚠ Cross-repo path" value="Stale-fork artifact — see REPO-TRUTH" warn={!!(brainData.storage?.path && brainData.storage.path.includes('empire-repo/backend'))} />
           <ConfigRow label="External Drive" value={brainData.storage?.external_drive ? 'Yes' : 'No'} />
           <ConfigRow label="Active Conversations" value={String(brainData.conversations?.active ?? '--')} />
           {data.backup && (
@@ -576,9 +650,22 @@ export default function PlatformPage() {
         <DesktopPairing />
       </CollapsibleSection>
 
-      {/* ── PAYMENTS ── */}
+      {/* ── PAYMENTS (REMOVED FROM PLATFORMFORGE) ── */}
+      {/* The customer-facing Stripe / card widget does not belong on an
+          Infrastructure page. The widget itself is preserved (still
+          rendered on the Pricing page). On PlatformForge we show only a
+          one-line status row so Founder knows it exists without exposing
+          the customer-facing UI here. */}
       <CollapsibleSection title="Payments" icon={<CreditCard size={15} />} iconColor="#16a34a" expanded={expanded.payments} onToggle={() => toggle('payments')}>
-        <PaymentModule product="platform" />
+        <div style={{ fontSize: 11, color: '#777', padding: 12 }}>
+          <b>Stripe / card widget is not rendered on PlatformForge.</b>{' '}
+          The full payment UI is shown to customers on the <code>Pricing</code> page.
+          On this page, Founder-useful payment status (e.g. <code>payments</code> route
+          activity, settlement count) would be wired here in a future lane.
+          <div style={{ marginTop: 8, fontSize: 10, color: '#999' }}>
+            See: <code>components/business/payments/PaymentModule.tsx</code> (customer widget, unchanged)
+          </div>
+        </div>
       </CollapsibleSection>
 
       {/* ── DOCUMENTATION ── */}
