@@ -8,6 +8,7 @@ import {
   Users, Repeat, Globe, FileText, Sparkles, Wallet, Sun, Heart,
   ChevronsLeft, ChevronsRight, Camera, PawPrint, Monitor, Menu, X, PenTool,
   Building2, ShoppingCart, LayoutDashboard, Archive, BadgeCheck, FileAudio, DollarSign,
+  ChevronDown, ChevronRight,
 } from 'lucide-react';
 
 interface NavItem {
@@ -17,67 +18,106 @@ interface NavItem {
   status: 'active' | 'dev' | 'planned';
   color: string;
   screen?: ScreenMode;
+  // 'daily-summary' is special: it toggles the inline Dashboard (RightPanel) instead of navigating.
+  kind?: 'product' | 'screen' | 'daily-summary';
 }
 
-const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
+interface NavGroup {
+  key: string;
+  label: string;
+  defaultExpanded: boolean;
+  // Items in this group.
+  items: NavItem[];
+}
+
+// ------------------------------------------------------------------
+// N1: Sidebar grouping (Lane N1).
+// Per Founder's spec: Command is always expanded; all other groups
+// are collapsed by default. One group expanded at a time (accordion).
+// "Daily Summary" replaces the loose Dashboard toggle below the
+// divider — it is now a 4th item inside Command.
+// ------------------------------------------------------------------
+const NAV_GROUPS: NavGroup[] = [
   {
+    key: 'command',
     label: 'Command',
+    defaultExpanded: true, // always expanded per Founder
     items: [
-      { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c' },
-      { id: 'max-avatar' as any, name: 'MAX Avatar', icon: <Monitor size={16} />, status: 'active', color: '#b8960c' },
+      { id: 'owner', name: "Owner's Desk", icon: <Crown size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04', kind: 'product' },
+      // Daily Summary is the inline Dashboard panel (rightPanel) — toggled, not navigated.
+      { id: 'daily-summary', name: 'Daily Summary', icon: <LayoutDashboard size={16} />, status: 'active', color: '#7c3aed', kind: 'daily-summary' },
     ],
   },
   {
-    label: 'Your Business',
+    key: 'business',
+    label: 'Business',
+    defaultExpanded: false,
     items: [
-      { id: 'workroom', name: 'Empire Workroom', icon: <Scissors size={16} />, status: 'active', color: '#16a34a' },
-      { id: 'craft', name: 'WoodCraft', icon: <TreePine size={16} />, status: 'active', color: '#ca8a04' },
-      { id: 'storefront', name: 'StoreFront Forge', icon: <ShoppingCart size={16} />, status: 'active', color: '#16a34a' },
-      { id: 'construction', name: 'ConstructionForge', icon: <Building2 size={16} />, status: 'active', color: '#b8960c' },
-      { id: 'luxe', name: 'LuxeForge', icon: <Gem size={16} />, status: 'active', color: '#7c3aed' },
+      { id: 'storefront', name: 'StoreFront Forge', icon: <ShoppingCart size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'construction', name: 'ConstructionForge', icon: <Building2 size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'luxe', name: 'LuxeForge', icon: <Gem size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
+      // Business Profile = BusinessOps (Phase 1) entry point. Routes to the
+      // `business-profile` screen; product remains unchanged.
+      { id: 'business-profile', name: 'Business Profile', icon: <BadgeCheck size={16} />, status: 'active', color: '#16a34a', screen: 'business-profile' as ScreenMode, kind: 'screen' },
+      { id: 'vendorops', name: 'VendorOps', icon: <BadgeCheck size={16} />, status: 'active', color: '#0d9488', kind: 'product' },
+      { id: 'contractor', name: 'ContractorForge', icon: <Wrench size={16} />, status: 'active', color: '#d97706', kind: 'product' },
+      { id: 'lead', name: 'LeadForge', icon: <Target size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'crm', name: 'ForgeCRM', icon: <Users size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'pay', name: 'EmpirePay', icon: <Wallet size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
     ],
   },
   {
+    key: 'tools',
     label: 'Tools',
+    defaultExpanded: false,
     items: [
-      { id: 'vision', name: 'AI Vision', icon: <Camera size={16} />, status: 'active', color: '#7c3aed' },
-      { id: 'drawings' as any, name: 'Drawing Studio', icon: <PenTool size={16} />, status: 'active', color: '#b8960c' },
-      { id: 'pricing-studio', name: 'Pricing Studio', icon: <DollarSign size={16} />, status: 'active', color: '#16a34a', screen: 'pricing-studio' },
+      { id: 'drawings', name: 'Drawing Studio', icon: <PenTool size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'vision', name: 'AI Vision', icon: <Camera size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
+      { id: 'pricing-studio', name: 'Pricing Studio', icon: <DollarSign size={16} />, status: 'active', color: '#16a34a', screen: 'pricing-studio', kind: 'screen' },
+      { id: 'recovery', name: 'RecoveryForge', icon: <ShieldCheck size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
     ],
   },
   {
-    label: 'Ecosystem',
+    key: 'growth',
+    label: 'Growth / Channels',
+    defaultExpanded: false,
     items: [
-      { id: 'social', name: 'SocialForge', icon: <Share2 size={16} />, status: 'active', color: '#ec4899' },
-      { id: 'openclaw', name: 'OpenClaw', icon: <Bot size={16} />, status: 'active', color: '#f59e0b' },
-      { id: 'vendorops', name: 'VendorOps', icon: <BadgeCheck size={16} />, status: 'active', color: '#0d9488' },
-      { id: 'recovery', name: 'RecoveryForge', icon: <ShieldCheck size={16} />, status: 'active', color: '#06b6d4' },
-      { id: 'market', name: 'MarketForge', icon: <Store size={16} />, status: 'active', color: '#2563eb' },
-      { id: 'contractor', name: 'ContractorForge', icon: <Wrench size={16} />, status: 'active', color: '#d97706' },
-      { id: 'support', name: 'SupportForge', icon: <Headphones size={16} />, status: 'active', color: '#7c3aed' },
-      { id: 'lead', name: 'LeadForge', icon: <Target size={16} />, status: 'active', color: '#16a34a' },
-      { id: 'ship', name: 'ShipForge', icon: <Truck size={16} />, status: 'active', color: '#2563eb' },
-      { id: 'crm', name: 'ForgeCRM', icon: <Users size={16} />, status: 'active', color: '#b8960c' },
-      { id: 'relist', name: 'RelistApp', icon: <Repeat size={16} />, status: 'active', color: '#06b6d4' },
-      { id: 'llc', name: 'LLCFactory', icon: <Globe size={16} />, status: 'active', color: '#16a34a' },
-      { id: 'apost', name: 'ApostApp', icon: <FileText size={16} />, status: 'active', color: '#b8960c' },
-      { id: 'transcript', name: 'TranscriptForge', icon: <FileAudio size={16} />, status: 'active', color: '#7c3aed' },
-      { id: 'assist', name: 'EmpireAssist', icon: <Sparkles size={16} />, status: 'dev', color: '#b8960c' },
-      { id: 'pay', name: 'EmpirePay', icon: <Wallet size={16} />, status: 'active', color: '#16a34a' },
-      { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b' },
-      { id: 'archive', name: 'ArchiveForge', icon: <Archive size={16} />, status: 'active', color: '#06b6d4' },
-      { id: 'vetforge', name: 'VetForge', icon: <Heart size={16} />, status: 'planned', color: '#ef4444' },
-      { id: 'petforge', name: 'PetForge', icon: <PawPrint size={16} />, status: 'planned', color: '#ef4444' },
+      { id: 'social', name: 'SocialForge', icon: <Share2 size={16} />, status: 'active', color: '#ec4899', kind: 'product' },
+      { id: 'market', name: 'MarketForge', icon: <Store size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
+      { id: 'support', name: 'SupportForge', icon: <Headphones size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
+      { id: 'ship', name: 'ShipForge', icon: <Truck size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
+      { id: 'amp', name: 'AMP', icon: <Sun size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
+      { id: 'archive', name: 'ArchiveForge', icon: <Archive size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
+      { id: 'transcript', name: 'TranscriptForge', icon: <FileAudio size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
     ],
   },
   {
-    label: 'Infrastructure / Utilities',
+    key: 'system',
+    label: 'System',
+    defaultExpanded: false,
     items: [
-      { id: 'platform', name: 'PlatformForge', icon: <Server size={16} />, status: 'active', color: '#2563eb' },
-      { id: 'max-continuity', name: 'MAX Continuity', icon: <ShieldCheck size={16} />, status: 'active', color: '#0d9488' },
-      { id: 'hardware', name: 'Hardware', icon: <Cpu size={16} />, status: 'dev', color: '#d97706' },
-      { id: 'system', name: 'System', icon: <Activity size={16} />, status: 'active', color: '#16a34a' },
-      { id: 'tokens', name: 'Tokens & Costs', icon: <Coins size={16} />, status: 'active', color: '#b8960c' },
+      { id: 'platform', name: 'PlatformForge', icon: <Server size={16} />, status: 'active', color: '#2563eb', kind: 'product' },
+      { id: 'openclaw', name: 'OpenClaw', icon: <Bot size={16} />, status: 'active', color: '#f59e0b', kind: 'product' },
+      { id: 'max-continuity', name: 'MAX Continuity', icon: <ShieldCheck size={16} />, status: 'active', color: '#0d9488', kind: 'product' },
+      { id: 'system', name: 'System', icon: <Activity size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'tokens', name: 'Tokens & Costs', icon: <Coins size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'hardware', name: 'Hardware', icon: <Cpu size={16} />, status: 'dev', color: '#d97706', kind: 'product' },
+    ],
+  },
+  {
+    key: 'more',
+    label: 'More',
+    defaultExpanded: false,
+    items: [
+      { id: 'relist', name: 'RelistApp', icon: <Repeat size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
+      { id: 'llc', name: 'LLCFactory', icon: <Globe size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      { id: 'apost', name: 'ApostApp', icon: <FileText size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
+      { id: 'assist', name: 'EmpireAssist', icon: <Sparkles size={16} />, status: 'dev', color: '#b8960c', kind: 'product' },
+      { id: 'vetforge', name: 'VetForge', icon: <Heart size={16} />, status: 'planned', color: '#ef4444', kind: 'product' },
+      { id: 'petforge', name: 'PetForge', icon: <PawPrint size={16} />, status: 'planned', color: '#ef4444', kind: 'product' },
+      { id: 'dev', name: 'Developer Panel', icon: <Monitor size={16} />, status: 'dev', color: '#b8960c', kind: 'product' },
     ],
   },
 ];
@@ -94,9 +134,14 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  // Per-group expanded state. Default: Command expanded, all others collapsed.
+  // Accordion: only one group can be expanded at a time. Clicking a collapsed
+  // group expands it AND collapses any currently-expanded group.
+  const [expandedGroup, setExpandedGroup] = useState<string>('command');
+  // Daily Summary toggle is a separate piece of state (it's a panel, not a nav).
   const [showDashboard, setShowDashboard] = useState(false);
 
-  // Detect mobile and auto-collapse
+  // Detect mobile and auto-collapse the sidebar
   useEffect(() => {
     const check = () => {
       const mobile = window.innerWidth < 768;
@@ -111,19 +156,35 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // Close mobile nav on product change
+  // On mobile: show hamburger button (rendered in TopBar area via CSS), overlay nav
   const handleNavClick = (item: NavItem) => {
-    if (item.screen) {
-      onScreenChange?.(item.screen);
+    if (item.kind === 'daily-summary') {
+      setShowDashboard(s => !s);
+      if (isMobile) setMobileOpen(false);
+      return;
+    }
+    if (item.screen && onScreenChange) {
+      onScreenChange(item.screen);
+    } else if (item.kind === 'product') {
+      onProductChange(item.id as EcosystemProduct);
+    } else if (item.screen) {
+      // safety: also fall through to onProductChange if kind was 'screen' but product also wanted
+      onProductChange(item.id as EcosystemProduct);
     } else {
       onProductChange(item.id as EcosystemProduct);
     }
     if (isMobile) setMobileOpen(false);
   };
 
-  // On mobile: show hamburger button (rendered in TopBar area via CSS), overlay nav
+  const toggleGroup = (key: string) => {
+    setExpandedGroup(prev => (prev === key ? '' : key));
+  };
+
   const showNav = isMobile ? mobileOpen : true;
   const isCollapsed = isMobile ? false : collapsed; // On mobile overlay, always show expanded
+
+  // Helper: count visible items per group (active + dev + planned).
+  const groupCount = (g: NavGroup) => g.items.length;
 
   return (
     <>
@@ -186,128 +247,101 @@ export default function LeftNav({ activeProduct, activeScreen, onProductChange, 
             {isMobile ? <X size={18} /> : (collapsed ? <ChevronsRight size={14} /> : <ChevronsLeft size={14} />)}
           </button>
 
-          {NAV_SECTIONS.map((section, si) => (
-            <div key={section.label}>
-              {si > 0 && <div className="h-px bg-[var(--border)] my-2" style={{ margin: isCollapsed ? '6px 4px' : '8px 6px' }} />}
-              {!isCollapsed && (
-                <div className="section-label mb-1.5" style={{ fontSize: 9, padding: '0 8px' }}>{section.label}</div>
-              )}
-              <div className="flex flex-col" style={{ gap: isCollapsed ? 2 : 3 }}>
-                {section.items.map(item => {
-                  const isActive = activeProduct === item.id;
-                  const itemActive = item.screen ? activeScreen === item.screen : isActive;
-                  const statusDot = item.status === 'active' ? '#22c55e'
-                    : item.status === 'dev' ? '#f59e0b'
-                    : '#d1d5db';
-
-                  if (isCollapsed) {
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => handleNavClick(item)}
-                        className="flex items-center justify-center cursor-pointer transition-all"
-                        title={item.name}
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: 12,
-                          border: itemActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                          background: itemActive ? '#fdf8eb' : 'transparent',
-                          color: itemActive ? '#b8960c' : item.color,
-                          opacity: itemActive ? 1 : 0.7,
-                          alignSelf: 'center',
-                          position: 'relative',
-                        }}
-                        onMouseEnter={e => { if (!itemActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.opacity = '1'; } }}
-                        onMouseLeave={e => { if (!itemActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.opacity = '0.7'; } }}
-                      >
-                        {item.icon}
-                        <span style={{
-                          position: 'absolute', top: 4, right: 4,
-                          width: 5, height: 5, borderRadius: '50%',
-                          background: itemActive ? '#b8960c' : statusDot,
-                        }} />
-                      </button>
-                    );
-                  }
-
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => handleNavClick(item)}
-                      className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
-                      style={{
-                        padding: '10px 12px',
-                        borderRadius: 12,
-                        fontSize: 13,
-                        minHeight: 44,
-                        border: itemActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                        background: itemActive ? '#fdf8eb' : 'transparent',
-                        fontWeight: itemActive ? 600 : 400,
-                        boxShadow: itemActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
-                      }}
-                      onMouseEnter={e => { if (!itemActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
-                      onMouseLeave={e => { if (!itemActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
-                    >
-                      <span className="shrink-0" style={{ color: itemActive ? '#b8960c' : item.color, opacity: itemActive ? 1 : 0.7 }}>
-                        {item.icon}
+          {/* Groups */}
+          {NAV_GROUPS.map((group, gi) => {
+            const isOpen = expandedGroup === group.key;
+            return (
+              <div key={group.key} style={{ marginTop: gi === 0 ? 0 : 4 }}>
+                {gi > 0 && !isCollapsed && <div className="h-px bg-[var(--border)] my-1.5" />}
+                {/* Group header — clickable to expand/collapse. Hidden entirely in icon-only mode. */}
+                {!isCollapsed && (
+                  <button
+                    onClick={() => toggleGroup(group.key)}
+                    className="w-full flex items-center justify-between gap-1.5 cursor-pointer hover:bg-[#f5f3ef] transition-colors"
+                    style={{
+                      padding: '7px 8px',
+                      borderRadius: 8,
+                      background: 'transparent',
+                      border: 'none',
+                      marginBottom: isOpen ? 4 : 0,
+                    }}
+                    title={isOpen ? `Collapse ${group.label}` : `Expand ${group.label}`}
+                    aria-expanded={isOpen}
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {isOpen
+                        ? <ChevronDown size={11} className="text-[#999] shrink-0" />
+                        : <ChevronRight size={11} className="text-[#999] shrink-0" />
+                      }
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#666', letterSpacing: 1, textTransform: 'uppercase' }}>
+                        {group.label}
                       </span>
-                      <span className="flex-1 truncate" style={{ color: itemActive ? '#96750a' : '#666' }}>{item.name}</span>
-                      <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: itemActive ? '#b8960c' : statusDot }} />
-                      {item.status === 'dev' && !itemActive && (
-                        <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
-                      )}
-                      {item.status === 'planned' && !itemActive && (
-                        <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
-                      )}
-                    </button>
-                  );
-                })}
+                      <span style={{ fontSize: 9, color: '#aaa', background: '#f0ede8', padding: '1px 5px', borderRadius: 4, fontWeight: 600 }}>
+                        {groupCount(group)}
+                      </span>
+                    </div>
+                  </button>
+                )}
+
+                {/* Items — only when group is expanded AND not in icon-only mode. */}
+                {isOpen && !isCollapsed && (
+                  <div className="flex flex-col" style={{ gap: 3 }}>
+                    {group.items.map(item => {
+                      const isActive =
+                        item.kind === 'daily-summary'
+                          ? showDashboard
+                          : (item.screen ? activeScreen === item.screen : activeProduct === item.id);
+                      const statusDot = item.status === 'active' ? '#22c55e'
+                        : item.status === 'dev' ? '#f59e0b'
+                        : '#d1d5db';
+
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => handleNavClick(item)}
+                          className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
+                          style={{
+                            padding: '8px 10px',
+                            borderRadius: 10,
+                            fontSize: 12.5,
+                            minHeight: 36,
+                            border: isActive ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
+                            background: isActive ? '#fdf8eb' : 'transparent',
+                            fontWeight: isActive ? 600 : 400,
+                            boxShadow: isActive ? '0 1px 4px rgba(184,150,12,0.08)' : 'none',
+                          }}
+                          onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; } }}
+                          onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                        >
+                          <span className="shrink-0" style={{ color: isActive ? '#b8960c' : item.color, opacity: isActive ? 1 : 0.7 }}>
+                            {item.icon}
+                          </span>
+                          <span className="flex-1 truncate" style={{ color: isActive ? '#96750a' : '#666' }}>{item.name}</span>
+                          {item.kind === 'daily-summary' ? (
+                            <span style={{ fontSize: 7, color: showDashboard ? '#b8960c' : '#9ca3af', fontWeight: 700, background: showDashboard ? '#fdf8eb' : '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>
+                              {showDashboard ? 'ON' : 'OFF'}
+                            </span>
+                          ) : (
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: isActive ? '#b8960c' : statusDot }} />
+                          )}
+                          {item.status === 'dev' && !isActive && (
+                            <span style={{ fontSize: 7, color: '#d97706', fontWeight: 700, background: '#fffbeb', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>DEV</span>
+                          )}
+                          {item.status === 'planned' && !isActive && (
+                            <span style={{ fontSize: 7, color: '#9ca3af', fontWeight: 700, background: '#f3f4f6', padding: '1px 5px', borderRadius: 4, lineHeight: '13px' }}>SOON</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
 
-          {/* Dashboard toggle — below Infrastructure */}
-          <div className="h-px bg-[var(--border)] my-2" style={{ margin: isCollapsed ? '6px 4px' : '8px 6px' }} />
-          {isCollapsed ? (
-            <button
-              onClick={() => setShowDashboard(!showDashboard)}
-              className="flex items-center justify-center cursor-pointer transition-all"
-              title="Dashboard"
-              style={{
-                width: 40, height: 40, borderRadius: 12, alignSelf: 'center',
-                border: showDashboard ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                background: showDashboard ? '#fdf8eb' : 'transparent',
-                color: showDashboard ? '#b8960c' : '#7c3aed',
-                opacity: showDashboard ? 1 : 0.7,
-              }}
-            >
-              <LayoutDashboard size={16} />
-            </button>
-          ) : (
-            <button
-              onClick={() => setShowDashboard(!showDashboard)}
-              className="w-full text-left flex items-center gap-2.5 cursor-pointer transition-all"
-              style={{
-                padding: '10px 12px', borderRadius: 12, fontSize: 13, minHeight: 44,
-                border: showDashboard ? '1.5px solid #f0e6c0' : '1.5px solid transparent',
-                background: showDashboard ? '#fdf8eb' : 'transparent',
-                fontWeight: showDashboard ? 600 : 400,
-              }}
-              onMouseEnter={e => { if (!showDashboard) { e.currentTarget.style.background = '#f5f3ef'; } }}
-              onMouseLeave={e => { if (!showDashboard) { e.currentTarget.style.background = 'transparent'; } }}
-            >
-              <span className="shrink-0" style={{ color: showDashboard ? '#b8960c' : '#7c3aed' }}>
-                <LayoutDashboard size={16} />
-              </span>
-              <span className="flex-1 truncate" style={{ color: showDashboard ? '#96750a' : '#666' }}>Dashboard</span>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: '#22c55e' }} />
-            </button>
-          )}
-
-          {/* Inline dashboard panel */}
+          {/* Inline dashboard panel (Daily Summary). Always available regardless of which group is expanded. */}
           {showDashboard && !isCollapsed && dashboardProps && (
-            <div style={{ padding: '8px 4px', marginTop: 4, borderTop: '1px solid var(--border)' }}>
+            <div style={{ padding: '8px 4px', marginTop: 8, borderTop: '1px solid var(--border)' }}>
               <RightPanel {...dashboardProps} />
             </div>
           )}

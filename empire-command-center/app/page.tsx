@@ -110,6 +110,58 @@ export default function CommandCenter() {
   const [clientView, setClientView] = useState(false);
   const pendingDeepLinkScreen = useRef<ScreenMode | null>(null);
 
+  // N2: In-app navigation history stack (LIFO). Used by the Global Back
+  // button in TopBar. Each entry is a snapshot of the previous state
+  // (product, screen, section) captured BEFORE the navigation that produced
+  // the new state. Capped at 30 entries to prevent unbounded growth.
+  // NOTE: this stack is in-memory only. On reload, it starts empty — the
+  // Back button is still visible but disabled until the user navigates.
+  // Per Founder's spec, this stack is the SOLE source of truth for Back
+  // behavior. We do NOT call window.history.back() anywhere.
+  const navigationHistory = useRef<Array<{ product: EcosystemProduct; screen: ScreenMode; section: string | null }>>([]);
+  const NAV_HISTORY_MAX = 30;
+
+  // Capture the CURRENT state into history. Call this BEFORE a navigation
+  // changes activeProduct/activeScreen/activeSection. We read the state
+  // directly from the useState setters' closure, which is always current
+  // at the moment of the call.
+  // We expose a parameter `from` so callers can pass the state they
+  // observed at navigation time (avoids stale-closure issues with rapid
+  // double-clicks in the same render cycle).
+  const pushHistory = useCallback((from: { product: EcosystemProduct; screen: ScreenMode; section: string | null }) => {
+    const stack = navigationHistory.current;
+    // De-duplicate consecutive identical snapshots (e.g. multiple clicks
+    // on the same nav item would otherwise bloat the stack).
+    const top = stack[stack.length - 1];
+    if (top && top.product === from.product && top.screen === from.screen && top.section === from.section) {
+      return;
+    }
+    stack.push(from);
+    if (stack.length > NAV_HISTORY_MAX) {
+      stack.splice(0, stack.length - NAV_HISTORY_MAX);
+    }
+  }, []);
+
+  // N2: Global Back handler. Pops the top of the history stack and
+  // restores the previous state. If the stack is empty, falls back to
+  // the Founder-default landing surface (Owner's Desk / chat). Does
+  // NOT touch window.history (per Founder's spec: in-app only).
+  const handleBack = useCallback(() => {
+    const stack = navigationHistory.current;
+    if (stack.length === 0) {
+      // Fallback: Owner's Desk / chat. This is also the initial state,
+      // so visually it may be a no-op if Founder is already there.
+      setActiveProduct('owner');
+      setActiveScreen('chat');
+      setActiveSection(null);
+      return;
+    }
+    const prev = stack.pop()!;
+    setActiveProduct(prev.product);
+    setActiveScreen(prev.screen);
+    setActiveSection(prev.section);
+  }, []);
+
   const chat = useChat();
   const sys = useSystemData();
   const history = useChatHistory();
@@ -174,6 +226,9 @@ export default function CommandCenter() {
   }, [activeScreen]);
 
   const handleProductChange = useCallback((product: EcosystemProduct) => {
+    // N2: capture the CURRENT state into history. Pass the live values
+    // directly so this works even if the user double-clicks rapidly.
+    pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
     setActiveProduct(product);
     setActiveSection(null);
     // When switching product, go to dashboard for that product (or chat for owner)
@@ -183,14 +238,17 @@ export default function CommandCenter() {
     else if (product === 'system') setActiveScreen('report');
     else if (product === 'dev') setActiveScreen('dev');
     else setActiveScreen('dashboard');
-  }, []);
+  }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const handleScreenChange = useCallback((screen: ScreenMode | string) => {
+    pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
     setActiveScreen(screen as ScreenMode);
     setActiveSection(null);
-  }, []);
+  }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const handleModuleClick = useCallback((module: string) => {
+    // N2: capture current state into history before any navigation.
+    pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
     // Tasks gets its own dedicated screen regardless of product
     if (module === 'tasks') {
       setActiveSection(null);
@@ -265,7 +323,7 @@ export default function CommandCenter() {
     };
     setActiveSection(null);
     setActiveScreen(moduleScreenMap[module] || 'dashboard');
-  }, [activeProduct]);
+  }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const handleSendMessage = useCallback((msg: string, imageFilename?: string | null) => {
     chat.sendMessage(msg, imageFilename);
@@ -317,6 +375,8 @@ export default function CommandCenter() {
   }, [chat, setActiveScreen]);
 
   const handleQuickSwitchSelect = useCallback((screen: string) => {
+    // N2: capture current state before navigating via QuickSwitch.
+    pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
     if (screen === 'workroom-page') { setActiveProduct('workroom'); setActiveScreen('dashboard'); }
     else if (screen === 'craft-page') { setActiveProduct('craft'); setActiveScreen('dashboard'); }
     else if (screen === 'platform-page') { setActiveProduct('platform'); setActiveScreen('dashboard'); }
@@ -325,7 +385,7 @@ export default function CommandCenter() {
     else if (screen === 'recovery') { setActiveProduct('recovery'); setActiveScreen('dashboard'); }
     else if (screen === 'relist') { setActiveProduct('relist'); setActiveScreen('dashboard'); }
     else handleScreenChange(screen);
-  }, [handleScreenChange]);
+  }, [activeProduct, activeScreen, activeSection, handleScreenChange, pushHistory]);
 
   const renderCenterContent = () => {
     // Dashboard renders product-specific pages
@@ -457,9 +517,13 @@ export default function CommandCenter() {
         onQuickSwitch={() => setShowQuickSwitch(true)}
         onClientView={() => setClientView(!clientView)}
         onNavigate={(product, screen) => {
+          // N2: capture current state before navigation.
+          pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
           setActiveProduct(product as EcosystemProduct);
           setActiveScreen(screen as ScreenMode);
         }}
+        onBack={handleBack}
+        canGoBack={navigationHistory.current.length > 0}
         services={sys.services}
       />
 

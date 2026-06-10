@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Bell, ChevronDown, Check } from 'lucide-react';
+import { Bell, ChevronDown, Check, ArrowLeft } from 'lucide-react';
 import { API } from '../../lib/api';
 import LanguageSwitcher from '../LanguageSwitcher';
 
@@ -70,10 +70,12 @@ interface Props {
   onQuickSwitch: () => void;
   onClientView: () => void;
   onNavigate?: (product: string, screen: string) => void;
+  onBack?: () => void; // N2: Global Back button
+  canGoBack?: boolean; // N2: false when history is empty (button still visible but disabled)
   services?: any;
 }
 
-export default function TopBar({ onQuickSwitch, onClientView, onNavigate }: Props) {
+export default function TopBar({ onQuickSwitch, onClientView, onNavigate, onBack, canGoBack = true }: Props) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [providerRows, setProviderRows] = useState<ProviderRow[]>([]);
@@ -219,6 +221,30 @@ export default function TopBar({ onQuickSwitch, onClientView, onNavigate }: Prop
       <div className="text-[16px] font-bold tracking-[3px] text-[var(--text)]">
         <span className="text-[var(--gold)]">E</span>MPIRE
       </div>
+
+      {/* N2: Global Back button. Always visible per Founder spec.
+          - Desktop: text label "← Back"
+          - Mobile (<768px): icon-only
+          - Disabled state (canGoBack === false): history is empty; click still falls back
+            to Owner's Desk in page.tsx (it's a no-op visually, but the button is
+            still clickable so the user always has a "go home" affordance). */}
+      {onBack && (
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 md:gap-1.5 bg-transparent border border-transparent rounded-[var(--radius)] px-1.5 md:px-2.5 py-[6px] md:py-[7px] text-[12px] font-semibold cursor-pointer transition-all"
+          style={{
+            color: canGoBack ? '#666' : '#bbb',
+            opacity: canGoBack ? 1 : 0.55,
+          }}
+          onMouseEnter={e => { if (canGoBack) { e.currentTarget.style.background = '#f5f3ef'; e.currentTarget.style.borderColor = '#ece8e0'; e.currentTarget.style.color = '#1a1a1a'; } }}
+          onMouseLeave={e => { if (canGoBack) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.color = '#666'; } }}
+          title={canGoBack ? 'Back to previous screen' : 'No previous screen — clicking returns to Owner’s Desk'}
+          aria-label="Back"
+        >
+          <ArrowLeft size={14} />
+          <span className="hidden sm:inline">Back</span>
+        </button>
+      )}
 
       {/* Search — hidden on mobile */}
       <button
