@@ -187,25 +187,48 @@ TIMELINE_STEPS = [
 ]
 
 
-def _project_status(order: dict) -> str:
-    """Map internal order+doc status to a public-facing 6-step label."""
-    docs = order.get("documents", [])
-    if not docs:
-        return order.get("status", "received")
+# Order-level (Founder-set) status → public 6-step status mapping.
+# Used as a fallback when per-document statuses do not reflect progress.
+# This keeps the public 6-step timeline deterministic regardless of whether
+# the Founder updates the order-level status or the per-doc statuses first.
+_ORDER_TO_PUBLIC = {
+    "received":   "received",
+    "processing": "notarized",   # 'under review / preparing document steps'
+    "at_state":   "at_state",
+    "completed":  "completed",
+    "closed":     "completed",
+    "cancelled":  "received",    # public stays at 'received' for cancelled; no leak
+}
 
-    # Use the most-progressed status across all documents
-    statuses = [d.get("status", "received") for d in docs]
-    if "completed" in statuses:
-        return "completed"
-    if "apostilled" in statuses:
-        return "apostilled"
-    if "at_state" in statuses:
-        return "at_state"
-    if "certified" in statuses:
-        return "certified"
-    if "notarized" in statuses:
-        return "notarized"
-    return "received"
+
+def _project_status(order: dict) -> str:
+    """Map internal order+doc status to a public-facing 6-step label.
+
+    Resolution order:
+      1. If any per-doc status is 'completed' / 'apostilled' / 'at_state' /
+         'certified' / 'notarized' (most-progressed wins), use that.
+      2. Otherwise, fall back to the order-level status via _ORDER_TO_PUBLIC.
+      3. If the order-level status is 'processing', treat as 'notarized'
+         (public sees "We are reviewing your request and preparing the
+         required document steps.")
+    """
+    docs = order.get("documents", [])
+    if docs:
+        statuses = [d.get("status", "received") for d in docs]
+        if "completed" in statuses:
+            return "completed"
+        if "apostilled" in statuses:
+            return "apostilled"
+        if "at_state" in statuses:
+            return "at_state"
+        if "certified" in statuses:
+            return "certified"
+        if "notarized" in statuses:
+            return "notarized"
+
+    # Fallback: read order-level status (set by the Founder-facing internal PUT).
+    order_status = order.get("status", "received")
+    return _ORDER_TO_PUBLIC.get(order_status, "received")
 
 
 def _build_timeline(order: dict) -> List[dict]:
@@ -235,8 +258,24 @@ def _build_timeline(order: dict) -> List[dict]:
     return timeline
 
 
-def _next_step_message(status: str) -> str:
-    """Plain-English next-step message for the status page."""
+def _next_step_message(status: str, order: dict = None) -> str:
+    """Plain-English next-step message for the status page.
+
+    If the projection came from the order-level `processing` state (Founder
+    has not yet moved the per-doc statuses), show the safe "under review"
+    message instead of the misleading "notarized is done" message.
+    """
+    if (
+        order is not None
+        and status == "notarized"
+        and order.get("status") == "processing"
+        and not any(
+            d.get("status") in ("notarized", "certified", "at_state", "apostilled", "completed")
+            for d in order.get("documents", [])
+        )
+    ):
+        return "We are reviewing your request and preparing the required document steps."
+
     messages = {
         "received": "We will review your documents and confirm eligibility within 1 business day. You will get an email when we move to the next step.",
         "notarized": "Notarization is done. Your document is being prepared for submission.",
@@ -375,7 +414,7 @@ async def public_verify(request: Request, req: PublicVerifyRequest):
 
     projected = _project_status(order)
     timeline = _build_timeline(order)
-    next_msg = _next_step_message(projected)
+    next_msg = _next_step_message(projected, order)
 
     timeline_models = [PublicStatusTimelineStep(**step) for step in timeline]
     return PublicStatusResponse(
