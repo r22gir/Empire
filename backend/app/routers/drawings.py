@@ -1449,8 +1449,8 @@ async def search_catalog(q: str = ""):
     return {"results": results[:50], "query": q, "total": len(results)}
 
 
-# ─────────────────────────────────────────────────────────────────────
-# D2 — Drawing intake schema (NEW). See REPORT-d1-drawing-workflow-research.md
+# ── D2 ────────────────────────────────────────────────────────────────
+# Drawing intake schema (NEW). See REPORT-d1-drawing-workflow-research.md
 # and REPORT-d1-addendum-animated-diagram.md for context.
 #
 # Thin route: all schema/enums/helpers live in
@@ -1461,9 +1461,19 @@ async def search_catalog(q: str = ""):
 #
 # D2 is the schema gate only; it does NOT call any renderer. The
 # actual render is a D4–D6 concern.
+# ── D4 ────────────────────────────────────────────────────────────────
+# D4 Fabrication QA Gate (NEW). See REPORT-d1-drawing-workflow-research.md
+# and the D1 Addendum for context.
+#
+# Additive only: evaluate_fabrication_readiness returns a richer verdict
+# (status, checks, blocking_issues, warnings, missing_fields,
+# unsupported_reasons, recommended_next_action) and is appended to the
+# response. The existing D2 fields (default_qa_status, per_category_*,
+# category_unsupported, warnings) are unchanged.
 # ─────────────────────────────────────────────────────────────────────
 import uuid
 from datetime import datetime, timezone
+from typing import List, Optional
 
 from app.services.drawing.intake_schema import (
     DrawingIntakeRequest as _D2Request,
@@ -1473,6 +1483,10 @@ from app.services.drawing.intake_schema import (
     default_qa_status_for as _default_qa_status_for,
     build_warnings as _build_warnings,
     is_animation_mode as _is_animation_mode,
+)
+from app.services.drawing.fabrication_qa import (
+    evaluate_fabrication_readiness as _evaluate_fabrication_readiness,
+    FabricationQAResult as _FabricationQAResult,
 )
 
 
@@ -1518,9 +1532,19 @@ def drawings_intake(req: _D2Request) -> _D2Response:
         warnings = list(warnings) + [w for w in req.warnings if w not in warnings]
 
     # Category-supported check (for now, all 13 categories are supported;
-    # future D4/D6 may mark some as "shop: planned" with a different
+    # future D6 may mark some as "shop: planned" with a different
     # response). Today we report supported.
     category_unsupported = False
+
+    # D4 — Fabrication QA Gate: run the 10-check evaluator. Additive:
+    # the existing default_qa_status is preserved; fab_qa may be
+    # STRICTER (e.g. shop_drawing + non-bench/banquette is capped at
+    # review_ready by D4, where D2 would also have said review_ready
+    # but without the documentation).
+    fab = _evaluate_fabrication_readiness(req)
+
+    # Extend warnings with D4 fab_qa warnings (deduped, sorted)
+    warnings_full = sorted(set(list(warnings) + list(fab.warnings)))
 
     return _D2Response(
         intake_id=str(uuid.uuid4()),
@@ -1533,5 +1557,10 @@ def drawings_intake(req: _D2Request) -> _D2Response:
         per_category_missing_fields=missing,
         default_qa_status=default_status,
         category_unsupported=category_unsupported,
-        warnings=warnings,
+        warnings=warnings_full,
+        # D4 additive fields:
+        fabrication_qa=fab,
+        qa_status=fab.status,
+        blocking_issues=fab.blocking_issues,
+        recommended_next_action=fab.recommended_next_action,
     )

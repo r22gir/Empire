@@ -174,6 +174,18 @@ class DrawingIntakeResponse(BaseModel):
     category_unsupported: bool
     warnings: List[str] = Field(default_factory=list)
 
+    # D4 — Fabrication QA Gate (additive, all Optional with defaults).
+    # The new fabrication_qa field carries the full 10-check verdict.
+    # The new qa_status is the D4-computed status (may differ from
+    # default_qa_status when D4 is stricter). The new blocking_issues
+    # and recommended_next_action are surfaced for the UI to display.
+    # The existing default_qa_status is preserved for backward
+    # compatibility with any caller that does not read the new fields.
+    fabrication_qa: Optional["FabricationQAResult"] = None
+    qa_status: Optional[QAStatus] = None
+    blocking_issues: List[str] = Field(default_factory=list)
+    recommended_next_action: Optional[str] = None
+
 
 # ── Per-category default behavior ────────────────────────────────────
 # Some categories (e.g. PILLOW) do not need an "animation_spec" to
@@ -329,3 +341,22 @@ def supported_categories() -> List[Category]:
 
 def animation_hint_for(category: Category) -> Optional[str]:
     return ANIMATION_HINT_BY_CATEGORY.get(category.value)
+
+
+# ── D4: forward-reference rebuild ────────────────────────────────────
+# DrawingIntakeResponse references FabricationQAResult (D4) which is
+# defined in a separate module to avoid an import cycle. The
+# forward-reference is resolved at module import time via
+# model_rebuild(). This is the standard Pydantic v2 pattern.
+def _d4_rebuild_response():
+    try:
+        from app.services.drawing.fabrication_qa import FabricationQAResult
+        DrawingIntakeResponse.model_rebuild()
+    except Exception:
+        # If fabrication_qa is not yet importable (e.g. during early
+        # boot), the rebuild is deferred. The optional field is None
+        # by default and the type annotation is preserved.
+        pass
+
+
+_d4_rebuild_response()
