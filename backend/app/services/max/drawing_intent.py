@@ -2,6 +2,17 @@
 
 This keeps drawing/CAD requests out of generic LLM completion unless MAX needs
 to ask for missing structured inputs first.
+
+D3 (per REPORT-d1-drawing-workflow-research.md and the D1 Addendum):
+- DrawingHandoff now carries an `intent_mode` field. Default "unknown"
+  preserves backward compatibility for any caller that does not read the
+  new field.
+- `classify_intent_mode(text)` is a pure-Python 6-way keyword classifier
+  that runs before the existing `is_drawing_intent` check.
+- Priority order matters: animated_diagram → visual_explainer →
+  shop_drawing → sketch_analysis → concept_image → planning_help →
+  unknown. This ensures animation/explainer keywords win substring
+  matches against generic "drawing" words.
 """
 from __future__ import annotations
 
@@ -40,6 +51,145 @@ DRAWING_PLAN_PHRASES = (
     "elevation plan",
     "section plan",
 )
+
+
+# ── D3 ────────────────────────────────────────────────────────────────
+# 6-way intent classification (per D1 + D1-Addendum).
+#
+# Priority order (CHECK IN THIS ORDER — first match wins):
+#   1. animated_diagram   (animation / sequence / step / process / assembly / exploded)
+#   2. planning_help      (help me plan / how to build / how to plan) — checked
+#                         before visual_explainer because planning_help
+#                         keywords are more specific than the generic
+#                         "how to" explainer catch-all. The Founder spec
+#                         explicitly requires "Help me plan how to build
+#                         this" to route to planning_help.
+#   3. visual_explainer   (explainer / how-to / show me how / installation diagram)
+#   4. shop_drawing       (shop drawing / fabrication drawing / cut list / draw a)
+#   5. sketch_analysis    (analyze this sketch / what is this / what dimensions are missing)
+#   6. concept_image      (concept image / generate an image / what would this look like)
+#   7. unknown            (no match)
+#
+# The priority order is the ONLY safe order: animation and explainer
+# keywords often co-occur with "drawing" or "diagram" words, so they
+# must win the substring match.
+#
+# Note on "how to" substring collisions:
+# - "visual_explainer" has "how to" as a generic catch-all
+# - "planning_help" has "how to build" / "how to plan" as more specific
+# - For "Help me plan how to build this", the explainer substring "how
+#   to" matches first. We add "how to build" and "how to plan" to
+#   planning_help as multi-word phrases that score before "how to" via
+#   a small lookahead in classify_intent_mode below.
+INTENT_MODE_KEYWORDS = {
+    "animated_diagram": (
+        "animated",
+        "animation",
+        "motion",
+        "sequence",
+        "step by step",
+        "process",
+        "assembly",
+        "exploded view",
+        "construction sequence",
+        "how it works",
+        "walkthrough",
+        "show the steps",
+    ),
+    "visual_explainer": (
+        "explainer",
+        "visual explanation",
+        "installation diagram",
+        "how-to",
+        "how to",
+        "show me how",
+    ),
+    "shop_drawing": (
+        "shop drawing",
+        "fabrication drawing",
+        "cut list",
+        "cutting diagram",
+        "manufacturing drawing",
+        "production drawing",
+        "draw a ",
+        "draw me ",
+        "draw the ",
+        "draw this ",
+    ),
+    "sketch_analysis": (
+        "analyze this sketch",
+        "what is this",
+        "identify this",
+        "what style is this",
+        "what dimensions are missing",
+        "what am i missing",
+    ),
+    "concept_image": (
+        "concept image",
+        "concept art",
+        "make a picture",
+        "generate an image",
+        "show me a concept",
+        "what would this look like",
+    ),
+    "planning_help": (
+        # Order matters: more specific multi-word phrases that contain
+        # "how to" come first, so they win the substring match.
+        "how to build",
+        "how to plan",
+        "help me plan",
+        "what should i measure",
+        "plan the build",
+        "plan this project",
+    ),
+}
+
+
+def classify_intent_mode(text: str) -> str:
+    """Classify text into one of the 7 intent modes (6 + 'unknown').
+
+    Pure-Python substring matching. No LLM call. No I/O.
+
+    Returns one of: animated_diagram, visual_explainer, shop_drawing,
+    sketch_analysis, concept_image, planning_help, unknown.
+
+    Algorithm:
+    1. Lowercase the text.
+    2. For each intent_mode in priority order (animated_diagram first),
+       check if any keyword is a substring of the text.
+    3. The first mode in priority order that matches wins.
+    4. If no match, return "unknown".
+
+    Examples (per Founder spec):
+    "Make a shop drawing for this banquette with dimensions"
+        -> shop_drawing
+    "Analyze this sketch and tell me what dimensions are missing"
+        -> sketch_analysis
+    "Make a concept image of this bench idea"
+        -> concept_image
+    "Help me plan how to build this"
+        -> planning_help
+    "Make an animated diagram showing the cushion construction sequence"
+        -> animated_diagram
+    "Create a visual explainer for how this Murphy bed mechanism works"
+        -> visual_explainer
+    "What's the weather like today?" -> unknown
+    """
+    if not text:
+        return "unknown"
+    lowered = text.lower()
+    for mode in (
+        "animated_diagram",
+        "planning_help",
+        "visual_explainer",
+        "shop_drawing",
+        "sketch_analysis",
+        "concept_image",
+    ):
+        for keyword in INTENT_MODE_KEYWORDS[mode]:
+            if keyword in lowered:
+                return mode
+    return "unknown"
 
 VIEW_KEYWORDS = {
     "plan": "plan",
@@ -104,6 +254,12 @@ class DrawingHandoff:
     source_image: str | None = None
     tool_payload: dict[str, Any] | None = None
     response: str = ""
+    # D3: 6-way intent classification (per D1 + D1-Addendum).
+    # Default "unknown" preserves backward compatibility for any caller
+    # that does not read the new field. Valid values: animated_diagram,
+    # visual_explainer, shop_drawing, sketch_analysis, concept_image,
+    # planning_help, unknown.
+    intent_mode: str = "unknown"
 
     @property
     def ready(self) -> bool:
@@ -181,6 +337,27 @@ def is_drawing_intent(text: str) -> bool:
 
     # Drawing-specific multi-token "plan" phrases. Bare "plan" alone is NOT enough.
     if any(phrase in lowered for phrase in DRAWING_PLAN_PHRASES):
+        return True
+
+    # D3: animated / explainer phrases (per D1 Addendum). These are
+    # NOT fabrication requests, but they ARE drawing-related and should
+    # be routed through the drawing handoff so MAX can apply the
+    # appropriate intent_mode (animated_diagram / visual_explainer).
+    animation_patterns = (
+        "animated diagram",
+        "animated drawing",
+        "animation of",
+        "animation showing",
+        "visual explainer",
+        "visual explanation",
+        "installation diagram",
+        "construction sequence",
+        "exploded view",
+        "assembly steps",
+        "how it works",
+        "walkthrough",
+    )
+    if any(pattern in lowered for pattern in animation_patterns):
         return True
 
     return any(keyword in lowered for keyword in DRAWING_KEYWORDS)
@@ -269,7 +446,18 @@ def _shape_for_text(text: str) -> str:
 
 def build_drawing_handoff(message: str, *, image_filename: str | None = None) -> DrawingHandoff:
     if not is_drawing_intent(message):
-        return DrawingHandoff(is_drawing_intent=False)
+        # Even when the message is not a drawing intent, classify it for
+        # log visibility. D3: routes that the MAX router logs "intent_mode
+        # = unknown" for non-drawing messages.
+        return DrawingHandoff(
+            is_drawing_intent=False,
+            intent_mode=classify_intent_mode(message),
+        )
+
+    # D3: classify the 6-way intent mode. Runs unconditionally for any
+    # message that passes is_drawing_intent, so the router can log
+    # "intent_mode = shop_drawing" (etc.) on every drawing handoff.
+    intent_mode = classify_intent_mode(message)
 
     subject, item_type = _extract_item_type(message)
     dimensions = _extract_dimensions(message)
@@ -284,6 +472,7 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         missing=missing,
         views=views,
         source_image=image_filename,
+        intent_mode=intent_mode,
     )
 
     if image_filename and not dimensions:

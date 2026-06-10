@@ -2145,13 +2145,16 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
     drawing_handoff = (
         build_drawing_handoff(request.message, image_filename=request.image_filename)
         if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
-        else type("NoDrawingHandoff", (), {"is_drawing_intent": False})()
+        else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
     )
     if drawing_handoff.is_drawing_intent:
+        # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
+        # and the D1 Addendum). Default is "unknown" for backward compatibility.
         logger.info(
-            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s message=%r",
+            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s intent_mode=%s message=%r",
             drawing_handoff.ready,
             drawing_handoff.missing,
+            drawing_handoff.intent_mode,
             request.message[:160],
         )
         if not drawing_handoff.ready:
@@ -2795,13 +2798,16 @@ async def chat_stream(request: ChatRequest):
     drawing_handoff = (
         build_drawing_handoff(request.message, image_filename=request.image_filename)
         if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
-        else type("NoDrawingHandoff", (), {"is_drawing_intent": False})()
+        else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
     )
     if drawing_handoff.is_drawing_intent:
+        # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
+        # and the D1 Addendum). Default is "unknown" for backward compatibility.
         logger.info(
-            "[MAX] Drawing intent intercepted before stream model: ready=%s missing=%s message=%r",
+            "[MAX] Drawing intent intercepted before stream model: ready=%s missing=%s intent_mode=%s message=%r",
             drawing_handoff.ready,
             drawing_handoff.missing,
+            drawing_handoff.intent_mode,
             request.message[:160],
         )
 

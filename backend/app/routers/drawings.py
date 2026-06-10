@@ -1447,3 +1447,91 @@ async def search_catalog(q: str = ""):
                 )
 
     return {"results": results[:50], "query": q, "total": len(results)}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# D2 — Drawing intake schema (NEW). See REPORT-d1-drawing-workflow-research.md
+# and REPORT-d1-addendum-animated-diagram.md for context.
+#
+# Thin route: all schema/enums/helpers live in
+# backend/app/services/drawing/intake_schema.py. This block only:
+#   1. imports the schema
+#   2. exposes ONE new route: POST /drawings/intake
+#   3. computes intake_id, received_at, calls the helpers
+#
+# D2 is the schema gate only; it does NOT call any renderer. The
+# actual render is a D4–D6 concern.
+# ─────────────────────────────────────────────────────────────────────
+import uuid
+from datetime import datetime, timezone
+
+from app.services.drawing.intake_schema import (
+    DrawingIntakeRequest as _D2Request,
+    DrawingIntakeResponse as _D2Response,
+    Category as _Category,
+    missing_fields_for as _missing_fields_for,
+    default_qa_status_for as _default_qa_status_for,
+    build_warnings as _build_warnings,
+    is_animation_mode as _is_animation_mode,
+)
+
+
+@router.post("/drawings/intake", response_model=_D2Response)
+def drawings_intake(req: _D2Request) -> _D2Response:
+    """D2 — Structured drawing intake. Returns the populated response.
+
+    This is the schema gate, not a renderer. The response includes the
+    per-category required-dim table, the missing-field list, and the
+    default QA status. Downstream consumers (D4 fab_qa, future renderers)
+    use the same response shape.
+    """
+    # Per-category required + missing
+    required = _D2Request.model_fields["category"].default  # placeholder; replaced below
+    cat: _Category = req.category
+    missing = _missing_fields_for(cat, req.dimensions)
+    # Re-derive required list from the schema (cleanly)
+    from app.services.drawing.intake_schema import REQUIRED_DIMS_BY_CATEGORY
+    required_list = REQUIRED_DIMS_BY_CATEGORY.get(cat.value, [])
+
+    # Compute default QA status (lowercase per Founder)
+    default_status = _default_qa_status_for(
+        req.output_mode, req.source_type, req.dimensions, missing, cat
+    )
+
+    # Guardrail: animation modes NEVER resolve to shop_ready
+    if _is_animation_mode(req.output_mode) and default_status == "shop_ready":
+        # This branch is a safety net; default_qa_status_for already
+        # never returns shop_ready for animation modes, but we re-assert
+        # to make the contract explicit.
+        default_status = "review_ready"
+
+    # Build warnings
+    warnings = _build_warnings(
+        req.output_mode,
+        cat,
+        req.source_type,
+        has_animation_spec=req.animation_spec is not None,
+    )
+
+    # Echo the user-supplied warnings (if any) without overriding computed
+    if req.warnings:
+        warnings = list(warnings) + [w for w in req.warnings if w not in warnings]
+
+    # Category-supported check (for now, all 13 categories are supported;
+    # future D4/D6 may mark some as "shop: planned" with a different
+    # response). Today we report supported.
+    category_unsupported = False
+
+    return _D2Response(
+        intake_id=str(uuid.uuid4()),
+        received_at=datetime.now(timezone.utc).isoformat(),
+        business_unit=req.business_unit,
+        category=req.category,
+        output_mode=req.output_mode,
+        source_type=req.source_type,
+        per_category_required_fields=required_list,
+        per_category_missing_fields=missing,
+        default_qa_status=default_status,
+        category_unsupported=category_unsupported,
+        warnings=warnings,
+    )
