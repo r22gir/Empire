@@ -69,12 +69,20 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 # ── Schemas ──────────────────────────────────────────────────────────
 
 class CheckoutRequest(BaseModel):
-    """Create a SaaS subscription checkout session."""
-    tier: str  # lite, pro, empire
+    """Create a checkout session. Supports two flows:
+    1. SaaS subscription (tier=lite|pro|empire) — recurring
+    2. Apostille one-time payment (apostille_order_id set) — single charge
+    """
+    tier: Optional[str] = None  # lite, pro, empire (SaaS only)
     customer_email: Optional[str] = None
     user_id: Optional[str] = None  # internal user id for subscription persistence
     success_url: str = "https://studio.empirebox.store/payments/success?session_id={CHECKOUT_SESSION_ID}"
     cancel_url: str = "https://studio.empirebox.store/payments/cancel"
+    # Apostille one-time flow (R1B Fast Lane) — see app/routers/apostapp_public.py
+    flow: Optional[str] = None  # "apostille_one_time" for single-charge apostille
+    apostille_order_id: Optional[str] = None  # when flow=apostille_one_time
+    apostille_package_id: Optional[str] = None  # basic_intake|standard|rush
+    apostille_amount_cents: Optional[int] = None  # required when flow=apostille_one_time
 
 
 class InvoiceLinkRequest(BaseModel):
@@ -196,14 +204,98 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
         return False
 
 
+def _mark_apostille_order_paid(order_id: str, stripe_session_id: str = "", amount_cents: int = 0):
+    """Mark an apostille order as paid in the JSON store. Used by the
+    apostille_one_time Stripe webhook branch."""
+    import json as _json
+    import os as _os
+    base = _os.path.expanduser("~/empire-repo/backend/data/apostapp/orders")
+    path = _os.path.join(base, f"{order_id}.json")
+    if not _os.path.exists(path):
+        logger.warning(f"Apostille order {order_id} not found for paid flip")
+        return False
+    try:
+        with open(path) as f:
+            order = _json.load(f)
+        order["paid"] = True
+        order["status"] = order.get("status", "received")
+        order["payment_session_id"] = stripe_session_id
+        order["payment_amount_cents"] = amount_cents
+        order["payment_completed_at"] = datetime.utcnow().isoformat()
+        order["updated_at"] = datetime.utcnow().isoformat()
+        with open(path, "w") as f:
+            _json.dump(order, f, indent=2, default=str)
+        logger.info(f"Apostille order {order_id} marked paid (${amount_cents/100:.2f})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to mark apostille order {order_id} paid: {e}")
+        return False
+
+
 # ── Flow 1: SaaS Subscription Checkout ───────────────────────────────
 
 @limiter.limit("10/minute")
 @router.post("/checkout")
 async def create_checkout_session(request: Request, req: CheckoutRequest):
-    """Create a Stripe Checkout session for a SaaS subscription."""
+    """Create a Stripe Checkout session.
+
+    Two flows are supported:
+      1. SaaS subscription (tier=lite|pro|empire) — recurring monthly.
+      2. Apostille one-time (flow=apostille_one_time + apostille_order_id) — single charge.
+
+    The two flows are mutually exclusive: if flow is set, tier is ignored.
+    """
     _require_stripe()
 
+    # ── Flow 2: Apostille one-time payment ──
+    if req.flow == "apostille_one_time":
+        if not req.apostille_order_id or not req.apostille_amount_cents:
+            raise HTTPException(
+                status_code=400,
+                detail="apostille flow requires apostille_order_id and apostille_amount_cents",
+            )
+        if req.apostille_amount_cents <= 0:
+            raise HTTPException(status_code=400, detail="apostille_amount_cents must be > 0")
+
+        try:
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": req.apostille_amount_cents,
+                        "product_data": {
+                            "name": f"Apostille — Order {req.apostille_order_id}",
+                            "description": f"EmpireBox Apostille Fast Lane — {req.apostille_package_id or 'standard'} package",
+                        },
+                    },
+                    "quantity": 1,
+                }],
+                success_url=req.success_url,
+                cancel_url=req.cancel_url,
+                metadata={
+                    "apostille_order_id": req.apostille_order_id,
+                    "apostille_package_id": req.apostille_package_id or "standard",
+                    "flow": "apostille_one_time",
+                },
+            )
+            return {
+                "checkout_url": session.url,
+                "session_id": session.id,
+                "apostille_order_id": req.apostille_order_id,
+                "amount_cents": req.apostille_amount_cents,
+                "flow": "apostille_one_time",
+            }
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe apostille checkout error: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # ── Flow 1: SaaS subscription (default) ──
+    if not req.tier:
+        raise HTTPException(
+            status_code=400,
+            detail="Either tier (SaaS) or flow=apostille_one_time (apostille) is required",
+        )
     tier = req.tier.lower()
     if tier not in TIER_PRICES:
         raise HTTPException(status_code=400, detail=f"Invalid tier: {tier}. Must be one of: lite, pro, empire")
@@ -397,6 +489,26 @@ async def stripe_webhook(request: Request):
                     context={
                         "invoice_id": invoice_id,
                         "invoice_number": invoice_number,
+                        "amount": data.get("amount_total", 0) / 100,
+                        "stripe_session_id": data.get("id"),
+                    },
+                )
+
+        elif flow == "apostille_one_time":
+            # R1B Fast Lane: flip paid=true on the matching apostille order.
+            apostille_order_id = metadata.get("apostille_order_id", "")
+            if apostille_order_id:
+                _mark_apostille_order_paid(
+                    apostille_order_id,
+                    stripe_session_id=data.get("id", ""),
+                    amount_cents=data.get("amount_total", 0),
+                )
+                await _notify_internal(
+                    title=f"Apostille Order {apostille_order_id} Paid",
+                    message=f"Apostille order {apostille_order_id} paid via Stripe (${data.get('amount_total', 0) / 100:.2f})",
+                    context={
+                        "apostille_order_id": apostille_order_id,
+                        "package_id": metadata.get("apostille_package_id", ""),
                         "amount": data.get("amount_total", 0) / 100,
                         "stripe_session_id": data.get("id"),
                     },
