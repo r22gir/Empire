@@ -97,7 +97,14 @@ def _is_test_mode() -> bool:
 # ── Pydantic schemas (public-safe) ──────────────────────────────────
 
 class PublicIntakeRequest(BaseModel):
-    """Public apostille intake. Minimal fields, no internal PII."""
+    """Public apostille intake. Minimal fields, no internal PII.
+
+    R1D-PUB-NAV-2: added 4 optional metadata fields captured from the public
+    Service Navigator. All Optional — the form continues to work without them.
+    The fields are written into the order's `metadata` block so the Founder
+    can see in the operator UI which service paths / categories a customer
+    was interested in before submitting.
+    """
     client_name: str = Field(..., min_length=1, max_length=200)
     email: str = Field(..., min_length=3, max_length=200)
     phone: Optional[str] = Field(None, max_length=50)
@@ -106,6 +113,27 @@ class PublicIntakeRequest(BaseModel):
     origin_state: str = Field(..., min_length=2, max_length=10)
     service_level: str = Field(..., min_length=1, max_length=20)
     notes: Optional[str] = Field(None, max_length=2000)
+
+    # R1D-PUB-NAV-2 metadata (all optional)
+    service_path: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Which service-path card caught the customer's interest: "
+                    "state_apostille | federal_apostille | embassy_legalization | "
+                    "certified_copy | vital_records_apostille | fbi_background_apostille | other",
+    )
+    notarization_needed: Optional[bool] = Field(
+        None,
+        description="True if customer indicated in the Notarization section that the document needs notarization.",
+    )
+    business_document_interest: Optional[bool] = Field(
+        None,
+        description="True if customer was reading the 'Business documents' section of the navigator.",
+    )
+    interested_in_llcfactory: Optional[bool] = Field(
+        None,
+        description="True if customer clicked or engaged with the related-service cross-link to LLCFactory.",
+    )
 
 
 class PublicIntakeResponse(BaseModel):
@@ -354,6 +382,24 @@ def _create_internal_order(req: PublicIntakeRequest, package_id: str) -> dict:
         "created_at": now,
         "updated_at": now,
     }
+
+    # R1D-PUB-NAV-2: capture optional Service Navigator signals into metadata.
+    # Only fields explicitly set by the customer are written; absence means
+    # the customer didn't engage with that section. This preserves the existing
+    # behavior for orders without the new fields and adds new fields cleanly.
+    nav_metadata = {}
+    if req.service_path is not None:
+        nav_metadata["service_path"] = req.service_path
+    if req.notarization_needed is not None:
+        nav_metadata["notarization_needed"] = req.notarization_needed
+    if req.business_document_interest is not None:
+        nav_metadata["business_document_interest"] = req.business_document_interest
+    if req.interested_in_llcfactory is not None:
+        nav_metadata["interested_in_llcfactory"] = req.interested_in_llcfactory
+    if nav_metadata:
+        nav_metadata["nav_source"] = "service_navigator_v2"
+        order_data["metadata"].update(nav_metadata)
+
     _save_json(ORDERS_DIR, f"{order_id}.json", order_data)
 
     logger.info(f"[apostapp-public] intake created: order={order_id} pkg={package_id} email={req.email}")
