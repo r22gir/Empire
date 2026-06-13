@@ -66,6 +66,12 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'lead', name: 'LeadForge', icon: <Target size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
       { id: 'crm', name: 'ForgeCRM', icon: <Users size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'pay', name: 'EmpirePay', icon: <Wallet size={16} />, status: 'active', color: '#16a34a', kind: 'product' },
+      // Patch B: Pricing Studio is the operator's revenue/quoting engine.
+      // It was previously hidden in the collapsed Tools group. Moved here
+      // (Business group, near EmpirePay) so the founder sees it from the
+      // default sidebar view. Public /pricing (SaaS pricing page) is a
+      // separate route and is not affected. QuickSwitch Z still works.
+      { id: 'pricing-studio', name: 'Pricing Studio', icon: <DollarSign size={16} />, status: 'active', color: '#16a34a', screen: 'pricing-studio', kind: 'screen' },
     ],
   },
   {
@@ -75,7 +81,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'drawings', name: 'Drawing Studio', icon: <PenTool size={16} />, status: 'active', color: '#b8960c', kind: 'product' },
       { id: 'vision', name: 'AI Vision', icon: <Camera size={16} />, status: 'active', color: '#7c3aed', kind: 'product' },
-      { id: 'pricing-studio', name: 'Pricing Studio', icon: <DollarSign size={16} />, status: 'active', color: '#16a34a', screen: 'pricing-studio', kind: 'screen' },
       { id: 'recovery', name: 'RecoveryForge', icon: <ShieldCheck size={16} />, status: 'active', color: '#06b6d4', kind: 'product' },
     ],
   },
