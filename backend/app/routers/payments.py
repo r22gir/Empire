@@ -8,7 +8,7 @@ Two payment flows, one Stripe account:
 All Stripe calls gracefully degrade when STRIPE_SECRET_KEY is not set (503).
 """
 from fastapi import APIRouter, HTTPException, Request, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List
 from datetime import datetime
 import os
@@ -68,21 +68,130 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 # ── Schemas ──────────────────────────────────────────────────────────
 
+# ── ApostApp URL allowlist (R1D-FIX-2) ────────────────────────────────
+# Public ApostApp surface hostname (the ONLY host that may receive
+# success/cancel redirects for the apostille_one_time flow).
+APOSTAPP_PUBLIC_HOST = "apostapp.empirebox.store"
+
+# Operator-side hostnames (gated by Cloudflare Access). MUST NOT appear
+# in any apostille_one_time redirect URL — would 302 customers to a
+# login page and effectively lose the payment.
+_OPERATOR_HOSTS = frozenset({
+    "studio.empirebox.store",
+    "api.empirebox.store",
+    "luxe.empirebox.store",
+    "forge.empirebox.store",
+    "hermes.empirebox.store",
+    "empirebox.store",  # bare apex (no subdomain) — also operator
+})
+
+
+def _validate_apostille_checkout_url(label: str, url: Optional[str]) -> None:
+    """Validate a success_url or cancel_url for the apostille_one_time flow.
+
+    Raises HTTPException(400) if the URL is:
+      - missing/empty
+      - not HTTPS
+      - using localhost / 127.0.0.1 (any port or scheme)
+      - using any operator hostname (would 302 customer to Access login)
+      - using any host other than the public ApostApp surface
+        (apostapp.empirebox.store)
+      - malformed (cannot be parsed)
+
+    This is the R1D-FIX-2 hardening to prevent silent fallback to
+    operator/localhost URLs in the public Apostille payment flow.
+    """
+    from urllib.parse import urlparse
+
+    if not url or not url.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow requires {label} (non-empty)",
+        )
+
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow: {label} is not a valid URL",
+        )
+
+    # Scheme: must be https
+    if parsed.scheme != "https":
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow: {label} must use https, got {parsed.scheme!r}",
+        )
+
+    host = (parsed.hostname or "").lower()
+
+    # Localhost / loopback (any port)
+    if host in ("localhost",) or host.startswith("127.") or host == "::1":
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow: {label} cannot use a loopback host (got {host!r})",
+        )
+
+    # Operator hostnames — would 302 the customer to a Cloudflare Access login
+    if host in _OPERATOR_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"apostille flow: {label} cannot use an operator hostname "
+                f"(got {host!r}); must be https://{APOSTAPP_PUBLIC_HOST}/..."
+            ),
+        )
+
+    # Must be the public ApostApp surface
+    if host != APOSTAPP_PUBLIC_HOST:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"apostille flow: {label} must use https://{APOSTAPP_PUBLIC_HOST}/..., "
+                f"got host {host!r}"
+            ),
+        )
+
+
 class CheckoutRequest(BaseModel):
     """Create a checkout session. Supports two flows:
     1. SaaS subscription (tier=lite|pro|empire) — recurring
     2. Apostille one-time payment (apostille_order_id set) — single charge
+
+    URL handling:
+      - SaaS flow (default): success_url/cancel_url are optional and default
+        to operator-side URLs (studio.empirebox.store), which is correct
+        because the SaaS flow is operator-facing.
+      - Apostille one_time flow: success_url/cancel_url are REQUIRED and
+        MUST be https URLs on the public ApostApp surface
+        (apostapp.empirebox.store). The R1B ApostilleIntakeForm.jsx passes
+        these explicitly. The backend enforces them at validation time
+        (R1D-FIX-2).
     """
     tier: Optional[str] = None  # lite, pro, empire (SaaS only)
     customer_email: Optional[str] = None
     user_id: Optional[str] = None  # internal user id for subscription persistence
-    success_url: str = "https://studio.empirebox.store/payments/success?session_id={CHECKOUT_SESSION_ID}"
-    cancel_url: str = "https://studio.empirebox.store/payments/cancel"
+    success_url: Optional[str] = "https://studio.empirebox.store/payments/success?session_id={CHECKOUT_SESSION_ID}"
+    cancel_url: Optional[str] = "https://studio.empirebox.store/payments/cancel"
     # Apostille one-time flow (R1B Fast Lane) — see app/routers/apostapp_public.py
     flow: Optional[str] = None  # "apostille_one_time" for single-charge apostille
     apostille_order_id: Optional[str] = None  # when flow=apostille_one_time
     apostille_package_id: Optional[str] = None  # basic_intake|standard|rush
     apostille_amount_cents: Optional[int] = None  # required when flow=apostille_one_time
+
+    @model_validator(mode="after")
+    def _validate_apostille_urls(self):
+        """R1D-FIX-2: enforce URL rules for the apostille_one_time flow.
+
+        Only runs when flow == "apostille_one_time". The SaaS branch is
+        unaffected (success_url/cancel_url stay optional with operator
+        defaults).
+        """
+        if self.flow == "apostille_one_time":
+            _validate_apostille_checkout_url("success_url", self.success_url)
+            _validate_apostille_checkout_url("cancel_url", self.cancel_url)
+        return self
 
 
 class InvoiceLinkRequest(BaseModel):
@@ -395,34 +504,68 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
 
 # ── Webhook Handler ──────────────────────────────────────────────────
 
+def _require_webhook_secret():
+    """Fail-closed: reject all webhooks if STRIPE_WEBHOOK_SECRET is not configured.
+
+    R1D-FIX safety hardening. The previous behavior fell back to parsing the
+    payload without signature verification when the secret was missing, which
+    is acceptable in dev (test mode) but unacceptable for live mode — any
+    attacker who can reach the webhook URL could forge a
+    `checkout.session.completed` event and flip arbitrary orders to `paid=true`.
+    For live deployments, the operator must configure STRIPE_WEBHOOK_SECRET
+    BEFORE switching Stripe to live mode. If it is missing or empty, every
+    webhook request is rejected with HTTP 503, no body is parsed, no order is
+    mutated, and the secret value is never logged.
+    """
+    if not STRIPE_WEBHOOK_SECRET or not STRIPE_WEBHOOK_SECRET.strip():
+        # Safe log: only the variable name and the fact that it's missing.
+        # Never log the (empty) secret itself, and never log any part of the
+        # incoming payload (it could contain PII, signed-but-bad data, etc.).
+        logger.error(
+            "Webhook rejected: STRIPE_WEBHOOK_SECRET is not configured. "
+            "Set STRIPE_WEBHOOK_SECRET in .env to accept live webhooks."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook unavailable: STRIPE_WEBHOOK_SECRET not configured",
+        )
+
+
 @limiter.limit("60/minute")
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events. Verifies signature if STRIPE_WEBHOOK_SECRET is set."""
+    """Handle Stripe webhook events.
+
+    Behavior:
+      * If STRIPE_SECRET_KEY is not set → 503 (no Stripe configured at all).
+      * If STRIPE_WEBHOOK_SECRET is missing/empty → 503 fail-closed (R1D-FIX).
+        The request body is NOT parsed, no order is mutated, the secret value
+        is not logged.
+      * If STRIPE_WEBHOOK_SECRET is set → verify Stripe signature; reject
+        invalid signatures (400); accept valid signed events.
+
+    Signed payloads only. No unsigned fallback. This applies to test mode AND
+    live mode — there is no dev convenience path that bypasses signature
+    verification anymore.
+    """
     _require_stripe()
+    _require_webhook_secret()
 
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    # Verify webhook signature
-    if STRIPE_WEBHOOK_SECRET:
-        try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, STRIPE_WEBHOOK_SECRET
-            )
-        except ValueError:
-            logger.error("Webhook: invalid payload")
-            raise HTTPException(status_code=400, detail="Invalid payload")
-        except stripe.error.SignatureVerificationError:
-            logger.error("Webhook: invalid signature")
-            raise HTTPException(status_code=400, detail="Invalid signature")
-    else:
-        import json
-        try:
-            event = json.loads(payload)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload")
-        logger.warning("Webhook signature verification skipped — STRIPE_WEBHOOK_SECRET not set")
+    # Verify webhook signature (STRIPE_WEBHOOK_SECRET is guaranteed non-empty
+    # by _require_webhook_secret above, so this branch is the only path).
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        logger.error("Webhook: invalid payload")
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        logger.error("Webhook: invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
     event_type = event.get("type", "")
     data = event.get("data", {}).get("object", {})
