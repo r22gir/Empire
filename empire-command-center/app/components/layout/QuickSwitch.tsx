@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor, Terminal, HardDrive, ShoppingBag } from 'lucide-react';
+import { Search, MessageSquare, BarChart3, ClipboardList, FolderOpen, Globe, Video, Scissors, Hammer, Server, MessageCircle, ListTodo, Monitor, Terminal, HardDrive, ShoppingBag, FileText } from 'lucide-react';
 
 const SECTIONS = [
   { label: 'Chat', shortcut: 'C', screen: 'chat', icon: MessageSquare, color: '#b8960c' },
@@ -19,6 +19,7 @@ const SECTIONS = [
   { label: 'RecoveryForge', shortcut: 'Y', screen: 'recovery', icon: HardDrive, color: '#b8960c' },
   { label: 'Pricing Studio', shortcut: 'Z', screen: 'pricing-studio', icon: Scissors, color: '#16a34a' },
   { label: 'RelistApp', shortcut: 'L', screen: 'relist', icon: ShoppingBag, color: '#b8960c' },
+  { label: 'ApostApp', shortcut: 'A', screen: 'apostapp', icon: FileText, color: '#b8960c' },
 ];
 
 interface Props {
