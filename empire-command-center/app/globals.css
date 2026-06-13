@@ -276,3 +276,15 @@ body:has([data-channel-page]) {
 @media (max-width: 640px) {
   [data-quote-page] .info-grid { grid-template-columns: 1fr !important; }
 }
+
+/* R2 (PlatformForge mobile): Allow scrolling on the PlatformForge page.
+   The default body is height:100vh / overflow:hidden for the Command
+   Center's EmpireShell. PlatformForge on /platform is rendered directly
+   (no EmpireShell wrapper), so the same override pattern used by the
+   quote / intake / channel / empirebox pages is required to let the body
+   scroll on iPhone. Scoped by [data-platform-page] so the operator
+   Command Center shell is unaffected. */
+body:has([data-platform-page]) {
+  overflow: auto;
+  height: auto;
+}

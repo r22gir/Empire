@@ -101,6 +101,17 @@ const SCREEN_DEEP_LINKS: Partial<Record<string, ScreenMode>> = {
   'pricing-studio': 'pricing-studio',
 };
 
+// Map a URL `?screen=` or `#hash` value to an EcosystemProduct.
+// Used by the deep-link handler in applyDeepLink() below to set
+// activeProduct directly (the SCREEN_DEEP_LINKS map above only
+// covers ScreenMode; some screens like ApostApp are reached via
+// activeProduct === 'apost' rather than a specific ScreenMode).
+const PRODUCT_DEEP_LINKS: Partial<Record<string, EcosystemProduct>> = {
+  apostapp: 'apost',
+  llc: 'llc',
+  llcfactory: 'llc',
+};
+
 export default function CommandCenter() {
   const [activeProduct, setActiveProduct] = useState<EcosystemProduct>('owner');
   const [activeScreen, setActiveScreen] = useState<ScreenMode>('chat');
@@ -185,6 +196,18 @@ export default function CommandCenter() {
     const applyDeepLink = () => {
       const params = new URLSearchParams(window.location.search);
       const candidate = params.get('screen') || window.location.hash.replace(/^#/, '');
+      // First check product deep links (e.g. apostapp -> activeProduct='apost').
+      // This lets screens reached via activeProduct (ApostApp) be deep-linked
+      // even though they are not in the ScreenMode enum.
+      const product = candidate ? PRODUCT_DEEP_LINKS[candidate] : null;
+      if (product) {
+        pendingDeepLinkScreen.current = null;
+        setActiveProduct(product);
+        setActiveScreen('dashboard');
+        setActiveSection(null);
+        return;
+      }
+      // Then check screen deep links (e.g. pricing-studio -> ScreenMode).
       const screen = candidate ? SCREEN_DEEP_LINKS[candidate] : null;
       if (screen) {
         pendingDeepLinkScreen.current = screen;
@@ -384,6 +407,7 @@ export default function CommandCenter() {
     else if (screen === 'dev' || screen === 'dev-panel') { setActiveProduct('dev'); setActiveScreen('dev'); }
     else if (screen === 'recovery') { setActiveProduct('recovery'); setActiveScreen('dashboard'); }
     else if (screen === 'relist') { setActiveProduct('relist'); setActiveScreen('dashboard'); }
+    else if (screen === 'apost-page' || screen === 'apostapp') { setActiveProduct('apost'); setActiveScreen('dashboard'); }
     else handleScreenChange(screen);
   }, [activeProduct, activeScreen, activeSection, handleScreenChange, pushHistory]);
 

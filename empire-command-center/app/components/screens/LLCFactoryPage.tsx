@@ -11,16 +11,12 @@ import {
 import ProductDocs from '../business/docs/ProductDocs';
 import { PaymentModule } from '../business/payments';
 
-// Stamp icon doesn't exist in lucide-react, use Shield as substitute
-const Stamp = Shield;
-
 const NAV_SECTIONS = [
   { id: 'overview', label: 'Overview', icon: Globe },
   { id: 'services', label: 'Services', icon: ClipboardList },
   { id: 'packages', label: 'Packages', icon: Package },
   { id: 'orders', label: 'Orders', icon: FileText },
   { id: 'customers', label: 'Customers', icon: Users },
-  { id: 'apostille', label: 'Apostille', icon: Stamp },
   { id: 'guides', label: 'State Guides', icon: MapPin },
   { id: 'financials', label: 'Financials', icon: DollarSign },
   { id: 'couriers', label: 'Couriers', icon: Truck },
@@ -47,12 +43,8 @@ const FALLBACK_SERVICES = [
   { id: 'operating-agreement', category: 'Document Services', name: 'Operating Agreement', description: 'Custom drafted LLC operating agreement', icon: 'FileText', serviceFee: 79, stateFees: { DC: 0, MD: 0, VA: 0 }, processingTime: '2-3 business days' },
   { id: 'articles-amendment', category: 'Document Services', name: 'Articles Amendment', description: 'Amend your formation documents', icon: 'FileText', serviceFee: 49, stateFees: { DC: 50, MD: 100, VA: 25 }, processingTime: '3-5 business days' },
   { id: 'certificate-good-standing', category: 'Document Services', name: 'Certificate of Good Standing', description: 'Obtain a certificate of good standing / existence', icon: 'Award', serviceFee: 29, stateFees: { DC: 22, MD: 20, VA: 6 }, processingTime: '2-5 business days' },
-  { id: 'apostille-vital-records', category: 'Document Services', name: 'Vital Records + Apostille', description: 'Obtain birth/death/marriage cert and apostille', icon: 'FileText', serviceFee: 89, stateFees: { DC: 15, MD: 15, VA: 22 }, processingTime: '7-14 business days' },
-  { id: 'fbi-background-apostille', category: 'Document Services', name: 'FBI Background Check + Apostille', description: 'FBI Identity History Summary with federal apostille', icon: 'Shield', serviceFee: 149, stateFees: { DC: 38, MD: 38, VA: 38 }, processingTime: '6-14 weeks' },
   { id: 'certified-copy', category: 'Document Services', name: 'Certified Copy Request', description: 'Obtain certified copies from state agencies', icon: 'FileDown', serviceFee: 39, stateFees: { DC: 50, MD: 20, VA: 6 }, processingTime: '3-10 business days' },
-  { id: 'apostille-service', category: 'Notary', name: 'Apostille / Authentication', description: 'State and federal document authentication', icon: 'Shield', serviceFee: 75, stateFees: { DC: 15, MD: 5, VA: 10 }, processingTime: '5-10 business days' },
   { id: 'notary-service', category: 'Notary', name: 'Notary Service', description: 'In-person or remote online notarization', icon: 'Shield', serviceFee: 25, stateFees: { DC: 0, MD: 0, VA: 0 }, processingTime: 'Same day' },
-  { id: 'federal-apostille', category: 'Notary', name: 'Federal Apostille (DS-4194)', description: 'US Department of State authentication for federal documents', icon: 'Shield', serviceFee: 99, stateFees: { DC: 20, MD: 20, VA: 20 }, processingTime: '5-11 weeks' },
   { id: 'embassy-legalization', category: 'Notary', name: 'Embassy Legalization', description: 'Authentication for non-Hague Convention countries', icon: 'Globe', serviceFee: 149, stateFees: { DC: 0, MD: 0, VA: 0 }, processingTime: '2-6 weeks' },
   { id: 'registered-agent', category: 'Registered Agent', name: 'Registered Agent (Annual)', description: 'Serve as your statutory registered agent', icon: 'User', serviceFee: 99, stateFees: { DC: 0, MD: 0, VA: 0 }, processingTime: 'Immediate' },
   { id: 'mail-forwarding', category: 'Additional', name: 'Mail Forwarding', description: 'Business mail scanning and forwarding', icon: 'Mail', serviceFee: 29, stateFees: { DC: 0, MD: 0, VA: 0 }, processingTime: 'Immediate' },
@@ -64,14 +56,14 @@ const FALLBACK_PACKAGES = [
     id: 'starter', name: 'Starter', price: 0, color: '#16a34a', badge: null,
     description: 'Just the essentials — formation filing only',
     included: ['llc-formation', 'digital-delivery'],
-    notIncluded: ['ein-application', 'operating-agreement', 'registered-agent', 'boc-report', 'apostille-service', 'annual-report'],
+    notIncluded: ['ein-application', 'operating-agreement', 'registered-agent', 'boc-report', 'annual-report'],
     processingTime: '5-7 business days',
   },
   {
     id: 'professional', name: 'Professional', price: 149, color: '#b8960c', badge: 'Most Popular',
     description: 'Everything you need to launch and operate',
     included: ['llc-formation', 'ein-application', 'operating-agreement', 'boc-report', 'digital-delivery'],
-    notIncluded: ['registered-agent', 'apostille-service', 'annual-report'],
+    notIncluded: ['registered-agent', 'annual-report'],
     processingTime: '3-5 business days',
   },
   {
@@ -92,15 +84,11 @@ const SERVICE_NAMES: Record<string, string> = {
   'certificate-good-standing': 'Certificate of Good Standing',
   'annual-report': 'Annual Report Filing',
   'mail-forwarding': 'Mail Forwarding (1 Year)',
-  'apostille-service': 'Apostille Service',
   'digital-delivery': 'Digital Document Delivery',
   'business-license': 'Business License Application',
   'state-tax-reg': 'State Tax Registration',
   'compliance-monitoring': 'Compliance Monitoring',
-  'federal-apostille': 'Federal Apostille (DS-4194)',
   'embassy-legalization': 'Embassy Legalization',
-  'apostille-vital-records': 'Vital Records + Apostille',
-  'fbi-background-apostille': 'FBI Background Check + Apostille',
   'certified-copy': 'Certified Copy Request',
 };
 
@@ -112,8 +100,6 @@ const STATUS_COLORS: Record<string, { bg: string; color: string; label: string }
   delivered: { bg: '#ede9fe', color: '#7c3aed', label: 'Delivered' },
   completed: { bg: '#d1fae5', color: '#065f46', label: 'Completed' },
 };
-
-const APOSTILLE_STAGES = ['Document Received', 'Notarized', 'State Auth', 'Federal Auth', 'Embassy', 'Delivered'];
 
 const STATE_GUIDES: Record<string, any> = {
   AL: {
@@ -621,7 +607,6 @@ export default function LLCFactoryPage() {
       case 'packages': return <PackagesSection onNewOrder={() => setShowNewOrder(true)} />;
       case 'orders': return <OrdersSection onNewOrder={() => setShowNewOrder(true)} />;
       case 'customers': return <CustomersSection />;
-      case 'apostille': return <ApostilleSection />;
       case 'guides': return <StateGuidesSection />;
       case 'financials': return <FinancialsSection />;
       case 'couriers': return <CourierManagementSection />;
@@ -719,7 +704,7 @@ function OverviewSection({ onNavigate, onNewOrder }: { onNavigate: (s: Section) 
     fetch(API + '/llcfactory/dashboard').then(r => r.json()).then(setDashboard)
       .catch(() => {
         setError(true);
-        setDashboard({ activeOrders: 0, revenueMTD: 0, formationsThisMonth: 0, pendingApostilles: 0, recentOrders: [], topServices: [] });
+        setDashboard({ activeOrders: 0, revenueMTD: 0, formationsThisMonth: 0, recentOrders: [], topServices: [] });
       })
       .finally(() => setLoading(false));
   }, []);
@@ -741,11 +726,10 @@ function OverviewSection({ onNavigate, onNewOrder }: { onNavigate: (s: Section) 
         </span>
       </div>
 
-      <div className="grid grid-cols-4 gap-3 mt-5 mb-6">
+      <div className="grid grid-cols-3 gap-3 mt-5 mb-6">
         <KPI icon={<ClipboardList size={18} />} iconBg="#dbeafe" iconColor="#2563eb" label="Active Orders" value={String(d.activeOrders ?? 0)} sub="In progress" onClick={() => onNavigate('orders')} />
         <KPI icon={<DollarSign size={18} />} iconBg="#dcfce7" iconColor="#16a34a" label="Revenue MTD" value={`$${(d.revenueMTD ?? 0).toLocaleString()}`} sub="This month" />
         <KPI icon={<Building size={18} />} iconBg="#fdf8eb" iconColor="#b8960c" label="Formations" value={String(d.formationsThisMonth ?? 0)} sub="This month" onClick={() => onNavigate('orders')} />
-        <KPI icon={<Shield size={18} />} iconBg="#ede9fe" iconColor="#7c3aed" label="Pending Apostilles" value={String(d.pendingApostilles ?? 0)} sub="In pipeline" onClick={() => onNavigate('apostille')} />
       </div>
 
       <div className="section-label" style={{ marginBottom: 8 }}>Quick Access</div>
@@ -1183,383 +1167,6 @@ function CustomersSection() {
   );
 }
 
-// ============ 6. APOSTILLE ============
-
-function ApostilleSection() {
-  const [apostilleOrders, setApostilleOrders] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [apostilleTab, setApostilleTab] = useState<'Tracker' | 'Forms & Fees' | 'Process Guide'>('Tracker');
-
-  useEffect(() => {
-    fetch(API + '/llcfactory/apostille').then(r => r.json()).then(data => { const list = data?.orders || data; setApostilleOrders(Array.isArray(list) ? list : []); })
-      .catch(() => setApostilleOrders([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="flex-1 flex items-center justify-center py-20"><Loader2 size={24} className="text-[#16a34a] animate-spin" /></div>;
-
-  const thStyle: React.CSSProperties = { padding: '10px 14px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#999', textAlign: 'left' };
-  const tdStyle: React.CSSProperties = { padding: '10px 14px', fontSize: 12, color: '#666' };
-  const subTabs: Array<'Tracker' | 'Forms & Fees' | 'Process Guide'> = ['Tracker', 'Forms & Fees', 'Process Guide'];
-
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 36px' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600, color: '#1a1a1a', margin: 0, marginBottom: 20 }}>Apostille Center</h1>
-
-      {/* Sub-tab navigation */}
-      <div className="flex items-center gap-2 mb-6">
-        {subTabs.map(tab => (
-          <button
-            key={tab}
-            onClick={() => setApostilleTab(tab)}
-            style={{
-              padding: '8px 18px', borderRadius: 8, fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer',
-              background: apostilleTab === tab ? '#7c3aed' : '#f5f0e8',
-              color: apostilleTab === tab ? '#fff' : '#666',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            {tab === 'Tracker' && <ClipboardList size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2 }} />}
-            {tab === 'Forms & Fees' && <FileText size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2 }} />}
-            {tab === 'Process Guide' && <MapPin size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2 }} />}
-            {tab}
-          </button>
-        ))}
-      </div>
-
-      {/* ==================== TAB: TRACKER ==================== */}
-      {apostilleTab === 'Tracker' && (
-        <>
-          {/* Pipeline visualization */}
-          <div className="empire-card mb-6" style={{ padding: '20px 24px' }}>
-            <div className="section-label" style={{ marginBottom: 14 }}>Authentication Pipeline</div>
-            <div className="flex items-center justify-between">
-              {APOSTILLE_STAGES.map((stage, i) => (
-                <React.Fragment key={stage}>
-                  <div style={{ textAlign: 'center', flex: 1 }}>
-                    <div className="w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center" style={{ background: '#ede9fe', color: '#7c3aed', fontSize: 14, fontWeight: 700 }}>{i + 1}</div>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: '#666' }}>{stage}</div>
-                  </div>
-                  {i < APOSTILLE_STAGES.length - 1 && <ArrowRight size={16} className="text-[#ddd] flex-shrink-0" />}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Apostille orders table */}
-          <div className="empire-card mb-6" style={{ padding: 0, overflow: 'hidden' }}>
-            <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #ece8e0' }}>
-                  {['ID', 'Customer', 'Document', 'Jurisdiction', 'Progress', 'Received', 'Est. Delivery'].map(h => (
-                    <th key={h} style={thStyle}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {apostilleOrders.map(o => (
-                  <tr key={o.id} style={{ borderBottom: '1px solid #f0ece4' }}>
-                    <td style={{ ...tdStyle, fontWeight: 600, color: '#1a1a1a' }}>{o.id}</td>
-                    <td style={{ ...tdStyle, color: '#1a1a1a' }}>{o.customer}</td>
-                    <td style={tdStyle}>{o.documentType}</td>
-                    <td style={tdStyle}>{o.jurisdiction}</td>
-                    <td style={{ padding: '10px 14px' }}>
-                      <div className="flex items-center gap-1">
-                        {APOSTILLE_STAGES.map((_, i) => (
-                          <div key={i} style={{ width: 20, height: 6, borderRadius: 3, background: i < o.status ? '#7c3aed' : '#ece8e0' }} />
-                        ))}
-                        <span style={{ fontSize: 10, color: '#7c3aed', fontWeight: 600, marginLeft: 6 }}>{o.status}/{APOSTILLE_STAGES.length}</span>
-                      </div>
-                    </td>
-                    <td style={{ ...tdStyle, fontSize: 11, color: '#999' }}>{o.dateReceived}</td>
-                    <td style={{ ...tdStyle, fontSize: 11, color: '#999' }}>{o.estimatedDelivery}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {apostilleOrders.length === 0 && <div style={{ padding: 30, textAlign: 'center', color: '#999', fontSize: 12 }}>No apostille orders</div>}
-          </div>
-
-          {/* Jurisdiction Reference Cards */}
-          <div className="section-label" style={{ marginBottom: 10 }}>Jurisdiction Reference</div>
-          <div className="grid grid-cols-2 gap-3 mb-6">
-            <div className="empire-card" style={{ padding: '14px 18px', borderLeft: '3px solid #2563eb' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 6 }}>
-                <Building size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#2563eb' }} />
-                District of Columbia
-              </div>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
-                <strong>Fee:</strong> $15/document<br />
-                <strong>Authority:</strong> Office of Notary Commissions &amp; Authentications (ONCA)<br />
-                <strong>Processing:</strong> 2-3 business days<br />
-                <strong>Note:</strong> Document must be notarized by a DC notary or be a DC government-issued certificate
-              </div>
-            </div>
-            <div className="empire-card" style={{ padding: '14px 18px', borderLeft: '3px solid #16a34a' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 6 }}>
-                <Building size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#16a34a' }} />
-                Maryland
-              </div>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
-                <strong>Fee:</strong> $5/document<br />
-                <strong>Authority:</strong> Secretary of State, Certification Desk<br />
-                <strong>Processing:</strong> Up to 1 week (mail) / Same-day (walk-in)<br />
-                <strong>Extra Step:</strong> Notarized docs require Circuit Court Clerk authentication (~$1) before state apostille
-              </div>
-            </div>
-            <div className="empire-card" style={{ padding: '14px 18px', borderLeft: '3px solid #b8960c' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 6 }}>
-                <Building size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#b8960c' }} />
-                Virginia
-              </div>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
-                <strong>Fee:</strong> $10/document ($5 each additional in same batch)<br />
-                <strong>Authority:</strong> Secretary of the Commonwealth<br />
-                <strong>Processing:</strong> 5-7 business days (mail) / Appointment-only in-person (Mon-Thu)<br />
-                <strong>Note:</strong> In-person requires scheduled appointment
-              </div>
-            </div>
-            <div className="empire-card" style={{ padding: '14px 18px', borderLeft: '3px solid #7c3aed' }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 6 }}>
-                <Globe size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#7c3aed' }} />
-                Federal (US Dept of State)
-              </div>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.6 }}>
-                <strong>Fee:</strong> $20/document<br />
-                <strong>Form:</strong> DS-4194 (Application for Apostille / Authentication)<br />
-                <strong>Processing:</strong> 5+ weeks (mail) / 2-3 weeks (walk-in drop-off, DC office)<br />
-                <strong>Use for:</strong> FBI background checks, federal court docs, any federal agency documents
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* ==================== TAB: FORMS & FEES ==================== */}
-      {apostilleTab === 'Forms & Fees' && (
-        <>
-          {/* Fee Comparison Table */}
-          <div className="section-label" style={{ marginBottom: 10 }}>Fee Comparison</div>
-          <div className="empire-card mb-6" style={{ padding: 0, overflow: 'hidden' }}>
-            <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #ece8e0' }}>
-                  {['', 'DC', 'Maryland', 'Virginia', 'Federal'].map(h => (
-                    <th key={h} style={{ ...thStyle, textAlign: h === '' ? 'left' : 'center' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  { label: 'Apostille Fee', dc: '$15/doc', md: '$5/doc', va: '$10/doc ($5 add\'l)', fed: '$20/doc' },
-                  { label: 'Notary Act Fee Cap', dc: '$5/signature', md: '$4/signature', va: '$5/notarial act', fed: 'N/A' },
-                  { label: 'Circuit Court Auth', dc: 'N/A', md: '~$1/doc (required)', va: 'N/A', fed: 'N/A' },
-                  { label: 'Processing Time', dc: '2-3 days', md: '1 week mail / same-day walk-in', va: '5-7 days mail / appt in-person', fed: '5+ wks mail / 2-3 wks drop-off' },
-                  { label: 'RON Available?', dc: 'Yes', md: 'Yes', va: 'Yes (RON pioneer)', fed: 'N/A' },
-                ].map(row => (
-                  <tr key={row.label} style={{ borderBottom: '1px solid #f0ece4' }}>
-                    <td style={{ ...tdStyle, fontWeight: 600, color: '#1a1a1a', fontSize: 11 }}>{row.label}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11 }}>{row.dc}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11 }}>{row.md}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11 }}>{row.va}</td>
-                    <td style={{ ...tdStyle, textAlign: 'center', fontSize: 11 }}>{row.fed}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Forms & Requirements Quick Reference */}
-          <div className="section-label" style={{ marginBottom: 10 }}>Document Types &amp; Requirements</div>
-          <div className="empire-card mb-6" style={{ padding: 0, overflow: 'hidden' }}>
-            <table className="empire-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #ece8e0' }}>
-                  {['Document Type', 'Examples', 'Authentication Chain'].map(h => (
-                    <th key={h} style={thStyle}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid #f0ece4' }}>
-                  <td style={{ ...tdStyle, fontWeight: 600, color: '#1a1a1a' }}>
-                    <FileText size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -2, color: '#2563eb' }} />
-                    Private Documents
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 11 }}>Power of Attorney, Affidavit, Corporate Resolution, Operating Agreement</td>
-                  <td style={tdStyle}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-                      Notarize <ArrowRight size={10} style={{ color: '#999' }} /> <span style={{ color: '#16a34a', fontWeight: 600 }}>MD only: Circuit Court</span> <ArrowRight size={10} style={{ color: '#999' }} /> State Apostille
-                    </span>
-                  </td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #f0ece4' }}>
-                  <td style={{ ...tdStyle, fontWeight: 600, color: '#1a1a1a' }}>
-                    <Award size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -2, color: '#b8960c' }} />
-                    Government-Issued
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 11 }}>Birth Certificate, Marriage Certificate, Court Order, Certified Transcript</td>
-                  <td style={tdStyle}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-                      Certified Copy <ArrowRight size={10} style={{ color: '#999' }} /> State Apostille <span style={{ color: '#999', fontStyle: 'italic' }}>(no notary needed)</span>
-                    </span>
-                  </td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #f0ece4' }}>
-                  <td style={{ ...tdStyle, fontWeight: 600, color: '#1a1a1a' }}>
-                    <Shield size={12} style={{ display: 'inline', marginRight: 4, verticalAlign: -2, color: '#7c3aed' }} />
-                    Federal Documents
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 11 }}>FBI Background Check, Federal Court Records, USCIS Documents, Patent/Trademark Certs</td>
-                  <td style={tdStyle}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
-                      DS-4194 <ArrowRight size={10} style={{ color: '#999' }} /> US Dept of State Apostille
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Required Government Forms */}
-          <div className="section-label" style={{ marginBottom: 10 }}>Required Government Forms</div>
-          <div className="grid grid-cols-1 gap-3 mb-6">
-            {[
-              { jurisdiction: 'DC', color: '#2563eb', form: 'Request for Authentication (mail-in form)', url: 'https://os.dc.gov/page/apostilles-and-authentications', note: 'Submit original notarized doc + completed request form + fee' },
-              { jurisdiction: 'Maryland', color: '#16a34a', form: 'Certification Checklist', url: 'https://sos.maryland.gov/documents/certchecklist.pdf', note: 'Use checklist to verify all requirements before submitting' },
-              { jurisdiction: 'Virginia', color: '#b8960c', form: 'Authentication Request Cover Letter', url: 'https://www.commonwealth.virginia.gov/official-documents/apostilles-and-authentications/', note: 'Include cover letter + docs + payment; schedule appointment for in-person' },
-              { jurisdiction: 'Federal', color: '#7c3aed', form: 'DS-4194 — Application for Apostille', url: 'https://eforms.state.gov/Forms/ds4194.pdf', note: 'Required for all federal document apostilles; mail to US Dept of State, Office of Authentications' },
-              { jurisdiction: 'FBI', color: '#999', form: 'FD-1164 — Identity History Summary Request', url: 'https://www.fbi.gov/how-can-we-help-you/more-fbi-services-and-information/identity-history-summary-checks', note: 'Request FBI background check; result then goes through DS-4194 federal apostille process' },
-            ].map(f => (
-              <div key={f.jurisdiction} className="empire-card" style={{ padding: '12px 18px', borderLeft: `3px solid ${f.color}` }}>
-                <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a' }}>
-                    <span style={{ color: f.color, marginRight: 6 }}>{f.jurisdiction}</span>
-                    {f.form}
-                  </div>
-                  <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3, textDecoration: 'none' }}>
-                    Open <ExternalLink size={11} />
-                  </a>
-                </div>
-                <div style={{ fontSize: 11, color: '#666', lineHeight: 1.5 }}>{f.note}</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ==================== TAB: PROCESS GUIDE ==================== */}
-      {apostilleTab === 'Process Guide' && (
-        <>
-          {/* Authentication Chain Flowcharts — Hague Country */}
-          <div className="section-label" style={{ marginBottom: 10 }}>Hague Convention Country — Authentication Chains</div>
-
-          {/* Private Document Flow */}
-          <div className="empire-card mb-4" style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 12 }}>
-              <FileText size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#2563eb' }} />
-              Private Document (POA, Affidavit, Corporate Resolution)
-            </div>
-            <div className="flex items-center flex-wrap gap-2">
-              {[
-                { label: 'Draft Document', bg: '#f0f4ff', color: '#2563eb' },
-                { label: 'Notarize', bg: '#f0fdf4', color: '#16a34a' },
-                { label: 'MD Only: Circuit Court Clerk Auth (~$1)', bg: '#fefce8', color: '#b8960c' },
-                { label: 'State Apostille', bg: '#ede9fe', color: '#7c3aed' },
-                { label: 'Done — Accepted in Hague Countries', bg: '#f0fdf4', color: '#16a34a' },
-              ].map((step, i, arr) => (
-                <React.Fragment key={i}>
-                  <div style={{ padding: '8px 14px', borderRadius: 8, background: step.bg, border: `1px solid ${step.color}22`, fontSize: 11, fontWeight: 600, color: step.color }}>{step.label}</div>
-                  {i < arr.length - 1 && <ArrowRight size={14} style={{ color: '#ccc', flexShrink: 0 }} />}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Government Document Flow */}
-          <div className="empire-card mb-4" style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 12 }}>
-              <Award size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#b8960c' }} />
-              Government-Issued Document (Birth Cert, Court Order)
-            </div>
-            <div className="flex items-center flex-wrap gap-2">
-              {[
-                { label: 'Obtain Certified Copy', bg: '#f0f4ff', color: '#2563eb' },
-                { label: 'State Apostille (no notary needed)', bg: '#ede9fe', color: '#7c3aed' },
-                { label: 'Done — Accepted in Hague Countries', bg: '#f0fdf4', color: '#16a34a' },
-              ].map((step, i, arr) => (
-                <React.Fragment key={i}>
-                  <div style={{ padding: '8px 14px', borderRadius: 8, background: step.bg, border: `1px solid ${step.color}22`, fontSize: 11, fontWeight: 600, color: step.color }}>{step.label}</div>
-                  {i < arr.length - 1 && <ArrowRight size={14} style={{ color: '#ccc', flexShrink: 0 }} />}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Federal Document Flow */}
-          <div className="empire-card mb-6" style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 12 }}>
-              <Shield size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#7c3aed' }} />
-              Federal Document (FBI Check, Federal Court Record)
-            </div>
-            <div className="flex items-center flex-wrap gap-2">
-              {[
-                { label: 'Obtain Federal Document', bg: '#f0f4ff', color: '#2563eb' },
-                { label: 'Complete Form DS-4194', bg: '#fefce8', color: '#b8960c' },
-                { label: 'Submit to US Dept of State ($20)', bg: '#ede9fe', color: '#7c3aed' },
-                { label: 'Done — Accepted in Hague Countries', bg: '#f0fdf4', color: '#16a34a' },
-              ].map((step, i, arr) => (
-                <React.Fragment key={i}>
-                  <div style={{ padding: '8px 14px', borderRadius: 8, background: step.bg, border: `1px solid ${step.color}22`, fontSize: 11, fontWeight: 600, color: step.color }}>{step.label}</div>
-                  {i < arr.length - 1 && <ArrowRight size={14} style={{ color: '#ccc', flexShrink: 0 }} />}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Non-Hague Country Flow */}
-          <div className="section-label" style={{ marginBottom: 10 }}>Non-Hague Country — Embassy Legalization Chain</div>
-          <div className="empire-card mb-4" style={{ padding: '16px 20px' }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 12 }}>
-              <Globe size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#7c3aed' }} />
-              Any Document Destined for a Non-Hague Country
-            </div>
-            <div className="flex items-center flex-wrap gap-2">
-              {[
-                { label: 'Prepare & Notarize (if private)', bg: '#f0f4ff', color: '#2563eb' },
-                { label: 'State Authentication (or Federal via DS-4194)', bg: '#ede9fe', color: '#7c3aed' },
-                { label: 'US Dept of State Authentication', bg: '#fefce8', color: '#b8960c' },
-                { label: 'Embassy / Consulate Legalization', bg: '#fef2f2', color: '#dc2626' },
-                { label: 'Done — Accepted in Destination Country', bg: '#f0fdf4', color: '#16a34a' },
-              ].map((step, i, arr) => (
-                <React.Fragment key={i}>
-                  <div style={{ padding: '8px 14px', borderRadius: 8, background: step.bg, border: `1px solid ${step.color}22`, fontSize: 11, fontWeight: 600, color: step.color }}>{step.label}</div>
-                  {i < arr.length - 1 && <ArrowRight size={14} style={{ color: '#ccc', flexShrink: 0 }} />}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Embassy Legalization Info */}
-          <div className="empire-card" style={{ padding: '16px 20px', borderLeft: '3px solid #b8960c' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: 6 }}>
-              <AlertTriangle size={13} style={{ display: 'inline', marginRight: 5, verticalAlign: -2, color: '#b8960c' }} />
-              Embassy Legalization — Non-Hague Countries
-            </div>
-            <div style={{ fontSize: 11, color: '#666', lineHeight: 1.7 }}>
-              Countries that have <strong>not</strong> joined the Hague Apostille Convention (e.g., Canada, China, UAE, Saudi Arabia, Qatar) do not accept apostilles.
-              Instead, documents require a full <strong>authentication + legalization</strong> chain: the document must first be authenticated by the
-              US Department of State, then legalized (stamped/certified) by the destination country&apos;s embassy or consulate in the US.
-              Processing times and fees vary by embassy. Some embassies require appointments; others accept mail-in submissions.
-              Always check the specific embassy website for current requirements, fees, and turnaround times before submitting.
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ============ 7. STATE GUIDES ============
 
 const APOSTILLE_FEES: Record<string, { fee: string; processing: string; office: string }> = {
@@ -1719,10 +1326,14 @@ function StateGuidesSection() {
           </div>
         </div>
 
-        {/* Apostille info */}
+        {/* Apostille cross-reference (handled by ApostApp, not LLCFactory) */}
         {apostille && (
           <div className="empire-card" style={{ padding: '18px 22px', borderLeft: '3px solid #7c3aed' }}>
-            <div className="section-label" style={{ marginBottom: 12, color: '#7c3aed' }}>Apostille Service</div>
+            <div className="section-label" style={{ marginBottom: 4, color: '#7c3aed' }}>Apostille Reference</div>
+            <div style={{ fontSize: 11, color: '#737373', marginBottom: 12, fontStyle: 'italic' }}>
+              Apostille for this state's filings is handled by ApostApp, not LLCFactory. See{' '}
+              <a href="https://apostapp.empirebox.store/apostille" style={{ color: '#0ea5e9' }}>apostapp.empirebox.store</a>.
+            </div>
             <div className="space-y-3">
               <div className="flex items-center justify-between" style={{ padding: '8px 0', borderBottom: '1px solid #f0ece4' }}>
                 <span style={{ fontSize: 12, color: '#666' }}>State Fee</span>
@@ -1790,8 +1401,8 @@ const OPERATIONAL_COSTS: Record<string, number> = {
   'ein-application': 5, 'annual-report': 12, 'boc-report': 8, 'business-license': 10,
   'state-tax-reg': 8, 'compliance-monitoring': 10,
   'operating-agreement': 8, 'articles-amendment': 8, 'certificate-good-standing': 8,
-  'apostille-vital-records': 25, 'fbi-background-apostille': 25, 'certified-copy': 8,
-  'apostille-service': 25, 'notary-service': 10, 'federal-apostille': 25, 'embassy-legalization': 25,
+  'certified-copy': 8,
+  'notary-service': 10, 'embassy-legalization': 25,
   'registered-agent': 20, 'mail-forwarding': 10, 'foreign-qualification': 15,
 };
 
@@ -2575,7 +2186,7 @@ function AIToolsSection() {
   const [docsLoading, setDocsLoading] = useState(false);
 
   const [quizStep, setQuizStep] = useState(0);
-  const [quizAnswers, setQuizAnswers] = useState({ members: '1', registeredAgent: false, apostille: false, budget: 'low' });
+  const [quizAnswers, setQuizAnswers] = useState({ members: '1', registeredAgent: false, budget: 'low' });
   const [quizResult, setQuizResult] = useState<string | null>(null);
 
   // Document Activity panel state
@@ -2732,8 +2343,8 @@ function AIToolsSection() {
   };
 
   const handleQuizSubmit = () => {
-    const { members, registeredAgent, apostille, budget } = quizAnswers;
-    if (budget === 'high' || apostille || registeredAgent) {
+    const { members, registeredAgent, budget } = quizAnswers;
+    if (budget === 'high' || registeredAgent) {
       setQuizResult('empire');
     } else if (parseInt(members) > 1 || budget === 'medium') {
       setQuizResult('professional');
@@ -2882,10 +2493,6 @@ function AIToolsSection() {
                   <input type="checkbox" checked={quizAnswers.registeredAgent} onChange={e => setQuizAnswers({ ...quizAnswers, registeredAgent: e.target.checked })} />
                   <label style={{ fontSize: 12, color: '#1a1a1a' }}>Need a registered agent?</label>
                 </div>
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" checked={quizAnswers.apostille} onChange={e => setQuizAnswers({ ...quizAnswers, apostille: e.target.checked })} />
-                  <label style={{ fontSize: 12, color: '#1a1a1a' }}>Need apostille / international use?</label>
-                </div>
                 <div>
                   <label style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#999', display: 'block', marginBottom: 4 }}>Budget range</label>
                   <select value={quizAnswers.budget} onChange={e => setQuizAnswers({ ...quizAnswers, budget: e.target.value })} style={selectStyle}>
@@ -2906,7 +2513,7 @@ function AIToolsSection() {
                    quizResult === 'professional' ? 'Complete formation package with EIN, operating agreement, and BOI report.' :
                    'Basic formation filing at the lowest cost — great for simple single-member LLCs.'}
                 </div>
-                <button onClick={() => { setQuizResult(null); setQuizAnswers({ members: '1', registeredAgent: false, apostille: false, budget: 'low' }); }}
+                <button onClick={() => { setQuizResult(null); setQuizAnswers({ members: '1', registeredAgent: false, budget: 'low' }); }}
                   style={{ fontSize: 11, color: '#666', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retake Quiz</button>
               </div>
             )}
@@ -3075,7 +2682,6 @@ function NewOrderWizard({ onClose }: { onClose: () => void }) {
     let total = 0;
     if (additionalServices.includes('registered-agent')) total += 99;
     if (additionalServices.includes('ein-application')) total += 49;
-    if (additionalServices.includes('apostille-service')) total += 79;
     if (additionalServices.includes('operating-agreement') && selectedPackage === 'starter') total += 79;
     if (additionalServices.includes('boc-report') && selectedPackage === 'starter') total += 49;
     return total;
@@ -3288,7 +2894,6 @@ function NewOrderWizard({ onClose }: { onClose: () => void }) {
               {[
                 { id: 'registered-agent', name: 'Registered Agent (1 Year)', price: 99, desc: 'Statutory agent service' },
                 { id: 'ein-application', name: 'EIN Application', price: 49, desc: 'Federal tax ID number' },
-                { id: 'apostille-service', name: 'Apostille / Authentication', price: 79, desc: 'Document authentication for international use' },
                 { id: 'operating-agreement', name: 'Operating Agreement', price: 79, desc: 'Custom drafted OA' },
                 { id: 'boc-report', name: 'BOI Report (FinCEN)', price: 49, desc: 'Beneficial ownership filing' },
                 { id: 'mail-forwarding', name: 'Mail Forwarding', price: 29, desc: 'Business mail service' },

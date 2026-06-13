@@ -228,8 +228,12 @@ def test_stripe_apostille_checkout(unique_intake):
             "apostille_package_id": "standard",
             "apostille_amount_cents": 9500,
             "customer_email": unique_intake["email"],
-            "success_url": "https://example.com/apostille/confirmation?order_id=" + order_id,
-            "cancel_url": "https://example.com/apostille/status?order_id=" + order_id,
+            # R1D-FIX-2: success_url/cancel_url MUST use the public ApostApp
+            # surface (https://apostapp.empirebox.store/...). This test was
+            # written before R1D-FIX-2 with example.com URLs; updated to
+            # use the production public surface so the validator accepts.
+            "success_url": "https://apostapp.empirebox.store/apostille/confirmation?order_id=" + order_id,
+            "cancel_url": "https://apostapp.empirebox.store/apostille",
         },
         timeout=10,
     )
@@ -237,7 +241,8 @@ def test_stripe_apostille_checkout(unique_intake):
     data = r2.json()
     assert "checkout_url" in data
     assert data["checkout_url"].startswith("https://checkout.stripe.com/c/pay/")
-    assert "cs_test_" in data["checkout_url"]
+    # R1D: live env is now active; session_id prefix is cs_live_ (was cs_test_)
+    assert "cs_live_" in data["checkout_url"]
     assert data["flow"] == "apostille_one_time"
     assert data["apostille_order_id"] == order_id
     assert data["amount_cents"] == 9500

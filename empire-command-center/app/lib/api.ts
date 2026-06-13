@@ -6,6 +6,17 @@ function resolveApiBase(): string {
   if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') {
     return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
   }
+  // R2 (PlatformForge API): forge.empirebox.store is the operator
+  // infrastructure surface. Use same-origin /api/v1 so Cloudflare Access
+  // (which is host-scoped) carries the CF_Authorization cookie and the
+  // request reaches the local backend. Cross-host fetches to
+  // api.empirebox.store return 302 to the Access login page and the
+  // browser's fetch() cannot follow that, so safeFetch() returns null
+  // and every PlatformForge card reads OFFLINE. Same-origin is
+  // forge-only; studio / luxe / api / localhost are unchanged.
+  if (host === 'forge.empirebox.store') {
+    return `${window.location.origin}/api/v1`;
+  }
   return 'https://api.empirebox.store/api/v1';
 }
 
