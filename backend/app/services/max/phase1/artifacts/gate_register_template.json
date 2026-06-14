@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "purpose": "Template for generated MAX gate status register records.",
+  "generated_runtime_register_path": "backend/data/max/gate_status_register.json",
+  "gate_template": {
+    "gate": "",
+    "name": "",
+    "state": "unknown",
+    "launch_ready": false,
+    "required_approvals_missing": [],
+    "blockers": [],
+    "evidence": [],
+    "last_report": null,
+    "next_operator": "",
+    "independent_audit_required": true
+  },
+  "gate_1_launch_ready_rule": {
+    "required_present_approvals": [
+      "APPROVE CLOUDFLARE/DNS CHANGE",
+      "APPROVE SERVICE RESTART",
+      "APPROVE GATE 1 EXECUTION"
+    ],
+    "rule": "Gate 1 cannot be launch-ready while any required approval is listed as missing."
+  },
+  "gate_examples": [
+    {
+      "gate": "Gate 1",
+      "name": "EmpireBox Public Site Launch / R1X",
+      "state": "pending_approval",
+      "launch_ready": false,
+      "required_approvals_missing": [
+        "APPROVE CLOUDFLARE/DNS CHANGE",
+        "APPROVE SERVICE RESTART",
+        "APPROVE GATE 1 EXECUTION"
+      ],
+      "blockers": [],
+      "evidence": [
+        "landing active locally",
+        "Cloudflare/DNS not approved",
+        "cloudflared reload not approved",
+        "Gate 1 execution not approved"
+      ],
+      "last_report": "CODEX/HERMES/HARRY report id",
+      "next_operator": "Harry",
+      "independent_audit_required": true
+    },
+    {
+      "gate": "Gate 2",
+      "name": "ApostApp Live Payment Verification",
+      "state": "closed",
+      "launch_ready": false,
+      "required_approvals_missing": [],
+      "blockers": [],
+      "evidence": ["refund reconciliation completed"],
+      "last_report": "PASS_REFUND_CONFIRMED",
+      "next_operator": "MAX",
+      "independent_audit_required": false
+    },
+    {
+      "gate": "Gate 3",
+      "name": "EmpireBox Production Release PR",
+      "state": "pending_approval",
+      "launch_ready": false,
+      "required_approvals_missing": ["APPROVE GATE 3 PRODUCTION PR"],
+      "blockers": ["Gate 1 decision or explicit staging required"],
+      "evidence": [],
+      "last_report": null,
+      "next_operator": "Codex",
+      "independent_audit_required": true
+    }
+  ]
+}
