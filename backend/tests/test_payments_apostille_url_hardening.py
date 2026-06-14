@@ -36,6 +36,20 @@ served the live smoke payment (PID 508161 at the time of writing).
 import os
 import re
 import requests
+
+# ⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+# This file calls /api/v1/payments/checkout on the LIVE backend (full
+# Cloudflare edge → cloudflared tunnel → backend stack) and creates
+# `cs_live_*` Checkout Sessions on the LIVE Stripe account. The tests
+# are now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is set explicitly.
+# See backend/tests/helpers/live_test_guard.py and
+# HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
+
 import pytest
 
 # Live backend (port 8000, not 3005). 127.0.0.1 because we're running

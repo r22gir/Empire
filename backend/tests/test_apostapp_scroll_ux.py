@@ -10,7 +10,24 @@ Verifies:
 - Mini-nav links scroll to their target sections
 - All R1D-PUB-NAV-2 metadata form selectors are still present (no regression)
 - Founder/operator interface and Stripe/Cloudflare/env are unchanged
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file calls GET https://apostapp.empirebox.store/* and the LIVE
+backend on the public CF edge. The calls are read-only (no order/customer
+mutation), but they exercise the live infrastructure and should be
+guarded behind explicit Founder approval for any CI/coverage run. The
+tests are now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is set explicitly.
+See backend/tests/helpers/live_test_guard.py and
+HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
+
 import requests
 import re
 import pytest

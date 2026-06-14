@@ -5,7 +5,24 @@ Verifies the public customer surface at https://apostapp.empirebox.store/apostil
 exposes a public-safe Service Navigator and does NOT expose any operator-only screens.
 
 Uses Playwright via the Node CLI; see the headless probe in the build report.
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file calls GET https://apostapp.empirebox.store/* via the LIVE
+CF edge + tunnel + backend stack. The calls are read-only (no order/
+customer mutation), but they exercise the live infrastructure and
+should be guarded behind explicit Founder approval for any CI/coverage
+run. The tests are now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is set
+explicitly. See backend/tests/helpers/live_test_guard.py and
+HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
+
 import json
 import requests
 import pytest

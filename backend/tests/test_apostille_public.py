@@ -14,7 +14,23 @@ No real money is charged — Stripe is in test mode.
 
 Run with:
     /home/rg/empire-repo/backend/venv/bin/pytest tests/test_apostille_public.py -v
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file was guarded on 2026-06-14 after a prior unsafe run accidentally
+created 17 ApostApp orders + 17 customers + 1 live Stripe Checkout Session
+on the LIVE backend. The tests are now SKIPPED unless the env var
+APOSTILLE_LIVE_TEST_TOKEN=I_APPROVE_LIVE_APOSTAPP_PAYMENT_TESTS is set
+explicitly (which requires Founder approval via `APPROVE LIVE STRIPE ACTION`).
+DO NOT REMOVE OR WEAKEN THIS GUARD. See backend/tests/helpers/live_test_guard.py
+and HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
 
 import json
 import re

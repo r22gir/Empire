@@ -30,7 +30,22 @@ R1D-FIX behavior under test:
 
 Run with:
     /home/rg/empire-repo/backend/venv/bin/pytest tests/test_payments_webhook_fail_closed.py -v
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file calls /api/v1/payments/webhook on the LIVE backend. While
+the webhook handler is fail-closed (unsigned webhooks are rejected),
+the tests POST forged webhook bodies to verify the rejection works.
+These tests are now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is set
+explicitly. See backend/tests/helpers/live_test_guard.py and
+HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
 
 import json
 import os

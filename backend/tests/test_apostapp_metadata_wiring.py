@@ -10,7 +10,23 @@ Verifies the metadata wiring from the public Service Navigator to the order JSON
 - Missing fields default to absent (not null/false)
 - Form data-testid selectors are present in the rendered HTML
 - Founder/operator interface and Stripe/Cloudflare/env are unchanged
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file calls POST /api/v1/apostapp/public/intake on the LIVE backend
+(via the public CF edge at apostapp.empirebox.store), which creates
+REAL ApostApp order files in backend/data/apostapp/orders/ on the live
+host. The tests are now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is
+set explicitly. See backend/tests/helpers/live_test_guard.py and
+HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
 """
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
+
 import json
 import time
 import uuid

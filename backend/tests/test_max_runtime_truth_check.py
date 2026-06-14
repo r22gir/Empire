@@ -1,3 +1,32 @@
+"""
+R1X MAX RUNTIME TRUTH — Live runtime state verification regression tests.
+
+Verifies that MAX's runtime-truth response correctly reports backend health,
+routing state, provider list, and memory state, and that the response is not
+fabricated. The test suite is a mix of in-process FastAPI TestClient tests
+and one (read-only) live HTTP test against the running backend.
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file contains one test that calls the LIVE backend over HTTP:
+
+  test_routing_unchanged_after_pre_search_guard (line 1353)
+    GET http://127.0.0.1:8000/api/v1/max/routing-state
+
+The test is wrapped in a try/except that silently passes on ConnectionError,
+so it is read-only (GET, no mutation). However, per the 2026-06-14 audit's
+broad rule ("any test that calls the live backend must be guarded"), the
+entire module is now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is set
+explicitly. See backend/tests/helpers/live_test_guard.py and
+HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
+"""
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
+
 import importlib
 
 from fastapi.testclient import TestClient

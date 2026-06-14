@@ -1,3 +1,30 @@
+"""
+R1X VENDOROPS — Operator Subscription & Approvals core regression tests.
+
+⚠️  LIVE-TEST GUARD (2026-06-14) ⚠️
+This file uses FastAPI's TestClient (in-process) and a temp DB, so it
+does NOT call the LIVE backend over HTTP. However:
+  * It imports `app.main` (which loads every FastAPI router, including
+    any live/Stripe-connected routers that may have import-time side
+    effects when Stripe env is configured).
+  * It contains references to "stripe" / payment handling (the import
+    path is in scope of the payment-safety incident).
+  * Per the 2026-06-14 audit, any test in the vendorops / payments /
+    apostapp surface is treated as "live-test-adjacent" and guarded
+    behind explicit Founder approval.
+
+These tests are now SKIPPED unless APOSTILLE_LIVE_TEST_TOKEN is set
+explicitly. See backend/tests/helpers/live_test_guard.py and
+HERMES-REPORT-GATE3-PAYMENT-INCIDENT-CLEANUP-AND-TEST-GUARDS-20260614.md.
+"""
+
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
+from helpers.live_test_guard import require_live_test_token  # noqa: E402
+
+require_live_test_token(__file__)
+
 import asyncio
 from datetime import datetime, timedelta, timezone
 
