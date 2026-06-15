@@ -5,7 +5,7 @@
 export interface DocEntry {
   title: string;
   path: string;
-  type: 'spec' | 'readme' | 'guide' | 'api' | 'plan' | 'report' | 'config' | 'audit' | 'session' | 'architecture' | 'legal' | 'business' | 'pdf' | 'image' | 'presentation' | 'mockup' | 'diagram' | 'compliance' | 'code' | 'research' | 'strategy' | 'playbook' | 'analysis' | 'framework';
+  type: 'spec' | 'readme' | 'guide' | 'api' | 'plan' | 'report' | 'update' | 'config' | 'audit' | 'session' | 'architecture' | 'legal' | 'business' | 'pdf' | 'image' | 'presentation' | 'mockup' | 'diagram' | 'compliance' | 'code' | 'research' | 'strategy' | 'playbook' | 'analysis' | 'framework';
   description: string;
 }
 
@@ -140,12 +140,44 @@ const SHARED_REPORTS: DocEntry[] = [
   { title: "Daily Report PDF", path: "backend/data/presentations/260308_0611_daily-report-for-empire-operations.pdf", type: "presentation", description: "Daily operations report — March 8, 2026" },
 ];
 
+const MODULE_DOCS_STANDARD: DocEntry = {
+  title: "Module Documentation Standard",
+  path: "docs/modules/README.md",
+  type: "guide",
+  description: "Canonical docs/modules structure for durable module current-state and update documents",
+};
+
+const MODULE_STATUS_UPDATES: Record<string, DocEntry[]> = {
+  publicSite: [
+    { title: "Gate 1 Public Launch Update", path: "docs/modules/empirebox-public-site/UPDATE-20260614-GATE1-PUBLIC-LAUNCH.md", type: "update", description: "Public apex and www launch state, boundaries, checks, approvals, and follow-up work" },
+    { title: "Cloudflare Apex Public Tunnel Update", path: "docs/infrastructure/cloudflare/UPDATE-20260614-APEX-PUBLIC-TUNNEL.md", type: "update", description: "Cloudflare public edge state for the apex and www landing launch" },
+  ],
+  max: [
+    { title: "MAX/OpenClaw Phase 1 Update", path: "docs/modules/max/UPDATE-20260614-MAX-OPENCLAW-PHASE1.md", type: "update", description: "MAX orchestration Phase 1 foundation state, tests, risks, and next approvals" },
+  ],
+  openclaw: [
+    { title: "OpenClaw Triage Foundation Update", path: "docs/modules/openclaw/UPDATE-20260614-TRIAGE-FOUNDATION.md", type: "update", description: "OpenClaw bounded executor safety posture and Phase 2 backlog/empire-git risks" },
+  ],
+  apostapp: [
+    { title: "ApostApp Gate 1 Preservation Update", path: "docs/modules/apostapp/UPDATE-20260614-GATE1-PRESERVATION.md", type: "update", description: "ApostApp public-route preservation through Gate 1 launch" },
+  ],
+  operatorSurfaces: [
+    { title: "Cloudflare Access Boundary Update", path: "docs/modules/operator-surfaces/UPDATE-20260614-CF-ACCESS-BOUNDARY.md", type: "update", description: "Operator hostname protection and public/private boundary state after Gate 1" },
+  ],
+};
+
 export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
 
   // ═══════════════════════════════════════════════
   // OWNER'S DESK
   // ═══════════════════════════════════════════════
   owner: [
+    MODULE_DOCS_STANDARD,
+    ...MODULE_STATUS_UPDATES.publicSite,
+    ...MODULE_STATUS_UPDATES.max,
+    ...MODULE_STATUS_UPDATES.openclaw,
+    ...MODULE_STATUS_UPDATES.apostapp,
+    ...MODULE_STATUS_UPDATES.operatorSurfaces,
     ...SHARED_ARCHITECTURE,
     ...SHARED_SESSION_REPORTS,
     ...SHARED_MOCKUPS,
@@ -193,6 +225,7 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // EMPIRE WORKROOM
   // ═══════════════════════════════════════════════
   workroom: [
+    MODULE_DOCS_STANDARD,
     ...QUOTE_PDFS,
     ...DESIGN_IMAGES,
     ...MARKET_PRESENTATION,
@@ -215,6 +248,7 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // WOODCRAFT (CraftForge)
   // ═══════════════════════════════════════════════
   craft: [
+    MODULE_DOCS_STANDARD,
     ...SHARED_ARCHITECTURE,
     ...DESIGN_IMAGES,
     ...SHARED_REPORTS,
@@ -234,6 +268,8 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // LUXEFORGE
   // ═══════════════════════════════════════════════
   luxe: [
+    MODULE_DOCS_STANDARD,
+    ...MODULE_STATUS_UPDATES.operatorSurfaces,
     ...QUOTE_PDFS,
     ...DESIGN_IMAGES,
     ...MARKET_PRESENTATION,
@@ -268,6 +304,8 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // OPENCLAW
   // ═══════════════════════════════════════════════
   openclaw: [
+    MODULE_DOCS_STANDARD,
+    ...MODULE_STATUS_UPDATES.openclaw,
     { title: "OpenClaw Module README", path: "modules/openclaw/README.md", type: "readme", description: "Local AI assistant powered by Ollama" },
     { title: "MAX Brain Spec", path: "docs/MAX_BRAIN_SPEC.md", type: "spec", description: "Persistent AI memory system (Ollama)" },
     { title: "EmpireBox System README", path: "EMPIREBOX_SYSTEM_README.md", type: "readme", description: "Hybrid AI system with routing" },
@@ -468,6 +506,8 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // APOSTAPP
   // ═══════════════════════════════════════════════
   apost: [
+    MODULE_DOCS_STANDARD,
+    ...MODULE_STATUS_UPDATES.apostapp,
     { title: "ApostApp Module README", path: "modules/apost/README.md", type: "readme", description: "Document apostille & authentication" },
     { title: "ApostApp API", path: "backend/app/routers/apostapp.py", type: "code", description: "Apostille service backend with 14 endpoints" },
     { title: "Revenue Model", path: "docs/REVENUE_MODEL.md", type: "business", description: "Revenue projections" },
@@ -479,6 +519,8 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // EMPIREASSIST
   // ═══════════════════════════════════════════════
   assist: [
+    MODULE_DOCS_STANDARD,
+    ...MODULE_STATUS_UPDATES.max,
     ...SHARED_CONTEXT_FILES,
     { title: "MAX Redesign Mockup", path: "docs/recovered/mockups/MAX_Command_Center_Redesign_Mockup_2026-03-07.html", type: "mockup", description: "MAX command center redesign mockup" },
     { title: "EmpireAssist Module README", path: "modules/assist/README.md", type: "readme", description: "AI-powered virtual assistant" },
@@ -498,6 +540,7 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // EMPIREPAY
   // ═══════════════════════════════════════════════
   pay: [
+    MODULE_DOCS_STANDARD,
     { title: "QB Replacement Audit", path: "docs/QB_REPLACEMENT_AUDIT_2026-03-08.md", type: "audit", description: "QuickBooks replacement — full backend/frontend audit" },
     { title: "EmpirePay Module README", path: "modules/pay/README.md", type: "readme", description: "Payment processing — crypto, invoicing" },
     { title: "Crypto Payments Spec", path: "docs/CRYPTO_PAYMENTS_SPEC.md", type: "spec", description: "Crypto payment integration (SOL, BNB, ADA, ETH)" },
@@ -507,6 +550,31 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
     { title: "Solana Partnership", path: "docs/SOLANA_PARTNERSHIP.md", type: "business", description: "Solana Seeker phone bundling proposal" },
     { title: "Ecosystem Directory", path: "docs/ECOSYSTEM.md", type: "architecture", description: "23+ products overview" },
     { title: "Product Directory", path: "docs/EMPIRE_PRODUCT_DIRECTORY.md", type: "architecture", description: "30+ products listing" },
+  ],
+
+  // ═══════════════════════════════════════════════
+  // PRICING STUDIO
+  // ═══════════════════════════════════════════════
+  "pricing-studio": [
+    MODULE_DOCS_STANDARD,
+    { title: "Pricing Studio Current Docs Status", path: "docs/modules/pricing-studio/README.md", type: "readme", description: "Pending module update placeholder for Pricing Studio documentation" },
+    { title: "Canonical Pricing Engine Test", path: "backend/tests/test_canonical_pricing_engine.py", type: "code", description: "Targeted tests for the canonical pricing engine" },
+    { title: "Pricing Studio Screen", path: "empire-command-center/app/components/screens/PricingStudioScreen.tsx", type: "code", description: "Command Center Pricing Studio UI surface" },
+    { title: "Pricing API Router", path: "backend/app/routers/pricing.py", type: "api", description: "Pricing API endpoints used by Pricing Studio" },
+    { title: "Workroom Module README", path: "modules/workroom/README.md", type: "readme", description: "Workroom module source for pricing inputs" },
+    { title: "WoodCraft Module README", path: "modules/craft/README.md", type: "readme", description: "WoodCraft module source for pricing inputs" },
+  ],
+
+  // ═══════════════════════════════════════════════
+  // VENDOROPS
+  // ═══════════════════════════════════════════════
+  vendorops: [
+    MODULE_DOCS_STANDARD,
+    { title: "VendorOps Current Docs Status", path: "docs/modules/vendorops/README.md", type: "readme", description: "Pending module update placeholder for VendorOps documentation" },
+    { title: "VendorOps Router", path: "backend/app/routers/vendorops.py", type: "api", description: "VendorOps backend API, activation, approvals, subscriptions, renewals, and audit routes" },
+    { title: "VendorOps Screen", path: "empire-command-center/app/components/screens/VendorOpsPage.tsx", type: "code", description: "Command Center VendorOps UI surface" },
+    { title: "VendorOps Core Tests", path: "backend/tests/test_vendorops_core.py", type: "code", description: "Targeted VendorOps backend coverage" },
+    { title: "MAX Operating Registry", path: "backend/app/services/max/operating_registry.json", type: "config", description: "MAX truth registry entry for VendorOps and module capability claims" },
   ],
 
   // ═══════════════════════════════════════════════
@@ -526,6 +594,9 @@ export const DOCS_REGISTRY: Record<string, DocEntry[]> = {
   // PLATFORMFORGE
   // ═══════════════════════════════════════════════
   platform: [
+    MODULE_DOCS_STANDARD,
+    ...MODULE_STATUS_UPDATES.publicSite,
+    ...MODULE_STATUS_UPDATES.operatorSurfaces,
     ...SHARED_ARCHITECTURE,
     ...SHARED_SESSION_REPORTS,
     ...SHARED_MOCKUPS,
@@ -715,6 +786,7 @@ export const DOC_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   api: { bg: '#fdf4ff', text: '#a855f7' },
   plan: { bg: '#fff7ed', text: '#ea580c' },
   report: { bg: '#f0f9ff', text: '#0284c7' },
+  update: { bg: '#ecfdf5', text: '#047857' },
   config: { bg: '#f5f5f5', text: '#737373' },
   audit: { bg: '#fef2f2', text: '#dc2626' },
   session: { bg: '#f5f3ff', text: '#7c3aed' },

@@ -16,8 +16,23 @@ GATE_TTL_SECONDS = 20
 WORKER_HEARTBEAT_FRESH_SECONDS = 90
 STALE_RUNNING_SECONDS = int(os.getenv("OPENCLAW_STALE_RUNNING_SECONDS", "120"))
 OPENCLAW_URL = os.getenv("OPENCLAW_URL", "http://localhost:7878").rstrip("/")
-DB_PATH = Path.home() / "empire-repo" / "backend" / "data" / "empire.db"
-HEARTBEAT_PATH = Path.home() / "empire-repo" / "backend" / "data" / "max" / "openclaw_worker_heartbeat.json"
+DB_PATH = Path(
+    os.getenv(
+        "OPENCLAW_DB_PATH",
+        str(Path.home() / "empire-repo-main" / "backend" / "data" / "empire.db"),
+    )
+)
+# HEARTBEAT_PATH default preserved at the legacy location because the live
+# openclaw_worker (PID running under /home/rg/empire-repo/openclaw) still
+# writes its heartbeat there. Verified fresh in audit: status=polling, age
+# ~18s. Env-overridable so a future worker relocation can re-point without
+# a code change.
+HEARTBEAT_PATH = Path(
+    os.getenv(
+        "OPENCLAW_HEARTBEAT_PATH",
+        str(Path.home() / "empire-repo" / "backend" / "data" / "max" / "openclaw_worker_heartbeat.json"),
+    )
+)
 
 GATE_MESSAGES = {
     "healthy": "OpenClaw healthy - delegating task now.",

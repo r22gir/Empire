@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "purpose": "Required fields for MAX-routed operator reports.",
+  "required_fields": [
+    "operator_session_used",
+    "access_mode",
+    "branch_head_if_applicable",
+    "runtime_service_state_if_applicable",
+    "commands_checks_run",
+    "files_touched",
+    "mutations_made",
+    "forbidden_actions_avoided",
+    "evidence",
+    "risks",
+    "verdict",
+    "required_founder_approvals",
+    "next_recommended_operator",
+    "independent_audit_needed"
+  ],
+  "templates": {
+    "max_report": {
+      "title_pattern": "MAX-REPORT-<GATE>-<TOPIC>-<YYYYMMDD>",
+      "fields": ["operator_session_used", "access_mode", "branch_head_if_applicable", "runtime_service_state_if_applicable", "commands_checks_run", "files_touched", "mutations_made", "forbidden_actions_avoided", "evidence", "risks", "verdict", "required_founder_approvals", "next_recommended_operator", "independent_audit_needed"]
+    },
+    "harry_report": {
+      "title_pattern": "HARRY-REPORT-<GATE>-<ACTION>-<YYYYMMDD>",
+      "fields": ["operator_session_used", "access_mode", "branch_head_if_applicable", "runtime_service_state_if_applicable", "commands_checks_run", "files_touched", "mutations_made", "forbidden_actions_avoided", "evidence", "risks", "verdict", "required_founder_approvals", "next_recommended_operator", "independent_audit_needed"]
+    },
+    "hermes_audit": {
+      "title_pattern": "HERMES-AUDIT-<GATE>-<ACTION>-<YYYYMMDD>",
+      "fields": ["operator_session_used", "access_mode", "branch_head_if_applicable", "runtime_service_state_if_applicable", "commands_checks_run", "files_touched", "mutations_made", "forbidden_actions_avoided", "evidence", "risks", "verdict", "required_founder_approvals", "next_recommended_operator", "independent_audit_needed"]
+    },
+    "codex_plan_report": {
+      "title_pattern": "CODEX-PLAN-<MODULE>-<YYYYMMDD> or CODEX-REPORT-<MODULE>-<TOPIC>-<YYYYMMDD>",
+      "fields": ["operator_session_used", "access_mode", "branch_head_if_applicable", "runtime_service_state_if_applicable", "commands_checks_run", "files_touched", "mutations_made", "forbidden_actions_avoided", "evidence", "risks", "verdict", "required_founder_approvals", "next_recommended_operator", "independent_audit_needed"]
+    },
+    "openclaw_report": {
+      "title_pattern": "OPENCLAW-REPORT-<TASK>-<YYYYMMDD>",
+      "fields": ["operator_session_used", "access_mode", "branch_head_if_applicable", "runtime_service_state_if_applicable", "commands_checks_run", "files_touched", "mutations_made", "forbidden_actions_avoided", "evidence", "risks", "verdict", "required_founder_approvals", "next_recommended_operator", "independent_audit_needed"]
+    }
+  }
+}

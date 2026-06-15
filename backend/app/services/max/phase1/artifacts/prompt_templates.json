@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "purpose": "Reusable prompt templates for MAX-routed execution planning. Templates are non-executing by default.",
+  "notification_policy": "opt_in_only",
+  "templates": {
+    "read_only_diagnosis": {
+      "title": "READ-ONLY DIAGNOSIS",
+      "runtime_execution_allowed": false,
+      "body": "Inspect only. Do not mutate services, files, queues, env, Cloudflare/DNS, Stripe, Git history, or notifications. Produce evidence, risks, and required approvals."
+    },
+    "codex_implementation_plan": {
+      "title": "CODEX IMPLEMENTATION PLAN",
+      "runtime_execution_allowed": false,
+      "body": "Plan source changes only. Do not edit until Founder issues APPROVE CODEX IMPLEMENTATION. Identify files, tests, risks, rollback, and audit path."
+    },
+    "harry_execution": {
+      "title": "HARRY EXECUTION REQUEST",
+      "runtime_execution_allowed": false,
+      "body": "External/mobile execution request. Stop unless exact Founder approval covers the requested action. Report commands, evidence, mutations, and audit need."
+    },
+    "hermes_audit": {
+      "title": "HERMES AUDIT REQUEST",
+      "runtime_execution_allowed": false,
+      "body": "Audit independently. Verify evidence, branch/runtime state, forbidden actions avoided, risks, and whether the next phase is safe."
+    },
+    "openclaw_bounded_task_proposal": {
+      "title": "OPENCLAW BOUNDED TASK PROPOSAL",
+      "runtime_execution_allowed": false,
+      "body": "Propose a bounded OpenClaw task only. Do not run it. Classify risk, required approval, expected output, and independent audit path."
+    },
+    "service_restart_request": {
+      "title": "SERVICE RESTART REQUEST",
+      "runtime_execution_allowed": false,
+      "body": "Stop unless APPROVE SERVICE RESTART is present. Identify service, reason, preflight, rollback, and post-restart smoke checks."
+    },
+    "cloudflare_dns_request": {
+      "title": "CLOUDFLARE/DNS REQUEST",
+      "runtime_execution_allowed": false,
+      "body": "Stop unless APPROVE CLOUDFLARE/DNS CHANGE is present. Identify exact record/config, risk, rollback, and public/operator smoke checks."
+    },
+    "stripe_hard_stop_request": {
+      "title": "STRIPE HARD STOP REQUEST",
+      "runtime_execution_allowed": false,
+      "body": "Do not create sessions, charges, refunds, or live API actions unless APPROVE LIVE STRIPE ACTION is present. Summarize what approval is needed."
+    },
+    "gate_closeout": {
+      "title": "GATE CLOSEOUT",
+      "runtime_execution_allowed": false,
+      "body": "Verify all evidence, approvals, audits, rollback notes, and remaining risks. Do not mark Gate 1 launch-ready while required approvals are missing."
+    }
+  }
+}

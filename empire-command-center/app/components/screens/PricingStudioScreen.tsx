@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { API } from '../../lib/api';
+import ProductDocs from '../business/docs/ProductDocs';
 
 type PricingStatus = {
   status: string;
@@ -72,7 +73,7 @@ const WOODCRAFT_TYPES = [
 export default function PricingStudioScreen() {
   const [status, setStatus] = useState<PricingStatus | null>(null);
   const [laborRates, setLaborRates] = useState<LaborRate[]>([]);
-  const [activeTab, setActiveTab] = useState<'engine' | 'workroom' | 'woodcraft' | 'override' | 'audit'>('engine');
+  const [activeTab, setActiveTab] = useState<'engine' | 'workroom' | 'woodcraft' | 'override' | 'audit' | 'docs'>('engine');
   const [workroomType, setWorkroomType] = useState('drapery');
   const [woodcraftType, setWoodcraftType] = useState('cnc_router_time');
   const [workroomInputs, setWorkroomInputs] = useState<Record<string, string>>({});
@@ -232,6 +233,7 @@ export default function PricingStudioScreen() {
     { id: 'woodcraft' as const, label: 'Woodcraft' },
     { id: 'override' as const, label: 'Manual Override' },
     { id: 'audit' as const, label: 'Unknown + Audit' },
+    { id: 'docs' as const, label: 'Docs' },
   ];
 
   return (
@@ -674,6 +676,12 @@ export default function PricingStudioScreen() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === 'docs' && (
+          <div style={cardStyle}>
+            <ProductDocs product="pricing-studio" />
           </div>
         )}
       </div>

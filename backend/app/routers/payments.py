@@ -8,7 +8,7 @@ Two payment flows, one Stripe account:
 All Stripe calls gracefully degrade when STRIPE_SECRET_KEY is not set (503).
 """
 from fastapi import APIRouter, HTTPException, Request, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List
 from datetime import datetime
 import os
@@ -68,13 +68,130 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 # ── Schemas ──────────────────────────────────────────────────────────
 
+# ── ApostApp URL allowlist (R1D-FIX-2) ────────────────────────────────
+# Public ApostApp surface hostname (the ONLY host that may receive
+# success/cancel redirects for the apostille_one_time flow).
+APOSTAPP_PUBLIC_HOST = "apostapp.empirebox.store"
+
+# Operator-side hostnames (gated by Cloudflare Access). MUST NOT appear
+# in any apostille_one_time redirect URL — would 302 customers to a
+# login page and effectively lose the payment.
+_OPERATOR_HOSTS = frozenset({
+    "studio.empirebox.store",
+    "api.empirebox.store",
+    "luxe.empirebox.store",
+    "forge.empirebox.store",
+    "hermes.empirebox.store",
+    "empirebox.store",  # bare apex (no subdomain) — also operator
+})
+
+
+def _validate_apostille_checkout_url(label: str, url: Optional[str]) -> None:
+    """Validate a success_url or cancel_url for the apostille_one_time flow.
+
+    Raises HTTPException(400) if the URL is:
+      - missing/empty
+      - not HTTPS
+      - using localhost / 127.0.0.1 (any port or scheme)
+      - using any operator hostname (would 302 customer to Access login)
+      - using any host other than the public ApostApp surface
+        (apostapp.empirebox.store)
+      - malformed (cannot be parsed)
+
+    This is the R1D-FIX-2 hardening to prevent silent fallback to
+    operator/localhost URLs in the public Apostille payment flow.
+    """
+    from urllib.parse import urlparse
+
+    if not url or not url.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow requires {label} (non-empty)",
+        )
+
+    try:
+        parsed = urlparse(url.strip())
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow: {label} is not a valid URL",
+        )
+
+    # Scheme: must be https
+    if parsed.scheme != "https":
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow: {label} must use https, got {parsed.scheme!r}",
+        )
+
+    host = (parsed.hostname or "").lower()
+
+    # Localhost / loopback (any port)
+    if host in ("localhost",) or host.startswith("127.") or host == "::1":
+        raise HTTPException(
+            status_code=400,
+            detail=f"apostille flow: {label} cannot use a loopback host (got {host!r})",
+        )
+
+    # Operator hostnames — would 302 the customer to a Cloudflare Access login
+    if host in _OPERATOR_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"apostille flow: {label} cannot use an operator hostname "
+                f"(got {host!r}); must be https://{APOSTAPP_PUBLIC_HOST}/..."
+            ),
+        )
+
+    # Must be the public ApostApp surface
+    if host != APOSTAPP_PUBLIC_HOST:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"apostille flow: {label} must use https://{APOSTAPP_PUBLIC_HOST}/..., "
+                f"got host {host!r}"
+            ),
+        )
+
+
 class CheckoutRequest(BaseModel):
-    """Create a SaaS subscription checkout session."""
-    tier: str  # lite, pro, empire
+    """Create a checkout session. Supports two flows:
+    1. SaaS subscription (tier=lite|pro|empire) — recurring
+    2. Apostille one-time payment (apostille_order_id set) — single charge
+
+    URL handling:
+      - SaaS flow (default): success_url/cancel_url are optional and default
+        to operator-side URLs (studio.empirebox.store), which is correct
+        because the SaaS flow is operator-facing.
+      - Apostille one_time flow: success_url/cancel_url are REQUIRED and
+        MUST be https URLs on the public ApostApp surface
+        (apostapp.empirebox.store). The R1B ApostilleIntakeForm.jsx passes
+        these explicitly. The backend enforces them at validation time
+        (R1D-FIX-2).
+    """
+    tier: Optional[str] = None  # lite, pro, empire (SaaS only)
     customer_email: Optional[str] = None
     user_id: Optional[str] = None  # internal user id for subscription persistence
-    success_url: str = "https://studio.empirebox.store/payments/success?session_id={CHECKOUT_SESSION_ID}"
-    cancel_url: str = "https://studio.empirebox.store/payments/cancel"
+    success_url: Optional[str] = "https://studio.empirebox.store/payments/success?session_id={CHECKOUT_SESSION_ID}"
+    cancel_url: Optional[str] = "https://studio.empirebox.store/payments/cancel"
+    # Apostille one-time flow (R1B Fast Lane) — see app/routers/apostapp_public.py
+    flow: Optional[str] = None  # "apostille_one_time" for single-charge apostille
+    apostille_order_id: Optional[str] = None  # when flow=apostille_one_time
+    apostille_package_id: Optional[str] = None  # basic_intake|standard|rush
+    apostille_amount_cents: Optional[int] = None  # required when flow=apostille_one_time
+
+    @model_validator(mode="after")
+    def _validate_apostille_urls(self):
+        """R1D-FIX-2: enforce URL rules for the apostille_one_time flow.
+
+        Only runs when flow == "apostille_one_time". The SaaS branch is
+        unaffected (success_url/cancel_url stay optional with operator
+        defaults).
+        """
+        if self.flow == "apostille_one_time":
+            _validate_apostille_checkout_url("success_url", self.success_url)
+            _validate_apostille_checkout_url("cancel_url", self.cancel_url)
+        return self
 
 
 class InvoiceLinkRequest(BaseModel):
@@ -196,14 +313,98 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
         return False
 
 
+def _mark_apostille_order_paid(order_id: str, stripe_session_id: str = "", amount_cents: int = 0):
+    """Mark an apostille order as paid in the JSON store. Used by the
+    apostille_one_time Stripe webhook branch."""
+    import json as _json
+    import os as _os
+    base = _os.path.expanduser("~/empire-repo/backend/data/apostapp/orders")
+    path = _os.path.join(base, f"{order_id}.json")
+    if not _os.path.exists(path):
+        logger.warning(f"Apostille order {order_id} not found for paid flip")
+        return False
+    try:
+        with open(path) as f:
+            order = _json.load(f)
+        order["paid"] = True
+        order["status"] = order.get("status", "received")
+        order["payment_session_id"] = stripe_session_id
+        order["payment_amount_cents"] = amount_cents
+        order["payment_completed_at"] = datetime.utcnow().isoformat()
+        order["updated_at"] = datetime.utcnow().isoformat()
+        with open(path, "w") as f:
+            _json.dump(order, f, indent=2, default=str)
+        logger.info(f"Apostille order {order_id} marked paid (${amount_cents/100:.2f})")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to mark apostille order {order_id} paid: {e}")
+        return False
+
+
 # ── Flow 1: SaaS Subscription Checkout ───────────────────────────────
 
 @limiter.limit("10/minute")
 @router.post("/checkout")
 async def create_checkout_session(request: Request, req: CheckoutRequest):
-    """Create a Stripe Checkout session for a SaaS subscription."""
+    """Create a Stripe Checkout session.
+
+    Two flows are supported:
+      1. SaaS subscription (tier=lite|pro|empire) — recurring monthly.
+      2. Apostille one-time (flow=apostille_one_time + apostille_order_id) — single charge.
+
+    The two flows are mutually exclusive: if flow is set, tier is ignored.
+    """
     _require_stripe()
 
+    # ── Flow 2: Apostille one-time payment ──
+    if req.flow == "apostille_one_time":
+        if not req.apostille_order_id or not req.apostille_amount_cents:
+            raise HTTPException(
+                status_code=400,
+                detail="apostille flow requires apostille_order_id and apostille_amount_cents",
+            )
+        if req.apostille_amount_cents <= 0:
+            raise HTTPException(status_code=400, detail="apostille_amount_cents must be > 0")
+
+        try:
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": req.apostille_amount_cents,
+                        "product_data": {
+                            "name": f"Apostille — Order {req.apostille_order_id}",
+                            "description": f"EmpireBox Apostille Fast Lane — {req.apostille_package_id or 'standard'} package",
+                        },
+                    },
+                    "quantity": 1,
+                }],
+                success_url=req.success_url,
+                cancel_url=req.cancel_url,
+                metadata={
+                    "apostille_order_id": req.apostille_order_id,
+                    "apostille_package_id": req.apostille_package_id or "standard",
+                    "flow": "apostille_one_time",
+                },
+            )
+            return {
+                "checkout_url": session.url,
+                "session_id": session.id,
+                "apostille_order_id": req.apostille_order_id,
+                "amount_cents": req.apostille_amount_cents,
+                "flow": "apostille_one_time",
+            }
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe apostille checkout error: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+
+    # ── Flow 1: SaaS subscription (default) ──
+    if not req.tier:
+        raise HTTPException(
+            status_code=400,
+            detail="Either tier (SaaS) or flow=apostille_one_time (apostille) is required",
+        )
     tier = req.tier.lower()
     if tier not in TIER_PRICES:
         raise HTTPException(status_code=400, detail=f"Invalid tier: {tier}. Must be one of: lite, pro, empire")
@@ -303,34 +504,68 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
 
 # ── Webhook Handler ──────────────────────────────────────────────────
 
+def _require_webhook_secret():
+    """Fail-closed: reject all webhooks if STRIPE_WEBHOOK_SECRET is not configured.
+
+    R1D-FIX safety hardening. The previous behavior fell back to parsing the
+    payload without signature verification when the secret was missing, which
+    is acceptable in dev (test mode) but unacceptable for live mode — any
+    attacker who can reach the webhook URL could forge a
+    `checkout.session.completed` event and flip arbitrary orders to `paid=true`.
+    For live deployments, the operator must configure STRIPE_WEBHOOK_SECRET
+    BEFORE switching Stripe to live mode. If it is missing or empty, every
+    webhook request is rejected with HTTP 503, no body is parsed, no order is
+    mutated, and the secret value is never logged.
+    """
+    if not STRIPE_WEBHOOK_SECRET or not STRIPE_WEBHOOK_SECRET.strip():
+        # Safe log: only the variable name and the fact that it's missing.
+        # Never log the (empty) secret itself, and never log any part of the
+        # incoming payload (it could contain PII, signed-but-bad data, etc.).
+        logger.error(
+            "Webhook rejected: STRIPE_WEBHOOK_SECRET is not configured. "
+            "Set STRIPE_WEBHOOK_SECRET in .env to accept live webhooks."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook unavailable: STRIPE_WEBHOOK_SECRET not configured",
+        )
+
+
 @limiter.limit("60/minute")
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events. Verifies signature if STRIPE_WEBHOOK_SECRET is set."""
+    """Handle Stripe webhook events.
+
+    Behavior:
+      * If STRIPE_SECRET_KEY is not set → 503 (no Stripe configured at all).
+      * If STRIPE_WEBHOOK_SECRET is missing/empty → 503 fail-closed (R1D-FIX).
+        The request body is NOT parsed, no order is mutated, the secret value
+        is not logged.
+      * If STRIPE_WEBHOOK_SECRET is set → verify Stripe signature; reject
+        invalid signatures (400); accept valid signed events.
+
+    Signed payloads only. No unsigned fallback. This applies to test mode AND
+    live mode — there is no dev convenience path that bypasses signature
+    verification anymore.
+    """
     _require_stripe()
+    _require_webhook_secret()
 
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    # Verify webhook signature
-    if STRIPE_WEBHOOK_SECRET:
-        try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, STRIPE_WEBHOOK_SECRET
-            )
-        except ValueError:
-            logger.error("Webhook: invalid payload")
-            raise HTTPException(status_code=400, detail="Invalid payload")
-        except stripe.error.SignatureVerificationError:
-            logger.error("Webhook: invalid signature")
-            raise HTTPException(status_code=400, detail="Invalid signature")
-    else:
-        import json
-        try:
-            event = json.loads(payload)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload")
-        logger.warning("Webhook signature verification skipped — STRIPE_WEBHOOK_SECRET not set")
+    # Verify webhook signature (STRIPE_WEBHOOK_SECRET is guaranteed non-empty
+    # by _require_webhook_secret above, so this branch is the only path).
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        logger.error("Webhook: invalid payload")
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except stripe.error.SignatureVerificationError:
+        logger.error("Webhook: invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
     event_type = event.get("type", "")
     data = event.get("data", {}).get("object", {})
@@ -397,6 +632,26 @@ async def stripe_webhook(request: Request):
                     context={
                         "invoice_id": invoice_id,
                         "invoice_number": invoice_number,
+                        "amount": data.get("amount_total", 0) / 100,
+                        "stripe_session_id": data.get("id"),
+                    },
+                )
+
+        elif flow == "apostille_one_time":
+            # R1B Fast Lane: flip paid=true on the matching apostille order.
+            apostille_order_id = metadata.get("apostille_order_id", "")
+            if apostille_order_id:
+                _mark_apostille_order_paid(
+                    apostille_order_id,
+                    stripe_session_id=data.get("id", ""),
+                    amount_cents=data.get("amount_total", 0),
+                )
+                await _notify_internal(
+                    title=f"Apostille Order {apostille_order_id} Paid",
+                    message=f"Apostille order {apostille_order_id} paid via Stripe (${data.get('amount_total', 0) / 100:.2f})",
+                    context={
+                        "apostille_order_id": apostille_order_id,
+                        "package_id": metadata.get("apostille_package_id", ""),
                         "amount": data.get("amount_total", 0) / 100,
                         "stripe_session_id": data.get("id"),
                     },

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "purpose": "Template for generated MAX component health register records.",
+  "generated_runtime_register_path": "backend/data/max/health_register.json",
+  "git_policy": "commit schemas/templates only; ignore generated runtime register snapshots unless Founder explicitly approves a snapshot",
+  "allowed_states": ["healthy", "degraded", "blocked", "stale", "unknown"],
+  "risk_levels": ["low", "medium", "high", "critical"],
+  "impact_levels": ["none", "possible", "active"],
+  "component_template": {
+    "component_name": "",
+    "role": "",
+    "state": "unknown",
+    "last_check_time": null,
+    "last_known_good_state": null,
+    "evidence": [],
+    "owner": "",
+    "backup_diagnostician": "",
+    "pending_approval": null,
+    "pending_audit": null,
+    "recent_changes": [],
+    "next_action": "",
+    "risk_level": "low",
+    "public_impact": "none",
+    "operator_impact": "none",
+    "payment_security_impact": "none"
+  },
+  "known_phase1_notes": [
+    "OpenClaw had 72 queued tasks in read-only discovery; record as backlog evidence only until a later approved queue audit.",
+    "Do not run OpenClaw tasks from Phase 1 artifacts.",
+    "Do not send notifications from Phase 1 artifacts."
+  ]
+}

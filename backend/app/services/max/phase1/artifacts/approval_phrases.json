@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "purpose": "Exact Founder approval phrase table for MAX/OpenClaw/Triage Phase 1.",
+  "approval_phrases": [
+    "APPROVE LIVE STRIPE ACTION",
+    "APPROVE CLOUDFLARE/DNS CHANGE",
+    "APPROVE SERVICE RESTART",
+    "APPROVE PUSH",
+    "APPROVE MERGE TO MAIN",
+    "APPROVE CODEX IMPLEMENTATION",
+    "APPROVE GATE 1 EXECUTION",
+    "APPROVE GATE 3 PRODUCTION PR"
+  ],
+  "matching_policy": "exact_string_match_only",
+  "gated_actions": [
+    {"action": "live_stripe_action", "required_phrase": "APPROVE LIVE STRIPE ACTION"},
+    {"action": "cloudflare_or_dns_change", "required_phrase": "APPROVE CLOUDFLARE/DNS CHANGE"},
+    {"action": "service_restart_or_reload", "required_phrase": "APPROVE SERVICE RESTART"},
+    {"action": "git_push", "required_phrase": "APPROVE PUSH"},
+    {"action": "merge_to_main", "required_phrase": "APPROVE MERGE TO MAIN"},
+    {"action": "codex_implementation", "required_phrase": "APPROVE CODEX IMPLEMENTATION"},
+    {"action": "gate_1_execution", "required_phrase": "APPROVE GATE 1 EXECUTION"},
+    {"action": "gate_3_production_pr", "required_phrase": "APPROVE GATE 3 PRODUCTION PR"}
+  ],
+  "openclaw_empire_git": {
+    "commit_push_capability": "dormant",
+    "rule": "OpenClaw must not commit, push, merge, restart services, edit Cloudflare/DNS, or touch Stripe without the exact matching Founder approval phrase.",
+    "phase_2_requirement": "Add a per-task approval gate before enabling OpenClaw execution."
+  }
+}

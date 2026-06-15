@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { API } from '../../lib/api';
+import ProductDocs from '../business/docs/ProductDocs';
 
 type Tier = 'free' | 'starter' | 'pro';
-type Tab = 'dashboard' | 'accounts' | 'approvals' | 'subscriptions' | 'preferences' | 'audit';
+type Tab = 'dashboard' | 'accounts' | 'approvals' | 'subscriptions' | 'preferences' | 'audit' | 'docs';
 type ModalMode = 'account-create' | 'account-edit' | 'subscription-create' | 'subscription-edit' | null;
 
 interface Plan {
@@ -154,6 +155,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'subscriptions', label: 'Subscriptions' },
   { id: 'preferences', label: 'Preferences' },
   { id: 'audit', label: 'Audit' },
+  { id: 'docs', label: 'Docs' },
 ];
 
 function currency(value?: number | null) {
@@ -555,7 +557,11 @@ export default function VendorOpsPage() {
           ))}
         </nav>
 
-        {loading ? (
+        {tab === 'docs' ? (
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <ProductDocs product="vendorops" />
+          </section>
+        ) : loading ? (
           <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-600">Loading VendorOps data from /api/v1/vendorops...</div>
         ) : (
           <>
