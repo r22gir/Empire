@@ -10,4 +10,3 @@ Current discoverable references:
 - pricing API router
 - canonical pricing engine tests
 - Workroom and WoodCraft module docs used as pricing input context
-

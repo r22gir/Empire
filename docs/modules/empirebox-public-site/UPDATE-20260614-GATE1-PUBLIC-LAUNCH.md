@@ -67,4 +67,3 @@ Reported Gate 1 checks:
 
 - `APPROVE GATE 3 PRODUCTION PR` for production PR work
 - `APPROVE PUSH` for any future pushed changes
-

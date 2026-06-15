@@ -10,4 +10,3 @@ Current discoverable references:
 - Command Center VendorOps screen
 - VendorOps targeted backend tests
 - MAX operating registry capability notes
-

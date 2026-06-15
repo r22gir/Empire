@@ -11,4 +11,3 @@ Standard module layout:
 - `docs/modules/<module-slug>/SPEC.md`
 
 Use lowercase kebab-case module slugs. New module changes should add or update a current-state/update document here and then register it in the Command Center docs registry when it should appear in the module Docs UI.
-

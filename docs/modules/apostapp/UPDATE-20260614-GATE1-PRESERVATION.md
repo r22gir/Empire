@@ -63,4 +63,3 @@ Reported preservation checks:
 
 - `APPROVE LIVE STRIPE ACTION` for any live payment/refund/checkout action
 - `APPROVE GATE 3 PRODUCTION PR` for production PR staging
-
