@@ -115,19 +115,67 @@ SAFE_CLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in SAFE_CLAIM_PHRASES]
 
 # Tool keys that count as proof for an operational claim.
 # Any entry in tool_results with a tool key that matches one of these
-# prefixes is considered a valid proof object.
+# prefixes OR an exact name is considered a valid proof object.
+#
+# 2026-06-15 pipeline-wiring patch: this allowlist was tightened.
+# The previous version included broad prefixes like ``send_``, ``read_``,
+# ``file_``, ``tool_``, etc. — but those allowed synthetic text-only
+# placeholders (e.g., ``tool_comment``, ``comment``, ``assistant_comment``)
+# to count as proof. The new allowlist is narrow and explicit:
+#
+#   - explicit real tool result prefixes
+#   - explicit real tool result exact names
+#
+# A "structured proof object" must be a real tool result whose
+# `tool` field is one of these. Plain text comments, intent to run,
+# or "I was going to check" MUST NOT count as proof.
 PROOF_TOOL_PREFIXES = (
-    # tool results
-    "send_", "read_", "fetch_", "get_", "list_", "show_", "view_", "search_", "query_",
-    "file_", "git_", "openclaw_", "memory_", "hermes_", "status_", "health_",
-    "runtime_", "broker_", "local_", "telegram_", "gmail_", "email_",
-    "empire_", "tool_", "skill_", "registry_", "audit_",
-    # explicit names
-    "web_read", "web_search", "send_email", "send_telegram",
-    "present", "svg_to_pdf", "send_quote_email", "send_quote_telegram",
-    "max_chat", "max_tts", "max_stt", "voice_capability_truth",
-    "runtime_truth_check",
+    # explicit real tool result prefixes (no broad patterns)
+    "openclaw_",          # OpenClaw read-only status
+    "memory_",            # memory / status endpoint result
+    "hermes_",            # Hermes local execution / memory
+    "status_",            # status endpoint result
+    "health_",            # backend health result
+    "runtime_",           # runtime proof object
+    "broker_",            # local broker result
+    "local_",             # local broker result
+    "git_",               # repo/runtime proof object
+    "telegram_",          # Telegram gateway status
+    "gmail_",             # Gmail/email adapter
+    "email_",             # email adapter
+    "audit_",             # audit result
+    "registry_",          # tool registry result
+    "repo_",              # repo status
+    "runtime_truth_",     # runtime truth check
 )
+
+# Explicit real tool result exact names. Only these are proof.
+PROOF_TOOL_EXACT = frozenset({
+    # real backend tools
+    "web_search", "web_read",  # only proof if real adapter exists
+    "openclaw_status",         # OpenClaw read-only status
+    "local_broker",            # local broker result
+    "repo_status",             # repo status result
+    "runtime_health",          # runtime health check
+    "memory_status",           # memory status endpoint
+    "tool_registry",           # tool registry result
+    "runtime_truth_check",     # runtime truth check
+    "max_chat", "max_tts", "max_stt",
+    "voice_capability_truth",
+    # verifiers that prove a specific check
+    "code_mode_honesty",
+    "accuracy_monitor",
+    "grounding_verification",
+})
+
+
+# Plain commentary / intent tool names that MUST NOT count as proof.
+# These are explicitly excluded even if they would match a prefix above.
+NON_PROOF_TOOL_NAMES = frozenset({
+    "tool_comment", "comment", "assistant_comment", "note", "notice",
+    "annotation", "remark", "thought", "intention", "intent",
+    "plan", "draft", "todo", "review", "reflection",
+})
 
 
 def _response_has_operational_claim(response_text: str) -> Optional[str]:
@@ -178,12 +226,18 @@ def _has_proof(tool_results: list[Any] | None) -> bool:
     """Return True if the tool_results list contains a structured proof object.
 
     A "structured proof object" is any tool result whose ``tool`` key
-    starts with one of the PROOF_TOOL_PREFIXES OR matches one of the
-    known proof-bearing tool names.
+    matches one of the PROOF_TOOL_PREFIXES OR is in the PROOF_TOOL_EXACT
+    set, AND is NOT in the NON_PROOF_TOOL_NAMES exclusion set.
 
-    This is intentionally permissive (any tool result counts as proof)
-    because the existing tool pipeline already filters out non-proof
-    entries via normalize_tool_results.
+    2026-06-15 pipeline-wiring patch: this was tightened. The old
+    implementation used broad prefixes (``send_``, ``file_``, ``tool_``,
+    etc.) which allowed synthetic text-only placeholders like
+    ``tool_comment`` to count as proof. The new allowlist is explicit:
+    every tool name must be a known real backend tool, and the
+    NON_PROOF_TOOL_NAMES list explicitly excludes commentary.
+
+    A failed tool result (``success=False``) is NOT proof. A tool
+    result with no ``tool`` field is NOT proof.
     """
     if not tool_results:
         return False
@@ -199,9 +253,17 @@ def _has_proof(tool_results: list[Any] | None) -> bool:
         # A tool result with success=False is NOT proof (failed call).
         if entry.get("success") is False:
             continue
-        # Match against prefixes OR exact names.
+        # Explicit non-proof exclusion: commentary / intent / notes.
+        if tool in NON_PROOF_TOOL_NAMES:
+            continue
+        # Match against the explicit exact allowlist first.
+        if tool in PROOF_TOOL_EXACT:
+            return True
+        # Match against the prefix allowlist.
         if any(tool.startswith(prefix) for prefix in PROOF_TOOL_PREFIXES):
             return True
+        # Legacy exact names from VERIFICATION_REQUIRED_TOOLS still count
+        # as proof (send_email with attachments_sent=1 is real proof).
         if tool in VERIFICATION_REQUIRED_TOOLS:
             return True
     return False

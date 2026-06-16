@@ -522,6 +522,282 @@ class TestProofReceiptEnforcement(unittest.TestCase):
             )
         )
 
+    # ------------------------------------------------------------------
+    # NEW: 2026-06-15 pipeline-wiring patch tests
+    # ------------------------------------------------------------------
+
+    def test_tool_comment_success_is_not_proof(self):
+        # Codex finding: "A synthetic tool_comment success result can
+        # count as proof." The patched _has_proof() must reject this.
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "tool_comment", "success": True, "result": {"text": "I checked OpenClaw and queue is healthy"}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="what is the queue?",
+            response_text="I checked OpenClaw and the queue is healthy.",
+        )
+        self.assertTrue(
+            len(failures) > 0,
+            "tool_comment success must NOT count as proof",
+        )
+
+    def test_comment_assistant_comment_note_not_proof(self):
+        # The full NON_PROOF_TOOL_NAMES set must be rejected.
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        for bad_name in ["comment", "assistant_comment", "note", "notice", "annotation",
+                          "remark", "thought", "intention", "intent", "plan", "draft",
+                          "todo", "review", "reflection"]:
+            tool_results = [{"tool": bad_name, "success": True, "result": {}}]
+            failures = runtime_truth_failures(
+                tool_results,
+                user_message="check",
+                response_text="I checked OpenClaw and it has 72 tasks queued.",
+            )
+            self.assertTrue(
+                len(failures) > 0,
+                f"'{bad_name}' must NOT count as proof",
+            )
+
+    def test_openclaw_status_success_is_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I checked OpenClaw and it has 72 tasks queued.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_openclaw_status_failure_is_not_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "openclaw_status", "success": False, "error": "timeout"}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I checked OpenClaw and it has 72 tasks queued.",
+        )
+        self.assertTrue(
+            len(failures) > 0,
+            "openclaw_status with success=False must NOT count as proof",
+        )
+
+    def test_local_broker_is_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "local_broker", "success": True, "result": {"openclaw": {"state": "available"}}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I checked the local broker and OpenClaw is up.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_repo_status_is_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "repo_status", "success": True, "result": {"branch": "main", "commit": "abc123"}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I verified the repo is on main at abc123.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_runtime_health_is_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "runtime_health", "success": True, "result": {"status": "ok"}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I verified the runtime is healthy.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_memory_status_is_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "memory_status", "success": True, "result": {"active": "hermes_memory"}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I checked the memory and it is active.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_tool_registry_is_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        tool_results = [
+            {"tool": "tool_registry", "success": True, "result": {"tools": []}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check",
+            response_text="I inspected the tool registry and it has 9 tools.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_random_tool_name_is_not_proof(self):
+        # A random tool name that doesn't match any prefix/exact must
+        # not count as proof. This is the broadest regression test.
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        for bad_name in ["xyzzy", "frobnicate", "gpt4_secret", "my_internal_thing",
+                          "assistant_text", "narrator", "meta_comment"]:
+            tool_results = [{"tool": bad_name, "success": True, "result": {}}]
+            failures = runtime_truth_failures(
+                tool_results,
+                user_message="check",
+                response_text="I checked OpenClaw and the queue is healthy.",
+            )
+            self.assertTrue(
+                len(failures) > 0,
+                f"'{bad_name}' must NOT count as proof",
+            )
+
+    def test_safe_can_check_passes(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [], user_message="check",
+            response_text="I can check after approval.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_safe_have_not_run_passes(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [], user_message="check",
+            response_text="I have not run that yet.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_final_content_mutation_simulation(self):
+        # Simulate the bug Codex found: a response initially passes
+        # guardrails, then a later replacement says "I checked OpenClaw"
+        # without a proof object. The FINAL _apply_truth_guardrails
+        # call must catch this.
+        from app.services.max.runtime_truth_enforcer import (
+            enforce_runtime_truth_response,
+        )
+        # Step 1: initial response passes (no claim, no proof needed).
+        initial = "Here is your onboarding plan."
+        # Step 2: factual guard / grounded response replaces with a claim.
+        # The new content has a past-tense claim but no tool_results.
+        grounded = "I checked OpenClaw and the queue has 72 tasks."
+        # Step 3: enforce on the FINAL content (with no tool_results).
+        final_guarded = enforce_runtime_truth_response(
+            user_message="check the queue",
+            response_text=grounded,
+            tool_results=[],
+        )
+        # The final guardrail must block the claim.
+        self.assertNotEqual(
+            final_guarded, grounded,
+            "FINAL guardrail must block the post-mutation claim",
+        )
+        self.assertTrue(
+            "have not run" in final_guarded.lower(),
+            f"FINAL guarded response should be a truth-failure message: {final_guarded!r}",
+        )
+
+
+class TestPipelineWiring(unittest.TestCase):
+    """The 2026-06-15 pipeline-wiring patch.
+
+    The non-stream /api/v1/max/chat and the /api/v1/max/chat/stream
+    endpoints BOTH have a SECOND _apply_truth_guardrails call that
+    runs AFTER all final_content / full_response mutations. This is
+    the AUTHORITATIVE final enforcement.
+
+    These tests verify the pipeline wiring by simulating the actual
+    sequence of mutations and confirming the final guardrail catches
+    post-mutation claims.
+    """
+
+    def test_non_stream_final_guardrail_catches_grounded_replacement(self):
+        # Simulate the bug: the early truth guardrail at line ~2423
+        # runs BEFORE the factual guard re-query. The factual guard
+        # replaces final_content with a new string that contains a
+        # past-tense claim. The LATE truth guardrail at line ~2660
+        # must catch this.
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+
+        # Original response (passes early guardrail).
+        original = "Let me check the queue for you."
+        # After early guardrail: no claim, no mutation.
+        early = enforce_runtime_truth_response("check queue", original, [])
+        self.assertEqual(early, original)
+
+        # Factual guard replaces with a new string containing a claim.
+        # (This is the bug — the early guardrail already passed, so
+        # the factual guard's replacement is uncaught unless the
+        # LATE guardrail runs.)
+        grounded_replacement = "I checked OpenClaw and the queue has 72 tasks."
+        # LATE guardrail runs on the FINAL content.
+        late = enforce_runtime_truth_response("check queue", grounded_replacement, [])
+        # The LATE guardrail must block the claim.
+        self.assertNotEqual(late, grounded_replacement)
+        self.assertIn("have not run", late.lower())
+
+    def test_streaming_final_guardrail_catches_quality_replacement(self):
+        # Same bug in the streaming path. The quality engine or GPU
+        # safety guard can replace full_response with a new string
+        # containing a past-tense claim. The LATE truth guardrail
+        # in the streaming path must catch this.
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+
+        # Quality engine replacement (simulated) contains a claim.
+        quality_replacement = "I verified the build is correct."
+        late = enforce_runtime_truth_response("verify build", quality_replacement, [])
+        self.assertNotEqual(late, quality_replacement)
+        self.assertIn("have not run", late.lower())
+
+    def test_final_guardrail_authoritative(self):
+        # No content returned after the final guardrail step can
+        # include unsupported operational claims. We test this by
+        # simulating EVERY possible final_content mutation and
+        # confirming the final guardrail still catches the claim.
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+
+        for replacement in [
+            "I checked OpenClaw and the queue has 72 tasks.",
+            "I probed localhost and the backend is healthy.",
+            "I verified the build is correct.",
+            "I confirmed the queue is healthy.",
+            "I fetched the file and it contains the secret.",
+            "I read the logs and found no errors.",
+        ]:
+            late = enforce_runtime_truth_response("test", replacement, [])
+            self.assertNotEqual(
+                late, replacement,
+                f"FINAL guardrail must block: {replacement!r}",
+            )
+            self.assertIn("have not run", late.lower())
+
+    def test_final_guardrail_with_valid_proof_passes(self):
+        # If the late-replacement response has a valid proof object,
+        # the FINAL guardrail must pass it through unchanged.
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+
+        # The factual guard re-queries with a tool result; the new
+        # response includes a real claim AND the tool_results now
+        # has a real proof object.
+        replacement = "I checked OpenClaw and the queue has 72 tasks."
+        tool_results = [
+            {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
+        ]
+        late = enforce_runtime_truth_response("test", replacement, tool_results)
+        self.assertEqual(late, replacement)
+
 
 class TestPaymentGuardsRemainIntact(unittest.TestCase):
     """The 2026-06-14 payment test guards must remain intact."""

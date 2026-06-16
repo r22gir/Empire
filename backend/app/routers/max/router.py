@@ -2650,6 +2650,32 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             logger.debug(f"Quality gate error (non-fatal): {qg_err}")
             quality_badge = None
 
+        # ── 2026-06-15 pipeline-wiring patch: FINAL truth guardrails ──
+        # The earlier _apply_truth_guardrails call (line ~2423) runs
+        # BEFORE the factual-guard re-query, the uncertainty fallback,
+        # the GPU safety output guardrail, the leakage sanitizer, the
+        # code-mode honesty banner, and the quality gate suffix. Any of
+        # those can replace final_content with a new string that may
+        # contain a past-tense operational claim ("I checked OpenClaw",
+        # "I verified the queue") without a real tool result. The first
+        # truth guardrail would NOT catch that.
+        #
+        # This SECOND call is the AUTHORITATIVE final enforcement. It
+        # runs AFTER all possible final_content mutations and just
+        # before the response is wrapped in ChatResponse. The last value
+        # returned to the caller is guaranteed truth-guarded.
+        _final_truth_guarded = _apply_truth_guardrails(
+            request.message,
+            final_content,
+            tool_results_list,
+        )
+        if _final_truth_guarded != final_content:
+            logger.warning(
+                "[max/chat] FINAL truth guardrails replaced response "
+                "(proved the AI bypassed the earlier check)"
+            )
+            final_content = _final_truth_guarded
+
         resp = ChatResponse(
             response=sanitize_output(final_content),
             model_used=response.model_used,
@@ -3239,6 +3265,32 @@ async def chat_stream(request: ChatRequest):
                     _chat_file.write_text(json.dumps(_chat_data, indent=2, default=str))
                 except Exception as _save_err:
                     logger.debug(f"[stream] Chat history save failed: {_save_err}")
+
+            # ── 2026-06-15 pipeline-wiring patch: FINAL truth guardrails ──
+            # The earlier _apply_truth_guardrails call (line ~3057) runs
+            # BEFORE the grounding re-verification, the quality engine,
+            # the GPU safety output guardrail, and the leakage sanitizer.
+            # Any of those can replace full_response with a new string
+            # that may contain a past-tense operational claim without a
+            # real tool result. The first truth guardrail would NOT
+            # catch that.
+            #
+            # This SECOND call is the AUTHORITATIVE final enforcement.
+            # It runs AFTER all possible full_response mutations and
+            # just before the 'done' event is yielded. The last value
+            # streamed to the caller is guaranteed truth-guarded.
+            _stream_final_truth_guarded = _apply_truth_guardrails(
+                request.message,
+                full_response,
+                tool_results_list,
+            )
+            if _stream_final_truth_guarded != full_response:
+                logger.warning(
+                    "[max/chat/stream] FINAL truth guardrails replaced response "
+                    "(proved the AI bypassed the earlier check)"
+                )
+                full_response = _stream_final_truth_guarded
+                yield f"data: {json.dumps({'type': 'runtime_truth_correction', 'content': full_response})}\n\n"
 
             _done_data = {
                 'type': 'done',
