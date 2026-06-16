@@ -159,6 +159,7 @@ PROOF_TOOL_EXACT = frozenset({
     "runtime_health",          # runtime health check
     "memory_status",           # memory status endpoint
     "tool_registry",           # tool registry result
+    "doctrine_status",         # 2026-06-15: doctrine loader result
     "runtime_truth_check",     # runtime truth check
     "max_chat", "max_tts", "max_stt",
     "voice_capability_truth",

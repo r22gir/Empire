@@ -526,6 +526,345 @@ def get_tool_registry() -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# DOCTRINE LOADER (2026-06-15 retrieval patch)
+# ---------------------------------------------------------------------------
+# This module reads the canonical MAX doctrine from
+# `/home/rg/empire-box-memory/MAX_DOCTRINE.md` and returns a structured
+# summary that the live MAX response path can use to answer
+# doctrine-scope questions (e.g., "Who is Hermes relative to MAX?",
+# "What are the primary EmpireBox modules?").
+#
+# The doctrine file path is configurable via the
+# `EMPIRE_MEMORY_ROOT` environment variable (or
+# `app.core.config.settings.empire_memory_root` if available). The
+# default is `/home/rg/empire-box-memory/`.
+#
+# If the file is unavailable, the loader returns an explicit
+# `unavailable` state, NOT a guessed answer. This preserves the
+# proof rule (no false past-tense claims).
+# ---------------------------------------------------------------------------
+
+# Canonical doctrine file name.
+DOCTRINE_FILE_NAME = "MAX_DOCTRINE.md"
+
+# Doctrine-scope question patterns (case-insensitive, word-boundary).
+# If a user message matches any of these, the live MAX response path
+# should consult the doctrine loader first, before falling back to
+# the generic M3 model answer.
+DOCTRINE_SCOPE_PATTERNS = [
+    r"\bmax\b.*\bpurpose\b",
+    r"\bwhat\s+(?:is|are)\s+(?:your\s+)?(?:max|doctrine|role|purpose)\b",
+    r"\bwho\s+is\s+(?:hermes|harry|opencode|openclaw|codex|max)\b",
+    r"\bhermes\s+relative\s+to\s+max\b",
+    r"\bharry\s+relative\s+to\s+max\b",
+    r"\bopencode\s+relative\s+to\s+max\b",
+    r"\bopenclaw\s+relative\s+to\s+max\b",
+    r"\bcodex\s+(?:role|relative)\b",
+    r"\bwhat\s+is\s+codex\W*s?\W*\s+role\b",
+    r"\bprimary\s+(?:empirebox|empire)\s+modules?\b",
+    r"\bphone\s+max\b.*\b(?:implemented|implemented|live)\b",
+    r"\bis\s+phone\s+max\b",
+    r"\bvoice\s+max\b.*\b(?:implemented|live)\b",
+    r"\bis\s+voice\s+max\b",
+    r"\bcan\s+you\s+claim\b.*\bproof\b",
+    r"\bprove\s+rule\b",
+    r"\bfounder\s+hierarchy\b",
+    r"\btruth\s+hierarchy\b",
+]
+
+
+def _get_doctrine_file_path() -> Path:
+    """Return the path to the canonical doctrine file.
+
+    Configurable via the `EMPIRE_MEMORY_ROOT` environment variable
+    (default: `/home/rg/empire-box-memory/`). The canonical file
+    name is `MAX_DOCTRINE.md`.
+    """
+    # Try env var first (the most explicit override).
+    env_root = os.getenv("EMPIRE_MEMORY_ROOT", "").strip()
+    if env_root:
+        return Path(env_root) / DOCTRINE_FILE_NAME
+    # Try settings if available.
+    try:
+        from app.core.config import settings
+        root = getattr(settings, "empire_memory_root", None)
+        if root:
+            return Path(root) / DOCTRINE_FILE_NAME
+    except Exception:
+        pass
+    # Default.
+    return Path("/home/rg/empire-box-memory") / DOCTRINE_FILE_NAME
+
+
+def _parse_doctrine_markdown(content: str) -> dict[str, Any]:
+    """Parse a doctrine Markdown file into a structured summary.
+
+    The parser is intentionally simple: it scans for H2 headings
+    (`## N. ...`) and extracts the bullet-list items that follow
+    each heading. This matches the structure of the canonical
+    MAX_DOCTRINE.md file.
+    """
+    out: dict[str, Any] = {
+        "sections": [],
+        "identity": "",
+        "hermes_role": "",
+        "harry_role": "",
+        "openclaw_role": "",
+        "codex_role": "",
+        "primary_modules": [],
+        "phone_status": "",
+        "voice_status": "",
+        "proof_rule": "",
+    }
+    current_section: Optional[dict[str, Any]] = None
+    lines = content.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        # H2 heading
+        if stripped.startswith("## "):
+            # Flush previous section.
+            if current_section is not None:
+                out["sections"].append(current_section)
+            heading = stripped[3:].strip()
+            current_section = {"title": heading, "bullets": []}
+            i += 1
+            # Capture section content until next H2.
+            while i < len(lines) and not lines[i].strip().startswith("## "):
+                sub = lines[i].strip()
+                if sub.startswith("- ") or sub.startswith("* "):
+                    current_section["bullets"].append(sub[2:].strip())
+                i += 1
+            continue
+        i += 1
+    # Flush last section.
+    if current_section is not None:
+        out["sections"].append(current_section)
+
+    # Extract canonical fields by section number.
+    # Section titles in the doctrine file look like
+    # "1. MAX identity (AUTHORITATIVE)". We strip the (AUTHORITATIVE)
+    # suffix and any whitespace so the lookup keys are clean.
+    section_by_title = {}
+    for sec in out["sections"]:
+        # Normalize: drop "(AUTHORITATIVE)" / "(meta)" / etc., trim.
+        title = sec["title"]
+        import re as _re
+        title_clean = _re.sub(r"\s*\([^)]*\)\s*$", "", title).strip()
+        section_by_title[title_clean] = sec
+        # Also index by the original title in case a future variant slips in.
+        section_by_title[title] = sec
+
+    def _lookup(*candidates):
+        for c in candidates:
+            if c in section_by_title:
+                return section_by_title[c]
+        return None
+
+    # Section 1: MAX identity.
+    s1 = _lookup("1. MAX identity")
+    if s1:
+        # Pull the first 4 bullets into identity text.
+        out["identity"] = " ".join(s1["bullets"][:4])
+
+    # Section 2: Founder hierarchy.
+    s2 = _lookup("2. Founder hierarchy")
+    if s2:
+        for bullet in s2["bullets"]:
+            low = bullet.lower()
+            if "hermes" in low and "local desktop" in low:
+                out["hermes_role"] = bullet
+            elif ("harry" in low or "opencode" in low) and "remote" in low:
+                out["harry_role"] = bullet
+            elif "openclaw" in low and ("execution" in low or "task subsystem" in low):
+                out["openclaw_role"] = bullet
+            elif "codex" in low and "verifier" in low:
+                out["codex_role"] = bullet
+
+    # Section 7: EmpireBox scope.
+    s7 = _lookup("7. EmpireBox scope")
+    if s7:
+        # Only the bullets under "**Primary ecosystem framing:**" count
+        # as primary modules. We detect that by stopping at the first
+        # bullet that says "Archive" (the start of the supporting list).
+        primary = []
+        for bullet in s7["bullets"]:
+            if "ArchiveForge" in bullet or "RecoveryForge" in bullet:
+                break
+            primary.append(bullet)
+        out["primary_modules"] = primary
+
+    # Section 6: Channels / surfaces.
+    s6 = _lookup("6. Channels / surfaces")
+    if s6:
+        for bullet in s6["bullets"]:
+            low = bullet.lower()
+            if "phone max" in low:
+                out["phone_status"] = bullet
+            elif "voice" in low:
+                out["voice_status"] = bullet
+
+    # Section 5: Proof rule.
+    s5 = _lookup("5. Proof rule")
+    if s5:
+        # The first bullets in section 5 are the literal past-tense
+        # phrase list (e.g., `"I ran"`, `"I searched"`). These are
+        # what MAX must NOT say. The explanatory content (what counts
+        # as proof, the safe future-tense phrases, the enforcement
+        # note) comes after. Concatenate the phrase list + the
+        # "valid proof object" bullets so the summary includes both.
+        proof_parts = []
+        for bullet in s5["bullets"]:
+            # Only include bullets that are not just a quoted phrase
+            # list item like `"I ran"`. Quoted-only bullets have a
+            # very short length and start with a quote.
+            stripped = bullet.strip()
+            if stripped.startswith('"') and stripped.endswith('"') and len(stripped) < 30:
+                # Keep for the phrase list (use the unquoted version).
+                proof_parts.append(stripped.strip('"'))
+            else:
+                # Explanatory bullet.
+                proof_parts.append(stripped)
+        out["proof_rule"] = " ".join(proof_parts)
+
+    return out
+
+
+def get_doctrine_status() -> dict[str, Any]:
+    """Return the structured doctrine status.
+
+    Returns:
+      - doctrine_source: path to the doctrine file (or None if not configured)
+      - doctrine_file: file name only
+      - doctrine_available: True if the file exists and is readable
+      - doctrine_mtime: ISO timestamp of the file's last modification
+      - doctrine_size_bytes: file size in bytes
+      - doctrine_summary: structured fields extracted from the file
+        (identity, hermes_role, harry_role, openclaw_role, codex_role,
+         primary_modules, phone_status, voice_status, proof_rule)
+      - proof_source: "doctrine_loader (read-only, no file mutation)"
+    """
+    doctrine_path = _get_doctrine_file_path()
+    out: dict[str, Any] = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "doctrine_source": str(doctrine_path),
+        "doctrine_file": DOCTRINE_FILE_NAME,
+        "doctrine_available": False,
+        "doctrine_mtime": None,
+        "doctrine_size_bytes": None,
+        "doctrine_summary": {},
+        "proof_source": "doctrine_loader (read-only, no file mutation)",
+    }
+    if not doctrine_path.exists():
+        out["doctrine_summary"] = {
+            "error": "doctrine_file_unavailable",
+            "detail": f"Canonical doctrine file not found at {doctrine_path}",
+        }
+        return out
+    try:
+        content = doctrine_path.read_text(encoding="utf-8")
+        stat = doctrine_path.stat()
+        out["doctrine_mtime"] = datetime.fromtimestamp(
+            stat.st_mtime, tz=timezone.utc
+        ).isoformat()
+        out["doctrine_size_bytes"] = stat.st_size
+        out["doctrine_available"] = True
+        out["doctrine_summary"] = _parse_doctrine_markdown(content)
+    except Exception as exc:
+        out["doctrine_summary"] = {
+            "error": "doctrine_file_unreadable",
+            "detail": str(exc),
+        }
+    return out
+
+
+def is_doctrine_scope_question(message) -> bool:
+    """Return True if the user message looks like a doctrine-scope question.
+
+    Doctrine-scope questions are routed to the doctrine loader
+    BEFORE the generic M3 model answer. This is a narrow, deterministic
+    pattern match — no AI call is made for this routing decision.
+
+    Accepts Optional[str] and treats None/empty as "not a doctrine
+    question" (the safe default).
+    """
+    if not message:
+        return False
+    import re
+    for pat in DOCTRINE_SCOPE_PATTERNS:
+        if re.search(pat, message, re.IGNORECASE):
+            return True
+    return False
+
+
+def build_doctrine_answer(message: str, doctrine_status: dict[str, Any]) -> str:
+    """Build a canonical answer for a doctrine-scope question.
+
+    Returns a deterministic answer derived from the loaded doctrine.
+    If the doctrine file is unavailable, returns an explicit
+    `unavailable` state, NOT a guessed answer.
+    """
+    summary = doctrine_status.get("doctrine_summary", {}) or {}
+    if not doctrine_status.get("doctrine_available") or not summary:
+        return (
+            "The canonical MAX doctrine file is currently unavailable. "
+            "I have not run that yet. I can check after approval."
+        )
+
+    low = (message or "").lower()
+
+    # Pattern: "what are the primary modules" / "primary empirebox modules"
+    if "primary" in low and ("module" in low or "empirebox" in low):
+        modules = summary.get("primary_modules") or []
+        if modules:
+            return "Primary EmpireBox modules:\n" + "\n".join(f"- {m}" for m in modules)
+    # Pattern: "who is hermes relative to max"
+    if "hermes" in low:
+        role = summary.get("hermes_role") or "Hermes is the local desktop execution/development/memory assistant under MAX."
+        return role
+    # Pattern: "who is harry / opencode relative to max"
+    if "harry" in low or "opencode" in low:
+        role = summary.get("harry_role") or "Harry / OpenCode is the remote/mobile code operator under MAX."
+        return role
+    # Pattern: "what is openclaw relative to max"
+    if "openclaw" in low:
+        role = summary.get("openclaw_role") or "OpenClaw is the execution/task subsystem under MAX (queue of tasks; read-only by mandate)."
+        return role
+    # Pattern: "codex role"
+    if "codex" in low:
+        role = summary.get("codex_role") or "Codex is the independent verifier/auditor when used. Not in the active chain of command."
+        return role
+    # Pattern: "phone max" / "is phone max"
+    if "phone" in low and "max" in low:
+        return summary.get("phone_status") or "Phone MAX is not implemented until separately built and verified."
+    # Pattern: "voice max" / "is voice max"
+    if "voice" in low and "max" in low:
+        return summary.get("voice_status") or "Voice MAX is not live until separately implemented and proven."
+    # Pattern: "can you claim ... without proof" / "proof rule"
+    if "proof" in low and ("claim" in low or "rule" in low or "without" in low):
+        return (
+            "No. Past-tense operational claims ('I ran / checked / probed / "
+            "verified / confirmed / fetched / read / called / inspected / "
+            "searched / looked up') require a structured proof object. "
+            "Without proof, MAX must say: 'I have not run that yet.'"
+        )
+    # Pattern: "what is your purpose" / "what is your role" / "what are you"
+    if "purpose" in low or "your role" in low or "your max" in low:
+        return (
+            summary.get("identity")
+            or "MAX is the Founder-facing command-center AI. MiniMax-M3 is the current language provider/model."
+        )
+    # Fallback: identity line.
+    return (
+        summary.get("identity")
+        or "MAX is the Founder-facing command-center AI. "
+        "Hermes is the local desktop assistant under MAX. "
+        "OpenClaw is the execution/task subsystem under MAX."
+    )
+
+
+# ---------------------------------------------------------------------------
 # MEMORY / DOCTRINE STATUS
 # ---------------------------------------------------------------------------
 
@@ -601,6 +940,15 @@ def get_memory_status() -> dict[str, Any]:
             "matches": startup_vs_runtime_match,
             "warning": None if startup_vs_runtime_match else "Startup commit does not match current runtime commit (a git pull/fast-forward has happened since startup).",
         },
+        # 2026-06-15 doctrine retrieval patch: enrich memory-status with
+        # the structured doctrine summary so the live MAX response path
+        # can answer doctrine-scope questions without making a generic
+        # AI call. The doctrine summary includes the canonical identity,
+        # Hermes/Harry/OpenClaw/Codex roles, primary modules list,
+        # phone/voice status, and proof rule summary.
+        "doctrine_summary": get_doctrine_status().get("doctrine_summary", {}),
+        "doctrine_source_path": str(_get_doctrine_file_path()),
+        "doctrine_available": get_doctrine_status().get("doctrine_available", False),
     }
 
 
@@ -635,4 +983,8 @@ def get_control_plane() -> dict[str, Any]:
         "local_broker": get_local_broker_status(),
         "tool_registry": get_tool_registry(),
         "memory": get_memory_status(),
+        # 2026-06-15 doctrine retrieval patch: include the structured
+        # doctrine summary at the top level of the control plane so
+        # Founder UIs and the live MAX response path can both reach it.
+        "doctrine": get_doctrine_status(),
     }

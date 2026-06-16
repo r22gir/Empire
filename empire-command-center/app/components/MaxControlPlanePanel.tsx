@@ -93,6 +93,28 @@ interface ControlPlaneResponse {
     newest_memory_timestamp: string | null;
     newest_memory_file: string | null;
   };
+  // 2026-06-15 doctrine retrieval patch: include the structured
+  // doctrine summary at the top level of the control plane.
+  doctrine?: {
+    doctrine_source?: string;
+    doctrine_file?: string;
+    doctrine_available?: boolean;
+    doctrine_mtime?: string | null;
+    doctrine_size_bytes?: number | null;
+    doctrine_summary?: {
+      identity?: string;
+      hermes_role?: string;
+      harry_role?: string;
+      openclaw_role?: string;
+      codex_role?: string;
+      primary_modules?: string[];
+      phone_status?: string;
+      voice_status?: string;
+      proof_rule?: string;
+      sections?: Array<{ title: string; bullets: string[] }>;
+    };
+    proof_source?: string;
+  };
   checked_at: string;
 }
 
@@ -243,6 +265,37 @@ export default function MaxControlPlanePanel() {
           <div><strong>newest_memory_file:</strong> {data.memory.newest_memory_file}</div>
         )}
       </div>
+
+      {data.doctrine && (
+        <div data-testid="cp-doctrine" style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 8, border: '1px solid var(--border)', borderRadius: 6 }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <strong>Doctrine:</strong>
+            <Pill
+              label={data.doctrine.doctrine_available ? 'available' : 'unavailable'}
+              tone={data.doctrine.doctrine_available ? 'ok' : 'bad'}
+            />
+            {data.doctrine.doctrine_mtime && (
+              <span style={{ fontSize: 10, color: '#4d564d', fontFamily: 'monospace' }}>
+                mtime: {data.doctrine.doctrine_mtime}
+              </span>
+            )}
+            {typeof data.doctrine.doctrine_size_bytes === 'number' && (
+              <span style={{ fontSize: 10, color: '#4d564d' }}>
+                ({data.doctrine.doctrine_size_bytes} B)
+              </span>
+            )}
+          </div>
+          {data.doctrine.doctrine_summary?.primary_modules && (
+            <div data-testid="cp-doctrine-primary-modules" style={{ fontSize: 11, color: '#4d564d' }}>
+              <strong>primary modules:</strong>{' '}
+              {data.doctrine.doctrine_summary.primary_modules.length}
+              {data.doctrine.doctrine_summary.primary_modules.length > 0 && (
+                <> — first: {data.doctrine.doctrine_summary.primary_modules[0].replace(/^\*\*/, '').replace(/\*\*.*$/, '')}</>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <details>
         <summary style={{ cursor: 'pointer', fontSize: 12, fontWeight: 800, color: '#4d564d', padding: '4px 0' }}>

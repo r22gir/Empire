@@ -2,7 +2,7 @@
 MAX API Router - Endpoints for AI Assistant Manager.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -1768,6 +1768,15 @@ def _maybe_handle_direct_route_request(request: ChatRequest) -> ChatResponse | N
 
     if not request.desk and not request.image_filename and _is_hermes_channel_status_request(request.message):
         return _hermes_channel_status_response(request)
+
+    # 2026-06-15 doctrine retrieval patch: short-circuit doctrine-scope
+    # questions to the canonical doctrine loader. The doctrine loader
+    # returns a deterministic answer derived from the active
+    # MAX_DOCTRINE.md. This avoids routing doctrine questions to the
+    # generic M3 model (which may guess) or to runtime_truth_check
+    # (which is the wrong surface for doctrine).
+    if not request.desk and not request.image_filename and _is_doctrine_scope_request(request.message):
+        return _doctrine_scope_response(request)
 
     if not request.desk and not request.image_filename and _is_voice_status_request(request.message):
         return _voice_status_response(request)
@@ -5093,6 +5102,63 @@ def _is_voice_status_request(message: str | None) -> bool:
     return any(marker in text for marker in VOICE_STATUS_REQUEST_MARKERS)
 
 
+# ---------------------------------------------------------------------------
+# DOCTRINE SCOPE (2026-06-15 retrieval patch)
+# ---------------------------------------------------------------------------
+# Doctrine-scope questions (e.g., "Who is Hermes relative to MAX?",
+# "What are the primary EmpireBox modules?") are short-circuited to the
+# canonical doctrine loader. The loader reads the active
+# MAX_DOCTRINE.md and returns a deterministic answer. This preserves
+# the proof rule (the doctrine loader returns a structured proof object)
+# and avoids the generic M3 model making up a list of modules.
+# ---------------------------------------------------------------------------
+
+
+def _is_doctrine_scope_request(message: str | None) -> bool:
+    """Return True if the message matches a doctrine-scope pattern."""
+    from app.services.max.control_plane import is_doctrine_scope_question
+    return is_doctrine_scope_question(message or "")
+
+
+def _doctrine_scope_response(request: ChatRequest) -> ChatResponse:
+    """Return a canonical ChatResponse for a doctrine-scope question.
+
+    Uses the structured doctrine loader to derive the answer. Returns
+    a `doctrine_status` tool result so the response is auditable and
+    the proof rule is satisfied.
+    """
+    from app.services.max.control_plane import (
+        get_doctrine_status,
+        build_doctrine_answer,
+    )
+
+    doctrine_status = get_doctrine_status()
+    answer = build_doctrine_answer(request.message, doctrine_status)
+
+    # Build a clean, narrow tool_results list with the structured
+    # doctrine proof object.
+    tool_result = {
+        "tool": "doctrine_status",
+        "success": doctrine_status.get("doctrine_available", False),
+        "result": {
+            "doctrine_source": doctrine_status.get("doctrine_source"),
+            "doctrine_mtime": doctrine_status.get("doctrine_mtime"),
+            "doctrine_size_bytes": doctrine_status.get("doctrine_size_bytes"),
+            "doctrine_available": doctrine_status.get("doctrine_available"),
+        },
+    }
+    return ChatResponse(
+        response=answer,
+        model_used="doctrine-loader-v1",
+        fallback_used=False,
+        tool_results=[tool_result],
+        metadata=_response_metadata(
+            request.channel,
+            skill_used="doctrine_loader",
+        ),
+    )
+
+
 def _voice_status_response(request: ChatRequest) -> ChatResponse:
     from app.services.max.voice_capability_truth import get_voice_capability_status
 
@@ -5179,6 +5245,69 @@ async def get_tool_registry_endpoint():
     """
     from app.services.max.control_plane import get_tool_registry
     return {"tools": get_tool_registry()}
+
+
+@router.get("/doctrine")
+async def get_doctrine_endpoint():
+    """Return the structured MAX doctrine status (2026-06-15 retrieval patch).
+
+    Surfaces:
+      - doctrine_source: path to the canonical doctrine file
+      - doctrine_file: file name only
+      - doctrine_available: True if the file exists and is readable
+      - doctrine_mtime: ISO timestamp of the file's last modification
+      - doctrine_size_bytes: file size in bytes
+      - doctrine_summary: structured fields (identity, hermes_role,
+        harry_role, openclaw_role, codex_role, primary_modules,
+        phone_status, voice_status, proof_rule)
+      - proof_source: "doctrine_loader (read-only, no file mutation)"
+
+    If the doctrine file is unavailable, returns an explicit
+    unavailable state, NOT a guessed answer.
+    """
+    from app.services.max.control_plane import get_doctrine_status
+    return get_doctrine_status()
+
+
+@router.post("/doctrine/answer")
+async def post_doctrine_answer(request: Request):
+    """Return a canonical answer for a doctrine-scope question.
+
+    The live MAX response path can POST a user message here to get
+    a deterministic answer derived from the loaded doctrine. If the
+    message is not a doctrine-scope question, returns
+    `is_doctrine_scope: false` so the caller can fall through to the
+    generic M3 model answer.
+
+    Request body: `{"message": "<user message>"}`
+    Response: `{"is_doctrine_scope": true, "answer": "...", "proof_source": "..."}`
+    """
+    from app.services.max.control_plane import (
+        get_doctrine_status,
+        is_doctrine_scope_question,
+        build_doctrine_answer,
+    )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    message = (body or {}).get("message", "")
+    is_scope = is_doctrine_scope_question(message)
+    if not is_scope:
+        return {
+            "is_doctrine_scope": False,
+            "answer": None,
+            "proof_source": None,
+        }
+    doctrine_status = get_doctrine_status()
+    answer = build_doctrine_answer(message, doctrine_status)
+    return {
+        "is_doctrine_scope": True,
+        "answer": answer,
+        "proof_source": "doctrine_loader (read-only, no file mutation)",
+        "doctrine_available": doctrine_status.get("doctrine_available", False),
+        "doctrine_mtime": doctrine_status.get("doctrine_mtime"),
+    }
 
 
 @router.get("/memory-status")
