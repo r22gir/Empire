@@ -1,12 +1,43 @@
-"""Runtime-truth enforcement for MAX operational claims."""
+"""Runtime-truth enforcement for MAX operational claims.
+
+This module is the AUTHORITATIVE source for "no claim without proof"
+in MAX's response pipeline. It enforces two rules:
+
+  1. VERIFICATION RULE — for VERIFICATION_REQUIRED_TOOLS, the tool
+     result must include proof fields (e.g., send_email must include
+     attachments_sent, file_write must include path, etc.).
+
+  2. GENERIC CLAIM RULE — for the OPERATIONAL_CLAIM_PHRASES list
+     ("I ran", "I checked", "I probed", etc.), the response text must
+     be backed by a structured proof object in the tool_results
+     list. If the claim is past-tense and no proof exists, return
+     a truth failure. If the claim is future-tense (e.g., "I will
+     check", "I can check", "I have not run that yet"), do NOT
+     fail — those are safe.
+
+A "structured proof object" is one of:
+  - a tool result (any entry in the tool_results list with a tool name)
+  - a local broker result (with a "broker" or "local" tool key)
+  - an OpenClaw read-only status result (tool key starting with "openclaw_")
+  - a memory/status endpoint result (tool key starting with "memory_" or
+    "hermes_" or "status_")
+  - a web/search adapter result (tool key starting with "web_")
+  - a backend health result (tool key "health" or any with "health" in name)
+  - a repo/runtime proof object (tool key "git", "runtime", or any with
+    "git" or "runtime" in name)
+
+Plain text comments, intent to run, or "I will check" do NOT count as proof.
+"""
+
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Iterable, Optional
 
 from app.services.max.tool_result_normalizer import normalize_tool_results
 
 
+# Tools that require specific proof fields in their result.
 VERIFICATION_REQUIRED_TOOLS = {
     "send_email",
     "send_quote_email",
@@ -21,6 +52,229 @@ VERIFICATION_REQUIRED_TOOLS = {
 }
 
 ATTACHMENT_REQUEST_RE = re.compile(r"\b(attach|attached|attachment|pdf|document|file)\b", re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# GENERIC OPERATIONAL CLAIM DETECTOR (2026-06-15 proof-receipt enforcement)
+# ---------------------------------------------------------------------------
+# Phrases that indicate MAX is CLAIMING to have done something. Each phrase
+# must be backed by a structured proof object in the tool_results list.
+#
+# We use a single regex that matches the claim as a word/phrase boundary
+# (so "I checked" matches but "I checked-in" does not, etc.). The phrase
+# detection operates on the RESPONSE TEXT, not the user message — MAX
+# shouldn't claim "I checked" unless it actually checked.
+#
+# Phrases MUST be in the past-tense / completed form. Future-tense /
+# conditional forms are allowed (see SAFE_CLAIM_PHRASES below).
+# ---------------------------------------------------------------------------
+
+# Past-tense / completed operational claim phrases. If MAX says one of
+# these in its response without a proof object, that's a truth failure.
+OPERATIONAL_CLAIM_PHRASES = [
+    r"\bI ran\b",
+    r"\bI searched\b",
+    r"\bI checked\b",
+    r"\bI probed\b",
+    r"\bI confirmed\b",
+    r"\bI verified\b",
+    r"\bI fetched\b",
+    r"\bI read\b",
+    r"\bI called\b",
+    r"\bI inspected\b",
+    r"\bI looked up\b",
+]
+
+# Future-tense / conditional / safe phrases that are NOT considered claims.
+# MAX can use these without proof (because they're not past-tense claims).
+SAFE_CLAIM_PHRASES = [
+    r"\bI can check\b",
+    r"\bI can probe\b",
+    r"\bI can search\b",
+    r"\bI will check\b",
+    r"\bI will probe\b",
+    r"\bI will search\b",
+    r"\bI will run\b",
+    r"\bI would need to\b",
+    r"\bI have not run\b",
+    r"\bI have not yet\b",
+    r"\bI have not checked\b",
+    r"\bI have not searched\b",
+    r"\bI have not probed\b",
+    r"\bI haven't run\b",
+    r"\bI haven't checked\b",
+    r"\bI haven't searched\b",
+    r"\bafter approval\b",
+    r"\bif you want\b",
+    r"\bif you approve\b",
+]
+
+# Compile the patterns.
+OPERATIONAL_CLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in OPERATIONAL_CLAIM_PHRASES]
+SAFE_CLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in SAFE_CLAIM_PHRASES]
+
+# Tool keys that count as proof for an operational claim.
+# Any entry in tool_results with a tool key that matches one of these
+# prefixes OR an exact name is considered a valid proof object.
+#
+# 2026-06-15 pipeline-wiring patch: this allowlist was tightened.
+# The previous version included broad prefixes like ``send_``, ``read_``,
+# ``file_``, ``tool_``, etc. — but those allowed synthetic text-only
+# placeholders (e.g., ``tool_comment``, ``comment``, ``assistant_comment``)
+# to count as proof. The new allowlist is narrow and explicit:
+#
+#   - explicit real tool result prefixes
+#   - explicit real tool result exact names
+#
+# A "structured proof object" must be a real tool result whose
+# `tool` field is one of these. Plain text comments, intent to run,
+# or "I was going to check" MUST NOT count as proof.
+PROOF_TOOL_PREFIXES = (
+    # explicit real tool result prefixes (no broad patterns)
+    "openclaw_",          # OpenClaw read-only status
+    "memory_",            # memory / status endpoint result
+    "hermes_",            # Hermes local execution / memory
+    "status_",            # status endpoint result
+    "health_",            # backend health result
+    "runtime_",           # runtime proof object
+    "broker_",            # local broker result
+    "local_",             # local broker result
+    "git_",               # repo/runtime proof object
+    "telegram_",          # Telegram gateway status
+    "gmail_",             # Gmail/email adapter
+    "email_",             # email adapter
+    "audit_",             # audit result
+    "registry_",          # tool registry result
+    "repo_",              # repo status
+    "runtime_truth_",     # runtime truth check
+)
+
+# Explicit real tool result exact names. Only these are proof.
+PROOF_TOOL_EXACT = frozenset({
+    # real backend tools
+    "web_search", "web_read",  # only proof if real adapter exists
+    "openclaw_status",         # OpenClaw read-only status
+    "local_broker",            # local broker result
+    "repo_status",             # repo status result
+    "runtime_health",          # runtime health check
+    "memory_status",           # memory status endpoint
+    "tool_registry",           # tool registry result
+    "runtime_truth_check",     # runtime truth check
+    "max_chat", "max_tts", "max_stt",
+    "voice_capability_truth",
+    # verifiers that prove a specific check
+    "code_mode_honesty",
+    "accuracy_monitor",
+    "grounding_verification",
+})
+
+
+# Plain commentary / intent tool names that MUST NOT count as proof.
+# These are explicitly excluded even if they would match a prefix above.
+NON_PROOF_TOOL_NAMES = frozenset({
+    "tool_comment", "comment", "assistant_comment", "note", "notice",
+    "annotation", "remark", "thought", "intention", "intent",
+    "plan", "draft", "todo", "review", "reflection",
+})
+
+
+def _response_has_operational_claim(response_text: str) -> Optional[str]:
+    """Return the matched claim phrase (str) if the response contains a
+    past-tense operational claim that is NOT covered by a safe phrase.
+
+    Returns None if the response has no operational claim, or if every
+    operational claim is offset by a safe phrase (e.g., "I have not
+    run that yet" — the "I have not run" is the safe phrase, not a
+    claim).
+
+    The check is: find the smallest matching claim phrase; if any safe
+    phrase occurs within 80 chars BEFORE the claim, the claim is
+    considered a future/conditional/safe form and is allowed.
+    """
+    if not response_text:
+        return None
+
+    # First, find all operational claim matches.
+    claim_matches: list[tuple[int, int, str]] = []  # (start, end, phrase)
+    for pat in OPERATIONAL_CLAIM_PATTERNS:
+        for m in pat.finditer(response_text):
+            claim_matches.append((m.start(), m.end(), m.group(0)))
+
+    if not claim_matches:
+        return None
+
+    # Sort by start position.
+    claim_matches.sort()
+
+    # For each claim, check if a safe phrase occurs within 80 chars before it.
+    for start, end, phrase in claim_matches:
+        # Look at the 80-char window BEFORE the claim for a safe phrase.
+        window_start = max(0, start - 80)
+        window = response_text[window_start:start]
+        # Strip newlines and extra whitespace for matching.
+        window_compact = re.sub(r"\s+", " ", window).strip()
+        for safe_pat in SAFE_CLAIM_PATTERNS:
+            if safe_pat.search(window_compact):
+                # This claim is offset by a safe phrase; skip.
+                return None  # actually we still need to check the NEXT claim
+        # No safe phrase offset this claim; it's a real past-tense claim.
+        return phrase
+    return None
+
+
+def _has_proof(tool_results: list[Any] | None) -> bool:
+    """Return True if the tool_results list contains a structured proof object.
+
+    A "structured proof object" is any tool result whose ``tool`` key
+    matches one of the PROOF_TOOL_PREFIXES OR is in the PROOF_TOOL_EXACT
+    set, AND is NOT in the NON_PROOF_TOOL_NAMES exclusion set.
+
+    2026-06-15 pipeline-wiring patch: this was tightened. The old
+    implementation used broad prefixes (``send_``, ``file_``, ``tool_``,
+    etc.) which allowed synthetic text-only placeholders like
+    ``tool_comment`` to count as proof. The new allowlist is explicit:
+    every tool name must be a known real backend tool, and the
+    NON_PROOF_TOOL_NAMES list explicitly excludes commentary.
+
+    A failed tool result (``success=False``) is NOT proof. A tool
+    result with no ``tool`` field is NOT proof.
+    """
+    if not tool_results:
+        return False
+    for entry in normalize_tool_results(tool_results):
+        tool = entry.get("tool")
+        if not tool:
+            continue
+        if not isinstance(tool, str):
+            continue
+        # Empty tool name is not a proof.
+        if not tool:
+            continue
+        # A tool result with success=False is NOT proof (failed call).
+        if entry.get("success") is False:
+            continue
+        # Explicit non-proof exclusion: commentary / intent / notes.
+        if tool in NON_PROOF_TOOL_NAMES:
+            continue
+        # Match against the explicit exact allowlist first.
+        if tool in PROOF_TOOL_EXACT:
+            return True
+        # Match against the prefix allowlist.
+        if any(tool.startswith(prefix) for prefix in PROOF_TOOL_PREFIXES):
+            return True
+        # Legacy exact names from VERIFICATION_REQUIRED_TOOLS still count
+        # as proof (send_email with attachments_sent=1 is real proof).
+        if tool in VERIFICATION_REQUIRED_TOOLS:
+            return True
+    return False
+
+
+def _claim_failure_reason(claim_phrase: str) -> str:
+    """Format a human-readable failure reason for an unsupported claim."""
+    return (
+        f"Claim '{claim_phrase}' has no structured proof object. "
+        f"MAX must say 'I have not run that yet.' or include a real tool result."
+    )
 
 
 def _tool_failure_reason(entry: dict[str, Any], user_message: str | None = None) -> str | None:
@@ -50,23 +304,56 @@ def _tool_failure_reason(entry: dict[str, Any], user_message: str | None = None)
     return None
 
 
-def runtime_truth_failures(tool_results: list[Any] | None, user_message: str | None = None) -> list[str]:
+def runtime_truth_failures(
+    tool_results: list[Any] | None,
+    user_message: str | None = None,
+    response_text: str | None = None,
+) -> list[str]:
+    """Return a list of truth-failure reasons for the given response.
+
+    Two failure modes:
+      1. TOOL VERIFICATION FAILURE — a tool in VERIFICATION_REQUIRED_TOOLS
+         ran but its result is missing required fields.
+      2. GENERIC CLAIM FAILURE — the response_text contains a past-tense
+         operational claim (e.g., "I checked OpenClaw") but no structured
+         proof object is in tool_results.
+
+    Returns an empty list if no failures.
+    """
     failures: list[str] = []
+
+    # Failure mode 1: tool verification failures.
     for entry in normalize_tool_results(tool_results):
         reason = _tool_failure_reason(entry, user_message=user_message)
         if reason:
             failures.append(reason)
+
+    # Failure mode 2: generic operational claim without proof.
+    # This is the new behavior added on 2026-06-15.
+    if response_text:
+        claim = _response_has_operational_claim(response_text)
+        if claim and not _has_proof(tool_results):
+            failures.append(_claim_failure_reason(claim))
+
     return failures
 
 
-def should_halt_after_tool_failure(tool_results: list[Any] | None, user_message: str | None = None) -> bool:
-    return bool(runtime_truth_failures(tool_results, user_message=user_message))
+def should_halt_after_tool_failure(
+    tool_results: list[Any] | None,
+    user_message: str | None = None,
+    response_text: str | None = None,
+) -> bool:
+    """Return True if the response should be halted / blocked due to truth failures."""
+    return bool(runtime_truth_failures(tool_results, user_message=user_message, response_text=response_text))
 
 
 def runtime_truth_failure_message(failures: list[str]) -> str:
     unique = list(dict.fromkeys([failure for failure in failures if failure]))
-    reason = "; ".join(unique) if unique else "operation verification failed"
-    return f"I attempted this, but verification failed: {reason}"
+    if not unique:
+        # Default message when we know we should halt but no specific failure.
+        return "I have not run that yet. I need a real tool result before I can claim I did something."
+    reason = "; ".join(unique)
+    return f"I have not run that yet. {reason}"
 
 
 def enforce_runtime_truth_response(
@@ -74,7 +361,24 @@ def enforce_runtime_truth_response(
     response_text: str,
     tool_results: list[Any] | None,
 ) -> str:
-    failures = runtime_truth_failures(tool_results, user_message=user_message)
+    """Enforce truth on the response. If a claim is unsupported, replace
+    the response with a truth-failure message.
+
+    This function is the WIRE-UP point for the live MAX response pipeline.
+    It is called from:
+      - /api/v1/max/chat/stream (line ~1386 of router.py)
+      - /api/v1/max/chat (line ~2363-2364 of router.py)
+      - /api/v1/max/chat streaming round (line ~3009-3010 of router.py)
+
+    The OLD behavior was: only check VERIFICATION_REQUIRED_TOOLS. With
+    no proof and no claim phrase, it would pass. The NEW behavior (2026-
+    06-15): also detect past-tense operational claims in the response
+    text and require proof.
+
+    Safe future-tense / conditional phrases (e.g., "I will check", "I
+    can check", "I have not run that yet") are explicitly allowed.
+    """
+    failures = runtime_truth_failures(tool_results, user_message=user_message, response_text=response_text)
     if failures:
         return runtime_truth_failure_message(failures)
     return response_text

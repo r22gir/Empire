@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import MaxControlPlanePanel from '../components/MaxControlPlanePanel';
 
 export const metadata: Metadata = {
   title: 'MAX — Empire AI Brain',
@@ -48,6 +49,10 @@ export default function MaxLanding() {
         <div style={{ border: '1px solid #d9ded5', borderRadius: 8, background: '#fff', minHeight: 360, overflow: 'hidden' }}>
           <iframe src="/avatar.html" title="MAX avatar" style={{ width: '100%', height: 360, border: 0, display: 'block', background: '#f7f8f5' }} />
         </div>
+      </section>
+
+      <section style={{ maxWidth: 1120, margin: '0 auto', padding: '8px 24px 24px' }}>
+        <MaxControlPlanePanel />
       </section>
 
       <section style={{ maxWidth: 1120, margin: '0 auto', padding: '24px 24px 64px' }}>
