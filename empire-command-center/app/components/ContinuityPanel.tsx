@@ -56,6 +56,22 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
     setStatus(await statusRes.json());
     const scoresRes = await fetch(API + '/max/evaluation/scores?limit=5', { cache: 'no-store' }).catch(() => null);
     if (scoresRes?.ok) setScores((await scoresRes.json()).scores || []);
+    // 2026-06-15 control plane hotfix: also load the new
+    // /api/v1/max/control-plane + /api/v1/max/memory-status endpoints,
+    // which are the AUTHORITATIVE source for the handoff freshness
+    // warning. They report whether the startup_commit still matches
+    // the current runtime commit (i.e., whether the running process
+    // has been restarted since the last git pull/fast-forward).
+    try {
+      const memoryRes = await fetch(API + '/max/memory-status', { cache: 'no-store' });
+      if (memoryRes.ok) {
+        const memoryData = await memoryRes.json();
+        setStatus((prev: any) => ({ ...(prev || {}), _controlPlaneMemory: memoryData }));
+      }
+    } catch {
+      // Non-blocking: if the endpoint is unavailable, the existing
+      // /max/status payload is still used as a fallback.
+    }
     if (runAudit) {
       const auditRes = await fetch(API + '/max/chat', {
         method: 'POST',
@@ -80,8 +96,25 @@ export default function ContinuityPanel({ mode = 'full', onOpenContinuity }: Con
   const currentCommit = status?.current_commit?.hash;
   const handoffCommit = runtime?.commit;
   const startupCommit = status?.startup_health?.running_commit_hash;
-  const handoffCommitDiffers = Boolean(currentCommit && handoffCommit && handoffCommit !== currentCommit);
-  const startupCommitDiffers = Boolean(currentCommit && startupCommit && startupCommit !== currentCommit);
+  // 2026-06-15 control plane hotfix: when the new
+  // /api/v1/max/memory-status endpoint reports that the startup commit
+  // matches the current commit, suppress the "Handoff stale" / "Startup
+  // differs" warnings. The control plane is the AUTHORITATIVE source.
+  const controlPlaneMemory = status?._controlPlaneMemory;
+  const handoffFreshness = controlPlaneMemory?.handoff_freshness;
+  const handoffMatchesFromControlPlane = handoffFreshness?.matches;
+  const handoffCommitDiffers = Boolean(
+    currentCommit
+    && handoffCommit
+    && handoffCommit !== currentCommit
+    && handoffMatchesFromControlPlane !== true  // control plane says fresh
+  );
+  const startupCommitDiffers = Boolean(
+    currentCommit
+    && startupCommit
+    && startupCommit !== currentCommit
+    && handoffMatchesFromControlPlane !== true  // control plane says fresh
+  );
   const staleCommitWarning = Boolean(handoffCommitDiffers || startupCommitDiffers);
   const latestScore = scores[0]?.overall_score ?? auditResult?.latest_score?.overall_score;
   const avgScore = useMemo(() => {

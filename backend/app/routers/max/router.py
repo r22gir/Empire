@@ -5086,3 +5086,59 @@ def _voice_status_response(request: ChatRequest) -> ChatResponse:
         tool_results=[{"tool": "voice_capability_truth", "success": True, "result": status}],
         metadata=_response_metadata(request.channel, skill_used="voice_capability_truth"),
     )
+
+
+# ---------------------------------------------------------------------------
+# MAX CONTROL PLANE ENDPOINTS (2026-06-15 hotfix)
+# ---------------------------------------------------------------------------
+# These endpoints expose the truthful control plane for the MAX identity
+# (separate from provider/model), the tool registry (with proof_required
+# flags), the local EmpireDell broker, and the memory/doctrine status.
+# The UI uses /api/v1/max/control-plane as the authoritative source for
+# the status panel; it MUST NOT make claims that aren't in this payload.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/control-plane")
+async def get_control_plane_endpoint():
+    """Return the full MAX control plane truth (identity + provider + tools + broker + memory).
+
+    This is the AUTHORITATIVE source for the MAX status panel. The UI
+    MUST NOT make claims about MAX that aren't in this payload. See
+    backend/app/services/max/control_plane.py for the data model.
+    """
+    from app.services.max.control_plane import get_control_plane
+    return get_control_plane()
+
+
+@router.get("/tool-registry")
+async def get_tool_registry_endpoint():
+    """Return the live tool registry for MAX.
+
+    Each tool is classified as one of:
+      - available           (live and ready)
+      - unavailable         (not configured or no backend)
+      - configured-but-unhealthy (configured but failing)
+      - read-only           (read-only access only)
+      - mutating            (mutates state, requires approval)
+
+    Tools with proof_required=True MUST NOT be claimed available
+    without a real structured tool result/proof object.
+    """
+    from app.services.max.control_plane import get_tool_registry
+    return {"tools": get_tool_registry()}
+
+
+@router.get("/memory-status")
+async def get_memory_status_endpoint():
+    """Return the truthful memory + doctrine + handoff freshness status.
+
+    Surfaces:
+      - active_memory_source (which memory service is currently active)
+      - newest_memory_timestamp (when the last memory record was written)
+      - doctrine_source_availability (which memory sources are available)
+      - hermes_sync_artifact_status
+      - handoff_freshness (startup_commit vs current_commit, with warning)
+    """
+    from app.services.max.control_plane import get_memory_status
+    return get_memory_status()
