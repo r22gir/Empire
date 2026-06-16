@@ -99,7 +99,7 @@ def get_local_broker_status() -> dict[str, Any]:
       - repo branch/HEAD
       - backend PID/health
       - portal PID/build ID
-      - OpenClaw queue/status (read-only)
+      - OpenClaw queue/status (read-only; detail inlined)
       - Hermes status (read-only)
       - Telegram gateway status
       - Ollama/local model status
@@ -113,6 +113,20 @@ def get_local_broker_status() -> dict[str, Any]:
     frontend_port = int(os.getenv("EMPIRE_FRONTEND_EXPECTED_PORT", "3005"))
     backend_up = _port_open("127.0.0.1", backend_port)
     frontend_up = _port_open("127.0.0.1", frontend_port)
+
+    # Inline the OpenClaw detail here (read-only) so the broker is
+    # no longer just a pointer. 2026-06-15: Codex flagged that the
+    # broker only pointed to /api/v1/openclaw/health, which left
+    # OpenClaw as a "partial" status. Now the broker inlines the
+    # gate result (queue stats, worker heartbeat) without ever
+    # calling /tasks (which would paginate) or mutating.
+    openclaw_block = _openclaw_broker_detail()
+
+    # Inline the Hermes memory status (read-only).
+    hermes_block = _hermes_broker_detail()
+
+    # Inline the Telegram gateway status (read-only, no token print).
+    telegram_block = _telegram_broker_detail()
 
     return {
         "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -132,15 +146,103 @@ def get_local_broker_status() -> dict[str, Any]:
             "state": "up" if frontend_up else "down",
             "detail": f"http://127.0.0.1:{frontend_port}/" if frontend_up else "port closed",
         },
-        # OpenClaw: defer to the existing openclaw_gate (live, healthy)
-        "openclaw": {"state": "see /api/v1/openclaw/health", "detail": "broker delegates to openclaw_gate"},
-        # Hermes: surface health from the hermes_memory service
-        "hermes": {"state": "see backend/app/services/max/hermes_memory.py", "detail": "broker delegates to hermes_memory.get_hermes_memory_status()"},
+        # OpenClaw: read-only detail inlined from openclaw_gate.
+        "openclaw": openclaw_block,
+        # Hermes: read-only status inlined from hermes_memory.
+        "hermes": hermes_block,
         # Telegram gateway
-        "telegram": {"state": "see /api/v1/max/telegram/status", "detail": "broker delegates to telegram_bot.is_configured"},
+        "telegram": telegram_block,
         # Ollama / local model
-        "ollama": {"state": "see /api/v1/ollama/models", "detail": "broker delegates to ollama client (kill-switched)"},
+        "ollama": {
+            "state": "unavailable",
+            "disabled_reason": "founder_disabled_due_to_stall_suspected",
+            "detail": "Ollama kill-switched (see /api/v1/max/routing-state provider_registry).",
+        },
     }
+
+
+def _openclaw_broker_detail() -> dict[str, Any]:
+    """Inline read-only OpenClaw detail for the local broker.
+
+    Calls check_openclaw_gate() (read-only, cached) and extracts the
+    queue stats + worker heartbeat. Does NOT call /api/v1/openclaw/tasks
+    (which would paginate) and does NOT mutate the queue.
+
+    Per the 2026-06-15 proof-receipt enforcement patch, the broker MUST
+    expose the OpenClaw detail directly so MAX can claim it has proof
+    when it says "I checked OpenClaw and the queue has 72 tasks."
+    """
+    try:
+        from app.services.max.openclaw_gate import check_openclaw_gate
+        gate = check_openclaw_gate()
+        gate_dict = gate.to_dict() if hasattr(gate, "to_dict") else {
+            "state": getattr(gate, "state", "unknown"),
+            "allowed": getattr(gate, "allowed", False),
+        }
+        state = gate_dict.get("state", "unknown")
+        queue_stats = gate_dict.get("queue_stats") or {}
+        heartbeat = gate_dict.get("worker_heartbeat") or {}
+        queued = queue_stats.get("queued", "unknown")
+        total = queue_stats.get("total", "unknown")
+        hb_status = heartbeat.get("state", "unknown")
+        hb_age = heartbeat.get("age_seconds", "unknown")
+        return {
+            "state": "available" if state == "healthy" else state,
+            "detail": f"queue {queued}/{total} · worker {hb_status} ({hb_age}s)",
+            "queue_stats": queue_stats,
+            "worker_heartbeat": heartbeat,
+            "proof_source": "openclaw_gate (cached, read-only)",
+        }
+    except Exception as exc:
+        return {
+            "state": "configured_but_detail_unavailable",
+            "detail": f"openclaw_gate query failed: {exc}",
+            "proof_source": "openclaw_gate (query failed; do not claim OpenClaw status)",
+        }
+
+
+def _hermes_broker_detail() -> dict[str, Any]:
+    """Inline read-only Hermes memory status for the local broker."""
+    try:
+        from app.services.max.hermes_memory import get_hermes_memory_status
+        status = get_hermes_memory_status()
+        return {
+            "state": "available",
+            "detail": "hermes_memory is loaded",
+            "status": status,
+            "proof_source": "hermes_memory (read-only)",
+        }
+    except Exception as exc:
+        return {
+            "state": "configured_but_detail_unavailable",
+            "detail": f"hermes_memory query failed: {exc}",
+            "proof_source": "hermes_memory (query failed; do not claim Hermes status)",
+        }
+
+
+def _telegram_broker_detail() -> dict[str, Any]:
+    """Inline read-only Telegram gateway status for the local broker."""
+    try:
+        from app.services.max import telegram_bot as tb_module
+        tb_instance = getattr(tb_module, "telegram_bot", None) or tb_module.TelegramBot()
+        configured = bool(getattr(tb_instance, "is_configured", False))
+        if configured:
+            return {
+                "state": "available",
+                "detail": "Telegram gateway configured (founder_chat_id set)",
+                "proof_source": "telegram_bot.is_configured (read-only)",
+            }
+        return {
+            "state": "unavailable",
+            "detail": "Telegram gateway not configured (no token / founder_chat_id)",
+            "proof_source": "telegram_bot.is_configured (read-only)",
+        }
+    except Exception as exc:
+        return {
+            "state": "configured_but_detail_unavailable",
+            "detail": f"telegram_bot query failed: {exc}",
+            "proof_source": "telegram_bot (query failed)",
+        }
 
 
 # ---------------------------------------------------------------------------

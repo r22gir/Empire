@@ -224,18 +224,40 @@ class TestProofReceiptEnforcement(unittest.TestCase):
     """MAX must not say 'I ran/probed/checked' without a real proof object.
 
     The 2026-06-14 OpenClaw audit showed MAX said it would probe OpenClaw
-    but did not. The runtime_truth_enforcer module already has the
+    but did not. The runtime_truth_enforcer module already had the
     'verification failed' pattern. These tests verify that the enforcer
     still works correctly.
+
+    The 2026-06-15 proof-receipt enforcement patch added generic claim
+    detection: past-tense operational claims (e.g., "I checked OpenClaw")
+    must be backed by a structured proof object in tool_results. Future-
+    tense / conditional / safe phrases (e.g., "I will check", "I have
+    not run that yet") are explicitly allowed.
     """
 
     def test_runtime_truth_enforcer_fails_on_empty_tool_results(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        # Empty tool_results means MAX cannot claim any verification.
-        # The enforcer should return no failures (because there are no
-        # verified-required tools in the empty list), but the caller
-        # should still treat this as "no proof".
-        failures = runtime_truth_failures([], user_message="I checked OpenClaw")
+        # With a past-tense claim in the response and no tool results,
+        # we MUST get a truth failure. This is the core 2026-06-15 fix.
+        failures = runtime_truth_failures(
+            [],
+            user_message="probe OpenClaw",
+            response_text="I checked OpenClaw and the queue is healthy.",
+        )
+        self.assertTrue(
+            len(failures) > 0,
+            "Empty tool_results + past-tense claim MUST produce a truth failure",
+        )
+
+    def test_empty_tool_results_no_claim_passes(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # If the response has NO past-tense claim, no failure is needed
+        # (the tool just wasn't called, but MAX didn't claim it was).
+        failures = runtime_truth_failures(
+            [],
+            user_message="probe OpenClaw",
+            response_text="I have not run that yet. If you want, I can check after approval.",
+        )
         self.assertEqual(failures, [])
 
     def test_runtime_truth_enforcer_detects_send_email_without_attachment(self):
@@ -255,6 +277,250 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         ]
         failures = runtime_truth_failures(tool_results, user_message="Please send the PDF")
         self.assertEqual(failures, [])
+
+    # ------------------------------------------------------------------
+    # NEW: 2026-06-15 proof-receipt enforcement tests
+    # ------------------------------------------------------------------
+
+    def test_claim_I_checked_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # "I checked OpenClaw" with no proof object MUST fail.
+        failures = runtime_truth_failures(
+            [],
+            user_message="what is the queue?",
+            response_text="I checked OpenClaw and it has 72 tasks queued.",
+        )
+        self.assertTrue(len(failures) > 0)
+        # The failure must mention the claim phrase or the lack of proof.
+        joined = " ".join(failures).lower()
+        self.assertTrue(
+            "i checked" in joined or "proof" in joined,
+            f"failure should mention the claim or lack of proof, got: {failures}",
+        )
+
+    def test_claim_I_probed_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="probe localhost",
+            response_text="I probed localhost and the backend is healthy.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_searched_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="search the web",
+            response_text="I searched the web and found relevant articles.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_confirmed_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="is the queue healthy?",
+            response_text="I confirmed the queue is healthy.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_verified_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="verify the build",
+            response_text="I verified the build is correct.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_fetched_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="fetch the file",
+            response_text="I fetched the file from the repository.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_read_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="read the file",
+            response_text="I read the file and it contains the secret.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_called_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="call the api",
+            response_text="I called the API and got a 200 response.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_inspected_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="inspect the logs",
+            response_text="I inspected the logs and found no errors.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_looked_up_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="look up the user",
+            response_text="I looked up the user and they are active.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_I_ran_with_no_proof_fails(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        failures = runtime_truth_failures(
+            [],
+            user_message="run the script",
+            response_text="I ran the script and it completed successfully.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_claim_with_valid_proof_passes(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # Same claim as the failing test, but with a valid proof object.
+        # The proof tool name must be a known proof prefix.
+        tool_results = [
+            {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="what is the queue?",
+            response_text="I checked OpenClaw and it has 72 tasks queued.",
+        )
+        self.assertEqual(failures, [])
+
+    def test_safe_future_tense_phrases_pass(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # Future-tense / conditional / safe phrases must NOT fail.
+        safe_responses = [
+            "I have not run that yet. I need a real tool result.",
+            "I can check after approval.",
+            "I will run the script when you say go.",
+            "I would need to see the file first.",
+            "I have not checked the queue yet.",
+            "I haven't run that yet.",
+            "I can probe the system if you approve.",
+        ]
+        for response_text in safe_responses:
+            failures = runtime_truth_failures(
+                [],
+                user_message="check the queue",
+                response_text=response_text,
+            )
+            self.assertEqual(
+                failures, [],
+                f"Safe phrase should not fail: {response_text!r} got {failures}",
+            )
+
+    def test_response_with_no_claim_phrase_passes(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # A response that makes no operational claim must not fail.
+        # (This is the natural case for non-tool responses.)
+        safe_responses = [
+            "Here is the onboarding plan you asked for.",
+            "The MAX system is designed to coordinate chat, voice, image, and document analysis.",
+            "I am MAX, your command center. How can I help?",
+        ]
+        for response_text in safe_responses:
+            failures = runtime_truth_failures(
+                [],
+                user_message="tell me about MAX",
+                response_text=response_text,
+            )
+            self.assertEqual(
+                failures, [],
+                f"Non-claim response should not fail: {response_text!r} got {failures}",
+            )
+
+    def test_enforce_runtime_truth_response_replaces_claim(self):
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+        # If the response has an unsupported claim, the function MUST
+        # replace it with a truth-failure message.
+        original = "I checked OpenClaw and the queue has 72 tasks."
+        result = enforce_runtime_truth_response("what is the queue?", original, [])
+        self.assertNotEqual(result, original)
+        # The result must contain a truth-failure indicator.
+        self.assertTrue(
+            "have not run" in result.lower() or "verification failed" in result.lower(),
+            f"result should be a truth-failure message: {result!r}",
+        )
+
+    def test_enforce_runtime_truth_response_passes_valid_claim(self):
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+        # A claim with valid proof must be passed through unchanged.
+        original = "I checked OpenClaw and it has 72 tasks queued."
+        tool_results = [
+            {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
+        ]
+        result = enforce_runtime_truth_response("what is the queue?", original, tool_results)
+        self.assertEqual(result, original)
+
+    def test_enforce_runtime_truth_response_passes_safe_phrase(self):
+        from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
+        # Future-tense / safe phrases must pass through unchanged.
+        original = "I have not run that yet. I can check after approval."
+        result = enforce_runtime_truth_response("what is the queue?", original, [])
+        self.assertEqual(result, original)
+
+    def test_failed_tool_result_is_not_proof(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # A tool result with success=False is NOT proof (failed call).
+        tool_results = [
+            {"tool": "openclaw_status", "success": False, "error": "timeout"}
+        ]
+        failures = runtime_truth_failures(
+            tool_results,
+            user_message="check the queue",
+            response_text="I checked OpenClaw and it has 72 tasks queued.",
+        )
+        # Should fail: the only tool result was a failure, not proof.
+        self.assertTrue(len(failures) > 0)
+
+    def test_old_api_no_response_text_still_works(self):
+        # Backwards compatibility: calling runtime_truth_failures WITHOUT
+        # response_text (the old signature) should still work — it just
+        # only checks for tool verification failures.
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # With no response_text, no claim check is performed.
+        failures = runtime_truth_failures(
+            [],
+            user_message="check",
+        )
+        self.assertEqual(failures, [])
+
+    def test_old_api_with_response_text_enforces_claim(self):
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # With response_text, the new claim detection fires.
+        failures = runtime_truth_failures(
+            [],
+            user_message="check",
+            response_text="I checked it.",
+        )
+        self.assertTrue(len(failures) > 0)
+
+    def test_should_halt_after_tool_failure_with_claim(self):
+        from app.services.max.runtime_truth_enforcer import should_halt_after_tool_failure
+        # The halt function should also detect the unsupported claim.
+        self.assertTrue(
+            should_halt_after_tool_failure(
+                [],
+                user_message="check",
+                response_text="I checked it.",
+            )
+        )
 
 
 class TestPaymentGuardsRemainIntact(unittest.TestCase):

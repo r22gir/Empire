@@ -1,20 +1,25 @@
 'use client';
 
 /**
- * MAX Control Plane Status Panel (2026-06-15 hotfix)
+ * MAX Control Plane Status Panel (2026-06-15 hotfix + 2026-06-15 proof-receipt patch)
  *
  * This panel is the AUTHORITATIVE truth source for the Founder UI.
  * It separates MAX's IDENTITY (MAX) from its IMPLEMENTATION
  * (provider/model) and surfaces the live tool registry, local
  * broker, and memory freshness.
  *
- * Key design rules (from the 2026-06-15 hotfix):
+ * Key design rules (from the 2026-06-15 hotfix + patch):
  *  - MAX identity is shown as "MAX" (NOT as the provider/model).
  *  - Provider/model is shown SEPARATELY as an implementation detail.
  *  - Tools are shown with their proof_required flag.
  *  - Web/search is shown as "unavailable" if no backend is registered.
  *  - Handoff/startup mismatches are suppressed when the new
  *    /api/v1/max/memory-status endpoint reports `matches: true`.
+ *  - OpenClaw queue detail is inlined in the local broker (not just
+ *    a pointer to /api/v1/openclaw/health).
+ *  - Memory timestamp + startup/current/runtime commit detail +
+ *    warning text for stale are all displayed as text (not just
+ *    chip status), per the 2026-06-15 proof-receipt patch.
  */
 
 import { useEffect, useState } from 'react';
@@ -55,9 +60,19 @@ interface ControlPlaneResponse {
     error?: string;
   };
   local_broker: {
-    repo: { branch: string; commit: string };
+    repo: { branch: string; commit: string; repo_root: string };
     backend: { port: number; state: string; detail: string };
-    frontend: { port: number; build_id: string; state: string };
+    frontend: { port: number; build_id: string; state: string; detail: string };
+    openclaw: {
+      state: string;
+      detail: string;
+      queue_stats?: { queued: number | string; total: number | string };
+      worker_heartbeat?: { state: string; age_seconds: number | string };
+      proof_source?: string;
+    };
+    hermes: { state: string; detail: string; proof_source?: string };
+    telegram: { state: string; detail: string; proof_source?: string };
+    ollama: { state: string; detail: string; disabled_reason?: string };
   };
   tool_registry: Array<{
     key: string;
@@ -67,15 +82,23 @@ interface ControlPlaneResponse {
     description: string;
   }>;
   memory: {
-    handoff_freshness: { matches: boolean; warning: string | null };
+    handoff_freshness: {
+      startup_commit: string;
+      startup_recorded_at: string;
+      current_commit: string;
+      matches: boolean;
+      warning: string | null;
+    };
     active_memory_source: string;
+    newest_memory_timestamp: string | null;
+    newest_memory_file: string | null;
   };
   checked_at: string;
 }
 
 function statusTone(status: string): Tone {
   if (status === 'available' || status === 'up' || status === 'read-only') return 'ok';
-  if (status === 'configured-but-unhealthy') return 'warn';
+  if (status === 'configured-but-unhealthy' || status === 'configured_but_detail_unavailable') return 'warn';
   if (status === 'unavailable' || status === 'down') return 'bad';
   return 'neutral';
 }
@@ -120,6 +143,14 @@ export default function MaxControlPlanePanel() {
   }
 
   const hf = data.memory.handoff_freshness;
+  const openclaw = data.local_broker.openclaw;
+  const openclawQueue = openclaw.queue_stats;
+  const openclawHeartbeat = openclaw.worker_heartbeat;
+  const ocTone: Tone = openclaw.state === 'available' ? 'ok'
+    : openclaw.state === 'configured_but_detail_unavailable' ? 'warn'
+    : openclaw.state === 'unavailable' ? 'bad'
+    : 'neutral';
+  const hfTone: Tone = hf.matches ? 'ok' : 'warn';
 
   return (
     <section
@@ -160,9 +191,57 @@ export default function MaxControlPlanePanel() {
         <Pill label={`Frontend :${data.local_broker.frontend.port} ${data.local_broker.frontend.state} (build ${data.local_broker.frontend.build_id})`} tone={statusTone(data.local_broker.frontend.state)} />
         <Pill
           label={hf.matches ? 'Handoff fresh' : 'Handoff stale'}
-          tone={hf.matches ? 'ok' : 'warn'}
+          tone={hfTone}
         />
         <Pill label={`Memory: ${data.memory.active_memory_source}`} tone="neutral" />
+        <Pill
+          label={`OpenClaw ${openclawQueue ? `q=${openclawQueue.queued}/${openclawQueue.total}` : 'no detail'}`}
+          tone={ocTone}
+        />
+      </div>
+
+      {/* Per the 2026-06-15 patch: show full warning text + memory timestamp + commit detail */}
+      {hf.warning && (
+        <div
+          data-testid="cp-handoff-warning"
+          style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: '#92400e',
+            background: '#fffbeb',
+            border: '1px solid #fde68a',
+            borderRadius: 6,
+            padding: '6px 8px',
+            marginBottom: 8,
+          }}
+        >
+          ⚠ {hf.warning}
+        </div>
+      )}
+
+      <div
+        data-testid="cp-commit-detail"
+        style={{
+          fontSize: 11,
+          color: '#4d564d',
+          fontFamily: 'monospace',
+          background: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: 6,
+          padding: '6px 8px',
+          marginBottom: 8,
+        }}
+      >
+        <div><strong>startup_commit:</strong> {hf.startup_commit || 'unknown'}</div>
+        <div><strong>startup_recorded_at:</strong> {hf.startup_recorded_at || 'unknown'}</div>
+        <div><strong>current_commit:</strong> {hf.current_commit || 'unknown'}</div>
+        <div><strong>matches:</strong> {hf.matches ? 'true' : 'false'}</div>
+        {data.memory.newest_memory_timestamp && (
+          <div data-testid="cp-newest-memory-timestamp"><strong>newest_memory_timestamp:</strong> {data.memory.newest_memory_timestamp}</div>
+        )}
+        {data.memory.newest_memory_file && (
+          <div><strong>newest_memory_file:</strong> {data.memory.newest_memory_file}</div>
+        )}
       </div>
 
       <details>
