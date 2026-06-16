@@ -7,9 +7,9 @@ import {
   RefreshCw, Filter, Download, Eye, Plus, Trash2, Star, Award, Layers,
 } from 'lucide-react';
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-  ? 'https://api.empirebox.store/api/v1'
-  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1');
+const API = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '0.0.0.0')
+  ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1')
+  : (typeof window !== 'undefined' ? `${window.location.origin}/api/v1` : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'));
 
 const AG_API = `${API}/archiveforge`;
 const SUPPORTED_UPLOAD_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
