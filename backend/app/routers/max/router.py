@@ -1083,6 +1083,12 @@ def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
     if not module_hit:
         return None
     response_text = _sanitize_internal_leakage_text(module_hit.get("response", ""))
+    result_payload = {
+        "module": module_hit.get("module"),
+        "sources": module_hit.get("sources", []),
+    }
+    if "live_routes_count" in module_hit:
+        result_payload["live_routes_count"] = module_hit["live_routes_count"]
     return ChatResponse(
         response=response_text,
         model_used="empire-module-knowledge",
@@ -1090,10 +1096,7 @@ def _empire_module_response(request: ChatRequest) -> ChatResponse | None:
         tool_results=[{
             "tool": "empire_module_knowledge",
             "success": True,
-            "result": {
-                "module": module_hit.get("module"),
-                "sources": module_hit.get("sources", []),
-            },
+            "result": result_payload,
         }],
         metadata=_response_metadata(request.channel, skill_used="empire_module_knowledge"),
     )
