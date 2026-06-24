@@ -23,7 +23,7 @@ from app.services.max.openclaw_gate import check_openclaw_gate, write_openclaw_w
 
 log = logging.getLogger("openclaw_worker")
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-repo/backend/data/empire.db"))
 OPENCLAW_URL = "http://localhost:7878"
 OPENCLAW_TIMEOUT = 300  # 5 min per task
 CODE_TASK_TIMEOUT = int(os.getenv("OPENCLAW_CODE_TASK_TIMEOUT", str(OPENCLAW_TIMEOUT)))

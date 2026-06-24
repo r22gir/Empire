@@ -9,7 +9,13 @@ from typing import Generator, AsyncGenerator
 import os
 
 # Get database URL from environment or use SQLite default
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./empirebox.db")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///" + os.path.join(
+        os.getenv("EMPIRE_DATA_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "empirebox.db",
+    ),
+)
 
 # Base class for models
 Base = declarative_base()

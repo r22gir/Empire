@@ -17,7 +17,7 @@ import subprocess
 from datetime import datetime, date
 from typing import Optional
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-repo/backend/data/empire.db"))
 REPO_PATH = os.path.expanduser("~/empire-repo")
 ROADMAP_PATH = os.path.join(REPO_PATH, ".session-artifacts/audit/productivity_roadmap.md")
 

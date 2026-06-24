@@ -19,6 +19,7 @@ from typing import Optional
 
 from app.config.business_config import biz
 from app.db.database import get_db, dict_row, dict_rows
+from app.services import data_paths as dp
 from app.services.max.inpaint_service import inpaint_service
 
 try:
@@ -46,7 +47,7 @@ FOUNDER_PIN = os.getenv("FOUNDER_PIN", "7777")
 
 TOOL_BLOCK_RE = re.compile(r"```(?:tool|json|action|actions)?\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
 
-QUOTES_DIR = os.path.expanduser("~/empire-repo/backend/data/quotes")
+QUOTES_DIR = str(dp.quotes_data_dir())
 
 
 @dataclass
@@ -655,7 +656,7 @@ def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
                 })
 
     # ── Search CraftForge quotes ──
-    cf_dir = os.path.expanduser("~/empire-repo/backend/data/craftforge/designs")
+    cf_dir = str(dp.craftforge_designs_dir())
     if source_filter in ("", "craftforge", "all"):
         if os.path.exists(cf_dir):
             for fname in os.listdir(cf_dir):
@@ -1061,7 +1062,7 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                         lining=lining,
                     )
                     # Save to disk (assemble_quote no longer auto-saves)
-                    _qdir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+                    _qdir = str(dp.quotes_data_dir())
                     os.makedirs(_qdir, exist_ok=True)
                     with open(os.path.join(_qdir, f"{qis_quote_data['id']}.json"), "w") as _qf:
                         json.dump(qis_quote_data, _qf, indent=2, default=str)
@@ -1176,7 +1177,7 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     photo_refs = params.get("photos", [])
     image_filename = params.get("image_filename")
     if image_filename:
-        uploads_dir = os.path.expanduser("~/empire-repo/backend/data/uploads/images")
+        uploads_dir = str(dp.uploads_images_dir())
         img_path = os.path.join(uploads_dir, image_filename)
         if os.path.exists(img_path):
             # Store base64 of original photo for PDF embedding
@@ -1364,7 +1365,7 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     pdf_path = None
     try:
         _run_async(_generate_pdf_for_quote(quote_id))
-        pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+        pdf_dir = str(dp.quote_pdf_dir())
         pdf_file = os.path.join(pdf_dir, f"{quote_number}.pdf")
         if os.path.exists(pdf_file):
             pdf_url = f"/api/v1/quotes/{quote_id}/pdf"
@@ -1450,7 +1451,7 @@ def _select_proposal(params: dict, desk: Optional[str] = None) -> ToolResult:
     pdf_path = None
     try:
         _run_async(_generate_pdf_for_quote(quote_id))
-        pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+        pdf_dir = str(dp.quote_pdf_dir())
         pdf_file = os.path.join(pdf_dir, f"{quote['quote_number']}.pdf")
         if os.path.exists(pdf_file):
             pdf_path = pdf_file
@@ -1791,7 +1792,7 @@ def _send_quote_telegram(params: dict, desk: Optional[str] = None) -> ToolResult
     total = quote.get("total", 0)
 
     # Generate PDF
-    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+    pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
 
@@ -1941,7 +1942,7 @@ def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     total = quote.get("total", 0)
 
     # Generate PDF
-    pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+    pdf_dir = str(dp.quote_pdf_dir())
     os.makedirs(pdf_dir, exist_ok=True)
     pdf_path = os.path.join(pdf_dir, f"{quote_number}.pdf")
 
@@ -2772,7 +2773,7 @@ def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                     lining=lining,
                 )
                 # Save to disk (assemble_quote no longer auto-saves)
-                _qdir = os.path.expanduser("~/empire-repo/backend/data/quotes")
+                _qdir = str(dp.quotes_data_dir())
                 os.makedirs(_qdir, exist_ok=True)
                 with open(os.path.join(_qdir, f"{qis_quote['id']}.json"), "w") as _qf:
                     json.dump(qis_quote, _qf, indent=2, default=str)
@@ -2873,7 +2874,7 @@ def _photo_to_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
                     pdf_url = None
                     try:
                         _run_async(_generate_pdf_for_quote(quote_id))
-                        pdf_dir = os.path.expanduser("~/empire-repo/backend/data/quotes/pdf")
+                        pdf_dir = str(dp.quote_pdf_dir())
                         pdf_file = os.path.join(pdf_dir, f"{quote_number}.pdf")
                         if os.path.exists(pdf_file):
                             pdf_url = f"/api/v1/quotes/{quote_id}/pdf"
@@ -3082,7 +3083,7 @@ def _log_async_task(task_id: str, title: str, status: str, result=None, error=No
     """Log async task status to DB."""
     try:
         import sqlite3
-        db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+        db_path = str(dp.db_path())
         conn = sqlite3.connect(db_path)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS atlas_tasks (
@@ -3125,7 +3126,7 @@ def _delegate_to_atlas(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 # ── PRESENTATION PDF + TELEGRAM TOOL ──────────────────────────────
 
-PRESENTATIONS_DIR = os.path.expanduser("~/empire-repo/backend/data/presentations")
+PRESENTATIONS_DIR = str(dp.presentations_dir())
 
 
 def _md_to_html(text: str) -> str:
@@ -4205,7 +4206,7 @@ def _db_query(params: dict, desk: Optional[str] = None) -> ToolResult:
         if d in query_upper:
             return ToolResult(tool="db_query", success=False, error=f"Query contains blocked keyword: {d}")
 
-    db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+    db_path = str(dp.db_path())
     try:
         conn = sqlite3.connect(db_path, timeout=10)
         conn.row_factory = sqlite3.Row

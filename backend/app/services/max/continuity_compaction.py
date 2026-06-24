@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -88,7 +89,7 @@ def _git_commit() -> str:
 
 
 def _active_task_state() -> dict[str, Any]:
-    db_path = Path.home() / "empire-repo" / "backend" / "data" / "empire.db"
+    db_path = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-repo" / "backend" / "data" / "empire.db"))
     try:
         import sqlite3
         with sqlite3.connect(db_path) as conn:
