@@ -121,6 +121,13 @@ def _item_to_dict(row) -> dict:
         else:
             d[key] = None
         del d[jf]
+    # Frontend (QuoteReviewScreen) reads item.rate / item.amount; DB stores
+    # unit_price / subtotal. Emit aliases so the review editor and verification
+    # panel show real values (symmetric with the write side accepting both).
+    if d.get("rate") is None:
+        d["rate"] = d.get("unit_price")
+    if d.get("amount") is None:
+        d["amount"] = d.get("subtotal")
     return d
 
 
