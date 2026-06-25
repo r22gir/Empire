@@ -515,6 +515,7 @@ class CodeTask:
     prompt_attempts: int = 0
     failure_reason: Optional[str] = None
     execution_protocol: str = "json-tool-action"
+    founder: bool = False
     state: CodeTaskState = CodeTaskState.QUEUED
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     started_at: Optional[str] = None
@@ -576,12 +577,13 @@ class CodeTaskRunner:
     def get_task(self, task_id: str) -> Optional[CodeTask]:
         return self._tasks.get(task_id)
 
-    def submit(self, prompt: str) -> CodeTask:
+    def submit(self, prompt: str, founder: bool = False) -> CodeTask:
         """Submit a new code task. Returns immediately with task ID."""
         task = CodeTask(
             id=str(uuid.uuid4())[:12],
             prompt=prompt,
             execution_mode=_infer_execution_mode(prompt),
+            founder=founder,
         )
         self._tasks[task.id] = task
         # Start execution in background
@@ -717,7 +719,7 @@ class CodeTaskRunner:
                     # Execute the tool (sync — run in thread to not block event loop)
                     try:
                         result = await asyncio.get_event_loop().run_in_executor(
-                            None, lambda t=tc: execute_tool(t, desk="codeforge")
+                            None, lambda t=tc: execute_tool(t, desk="codeforge", founder=task.founder)
                         )
                         executed_tool_calls.append(_tool_record(tc, result, success=result.success, error=result.error))
 

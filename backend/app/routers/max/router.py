@@ -4542,7 +4542,7 @@ async def submit_code_task(request: CodeTaskRequest):
 
     from app.services.max.code_task_runner import code_task_runner
 
-    task = code_task_runner.submit(request.prompt)
+    task = code_task_runner.submit(request.prompt, founder=founder)
     return {
         "task_id": task.id,
         "state": task.state.value,
