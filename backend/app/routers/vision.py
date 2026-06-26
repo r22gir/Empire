@@ -4,7 +4,7 @@ Ported from WorkroomForge (port 3001) so all analysis runs through the backend.
 Image understanding uses MiniMax Token Plan through the working mmx CLI transport.
 Image generation remains explicit and separate from image-understanding quota.
 """
-import os, json, re, httpx, logging, base64, uuid, time
+import os, json, re, httpx, asyncio, logging, base64, uuid, time
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -12,6 +12,8 @@ from typing import Any, Optional
 
 from app.services.data_paths import data_root
 from app.services.max.minimax_tools import minimax_tools_status, minimax_understand_image
+from app.services.max.ai_router import ai_router, AIMessage, AIModel
+from app.routers.notifications import notify_founder
 
 router = APIRouter(prefix="/api/v1/vision", tags=["vision"])
 log = logging.getLogger("vision")
@@ -46,13 +48,58 @@ class ImagineRequest(BaseModel):
 # ── Helpers ─────────────────────────────────────────────────
 
 def _extract_json_object(text: str) -> dict[str, Any]:
-    match = re.search(r"\{[\s\S]*\}", text or "")
-    if not match:
+    """Extract first balanced JSON object from text, stripping markdown fences.
+
+    Robust to:
+      - Markdown code fences (```json ... ``` or ``` ... ```)
+      - Leading prose before the JSON
+      - Nested objects (balanced-brace finder respects string boundaries)
+      - Trailing prose after the JSON
+    """
+    cleaned = _strip_markdown_fences(text or "")
+    candidate = _find_balanced_json(cleaned)
+    if not candidate:
         raise HTTPException(500, "Could not parse AI response")
     try:
-        return json.loads(match.group(0))
+        return json.loads(candidate)
     except json.JSONDecodeError as exc:
         raise HTTPException(500, f"Could not parse AI response JSON: {exc}") from exc
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Strip ```json ... ``` or bare ``` ... ``` fences."""
+    return re.sub(r"```(?:json|JSON)?\s*\n?(.*?)\n?```", r"\1", text, flags=re.DOTALL).strip()
+
+
+def _find_balanced_json(text: str) -> Optional[str]:
+    """Find first balanced {...} object. Respects string boundaries."""
+    text = text or ""
+    start = text.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape:
+                escape = False
+                continue
+            if c == "\\" and in_string:
+                escape = True
+                continue
+            if c == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+        start = text.find("{", start + 1)
+    return None
 
 
 def _env_flag(*names: str) -> bool:
@@ -168,28 +215,265 @@ def _materialize_image_input(image: str) -> str:
     return str(path)
 
 
-def _parsed_json_from_minimax_result(result: dict[str, Any]) -> dict[str, Any]:
+# Schema the formatter and consumer both target.
+_MOCKUP_RESULT_SCHEMA = {
+    "room_assessment": {
+        "room_type": "string",
+        "style": "string",
+        "light_level": "string (natural|bright|dim|mixed)",
+        "color_palette": ["list of color strings"],
+        "privacy_need": "low|medium|high",
+    },
+    "window_info": {
+        "type": "string",
+        "estimated_width": "number (inches)",
+        "estimated_height": "number (inches)",
+        "current_treatment": "string or null",
+    },
+    "proposals": [{
+        "tier": "string (Elegant Essential | Designer's Choice | Ultimate Luxury)",
+        "treatment_type": "string",
+        "style": "string",
+        "fabric": "string",
+        "lining": "string",
+        "hardware": "string",
+        "extras": ["list of strings"],
+        "price_range_low": "number",
+        "price_range_high": "number",
+        "visual_description": "string",
+        "design_rationale": "string",
+    }],
+    "general_recommendations": ["list of strings"],
+    "confidence": "number 0-100",
+    "notes": "string",
+}
+
+
+_MOCKUP_FORMATTER_SYSTEM = (
+    "You are a precise JSON formatter for a window-treatment design tool. "
+    "Output ONLY valid JSON matching the schema the user provides. "
+    "No markdown fences, no commentary, no explanation before or after."
+)
+
+
+# F4 Telegram-ping rate-limit state (module-level; one ping per 10 minutes).
+_F4_PING_COOLDOWN_SECONDS = 600
+_last_f4_ping_at: float = 0.0
+
+
+async def _parsed_json_from_minimax_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Parse a MiniMax mmx_cli result into the mockup schema.
+
+    Tries in order:
+      1. Direct JSON extraction — works when mmx happens to return JSON.
+      2. Two-stage formatter — M3 converts mmx prose to schema-valid JSON
+         (one retry on parse failure).
+      3. F4 fallback — wrap the prose with empty proposals so the UI
+         degrades gracefully (description shown, no mockup images) instead
+         of throwing a 500. Both F4 paths also notify the founder.
+
+    Never raises — always returns a dict so /api/v1/vision/mockup is never
+    a customer-facing 500 for this class of failure.
+    """
+    source_model = result.get("model") or "mmx_vision"
+
     if not result.get("success"):
         error = result.get("error") or "MiniMax image understanding failed verification"
-        raise HTTPException(502, error)
+        log.warning(f"vision_mockup: MiniMax result not successful: {error}")
+        return await _wrap_prose_as_empty_schema(
+            "", source_model, reason=f"minimax result unsuccessful: {error[:120]}"
+        )
+
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
-    text = data.get("full_response") or data.get("summary") or ""
-    parsed = _extract_json_object(str(text))
-    parsed["_vision_runtime"] = {
-        "provider": "minimax",
-        "transport": "mmx_cli",
-        "quota_bucket": "mcp_understand_image",
-        "model": result.get("model") or "mmx_vision",
-        "image_generation_used": False,
+    text = str(data.get("full_response") or data.get("summary") or "")
+
+    # Stage 1: direct parse (mmx occasionally returns JSON-ish already).
+    try:
+        parsed = _extract_json_object(text)
+        if isinstance(parsed, dict) and ("proposals" in parsed or "room_assessment" in parsed):
+            parsed["_vision_runtime"] = {
+                "provider": "minimax",
+                "transport": "mmx_cli",
+                "format_status": "direct_parse",
+                "model": source_model,
+                "image_generation_used": False,
+            }
+            return parsed
+    except HTTPException:
+        pass  # not parseable; fall through to formatter
+
+    # Stage 2: format mmx's prose through chat LLM.
+    return await _format_mmx_prose_to_schema(text, source_model)
+
+
+async def _format_mmx_prose_to_schema(prose: str, source_model: str) -> dict[str, Any]:
+    """Two-stage pipeline: send mmx's prose to M3 chat with a strict
+    schema-conformance prompt, parse the response. One retry on parse failure.
+    Falls back to _wrap_prose_as_empty_schema on second failure (which fires F4
+    notification)."""
+    schema_str = json.dumps(_MOCKUP_RESULT_SCHEMA, indent=2)
+    user_prompt = (
+        "Convert the room description below into a JSON object matching this exact schema:\n\n"
+        f"{schema_str}\n\n"
+        "Field guidance:\n"
+        '- room_assessment.room_type: pick from ["living room", "bedroom", "dining room", '
+        '"kitchen", "office", "bathroom", "other"]\n'
+        '- room_assessment.style: brief descriptor (e.g. "transitional", "modern farmhouse")\n'
+        '- room_assessment.light_level: "natural", "bright", "dim", or "mixed"\n'
+        "- room_assessment.color_palette: dominant colors you can identify\n"
+        '- room_assessment.privacy_need: "low", "medium", or "high"\n'
+        "- window_info.type: best guess from the description\n"
+        "- window_info.estimated_width / estimated_height: numbers in inches, or 0 if unknown\n"
+        '- window_info.current_treatment: describe what you see, or null\n'
+        '- proposals: ALWAYS include exactly 3 distinct proposals:\n'
+        '    * "Elegant Essential": budget-friendly, simple, $200-$600\n'
+        '    * "Designer\'s Choice": mid-range, layered, $600-$1,500\n'
+        '    * "Ultimate Luxury": premium, multi-layered, $1,500-$4,000+\n'
+        "  Each with: tier, treatment_type, style, fabric, lining, hardware, extras, "
+        "price_range_low, price_range_high, visual_description, design_rationale\n"
+        "- general_recommendations: 2-4 actionable suggestions\n"
+        "- confidence: integer 0-100 (your self-assessed confidence)\n"
+        "- notes: brief caveat about assumptions\n\n"
+        "Output ONLY the JSON object. Nothing else.\n\n"
+        f"Room description:\n{prose[:6000]}"
+    )
+
+    last_error: Optional[str] = None
+    for attempt in range(2):
+        try:
+            response = await ai_router.chat(
+                [AIMessage(role="user", content=user_prompt)],
+                model=AIModel.MINIMAX,
+                system_prompt=_MOCKUP_FORMATTER_SYSTEM,
+                source="vision_formatter",
+            )
+            content = (response.content or "").strip()
+            try:
+                parsed = _extract_json_object(content)
+            except HTTPException as exc:
+                last_error = f"parse failed: {exc.detail}"
+                log.warning(f"vision_formatter attempt {attempt + 1}: {last_error}")
+                continue
+            if not isinstance(parsed, dict):
+                last_error = "parsed result is not a dict"
+                continue
+            parsed.setdefault("proposals", [])
+            parsed.setdefault("room_assessment", {})
+            parsed.setdefault("window_info", {})
+            parsed.setdefault("general_recommendations", [])
+            parsed.setdefault("confidence", 0)
+            parsed.setdefault("notes", "")
+            parsed["_vision_runtime"] = {
+                "provider": "minimax",
+                "transport": "mmx_cli",
+                "format_status": "two_stage_formatter",
+                "format_attempts": attempt + 1,
+                "model": source_model,
+                "image_generation_used": False,
+                "formatter_model": getattr(response, "model_used", "minimax"),
+            }
+            log.info(f"vision_formatter succeeded on attempt {attempt + 1}")
+            return parsed
+        except Exception as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            log.warning(f"vision_formatter attempt {attempt + 1} failed: {last_error}")
+
+    log.warning(f"vision_formatter exhausted retries ({last_error}); F4 fallback")
+    return await _wrap_prose_as_empty_schema(
+        prose, source_model, reason=f"formatter exhausted retries: {last_error}"
+    )
+
+
+async def _wrap_prose_as_empty_schema(
+    prose: str, source_model: str, reason: str = "fallback"
+) -> dict[str, Any]:
+    """F4 fallback: structured object with prose description and empty proposals.
+    UI degrades gracefully (description shown, no mockup images) instead of 500.
+    Fires founder notification (dashboard always; Telegram rate-limited to 1/10min)."""
+    await _notify_f4_fallback(reason=reason, source_model=source_model, prose_snippet=prose)
+    return {
+        "room_assessment": {
+            "room_type": "unknown",
+            "style": "unknown",
+            "light_level": "natural",
+            "color_palette": [],
+            "privacy_need": "medium",
+        },
+        "window_info": {
+            "type": "unknown",
+            "estimated_width": 0,
+            "estimated_height": 0,
+            "current_treatment": None,
+        },
+        "proposals": [],
+        "general_recommendations": [
+            "Vision analysis could not be structured into design proposals.",
+            "Please review the raw room description in the _vision_runtime field.",
+        ],
+        "confidence": 0,
+        "notes": "Mockup formatting failed; raw vision description preserved for review.",
+        "_vision_runtime": {
+            "provider": "minimax",
+            "transport": "mmx_cli",
+            "format_status": "fallback_to_prose",
+            "model": source_model,
+            "image_generation_used": False,
+            "description": (prose or "")[:5000],
+        },
     }
-    return parsed
+
+
+async def _notify_f4_fallback(reason: str, source_model: str, prose_snippet: str = "") -> None:
+    """Notify the founder when the vision formatter degrades to F4 fallback.
+
+    Always writes a dashboard notification (in-DB, cheap).
+    Sends a Telegram ping rate-limited to once per 10 minutes.
+    """
+    global _last_f4_ping_at
+
+    try:
+        notify_founder(
+            "Vision",
+            "system_alert",
+            "Mockup formatter degraded to F4 fallback",
+            f"reason: {reason}\nmodel: {source_model}",
+            "medium",
+            {"endpoint": "/api/v1/vision/mockup", "degraded": True},
+        )
+    except Exception as exc:
+        log.warning(f"vision_mockup: notify_founder failed: {type(exc).__name__}: {exc}")
+
+    now = time.monotonic()
+    if _last_f4_ping_at and (now - _last_f4_ping_at) < _F4_PING_COOLDOWN_SECONDS:
+        log.debug(f"vision_mockup: F4 ping suppressed (last sent {int(now - _last_f4_ping_at)}s ago)")
+        return
+    _last_f4_ping_at = now
+
+    try:
+        from app.services.max.telegram_bot import telegram_bot
+        snippet = (prose_snippet or "")[:200].replace("\n", " ")
+        msg = (
+            "⚠️ <b>Vision Mockup F4 Fallback</b>\n\n"
+            f"<b>Reason:</b> {reason[:200]}\n"
+            f"<b>Model:</b> {source_model}\n"
+        )
+        if snippet:
+            msg += f"<b>Vision snippet:</b> <i>{snippet}…</i>\n"
+        msg += (
+            "\n<i>Endpoint degraded to prose fallback; UI shows description "
+            "without mockup images. Next ping suppressed for 10 min "
+            "unless the formatter recovers.</i>"
+        )
+        await telegram_bot.send_message(msg)
+    except Exception as exc:
+        log.warning(f"vision_mockup: telegram ping failed: {type(exc).__name__}: {exc}")
 
 
 async def call_minimax_image_understanding(prompt: str, image_url: str, max_tokens: int = 4500) -> dict[str, Any]:
     """Call MiniMax image understanding through the shared mmx CLI wrapper."""
     image_path = _materialize_image_input(image_url)
     result = await minimax_understand_image(image_path, prompt=prompt)
-    parsed = _parsed_json_from_minimax_result(result)
+    parsed = await _parsed_json_from_minimax_result(result)
     log.info("provider=minimax capability=image_understanding transport=mmx_cli response_status=ok parsed_json_valid=true")
     return parsed
 
