@@ -49,6 +49,15 @@ VERIFICATION_REQUIRED_TOOLS = {
     "file_edit",
     "file_append",
     "web_read",
+    # 2026-06-25 — extend to action tools that claim completion.
+    # NOTE: create_contact's proof (contact_id) is generated pre-INSERT
+    # (uuid.uuid4()[:8] at tool_executor.py:1513), so it is a WEAKER check
+    # than create_task's identity_verified (which requires a SELECT round-trip).
+    # Acceptable for now — flag for follow-up to add a SELECT round-trip to
+    # _create_contact mirroring _create_task's pattern.
+    "create_quick_quote",
+    "create_contact",
+    "create_task",
 }
 
 ATTACHMENT_REQUEST_RE = re.compile(r"\b(attach|attached|attachment|pdf|document|file)\b", re.IGNORECASE)
@@ -69,6 +78,39 @@ ATTACHMENT_REQUEST_RE = re.compile(r"\b(attach|attached|attachment|pdf|document|
 # conditional forms are allowed (see SAFE_CLAIM_PHRASES below).
 # ---------------------------------------------------------------------------
 
+# ── 2026-06-25 ── Completion-passive past-time filter ─────────────────
+# A bare completion-passive pattern like "(quote|order|email) is/was/has been ready/sent/..."
+# will false-positive on incidental historical prose ("the fabric was created in 2019",
+# "your prior order was completed on schedule"). Anchor it to a deliverable noun
+# AND filter out matches that are historical references (preceded within
+# _COMPLETION_PASSIVE_WINDOW chars by a past-time marker).
+_OPERATIONAL_CLAIM_COMPLETION_PASSIVE = [
+    r"\b(quote|estimate|email|message|task|contact|invoice|order|PDF|mockup|drawing)"
+    r"\s+(is|was|has been|have been)"
+    r"\s+(?:now\s+|just\s+)?"          # optional current-time adverb
+    r"(ready|sent|created|done|complete|completed|attached|saved|added|built|generated|posted|queued|dispatched|uploaded|written|filed|scheduled)\b",
+]
+
+PAST_TIME_MARKER_RE = re.compile(
+    r"\b(prior|previous|earlier|last|old|yesterday|ago|recently|formerly|past|before)\b",
+    re.IGNORECASE,
+)
+
+_COMPLETION_PASSIVE_WINDOW = 15  # chars before the noun to scan for past-time markers
+
+
+def _is_current_turn_completion(response_text: str, match_start: int) -> bool:
+    """For completion-passive matches, return False if preceded by a past-time
+    marker within _COMPLETION_PASSIVE_WINDOW chars — i.e. it is a historical
+    reference, not a current-turn claim. Catches 'your prior order was completed
+    on schedule' while keeping 'the quote is ready'.
+    """
+    window_start = max(0, match_start - _COMPLETION_PASSIVE_WINDOW)
+    window = response_text[window_start:match_start]
+    window_compact = re.sub(r"\s+", " ", window).strip()
+    return not PAST_TIME_MARKER_RE.search(window_compact)
+
+
 # Past-tense / completed operational claim phrases. If MAX says one of
 # these in its response without a proof object, that's a truth failure.
 OPERATIONAL_CLAIM_PHRASES = [
@@ -83,6 +125,40 @@ OPERATIONAL_CLAIM_PHRASES = [
     r"\bI called\b",
     r"\bI inspected\b",
     r"\bI looked up\b",
+    # 2026-06-25 — action-completion verbs MAX uses for terse confirmations.
+    # Each "I X" form is unambiguous (subject + past-tense verb). The
+    # completion-passive forms below are handled separately with extra
+    # past-time filtering (see _OPERATIONAL_CLAIM_COMPLETION_PASSIVE).
+    r"\bI sent\b",
+    r"\bI created\b",
+    r"\bI made\b",
+    r"\bI generated\b",
+    r"\bI posted\b",
+    r"\bI dispatched\b",
+    r"\bI queued\b",
+    r"\bI added\b",
+    r"\bI scheduled\b",
+    r"\bI wrote\b",
+    r"\bI saved\b",
+    r"\bI built\b",
+    r"\bI set up\b",
+    r"\bI uploaded\b",
+    r"\bI attached\b",
+    r"\bI shipped\b",
+    r"\bI launched\b",
+    r"\bI started\b",
+    r"\bI completed\b",
+    r"\bI finished\b",
+    r"\bI deployed\b",
+    r"\bI committed\b",
+    # 2026-06-25 — completion-passive forms, anchored to deliverable nouns
+    # (quote|estimate|email|message|task|contact|invoice|order|PDF|mockup|drawing)
+    # with past-time-marker filtering via _is_current_turn_completion().
+    # Catches "the quote is ready" / "your estimate has been generated".
+    # Skips "the fabric was created in 2019" (noun not in list).
+    # Skips "your prior order was completed on schedule" (past-time marker
+    # in 15-char window).
+    *_OPERATIONAL_CLAIM_COMPLETION_PASSIVE,
 ]
 
 # Future-tense / conditional / safe phrases that are NOT considered claims.
@@ -107,6 +183,37 @@ SAFE_CLAIM_PHRASES = [
     r"\bafter approval\b",
     r"\bif you want\b",
     r"\bif you approve\b",
+    # 2026-06-25 — future-tense counterparts for new action verbs.
+    r"\bI will create\b",
+    r"\bI will send\b",
+    r"\bI will make\b",
+    r"\bI will generate\b",
+    r"\bI will post\b",
+    r"\bI will add\b",
+    r"\bI will save\b",
+    r"\bI will build\b",
+    r"\bI will set up\b",
+    r"\bI will attach\b",
+    r"\bI will complete\b",
+    r"\bI will start\b",
+    r"\bI can create\b",
+    r"\bI can send\b",
+    r"\bI can make\b",
+    r"\bI can add\b",
+    r"\bI can save\b",
+    r"\bI can build\b",
+    r"\bI can attach\b",
+    r"\bI would create\b",
+    r"\bI would send\b",
+    r"\bI would add\b",
+    r"\bI would save\b",
+    r"\bI have not created\b",
+    r"\bI have not sent\b",
+    r"\bI have not added\b",
+    r"\bI have not saved\b",
+    r"\bI have not made\b",
+    r"\bI haven't created\b",
+    r"\bI haven't sent\b",
 ]
 
 # Compile the patterns.
@@ -196,8 +303,14 @@ def _response_has_operational_claim(response_text: str) -> Optional[str]:
 
     # First, find all operational claim matches.
     claim_matches: list[tuple[int, int, str]] = []  # (start, end, phrase)
-    for pat in OPERATIONAL_CLAIM_PATTERNS:
+    for pat, raw_phrase in zip(OPERATIONAL_CLAIM_PATTERNS, OPERATIONAL_CLAIM_PHRASES):
+        # 2026-06-25: completion-passive patterns are filtered through
+        # _is_current_turn_completion to skip historical references
+        # like "your prior order was completed on schedule".
+        is_completion_passive = raw_phrase in _OPERATIONAL_CLAIM_COMPLETION_PASSIVE
         for m in pat.finditer(response_text):
+            if is_completion_passive and not _is_current_turn_completion(response_text, m.start()):
+                continue
             claim_matches.append((m.start(), m.end(), m.group(0)))
 
     if not claim_matches:
@@ -293,6 +406,16 @@ def _tool_failure_reason(entry: dict[str, Any], user_message: str | None = None)
     if tool == "send_quote_email":
         if int(result.get("attachments_sent") or 0) <= 0 or not result.get("pdf_path"):
             return "send_quote_email: quote PDF attachment was not verified"
+    if tool == "send_telegram":
+        # 2026-06-25 — bot must report success=True AND result.sent must be True.
+        if result.get("sent") is not True:
+            return "send_telegram: result.sent is not True"
+    if tool == "send_quote_telegram":
+        # 2026-06-25 — PDF gen + delivery must both succeed.
+        if not result.get("pdf_path"):
+            return "send_quote_telegram: result missing pdf_path"
+        if int(result.get("pdf_size_bytes") or 0) <= 0:
+            return "send_quote_telegram: result.pdf_size_bytes is zero or missing"
     if tool in {"svg_to_pdf", "present"}:
         pdf_path = result.get("pdf_path")
         size = int(result.get("size_bytes") or result.get("pdf_size_bytes") or 0)
@@ -301,6 +424,30 @@ def _tool_failure_reason(entry: dict[str, Any], user_message: str | None = None)
     if tool in {"file_write", "file_edit", "file_append"}:
         if not result.get("path"):
             return f"{tool}: saved file path was not verified"
+    # 2026-06-25 — proof fields for create-* actions.
+    # NOTE: create_contact's proof (contact_id) is generated pre-INSERT
+    # (uuid.uuid4()[:8] at tool_executor.py:1513) and is therefore a WEAKER
+    # check than create_task's identity_verified. Follow-up PR should add
+    # a SELECT round-trip to _create_contact mirroring _create_task (line 422).
+    if tool == "create_quick_quote":
+        # quote_number + quote_id are ALWAYS set on success (tool_executor.py:1390).
+        # pdf_url/pdf_path may legitimately be null (PDF gen is best-effort).
+        qn = (result.get("quote_number") or "").strip()
+        qid = (result.get("quote_id") or "").strip()
+        if not qn and not qid:
+            return "create_quick_quote: result missing both quote_number and quote_id"
+        if not (result.get("customer_name") or "").strip():
+            return "create_quick_quote: result missing customer_name"
+    if tool == "create_contact":
+        # contact_id is uuid.uuid4()[:8], always non-empty if function returned.
+        # WEAKER than create_task's identity_verified — see comment above.
+        if not (result.get("contact_id") or "").strip():
+            return "create_contact: result missing contact_id"
+    if tool == "create_task":
+        if not (result.get("task_id") or "").strip():
+            return "create_task: result missing task_id"
+        if result.get("identity_verified") is not True:
+            return "create_task: result.identity_verified is not True"
     return None
 
 
