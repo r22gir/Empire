@@ -163,25 +163,6 @@ def create_all_tables(conn: sqlite3.Connection):
     );
     CREATE INDEX IF NOT EXISTS idx_qli_quote ON quote_line_items(quote_id);
 
-    -- ---------------------------------------------------------------------
-    -- 2026-07-06 sprint 1a: proposed/final price columns on quote_line_items
-    -- proposed_price:  engine-computed, immutable after write
-    -- final_price:     founder-editable, defaults to proposed_price
-    -- price_overridden: 0/1, true once final_price has been edited
-    -- business_unit:   flows from quotes_v2.business_unit per multi-tenant rule
-    -- ---------------------------------------------------------------------
-    for _alter in (
-        "ALTER TABLE quote_line_items ADD COLUMN proposed_price REAL DEFAULT 0.0",
-        "ALTER TABLE quote_line_items ADD COLUMN final_price REAL DEFAULT 0.0",
-        "ALTER TABLE quote_line_items ADD COLUMN price_overridden INTEGER DEFAULT 0",
-        "ALTER TABLE quote_line_items ADD COLUMN business_unit TEXT DEFAULT 'workroom'",
-    ):
-        try:
-            cur.execute(_alter)
-        except sqlite3.OperationalError:
-            pass  # column already exists (idempotent re-run)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_qli_business ON quote_line_items(business_unit)")
-
     -- Quote Photos
     CREATE TABLE IF NOT EXISTS quote_photos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -282,6 +263,27 @@ def create_all_tables(conn: sqlite3.Connection):
     );
     """)
     conn.commit()
+
+    # ---------------------------------------------------------------------
+    # 2026-07-06 sprint 1a: proposed/final price columns on quote_line_items
+    # proposed_price:  engine-computed, immutable after write
+    # final_price:     founder-editable, defaults to proposed_price
+    # price_overridden: 0/1, true once final_price has been edited
+    # business_unit:   flows from quotes_v2.business_unit per multi-tenant rule
+    # ---------------------------------------------------------------------
+    for _alter_sql in (
+        "ALTER TABLE quote_line_items ADD COLUMN proposed_price REAL DEFAULT 0.0",
+        "ALTER TABLE quote_line_items ADD COLUMN final_price REAL DEFAULT 0.0",
+        "ALTER TABLE quote_line_items ADD COLUMN price_overridden INTEGER DEFAULT 0",
+        "ALTER TABLE quote_line_items ADD COLUMN business_unit TEXT DEFAULT 'workroom'",
+    ):
+        try:
+            conn.execute(_alter_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists (idempotent re-run)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_qli_business ON quote_line_items(business_unit)")
+    conn.commit()
+
     logger.info("All unified business tables created successfully")
 
 
