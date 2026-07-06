@@ -8,6 +8,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from app.db.database import get_db, dict_row, dict_rows
+from app.data.product_catalog import PRICING_SPECS
+from app.services.pricing.engine import price_workroom_line, PricingInputError
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,71 @@ def _audit_log(conn, entity_type: str, entity_id: str, action: str,
           str(old_value) if old_value is not None else None,
           str(new_value) if new_value is not None else None,
           changed_by, reason))
+
+
+def _price_line_item(category, inputs, business_unit, legacy):
+    """Build the pricing columns for a line item.
+
+    Sprint 1b behavior:
+      - If `category` is one of the 12 catalog categories, route through the
+        pricing engine so proposed_price = final_price = engine output and
+        the computed breakdown is persisted. PricingInputError raises out
+        (caller maps to HTTP 400) — never silently fall back to qty × rate
+        for catalog categories.
+      - If `category` is NOT in PRICING_SPECS, fall back to manual pricing
+        (qty × rate) so existing free-form line items keep working.
+
+    Returns a dict ready to merge into the INSERT/UPDATE column list.
+    """
+    bu = business_unit or "workroom"
+    inputs = inputs or {}
+    if category and str(category).lower() in PRICING_SPECS:
+        # Fail loud — never silently fall back to qty × rate for catalog items.
+        # Empty inputs produce a bogus $0.00 from the engine, which is exactly
+        # the "wrong price reaching a customer" risk we're guarding against.
+        if not inputs or not any(
+            v is not None and v != "" and v != 0
+            for v in inputs.values()
+        ):
+            raise PricingInputError(
+                f"catalog category '{category}' requires non-empty 'inputs'"
+            )
+        result = price_workroom_line(category, inputs, business_unit=bu)
+        # Belt-and-suspenders: if the engine still produced 0 with non-empty
+        # inputs (e.g. all-zero measurements), refuse to persist it.
+        if result["proposed_price"] <= 0:
+            raise PricingInputError(
+                f"catalog category '{category}' produced proposed_price=0 "
+                f"with inputs={inputs}"
+            )
+        proposed = result["proposed_price"]
+        return {
+            "subtotal":         proposed,
+            "unit_price":       proposed,
+            "proposed_price":   proposed,
+            "final_price":      result["final_price"],
+            "price_overridden": 0,
+            "business_unit":    result["business_unit"],
+            "computed_json":    json.dumps(result["computed"], default=str),
+        }
+
+    # Legacy manual path — only for non-catalog items
+    qty  = float(legacy.get("quantity", 1) or 1)
+    rate = float(legacy.get("unit_price", legacy.get("rate", 0)) or 0)
+    subtotal = round(qty * rate, 2)
+    return {
+        "subtotal":         subtotal,
+        "unit_price":       rate,
+        "proposed_price":   subtotal,
+        "final_price":      subtotal,
+        "price_overridden": 0,
+        "business_unit":    bu,
+        "computed_json":    json.dumps({
+            "note": "manual pricing (category not in PRICING_SPECS)",
+            "qty":  qty,
+            "rate": rate,
+        }, default=str),
+    }
 
 
 def _next_quote_number(conn) -> str:
@@ -45,11 +112,24 @@ def _next_quote_number(conn) -> str:
 
 
 def _recalculate_totals(conn, quote_id: str, changed_by: str = "system"):
-    """Recalculate quote totals from line items. Log changes to audit."""
+    """Recalculate quote totals from line items. Log changes to audit.
+
+    Sprint 1b fix: sum final_price (honoring price_overridden=1 rows),
+    fall back to subtotal only when final_price is NULL (defensive —
+    legacy rows should already have been backfilled).
+    """
     items = conn.execute(
-        "SELECT subtotal FROM quote_line_items WHERE quote_id = ?", (quote_id,)
+        "SELECT subtotal, final_price, price_overridden "
+        "FROM quote_line_items WHERE quote_id = ?",
+        (quote_id,),
     ).fetchall()
-    items_subtotal = round(sum(r[0] or 0 for r in items), 2)
+    items_subtotal = round(
+        sum(
+            (r["final_price"] if r["final_price"] is not None else r["subtotal"]) or 0
+            for r in items
+        ),
+        2,
+    )
 
     q = conn.execute(
         "SELECT subtotal, tax_rate, discount_amount, discount_type, total, deposit_percent FROM quotes_v2 WHERE id = ?",
@@ -230,30 +310,39 @@ def create_quote(data: dict) -> dict:
             now, now,
         ))
 
-        # Insert line items
+        # Insert line items — sprint 1b routes through _price_line_item
+        # (catalog categories → engine; non-catalog → manual qty × rate)
         for idx, li in enumerate(data.get('line_items', data.get('items', []))):
             if not isinstance(li, dict):
                 continue
-            qty = float(li.get('quantity', 1))
-            rate = float(li.get('rate', li.get('unit_price', 0)))
-            subtotal = round(qty * rate, 2)
-            li_amount = float(li.get('amount', subtotal))
-
+            pricing = _price_line_item(
+                category=li.get('category'),
+                inputs=li.get('inputs') or li,  # engine reads from li itself if no separate inputs
+                business_unit=data.get('business_unit'),
+                legacy=li,
+            )
+            qty = float(li.get('quantity', pricing["unit_price"] and 1) or 1)
             conn.execute("""
                 INSERT INTO quote_line_items (
-                    quote_id, line_number, description, quantity, unit, unit_price, subtotal, category,
-                    pricing_snapshot_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    quote_id, line_number, description, quantity, unit, unit_price, subtotal,
+                    category, pricing_snapshot_json,
+                    proposed_price, final_price, price_overridden, business_unit, computed_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 quote_id, idx + 1,
                 li.get('description', ''),
                 qty,
                 li.get('unit', 'ea'),
-                rate,
-                li_amount if li_amount else subtotal,
+                pricing["unit_price"],
+                pricing["subtotal"],
                 li.get('category', 'labor'),
                 json.dumps(li.get('pricing_snapshot_json') or li.get('pricing_snapshot'), default=str)
                 if (li.get('pricing_snapshot_json') or li.get('pricing_snapshot')) else None,
+                pricing["proposed_price"],
+                pricing["final_price"],
+                pricing["price_overridden"],
+                pricing["business_unit"],
+                pricing["computed_json"],
             ))
 
         _recalculate_totals(conn, quote_id, 'api')
@@ -327,9 +416,15 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             (quote_id,)
         ).fetchone()[0]
 
-        qty = float(data.get('quantity', 1))
-        rate = float(data.get('rate', data.get('unit_price', 0)))
-        subtotal = round(qty * rate, 2)
+        # Sprint 1b: route catalog categories through the engine; non-catalog → manual.
+        # For catalog categories, PricingInputError raises out (router maps to 400).
+        pricing = _price_line_item(
+            category=data.get('category'),
+            inputs=data.get('inputs') or data,
+            business_unit=data.get('business_unit'),
+            legacy=data,
+        )
+        qty = float(data.get('quantity', 1) or 1)
 
         conn.execute("""
             INSERT INTO quote_line_items (
@@ -339,8 +434,9 @@ def add_line_item(quote_id: str, data: dict) -> dict:
                 lining_type, lining_cost,
                 labor_description, labor_hours, labor_rate, labor_total,
                 hardware_description, hardware_cost,
-                quantity, unit, unit_price, subtotal, category, pricing_snapshot_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                quantity, unit, unit_price, subtotal, category, pricing_snapshot_json,
+                proposed_price, final_price, price_overridden, business_unit, computed_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             quote_id, max_ln + 1,
             data.get('item_type', ''),
@@ -357,17 +453,22 @@ def add_line_item(quote_id: str, data: dict) -> dict:
             data.get('lining_cost'),
             data.get('labor_description', ''),
             data.get('labor_hours'),
-            data.get('labor_rate', rate),
+            data.get('labor_rate', pricing["unit_price"]),
             data.get('labor_total'),
             data.get('hardware_description', ''),
             data.get('hardware_cost'),
             qty,
             data.get('unit', 'ea'),
-            rate,
-            data.get('amount', subtotal),
+            pricing["unit_price"],
+            pricing["subtotal"],
             data.get('category', 'labor'),
             json.dumps(data.get('pricing_snapshot_json') or data.get('pricing_snapshot'), default=str)
             if (data.get('pricing_snapshot_json') or data.get('pricing_snapshot')) else None,
+            pricing["proposed_price"],
+            pricing["final_price"],
+            pricing["price_overridden"],
+            pricing["business_unit"],
+            pricing["computed_json"],
         ))
 
         _recalculate_totals(conn, quote_id, 'api')
@@ -375,6 +476,47 @@ def add_line_item(quote_id: str, data: dict) -> dict:
                    data.get('description', ''), 'api')
 
     return get_quote(quote_id)
+
+
+def update_final_price(quote_id: str, item_id: int, final_price,
+                       changed_by: str = "founder",
+                       reason: Optional[str] = None) -> Optional[dict]:
+    """Override a line item's final_price. Sprint 1b.
+
+    - Sets final_price and price_overridden=1
+    - Writes a financial_audit_log row (action='final_price_override',
+      old_value=prior final_price, new_value=new final_price)
+    - Recalculates the quote's totals (which now sum final_price, not subtotal)
+    - Returns the updated line item dict, or None if the line item doesn't exist
+    """
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, final_price, business_unit FROM quote_line_items "
+            "WHERE id = ? AND quote_id = ?",
+            (item_id, quote_id),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            new_final = round(float(final_price), 2)
+        except (TypeError, ValueError):
+            return None
+        old_final = row["final_price"]
+        conn.execute(
+            "UPDATE quote_line_items "
+            "SET final_price = ?, price_overridden = 1, updated_at = datetime('now') "
+            "WHERE id = ?",
+            (new_final, item_id),
+        )
+        _audit_log(
+            conn, "quote_line_item", str(item_id), "final_price_override",
+            "final_price", old_final, new_final, changed_by, reason,
+        )
+        _recalculate_totals(conn, quote_id, changed_by)
+        updated = conn.execute(
+            "SELECT * FROM quote_line_items WHERE id = ?", (item_id,),
+        ).fetchone()
+        return _item_to_dict(updated)
 
 
 def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:

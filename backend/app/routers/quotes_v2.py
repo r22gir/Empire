@@ -5,9 +5,11 @@ These endpoints operate on quotes_v2 table (SQL).
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
+from pydantic import BaseModel
 import logging
 
 from app.services import quote_service
+from app.services.pricing.engine import PricingInputError
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +48,14 @@ async def quote_stats():
 
 @router.post("")
 async def create_quote(body: dict):
-    """Create a new quote in SQL."""
+    """Create a new quote in SQL. Sprint 1b: catalog line items route
+    through the pricing engine; PricingInputError → HTTP 400."""
     if not body.get("customer_name"):
         raise HTTPException(400, "customer_name required")
-    result = quote_service.create_quote(body)
+    try:
+        result = quote_service.create_quote(body)
+    except PricingInputError as e:
+        raise HTTPException(400, str(e))
     return {"status": "created", "quote": result}
 
 
@@ -83,8 +89,12 @@ async def delete_quote(quote_id: str):
 
 @router.post("/{quote_id}/items")
 async def add_item(quote_id: str, body: dict):
-    """Add a line item to a quote."""
-    result = quote_service.add_line_item(quote_id, body)
+    """Add a line item to a quote. Sprint 1b: catalog categories route
+    through the pricing engine; PricingInputError → HTTP 400."""
+    try:
+        result = quote_service.add_line_item(quote_id, body)
+    except PricingInputError as e:
+        raise HTTPException(400, str(e))
     if not result:
         raise HTTPException(404, f"Quote {quote_id} not found")
     return {"status": "added", "quote": result}
@@ -97,6 +107,27 @@ async def update_item(quote_id: str, item_id: int, body: dict):
     if not result:
         raise HTTPException(404, "Quote or item not found")
     return {"status": "updated", "quote": result}
+
+
+class FinalPriceUpdate(BaseModel):
+    final_price: float
+    changed_by: str = "founder"
+    reason: Optional[str] = None
+
+
+@router.patch("/{quote_id}/items/{item_id}/final-price")
+async def update_item_final_price(quote_id: str, item_id: int, body: FinalPriceUpdate):
+    """Override a line item's final_price. Sprint 1b.
+
+    Marks price_overridden=1, writes a financial_audit_log row,
+    recalculates the quote's totals.
+    """
+    result = quote_service.update_final_price(
+        quote_id, item_id, body.final_price, body.changed_by, body.reason,
+    )
+    if not result:
+        raise HTTPException(404, "Quote or item not found")
+    return {"status": "updated", "item": result}
 
 
 @router.delete("/{quote_id}/items/{item_id}")

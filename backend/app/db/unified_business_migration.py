@@ -28,7 +28,13 @@ QUOTES_DIR = str(quotes_data_dir())
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # Sprint 1b (Option A): read EMPIRE_TASK_DB at call time so any consumer
+    # of get_conn() targets the live DB regardless of import-time env state.
+    # Falls back to backend/data/empire.db for legacy/dev callers.
+    db_path = os.getenv("EMPIRE_TASK_DB") or str(
+        Path(__file__).resolve().parent.parent.parent / "data" / "empire.db"
+    )
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -276,6 +282,7 @@ def create_all_tables(conn: sqlite3.Connection):
         "ALTER TABLE quote_line_items ADD COLUMN final_price REAL DEFAULT 0.0",
         "ALTER TABLE quote_line_items ADD COLUMN price_overridden INTEGER DEFAULT 0",
         "ALTER TABLE quote_line_items ADD COLUMN business_unit TEXT DEFAULT 'workroom'",
+        "ALTER TABLE quote_line_items ADD COLUMN computed_json TEXT",
     ):
         try:
             conn.execute(_alter_sql)
