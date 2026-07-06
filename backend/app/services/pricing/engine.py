@@ -541,3 +541,412 @@ def price_woodcraft_item(
         source_quote_id=source_quote_id,
         source_line_item_id=source_line_item_id,
     )
+
+
+# ===========================================================================
+# 2026-07-06 sprint 1a — per-treatment line pricers
+#
+# Every function below returns a dict with EXACTLY these keys:
+#   category, unit, business_unit, computed (breakdown),
+#   proposed_price, final_price (=proposed initially), price_overridden (=False),
+#   pricing_engine_version
+#
+# 1b will add PATCH endpoints that mutate final_price + price_overridden
+# for each quote_line_items row. The existing price_workroom_item and
+# price_woodcraft_item are LEFT UNTOUCHED for backward compatibility.
+# ===========================================================================
+import math
+
+from app.data.product_catalog import PRICING_SPECS
+
+
+def _compute_widths(window_width_in: float, fullness: float, fabric_width_in: float) -> int:
+    if fullness <= 0 or fabric_width_in <= 0:
+        raise PricingInputError("fullness and fabric_width must be positive")
+    return int(math.ceil(window_width_in * fullness / fabric_width_in))
+
+
+def _over_length_escalator(
+    length_in: float,
+    *,
+    threshold: float,
+    base_below: float,
+    add_per_inch=None,
+    add_above=None,
+    floor_above: float,
+) -> float:
+    """Shared escalator parameterized per style.
+    regular:    max(length_in * add_per_inch, floor_above)
+    ripplefold: max(length_in + add_above,   floor_above)
+    """
+    if length_in <= threshold:
+        return float(base_below)
+    if add_per_inch is not None:
+        return float(max(length_in * add_per_inch, floor_above))
+    if add_above is not None:
+        return float(max(length_in + add_above, floor_above))
+    raise PricingInputError("escalator misconfigured: need add_per_inch or add_above")
+
+
+def _line_result(category: str, unit: str, business_unit: str, computed: dict,
+                 proposed: float) -> dict:
+    """Canonical result shape. 1b will edit final_price + price_overridden."""
+    p = round(float(proposed), 2)
+    return {
+        "category": category,
+        "unit": unit,
+        "business_unit": business_unit,
+        "computed": computed,
+        "proposed_price": p,
+        "final_price": p,
+        "price_overridden": False,
+        "pricing_engine_version": PRICING_ENGINE_VERSION,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Drapery
+# ---------------------------------------------------------------------------
+def price_drapery(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["drapery"]
+    style = (inputs.get("style") or "regular").lower()
+    if style not in spec["styles"]:
+        raise PricingInputError(f"drapery style must be one of {list(spec['styles'])}")
+
+    style_spec = spec["styles"][style]
+    window_width_in = _positive(inputs, "window_width_in")
+    length_in       = _positive(inputs, "length_in")
+    fullness        = _positive(inputs, "fullness",        spec["default_fullness"])
+    fabric_width_in = _positive(inputs, "fabric_width_in", spec["default_fabric_width_in"])
+    leading_edges   = int(_positive(inputs, "leading_edges", 0))
+
+    widths = _compute_widths(window_width_in, fullness, fabric_width_in)
+
+    if style == "ripplefold":
+        price_per_width = _over_length_escalator(
+            length_in,
+            threshold=style_spec["over_threshold_in"],
+            base_below=style_spec["base_rate_below_threshold"],
+            add_above=style_spec["add_above"],
+            floor_above=style_spec["over_floor"],
+        )
+    else:
+        price_per_width = _over_length_escalator(
+            length_in,
+            threshold=style_spec["over_threshold_in"],
+            base_below=style_spec["base_rate_below_threshold"],
+            add_per_inch=style_spec["add_per_inch"],
+            floor_above=style_spec["over_floor"],
+        )
+
+    base    = widths * price_per_width
+    banding = leading_edges * spec["banding_per_leading_edge"]
+
+    lining_type  = inputs.get("lining_type")
+    lining_cost  = 0.0
+    lining_yards = 0.0
+    if lining_type:
+        rate = spec["linings"].get(lining_type)
+        if rate is None:
+            raise PricingInputError(f"unknown lining_type '{lining_type}'")
+        yards_per_width = math.ceil(length_in / 36)
+        lining_yards = widths * yards_per_width
+        lining_cost  = round(lining_yards * rate, 2)
+
+    proposed = round(base + banding + lining_cost, 2)
+
+    return _line_result(
+        "drapery", "width", business_unit,
+        {"widths": widths,
+         "style": style,
+         "price_per_width": price_per_width,
+         "base": round(base, 2),
+         "banding": round(banding, 2),
+         "lining_type": lining_type,
+         "lining_yards": lining_yards,
+         "lining_cost": lining_cost},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Roman shade — sqft line + companion fabric proposal (NO fullness factor)
+# ---------------------------------------------------------------------------
+def propose_roman_shade_fabric(width_in: float, height_in: float,
+                                fabric_width_in: float = 54,
+                                default_price_per_yard: float = 30.0) -> dict:
+    """Returns a fabric_only proposal SPECIFICALLY for a roman shade.
+    Per 1a-correction: no fullness multiplier. Both price_per_yard and
+    yards_needed are founder-editable. fabric_spec_url is stored for
+    future inpaint-mockup integration.
+    """
+    if fabric_width_in <= 0:
+        raise PricingInputError("fabric_width_in must be positive")
+    widths = math.ceil(width_in / fabric_width_in)
+    proposed_yards = round((widths * height_in) / 36.0, 2)
+    proposed = round(proposed_yards * default_price_per_yard, 2)
+    return _line_result(
+        "fabric_only", "yard", "workroom",
+        {"subcategory": "roman_shade_fabric",
+         "proposed_yards": proposed_yards,
+         "proposed_yards_editable": True,
+         "default_price_per_yard": default_price_per_yard,
+         "default_price_per_yard_editable": True,
+         "fabric_width_in_used": fabric_width_in,
+         "fabric_width_in_editable": True,
+         "fabric_spec_url": None,
+         "fabric_spec_url_editable": True,
+         "note": ("Roman shade fabric: NO fullness factor. Founder edits "
+                  "price_per_yard, yards_needed, and (optionally) fabric_width_in. "
+                  "fabric_spec_url enables future auto-lookup + inpaint mockup.")},
+        proposed,
+    )
+
+
+def price_roman_shade(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["roman_shade"]
+    width_in  = _positive(inputs, "width_in")
+    height_in = _positive(inputs, "height_in")
+    rate      = _positive(inputs, "rate_per_sqft", spec["base_rate"])
+    sqft      = (width_in * height_in) / 144.0
+    proposed  = round(sqft * rate, 2)
+
+    # Companion fabric proposal (separate fabric_only line item; 1b inserts both)
+    fabric_width_in = _positive(inputs, "fabric_width_in",
+                                spec["fabric"]["default_fabric_width_in"])
+    default_price_per_yard = _positive(inputs, "default_price_per_yard",
+                                       spec["fabric"]["default_price_per_yard"])
+    fabric_proposal = propose_roman_shade_fabric(
+        width_in=width_in, height_in=height_in,
+        fabric_width_in=fabric_width_in,
+        default_price_per_yard=default_price_per_yard,
+    )
+
+    return _line_result(
+        "roman_shade", "sqft", business_unit,
+        {"width_in": width_in, "height_in": height_in,
+         "sqft": round(sqft, 2), "rate_per_sqft": rate,
+         "fabric_proposal": fabric_proposal},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Valance
+# ---------------------------------------------------------------------------
+def price_valance(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["valance"]
+    width_in  = _positive(inputs, "width_in")
+    rate      = _positive(inputs, "rate_per_lineal_ft", spec["base_rate"])
+    lineal_ft = width_in / 12.0
+    proposed  = round(lineal_ft * rate, 2)
+    return _line_result(
+        "valance", "lineal_ft", business_unit,
+        {"width_in": width_in, "lineal_ft": round(lineal_ft, 2),
+         "rate_per_lineal_ft": rate},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cornice — business_unit is an INPUT (default 'workroom'); 1c/1d may split
+# ---------------------------------------------------------------------------
+def price_cornice(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["cornice"]
+    width_in  = _positive(inputs, "width_in")
+    rate      = _positive(inputs, "rate_per_lineal_ft", spec["base_rate"])
+    lineal_ft = width_in / 12.0
+    proposed  = round(lineal_ft * rate, 2)
+    return _line_result(
+        "cornice", "lineal_ft", business_unit,
+        {"width_in": width_in, "lineal_ft": round(lineal_ft, 2),
+         "rate_per_lineal_ft": rate,
+         "note": ("Caller-supplied business_unit (default 'workroom'). 1c/1d may "
+                  "split cornice into WoodCraft frame/build + Workroom covering lines.")},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fabric-only (founder-editable)
+# ---------------------------------------------------------------------------
+def price_fabric(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    """Both price_per_yard and yards_needed are founder-editable."""
+    price_per_yard  = _positive(inputs, "price_per_yard", 0)
+    yards_needed    = _positive(inputs, "yards_needed",   0)
+    yards_override  = bool(inputs.get("yards_override", False))
+    spec_url        = inputs.get("fabric_spec_url")  # future auto-lookup
+    proposed        = round(price_per_yard * yards_needed, 2)
+    return _line_result(
+        "fabric_only", "yard", business_unit,
+        {"price_per_yard": price_per_yard,
+         "yards_needed": yards_needed,
+         "yards_override": yards_override,
+         "fabric_spec_url": spec_url,
+         "editable_fields": ["price_per_yard", "yards_needed", "fabric_spec_url"]},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hardware — SUGGESTIONS only; final_price founder-editable (already in
+# _line_result with price_overridden=False)
+# ---------------------------------------------------------------------------
+def price_hardware_rod(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["hardware_rod_1_1_8"]
+    width_in = _positive(inputs, "width_in")
+    width_ft = width_in / 12.0
+    units    = int(math.ceil(width_ft / 6))
+    rate     = _positive(inputs, "rate_per_run", spec["base_rate"])
+    proposed = round(units * rate, 2)
+    return _line_result(
+        "hardware_rod_1_1_8", "rod_run", business_unit,
+        {"width_ft": round(width_ft, 2), "units": units, "rate_per_run": rate,
+         "suggestion_only": True},
+        proposed,
+    )
+
+
+def price_hardware_ripplefold_track(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["hardware_ripplefold_track"]
+    width_in = _positive(inputs, "width_in")
+    width_ft = width_in / 12.0
+    units    = int(math.ceil(width_ft / 6))
+    rate     = _positive(inputs, "rate_per_run", spec["base_rate"])
+    proposed = round(units * rate, 2)
+    return _line_result(
+        "hardware_ripplefold_track", "track_run", business_unit,
+        {"width_ft": round(width_ft, 2), "units": units, "rate_per_run": rate,
+         "suggestion_only": True},
+        proposed,
+    )
+
+
+def price_hardware_rings(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["hardware_rings"]
+    widths = int(_positive(inputs, "widths", 1))
+    packs  = int(_positive(inputs, "packs", widths))  # default 1/width
+    rate   = _positive(inputs, "rate_per_pack", spec["base_rate"])
+    proposed = round(packs * rate, 2)
+    return _line_result(
+        "hardware_rings", "pack_8", business_unit,
+        {"widths": widths, "packs": packs, "rate_per_pack": rate,
+         "suggestion_only": True},
+        proposed,
+    )
+
+
+def price_hardware_brackets(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["hardware_brackets"]
+    width_in = _positive(inputs, "width_in")
+    width_ft = width_in / 12.0
+    if width_ft <= 6:
+        default_count = spec["default_count_by_width_ft"]["<=6"]
+    elif width_ft <= 12:
+        default_count = spec["default_count_by_width_ft"]["6-12"]
+    else:
+        default_count = spec["default_count_by_width_ft"][">12"]
+    count   = int(_positive(inputs, "count", default_count))
+    rate    = _positive(inputs, "rate_per_bracket", spec["base_rate"])
+    proposed = round(count * rate, 2)
+    return _line_result(
+        "hardware_brackets", "bracket", business_unit,
+        {"width_ft": round(width_ft, 2),
+         "default_count": default_count,
+         "count": count, "rate_per_bracket": rate,
+         "suggestion_only": True},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Labor — separate line per treatment
+# ---------------------------------------------------------------------------
+def price_labor(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["labor"]
+    hours    = _positive(inputs, "hours", 0)
+    rate     = _positive(inputs, "rate_per_hour", spec["base_rate"])
+    proposed = round(hours * rate, 2)
+    return _line_result(
+        "labor", "hour", business_unit,
+        {"hours": hours, "rate_per_hour": rate},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pillow — fully editable; welting +$10, flange +$20
+# ---------------------------------------------------------------------------
+def price_pillow(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    spec = PRICING_SPECS["pillow"]
+    qty          = int(_positive(inputs, "quantity", 1))
+    unit_price   = _positive(inputs, "unit_price", 0)   # founder-editable
+    has_welting  = bool(inputs.get("welting", False))
+    has_flange   = bool(inputs.get("flange", False))
+    welting_add  = spec["welting_add"] if has_welting else 0
+    flange_add   = spec["flange_add"]  if has_flange  else 0
+    suggested    = spec["base_unit_20x20"] + welting_add + flange_add
+    proposed     = round(qty * unit_price, 2)
+    return _line_result(
+        "pillow", "each", business_unit,
+        {"quantity": qty,
+         "welting": has_welting,
+         "flange": has_flange,
+         "base_unit": spec["base_unit_20x20"],
+         "welting_add": welting_add,
+         "flange_add": flange_add,
+         "suggested_unit_price": suggested,
+         "unit_price_used": unit_price,
+         "editable_fields": ["unit_price", "welting", "flange", "quantity"],
+         "note": "Pillow 20x20 base $30; welting +$10; flange +$20. Founder sets final unit_price."},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cover — fully editable
+# ---------------------------------------------------------------------------
+def price_cover(inputs: dict, *, business_unit: str = "workroom") -> dict:
+    qty        = int(_positive(inputs, "quantity", 1))
+    unit_price = _positive(inputs, "unit_price", 0)
+    proposed   = round(qty * unit_price, 2)
+    return _line_result(
+        "cover", "each", business_unit,
+        {"quantity": qty, "unit_price_used": unit_price,
+         "editable_fields": ["unit_price", "quantity"]},
+        proposed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dispatch table + new entry point (1b will call this from routers)
+# ---------------------------------------------------------------------------
+WORKROOM_LINE_PRICERS = {
+    "drapery":                   price_drapery,
+    "roman_shade":               price_roman_shade,
+    "valance":                   price_valance,
+    "cornice":                   price_cornice,
+    "fabric_only":               price_fabric,
+    "hardware_rod_1_1_8":        price_hardware_rod,
+    "hardware_ripplefold_track": price_hardware_ripplefold_track,
+    "hardware_rings":            price_hardware_rings,
+    "hardware_brackets":         price_hardware_brackets,
+    "labor":                     price_labor,
+    "pillow":                    price_pillow,
+    "cover":                     price_cover,
+}
+
+
+def price_workroom_line(category: str, inputs: dict, *,
+                        business_unit: str = "workroom") -> dict:
+    """Sprint 1a entry point.
+
+    Returns a dict with proposed_price, final_price (=proposed), price_overridden
+    (=False), business_unit, computed breakdown, pricing_engine_version.
+    1b will add PATCH endpoints that mutate final_price + price_overridden
+    on quote_line_items rows.
+    """
+    key = (category or "").lower()
+    if key not in WORKROOM_LINE_PRICERS:
+        raise PricingClassificationError(f"unknown workroom category '{category}'")
+    return WORKROOM_LINE_PRICERS[key](inputs, business_unit=business_unit)

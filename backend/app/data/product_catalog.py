@@ -1091,3 +1091,155 @@ def get_measurement_requirements(product_type: str) -> dict:
     {'required': ['width', 'height', 'depth'], 'optional': ['seat_height', 'arm_height']}
     """
     return MEASUREMENT_REQUIREMENTS.get(product_type, {})
+
+
+# ===========================================================================
+# PRICING SPECS — consumed by services/pricing/engine.py
+# 2026-07-06 sprint 1a. All rates are founder-editable at quote time; these
+# are the DEFAULTS. business_unit flows to quote_line_items per multi-tenant
+# rule.
+# ===========================================================================
+
+PRICING_SPECS = {
+    "drapery": {
+        "business_unit": "workroom",
+        "unit": "width",
+        "rate_field": "widths",
+        "default_fabric_width_in": 54,
+        "default_fullness": 2.5,
+        "styles": {
+            "regular": {
+                "base_rate_below_threshold": 95.00,   # length <= 120"
+                "over_threshold_in": 120,
+                "add_per_inch": 1.00,                  # max(length*1, 125) over 120"
+                "over_floor": 125.00,
+            },
+            "ripplefold": {
+                "base_rate_below_threshold": 110.00,  # length <= 120"
+                "over_threshold_in": 120,
+                "add_above": 15.00,                    # max(length+15, 140) over 120"
+                "over_floor": 140.00,
+            },
+        },
+        "banding_per_leading_edge": 30.00,
+        "linings": {                                 # per-yard, follows widths
+            "blackout": 12.95,
+            "premiere_satin": 9.95,
+        },
+    },
+    "roman_shade": {
+        "business_unit": "workroom",
+        "unit": "sqft",
+        "rate_field": "W * H / 144",
+        "base_rate": 19.95,
+        "fabric": {
+            "default_fabric_width_in": 54,
+            "default_price_per_yard": 30.00,
+            "no_fullness_factor": True,
+            "yardage_formula": "ceil(width_in / fabric_width_in) * length_in / 36",
+            "editable_fields": [
+                "price_per_yard",
+                "yards_needed",
+                "fabric_width_in",
+                "fabric_spec_url",
+            ],
+            "note": (
+                "Roman shade fabric is a SEPARATE fabric_only line. "
+                "NO fullness multiplier (per 1a-correction). Both price_per_yard "
+                "and yards_needed are founder-editable. Optional fabric_spec_url "
+                "stored for future auto-lookup + inpaint mockup integration."
+            ),
+        },
+    },
+    "valance": {
+        "business_unit": "workroom",
+        "unit": "lineal_ft",
+        "rate_field": "width_in / 12",
+        "base_rate": 39.00,
+    },
+    "cornice": {
+        # business_unit is supplied by caller (default 'workroom'); 1c/1d
+        # may split cornice into WoodCraft frame/build + Workroom covering lines.
+        "business_unit_default": "workroom",
+        "unit": "lineal_ft",
+        "rate_field": "width_in / 12",
+        "base_rate": 49.00,
+        "note": (
+            "Cornice cannot remain 'business=both' for accounting. "
+            "Caller passes business_unit; defaults to 'workroom'. "
+            "Future 1c/1d may split into two lines: WoodCraft frame/build + "
+            "Workroom covering, each with its own business_unit."
+        ),
+    },
+    "fabric_only": {
+        "business_unit": "workroom",
+        "unit": "yard",
+        "rate_field": "yards_needed",
+        "editable_fields": ["price_per_yard", "yards_needed", "fabric_spec_url"],
+        "note": (
+            "Both price_per_yard AND yards_needed are founder-editable inputs. "
+            "Optional fabric_spec_url stored for future auto-lookup (manual "
+            "calculation now)."
+        ),
+    },
+    "hardware_rod_1_1_8": {
+        "business_unit": "workroom",
+        "unit": "rod_run",
+        "rate_field": "ceil(width_ft / 6)",
+        "base_rate": 275.00,
+        "suggestion_only": True,
+        "note": "Hardware values are SUGGESTIONS only; founder-editable final_price.",
+    },
+    "hardware_ripplefold_track": {
+        "business_unit": "workroom",
+        "unit": "track_run",
+        "rate_field": "ceil(width_ft / 6)",
+        "base_rate": 195.00,
+        "suggestion_only": True,
+        "note": "Hardware values are SUGGESTIONS only; founder-editable final_price.",
+    },
+    "hardware_rings": {
+        "business_unit": "workroom",
+        "unit": "pack_8",
+        "rate_field": "widths (default 1 pack per width, editable)",
+        "base_rate": 35.00,
+        "suggestion_only": True,
+        "note": "Hardware values are SUGGESTIONS only; founder-editable final_price.",
+    },
+    "hardware_brackets": {
+        "business_unit": "workroom",
+        "unit": "bracket",
+        "rate_field": "by width_ft range",
+        "base_rate": 29.00,
+        "default_count_by_width_ft": {"<=6": 2, "6-12": 3, ">12": 4},
+        "suggestion_only": True,
+        "note": "Hardware values are SUGGESTIONS only; founder-editable final_price.",
+    },
+    "labor": {
+        "business_unit": "workroom",
+        "unit": "hour",
+        "rate_field": "hours",
+        "base_rate": 50.00,
+        "note": "One labor line per treatment. hours is an input.",
+    },
+    "pillow": {
+        "business_unit": "workroom",
+        "unit": "each",
+        "rate_field": "qty * unit_price (no formula; founder prices manually)",
+        "base_unit_20x20": 30.00,
+        "welting_add": 10.00,
+        "flange_add": 20.00,
+        "editable_fields": ["unit_price", "welting", "flange", "quantity"],
+        "note": (
+            "Pillow 20x20 base $30. Welting +$10, Flange +$20. "
+            "Both are toggle options. Founder sets final unit_price."
+        ),
+    },
+    "cover": {
+        "business_unit": "workroom",
+        "unit": "each",
+        "rate_field": "qty * unit_price (no formula; founder prices manually)",
+        "base_unit": 0.00,
+        "note": "Covers fully editable; no auto-formula yet.",
+    },
+}
