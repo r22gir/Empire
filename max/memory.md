@@ -215,3 +215,24 @@ Last sync: 2026-04-25 23:00
 ### System
 - CPU: 0.4% | RAM: 14.5% (4GB/31GB) | Disk: 63.7% (55GB/91GB)
 - Backend routers loaded: 84
+
+---
+
+## Pricing Engine v6 — 2026-07-06 sprint 1a/1b rebuild
+
+Empire Workroom pricing is now driven by a per-treatment engine (see `backend/app/services/pricing/engine.py` + `backend/app/data/product_catalog.py` PRICING_SPECS). All engine outputs are PROPOSALS — founder edits `final_price` via `PATCH /api/v1/quotes-v2/{qid}/items/{item_id}/final-price`, which writes a `financial_audit_log` row (entity_type=`quote_line_item`, action=`final_price_override`).
+
+- **Drapery** priced per fabric WIDTH. `widths = ceil(window_width_in × fullness ÷ 54)`. Length ≤120" → $95/width (ripplefold $110); length >120" → $1/inch with $125 floor (ripplefold: `length + $15` with $140 floor). Banding +$30 per leading edge.
+- **Linings** (per yard, follows widths): blackout $12.95/yd, premiere satin $9.95/yd.
+- **Roman shades** $19.95/sqft; sqft = W×H÷144. Fabric yardage is a SEPARATE no-fullness editable fabric_only line. `fabric_spec_url` may be stored for future auto-lookup + inpaint mockup.
+- **Fabric-only** by the yard; both `price_per_yard` and `yards_needed` founder-editable.
+- **Valance** $39/lineal ft. **Cornice** $49/lineal ft. (caller passes `business_unit`, default `workroom`).
+- **Hardware** (suggestions only, founder-editable): rod 1⅛" $275/6-ft run, ripplefold track $195/6-ft, rings $35/8-pack (default 1/width), brackets $29 (≤6ft→2, 6–12ft→3, >12ft→4).
+- **Pillows** 20×20 base $30; welting +$10, flange +$20 (founder sets final `unit_price`).
+- **Labor** separate line per treatment; $50/hr default.
+
+**Single source of truth: `quotes-v2`** (SQL). All new quotes must use `quotes_v2` table via `quote_service.create_quote` or `quote_service.add_line_item`. Catalog categories route through `price_workroom_line`; non-catalog items use legacy qty×rate. PricingInputError → HTTP 400 (never silent fallback for catalog items).
+
+**State machine** (existing, sprint 1c will extend): `draft → sent → approved → ordered → in_production → completed`; `cancelled` reachable from any non-terminal state.
+
+**MAX tool routing (2026-07-08):** Always call `create_engine_quote` (not `create_quick_quote`) when creating a new quote. `create_engine_quote` writes to `quotes_v2` via the pricing engine and returns per-line `proposed_price` + `computed_json`; `create_quick_quote` is DEPRECATED and persists to the legacy JSON store at `/home/rg/empire-data/quotes/*.json` (returns `store: "json_legacy"`, `engine: "qis"`). If a customer asks for a "quick quote" or "proposal", still use `create_engine_quote`. Sprint 1d will retire `create_quick_quote`.

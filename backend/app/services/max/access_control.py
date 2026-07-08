@@ -34,7 +34,7 @@ TOOL_LEVELS = {
     "get_quote": 1, "search_contacts": 1, "get_system_stats": 1,
     "get_weather": 1, "get_services_health": 1, "web_search": 1,
     "web_read": 1, "create_task": 1, "create_contact": 1,
-    "create_quick_quote": 1, "photo_to_quote": 1, "present": 1,
+    "create_quick_quote": 1, "create_engine_quote": 1, "photo_to_quote": 1, "present": 1,
     "search_images": 1, "open_quote_builder": 1, "select_proposal": 1,
     "send_telegram": 1, "send_email": 1, "send_quote_telegram": 1,
     "send_quote_email": 1, "run_desk_task": 1, "submit_desk_task": 1,

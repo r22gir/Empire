@@ -348,8 +348,12 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
             "write_file": "file_write",
             "edit_file": "file_edit",
             "append_file": "file_append",
-            "create_quote": "create_quick_quote",
-            "make_quote": "create_quick_quote",
+            "create_quote": "create_engine_quote",
+            "make_quote": "create_engine_quote",
+            "new_quote": "create_engine_quote",
+            # NOTE: do NOT map bare "quote" → create_engine_quote;
+            # "quote" can mean retrieve/show — auto-correcting that to a
+            # CREATE causes silent quote creation from read intent.
             "send_message": "send_telegram",
             "git": "git_ops",
             "telegram": "send_telegram",
@@ -1391,6 +1395,8 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "quote_id": quote_id,
         "quote_number": quote_number,
         "customer_name": customer_name,
+        "store":          "json_legacy",
+        "engine":         "qis",
         "total": 0,  # Zero until proposal selected
         "proposal_totals": quote_data["proposal_totals"],
         "items_count": len(line_items),
@@ -1402,7 +1408,108 @@ def _create_quick_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
         "mockup_provider": quote_data.get("mockup_provider", "none"),
         "mockup_cost": quote_data.get("mockup_cost", 0),
         "mockup_count": quote_data.get("mockup_count", 0),
+        "deprecation_notice": (
+            "This tool persists to the legacy JSON store. Sprint 1d will migrate "
+            "this quote into quotes_v2. Use create_engine_quote for new quotes."
+        ),
     })
+
+
+# ── CANONICAL ENGINE-PRICED QUOTE TOOL ─────────────────────────────
+
+@tool("create_engine_quote")
+def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Create a quote via the pricing engine (canonical quotes_v2 store).
+
+    Multi-line: pass line_items[] — a real job is usually 1+ treatment lines
+    (drapery + rod + rings + brackets, etc.). Each item must declare its
+    `category` from PRICING_SPECS plus an `inputs` dict for the engine.
+    Non-catalog categories fall back to manual qty × rate pricing.
+
+    Returns an honest payload with store="quotes_v2", engine="pricing_engine_v1",
+    per-line proposed_price + computed_json, plus quote_number.
+    """
+    customer_name = (params.get("customer_name") or "").strip() or "Customer 1"
+    business_unit = (params.get("business_unit") or "workroom").strip()
+    line_items = params.get("line_items") or []
+
+    if not line_items:
+        return ToolResult(
+            tool="create_engine_quote", success=False,
+            error="line_items required (use category + inputs from PRICING_SPECS)",
+        )
+
+    body = {
+        "customer_name":       customer_name,
+        "business_unit":       business_unit,
+        "customer_email":      params.get("customer_email", ""),
+        "customer_phone":      params.get("customer_phone", ""),
+        "customer_address":    params.get("customer_address", ""),
+        "project_name":        params.get("project_name", ""),
+        "project_description": params.get("project_description", ""),
+        "tax_rate":            params.get("tax_rate", 0.0),
+        "line_items": [
+            {
+                "category":    li.get("category"),
+                "description": li.get("description", ""),
+                "inputs":      li.get("inputs") or {},
+                "quantity":    li.get("quantity", 1),
+            }
+            for li in line_items
+            if isinstance(li, dict)
+        ],
+    }
+
+    try:
+        from app.services.quote_service import create_quote as _qs_create
+        result = _qs_create(body)
+    except Exception as e:
+        return ToolResult(
+            tool="create_engine_quote", success=False,
+            error=f"create_quote failed: {type(e).__name__}: {e}",
+        )
+
+    if not result:
+        return ToolResult(
+            tool="create_engine_quote", success=False,
+            error="create_quote returned None — check service logs",
+        )
+
+    items = result.get("line_items", []) or []
+    return ToolResult(
+        tool="create_engine_quote",
+        success=True,
+        result={
+            "quote_id":      result.get("id"),
+            "quote_number":  result.get("quote_number"),
+            "customer_name": result.get("customer_name"),
+            "store":         "quotes_v2",
+            "engine":        "pricing_engine_v1",
+            "business_unit": result.get("business_unit"),
+            "status":        result.get("status"),
+            "subtotal":      result.get("subtotal"),
+            "tax_amount":    result.get("tax_amount"),
+            "total":         result.get("total"),
+            "line_items": [
+                {
+                    "id":              li.get("id"),
+                    "category":        li.get("category"),
+                    "description":     li.get("description"),
+                    "proposed_price":  li.get("proposed_price"),
+                    "final_price":     li.get("final_price"),
+                    "price_overridden": li.get("price_overridden", 0),
+                    "business_unit":   li.get("business_unit"),
+                    "computed_json":   li.get("computed_json"),
+                }
+                for li in items
+            ],
+            "engine_summary": (
+                f"Created via pricing_engine_v1. {len(items)} line item(s). "
+                f"Founder edits final_price via PATCH "
+                f"/api/v1/quotes-v2/{result.get('id')}/items/{{item_id}}/final-price."
+            ),
+        },
+    )
 
 
 # ── PROPOSAL SELECTION TOOL ─────────────────────────────────────────
@@ -3637,10 +3744,10 @@ If a tool call fails with "Unknown tool", check the name against this list.
   `{"tool": "search_conversations", "query": "keyword or phrase", "channel": "telegram|web|cc"}`
 
 ### Action Tools
-- **create_quick_quote** — Create a quick quote with 3 stacked design proposals (Essential/Designer/Premium). Uses QT-CUSTOMER-DATE-NNN numbering. Total starts at $0 until a proposal is selected.
-  `{"tool": "create_quick_quote", "customer_name": "Newman", "rooms": [{"name": "Living Room", "windows": [{"name": "Window 1", "width": 72, "height": 84, "quantity": 1, "treatmentType": "roman-shade", "fabricColor": "navy blue"}]}], "max_analysis": "Professional analysis here..."}`
-  CRITICAL: Set treatmentType to EXACTLY what the customer requested (roman-shade, pinch-pleat, ripplefold, grommet, rod-pocket, roller-shade). NEVER default to ripplefold if the customer asked for something else. Include fabricColor if the customer mentioned a color preference.
-  Returns 3 options (A: Essential, B: Designer, C: Premium) with different fabric grades and pricing. Founder selects one to finalize.
+- **create_quick_quote** — DEPRECATED. Legacy JSON store (`/home/rg/empire-data/quotes/*.json`). Does NOT use the pricing engine. Returns `store: "json_legacy"`, `engine: "qis"`, `deprecation_notice`. Will be retired in sprint 1d. **Do NOT pick this tool for new quotes — use `create_engine_quote` instead.**
+- **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
+  `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
+  Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. PricingInputError → HTTP 400 (never silent fallback for catalog items).
 - **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
   `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`
   After selection, the quote gets real totals and can be sent via Telegram or email.

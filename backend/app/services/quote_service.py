@@ -348,7 +348,9 @@ def create_quote(data: dict) -> dict:
         _recalculate_totals(conn, quote_id, 'api')
         _audit_log(conn, 'quote', quote_id, 'created', None, None, quote_number, 'api')
 
-        return get_quote(quote_id)
+    # Return OUTSIDE the with block so the commit happens before get_quote's
+    # separate connection tries to read the freshly-inserted row.
+    return get_quote(quote_id)
 
 
 def update_quote(quote_id: str, data: dict) -> dict:
