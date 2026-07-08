@@ -5,13 +5,34 @@ All financial writes logged to financial_audit_log.
 """
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from app.db.database import get_db, dict_row, dict_rows
 from app.data.product_catalog import PRICING_SPECS
 from app.services.pricing.engine import price_workroom_line, PricingInputError
+from app.services.max.access_control import FOUNDER_APPROVAL_PIN, verify_founder_approval
 
 logger = logging.getLogger(__name__)
+
+
+def _require_founder_pin(founder_pin, op_name: str) -> None:
+    """Sprint 1c-fix: defense-in-depth PIN check at service layer for level-0 ops.
+
+    The primary gate lives in access_control.verify_founder_approval (called
+    from the MAX tool wrapper and router); this service-layer check is a
+    second line of defense in case a future caller bypasses the wrapper.
+    Raises InvalidFounderPin if PIN is missing or doesn't match.
+    """
+    # If FOUNDER_APPROVAL_PIN env is unset, fail closed.
+    if not FOUNDER_APPROVAL_PIN:
+        raise InvalidFounderPin(
+            f"{op_name} requires FOUNDER_APPROVAL_PIN env var to be set"
+        )
+    if not founder_pin or str(founder_pin) != FOUNDER_APPROVAL_PIN:
+        raise InvalidFounderPin(
+            f"{op_name} requires valid founder_pin (missing or wrong)"
+        )
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -122,6 +143,12 @@ class InvalidTransition(ValueError):
 
 class ImmutableQuoteError(ValueError):
     """Raised when a mutation is attempted on a quote whose status is final."""
+
+
+class InvalidFounderPin(PermissionError):
+    """Sprint 1c-fix: raised when a level-0 tool/service call lacks a
+    valid founder_pin. Defense-in-depth check at the service layer —
+    the access controller (verify_founder_approval) is the primary gate."""
 
 
 def _check_immutable(conn, quote_id: str, op: str) -> None:
@@ -608,13 +635,16 @@ def submit_for_review(quote_id: str, changed_by: str = "api",
 
 
 def approve_quote(quote_id: str, changed_by: str = "founder",
-                  reason: Optional[str] = None) -> Optional[dict]:
+                  reason: Optional[str] = None,
+                  founder_pin: Optional[str] = None) -> Optional[dict]:
     """Founder-only transition: founder_review → sent.
 
     Does NOT auto-send the quote. Sending the customer-facing PDF/email
     remains an explicit action via the existing /send route.
     Raises InvalidTransition if the quote is not in founder_review.
+    Sprint 1c-fix: raises InvalidFounderPin if founder_pin missing/wrong.
     """
+    _require_founder_pin(founder_pin, "approve_quote")
     with get_db() as conn:
         prior = _check_transition(conn, quote_id, "sent")
         conn.execute(
@@ -630,13 +660,16 @@ def approve_quote(quote_id: str, changed_by: str = "founder",
 
 
 def reject_quote(quote_id: str, changed_by: str = "founder",
-                 reason: Optional[str] = None) -> Optional[dict]:
+                 reason: Optional[str] = None,
+                 founder_pin: Optional[str] = None) -> Optional[dict]:
     """Founder-only transition: founder_review → draft.
 
     Rejection means "needs changes" — the founder can iterate further
     and re-submit. A true kill is a separate cancel action.
     Raises InvalidTransition if the quote is not in founder_review.
+    Sprint 1c-fix: raises InvalidFounderPin if founder_pin missing/wrong.
     """
+    _require_founder_pin(founder_pin, "reject_quote")
     with get_db() as conn:
         prior = _check_transition(conn, quote_id, "draft")
         conn.execute(

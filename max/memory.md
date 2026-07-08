@@ -254,3 +254,5 @@ draft → founder_review → sent → accepted → in_production → completed
 **Immutability after sent:** once a quote is sent/accepted/in_production/completed, `PATCH /final-price` and line-item edits return HTTP 409. The customer-visible snapshot is locked.
 
 **Legacy quotes** with `status='proposal'` (created by `create_quick_quote` before 1c): surfaced in the review list with `pending_migration: true` flag, read-only. Approve/reject return 409. Sprint 1d migrates them to `quotes_v2` with state mapping.
+
+**Founder approval PIN (Sprint 1c-fix, 2026-07-08):** `approve_quote` and `reject_quote` now require a `founder_pin` parameter matching env `FOUNDER_APPROVAL_PIN`, OR the call must come from Telegram with the founder's `chat_id`. MAX must ASK THE FOUNDER for the PIN when they say "approve" or "reject" — never guess it. Without a valid PIN, the call is denied with an honest error. The PIN is stored only in the systemd unit's `Environment=`, never in chat history or MAX memory.

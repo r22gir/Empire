@@ -1603,15 +1603,32 @@ def _show_quote_for_review(params: dict, desk: Optional[str] = None) -> ToolResu
 def _approve_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Sprint 1c: founder-only transition founder_review → sent.
     Access_level=0 (founder-only). Does NOT auto-send the PDF/email —
-    sending remains an explicit /send action."""
+    sending remains an explicit /send action.
+
+    Sprint 1c-fix: requires founder_pin matching env FOUNDER_APPROVAL_PIN,
+    unless caller is Telegram-with-matching-chat-id. MAX should prompt
+    the user for the PIN before invoking this tool."""
     quote_id = params.get("quote_id", "")
     changed_by = params.get("changed_by", "founder")
     reason = params.get("reason")
+    founder_pin = params.get("founder_pin")
+    channel = params.get("channel") or params.get("_channel") or ""
+    chat_id = params.get("chat_id") or params.get("_chat_id") or ""
     if not quote_id:
         return ToolResult(tool="approve_quote", success=False, error="quote_id required")
+    # Primary gate: real-identity check OR founder_pin match.
+    from app.services.max.access_control import verify_founder_approval
+    if not verify_founder_approval(channel, chat_id, founder_pin):
+        return ToolResult(
+            tool="approve_quote", success=False,
+            error=("founder approval required: provide founder_pin matching "
+                   "FOUNDER_APPROVAL_PIN, or call from Telegram with the "
+                   "founder chat_id. MAX: ask the founder for the PIN.")
+        )
     try:
         from app.services.quote_service import approve_quote
-        q = approve_quote(quote_id, changed_by=changed_by, reason=reason)
+        q = approve_quote(quote_id, changed_by=changed_by, reason=reason,
+                          founder_pin=founder_pin)
     except Exception as e:
         return ToolResult(tool="approve_quote", success=False,
                          error=f"{type(e).__name__}: {e}")
@@ -1632,15 +1649,30 @@ def _approve_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
 def _reject_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Sprint 1c: founder-only transition founder_review → draft.
     Access_level=0 (founder-only). Rejection means 'needs changes' —
-    the founder can iterate further and re-submit."""
+    the founder can iterate further and re-submit.
+
+    Sprint 1c-fix: requires founder_pin matching env FOUNDER_APPROVAL_PIN,
+    unless caller is Telegram-with-matching-chat-id."""
     quote_id = params.get("quote_id", "")
     changed_by = params.get("changed_by", "founder")
     reason = params.get("reason")
+    founder_pin = params.get("founder_pin")
+    channel = params.get("channel") or params.get("_channel") or ""
+    chat_id = params.get("chat_id") or params.get("_chat_id") or ""
     if not quote_id:
         return ToolResult(tool="reject_quote", success=False, error="quote_id required")
+    from app.services.max.access_control import verify_founder_approval
+    if not verify_founder_approval(channel, chat_id, founder_pin):
+        return ToolResult(
+            tool="reject_quote", success=False,
+            error=("founder approval required: provide founder_pin matching "
+                   "FOUNDER_APPROVAL_PIN, or call from Telegram with the "
+                   "founder chat_id. MAX: ask the founder for the PIN.")
+        )
     try:
         from app.services.quote_service import reject_quote
-        q = reject_quote(quote_id, changed_by=changed_by, reason=reason)
+        q = reject_quote(quote_id, changed_by=changed_by, reason=reason,
+                         founder_pin=founder_pin)
     except Exception as e:
         return ToolResult(tool="reject_quote", success=False,
                          error=f"{type(e).__name__}: {e}")
@@ -3902,9 +3934,10 @@ State machine: `draft → founder_review → sent → accepted → in_production
 - **show_quote_for_review** — Show a quote's full line items with proposed vs final + delta + state_metadata. Agent-level.
   `{"tool": "show_quote_for_review", "quote_id": "abc123"}`
 - **approve_quote** — FOUNDER ONLY (access_level=0). Transition founder_review → sent. **Does NOT auto-send the PDF/email** — sending remains an explicit /send action. Implies the founder has reviewed the line items and accepted the proposed/final prices.
-  `{"tool": "approve_quote", "quote_id": "abc123", "changed_by": "founder", "reason": "looks good"}`
-- **reject_quote** — FOUNDER ONLY (access_level=0). Transition founder_review → draft. Means "needs changes" — the founder can edit final_price and re-submit. A true kill is a separate cancel action.
-  `{"tool": "reject_quote", "quote_id": "abc123", "changed_by": "founder", "reason": "fabric wrong"}`
+  **Sprint 1c-fix: requires `founder_pin` matching env `FOUNDER_APPROVAL_PIN`** unless the call comes from Telegram with the founder's `chat_id`. When the founder asks you to approve a quote, **ASK THEM FOR THE PIN FIRST** — say "Please share your founder PIN to approve this quote." Then call the tool with `founder_pin` in the params. The founder knows the PIN; you don't, and you should never guess it. Without a valid PIN (or real Telegram identity) the call returns an honest denial, not a silent fallback.
+  `{"tool": "approve_quote", "quote_id": "abc123", "changed_by": "founder", "reason": "looks good", "founder_pin": "<PIN_FROM_FOUNDER>"}`
+- **reject_quote** — FOUNDER ONLY (access_level=0). Transition founder_review → draft. Means "needs changes" — the founder can edit final_price and re-submit. A true kill is a separate cancel action. **Sprint 1c-fix: same PIN requirement as `approve_quote`.**
+  `{"tool": "reject_quote", "quote_id": "abc123", "changed_by": "founder", "reason": "fabric wrong", "founder_pin": "<PIN_FROM_FOUNDER>"}`
 
 - **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
   `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`

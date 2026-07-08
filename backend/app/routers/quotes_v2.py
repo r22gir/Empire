@@ -3,7 +3,7 @@ Quotes v2 Router — SQL-backed CRUD for unified business system.
 Supplements the original quotes.py router which handles QIS pipeline.
 These endpoints operate on quotes_v2 table (SQL).
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from pydantic import BaseModel
 import logging
@@ -149,6 +149,19 @@ async def update_item_final_price(quote_id: str, item_id: int, body: FinalPriceU
 class StateChangeRequest(BaseModel):
     changed_by: str = "founder"
     reason: Optional[str] = None
+    # Sprint 1c-fix: founder_pin for level-0 ops. Required unless caller
+    # is Telegram with matching chat_id (verified via X-Channel / X-Chat-Id
+    # headers — see _channel_and_chat helper).
+    founder_pin: Optional[str] = None
+
+
+def _channel_and_chat(request, body_channel: str = "", body_chat_id: str = ""):
+    """Extract (channel, chat_id) from request headers, falling back to body.
+    Lets direct API callers indicate which channel they're calling from,
+    so the Telegram-real-identity exemption can apply to non-MAX clients."""
+    channel = request.headers.get("X-Channel") or body_channel or ""
+    chat_id = request.headers.get("X-Chat-Id") or body_chat_id or ""
+    return channel, chat_id
 
 
 @router.post("/{quote_id}/submit-for-review")
@@ -164,31 +177,52 @@ async def submit_quote_for_review(quote_id: str, body: StateChangeRequest):
 
 
 @router.post("/{quote_id}/approve")
-async def approve_quote_route(quote_id: str, body: StateChangeRequest):
+async def approve_quote_route(request: Request, quote_id: str, body: StateChangeRequest):
     """Sprint 1c: founder_review → sent. Founder-only via access_level=0.
-
-    Transition only — does NOT auto-send (sending has customer-facing
-    side effects and stays an explicit /send action).
+    Sprint 1c-fix: requires founder_pin (or Telegram-with-matching-chat-id).
     """
+    from app.services.max.access_control import verify_founder_approval
+    channel, chat_id = _channel_and_chat(request)
+    if not verify_founder_approval(channel, chat_id, body.founder_pin):
+        raise HTTPException(
+            401,
+            "founder approval required: provide founder_pin matching "
+            "FOUNDER_APPROVAL_PIN, or call from Telegram with the founder chat_id"
+        )
     try:
-        result = quote_service.approve_quote(quote_id, body.changed_by, body.reason)
+        result = quote_service.approve_quote(
+            quote_id, body.changed_by, body.reason, founder_pin=body.founder_pin,
+        )
     except InvalidTransition as e:
         raise HTTPException(409, str(e))
+    except quote_service.InvalidFounderPin as e:
+        raise HTTPException(401, str(e))
     if not result:
         raise HTTPException(404, f"Quote {quote_id} not found")
     return {"status": "approved", "quote": result}
 
 
 @router.post("/{quote_id}/reject")
-async def reject_quote_route(quote_id: str, body: StateChangeRequest):
+async def reject_quote_route(request: Request, quote_id: str, body: StateChangeRequest):
     """Sprint 1c: founder_review → draft. Founder-only via access_level=0.
-
-    Rejection means 'needs changes' — founder can iterate and re-submit.
+    Sprint 1c-fix: requires founder_pin (or Telegram-with-matching-chat-id).
     """
+    from app.services.max.access_control import verify_founder_approval
+    channel, chat_id = _channel_and_chat(request)
+    if not verify_founder_approval(channel, chat_id, body.founder_pin):
+        raise HTTPException(
+            401,
+            "founder approval required: provide founder_pin matching "
+            "FOUNDER_APPROVAL_PIN, or call from Telegram with the founder chat_id"
+        )
     try:
-        result = quote_service.reject_quote(quote_id, body.changed_by, body.reason)
+        result = quote_service.reject_quote(
+            quote_id, body.changed_by, body.reason, founder_pin=body.founder_pin,
+        )
     except InvalidTransition as e:
         raise HTTPException(409, str(e))
+    except quote_service.InvalidFounderPin as e:
+        raise HTTPException(401, str(e))
     if not result:
         raise HTTPException(404, f"Quote {quote_id} not found")
     return {"status": "rejected", "quote": result}

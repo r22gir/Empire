@@ -4,6 +4,7 @@ import sqlite3
 import hashlib
 import secrets
 import logging
+import os
 from datetime import datetime, timedelta
 from enum import IntEnum
 
@@ -28,6 +29,34 @@ class AccessLevel(IntEnum):
     AUTO = 1
     CONFIRM = 2
     PIN = 3
+
+
+# Sprint 1c-fix: founder approval PIN for level-0 tools.
+# Set via env (e.g., systemd unit's Environment=). If unset, ALL non-telegram
+# level-0 calls are denied (fail-closed).
+FOUNDER_APPROVAL_PIN = os.getenv("FOUNDER_APPROVAL_PIN", "")
+
+
+def verify_founder_approval(channel: str, chat_id, founder_pin) -> bool:
+    """Sprint 1c-fix: check that a level-0 tool call is founder-authorized.
+
+    Returns True if:
+      - Channel is 'telegram' AND chat_id matches FOUNDER_TELEGRAM_CHAT_ID
+        (real identity, no PIN required — proven by Telegram's chat_id
+        signed-secret model), OR
+      - founder_pin is provided AND equals FOUNDER_APPROVAL_PIN env var.
+
+    Returns False otherwise (caller must be denied).
+    """
+    try:
+        from app.services.max.founder_auth import FOUNDER_TELEGRAM_CHAT_ID
+        if channel == "telegram" and str(chat_id or "") == FOUNDER_TELEGRAM_CHAT_ID:
+            return True
+    except Exception:
+        pass
+    if not founder_pin or not FOUNDER_APPROVAL_PIN:
+        return False
+    return str(founder_pin) == FOUNDER_APPROVAL_PIN
 
 
 TOOL_LEVELS = {
