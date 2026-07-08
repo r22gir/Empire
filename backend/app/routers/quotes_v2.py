@@ -10,6 +10,7 @@ import logging
 
 from app.services import quote_service
 from app.services.pricing.engine import PricingInputError
+from app.services.quote_service import InvalidTransition, ImmutableQuoteError
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,15 @@ async def search_quotes(q: str = Query(..., min_length=1), limit: int = 20):
     """Full-text search across quotes."""
     results = quote_service.search_quotes(q, limit=limit)
     return {"results": results, "count": len(results), "query": q}
+
+
+@router.get("/awaiting-review")
+async def list_awaiting_review_route(business_unit: Optional[str] = None):
+    """Sprint 1c: list founder_review quotes + legacy 'proposal' quotes
+    (tagged with pending_migration=True). MUST be declared BEFORE the
+    GET /{quote_id} catch-all below, otherwise FastAPI matches 'awaiting-review'
+    as a quote_id and returns 404."""
+    return quote_service.list_quotes_awaiting_review(business_unit=business_unit)
 
 
 @router.get("/stats")
@@ -121,13 +131,71 @@ async def update_item_final_price(quote_id: str, item_id: int, body: FinalPriceU
 
     Marks price_overridden=1, writes a financial_audit_log row,
     recalculates the quote's totals.
+
+    Sprint 1c: 409 Conflict if quote status is sent/accepted/in_production/
+    completed (immutable after sent).
     """
-    result = quote_service.update_final_price(
-        quote_id, item_id, body.final_price, body.changed_by, body.reason,
-    )
+    try:
+        result = quote_service.update_final_price(
+            quote_id, item_id, body.final_price, body.changed_by, body.reason,
+        )
+    except ImmutableQuoteError as e:
+        raise HTTPException(409, str(e))
     if not result:
         raise HTTPException(404, "Quote or item not found")
     return {"status": "updated", "item": result}
+
+
+class StateChangeRequest(BaseModel):
+    changed_by: str = "founder"
+    reason: Optional[str] = None
+
+
+@router.post("/{quote_id}/submit-for-review")
+async def submit_quote_for_review(quote_id: str, body: StateChangeRequest):
+    """Sprint 1c: draft → founder_review. Accessible to agents (level 1)."""
+    try:
+        result = quote_service.submit_for_review(quote_id, body.changed_by, body.reason)
+    except InvalidTransition as e:
+        raise HTTPException(409, str(e))
+    if not result:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    return {"status": "submitted", "quote": result}
+
+
+@router.post("/{quote_id}/approve")
+async def approve_quote_route(quote_id: str, body: StateChangeRequest):
+    """Sprint 1c: founder_review → sent. Founder-only via access_level=0.
+
+    Transition only — does NOT auto-send (sending has customer-facing
+    side effects and stays an explicit /send action).
+    """
+    try:
+        result = quote_service.approve_quote(quote_id, body.changed_by, body.reason)
+    except InvalidTransition as e:
+        raise HTTPException(409, str(e))
+    if not result:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    return {"status": "approved", "quote": result}
+
+
+@router.post("/{quote_id}/reject")
+async def reject_quote_route(quote_id: str, body: StateChangeRequest):
+    """Sprint 1c: founder_review → draft. Founder-only via access_level=0.
+
+    Rejection means 'needs changes' — founder can iterate and re-submit.
+    """
+    try:
+        result = quote_service.reject_quote(quote_id, body.changed_by, body.reason)
+    except InvalidTransition as e:
+        raise HTTPException(409, str(e))
+    if not result:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    return {"status": "rejected", "quote": result}
+
+
+# NOTE: /awaiting-review is declared EARLIER (before /{quote_id}) so FastAPI
+# matches it as a literal path, not a quote_id. See line ~42.
 
 
 @router.delete("/{quote_id}/items/{item_id}")

@@ -24,6 +24,7 @@ DB_PATH = os.getenv(
 
 
 class AccessLevel(IntEnum):
+    FOUNDER_ONLY = 0  # Sprint 1c: level-0 = founder-only, no other role
     AUTO = 1
     CONFIRM = 2
     PIN = 3
@@ -38,6 +39,13 @@ TOOL_LEVELS = {
     "search_images": 1, "open_quote_builder": 1, "select_proposal": 1,
     "send_telegram": 1, "send_email": 1, "send_quote_telegram": 1,
     "send_quote_email": 1, "run_desk_task": 1, "submit_desk_task": 1,
+    # Sprint 1c — approval gate workflow:
+    # agents propose (level 1); founder disposes (level 0)
+    "submit_quote_for_review":      1,   # agents can submit their drafts
+    "list_quotes_awaiting_review": 1,   # agents + founder can list
+    "show_quote_for_review":       1,   # agents + founder can show
+    "approve_quote":                0,   # FOUNDER ONLY — founder_review → sent
+    "reject_quote":                 0,   # FOUNDER ONLY — founder_review → draft
     "delete_task": 2, "bulk_update": 2, "modify_config": 2,
     "update_contact": 2, "delete_contact": 2, "clear_data": 2,
     "shell_execute": 3, "dispatch_to_openclaw": 3, "deploy": 3,
@@ -50,11 +58,13 @@ LEVEL_PATTERNS = {
 }
 
 ROLE_PERMISSIONS = {
-    "founder":  {1: "auto", 2: "confirm", 3: "pin"},
-    "admin":    {1: "auto", 2: "confirm", 3: "pin"},
-    "manager":  {1: "auto", 2: "confirm", 3: "deny"},
-    "operator": {1: "auto", 2: "confirm_own_desk", 3: "deny"},
-    "viewer":   {1: "read_only", 2: "deny", 3: "deny"},
+    # level 0 = FOUNDER_ONLY: only 'founder' role gets "auto";
+    # every other role gets "deny" (key absent → defaults to deny).
+    "founder":  {0: "auto", 1: "auto", 2: "confirm", 3: "pin"},
+    "admin":    {            1: "auto", 2: "confirm", 3: "pin"},
+    "manager":  {            1: "auto", 2: "confirm", 3: "deny"},
+    "operator": {            1: "auto", 2: "confirm_own_desk", 3: "deny"},
+    "viewer":   {            1: "read_only", 2: "deny", 3: "deny"},
 }
 
 CONFIRM_TIMEOUT = 60

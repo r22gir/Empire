@@ -94,6 +94,64 @@ def _price_line_item(category, inputs, business_unit, legacy):
     }
 
 
+# ── State machine (Sprint 1c approval gate) ─────────────────────────
+
+VALID_TRANSITIONS = {
+    'draft':          ['founder_review', 'cancelled'],
+    'founder_review': ['sent', 'draft', 'cancelled'],
+    'sent':           ['accepted', 'cancelled'],
+    'accepted':       ['in_production', 'cancelled'],
+    'in_production':  ['completed', 'cancelled'],
+    'completed':      ['cancelled'],
+    'cancelled':      ['draft'],
+    # Legacy state from MAX's create_quick_quote (pre-1c). Read-only.
+    # Surface in the review list as "legacy — pending migration" and
+    # block all transitions until 1d migrates them.
+    'proposal':       [],
+}
+
+# Once a quote is sent (or beyond), prices are immutable. The customer
+# sees the snapshot we sent — editing it later would silently rewrite
+# the customer's contract.
+IMMUTABLE_STATUSES = {'sent', 'accepted', 'in_production', 'completed'}
+
+
+class InvalidTransition(ValueError):
+    """Raised when a quote status transition is not allowed."""
+
+
+class ImmutableQuoteError(ValueError):
+    """Raised when a mutation is attempted on a quote whose status is final."""
+
+
+def _check_immutable(conn, quote_id: str, op: str) -> None:
+    """Raise ImmutableQuoteError if quote is in a terminal-after-send state."""
+    row = conn.execute("SELECT status FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
+    if not row:
+        raise InvalidTransition(f"quote {quote_id} not found")
+    if row["status"] in IMMUTABLE_STATUSES:
+        raise ImmutableQuoteError(
+            f"quote {quote_id} is in status '{row['status']}' — "
+            f"{op} is forbidden (prices are immutable after sent)"
+        )
+
+
+def _check_transition(conn, quote_id: str, target_status: str) -> str:
+    """Raise InvalidTransition if the requested transition is illegal.
+    Returns the prior status if the transition is allowed."""
+    row = conn.execute("SELECT status FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
+    if not row:
+        raise InvalidTransition(f"quote {quote_id} not found")
+    current = row["status"]
+    allowed = VALID_TRANSITIONS.get(current, [])
+    if target_status not in allowed:
+        raise InvalidTransition(
+            f"quote {quote_id} cannot transition '{current}' → '{target_status}' "
+            f"(allowed: {allowed})"
+        )
+    return current
+
+
 def _next_quote_number(conn) -> str:
     """Generate sequential quote number EST-YYYY-NNN."""
     year = datetime.now().year
@@ -483,15 +541,20 @@ def add_line_item(quote_id: str, data: dict) -> dict:
 def update_final_price(quote_id: str, item_id: int, final_price,
                        changed_by: str = "founder",
                        reason: Optional[str] = None) -> Optional[dict]:
-    """Override a line item's final_price. Sprint 1b.
+    """Override a line item's final_price. Sprint 1b / 1c.
 
     - Sets final_price and price_overridden=1
     - Writes a financial_audit_log row (action='final_price_override',
       old_value=prior final_price, new_value=new final_price)
     - Recalculates the quote's totals (which now sum final_price, not subtotal)
     - Returns the updated line item dict, or None if the line item doesn't exist
+
+    Sprint 1c: raises ImmutableQuoteError if quote status is sent/accepted/
+    in_production/completed — the customer-visible snapshot is locked.
     """
     with get_db() as conn:
+        # Sprint 1c: immutability check first — refuse mutation if locked.
+        _check_immutable(conn, quote_id, "final_price override")
         row = conn.execute(
             "SELECT id, final_price, business_unit FROM quote_line_items "
             "WHERE id = ? AND quote_id = ?",
@@ -521,8 +584,134 @@ def update_final_price(quote_id: str, item_id: int, final_price,
         return _item_to_dict(updated)
 
 
+# ── Sprint 1c: approval gate state transitions ─────────────────────
+
+def submit_for_review(quote_id: str, changed_by: str = "api",
+                      reason: Optional[str] = None) -> Optional[dict]:
+    """Move a draft into the founder_review queue.
+
+    Allowed transition: draft → founder_review.
+    Agents (level 1) can call this. Founder (level 0) can also call it.
+    """
+    with get_db() as conn:
+        prior = _check_transition(conn, quote_id, "founder_review")
+        conn.execute(
+            "UPDATE quotes_v2 SET status='founder_review', updated_at=datetime('now') "
+            "WHERE id = ?",
+            (quote_id,),
+        )
+        _audit_log(
+            conn, "quote", quote_id, "submit_for_review", "status",
+            prior, "founder_review", changed_by, reason,
+        )
+    return get_quote(quote_id)
+
+
+def approve_quote(quote_id: str, changed_by: str = "founder",
+                  reason: Optional[str] = None) -> Optional[dict]:
+    """Founder-only transition: founder_review → sent.
+
+    Does NOT auto-send the quote. Sending the customer-facing PDF/email
+    remains an explicit action via the existing /send route.
+    Raises InvalidTransition if the quote is not in founder_review.
+    """
+    with get_db() as conn:
+        prior = _check_transition(conn, quote_id, "sent")
+        conn.execute(
+            "UPDATE quotes_v2 SET status='sent', sent_at=datetime('now'), "
+            "updated_at=datetime('now') WHERE id = ?",
+            (quote_id,),
+        )
+        _audit_log(
+            conn, "quote", quote_id, "approve", "status",
+            prior, "sent", changed_by, reason,
+        )
+    return get_quote(quote_id)
+
+
+def reject_quote(quote_id: str, changed_by: str = "founder",
+                 reason: Optional[str] = None) -> Optional[dict]:
+    """Founder-only transition: founder_review → draft.
+
+    Rejection means "needs changes" — the founder can iterate further
+    and re-submit. A true kill is a separate cancel action.
+    Raises InvalidTransition if the quote is not in founder_review.
+    """
+    with get_db() as conn:
+        prior = _check_transition(conn, quote_id, "draft")
+        conn.execute(
+            "UPDATE quotes_v2 SET status='draft', updated_at=datetime('now') "
+            "WHERE id = ?",
+            (quote_id,),
+        )
+        _audit_log(
+            conn, "quote", quote_id, "reject", "status",
+            prior, "draft", changed_by, reason,
+        )
+    return get_quote(quote_id)
+
+
+def list_quotes_awaiting_review(business_unit: Optional[str] = None) -> dict:
+    """List quotes in founder_review status PLUS legacy 'proposal' quotes
+    (tagged with pending_migration=True so the founder sees them but
+    the approve/reject endpoints will reject legacy quotes with 409
+    until 1d migrates them).
+
+    Returns: {"quotes": [...], "legacy_count": N}
+    Each item carries state_metadata = {legacy: bool, pending_migration: bool}.
+    """
+    with get_db() as conn:
+        where = ["status = 'founder_review'"]
+        params = []
+        if business_unit:
+            where.append("business_unit = ?")
+            params.append(business_unit)
+        rows = conn.execute(
+            f"SELECT * FROM quotes_v2 WHERE {' AND '.join(where)} "
+            f"ORDER BY updated_at DESC LIMIT 100",
+            params,
+        ).fetchall()
+        awaiting = []
+        for r in rows:
+            q = _quote_to_dict(r)
+            q["state_metadata"] = {"legacy": False, "pending_migration": False}
+            awaiting.append(q)
+
+        legacy_where = ["status = 'proposal'"]
+        legacy_params = []
+        if business_unit:
+            legacy_where.append("business_unit = ?")
+            legacy_params.append(business_unit)
+        legacy_rows = conn.execute(
+            f"SELECT * FROM quotes_v2 WHERE {' AND '.join(legacy_where)} "
+            f"ORDER BY updated_at DESC LIMIT 100",
+            legacy_params,
+        ).fetchall()
+        legacy = []
+        for r in legacy_rows:
+            q = _quote_to_dict(r)
+            q["state_metadata"] = {
+                "legacy": True,
+                "pending_migration": True,
+                "note": "Legacy 'proposal' status — read-only. Will be migrated to "
+                        "quotes_v2 with state mapping in sprint 1d. Approve/reject "
+                        "endpoints will return 409 until migrated.",
+            }
+            legacy.append(q)
+
+    return {
+        "awaiting_review": awaiting,
+        "legacy_pending_migration": legacy,
+        "total_awaiting": len(awaiting),
+        "total_legacy": len(legacy),
+    }
+
+
 def update_line_item(quote_id: str, item_id: int, data: dict) -> dict:
     with get_db() as conn:
+        # Sprint 1c: refuse line-item mutation if quote is in an immutable
+        # status (sent/accepted/in_production/completed).
+        _check_immutable(conn, quote_id, "line-item edit")
         existing = conn.execute(
             "SELECT * FROM quote_line_items WHERE id = ? AND quote_id = ?",
             (item_id, quote_id)
@@ -574,7 +763,12 @@ def delete_line_item(quote_id: str, item_id: int) -> dict:
 
 # ── Status Transitions ─────────────────────────────────────────
 
-VALID_TRANSITIONS = {
+# Legacy state map — kept for the pre-existing transition_quote function
+# (still used by the legacy POST /{quote_id}/approve route, etc.).
+# Sprint 1c introduced a NEW state machine above (VALID_TRANSITIONS at line
+# 99 with founder_review state); this dict is intentionally kept separate
+# to avoid name shadowing. New code uses the new dict; old code uses this.
+LEGACY_VALID_TRANSITIONS = {
     'draft': ['sent', 'cancelled'],
     'sent': ['approved', 'cancelled', 'draft'],
     'approved': ['ordered', 'cancelled'],
@@ -591,7 +785,7 @@ def transition_quote(quote_id: str, new_status: str, changed_by: str = 'api') ->
         if not row:
             return None
         current = row[0]
-        if new_status not in VALID_TRANSITIONS.get(current, []):
+        if new_status not in LEGACY_VALID_TRANSITIONS.get(current, []):
             raise ValueError(f"Cannot transition from {current} to {new_status}")
 
         now = datetime.now().isoformat()

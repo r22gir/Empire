@@ -295,9 +295,27 @@ class MaxScheduler:
             import re
 
             now = datetime.now()
-            memory_file = Path.home() / "empire-repo" / "max" / "memory.md"
+            # Sprint 1c: read MAX's memory.md from the canonical repo path.
+            # Resolution order:
+            #   1. MAX_MEMORY_PATH env var (explicit override)
+            #   2. <canonical_repo>/max/memory.md (default — derived from
+            #      this scheduler file's location, walks up to the repo root)
+            #   3. ~/empire-repo/max/memory.md (legacy fallback during
+            #      stale-fork retirement)
+            memory_file = None
+            env_path = os.getenv("MAX_MEMORY_PATH")
+            if env_path:
+                memory_file = Path(env_path)
+            else:
+                # backend/app/services/max/scheduler.py → repo root is 4 parents up
+                canonical_repo = Path(__file__).resolve().parents[3]
+                candidate = canonical_repo / "max" / "memory.md"
+                if candidate.exists():
+                    memory_file = candidate
+                else:
+                    memory_file = Path.home() / "empire-repo" / "max" / "memory.md"
             if not memory_file.exists():
-                logger.warning("Brain sync: memory.md not found")
+                logger.warning(f"Brain sync: memory.md not found at {memory_file}")
                 return
 
             content = memory_file.read_text(encoding="utf-8")

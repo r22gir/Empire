@@ -236,3 +236,21 @@ Empire Workroom pricing is now driven by a per-treatment engine (see `backend/ap
 **State machine** (existing, sprint 1c will extend): `draft → sent → approved → ordered → in_production → completed`; `cancelled` reachable from any non-terminal state.
 
 **MAX tool routing (2026-07-08):** Always call `create_engine_quote` (not `create_quick_quote`) when creating a new quote. `create_engine_quote` writes to `quotes_v2` via the pricing engine and returns per-line `proposed_price` + `computed_json`; `create_quick_quote` is DEPRECATED and persists to the legacy JSON store at `/home/rg/empire-data/quotes/*.json` (returns `store: "json_legacy"`, `engine: "qis"`). If a customer asks for a "quick quote" or "proposal", still use `create_engine_quote`. Sprint 1d will retire `create_quick_quote`.
+
+**Approval gate workflow (2026-07-08 sprint 1c):**
+State machine for `quotes_v2.status`:
+```
+draft → founder_review → sent → accepted → in_production → completed
+  ↑         ↓ ↓
+  └─────────┘ ↓ (reject = back to draft)
+              ↓
+          cancelled  (soft delete, from any non-terminal)
+```
+- `submit_quote_for_review` (level 1, agents can call): draft → founder_review
+- `list_quotes_awaiting_review` / `show_quote_for_review` (level 1): read-only listing with per-line proposed vs final
+- `approve_quote` (level 0, founder only): founder_review → sent. **Transition only — does NOT auto-send the PDF/email.** Use `/send` separately for dispatch.
+- `reject_quote` (level 0, founder only): founder_review → draft. Means "needs changes"; a true kill is `cancel`.
+
+**Immutability after sent:** once a quote is sent/accepted/in_production/completed, `PATCH /final-price` and line-item edits return HTTP 409. The customer-visible snapshot is locked.
+
+**Legacy quotes** with `status='proposal'` (created by `create_quick_quote` before 1c): surfaced in the review list with `pending_migration: true` flag, read-only. Approve/reject return 409. Sprint 1d migrates them to `quotes_v2` with state mapping.

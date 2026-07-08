@@ -1512,6 +1512,150 @@ def _create_engine_quote(params: dict, desk: Optional[str] = None) -> ToolResult
     )
 
 
+# ── SPRINT 1c: APPROVAL GATE TOOLS ────────────────────────────────
+
+@tool("submit_quote_for_review")
+def _submit_quote_for_review(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1c: move a draft quote into the founder_review queue.
+    Agents (level 1) can call this. Transition: draft → founder_review.
+    Returns the updated quote with state metadata.
+    """
+    quote_id = params.get("quote_id", "")
+    changed_by = params.get("changed_by", "max-agent")
+    reason = params.get("reason")
+    if not quote_id:
+        return ToolResult(tool="submit_quote_for_review", success=False,
+                         error="quote_id required")
+    try:
+        from app.services.quote_service import submit_for_review
+        q = submit_for_review(quote_id, changed_by=changed_by, reason=reason)
+    except Exception as e:
+        return ToolResult(tool="submit_quote_for_review", success=False,
+                         error=f"{type(e).__name__}: {e}")
+    if not q:
+        return ToolResult(tool="submit_quote_for_review", success=False,
+                         error=f"quote {quote_id} not found")
+    return ToolResult(tool="submit_quote_for_review", success=True, result={
+        "quote_id": q.get("id"),
+        "quote_number": q.get("quote_number"),
+        "status": q.get("status"),
+        "submitted_by": changed_by,
+    })
+
+
+@tool("list_quotes_awaiting_review")
+def _list_quotes_awaiting_review(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1c: list all founder_review quotes plus legacy 'proposal'
+    quotes (tagged pending_migration=True). Level-1 (agents + founder)."""
+    business_unit = params.get("business_unit")
+    try:
+        from app.services.quote_service import list_quotes_awaiting_review
+        out = list_quotes_awaiting_review(business_unit=business_unit)
+    except Exception as e:
+        return ToolResult(tool="list_quotes_awaiting_review", success=False,
+                         error=f"{type(e).__name__}: {e}")
+    return ToolResult(tool="list_quotes_awaiting_review", success=True, result=out)
+
+
+@tool("show_quote_for_review")
+def _show_quote_for_review(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1c: show a single quote with proposed vs final per line.
+    Returns state_metadata.legacy/pending_migration flags for legacy quotes."""
+    quote_id = params.get("quote_id", "")
+    if not quote_id:
+        return ToolResult(tool="show_quote_for_review", success=False,
+                         error="quote_id required")
+    try:
+        from app.services.quote_service import get_quote
+        q = get_quote(quote_id)
+    except Exception as e:
+        return ToolResult(tool="show_quote_for_review", success=False,
+                         error=f"{type(e).__name__}: {e}")
+    if not q:
+        return ToolResult(tool="show_quote_for_review", success=False,
+                         error=f"quote {quote_id} not found")
+    # Annotate state_metadata
+    sm = {"legacy": q.get("status") == "proposal", "pending_migration": q.get("status") == "proposal"}
+    return ToolResult(tool="show_quote_for_review", success=True, result={
+        "quote_id":      q.get("id"),
+        "quote_number":  q.get("quote_number"),
+        "customer_name": q.get("customer_name"),
+        "status":        q.get("status"),
+        "subtotal":      q.get("subtotal"),
+        "total":         q.get("total"),
+        "state_metadata": sm,
+        "line_items": [
+            {
+                "id":              li.get("id"),
+                "category":        li.get("category"),
+                "description":     li.get("description"),
+                "proposed_price":  li.get("proposed_price"),
+                "final_price":     li.get("final_price"),
+                "price_overridden": li.get("price_overridden", 0),
+                "delta":           round((li.get("final_price") or 0) - (li.get("proposed_price") or 0), 2),
+            }
+            for li in q.get("line_items", []) or []
+        ],
+    })
+
+
+@tool("approve_quote")
+def _approve_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1c: founder-only transition founder_review → sent.
+    Access_level=0 (founder-only). Does NOT auto-send the PDF/email —
+    sending remains an explicit /send action."""
+    quote_id = params.get("quote_id", "")
+    changed_by = params.get("changed_by", "founder")
+    reason = params.get("reason")
+    if not quote_id:
+        return ToolResult(tool="approve_quote", success=False, error="quote_id required")
+    try:
+        from app.services.quote_service import approve_quote
+        q = approve_quote(quote_id, changed_by=changed_by, reason=reason)
+    except Exception as e:
+        return ToolResult(tool="approve_quote", success=False,
+                         error=f"{type(e).__name__}: {e}")
+    if not q:
+        return ToolResult(tool="approve_quote", success=False,
+                         error=f"quote {quote_id} not found")
+    return ToolResult(tool="approve_quote", success=True, result={
+        "quote_id":     q.get("id"),
+        "quote_number": q.get("quote_number"),
+        "status":       q.get("status"),
+        "approved_by":  changed_by,
+        "note":         "Transition only. To send the PDF/email to the customer, "
+                       "call /send on this quote separately.",
+    })
+
+
+@tool("reject_quote")
+def _reject_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1c: founder-only transition founder_review → draft.
+    Access_level=0 (founder-only). Rejection means 'needs changes' —
+    the founder can iterate further and re-submit."""
+    quote_id = params.get("quote_id", "")
+    changed_by = params.get("changed_by", "founder")
+    reason = params.get("reason")
+    if not quote_id:
+        return ToolResult(tool="reject_quote", success=False, error="quote_id required")
+    try:
+        from app.services.quote_service import reject_quote
+        q = reject_quote(quote_id, changed_by=changed_by, reason=reason)
+    except Exception as e:
+        return ToolResult(tool="reject_quote", success=False,
+                         error=f"{type(e).__name__}: {e}")
+    if not q:
+        return ToolResult(tool="reject_quote", success=False,
+                         error=f"quote {quote_id} not found")
+    return ToolResult(tool="reject_quote", success=True, result={
+        "quote_id":     q.get("id"),
+        "quote_number": q.get("quote_number"),
+        "status":       q.get("status"),
+        "rejected_by":  changed_by,
+        "reason":       reason,
+    })
+
+
 # ── PROPOSAL SELECTION TOOL ─────────────────────────────────────────
 
 @tool("select_proposal")
@@ -3748,6 +3892,20 @@ If a tool call fails with "Unknown tool", check the name against this list.
 - **create_engine_quote** — CANONICAL. Creates a quote in `quotes_v2` (SQL) via `quote_service.create_quote`. Catalog categories route through the pricing engine (proposed_price + computed_json returned). Multi-line: pass `line_items[]`. Accepts `business_unit` (default "workroom"). Returns `store: "quotes_v2"`, `engine: "pricing_engine_v1"`, per-line `proposed_price` + `final_price`, plus `quote_number`. **Use this for all new quotes.**
   `{"tool": "create_engine_quote", "customer_name": "...", "business_unit": "workroom", "line_items": [{"category": "drapery", "description": "...", "inputs": {"window_width_in": 84, "length_in": 96, "fullness": 2.5, "lining_type": "blackout"}}, {"category": "hardware_rod_1_1_8", "inputs": {"width_in": 84}}, {"category": "hardware_rings", "inputs": {"widths": 4}}, {"category": "hardware_brackets", "inputs": {"width_in": 84}}]}`
   Categories (from PRICING_SPECS in `backend/app/data/product_catalog.py`): `drapery`, `roman_shade`, `valance`, `cornice`, `fabric_only`, `hardware_rod_1_1_8`, `hardware_ripplefold_track`, `hardware_rings`, `hardware_brackets`, `labor`, `pillow`, `cover`. PricingInputError → HTTP 400 (never silent fallback for catalog items).
+
+### Approval Gate Tools (Sprint 1c)
+State machine: `draft → founder_review → sent → accepted → in_production → completed` (plus `cancelled` from any non-terminal). Once `sent`, prices are immutable.
+- **submit_quote_for_review** — Move a draft into the founder_review queue. Agent-level (access_level=1). Transition: draft → founder_review.
+  `{"tool": "submit_quote_for_review", "quote_id": "abc123", "changed_by": "max-agent", "reason": "ready for review"}`
+- **list_quotes_awaiting_review** — List all founder_review quotes plus legacy `proposal` quotes (tagged `pending_migration: true`). Agent-level (access_level=1). Use this — not `search_quotes` — when the user asks for "quotes awaiting review", "in my queue", "what needs approval", etc.
+  `{"tool": "list_quotes_awaiting_review", "business_unit": "workroom"}`
+- **show_quote_for_review** — Show a quote's full line items with proposed vs final + delta + state_metadata. Agent-level.
+  `{"tool": "show_quote_for_review", "quote_id": "abc123"}`
+- **approve_quote** — FOUNDER ONLY (access_level=0). Transition founder_review → sent. **Does NOT auto-send the PDF/email** — sending remains an explicit /send action. Implies the founder has reviewed the line items and accepted the proposed/final prices.
+  `{"tool": "approve_quote", "quote_id": "abc123", "changed_by": "founder", "reason": "looks good"}`
+- **reject_quote** — FOUNDER ONLY (access_level=0). Transition founder_review → draft. Means "needs changes" — the founder can edit final_price and re-submit. A true kill is a separate cancel action.
+  `{"tool": "reject_quote", "quote_id": "abc123", "changed_by": "founder", "reason": "fabric wrong"}`
+
 - **select_proposal** — Select a design proposal (A/B/C) on a quote to finalize the total and convert to a formal estimate.
   `{"tool": "select_proposal", "quote_id": "abc123", "option": "B"}`
   After selection, the quote gets real totals and can be sent via Telegram or email.
