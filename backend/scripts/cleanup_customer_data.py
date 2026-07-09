@@ -16,7 +16,7 @@ import os
 import shutil
 from datetime import datetime
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+DB_PATH = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
 BACKUP_DIR = os.path.expanduser("~/empire-repo/backend/data/backups")
 
 # --- Type classification rules ---
