@@ -13,7 +13,7 @@ from app.services.orchestration.payment_monitor import payment_monitor
 from app.services.orchestration.inventory_manager import inventory_manager
 from app.services.orchestration.client_notifier import client_notifier
 
-router = APIRouter(prefix="/api/v1/orchestration", tags=["orchestration"])
+router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
 API = "http://localhost:8000/api/v1"
 
@@ -137,52 +137,43 @@ async def trigger_client_updates(job_id: str = None, stage: str = None):
 
 @router.get("/dashboard")
 async def get_orchestration_dashboard():
-    """Aggregated data for the orchestration dashboard."""
-    # Today's automation metrics
-    auto_quote_count = 0  # Would query logs
-    jobs_optimized = 0
-    overdue_chased = 0
-    low_stock_alerts = 0
-    notifications_sent = 0
-
-    # Active orchestrator decisions (last 10)
-    decisions = [
-        {"action": "Production schedule optimized", "detail": "12 jobs reordered by urgency", "time": "07:00 AM"},
-        {"action": "Low stock alert", "detail": "Walnut veneer (3 projects need it)", "time": "09:00 AM"},
-        {"action": "Payment reminder sent", "detail": "Invoice #8765 (31 days overdue)", "time": "10:00 AM"},
-        {"action": "Auto-quote generated", "detail": "Client: Alex Morgan — $2,890 Pro tier", "time": "11:30 AM"},
-    ]
-
-    # Ecosystem health
-    health_status = await check_ecosystem_health()
-
+    """Sprint 1d-fix: was returning hardcoded fake decisions and zero-value
+    counters. Replaced with honest {'implemented': False} until real data
+    is wired (the orchestrator.py module itself also has hardcoded sample
+    data — to be replaced in a follow-up sprint)."""
     return {
+        "implemented": False,
+        "reason": "Sprint 1d-fix: previous response fabricated hardcoded metrics "
+                  "(auto_quote_count=0, jobs_optimized=0, etc.) and four "
+                  "fake 'decisions' entries (Production schedule optimized, "
+                  "Low stock alert, Payment reminder, Auto-quote). Real data "
+                  "wiring is queued for a follow-up sprint.",
         "metrics": {
-            "auto_quotes_today": auto_quote_count,
-            "jobs_optimized": jobs_optimized,
-            "overdue_chased": overdue_chased,
-            "low_stock_alerts": low_stock_alerts,
-            "notifications_sent": notifications_sent,
+            "auto_quotes_today": None,
+            "jobs_optimized": None,
+            "overdue_chased": None,
+            "low_stock_alerts": None,
+            "notifications_sent": None,
         },
-        "decisions": decisions,
-        "health": health_status,
+        "decisions": [],
+        "health": await check_ecosystem_health(),
         "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 async def check_ecosystem_health():
-    backend = await check_service("http://localhost:8000/health")
-    frontend = await check_service("http://localhost:3005")
-    openclaw = await check_service("http://localhost:7878/health")
-    ollama = await check_service("http://localhost:11434/api/tags")
-
+    """Sprint 1d-fix: was returning fabricated hardcoded data
+    (tasks=60, desks=18, memories="3000+"). Replaced with honest
+    {'implemented': False} response until real data is wired."""
     return {
-        "score": round(sum(100 for v in [backend, frontend, openclaw, ollama]) / 4),
-        "services": [
-            {"name": "Backend", "status": "healthy" if backend else "degraded", "port": 8000},
-            {"name": "Frontend", "status": "healthy" if frontend else "degraded", "port": 3005},
-            {"name": "OpenClaw", "status": "healthy" if openclaw else "degraded", "port": 7878, "tasks": 60},
-            {"name": "MAX", "status": "healthy", "desks": 18},
-            {"name": "Hermes", "status": "healthy", "memories": "3000+"},
-        ],
+        "implemented": False,
+        "reason": "Sprint 1d-fix: previous response fabricated hardcoded metrics "
+                  "(tasks=60, desks=18, memories='3000+'). Real data wiring "
+                  "is queued for a follow-up sprint.",
+        "services_checked_live": {
+            "backend_up": await check_service("http://localhost:8000/health"),
+            "frontend_up": await check_service("http://localhost:3005"),
+            "openclaw_up": await check_service("http://localhost:7878/health"),
+            "ollama_up": await check_service("http://localhost:11434/api/tags"),
+        },
     }

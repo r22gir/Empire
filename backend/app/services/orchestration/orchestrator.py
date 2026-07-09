@@ -12,8 +12,8 @@ from typing import Any, Optional
 from fastapi import HTTPException
 import httpx
 
-from app.services.openclaw_worker import dispatch_to_openclaw
-from app.services.hermes_memory import HermesMemory
+from app.routers.openclaw_bridge import dispatch_desk_task_to_openclaw
+from app.services.max.hermes_memory import get_hermes_memory_status
 
 logger = logging.getLogger("orchestrator")
 
@@ -26,7 +26,11 @@ FRONTEND_HEALTH = "http://localhost:3005"
 class EmpireOrchestrator:
     def __init__(self):
         self.enabled = False
-        self.hermes = HermesMemory()
+        # Sprint 1d-fix: HermesMemory class doesn't exist (the real module
+        # exports FUNCTIONS only). Keep a handle on get_hermes_memory_status()
+        # so the dashboard endpoint can surface real memory stats instead
+        # of the hardcoded "3000+" fabrication.
+        self._hermes_status_fn = get_hermes_memory_status
         self.max_disable_ollama = os.getenv("MAX_DISABLE_OLLAMA", "").lower() in ("true", "1", "yes")
         self.alert_thresholds = {
             "task_failure_rate_pct": 10,
@@ -163,9 +167,22 @@ class EmpireOrchestrator:
     # ── OpenClaw Delegation ─────────────────────────────────────────────────────
 
     async def delegate_to_openclaw(self, task: dict) -> dict:
-        """Dispatch a task to OpenClaw for execution."""
+        """Dispatch a task to OpenClaw for execution.
+
+        Sprint 1d-fix: was calling `dispatch_to_openclaw(task)` which doesn't
+        exist (the real symbols are `_dispatch_to_openclaw(prompt: str)`
+        in openclaw_worker and `dispatch_desk_task_to_openclaw(desk_id,
+        task_title, task_description, timeout)` in routers.openclaw_bridge).
+        Now uses the proper bridge entry point.
+        """
         try:
-            result = await dispatch_to_openclaw(task)
+            title = f"{task.get('type', 'orchestrator_task')}"
+            description = json.dumps(task)
+            result = await dispatch_desk_task_to_openclaw(
+                desk_id="orchestrator",
+                task_title=title,
+                task_description=description,
+            )
             return {"success": True, "result": result}
         except Exception as e:
             return {"success": False, "error": str(e)}
