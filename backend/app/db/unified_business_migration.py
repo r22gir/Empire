@@ -291,6 +291,43 @@ def create_all_tables(conn: sqlite3.Connection):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_qli_business ON quote_line_items(business_unit)")
     conn.commit()
 
+    # ---------------------------------------------------------------------
+    # Sprint 1d micro-fix: task_activity had FOREIGN KEY (task_id)
+    # REFERENCES tasks(id) which blocked the openclaw_bridge from
+    # persisting results (it logs activity for OpenClaw task IDs
+    # like "oc-desk-orchestrator-..." that aren't in `tasks`). The
+    # table is an activity log, not a strict child of `tasks` —
+    # drop the FK constraint. Idempotent (CREATE TABLE ... replaces
+    # only if FK still present; data preserved via INSERT...SELECT).
+    # ---------------------------------------------------------------------
+    cur = conn.execute("SELECT sql FROM sqlite_master WHERE name='task_activity'")
+    row = cur.fetchone()
+    if row and row[0] and "REFERENCES tasks(id)" in row[0]:
+        logger.info("Sprint 1d micro-fix: dropping FK on task_activity.task_id")
+        # Copy existing rows, drop and re-create without the FK.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS task_activity_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                actor TEXT NOT NULL,
+                action TEXT NOT NULL,
+                detail TEXT,
+                metadata TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            INSERT INTO task_activity_new
+                (id, task_id, actor, action, detail, metadata, created_at)
+            SELECT id, task_id, actor, action, detail, metadata, created_at
+            FROM task_activity
+        """)
+        conn.execute("DROP TABLE task_activity")
+        conn.execute("ALTER TABLE task_activity_new RENAME TO task_activity")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_task ON task_activity(task_id)")
+        conn.commit()
+        logger.info("task_activity FK dropped; data preserved")
+
     logger.info("All unified business tables created successfully")
 
 

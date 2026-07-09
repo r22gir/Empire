@@ -48,7 +48,7 @@ async def check_service(url: str) -> bool:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.get(url)
-            return r.ok
+            return r.is_success
     except Exception:
         return False
 
