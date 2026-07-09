@@ -534,6 +534,135 @@ def create_activity(lead_id: int, act: ActivityCreate):
     return {"activity": _dict(row)}
 
 
+# ── LeadForge → ForgeCRM Promotion (Sprint 1d Item 4) ─────────────
+
+@router.post("/{lead_id}/promote")
+def promote_lead_to_forgecrm(lead_id: int):
+    """Sprint 1d Item 4: promote a LeadForge lead to ForgeCRM customer.
+
+    Path: /api/v1/leads/{lead_id}/promote
+    (Live router prefix is /leads; sprint spec said /leadforge/leads/{id}/promote —
+    non-breaking deviation documented in the apply report.)
+
+    Business-scoped: lf_leads.business_unit → customers.business.
+    Dedupe on email (case-insensitive LOWER) OR phone (digits-only
+    normalization on BOTH sides; skip phone-match when normalized <7 digits).
+    Re-promote is a no-op: returns "already_promoted", no duplicate
+    customer insert, no duplicate lf_activities row. Promotion recorded
+    in lf_activities (type='forge_crm_promoted').
+
+    _db() is a context manager that commits on successful exit (leadforge.py
+    line 38: conn.commit() after yield). All writes inside the with-block
+    are committed when this function returns cleanly.
+    """
+    with _db() as conn:
+        lead = conn.execute("SELECT * FROM lf_leads WHERE id = ?", (lead_id,)).fetchone()
+        if not lead:
+            raise HTTPException(404, f"Lead {lead_id} not found")
+        lead_d = _dict(lead)
+
+        # ── Re-promote short-circuit (FIX 1: same field shape as main return) ──
+        if lead_d.get("customer_id"):
+            existing = conn.execute(
+                "SELECT * FROM customers WHERE id = ?",
+                (lead_d["customer_id"],),
+            ).fetchone()
+            if existing:
+                existing_d = _dict(existing)
+                return {
+                    "promote_outcome": "already_promoted",
+                    "dedupe_outcome": "matched",
+                    "lead_id": lead_id,
+                    "customer_id": existing_d["id"],
+                    "customer": existing_d,
+                    "store": "forge_crm",
+                    "engine": "leadforge_promote_v1",
+                    "business": existing_d.get("business") or lead_d.get("business_unit") or "empire",
+                }
+
+        # ── Build customer fields ──
+        name = " ".join(filter(None, [lead_d.get("first_name"), lead_d.get("last_name")])).strip() or None
+        email = (lead_d.get("email") or "").strip() or None
+        phone_raw = (lead_d.get("phone") or "").strip() or None
+        # FIX 3: phone normalization — digits only, used for dedupe (not stored)
+        phone_digits = "".join(c for c in phone_raw if c.isdigit()) if phone_raw else ""
+        address = lead_d.get("address")
+        company = lead_d.get("company")
+        business = lead_d.get("business_unit") or "empire"
+        source = lead_d.get("source") or "leadforge"
+
+        # ── FIX 4: email dedupe case-insensitive (LOWER(email) = LOWER(?)) ──
+        existing = None
+        if email:
+            existing = conn.execute(
+                "SELECT * FROM customers WHERE LOWER(email) = LOWER(?) LIMIT 1",
+                (email,),
+            ).fetchone()
+
+        # ── FIX 3: phone dedupe — digits-only normalization on BOTH sides ──
+        # Skip when <7 digits (too short to be a real phone number).
+        if not existing and phone_digits and len(phone_digits) >= 7:
+            existing = conn.execute(
+                """SELECT * FROM customers
+                   WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone, '(', ''), ')', ''), ' ', ''), '-', '') = ?
+                   LIMIT 1""",
+                (phone_digits,),
+            ).fetchone()
+
+        if existing:
+            customer_id = existing["id"]
+            dedupe_outcome = "matched"
+            customer = _dict(existing)
+        else:
+            cur = conn.execute(
+                """INSERT INTO customers
+                   (name, email, phone, address, company, type, source, business, notes)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (name, email, phone_raw, address, company, "residential", source, business,
+                 f"Promoted from LeadForge lead #{lead_id}"),
+            )
+            # NOTE: customers.id is a TEXT hex (default = lower(hex(randomblob(8))))
+            # not the SQLite rowid. lastrowid returns the rowid, so we
+            # SELECT by rowid to get the actual stored id column value.
+            customer_id = cur.lastrowid
+            inserted = conn.execute(
+                "SELECT * FROM customers WHERE rowid = ?", (customer_id,)
+            ).fetchone()
+            customer_id = inserted["id"]  # now the real TEXT id
+            dedupe_outcome = "created"
+            customer = _dict(inserted)
+
+        # ── Link lead to customer ──
+        conn.execute(
+            "UPDATE lf_leads SET customer_id = ?, updated_at = datetime('now') WHERE id = ?",
+            (customer_id, lead_id),
+        )
+
+        # ── Record activity (FIX 2: datetime('now') in SQL, not as param) ──
+        conn.execute(
+            """INSERT INTO lf_activities
+               (lead_id, type, channel, subject, content, ai_generated, status,
+                scheduled_at, completed_at)
+               VALUES (?,?,?,?,?,?,?, NULL, datetime('now'))""",
+            (lead_id, "forge_crm_promoted", "internal",
+             f"Promoted lead #{lead_id} to ForgeCRM customer {customer_id}",
+             f"dedupe_outcome={dedupe_outcome}; customer_id={customer_id}; "
+             f"business={business}; phone_digits={phone_digits or 'none'}",
+             0, "completed"),
+        )
+
+    return {
+        "promote_outcome": "promoted",
+        "dedupe_outcome": dedupe_outcome,
+        "lead_id": lead_id,
+        "customer_id": customer_id,
+        "customer": customer,
+        "store": "forge_crm",
+        "engine": "leadforge_promote_v1",
+        "business": business,
+    }
+
+
 # ── AI Endpoints (stubs — realistic placeholders) ────────────────────
 
 @router.post("/ai/find-prospects")

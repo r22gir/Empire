@@ -708,6 +708,43 @@ def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     return ToolResult(tool="get_quote", success=True, result=q)
 
 
+# ── LEADFORGE → FORGECRM PROMOTION TOOL (Sprint 1d Item 4) ─────────
+
+@tool("promote_lead_to_forgecrm")
+def _promote_lead_to_forgecrm(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1d Item 4: promote a LeadForge lead to ForgeCRM customer.
+
+    Path: POST /api/v1/leads/{lead_id}/promote (live router prefix is /leads;
+    sprint spec said /leadforge/leads — non-breaking deviation documented
+    in the apply report).
+
+    Honest payload (per Item 2 sprint brief): returns
+    promote_outcome (promoted | already_promoted),
+    dedupe_outcome (matched | created),
+    store, engine, business, plus the customer snapshot. Dedupe on
+    email (LOWER) OR phone (digits-only normalization on both sides;
+    skip phone-match when normalized <7 digits). Re-promote is a no-op.
+    """
+    lead_id = params.get("lead_id")
+    if not lead_id:
+        return ToolResult(tool="promote_lead_to_forgecrm", success=False,
+                         error="lead_id required")
+    try:
+        import httpx
+        with httpx.Client(timeout=30) as c:
+            r = c.post(f"http://localhost:8000/api/v1/leads/{lead_id}/promote")
+        if r.status_code == 404:
+            return ToolResult(tool="promote_lead_to_forgecrm", success=False,
+                             error=f"Lead {lead_id} not found")
+        if r.status_code != 200:
+            return ToolResult(tool="promote_lead_to_forgecrm", success=False,
+                             error=f"API error: {r.status_code} {r.text[:200]}")
+        return ToolResult(tool="promote_lead_to_forgecrm", success=True, result=r.json())
+    except Exception as e:
+        return ToolResult(tool="promote_lead_to_forgecrm", success=False,
+                         error=f"{type(e).__name__}: {e}")
+
+
 # ── QUOTE BUILDER TOOL ─────────────────────────────────────────────
 
 @tool("open_quote_builder")
@@ -3929,6 +3966,17 @@ If a tool call fails with "Unknown tool", check the name against this list.
 State machine: `draft → founder_review → sent → accepted → in_production → completed` (plus `cancelled` from any non-terminal). Once `sent`, prices are immutable.
 - **submit_quote_for_review** — Move a draft into the founder_review queue. Agent-level (access_level=1). Transition: draft → founder_review.
   `{"tool": "submit_quote_for_review", "quote_id": "abc123", "changed_by": "max-agent", "reason": "ready for review"}`
+- **promote_lead_to_forgecrm** — Sprint 1d Item 4: promote a LeadForge
+  lead to ForgeCRM. Dedupe on email (case-insensitive LOWER) or phone
+  (digits-only normalization on both sides; skip phone-match when
+  normalized <7 digits). Re-promote is a no-op (returns
+  already_promoted; no duplicate customer insert, no duplicate
+  lf_activities row). Business-scoped (lf_leads.business_unit →
+  customers.business). Returns honest payload with promote_outcome,
+  dedupe_outcome, store="forge_crm", engine, business, plus customer
+  snapshot. Use when the founder says "promote this lead" / "add to
+  CRM" / "make them a customer" / "convert to customer".
+  `{"tool": "promote_lead_to_forgecrm", "lead_id": 42}`
 - **list_quotes_awaiting_review** — List all founder_review quotes plus legacy `proposal` quotes (tagged `pending_migration: true`). Agent-level (access_level=1). Use this — not `search_quotes` — when the user asks for "quotes awaiting review", "in my queue", "what needs approval", etc.
   `{"tool": "list_quotes_awaiting_review", "business_unit": "workroom"}`
 - **show_quote_for_review** — Show a quote's full line items with proposed vs final + delta + state_metadata. Agent-level.

@@ -12,6 +12,7 @@ Does NOT modify routing blindly — exposes metrics for smarter routing decision
 """
 import json
 import logging
+import os
 import re
 import uuid
 
