@@ -19,7 +19,7 @@ OPENCLAW_URL = os.getenv("OPENCLAW_URL", "http://localhost:7878").rstrip("/")
 DB_PATH = Path(
     os.getenv(
         "OPENCLAW_DB_PATH",
-        str(Path.home() / "empire-repo-main" / "backend" / "data" / "empire.db"),
+        os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db")),
     )
 )
 # HEARTBEAT_PATH default preserved at the legacy location because the live
