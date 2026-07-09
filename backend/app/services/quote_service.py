@@ -795,50 +795,12 @@ def delete_line_item(quote_id: str, item_id: int) -> dict:
 
 
 # ── Status Transitions ─────────────────────────────────────────
-
-# Legacy state map — kept for the pre-existing transition_quote function
-# (still used by the legacy POST /{quote_id}/approve route, etc.).
-# Sprint 1c introduced a NEW state machine above (VALID_TRANSITIONS at line
-# 99 with founder_review state); this dict is intentionally kept separate
-# to avoid name shadowing. New code uses the new dict; old code uses this.
-LEGACY_VALID_TRANSITIONS = {
-    'draft': ['sent', 'cancelled'],
-    'sent': ['approved', 'cancelled', 'draft'],
-    'approved': ['ordered', 'cancelled'],
-    'ordered': ['in_production', 'cancelled'],
-    'in_production': ['completed', 'cancelled'],
-    'completed': ['cancelled'],
-    'cancelled': ['draft'],
-}
-
-
-def transition_quote(quote_id: str, new_status: str, changed_by: str = 'api') -> dict:
-    with get_db() as conn:
-        row = conn.execute("SELECT status FROM quotes_v2 WHERE id = ?", (quote_id,)).fetchone()
-        if not row:
-            return None
-        current = row[0]
-        if new_status not in LEGACY_VALID_TRANSITIONS.get(current, []):
-            raise ValueError(f"Cannot transition from {current} to {new_status}")
-
-        now = datetime.now().isoformat()
-        extra = {}
-        if new_status == 'sent':
-            extra['sent_at'] = now
-        elif new_status == 'approved':
-            extra['accepted_at'] = now
-
-        sets = ["status = ?", "updated_at = ?"]
-        params = [new_status, now]
-        for k, v in extra.items():
-            sets.append(f"{k} = ?")
-            params.append(v)
-        params.append(quote_id)
-
-        conn.execute(f"UPDATE quotes_v2 SET {', '.join(sets)} WHERE id = ?", params)
-        _audit_log(conn, 'quote', quote_id, 'status_change', 'status', current, new_status, changed_by)
-
-    return get_quote(quote_id)
+# NOTE: LEGACY_VALID_TRANSITIONS and transition_quote() were removed
+# in sprint 1d Phase C. They implemented a draft→sent→approved→ordered
+# state machine that has been superseded by the new VALID_TRANSITIONS
+# map above (with founder_review state, per sprint 1c). The legacy
+# routes /send, /approve, /order in quotes_v2.py that called
+# transition_quote() have also been removed (they were dead code).
 
 
 # ── Stats ──────────────────────────────────────────────────────

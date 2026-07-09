@@ -25,7 +25,7 @@ import httpx
 
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    str(Path(__file__).resolve().parent.parent.parent.parent / "data" / "empire.db"),
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 
 # Read at call time, not import time (dotenv may not be loaded yet at import)

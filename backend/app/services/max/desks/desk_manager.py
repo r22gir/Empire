@@ -141,7 +141,7 @@ class AIDeskManager:
         """Sync DeskTask result back to the SQLite tasks table."""
         try:
             import sqlite3, os
-            db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+            db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
             conn = sqlite3.connect(db_path)
             state_map = {
                 TaskState.COMPLETED: "done",

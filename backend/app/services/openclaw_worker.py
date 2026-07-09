@@ -23,7 +23,7 @@ from app.services.max.openclaw_gate import check_openclaw_gate, write_openclaw_w
 
 log = logging.getLogger("openclaw_worker")
 
-DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-repo/backend/data/empire.db"))
+DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
 OPENCLAW_URL = "http://localhost:7878"
 OPENCLAW_TIMEOUT = 300  # 5 min per task
 CODE_TASK_TIMEOUT = int(os.getenv("OPENCLAW_CODE_TASK_TIMEOUT", str(OPENCLAW_TIMEOUT)))
@@ -1173,8 +1173,7 @@ async def _process_task(task: dict):
 REPO_DIR = os.path.expanduser("~/empire-repo")
 
 # Files that must NEVER be modified by automated processes
-PROTECTED_PATTERNS = [".env", ".git/", "node_modules/", "backend/data/empire.db",
-                      "backend/data/", "main.py", "start-empire.sh", "__pycache__/"]
+PROTECTED_PATTERNS = [".env", ".git/", "node_modules/", "main.py", "start-empire.sh", "__pycache__/"]
 
 
 def _is_protected(filepath: str) -> bool:

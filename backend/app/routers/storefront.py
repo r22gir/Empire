@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/storefront", tags=["storefront"])
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
 
 
 # ── Database helpers ────────────────────────────────────────────

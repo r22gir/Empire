@@ -24,8 +24,12 @@ logger = logging.getLogger("max.evaluation")
 # ── Database path ────────────────────────────────────────────────────
 
 def _get_db_path() -> Path:
-    """DB stored at backend/data/empire.db."""
-    return Path(__file__).resolve().parents[3] / "data" / "empire.db"
+    """Sprint 1d Phase C: honor EMPIRE_TASK_DB env first; canonical
+    fallback is ~/empire-data/empire.db (the live DB)."""
+    env = os.getenv("EMPIRE_TASK_DB")
+    if env:
+        return Path(env)
+    return Path.home() / "empire-data" / "empire.db"
 
 
 # ── Schema initialization ────────────────────────────────────────────

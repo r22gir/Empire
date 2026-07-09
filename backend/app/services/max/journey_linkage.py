@@ -57,7 +57,7 @@ logger = logging.getLogger("max.journey_linkage")
 # stable across restarts; we resolve it the same way the rest of
 # the app does. If a different DB path is configured (env var), we
 # honor it.
-DEFAULT_DB_PATH = "/home/rg/empire-repo/backend/data/empire.db"
+DEFAULT_DB_PATH = os.getenv("EMPIRE_TASK_DB", str(Path.home() / "empire-data" / "empire.db"))
 BACKFILL_AUDIT_PATH = "/home/rg/empire-repo-main/backend/data/journey_backfill_audit.json"
 
 

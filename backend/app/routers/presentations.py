@@ -10,7 +10,7 @@ from typing import Optional
 
 router = APIRouter()
 
-DB_PATH = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+DB_PATH = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
 
 
 def _get_db():

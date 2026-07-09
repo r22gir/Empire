@@ -257,33 +257,15 @@ async def calculate_totals(quote_id: str):
 
 
 # ── Status Transitions ─────────────────────────────────────────
-
-@router.post("/{quote_id}/send")
-async def send_quote(quote_id: str):
-    """Mark quote as sent."""
-    try:
-        return quote_service.transition_quote(quote_id, 'sent', 'api')
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@router.post("/{quote_id}/approve")
-async def approve_quote(quote_id: str):
-    """Mark quote as approved."""
-    try:
-        return quote_service.transition_quote(quote_id, 'approved', 'api')
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-
-@router.post("/{quote_id}/order")
-async def order_quote(quote_id: str):
-    """Mark quote as ordered (deposit confirmed)."""
-    try:
-        return quote_service.transition_quote(quote_id, 'ordered', 'api')
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
+# NOTE: /send, /approve, /order below were the LEGACY transitions removed
+# in sprint 1d Phase C. They used transition_quote (also removed) which
+# operated on a draft→sent state machine that no longer exists. The new
+# state machine (sprint 1c) replaces these with:
+#   - /submit-for-review (draft → founder_review)
+#   - /approve (founder_review → sent) — founder only, requires PIN
+#   - /reject  (founder_review → draft)
+# Lifecycle endpoints /to-work-order and /to-invoice below are
+# unaffected.
 
 # ── Cross-entity creation (Block 4 lifecycle) ──────────────────
 

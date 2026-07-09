@@ -129,7 +129,7 @@ def _log_quality_metric(quality_result, model_used: str, channel: str, response_
     """Log quality gate result + response time to database for metrics."""
     try:
         import sqlite3
-        db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+        db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
         conn = sqlite3.connect(db_path)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS quality_metrics (
@@ -4488,7 +4488,7 @@ async def get_desk_daily_report():
 async def get_quality_metrics():
     """Get quality gate metrics for today."""
     import sqlite3
-    db_path = os.path.expanduser("~/empire-repo/backend/data/empire.db")
+    db_path = os.getenv("EMPIRE_TASK_DB", os.path.expanduser("~/empire-data/empire.db"))
     try:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row

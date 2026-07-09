@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    str(Path(__file__).resolve().parent.parent.parent.parent / "data" / "empire.db"),
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 
 

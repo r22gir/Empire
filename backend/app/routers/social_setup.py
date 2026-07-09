@@ -24,7 +24,7 @@ router = APIRouter(tags=["social-setup"])
 
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    str(Path(__file__).resolve().parent.parent.parent / "data" / "empire.db"),
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 ENV_PATH = Path(__file__).resolve().parent.parent.parent / ".env"
 GRAPH_API = "https://graph.facebook.com/v21.0"

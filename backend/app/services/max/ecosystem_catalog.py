@@ -501,7 +501,7 @@ EMPIRE_CATALOG = {
 
     "databases": {
         "empire.db": {
-            "path": "backend/data/empire.db",
+            "path": "~/empire-data/empire.db",
             "tables": 17,
             "key_tables": {
                 "tasks": {"rows": 139, "purpose": "All desk tasks with status tracking"},
