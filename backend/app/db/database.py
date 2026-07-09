@@ -9,10 +9,7 @@ from contextlib import contextmanager
 
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    os.path.join(
-        os.getenv("EMPIRE_DATA_DIR", str(Path(__file__).resolve().parent.parent.parent / "data")),
-        "empire.db",
-    ),
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 
 

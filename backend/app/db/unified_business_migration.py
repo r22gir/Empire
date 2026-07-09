@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    str(Path(__file__).resolve().parent.parent.parent / "data" / "empire.db")
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 
 QUOTES_DIR = str(quotes_data_dir())
@@ -30,9 +30,11 @@ QUOTES_DIR = str(quotes_data_dir())
 def get_conn():
     # Sprint 1b (Option A): read EMPIRE_TASK_DB at call time so any consumer
     # of get_conn() targets the live DB regardless of import-time env state.
-    # Falls back to backend/data/empire.db for legacy/dev callers.
+    # Falls back to ~/empire-data/empire.db (the canonical live DB path)
+    # for legacy/dev callers. backend/data/empire.db is no longer used
+    # (it was the stale mirror path; deleted in sprint 1d Phase C).
     db_path = os.getenv("EMPIRE_TASK_DB") or str(
-        Path(__file__).resolve().parent.parent.parent / "data" / "empire.db"
+        Path.home() / "empire-data" / "empire.db"
     )
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

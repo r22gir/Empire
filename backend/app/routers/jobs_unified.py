@@ -25,7 +25,7 @@ router = APIRouter(tags=["jobs-unified"])
 
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    str(Path(__file__).resolve().parent.parent.parent / "data" / "empire.db"),
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 QUOTES_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "quotes"
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
