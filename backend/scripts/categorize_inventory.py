@@ -21,7 +21,7 @@ from pathlib import Path
 # Resolve DB path (same as backend/app/db/database.py)
 DB_PATH = os.getenv(
     "EMPIRE_TASK_DB",
-    str(Path(__file__).resolve().parent.parent / "data" / "empire.db")
+    str(Path.home() / "empire-data" / "empire.db"),
 )
 
 # ── Category rules (same as inventory router) ─────────────────────
