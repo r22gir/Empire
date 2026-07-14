@@ -34,7 +34,29 @@ DRAWING_KEYWORDS = (
     "pdf drawing",
     "bench drawing",
     "cad",
+    # Sprint 1d Phase A Fix #2: founder re-ask keywords — so "redraw the
+    # Willard bench", "regenerate as 4-view", "redo with the new dims",
+    # "new version", "same version" all route to drawing-router
+    # instead of silently falling through to plain chat.
+    "redraw",
+    "regenerate",
+    "redo",
+    "new version",
+    "same version",
 )
+
+
+def clear_handoff_state() -> None:
+    """Sprint 1d Phase A Fix #3: zero any module-level state.
+
+    Called by chat_with_max at the start of every turn. Belt-and-suspenders
+    for any future state-creep that would otherwise leak dims/dims-keyed
+    items between turns. The structured-question flow (`handoff.missing`)
+    is the proper way to ask the founder for missing data; this helper
+    only ensures no stale dataclass survives across turns.
+    """
+    global _LAST_HANDOFF  # noqa: defined lazily below if needed
+    _LAST_HANDOFF = None
 
 # Drawing-specific multi-token "plan" phrases. Bare "plan" is intentionally NOT
 # in DRAWING_KEYWORDS: it appears in phrases like "plan mode", "make a plan",
@@ -509,13 +531,40 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
         "output_format": handoff.output_format,
     }
     if item_type == "bench":
-        payload.update({
+        # Sprint 1d Phase A Fix #1: NEVER invent default dims (per Standard
+        # Hard Rule 1). Each of width/depth/seat_height/back_height is taken
+        # from the founder's message only — if any is missing, it's added
+        # to handoff.missing so the structured-question flow fires.
+        # Note: `back_height` falls back to `height` ONLY when the founder
+        # explicitly supplied a "height" value (e.g. "the bench is 17 tall"),
+        # because users often mean seat-to-top-of-back. We still flag the
+        # missing key (back_height) if neither was supplied.
+        _supplied_back_height = dimensions.get("back_height")
+        _supplied_height = dimensions.get("height")
+        _back_height_value = (
+            _supplied_back_height
+            if _supplied_back_height is not None and _supplied_back_height != ""
+            else (_supplied_height if _supplied_height not in (None, "") else None)
+        )
+        _bench_dims = {
             "shape": _shape_for_text(message),
-            "width": dimensions.get("width", "120\"").rstrip('"'),
-            "depth": dimensions.get("depth", "22\"").rstrip('"'),
-            "seat_height": dimensions.get("seat_height", "18\"").rstrip('"'),
-            "back_height": dimensions.get("back_height", dimensions.get("height", "36\"")).rstrip('"'),
-        })
+            "width": (dimensions.get("width", "") or "").rstrip('"') or None,
+            "depth": (dimensions.get("depth", "") or "").rstrip('"') or None,
+            "seat_height": (dimensions.get("seat_height", "") or "").rstrip('"') or None,
+            "back_height": (
+                _back_height_value.rstrip('"')
+                if isinstance(_back_height_value, str) and _back_height_value
+                else _back_height_value
+            ),
+        }
+        # Drop Nones so the renderer never gets placeholders.
+        _bench_dims = {k: v for k, v in _bench_dims.items() if v}
+        if not _bench_dims:
+            handoff.missing.extend(
+                ["bench dimensions (width / depth / seat_height / back_height)"]
+            )
+        else:
+            payload.update(_bench_dims)
     if image_filename:
         payload["source_image"] = image_filename
 

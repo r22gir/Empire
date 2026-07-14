@@ -455,6 +455,7 @@ def runtime_truth_failures(
     tool_results: list[Any] | None,
     user_message: str | None = None,
     response_text: str | None = None,
+    warnings: list[str] | None = None,
 ) -> list[str]:
     """Return a list of truth-failure reasons for the given response.
 
@@ -481,6 +482,20 @@ def runtime_truth_failures(
         claim = _response_has_operational_claim(response_text)
         if claim and not _has_proof(tool_results):
             failures.append(_claim_failure_reason(claim))
+
+    # Failure mode 3 (Sprint 1d Phase A): theater detection. WARNING only.
+    # The detector flags chat responses that contain {"tool": ...} JSON snippets
+    # for tools that were never actually executed. We add to a separate
+    # warnings[] (NOT failures[]) so the response is never blocked.
+    # The caller is responsible for surfacing warnings[] in response metadata.
+    if response_text and tool_results is not None:
+        from app.services.max.theater_detector import detect_fabricated_tool_text
+        fabrication = detect_fabricated_tool_text(
+            response_text, [t.get("tool") for t in tool_results]
+        )
+        if fabrication:
+            warnings.append(fabrication)
+            logger.warning(fabrication)
 
     return failures
 

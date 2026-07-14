@@ -2145,10 +2145,42 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             metadata=_response_metadata(request.channel, skill_used="image_availability_check"),
         )
 
+    # Sprint 1d Phase A Fix #3 — clear any stale handoff state at the start
+    # of every chat turn (belt-and-suspenders for any future state-creep).
+    try:
+        from app.services.max.drawing_intent import clear_handoff_state
+        clear_handoff_state()
+    except Exception:
+        pass
+
+    # Sprint 1d Phase A Fix #2 — check for a pending drawing job (resume).
+    # Cancel keywords: drop pending, skip drawing route entirely.
+    # Otherwise: if a continuation reply matches, merge dims and use the
+    # merged snapshot; if it doesn't match, route normally and KEEP pending.
+    merged_handoff = None
+    if request.conversation_id and request.channel:
+        try:
+            from app.services.max.drawing_pending import (
+                is_cancel_message, clear_pending, get_pending,
+                is_continuation_reply, merge_founder_reply, set_pending,
+            )
+            msg_text = request.message or ""
+            if is_drawing_intent(msg_text) and is_cancel_message(msg_text):
+                clear_pending(request.conversation_id, request.channel)
+            pending = get_pending(request.conversation_id, request.channel)
+            if pending and is_continuation_reply(msg_text, pending.get("missing", [])):
+                merged_handoff = merge_founder_reply(pending, msg_text)
+        except Exception as exc:
+            logger.debug(f"pending_drawing_jobs lookup failed (non-fatal): {exc}")
+
     drawing_handoff = (
-        build_drawing_handoff(request.message, image_filename=request.image_filename)
-        if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
-        else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
+        merged_handoff
+        if merged_handoff is not None
+        else (
+            build_drawing_handoff(request.message, image_filename=request.image_filename)
+            if not _explicit_no_drawing_router(request.message) and not _prefer_archiveforge_over_drawing(request.message)
+            else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
+        )
     )
     if drawing_handoff.is_drawing_intent:
         # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
@@ -2174,6 +2206,16 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
             if drawing_result.success
             else f"Drawing workflow failed: {drawing_result.error}"
         )
+        # Sprint 1d Phase A Fix #2 — persist the snapshot if there are
+        # still missing dims (so the next founder reply can resume).
+        try:
+            from app.services.max.drawing_pending import set_pending
+            if drawing_handoff.missing and drawing_handoff.tool_payload:
+                snap = dict(drawing_handoff.tool_payload)
+                snap["missing"] = list(drawing_handoff.missing)
+                set_pending(request.conversation_id, request.channel, snap)
+        except Exception:
+            pass
         return ChatResponse(
             response=response_text,
             model_used="drawing-router",
