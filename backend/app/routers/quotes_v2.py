@@ -284,7 +284,25 @@ async def quote_to_work_order(quote_id: str):
 
 @router.post("/{quote_id}/to-invoice")
 async def quote_to_invoice(quote_id: str):
-    """Create an invoice from a completed quote."""
+    """Create an invoice from a quote.
+
+    Sprint 1d Payment Phase 1: gated to quote.status in
+    {sent, accepted, in_production, completed} (the canonical
+    customer-facing states). Draft / founder_review / cancelled /
+    proposal states return HTTP 409 — use /submit-for-review +
+    /approve first.
+    """
+    q = quote_service.get_quote(quote_id)
+    if not q:
+        raise HTTPException(404, f"Quote {quote_id} not found")
+    allowed = {"sent", "accepted", "in_production", "completed"}
+    if q.get("status") not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"quote is in status {q.get('status')!r}; "
+                    f"to-invoice requires one of {sorted(allowed)}. "
+                    f"Use /submit-for-review + /approve first."),
+        )
     try:
         from app.services.lifecycle_service import create_invoice_from_quote
         inv = create_invoice_from_quote(quote_id)

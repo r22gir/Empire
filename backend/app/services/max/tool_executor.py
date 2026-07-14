@@ -1636,6 +1636,43 @@ def _show_quote_for_review(params: dict, desk: Optional[str] = None) -> ToolResu
     })
 
 
+@tool("create_invoice_from_quote")
+def _create_invoice_from_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """Sprint 1d Payment Phase 1: explicit quote→invoice action.
+
+    Calls POST /quotes-v2/{id}/to-invoice. The endpoint is gated to
+    quote.status ∈ {sent, accepted, in_production, completed} — a draft
+    or founder_review quote returns HTTP 409 (use /submit-for-review +
+    /approve first).
+
+    Returns honest payload: invoice snapshot from canonical invoices
+    table, store="quotes_v2", engine="lifecycle_v1".
+    """
+    quote_id = params.get("quote_id", "")
+    if not quote_id:
+        return ToolResult(tool="create_invoice_from_quote", success=False,
+                         error="quote_id required")
+    try:
+        import httpx
+        with httpx.Client(timeout=30) as c:
+            r = c.post(f"http://localhost:8000/api/v1/quotes-v2/{quote_id}/to-invoice")
+        if r.status_code == 404:
+            return ToolResult(tool="create_invoice_from_quote", success=False,
+                             error=f"Quote {quote_id} not found")
+        if r.status_code == 409:
+            return ToolResult(
+                tool="create_invoice_from_quote", success=False,
+                error=f"gate rejected: {r.json().get('detail', 'unknown')}",
+            )
+        if r.status_code != 200:
+            return ToolResult(tool="create_invoice_from_quote", success=False,
+                             error=f"API error: {r.status_code} {r.text[:200]}")
+        return ToolResult(tool="create_invoice_from_quote", success=True, result=r.json())
+    except Exception as e:
+        return ToolResult(tool="create_invoice_from_quote", success=False,
+                         error=f"{type(e).__name__}: {e}")
+
+
 @tool("approve_quote")
 def _approve_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Sprint 1c: founder-only transition founder_review → sent.
@@ -4106,6 +4143,10 @@ When analyzing a photo of windows or furniture, use photo_to_quote to create and
 - **reset_max_state** — Reset MAX: clear caches, reload .env, verify OpenClaw. FOUNDER ONLY.
   `{"tool": "reset_max_state"}`
   Triggers: "MAX reset", "reset yourself", "clear your cache", "reload config", "refresh yourself", "start fresh"
+
+### Payment Phase 1 Tools (Sprint 1d)
+- **create_invoice_from_quote** — Explicit quote→invoice action. Calls `POST /api/v1/quotes-v2/{id}/to-invoice`. The endpoint is GATED to quote.status ∈ {sent, accepted, in_production, completed}. A draft or founder_review quote returns HTTP 409 (use /submit-for-review + /approve first). Returns honest payload: invoice snapshot from canonical invoices table, store="quotes_v2", engine="lifecycle_v1". Use when the founder says "create an invoice from this quote", "bill the Willard", "invoice the bench + panel".
+  `{"tool": "create_invoice_from_quote", "quote_id": "4d9b1d03"}`
 
 ### TOOL DISCIPLINE — READ BEFORE EVERY RESPONSE
 - NEVER fabricate data. All statistics, charts, and numbers must come from real tool results.

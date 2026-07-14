@@ -195,8 +195,19 @@ class CheckoutRequest(BaseModel):
 
 
 class InvoiceLinkRequest(BaseModel):
-    """Generate a one-time payment link for a workroom invoice."""
+    """Generate a one-time payment link for an invoice (WoodCraft + Workroom).
+
+    Sprint 1d Payment Phase 1: supports full / percentage / fixed
+    partial amounts. All amounts resolve server-side. Business identity
+    ('workroom' | 'woodcraft') is propagated to the Stripe checkout
+    session via metadata → webhook → canonical payments_v2.
+    """
     invoice_id: str
+    # amount_mode: 'full' (default) charges the entire balance_due;
+    # 'percentage' charges amount_value percent (0 < x <= 100);
+    # 'fixed' charges exactly amount_value dollars.
+    amount_mode: str = "full"
+    amount_value: float = 0
     success_url: str = "https://studio.empirebox.store/payments/invoice-success?session_id={CHECKOUT_SESSION_ID}"
     cancel_url: str = "https://studio.empirebox.store/payments/invoice-cancel"
 
@@ -242,8 +253,21 @@ async def _notify_emergency(title: str, message: str, context: dict = None):
 
 
 def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "card",
-                           stripe_session_id: str = None):
-    """Update invoice status and record payment in finance DB."""
+                           stripe_session_id: str = None,
+                           amount_cents: int = None,
+                           business_unit: str = None):
+    """Update invoice status and record payment in finance DB.
+
+    Sprint 1d Payment Phase 1:
+      - Inserts into canonical `payments_v2` (NOT legacy `payments`)
+      - `stripe_session_id` triggers idempotency: if a row with the
+        same stripe_session_id already exists, return success without
+        inserting (Stripe webhook can retry).
+      - Computes amount_paid from SUM(payments_v2.amount) and
+        sets invoice status='paid' | 'partial' based on whether balance
+        remains.
+      - Persists business_unit (from invoice row) on the payment row.
+    """
     try:
         from app.db.database import get_db, dict_row
         with get_db() as conn:
@@ -255,50 +279,82 @@ def _update_invoice_status(invoice_id: str, status: str, payment_method: str = "
             inv_dict = dict_row(inv)
 
             if status == "paid":
-                # Record payment
+                # IDEMPOTENCY: skip if stripe_session_id already in payments_v2
+                if stripe_session_id:
+                    existing = conn.execute(
+                        "SELECT 1 FROM payments_v2 WHERE stripe_session_id = ? LIMIT 1",
+                        (stripe_session_id,),
+                    ).fetchone()
+                    if existing:
+                        logger.info(
+                            f"Webhook: stripe_session_id={stripe_session_id} already in payments_v2, skip"
+                        )
+                        return True
+
+                # Use explicit amount_cents if provided (from metadata); else full balance_due
                 from datetime import date
-                amount = inv_dict.get("balance_due") or inv_dict.get("total", 0)
+                if amount_cents is not None:
+                    amount = amount_cents / 100.0
+                else:
+                    amount = inv_dict.get("balance_due") or inv_dict.get("total", 0)
+                # business_unit: prefer the param (from metadata), else read from invoice row
+                bu = business_unit or inv_dict.get("business_unit") or "workroom"
+
                 conn.execute(
-                    """INSERT INTO payments
-                       (id, invoice_id, customer_id, amount, method, reference, notes, payment_date)
-                       VALUES (lower(hex(randomblob(8))), ?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO payments_v2
+                       (payment_number, invoice_id, customer_id, amount,
+                        payment_method, payment_reference, payment_type, status,
+                        account_code, notes, business_unit,
+                        stripe_session_id, payment_date, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
+                        f"pay_{stripe_session_id[:24]}" if stripe_session_id
+                            else f"pay_{int(date.today().strftime('%Y%m%d'))}_{invoice_id[:6]}",
                         invoice_id,
                         inv_dict.get("customer_id"),
                         amount,
                         payment_method,
                         stripe_session_id or "",
-                        "Paid via Stripe",
+                        "payment",
+                        "completed",
+                        None,
+                        f"Paid via Stripe checkout.session.completed",
+                        bu,
+                        stripe_session_id or None,
                         date.today().isoformat(),
-                    )
+                        date.today().isoformat() + "T00:00:00",
+                        date.today().isoformat() + "T00:00:00",
+                    ),
                 )
 
-                # Recalculate totals
+                # Recalculate totals from canonical payments_v2
                 subtotal = inv_dict.get("subtotal", 0)
                 tax_rate = inv_dict.get("tax_rate", 0)
                 tax_amount = round(subtotal * tax_rate, 2)
                 total = round(subtotal + tax_amount, 2)
 
                 paid_row = conn.execute(
-                    "SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE invoice_id = ?",
-                    (invoice_id,)
+                    "SELECT COALESCE(SUM(amount), 0) AS total_paid FROM payments_v2 WHERE invoice_id = ?",
+                    (invoice_id,),
                 ).fetchone()
                 amount_paid = paid_row["total_paid"]
                 balance_due = round(total - amount_paid, 2)
 
+                new_status = "paid" if balance_due <= 0.005 else "partial"
                 conn.execute(
                     """UPDATE invoices SET status = ?, amount_paid = ?, balance_due = ?,
-                       paid_at = datetime('now'), updated_at = datetime('now') WHERE id = ?""",
-                    ("paid" if balance_due <= 0 else "partial", amount_paid, max(balance_due, 0), invoice_id)
+                       paid_at = CASE WHEN ? = 'paid' THEN datetime('now') ELSE paid_at END,
+                       updated_at = datetime('now') WHERE id = ?""",
+                    (new_status, amount_paid, max(balance_due, 0), new_status, invoice_id),
                 )
 
-                # Update customer total_revenue if linked
+                # Update customer total_revenue from canonical payments_v2
                 if inv_dict.get("customer_id"):
                     conn.execute(
                         """UPDATE customers SET total_revenue = (
-                             SELECT COALESCE(SUM(amount), 0) FROM payments WHERE customer_id = ?
+                             SELECT COALESCE(SUM(amount), 0) FROM payments_v2 WHERE customer_id = ?
                            ), updated_at = datetime('now') WHERE id = ?""",
-                        (inv_dict["customer_id"], inv_dict["customer_id"])
+                        (inv_dict["customer_id"], inv_dict["customer_id"]),
                     )
             else:
                 conn.execute(
@@ -446,26 +502,60 @@ async def create_checkout_session(request: Request, req: CheckoutRequest):
 @limiter.limit("10/minute")
 @router.post("/invoice-link")
 async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest):
-    """Generate a Stripe Checkout session for a one-time invoice payment."""
+    """Generate a Stripe-HOSTED Checkout session for an invoice payment.
+
+    Sprint 1d Payment Phase 1:
+      - amount_mode 'full' (default) charges the entire balance_due.
+      - amount_mode 'percentage' charges amount_value percent of balance_due.
+      - amount_mode 'fixed' charges exactly amount_value dollars.
+    All amounts resolve server-side. Business identity is propagated
+    via metadata → webhook → canonical payments_v2.
+    """
     _require_stripe()
 
-    # Look up invoice in DB
     from app.db.database import get_db, dict_row
     with get_db() as conn:
         inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (req.invoice_id,)).fetchone()
         if not inv:
             raise HTTPException(status_code=404, detail=f"Invoice {req.invoice_id} not found")
-
         inv_dict = dict_row(inv)
 
     if inv_dict.get("status") == "paid":
         raise HTTPException(status_code=400, detail="Invoice is already paid")
 
-    amount_cents = int(round((inv_dict.get("balance_due") or inv_dict.get("total", 0)) * 100))
+    total_dollars = float(inv_dict.get("total") or 0)
+    balance_dollars = float(inv_dict.get("balance_due") or total_dollars)
+
+    # Resolve amount based on mode
+    if req.amount_mode == "full":
+        amount_dollars = balance_dollars
+    elif req.amount_mode == "percentage":
+        if not (0 < req.amount_value <= 100):
+            raise HTTPException(status_code=400, detail="percentage must be 0 < x <= 100")
+        amount_dollars = round(balance_dollars * (req.amount_value / 100.0), 2)
+    elif req.amount_mode == "fixed":
+        if req.amount_value <= 0:
+            raise HTTPException(status_code=400, detail="fixed amount must be > 0")
+        amount_dollars = float(req.amount_value)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"amount_mode must be full|percentage|fixed, got {req.amount_mode!r}",
+        )
+
+    if amount_dollars > balance_dollars + 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=f"amount ${amount_dollars} exceeds outstanding balance ${balance_dollars}",
+        )
+
+    amount_cents = int(round(amount_dollars * 100))
     if amount_cents <= 0:
-        raise HTTPException(status_code=400, detail="Invoice has no outstanding balance")
+        raise HTTPException(status_code=400, detail="computed amount is 0")
 
     invoice_number = inv_dict.get("invoice_number", req.invoice_id)
+    business_unit = inv_dict.get("business_unit", "workroom")
+    payment_kind = "partial" if amount_dollars < (total_dollars - 0.01) else "full"
 
     try:
         session = stripe.checkout.Session.create(
@@ -476,7 +566,7 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
                     "unit_amount": amount_cents,
                     "product_data": {
                         "name": f"Invoice {invoice_number}",
-                        "description": f"Payment for invoice {invoice_number}",
+                        "description": f"Payment for invoice {invoice_number} ({payment_kind})",
                     },
                 },
                 "quantity": 1,
@@ -486,7 +576,10 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
             metadata={
                 "invoice_id": req.invoice_id,
                 "invoice_number": invoice_number,
-                "flow": "workroom_invoice",
+                "business_unit": business_unit,           # ← Phase 1: propagated
+                "payment_kind": payment_kind,                # ← Phase 1: 'full'|'partial'
+                "amount_cents": str(amount_cents),           # ← Phase 1: redundant safety
+                "flow": "workroom_invoice",                  # ← preserves existing handler routing
             },
         )
 
@@ -495,7 +588,10 @@ async def create_invoice_payment_link(request: Request, req: InvoiceLinkRequest)
             "session_id": session.id,
             "invoice_id": req.invoice_id,
             "invoice_number": invoice_number,
-            "amount": amount_cents / 100,
+            "amount": amount_dollars,
+            "amount_cents": amount_cents,
+            "payment_kind": payment_kind,
+            "business_unit": business_unit,
         }
     except stripe.error.StripeError as e:
         logger.error(f"Stripe invoice link error: {e}")
@@ -621,10 +717,20 @@ async def stripe_webhook(request: Request):
             invoice_id = metadata.get("invoice_id", "")
             invoice_number = metadata.get("invoice_number", "")
             if invoice_id:
+                # Sprint 1d Phase 1: read business_unit + amount_cents from
+                # metadata (set by create_invoice_payment_link) so the
+                # webhook doesn't have to fetch from Stripe again.
+                bu = metadata.get("business_unit")
+                amt_cents = None
+                mc = metadata.get("amount_cents")
+                if mc and str(mc).isdigit():
+                    amt_cents = int(mc)
                 _update_invoice_status(
                     invoice_id, "paid",
                     payment_method="card",
                     stripe_session_id=data.get("id"),
+                    amount_cents=amt_cents,
+                    business_unit=bu,
                 )
                 await _notify_internal(
                     title=f"Invoice {invoice_number} Paid",
@@ -634,6 +740,7 @@ async def stripe_webhook(request: Request):
                         "invoice_number": invoice_number,
                         "amount": data.get("amount_total", 0) / 100,
                         "stripe_session_id": data.get("id"),
+                        "business_unit": bu,
                     },
                 )
 

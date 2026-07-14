@@ -258,6 +258,26 @@ def create_all_tables(conn: sqlite3.Connection):
     CREATE INDEX IF NOT EXISTS idx_pv2_invoice ON payments_v2(invoice_id);
     CREATE INDEX IF NOT EXISTS idx_pv2_customer ON payments_v2(customer_id);
 
+    # ---------------------------------------------------------------------
+    # Sprint 1d Payment Phase 1: payments_v2 needs business_unit + stripe_session_id.
+    # webhook writes via stripe_session_id; idempotency on stripe_session_id
+    # so webhook re-fires don't create duplicates. Idempotent ALTER — safe
+    # to re-run.
+    # ---------------------------------------------------------------------
+    for _alter_sql in (
+        "ALTER TABLE payments_v2 ADD COLUMN business_unit TEXT NOT NULL DEFAULT 'workroom'",
+        "ALTER TABLE payments_v2 ADD COLUMN stripe_session_id TEXT",
+    ):
+        try:
+            conn.execute(_alter_sql)
+        except sqlite3.OperationalError:
+            pass  # column already exists / already applied
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_payments_v2_stripe_session_id "
+        "ON payments_v2(stripe_session_id) WHERE stripe_session_id IS NOT NULL"
+    )
+    conn.commit()
+
     -- Chart of Accounts
     CREATE TABLE IF NOT EXISTS chart_of_accounts (
         code TEXT PRIMARY KEY,
