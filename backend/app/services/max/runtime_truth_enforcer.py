@@ -31,10 +31,13 @@ Plain text comments, intent to run, or "I will check" do NOT count as proof.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Iterable, Optional
 
 from app.services.max.tool_result_normalizer import normalize_tool_results
+
+logger = logging.getLogger("max.runtime_truth_enforcer")
 
 
 # Tools that require specific proof fields in their result.
@@ -456,18 +459,35 @@ def runtime_truth_failures(
     user_message: str | None = None,
     response_text: str | None = None,
     warnings: list[str] | None = None,
-) -> list[str]:
-    """Return a list of truth-failure reasons for the given response.
+) -> tuple[list[str], list[str]]:
+    """Return (failures, warnings) for the given response.
 
-    Two failure modes:
+    Failures are reasons the response MUST be rewritten (tool
+    verification gaps, unsupported past-tense claims). Warnings are
+    informational only — they never block the response. The caller is
+    responsible for surfacing warnings in response metadata if it wants
+    the founder to see them.
+
+    Three failure modes:
       1. TOOL VERIFICATION FAILURE — a tool in VERIFICATION_REQUIRED_TOOLS
          ran but its result is missing required fields.
       2. GENERIC CLAIM FAILURE — the response_text contains a past-tense
          operational claim (e.g., "I checked OpenClaw") but no structured
          proof object is in tool_results.
+      3. (WARNING only, Sprint 1d Phase A) Theater detection — chat
+         response contains {"tool": ...} JSON snippets for tools that were
+         never actually executed. Added to warnings (logged + returned);
+         never blocks the response.
 
-    Returns an empty list if no failures.
+    Returns ([], []) if no failures and no warnings.
+
+    Hotfix 2026-07-15: defensive None guard for warnings — callers were
+    passing warnings=None implicitly (default), which crashed
+    .append() when theater detection fired. Now always coerced to [].
+    Return shape changed from list[str] to tuple[list[str], list[str]]
+    so callers can surface warnings in response metadata.
     """
+    warnings = warnings if warnings is not None else []
     failures: list[str] = []
 
     # Failure mode 1: tool verification failures.
@@ -477,17 +497,12 @@ def runtime_truth_failures(
             failures.append(reason)
 
     # Failure mode 2: generic operational claim without proof.
-    # This is the new behavior added on 2026-06-15.
     if response_text:
         claim = _response_has_operational_claim(response_text)
         if claim and not _has_proof(tool_results):
             failures.append(_claim_failure_reason(claim))
 
-    # Failure mode 3 (Sprint 1d Phase A): theater detection. WARNING only.
-    # The detector flags chat responses that contain {"tool": ...} JSON snippets
-    # for tools that were never actually executed. We add to a separate
-    # warnings[] (NOT failures[]) so the response is never blocked.
-    # The caller is responsible for surfacing warnings[] in response metadata.
+    # Failure mode 3 (WARNING only, Sprint 1d Phase A): theater detection.
     if response_text and tool_results is not None:
         from app.services.max.theater_detector import detect_fabricated_tool_text
         fabrication = detect_fabricated_tool_text(
@@ -497,7 +512,7 @@ def runtime_truth_failures(
             warnings.append(fabrication)
             logger.warning(fabrication)
 
-    return failures
+    return failures, warnings
 
 
 def should_halt_after_tool_failure(
@@ -506,7 +521,10 @@ def should_halt_after_tool_failure(
     response_text: str | None = None,
 ) -> bool:
     """Return True if the response should be halted / blocked due to truth failures."""
-    return bool(runtime_truth_failures(tool_results, user_message=user_message, response_text=response_text))
+    failures, _warnings = runtime_truth_failures(
+        tool_results, user_message=user_message, response_text=response_text
+    )
+    return bool(failures)
 
 
 def runtime_truth_failure_message(failures: list[str]) -> str:
@@ -522,9 +540,10 @@ def enforce_runtime_truth_response(
     user_message: str | None,
     response_text: str,
     tool_results: list[Any] | None,
-) -> str:
+) -> tuple[str, list[str]]:
     """Enforce truth on the response. If a claim is unsupported, replace
-    the response with a truth-failure message.
+    the response with a truth-failure message. Returns (final_text, warnings)
+    so the caller can surface theater-detector warnings in response metadata.
 
     This function is the WIRE-UP point for the live MAX response pipeline.
     It is called from:
@@ -539,8 +558,13 @@ def enforce_runtime_truth_response(
 
     Safe future-tense / conditional phrases (e.g., "I will check", "I
     can check", "I have not run that yet") are explicitly allowed.
+
+    Hotfix 2026-07-15: return shape changed to tuple[str, list[str]]
+    so callers can surface theater-detector warnings in metadata.
     """
-    failures = runtime_truth_failures(tool_results, user_message=user_message, response_text=response_text)
+    failures, warnings = runtime_truth_failures(
+        tool_results, user_message=user_message, response_text=response_text
+    )
     if failures:
-        return runtime_truth_failure_message(failures)
-    return response_text
+        return runtime_truth_failure_message(failures), warnings
+    return response_text, warnings

@@ -239,7 +239,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
         # With a past-tense claim in the response and no tool results,
         # we MUST get a truth failure. This is the core 2026-06-15 fix.
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="probe OpenClaw",
             response_text="I checked OpenClaw and the queue is healthy.",
@@ -253,7 +253,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
         # If the response has NO past-tense claim, no failure is needed
         # (the tool just wasn't called, but MAX didn't claim it was).
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="probe OpenClaw",
             response_text="I have not run that yet. If you want, I can check after approval.",
@@ -266,7 +266,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "send_email", "success": True, "result": {"attachments_sent": 0}}
         ]
-        failures = runtime_truth_failures(tool_results, user_message="Please send the PDF")
+        failures, _warnings = runtime_truth_failures(tool_results, user_message="Please send the PDF")
         self.assertTrue(len(failures) > 0)
         self.assertIn("attachment", failures[0].lower())
 
@@ -275,7 +275,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "send_email", "success": True, "result": {"attachments_sent": 1}}
         ]
-        failures = runtime_truth_failures(tool_results, user_message="Please send the PDF")
+        failures, _warnings = runtime_truth_failures(tool_results, user_message="Please send the PDF")
         self.assertEqual(failures, [])
 
     # ------------------------------------------------------------------
@@ -285,7 +285,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
     def test_claim_I_checked_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
         # "I checked OpenClaw" with no proof object MUST fail.
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="what is the queue?",
             response_text="I checked OpenClaw and it has 72 tasks queued.",
@@ -300,7 +300,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_probed_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="probe localhost",
             response_text="I probed localhost and the backend is healthy.",
@@ -309,7 +309,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_searched_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="search the web",
             response_text="I searched the web and found relevant articles.",
@@ -318,7 +318,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_confirmed_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="is the queue healthy?",
             response_text="I confirmed the queue is healthy.",
@@ -327,7 +327,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_verified_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="verify the build",
             response_text="I verified the build is correct.",
@@ -336,7 +336,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_fetched_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="fetch the file",
             response_text="I fetched the file from the repository.",
@@ -345,7 +345,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_read_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="read the file",
             response_text="I read the file and it contains the secret.",
@@ -354,7 +354,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_called_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="call the api",
             response_text="I called the API and got a 200 response.",
@@ -363,7 +363,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_inspected_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="inspect the logs",
             response_text="I inspected the logs and found no errors.",
@@ -372,7 +372,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_looked_up_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="look up the user",
             response_text="I looked up the user and they are active.",
@@ -381,7 +381,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_claim_I_ran_with_no_proof_fails(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="run the script",
             response_text="I ran the script and it completed successfully.",
@@ -395,7 +395,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="what is the queue?",
             response_text="I checked OpenClaw and it has 72 tasks queued.",
@@ -415,7 +415,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
             "I can probe the system if you approve.",
         ]
         for response_text in safe_responses:
-            failures = runtime_truth_failures(
+            failures, _warnings = runtime_truth_failures(
                 [],
                 user_message="check the queue",
                 response_text=response_text,
@@ -435,7 +435,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
             "I am MAX, your command center. How can I help?",
         ]
         for response_text in safe_responses:
-            failures = runtime_truth_failures(
+            failures, _warnings = runtime_truth_failures(
                 [],
                 user_message="tell me about MAX",
                 response_text=response_text,
@@ -450,12 +450,12 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         # If the response has an unsupported claim, the function MUST
         # replace it with a truth-failure message.
         original = "I checked OpenClaw and the queue has 72 tasks."
-        result = enforce_runtime_truth_response("what is the queue?", original, [])
+        result, _warnings = enforce_runtime_truth_response("what is the queue?", original, [])
         self.assertNotEqual(result, original)
         # The result must contain a truth-failure indicator.
         self.assertTrue(
             "have not run" in result.lower() or "verification failed" in result.lower(),
-            f"result should be a truth-failure message: {result!r}",
+            f"result should be a truth-failure message: {result[0]!r}",
         )
 
     def test_enforce_runtime_truth_response_passes_valid_claim(self):
@@ -465,14 +465,14 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
         ]
-        result = enforce_runtime_truth_response("what is the queue?", original, tool_results)
+        result, _warnings = enforce_runtime_truth_response("what is the queue?", original, tool_results)
         self.assertEqual(result, original)
 
     def test_enforce_runtime_truth_response_passes_safe_phrase(self):
         from app.services.max.runtime_truth_enforcer import enforce_runtime_truth_response
         # Future-tense / safe phrases must pass through unchanged.
         original = "I have not run that yet. I can check after approval."
-        result = enforce_runtime_truth_response("what is the queue?", original, [])
+        result, _warnings = enforce_runtime_truth_response("what is the queue?", original, [])
         self.assertEqual(result, original)
 
     def test_failed_tool_result_is_not_proof(self):
@@ -481,7 +481,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "openclaw_status", "success": False, "error": "timeout"}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check the queue",
             response_text="I checked OpenClaw and it has 72 tasks queued.",
@@ -495,7 +495,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         # only checks for tool verification failures.
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
         # With no response_text, no claim check is performed.
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="check",
         )
@@ -504,7 +504,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
     def test_old_api_with_response_text_enforces_claim(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
         # With response_text, the new claim detection fires.
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [],
             user_message="check",
             response_text="I checked it.",
@@ -533,7 +533,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "tool_comment", "success": True, "result": {"text": "I checked OpenClaw and queue is healthy"}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="what is the queue?",
             response_text="I checked OpenClaw and the queue is healthy.",
@@ -550,7 +550,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
                           "remark", "thought", "intention", "intent", "plan", "draft",
                           "todo", "review", "reflection"]:
             tool_results = [{"tool": bad_name, "success": True, "result": {}}]
-            failures = runtime_truth_failures(
+            failures, _warnings = runtime_truth_failures(
                 tool_results,
                 user_message="check",
                 response_text="I checked OpenClaw and it has 72 tasks queued.",
@@ -565,7 +565,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I checked OpenClaw and it has 72 tasks queued.",
@@ -577,7 +577,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "openclaw_status", "success": False, "error": "timeout"}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I checked OpenClaw and it has 72 tasks queued.",
@@ -592,7 +592,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "local_broker", "success": True, "result": {"openclaw": {"state": "available"}}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I checked the local broker and OpenClaw is up.",
@@ -604,7 +604,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "repo_status", "success": True, "result": {"branch": "main", "commit": "abc123"}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I verified the repo is on main at abc123.",
@@ -616,7 +616,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "runtime_health", "success": True, "result": {"status": "ok"}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I verified the runtime is healthy.",
@@ -628,7 +628,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "memory_status", "success": True, "result": {"active": "hermes_memory"}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I checked the memory and it is active.",
@@ -640,7 +640,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         tool_results = [
             {"tool": "tool_registry", "success": True, "result": {"tools": []}}
         ]
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             tool_results,
             user_message="check",
             response_text="I inspected the tool registry and it has 9 tools.",
@@ -654,7 +654,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         for bad_name in ["xyzzy", "frobnicate", "gpt4_secret", "my_internal_thing",
                           "assistant_text", "narrator", "meta_comment"]:
             tool_results = [{"tool": bad_name, "success": True, "result": {}}]
-            failures = runtime_truth_failures(
+            failures, _warnings = runtime_truth_failures(
                 tool_results,
                 user_message="check",
                 response_text="I checked OpenClaw and the queue is healthy.",
@@ -666,7 +666,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_safe_can_check_passes(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [], user_message="check",
             response_text="I can check after approval.",
         )
@@ -674,7 +674,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
 
     def test_safe_have_not_run_passes(self):
         from app.services.max.runtime_truth_enforcer import runtime_truth_failures
-        failures = runtime_truth_failures(
+        failures, _warnings = runtime_truth_failures(
             [], user_message="check",
             response_text="I have not run that yet.",
         )
@@ -694,7 +694,7 @@ class TestProofReceiptEnforcement(unittest.TestCase):
         # The new content has a past-tense claim but no tool_results.
         grounded = "I checked OpenClaw and the queue has 72 tasks."
         # Step 3: enforce on the FINAL content (with no tool_results).
-        final_guarded = enforce_runtime_truth_response(
+        final_guarded, _warnings = enforce_runtime_truth_response(
             user_message="check the queue",
             response_text=grounded,
             tool_results=[],
@@ -734,7 +734,7 @@ class TestPipelineWiring(unittest.TestCase):
         # Original response (passes early guardrail).
         original = "Let me check the queue for you."
         # After early guardrail: no claim, no mutation.
-        early = enforce_runtime_truth_response("check queue", original, [])
+        early, _warnings = enforce_runtime_truth_response("check queue", original, [])
         self.assertEqual(early, original)
 
         # Factual guard replaces with a new string containing a claim.
@@ -743,7 +743,7 @@ class TestPipelineWiring(unittest.TestCase):
         # LATE guardrail runs.)
         grounded_replacement = "I checked OpenClaw and the queue has 72 tasks."
         # LATE guardrail runs on the FINAL content.
-        late = enforce_runtime_truth_response("check queue", grounded_replacement, [])
+        late, _warnings = enforce_runtime_truth_response("check queue", grounded_replacement, [])
         # The LATE guardrail must block the claim.
         self.assertNotEqual(late, grounded_replacement)
         self.assertIn("have not run", late.lower())
@@ -757,7 +757,7 @@ class TestPipelineWiring(unittest.TestCase):
 
         # Quality engine replacement (simulated) contains a claim.
         quality_replacement = "I verified the build is correct."
-        late = enforce_runtime_truth_response("verify build", quality_replacement, [])
+        late, _warnings = enforce_runtime_truth_response("verify build", quality_replacement, [])
         self.assertNotEqual(late, quality_replacement)
         self.assertIn("have not run", late.lower())
 
@@ -776,7 +776,7 @@ class TestPipelineWiring(unittest.TestCase):
             "I fetched the file and it contains the secret.",
             "I read the logs and found no errors.",
         ]:
-            late = enforce_runtime_truth_response("test", replacement, [])
+            late, _warnings = enforce_runtime_truth_response("test", replacement, [])
             self.assertNotEqual(
                 late, replacement,
                 f"FINAL guardrail must block: {replacement!r}",
@@ -795,7 +795,7 @@ class TestPipelineWiring(unittest.TestCase):
         tool_results = [
             {"tool": "openclaw_status", "success": True, "result": {"queue_stats": {"queued": 72}}}
         ]
-        late = enforce_runtime_truth_response("test", replacement, tool_results)
+        late, _warnings = enforce_runtime_truth_response("test", replacement, tool_results)
         self.assertEqual(late, replacement)
 
 
@@ -914,6 +914,100 @@ class TestControlPlaneVsLiveTruth(unittest.TestCase):
             capture_output=True, text=True, timeout=5,
         ).stdout.strip()
         self.assertEqual(broker["repo"]["commit"], actual)
+
+    # --------------------------------------------------------------
+    # HOTFIX 2026-07-15: regression tests for the None warnings-list crash.
+    # Pre-fix: runtime_truth_failures(..., warnings=None) raised
+    # AttributeError when theater detection fired and tried to .append
+    # onto None. Post-fix: warnings coerced to [] inside the function
+    # and returned as a 2-tuple so callers can surface warnings.
+    # --------------------------------------------------------------
+
+    def test_runtime_truth_failures_none_warnings_does_not_crash(self):
+        """Defensive init: warnings=None must not crash .append when theater
+        detection fires on a malformed tool JSON in the response_text."""
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        # The malformed-tool-JSON trigger:
+        text_with_fabricated_tool = (
+            'I queried the database: {"tool": "db_query", "table": "leads"}'
+        )
+        # Force theater detection by passing tool_results that don't contain
+        # db_query in their list. Use empty tool_results to maximize coverage.
+        failures, warnings = runtime_truth_failures(
+            tool_results=[],
+            user_message="find me the leads",
+            response_text=text_with_fabricated_tool,
+        )
+        # Should NOT raise. Either warnings has the detection, or it's [].
+        assert isinstance(warnings, list)
+        # Theater detection should have caught the fabricated {"tool":"db_query"}.
+        # (Empty tool_results → db_query not executed → fabricated.)
+        assert any("fabricated" in w.lower() for w in warnings), (
+            f"expected theater-detector warning for fabricated db_query, got {warnings}"
+        )
+
+    def test_runtime_truth_failures_stream_path_no_exception(self):
+        """The MAX chat stream path (router.py:3081) calls
+        runtime_truth_failures + runtime_truth_failure_message when
+        should_halt_after_tool_failure fires. This is the exact code
+        path that crashed in production on 2026-07-14. Pre-fix: it raised
+        AttributeError when the response_text contained a fabricated tool
+        JSON. Post-fix: no exception is raised, even with warnings=None
+        implicitly passed through should_halt_after_tool_failure's default
+        warnings=None."""
+        from app.services.max.runtime_truth_enforcer import (
+            runtime_truth_failures, should_halt_after_tool_failure,
+            runtime_truth_failure_message,
+        )
+        # Simulate the stream path: malformed tool JSON in response_text
+        # with no tool results (no execution occurred).
+        text = 'Here is the answer. {"tool": "db_query", "table": "x"}'
+        try:
+            should_halt = should_halt_after_tool_failure(
+                tool_results=[],
+                user_message="look up x",
+                response_text=text,
+            )
+            # Even if it returns True (claims detected), the message must
+            # be buildable without raising.
+            if should_halt:
+                failures, warnings = runtime_truth_failures(
+                    tool_results=[],
+                    user_message="look up x",
+                    response_text=text,
+                )
+                msg = runtime_truth_failure_message(failures)
+                assert isinstance(msg, str)
+                assert isinstance(warnings, list)
+        except AttributeError as e:
+            self.fail(f"regression: runtime_truth_failures crashed with AttributeError: {e}")
+        except Exception as e:
+            # Other unexpected exceptions also fail this regression
+            self.fail(f"regression: unexpected exception in stream path: {e}")
+
+    def test_runtime_truth_failures_returns_tuple_with_both_lists(self):
+        """Return shape is tuple[list[str], list[str]] — (failures, warnings)."""
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        result = runtime_truth_failures(tool_results=[], user_message="x",
+                                       response_text="no claim here")
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        failures, warnings = result
+        assert isinstance(failures, list)
+        assert isinstance(warnings, list)
+
+    def test_runtime_truth_failures_warnings_param_explicit_none(self):
+        """If the caller passes warnings=None explicitly (the stream path
+        via should_halt_after_tool_failure's default), no crash."""
+        from app.services.max.runtime_truth_enforcer import runtime_truth_failures
+        result = runtime_truth_failures(
+            tool_results=[],
+            user_message="x",
+            response_text='{"tool": "send_email"} fabricated',
+            warnings=None,  # explicit None — pre-fix would crash here
+        )
+        failures, warnings = result
+        assert isinstance(warnings, list)
 
 
 if __name__ == "__main__":

@@ -2406,7 +2406,8 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 tool_results_list.append(entry)
 
             if should_halt_after_tool_failure(round_results, user_message=request.message):
-                final_content = runtime_truth_failure_message(runtime_truth_failures(round_results, user_message=request.message))
+                _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
+                final_content = runtime_truth_failure_message(_failures)
                 break
 
             # Build tool summary and ask AI for follow-up
@@ -3078,7 +3079,8 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'tool_result', **entry})}\n\n"
 
                 if should_halt_after_tool_failure(round_results, user_message=request.message):
-                    full_response = runtime_truth_failure_message(runtime_truth_failures(round_results, user_message=request.message))
+                    _failures, _warnings = runtime_truth_failures(round_results, user_message=request.message)
+                    full_response = runtime_truth_failure_message(_failures)
                     yield f"data: {json.dumps({'type': 'text', 'content': full_response})}\n\n"
                     break
 
