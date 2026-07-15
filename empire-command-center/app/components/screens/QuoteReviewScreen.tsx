@@ -58,7 +58,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
 
   useEffect(() => {
     if (!quoteId) {
-      fetch(API + '/quotes?limit=1').then(r => r.json()).then(data => {
+      fetch(API + '/quotes-v2?limit=1').then(r => r.json()).then(data => {
         const q = data.quotes?.[0] || data[0];
         if (q) { setQuote(q); loadFull(q.id); }
       }).catch(() => {});
@@ -70,7 +70,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const loadFull = async (id: string) => {
     setLoading(true);
     try {
-      const res = await fetch(API + '/quotes/' + id);
+      const res = await fetch(API + '/quotes-v2/' + id);
       if (res.ok) setQuote(await res.json());
     } catch { /* silent */ }
     setLoading(false);
@@ -125,7 +125,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     if (!quote) return;
     setSaving(true);
     try {
-      const res = await fetch(`${API}/quotes/${quote.id}`, {
+      const res = await fetch(`${API}/quotes-v2/${quote.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -358,7 +358,7 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     } else if (action === 'confirm') {
       showFeedback('Confirming selection...');
       try {
-        const res = await fetch(API + `/quotes/${quote.id}`, {
+        const res = await fetch(API + `/quotes-v2/${quote.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

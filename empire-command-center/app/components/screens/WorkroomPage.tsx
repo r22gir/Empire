@@ -64,7 +64,7 @@ export default function WorkroomPage({ initialSection }: WorkroomPageProps) {
   }, [initialSection]);
 
   useEffect(() => {
-    fetch(API + '/quotes?limit=20&business=workroom').then(r => r.json()).then(data => {
+    fetch(API + '/quotes-v2?limit=20&business=workroom').then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       const q = Array.isArray(raw) ? raw : [];
       setQuotes(q);
@@ -450,7 +450,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
   });
 
   const refetchQuotes = () => {
-    fetch(API + '/quotes?limit=50&business=workroom').then(r => r.json()).then(data => {
+    fetch(API + '/quotes-v2?limit=50&business=workroom').then(r => r.json()).then(data => {
       const raw = data.quotes || data || [];
       setQuotes(Array.isArray(raw) ? raw : []);
     }).catch(() => {});
@@ -478,7 +478,7 @@ function QuotesSection({ quotes: initialQuotes, initialQuoteId, onClearInitial }
     setDeleting(true);
     for (const id of selected) {
       try {
-        await fetch(`${API}/quotes/${id}`, { method: 'DELETE' });
+        await fetch(`${API}/quotes-v2/${id}`, { method: 'DELETE' });
       } catch { /* skip failed */ }
     }
     setSelected(new Set());
