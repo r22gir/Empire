@@ -606,105 +606,65 @@ def _get_desk_status(params: dict, desk: Optional[str] = None) -> ToolResult:
 
 @tool("search_quotes")
 def _search_quotes(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Search quotes by customer name or status. Searches BOTH Workroom and CraftForge quotes."""
-    customer = params.get("customer_name", "").lower()
+    """Search canonical quotes (quotes_v2 table) by customer name + status.
+
+    Hotfix 2026-07-15: repointed from legacy JSON store
+    (backend/data/quotes/{id}.json — stale pre-consolidation records)
+    to canonical quote_service.list_quotes so MAX sees the same data
+    that show_quote_for_review reads and what the Workroom frontend
+    WorkroomPage fetches.
+
+    CraftForge designs are a separate concern (drawings for design
+    instances, not customer-facing quotes) and stay on their existing
+    JSON path in CraftForge's own router. Quote tools here only
+    search canonical Workroom + WoodCraft quotes.
+    """
+    from app.services.quote_service import list_quotes as _qs_list_quotes
+    customer = (params.get("customer_name") or "").strip()
     status = params.get("status")
-    source_filter = params.get("source", "").lower()  # "workroom", "craftforge", or "" for both
-    limit = min(params.get("limit", 10), 20)
+    business_unit = params.get("business_unit")  # workroom | woodcraft | None
+    limit = min(int(params.get("limit") or 10), 20)
 
-    quotes = []
+    raw = _qs_list_quotes(status=status, business_unit=business_unit, limit=200)
+    # list_quotes returns {'quotes': [...], 'total': ..., 'limit': ..., 'offset': ...}
+    quotes = raw.get("quotes") if isinstance(raw, dict) else raw
 
-    # ── Search Workroom quotes ──
-    if source_filter in ("", "workroom", "all"):
-        if os.path.exists(QUOTES_DIR):
-            for fname in os.listdir(QUOTES_DIR):
-                if not fname.endswith(".json") or fname.startswith("_") or "_verification" in fname:
-                    continue
-                try:
-                    with open(os.path.join(QUOTES_DIR, fname)) as f:
-                        q = json.load(f)
-                    if "id" not in q:
-                        continue
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if customer and customer not in q.get("customer_name", "").lower():
-                    continue
-                if status and q.get("status") != status:
-                    continue
-                # Resolve total: flat field → tiers.A → tiers.B → tiers.C
-                total = q.get("total") or 0
-                if not total:
-                    tiers = q.get("tiers") or {}
-                    for t in ("A", "B", "C"):
-                        tier = tiers.get(t)
-                        if tier and tier.get("subtotal"):
-                            total = tier["subtotal"]
-                            break
-                # Resolve items count: flat line_items → tiers items → rooms
-                items_count = len(q.get("line_items") or [])
-                if not items_count:
-                    tiers = q.get("tiers") or {}
-                    tier_a = tiers.get("A") or {}
-                    items_count = len(tier_a.get("items") or [])
-                if not items_count:
-                    items_count = sum(len(r.get("items") or r.get("windows") or []) for r in (q.get("rooms") or []))
-                quotes.append({
-                    "id": q["id"],
-                    "quote_number": q.get("quote_number"),
-                    "customer_name": q.get("customer_name"),
-                    "total": total,
-                    "status": q.get("status"),
-                    "created_at": q.get("created_at", "")[:10],
-                    "items_count": items_count,
-                    "source": "workroom",
-                })
-
-    # ── Search CraftForge quotes ──
-    cf_dir = str(dp.craftforge_designs_dir())
-    if source_filter in ("", "craftforge", "all"):
-        if os.path.exists(cf_dir):
-            for fname in os.listdir(cf_dir):
-                if not fname.endswith(".json") or fname.startswith("_"):
-                    continue
-                try:
-                    with open(os.path.join(cf_dir, fname)) as f:
-                        q = json.load(f)
-                    if "id" not in q:
-                        continue
-                except (json.JSONDecodeError, OSError):
-                    continue
-                if customer and customer not in q.get("customer_name", "").lower():
-                    continue
-                if status and q.get("status") != status:
-                    continue
-                total = q.get("total") or q.get("subtotal") or 0
-                items_count = len(q.get("line_items") or q.get("materials") or [])
-                quotes.append({
-                    "id": q["id"],
-                    "quote_number": q.get("design_number") or q.get("quote_number"),
-                    "customer_name": q.get("customer_name"),
-                    "total": total,
-                    "status": q.get("status"),
-                    "created_at": q.get("created_at", "")[:10],
-                    "items_count": items_count,
-                    "source": "craftforge",
-                })
-
-    quotes.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    out = []
+    for q in quotes:
+        if customer and customer.lower() not in (q.get("customer_name") or "").lower():
+            continue
+        out.append({
+            "id": q.get("id"),
+            "quote_number": q.get("quote_number"),
+            "customer_name": q.get("customer_name"),
+            "total": q.get("total"),
+            "status": q.get("status"),
+            "created_at": (q.get("created_at") or "")[:10],
+            "items_count": q.get("item_count") or 0,
+            "source": "canonical",
+            "business_unit": q.get("business_unit"),
+        })
+    out.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return ToolResult(tool="search_quotes", success=True, result={
-        "quotes": quotes[:limit], "count": len(quotes),
+        "quotes": out[:limit], "count": len(out),
     })
 
 
 @tool("get_quote")
 def _get_quote(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Get full details of a specific quote."""
+    """Get full details of a specific quote.
+
+    Hotfix 2026-07-15: repointed from legacy JSON store
+    (backend/data/quotes/{id}.json) to canonical quote_service.get_quote
+    so that MAX sees the same data show_quote_for_review reads. The legacy
+    path was returning stale pre-consolidation records (e.g. Nov-2025 EST-2026-110,
+    Lauren Bassett) because quotes_v2 was the only canonical store post-1d.
+    """
+    from app.services.quote_service import get_quote as _qs_get_quote
     quote_id = params.get("quote_id", "")
-    path = os.path.join(QUOTES_DIR, f"{quote_id}.json")
-    if not os.path.exists(path):
+    q = _qs_get_quote(quote_id)
+    if not q:
         return ToolResult(tool="get_quote", success=False, error=f"Quote {quote_id} not found")
-    with open(path) as f:
-        q = json.load(f)
     return ToolResult(tool="get_quote", success=True, result=q)
 
 
