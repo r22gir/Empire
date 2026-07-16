@@ -69,6 +69,26 @@ async def create_quote(body: dict):
     return {"status": "created", "quote": result}
 
 
+@router.get("/by-number/{quote_number}")
+async def get_quote_by_number(quote_number: str):
+    """HOTFIX 4b (2026-07-15): resolve a human-facing quote number
+    ('EST-2026-110') to the canonical quote row. Pinned BEFORE the
+    catch-all '/{quote_id}' route so FastAPI's matcher hits the
+    literal path first.
+
+    Frontend hot path: ChatScreen click on a 'EST-2026-XXX' badge
+    calls this to get the canonical id, then navigates with the id
+    so QuoteReviewScreen loads the exact right quote (previously
+    it fell back to 'first row of the list' which silently opened
+    the wrong row)."""
+    q = quote_service.get_quote_by_number(quote_number)
+    if not q:
+        raise HTTPException(
+            404, f"Quote {quote_number} not found in canonical store"
+        )
+    return q
+
+
 @router.get("/{quote_id}")
 async def get_quote(quote_id: str):
     """Get a single quote with line items and photos."""

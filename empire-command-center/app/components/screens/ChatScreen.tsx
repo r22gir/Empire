@@ -1203,7 +1203,7 @@ function StatusChip({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'dar
   );
 }
 
-function renderContent(content: string, onScreenChange?: (s: string) => void) {
+function renderContent(content: string, onScreenChange?: (s: string, id?: string) => void) {
   return content.split('\n').map((line, i) => {
     // Bold
     let processed = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -1214,13 +1214,19 @@ function renderContent(content: string, onScreenChange?: (s: string) => void) {
     if (hasQuoteRef && onScreenChange) {
       processed = processed.replace(
         /(QuoteBuilder\s*interface|QuoteBuilder)/gi,
-        '<a class="quote-link" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
+        '<a class="quote-link" data-link-type="builder" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
       );
     }
-    // Detect quote numbers like EST-2026-027 and make clickable
+    // Detect quote numbers like EST-2026-027 and make clickable. The
+    // data-quote-number attr lets the click handler resolve the visible
+    // badge to its canonical id via /quotes-v2/by-number/{qn}. Without
+    // this, a click routed to screen='quote' with NO id and the
+    // QuoteReviewScreen silently fell back to the first row of the list
+    // (HOTFIX 4b defect).
     processed = processed.replace(
       /(EST-\d{4}-\d{3})/g,
-      '<a class="quote-link" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">$1</a>'
+      (match: string) =>
+        `<a class="quote-link" data-link-type="quote-number" data-quote-number="${match}" style="color:#b8960c;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:2px">${match}</a>`
     );
     const html = processed + (i < content.split('\n').length - 1 ? '<br/>' : '');
     return (
@@ -1229,9 +1235,39 @@ function renderContent(content: string, onScreenChange?: (s: string) => void) {
         dangerouslySetInnerHTML={{ __html: html }}
         onClick={(e) => {
           const target = e.target as HTMLElement;
-          if (target.classList.contains('quote-link')) {
-            onScreenChange?.('quote');
+          if (!target.classList.contains('quote-link')) return;
+          const linkType = target.getAttribute('data-link-type');
+          if (linkType === 'quote-number') {
+            const quoteNumber = target.getAttribute('data-quote-number');
+            if (!quoteNumber) return;
+            // Resolve the visible "EST-2026-110" to its canonical id.
+            // Stay silent on miss — never fall back to "first row of
+            // the list" again; that's the exact bug we're fixing.
+            fetch(`${API}/quotes-v2/by-number/${encodeURIComponent(quoteNumber)}`)
+              .then(r => {
+                if (r.status === 404) {
+                  throw new Error(`Quote ${quoteNumber} not found`);
+                }
+                if (!r.ok) throw new Error(`Resolver returned ${r.status}`);
+                return r.json();
+              })
+              .then((q: any) => {
+                if (q && q.id) onScreenChange?.('quote', q.id);
+              })
+              .catch(err => {
+                // Visible in dev console only — don't navigate. The user
+                // remains on chat and can re-ask MAX to surface the
+                // quote id explicitly.
+                // eslint-disable-next-line no-console
+                console.error(`[quote-link] failed to resolve ${quoteNumber}:`, err);
+              });
+            return;
           }
+          if (linkType === 'builder') {
+            onScreenChange?.('quote');
+            return;
+          }
+          onScreenChange?.('quote');
         }}
       />
     );

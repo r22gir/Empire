@@ -57,11 +57,22 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // HOTFIX 4b: removed silent "first row of list" fallback. Pre-fix,
+    // when no quoteId was passed (e.g. clicking a chat link that only
+    // carried "EST-2026-110"), this effect fetched the most recent
+    // quote and surfaced IT as if it were the requested one. The bug
+    // was: an active list with EST-2026-124 (draft) made every
+    // EST-2026-110 click land on EST-2026-124's review page.
+    //
+    // Post-fix: if no quoteId is passed, show a not-found state. The
+    // chat-link click handler in ChatScreen.tsx now resolves the
+    // quote_number to a real id via /quotes-v2/by-number/{qn} before
+    // navigating, so this branch should rarely fire — but if it does,
+    // the user sees a clear "no quote selected" hint instead of
+    // silently opening the wrong quote.
     if (!quoteId) {
-      fetch(API + '/quotes-v2?limit=1').then(r => r.json()).then(data => {
-        const q = data.quotes?.[0] || data[0];
-        if (q) { setQuote(q); loadFull(q.id); }
-      }).catch(() => {});
+      setQuote(null);
+      setLoading(false);
       return;
     }
     loadFull(quoteId);

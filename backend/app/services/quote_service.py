@@ -348,6 +348,38 @@ def get_quote(quote_id: str) -> dict:
         return q
 
 
+def get_quote_by_number(quote_number: str) -> dict | None:
+    """HOTFIX 4b (2026-07-15): resolve a human-facing quote number
+    (e.g. "EST-2026-110") to the canonical quote row. Used by the
+    frontend's chat-link click handler so a click on the visible
+    "EST-2026-110" badge always lands on the right quote — previously
+    the frontend fell back to "first row of list" when no id was passed,
+    which silently opened the most recent quote (any active list moved
+    EST-2026-110's link to EST-2026-124's row).
+
+    Returns None if not found. Pinned to canonical quotes_v2 (SQL),
+    never reads the legacy JSON store."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM quotes_v2 WHERE quote_number = ? LIMIT 1",
+            (quote_number,)
+        ).fetchone()
+        if not row:
+            return None
+        q = _quote_to_dict(row)
+        quote_id = q['id']
+        items = conn.execute(
+            "SELECT * FROM quote_line_items WHERE quote_id = ? ORDER BY line_number",
+            (quote_id,)
+        ).fetchall()
+        q['line_items'] = [_item_to_dict(i) for i in items]
+        photos = conn.execute(
+            "SELECT * FROM quote_photos WHERE quote_id = ?", (quote_id,)
+        ).fetchall()
+        q['quote_photos'] = dict_rows(photos)
+        return q
+
+
 def create_quote(data: dict) -> dict:
     with get_db() as conn:
         import uuid

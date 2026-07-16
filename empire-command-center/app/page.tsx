@@ -263,10 +263,22 @@ export default function CommandCenter() {
     else setActiveScreen('dashboard');
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
-  const handleScreenChange = useCallback((screen: ScreenMode | string) => {
+  const [activeQuoteId, setActiveQuoteId] = useState<string | null>(null);
+
+  const handleScreenChange = useCallback((screen: ScreenMode | string, id?: string) => {
     pushHistory({ product: activeProduct, screen: activeScreen, section: activeSection });
     setActiveScreen(screen as ScreenMode);
     setActiveSection(null);
+    // HOTFIX 4b: route the optional id from a chat-link click through to
+    // QuoteReviewScreen. Pre-fix this prop only carried a string screen
+    // name, so a click on "EST-2026-110" had no id to pass and
+    // QuoteReviewScreen fell back to "first row of list" (which could
+    // be EST-2026-124 from a draft row).
+    if (screen === 'quote' && id) {
+      setActiveQuoteId(id);
+    } else if (screen !== 'quote') {
+      setActiveQuoteId(null);
+    }
   }, [activeProduct, activeScreen, activeSection, pushHistory]);
 
   const handleModuleClick = useCallback((module: string) => {
@@ -510,7 +522,7 @@ export default function CommandCenter() {
         />
       );
     }
-    if (activeScreen === 'quote') return <QuoteReviewScreen />;
+    if (activeScreen === 'quote') return <QuoteReviewScreen quoteId={activeQuoteId ?? undefined} />;
     if (activeScreen === 'jobs') return <JobsScreen business={activeProduct === 'workroom' ? 'workroom' : activeProduct === 'craft' ? 'woodcraft' : undefined} />;
     if (activeScreen === 'invoices') return <InvoiceScreen />;
     if (activeScreen === 'docs') return <DocumentScreen />;
