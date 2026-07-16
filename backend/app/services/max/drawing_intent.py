@@ -247,9 +247,17 @@ DIMENSION_ALIASES = {
     "wide": "width",
     "width": "width",
     "w": "width",
-    "long": "width",
-    "length": "width",
-    "l": "width",
+    # HOTFIX 4.0 (c) — 'long' / 'length' / 'l' map to LENGTH (the drop
+    # axis for drapery/roman/valance/cornice/wall_panel AND the
+    # long-edge axis for bench/banquette). The previous mapping to
+    # 'width' silently overwrote the user's first 'wide' dimension
+    # when they wrote "38 wide 64 long" — see _extract_dimensions
+    # test_c for the live bug report. Item-type context below
+    # disambiguates the bench case (where 'long' is the long-edge
+    # width) by overriding 'length' -> 'width' for furniture.
+    "long": "length",
+    "length": "length",
+    "l": "length",
     "deep": "depth",
     "depth": "depth",
     "d": "depth",
@@ -257,6 +265,7 @@ DIMENSION_ALIASES = {
     "height": "height",
     "h": "height",
     "overall height": "height",
+    "drop": "length",      # valance / cornice / roman: drop == length axis
     "seat height": "seat_height",
     "seat h": "seat_height",
     "back height": "back_height",
@@ -409,17 +418,92 @@ def _normalize_dimension(label: str) -> str:
     return DIMENSION_ALIASES.get(label, label.replace(" ", "_"))
 
 
-def _extract_dimensions(text: str) -> dict[str, str]:
+# HOTFIX 4.0 (c) — for furniture (bench / banquette / sofa / chair /
+# ottoman / daybed / settee), the conventional 'long' axis is the
+# FRONT EDGE (i.e. width). For every other family (drapery / roman /
+# valance / cornice / wall panel / headboard), 'long'/'length' means
+# the perpendicular drop or the vertical rise — distinct from 'width'.
+# Per-item-type overrides re-bind 'length' -> 'width' for furniture
+# so "bench 96 wide 36 high 22 deep" still routes the 'long'-side
+# dimensions to width where it belongs.
+_DIMENSION_OVERRIDES_BY_ITEM_TYPE: dict[str, dict[str, str]] = {
+    # Furniture: long-axis = width (the LENGTH of a bench is its width).
+    "bench":        {"length": "width",  "long": "width"},
+    "banquette":    {"length": "width",  "long": "width"},
+    "sofa":         {"length": "width",  "long": "width"},
+    "chair":        {"length": "width",  "long": "width"},
+    "dining_chair": {"length": "width",  "long": "width"},
+    "bar_stool":    {"length": "width",  "long": "width"},
+    "chaise":       {"length": "width",  "long": "width"},
+    "daybed":       {"length": "width",  "long": "width"},
+    "settee":       {"length": "width",  "long": "width"},
+    "loveseat":     {"length": "width",  "long": "width"},
+    "sectional":    {"length": "width",  "long": "width"},
+}
+
+
+def _apply_item_type_overrides(
+    dimensions: dict[str, str], item_type: str | None
+) -> dict[str, str]:
+    """Re-bind long/length keys when the item_type is furniture where
+    long == width. No-op when item_type is not in the override table
+    (drapery, roman, valance, cornice — keep long as length)."""
+    if not item_type:
+        return dimensions
+    overrides = _DIMENSION_OVERRIDES_BY_ITEM_TYPE.get(
+        item_type.lower().strip()
+    )
+    if not overrides:
+        return dimensions
+    out = dict(dimensions)
+    for src, dst in overrides.items():
+        if src in out:
+            val = out.pop(src)
+            # Last-write-wins — preserve the founder's intent if both
+            # keys are present (e.g. user wrote "96 long, 88 wide").
+            out.setdefault(dst, val)
+    return out
+
+
+def _extract_dimensions(
+    text: str, item_type: str | None = None
+) -> dict[str, str]:
+    """HOTFIX 4.0 — extract dimensions from natural-language input.
+
+    Accepts:
+      "38 wide 64 long"                       (value-first; no unit)
+      "18in wide 24in long"                   (value-first with units)
+      "width: 96, height: 36, depth: 22"      (label-first, comma-separated)
+      "28 long, 22 in wide"                   (order doesn't matter)
+
+    For furniture (bench, banquette, sofa, ...) the long / length
+    dimension is the WIDTH (front-edge length). For window treatments
+    (drapery, roman, valance, cornice), the long / length dimension
+    is the perpendicular drop. The override map above re-binds the
+    parsed keys accordingly so the founder's intent — width along the
+    front edge, length along the drop, etc. — survives the parse
+    step unchanged.
+
+    Spec-Phase A precedent: never invent dim values. Missing dims
+    remain missing; a downstream validator surfaces them as
+    structured questions.
+    """
     dimensions: dict[str, str] = {}
-    # 96" wide, 22 in deep, 36 high, 8 ft long
+    # HOTFIX 4.0 (c): 'drop' is now a recognized label for valance /
+    # cornice / roman. The 'seat h' / 'back h' shortforms are also
+    # recognized for furniture. HOTFIX 4.0 (c) did NOT add 'drop' to
+    # the value-first pattern's label alternation because some
+    # phrases ('no drop specified') would false-positive — we keep
+    # the label-first form as the canonical path.
     value_first = re.compile(
         r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?\s+"
         r"(?P<label>overall height|seat height|seat h|back height|back h|wide|width|long|length|deep|depth|high|height)\b",
         re.IGNORECASE,
     )
-    # width 96", seat height 18
+    # HOTFIX 4.0 (c): label-first pattern grew 'drop' so the natural
+    # request "width: 60, drop: 48" parses correctly for roman/valance.
     label_first = re.compile(
-        r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|depth|height)\s*[:=]?\s*"
+        r"(?P<label>overall height|seat height|seat h|back height|back h|width|length|drop|depth|height)\s*[:=]?\s*"
         r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?",
         re.IGNORECASE,
     )
@@ -432,6 +516,7 @@ def _extract_dimensions(text: str) -> dict[str, str]:
             suffix = "ft" if unit in ("ft", "feet", "'") else '"'
             dimensions[label] = f"{value}{suffix}"
 
+    dimensions = _apply_item_type_overrides(dimensions, item_type)
     return dimensions
 
 

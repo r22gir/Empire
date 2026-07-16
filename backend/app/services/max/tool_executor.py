@@ -2564,12 +2564,10 @@ def _svg_to_pdf(params: dict, desk: Optional[str] = None) -> ToolResult:
                 return ToolResult(tool="svg_to_pdf", success=False, error=f"SVG file not found: {svg_path}")
             svg_content = p.read_text()
 
-        # Default output path
+        # Default output path — HOTFIX 4.0 (d) uses canonical resolver
         if not output_path:
-            output_dir = os.path.expanduser("~/empire-repo/uploads")
-            os.makedirs(output_dir, exist_ok=True)
-            import uuid
-            output_path = os.path.join(output_dir, f"drawing_{uuid.uuid4().hex[:8]}.pdf")
+            from app.services.drawing.canonical_path import new_drawing_path
+            output_path = str(new_drawing_path(prefix="svg", suffix=".pdf"))
 
         # Wrap SVG in HTML and render via WeasyPrint
         html_content = f"""<!DOCTYPE html>
@@ -2621,19 +2619,221 @@ def _auto_email_pdf(pdf_path: str, email_to: str, drawing_name: str) -> dict | N
         return {"emailed": False, "error": str(e)}
 
 
+@tool("render_shop_drawing")
+def _render_shop_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
+    """HOTFIX 4.0 (a) — Render a parametric B1 shop drawing for an
+    explicit product_type + dims.
+
+    This is the canonical path for Founder-style drawing requests
+    such as "create a shop drawing for a flat roman shade, 38 wide 64
+    long". The B1 template registry (app.services.drawing.templates)
+    ships 6 families and ~46 product_types — every B1 implementation
+    MUST use render_spec() here, never defaults from any other path.
+
+    Required params:
+      product_type — one of the B1-registered product_types
+                     (pinch_pleat, flat_fold, scalloped, straight,
+                     bench, banquette, headboard_channel, ...).
+                     See templates.registry.implemented_product_types()
+                     for the full list.
+      dims         — dict of width/height/drop/thickness/etc. The
+                     required keys depend on product_type and are
+                     surfaced via validate_spec() (a missing-dim list).
+
+    Optional params:
+      client_name, site_address, material, date — title-block rows.
+      output_filename — overrides the auto-generated UUID name.
+      email_to        — auto-email the PDF after writing.
+
+    Returns:
+      On success: dict with pdf_path, size_bytes, and a structured
+                  warnings list (e.g. "ASSUMED 4" foam thickness").
+      On failure: returns a structured error explaining what's missing
+                  (no defaults are invented).
+    """
+    try:
+        from app.services.drawing.templates import render_spec
+    except Exception as e:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=f"templates package unavailable: {e}",
+        )
+
+    product_type = str(params.get("product_type", "")).strip()
+    if not product_type:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=(
+                "render_shop_drawing requires explicit product_type "
+                "(e.g. 'flat_fold', 'pinch_pleat', 'bench', "
+                "'headboard_channel'). Caller-side natural-language "
+                "intent parsing should fill this in via drawing_intent. "
+                "Defaults are NEVER invented."
+            ),
+        )
+
+    dims = params.get("dims")
+    if not isinstance(dims, dict) or not dims:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=(
+                f"render_shop_drawing requires explicit dims for "
+                f"product_type={product_type!r}. No defaults invented."
+            ),
+        )
+
+    spec = {
+        "product_type": product_type,
+        "dims": {str(k): float(v) for k, v in dims.items() if v is not None},
+        "client_name":  params.get("client_name", ""),
+        "site_address": params.get("site_address", ""),
+        "material":     params.get("material", ""),
+        "date":         params.get("date", ""),
+    }
+
+    try:
+        pdf_bytes = render_spec(spec)
+    except ValueError as e:
+        # Missing required dims — surface structured; never invent.
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=str(e),
+            result={
+                "spec": spec, "missing_required_dims":
+                [k for k in dims if dims.get(k) is None],
+            },
+        )
+    except KeyError as e:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=(
+                f"product_type={product_type!r} is not implemented in "
+                f"the B1 registry ({e}). Use one of the listed "
+                f"product_types."
+            ),
+        )
+    except Exception as e:
+        return ToolResult(
+            tool="render_shop_drawing", success=False,
+            error=f"render_spec raised {type(e).__name__}: {e}",
+        )
+
+    # HOTFIX 4.0 (d) — output path comes from canonical_drawings_dir
+    # (NOT from ~/empire-repo/, the stale fork).
+    from app.services.drawing.canonical_path import new_drawing_path
+    out_path = new_drawing_path(prefix=product_type, suffix=".pdf")
+    # Caller-provided override is honored only when it lands under
+    # the canonical root (refuses stale-fork writes).
+    override = str(params.get("output_filename", "")).strip()
+    if override:
+        from pathlib import Path as _P
+        candidate = _P(override)
+        try:
+            candidate.relative_to(new_drawing_path().parent)
+        except (ValueError, FileNotFoundError):
+            return ToolResult(
+                tool="render_shop_drawing", success=False,
+                error=(
+                    f"output_filename={override!r} does not live under "
+                    f"the canonical drawings dir; refusing to write "
+                    f"outside the canonical root."
+                ),
+            )
+        out_path = candidate
+
+    out_path.write_bytes(pdf_bytes)
+    size = out_path.stat().st_size
+
+    email_to = str(params.get("email_to", "")).strip()
+    email_status: dict | None = None
+    if email_to:
+        if email_to.lower() in ("me", "owner", "founder", "my email", "myself"):
+            email_to = os.getenv("FOUNDER_EMAIL", "empirebox2026@gmail.com")
+        email_status = _auto_email_pdf(str(out_path), email_to, product_type)
+
+    return ToolResult(
+        tool="render_shop_drawing", success=True,
+        result={
+            "pdf_path": str(out_path),
+            "size_bytes": size,
+            "product_type": product_type,
+            "dims": spec["dims"],
+            "drawing_engine": "templates.render_spec (B1)",
+            "email": email_status,
+            "warnings": (
+                # Heuristic for surfacing — read first 200 chars of
+                # the rendered PDF for an ASSUMED-list preview.
+                "(see assumptions block in PDF)"
+            ),
+        },
+    )
+
+
 @tool("sketch_to_drawing")
 def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
-    """Generate professional architectural drawings (PDF) for any item type.
+    """HOTFIX 4.0 (b) — Draw-from-image ONLY.
 
-    Auto-classifies input to determine what to draw: bench, window treatment,
-    pillow, upholstery, table, or generic measurement diagram.
+    Per Empire Drawing Standard v1.0 hard rule 1 (spec fidelity), this
+    tool MUST NOT emit default dimensions. If the caller supplies
+    explicit numeric dimensions, the tool defers to render_shop_drawing
+    (templates.render_spec). If no dimensions are supplied but the
+    request is text-only, it REFUSES with a structured error so the
+    caller knows to route to render_shop_drawing.
 
-    Accepts either:
-    - quote_id: generate drawings for all areas in a quote
-    - shape + lf + name: generate a single bench drawing (bench items only)
-    - name + description + dimensions: generate a measurement diagram for any item type
-    - item_type: override auto-classification (bench, window, pillow, upholstery, table, generic)
+    Use cases:
+      1. IMAGE-INPUT: caller passes an image path / image_url.
+         The tool classifies the image and emits a measurement diagram.
+         Image classification may yield a default item_type default
+         rendered with OVERLAID measurements drawn from the image
+         (NOT invented).
+      2. QUOTE-ID: caller passes a quote_id. The tool renders the
+         quote's existing line items verbatim.
+
+    Refused cases (must reroute to render_shop_drawing):
+      - Text-only with `dimensions` field provided → render_shop_drawing
+      - Text-only without `dimensions` AND without an image →
+        refuses with `dimensions_required_for_text_requests`
     """
+    has_image = any(
+        params.get(k) for k in ("image_path", "image_url", "image")
+    )
+    has_quote_id = bool(params.get("quote_id"))
+    explicit_dims = bool(
+        params.get("dimensions") or params.get("width")
+        or params.get("height") or params.get("length") or params.get("depth")
+    )
+    item_type_param = str(params.get("item_type", "")).strip()
+
+    # HOTFIX 4.0 (b) gate: text-only requests with explicit dims
+    # MUST route to render_shop_drawing. We do not silently default.
+    if not has_image and not has_quote_id and explicit_dims:
+        return ToolResult(
+            tool="sketch_to_drawing", success=False,
+            error=(
+                "sketch_to_drawing: text-only requests with explicit "
+                "dimensions must use render_shop_drawing (the B1 "
+                "parametric engine). Refusing to emit a default-dim "
+                "drawing — see Empire Drawing Standard v1.0 hard rule 1."
+            ),
+            result={
+                "reroute_to": "render_shop_drawing",
+                "product_type_required": True,
+            },
+        )
+
+    # HOTFIX 4.0 (b) gate: text-only, no dims — refuse with a clear
+    # message so the caller knows to gather dims first (rendered by
+    # drawing_intent on the chat side).
+    if not has_image and not has_quote_id and not explicit_dims:
+        return ToolResult(
+            tool="sketch_to_drawing", success=False,
+            error=(
+                "sketch_to_drawing: text-only with no dimensions. Use "
+                "render_shop_drawing with explicit dims, or pass an "
+                "image path so the tool can extract measurements."
+            ),
+        )
+
     try:
         from app.services.vision.drawing_service import classify_input, render_measurement_diagram
         from app.services.vision.bench_renderer import (
@@ -2684,9 +2884,10 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
 
             drawings = render_quote_drawings(line_items, quote_num)
             if not output_path:
-                out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-                os.makedirs(out_dir, exist_ok=True)
-                output_path = os.path.join(out_dir, f"{quote_num}_drawings.pdf")
+                # HOTFIX 4.0 (d) — canonical output path; never ~/empire-repo/.
+                from app.services.drawing.canonical_path import canonical_drawings_dir
+                out_dir = canonical_drawings_dir()
+                output_path = str(out_dir / f"{quote_num}_drawings.pdf")
 
             drawings_to_pdf(drawings, output_path)
             size = os.path.getsize(output_path)
@@ -2759,10 +2960,10 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
             logger.info(f"sketch_to_drawing: bench '{shape}' rendered via bench_renderer.py (4-quadrant, 1200x850)")
 
             if not output_path:
-                out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-                os.makedirs(out_dir, exist_ok=True)
-                import uuid as _uuid
-                output_path = os.path.join(out_dir, f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
+                # HOTFIX 4.0 (d) — canonical output path.
+                from app.services.drawing.canonical_path import canonical_drawings_dir
+                out_dir = canonical_drawings_dir()
+                output_path = str(out_dir / f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
 
             drawings_to_pdf([{"name": name, "svg": svg, "lf": lf}], output_path)
             size = os.path.getsize(output_path)
@@ -2814,10 +3015,10 @@ def _sketch_to_drawing(params: dict, desk: Optional[str] = None) -> ToolResult:
         )
 
         if not output_path:
-            out_dir = os.path.expanduser("~/empire-repo/uploads/arch_drawings")
-            os.makedirs(out_dir, exist_ok=True)
-            import uuid as _uuid
-            output_path = os.path.join(out_dir, f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
+            # HOTFIX 4.0 (d) — canonical output path; never ~/empire-repo/.
+            from app.services.drawing.canonical_path import canonical_drawings_dir
+            out_dir = canonical_drawings_dir()
+            output_path = str(out_dir / f"drawing_{_uuid.uuid4().hex[:8]}.pdf")
 
         drawings_to_pdf([{"name": name, "svg": svg, "lf": 0}], output_path)
         size = os.path.getsize(output_path)
