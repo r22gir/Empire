@@ -257,13 +257,20 @@ def create_all_tables(conn: sqlite3.Connection):
     );
     CREATE INDEX IF NOT EXISTS idx_pv2_invoice ON payments_v2(invoice_id);
     CREATE INDEX IF NOT EXISTS idx_pv2_customer ON payments_v2(customer_id);
+    """)
+    conn.commit()
 
-    # ---------------------------------------------------------------------
+    # ── 2026-07-15 HOTFIX 4: the next two blocks used to live INSIDE the
+    # executescript("""...""") above. Python comments ('#') in the SQL
+    # string broke the script with 'unrecognized token: #', so fresh
+    # bootstrap DBs couldn't be rebuilt. They are real schema work
+    # (Sprint 1d Payment Phase 1 ALTERs + chart_of_accounts CREATE) and
+    # run here, after the script, against the same connection.
+
     # Sprint 1d Payment Phase 1: payments_v2 needs business_unit + stripe_session_id.
     # webhook writes via stripe_session_id; idempotency on stripe_session_id
     # so webhook re-fires don't create duplicates. Idempotent ALTER — safe
     # to re-run.
-    # ---------------------------------------------------------------------
     for _alter_sql in (
         "ALTER TABLE payments_v2 ADD COLUMN business_unit TEXT NOT NULL DEFAULT 'workroom'",
         "ALTER TABLE payments_v2 ADD COLUMN stripe_session_id TEXT",
@@ -278,7 +285,8 @@ def create_all_tables(conn: sqlite3.Connection):
     )
     conn.commit()
 
-    -- Chart of Accounts
+    # Chart of Accounts
+    conn.execute("""
     CREATE TABLE IF NOT EXISTS chart_of_accounts (
         code TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -288,7 +296,7 @@ def create_all_tables(conn: sqlite3.Connection):
         is_active INTEGER DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+    )
     """)
     conn.commit()
 
