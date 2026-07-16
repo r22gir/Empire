@@ -604,6 +604,28 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                       <input type="text" value={item.description || ''}
                         onChange={e => updateItem(i, 'description', e.target.value)}
                         style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid #ece8e0', borderRadius: 6, background: '#faf9f7', color: '#333' }} />
+                      {/* HOTFIX 5: per-row "Founder override" badge when
+                          price_overridden=1. The server's _item_to_dict
+                          now aliases rate/amount to final_price when
+                          overridden, so the editable inputs already
+                          show $1,933.33 — this badge makes the override
+                          state explicit so the founder doesn't accidentally
+                          edit and lose the override on a Save that goes
+                          through a path we haven't audited. */}
+                      {item.price_overridden ? (
+                        <span
+                          title={`Found set final price: $${(item.final_price ?? item.rate ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} (original unit_price was $${item.unit_price ?? 0}).`}
+                          style={{
+                            display: 'inline-block', marginTop: 4,
+                            fontSize: 10, fontWeight: 600, color: '#7c5a00',
+                            background: '#fcf3cf', border: '1px solid #e0b700',
+                            borderRadius: 4, padding: '1px 6px',
+                            textTransform: 'uppercase', letterSpacing: '0.5px',
+                          }}
+                        >
+                          Founder override
+                        </span>
+                      ) : null}
                     </td>
                     <td style={{ padding: '4px 4px' }}>
                       <input type="number" step="0.1" value={item.quantity ?? ''}
@@ -687,9 +709,34 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
                   <td></td>
                 </tr>
                 <tr style={{ borderTop: '2px solid #b8960c' }}>
-                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>Total</td>
+                  <td colSpan={4} style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 15 }}>
+                    Total
+                    <span
+                      title="HOTFIX 5: total is read from quotes_v2.total (canonical server value), not client-side recompute. The client-computed value would silently double-count when a line item's price_overridden=1."
+                      style={{
+                        marginLeft: 8, fontSize: 10, fontWeight: 500, color: '#888',
+                        background: '#fef9e7', border: '1px solid #f1c40f', borderRadius: 4, padding: '1px 6px',
+                      }}
+                    >
+                      canonical
+                    </span>
+                  </td>
                   <td style={{ padding: '10px 8px', textAlign: 'right', fontWeight: 700, fontSize: 18, color: '#b8960c' }}>
-                    ${computedTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {/* HOTFIX 5: previously this read computedTotal (a
+                        client-side recompute that ignored price_overridden
+                        and rendered $3,600 instead of the canonical $2,900
+                        for the Maggie O'Neil EST-2026-110 quote). The
+                        server's _recalculate_totals honors final_price
+                        when price_overridden=1, so quotes_v2.total is the
+                        authoritative total. We display the canonical
+                        total and only flip to computedTotal while the
+                        user has unsaved edits (so they see what their
+                        in-progress change will look like). */}
+                    ${(
+                      dirty
+                        ? computedTotal
+                        : (quote as any).total ?? computedTotal
+                    ).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </td>
                   <td></td>
                 </tr>

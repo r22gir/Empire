@@ -289,10 +289,27 @@ def _item_to_dict(row) -> dict:
     # Frontend (QuoteReviewScreen) reads item.rate / item.amount; DB stores
     # unit_price / subtotal. Emit aliases so the review editor and verification
     # panel show real values (symmetric with the write side accepting both).
+    #
+    # HOTFIX 5 (2026-07-15): when the founder has overridden a line item
+    # (price_overridden=1) the DB still carries the ORIGINAL unit_price /
+    # subtotal. The override lives in final_price. Without this guard, the
+    # client-facing rate/amount aliases silently surfaced the original
+    # unit_price — making a $2,900 quote (Maggie O'Neil) render as $3,600
+    # with the wrong per-line rates.
+    is_override = bool(d.get("price_overridden"))
+    final_price = d.get("final_price")
+    rate_value = (
+        final_price if is_override and final_price is not None
+        else d.get("unit_price")
+    )
+    amount_value = (
+        final_price if is_override and final_price is not None
+        else d.get("subtotal")
+    )
     if d.get("rate") is None:
-        d["rate"] = d.get("unit_price")
+        d["rate"] = rate_value
     if d.get("amount") is None:
-        d["amount"] = d.get("subtotal")
+        d["amount"] = amount_value
     return d
 
 

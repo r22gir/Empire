@@ -170,10 +170,21 @@ def generate_quote_pdf(quote_id: str) -> bytes:
                                   styles['ItemDesc'])
 
             qty = item.get('quantity', 1) or 1
-            unit_price = float(item.get('unit_price', 0) or 0)
-            subtotal = float(item.get('subtotal', 0) or 0)
-            if subtotal == 0:
-                subtotal = round(qty * unit_price, 2)
+            # HOTFIX 5 (2026-07-15): when price_overridden=1, the DB still
+            # carries the original unit_price / subtotal — the override
+            # lives in final_price. Render the founder-set value here too,
+            # or the customer-facing PDF disagrees with the canonical quote
+            # total.
+            is_override = bool(item.get('price_overridden'))
+            final_price = item.get('final_price')
+            if is_override and final_price is not None:
+                unit_price = float(final_price)
+                subtotal = float(final_price)
+            else:
+                unit_price = float(item.get('unit_price', 0) or 0)
+                subtotal = float(item.get('subtotal', 0) or 0)
+                if subtotal == 0:
+                    subtotal = round(qty * unit_price, 2)
 
             item_data.append([
                 str(idx),
