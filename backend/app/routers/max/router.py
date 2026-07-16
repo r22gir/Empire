@@ -21,7 +21,7 @@ from app.services.max.ai_router import ai_router, AIMessage, AIModel
 from app.services.max.telegram_bot import telegram_bot, _auto_save_exchange_to_memory
 from app.services.max.guardrails import check_input, sanitize_output, sanitize_output_streaming, SAFE_REFUSAL, is_founder_message, check_gpu_safety, GPU_VERIFICATION_COMMANDS
 from app.services.max.security.sanitizer import sanitizer as input_sanitizer
-from app.services.max.tool_executor import parse_tool_blocks, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
+from app.services.max.tool_executor import parse_tool_blocks, parse_tool_blocks_with_errors, strip_tool_blocks, execute_tool, ToolResult, get_xai_tool_definitions
 from app.services.max.minimax_tools import minimax_tools_status
 from app.services.max.tool_result_normalizer import (
     normalize_tool_result_entry as _normalize_tool_result_entry_canonical,
