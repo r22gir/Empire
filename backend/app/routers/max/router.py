@@ -1386,7 +1386,18 @@ def _apply_gpu_safety_output_guardrail(message: str | None, response_text: str) 
 
 
 def _apply_truth_guardrails(message: str | None, response_text: str, tool_results: list[Any] | None) -> str:
-    enforced = enforce_runtime_truth_response(message, response_text, tool_results)
+    # HOTFIX 2026-07-15 (HOTFIX 3): enforce_runtime_truth_response now
+    # returns tuple[str, list[str]] (failures, warnings) per 0aa5e67.
+    # Unpack here so this wrapper's -> str contract holds; downstream
+    # callers (sanitize_output, strip_tool_blocks, regex guards, len())
+    # all assume str and would TypeError on a tuple. Surface warnings
+    # via logger (not yet propagated to response metadata — that's a
+    # follow-up). Symptom seen in production: chat response ended with
+    # "expected string or bytes-like object, got 'tuple'" originating
+    # from regex/string fns that received a tuple-typed final_content.
+    enforced, warnings = enforce_runtime_truth_response(message, response_text, tool_results)
+    for w in warnings:
+        logger.warning(f"theater-detector: {w}")
     if enforced != response_text:
         return enforced
 

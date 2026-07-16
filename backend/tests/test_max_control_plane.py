@@ -1009,6 +1009,83 @@ class TestControlPlaneVsLiveTruth(unittest.TestCase):
         failures, warnings = result
         assert isinstance(warnings, list)
 
+    # --------------------------------------------------------------
+    # HOTFIX 3 (2026-07-15): _apply_truth_guardrails must unpack
+    # enforce_runtime_truth_response's tuple return. Pre-fix the wrapper
+    # claimed -> str but returned the tuple straight through, which
+    # propagated to _sanitize_internal_leakage_text / strip_tool_blocks /
+    # sanitize_output / len() / str!= comparisons and crashed on the
+    # first regex call with "expected string or bytes-like object, got
+    # 'tuple'". This pin asserts the wrapper returns a real str and the
+    # downstream regex/string consumers receive a str.
+    # --------------------------------------------------------------
+
+    def test_apply_truth_guardrails_returns_str_not_tuple(self):
+        """After HOTFIX 3, _apply_truth_guardrails must return a real
+        str (unpacked from enforce_runtime_truth_response's tuple) so
+        downstream string/regex consumers don't TypeError."""
+        from app.routers.max.router import _apply_truth_guardrails
+        out = _apply_truth_guardrails(
+            message="what is the status?",
+            response_text="The status is nominal.",
+            tool_results=[],
+        )
+        assert isinstance(out, str), (
+            f"_apply_truth_guardrails must unpack the tuple and return str; "
+            f"got {type(out).__name__}: {out!r}"
+        )
+
+    def test_apply_truth_guardrails_downstream_regex_does_not_crash(self):
+        """Hot reproduce: pre-fix, _apply_truth_guardrails returned the
+        tuple, then _sanitize_internal_leakage_text (regex on response)
+        tripped "expected string or bytes-like object, got 'tuple'".
+        Post-fix, the same pipeline completes without raising."""
+        import re as _re
+        from app.routers.max.router import (
+            _apply_truth_guardrails, _sanitize_internal_leakage_text,
+        )
+        # Use a response that would trigger sanitization regexes.
+        response = "Here is some content: <!-- internal: leaked --> and more text."
+        sanitized = _sanitize_internal_leakage_text(response)
+        assert isinstance(sanitized, str)
+
+        # Same shape MAX would feed: through _apply_truth_guardrails then
+        # _sanitize_internal_leakage_text. Pre-fix this crashed with TypeError.
+        guarded = _apply_truth_guardrails("test", response, [])
+        assert isinstance(guarded, str), (
+            f"guarded must be str (would flow into regex); got {type(guarded).__name__}"
+        )
+        # Now the regex consumer can run without TypeError. If the wrapped
+        # value were a tuple this line would raise.
+        _re.search(r"content", guarded, _re.IGNORECASE)
+        _re.search(r"leaked", sanitized, _re.IGNORECASE)
+
+    def test_apply_truth_guardrails_propagates_truth_failure_message(self):
+        """When the response contains an unsupported past-tense claim,
+        _apply_truth_guardrails must still swap to the truth-failure
+        message — HOTFIX 3 must not break that behavior."""
+        from app.routers.max.router import _apply_truth_guardrails
+        # "I checked" without a proof object triggers a failure.
+        original = "I checked OpenClaw and it's reachable."
+        out = _apply_truth_guardrails("status", original, tool_results=[])
+        assert isinstance(out, str)
+        assert out != original, (
+            "expected truth-failure replacement for unsupported claim, "
+            f"got back the original: {out!r}"
+        )
+        assert "have not run" in out or "truth" in out.lower()
+
+    def test_apply_truth_guardrails_passes_through_clean_response(self):
+        """When no claim or verification gap exists, pass through the
+        original response unchanged."""
+        from app.routers.max.router import _apply_truth_guardrails
+        original = "Sure, here is the summary you asked for."
+        out = _apply_truth_guardrails("give me a summary", original, tool_results=[])
+        assert isinstance(out, str)
+        assert out == original, (
+            f"clean response must pass through unchanged; got {out!r}"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
