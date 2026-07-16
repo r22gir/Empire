@@ -2357,8 +2357,77 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         current_response = response
 
         for _tool_round in range(3):
-            # Check for ```tool ... ``` blocks first (existing text-based format)
-            tool_calls = parse_tool_blocks(current_response.content)
+            # Check for ```tool ... ``` blocks first (existing text-based format).
+            # HOTFIX 2026-07-16 (parser fix): when multiple NDJSON objects
+            # appear in a single block, parse_tool_blocks_with_errors
+            # yields (actions, per-object errors). We surface each error
+            # as a synthetic tool-result entry so MAX can self-correct;
+            # the parse-actions still execute per BLOCK_PARSE_POLICY.
+            tool_calls, tool_block_errors = parse_tool_blocks_with_errors(
+                current_response.content
+            )
+            if tool_block_errors:
+                for err in tool_block_errors:
+                    logger.warning(
+                        "[chat] tool block parse error: object %d at line "
+                        "%s col %s — %s",
+                        err["index"], err.get("line"), err.get("column"), err["error"],
+                    )
+                error_entries = [
+                    {
+                        # Synthetic tool name; MAX will see this in the
+                        # tool_results round and self-correct on its next
+                        # reply. It is intentionally NOT in
+                        # VERIFICATION_REQUIRED_TOOLS so the runtime
+                        # truth gate does not require proof for this
+                        # error feedback — the error IS the proof.
+                        "tool": "_tool_block_parse_error",
+                        "success": False,
+                        "error": (
+                            f"tool block object {e['index']} malformed: "
+                            f"{e['error']}. Re-emit this object as a valid "
+                            f"JSON line in your next reply. Other objects "
+                            f"in the same block DID execute."
+                            for e in tool_block_errors
+                        )
+                        if len(tool_block_errors) == 1
+                        else (
+                            f"{len(tool_block_errors)} tool block objects "
+                            f"malformed: " + "; ".join(
+                                f"#{e['index']}:{e['error']}"
+                                for e in tool_block_errors
+                            ) + ". Re-emit each as a valid JSON line. "
+                              "Other objects in the same block DID execute."
+                        ),
+                        "result": {
+                            "parse_errors": tool_block_errors,
+                            "policy": "BLOCK_PARSE_POLICY: execute good, surface bad",
+                        },
+                    }
+                ]
+                # Make error_entries a flat list (one entry per error so
+                # MAX gets a one-per-error summary).
+                error_entries = [{
+                    "tool": "_tool_block_parse_error",
+                    "success": False,
+                    "error": (
+                        f"tool block object {e['index']} malformed: "
+                        f"{e['error']}. Re-emit this object as a valid "
+                        f"JSON line in your next reply. Other objects "
+                        f"in the same block DID execute."
+                    ),
+                    "result": {
+                        "index": e["index"],
+                        "line": e.get("line"),
+                        "column": e.get("column"),
+                        "snippet": e["snippet"],
+                        "policy": "BLOCK_PARSE_POLICY: execute good, surface bad",
+                    },
+                } for e in tool_block_errors]
+                # Prepend error entries so MAX sees them in this round's
+                # tool_results context BEFORE the follow-up instruction.
+                round_results = error_entries + round_results
+                tool_results_list = error_entries + tool_results_list
             # Also check xAI /v1/responses function_calls format
             if not tool_calls and hasattr(current_response, 'function_calls') and current_response.function_calls:
                 tool_calls = current_response.function_calls
@@ -3033,7 +3102,36 @@ async def chat_stream(request: ChatRequest):
             current_text = full_response
 
             for _tool_round in range(3):
-                tool_calls = parse_tool_blocks(current_text)
+                # HOTFIX 2026-07-16 (parser fix): same NDJSON-tolerant
+                # parse + structured error feedback as the non-streaming
+                # chat path above.
+                tool_calls, tool_block_errors = parse_tool_blocks_with_errors(current_text)
+                if tool_block_errors:
+                    for err in tool_block_errors:
+                        logger.warning(
+                            "[stream] tool block parse error: object %d at "
+                            "line %s col %s — %s",
+                            err["index"], err.get("line"), err.get("column"), err["error"],
+                        )
+                    error_entries = [{
+                        "tool": "_tool_block_parse_error",
+                        "success": False,
+                        "error": (
+                            f"tool block object {e['index']} malformed: "
+                            f"{e['error']}. Re-emit this object as a valid "
+                            f"JSON line in your next reply. Other objects "
+                            f"in the same block DID execute."
+                        ),
+                        "result": {
+                            "index": e["index"],
+                            "line": e.get("line"),
+                            "column": e.get("column"),
+                            "snippet": e["snippet"],
+                            "policy": "BLOCK_PARSE_POLICY: execute good, surface bad",
+                        },
+                    } for e in tool_block_errors]
+                    round_results = error_entries + round_results
+                    tool_results_list = error_entries + tool_results_list
                 if not tool_calls:
                     break
 

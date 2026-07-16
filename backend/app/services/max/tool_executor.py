@@ -41,6 +41,13 @@ except ImportError:
 
 logger = logging.getLogger("max.tool_executor")
 
+# Per-block safety cap on parse errors. A normal block has 0 errors; a
+# really corrupted block (e.g. tail-garbage mid-stream) might produce
+# many, but never many-many. When len(errors) hits the cap we declare
+# the block unrecoverable and stop — so a single bad block can never
+# overwhelm the conversation with spurious per-byte errors.
+MAX_PER_BLOCK_ERRORS = 16
+
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
 DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
 FOUNDER_PIN = os.getenv("FOUNDER_PIN", "7777")
@@ -117,8 +124,58 @@ def _parse_action_payload(payload) -> list[dict]:
 
 
 def parse_tool_blocks(text: str) -> list[dict]:
-    """Extract executable tool-action JSON objects from fenced blocks or raw JSON."""
-    results = []
+    """Extract executable tool-action JSON objects from fenced blocks or raw JSON.
+
+    HOTFIX 2026-07-16 (parser fix):
+
+      Pre-fix, this function called `json.loads(candidate)` on the
+      entire fenced-block body. When MAX emits multiple newline-
+      delimited JSON objects in one block (its natural behavior — see
+      the 12:45 and 17:12 transcripts), `json.loads()` raises
+      `Extra data: line 2 column 1` because JSON permits only one
+      top-level value. The exception was caught and the block was
+      silently skipped — so MAX received NO error feedback, NO
+      executed tools, and could not self-correct.
+
+      Post-fix: parse each block via `json.JSONDecoder().raw_decode()`
+      in a loop. Successfully-decoded objects are appended to results
+      in order. Malformed objects produce a structured error marker;
+      callers that want to surface errors (the chat router) use
+      `parse_tool_blocks_with_errors()` instead. Single-object blocks
+      behave exactly as before.
+
+    Policy on mixed blocks (BLOCK_PARSE_POLICY): EXECUTE GOOD, SURFACE
+    BAD. Execute every successfully-decoded object in order; for
+    every malformed object, build a structured error marker so the
+    chat router can feed it back to MAX as a tool result. Going
+    strict (whole-block reject on first error) would force MAX to
+    re-emit the entire block — including the calls that already
+    succeeded — which is wasteful and brittle.
+    """
+    return parse_tool_blocks_with_errors(text)[0]
+
+
+def parse_tool_blocks_with_errors(text: str) -> tuple[list[dict], list[dict]]:
+    """Like parse_tool_blocks, but also returns a list of structured
+    error markers — one per malformed object — so the chat router
+    can build a synthetic tool-error result for each.
+
+    Returns:
+        (actions, errors):
+          actions — list of parsed tool-action dicts (successful).
+          errors  — list of error dicts, each:
+                       {
+                         "index": int,        # 1-based object index in the block
+                         "line": int | None,  # line number of the failing parse
+                         "column": int | None,
+                         "error": str,        # human-readable json error
+                         "snippet": str,      # raw block content (truncated)
+                       }
+
+    Block-parse policy: see parse_tool_blocks docstring.
+    """
+    results: list[dict] = []
+    errors: list[dict] = []
     seen_payloads: set[str] = set()
 
     for match in TOOL_BLOCK_RE.finditer(text):
@@ -126,22 +183,116 @@ def parse_tool_blocks(text: str) -> list[dict]:
         if candidate in seen_payloads:
             continue
         seen_payloads.add(candidate)
-        try:
-            obj = json.loads(candidate)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Malformed tool JSON: {e}")
-            continue
-        results.extend(_parse_action_payload(obj))
+
+        block_actions, block_errors = _parse_ndjson_block(candidate)
+        results.extend(block_actions)
+        errors.extend(block_errors)
 
     stripped = text.strip()
     if not results and stripped and stripped[0] in "{[":
-        try:
-            obj = json.loads(stripped)
-            results.extend(_parse_action_payload(obj))
-        except json.JSONDecodeError as e:
-            logger.warning(f"Malformed raw tool JSON: {e}")
+        # Single raw JSON message (no fences) — same NDJSON-tolerant parser.
+        raw_actions, raw_errors = _parse_ndjson_block(stripped)
+        results.extend(raw_actions)
+        errors.extend(raw_errors)
 
-    return results
+    return results, errors
+
+
+def _parse_ndjson_block(body: str) -> tuple[list[dict], list[dict]]:
+    """Parse one fenced-block body (or a raw JSON message) via
+    json.JSONDecoder().raw_decode() in a loop.
+
+    Tolerant of:
+      - a single object (the pre-fix case; behaves identically)
+      - NDJSON: multiple newline-delimited objects
+      - objects separated by arbitrary whitespace (spaces / tabs /
+        blank lines) — anything the decoder treats as token
+        terminators works here.
+
+    Returns:
+        (actions, errors) — see parse_tool_blocks_with_errors.
+
+    Per BLOCK_PARSE_POLICY: continues past parse failures so a
+    malformed object doesn't kill the rest of the block. Each error
+    captured here is surfaced to the router via the errors list.
+
+    Safety cap: MAX_PER_BLOCK_ERRORS. If a block produces more errors
+    than this cap, we declare it unrecoverable (probably tail-
+    corrupted) and stop parsing — so a single malformed block can
+    never overwhelm the conversation with spurious errors.
+    """
+    actions: list[dict] = []
+    errors: list[dict] = []
+    decoder = json.JSONDecoder()
+    idx = 0
+    n = len(body)
+    obj_index = 0
+    abort_due_to_cap = False
+    while idx < n:
+        # Skip whitespace between objects (NDJSON + extra-blank-line
+        # friendly). Stops on the first non-whitespace byte.
+        while idx < n and body[idx] in " \t\r\n":
+            idx += 1
+        if idx >= n:
+            break
+        try:
+            obj, end_idx = decoder.raw_decode(body, idx)
+            obj_index += 1
+            actions.extend(_parse_action_payload(obj))
+            idx = end_idx
+        except json.JSONDecodeError as e:
+            obj_index += 1
+            errors.append({
+                "index": obj_index,
+                "line": e.lineno,
+                "column": e.colno,
+                "error": f"{e.msg} (line {e.lineno}, column {e.colno})",
+                "snippet": body[idx:min(n, idx + 240)],
+            })
+            logger.warning(
+                "tool block object %d malformed at line %d col %d: %s — "
+                "raw block (truncated): %r",
+                obj_index, e.lineno, e.colno, e.msg,
+                body[idx:min(n, idx + 240)],
+            )
+            # Skip past this failed object. We advance to the GREATEST
+            # of:
+            #   - e.pos + 1          (the byte after the parser's
+            #                        failure point)
+            #   - next_newline + 1   (start of the next line)
+            # Without this `max`, when the bad object has no trailing
+            # newline (e.g. the LAST line in a block) the loop would
+            # re-parse from the middle of the bad object on every
+            # iteration, emitting one spurious "Expecting value"
+            # error per byte.
+            next_nl = body.find("\n", idx)
+            next_nl_advance = next_nl + 1 if next_nl != -1 else n
+            advance = max(e.pos + 1, next_nl_advance)
+            if advance <= idx:
+                # The parser didn't even advance past its starting
+                # position — pathological input. Force a 1-char step
+                # so we eventually exit the loop.
+                advance = idx + 1
+            idx = advance
+            if len(errors) >= MAX_PER_BLOCK_ERRORS:
+                abort_due_to_cap = True
+                break
+    if abort_due_to_cap:
+        # Final entry: block aborted due to error cap. The chat
+        # router surfaces this as one tool-error result; MAX uses it
+        # to know to re-emit the block from scratch.
+        errors.append({
+            "index": obj_index + 1,
+            "line": None,
+            "column": None,
+            "error": (
+                f"block_aborted: >{MAX_PER_BLOCK_ERRORS} malformed "
+                f"objects without forward progress — block is likely "
+                f"tail-corrupted; re-emit the block from scratch."
+            ),
+            "snippet": body[idx:min(n, idx + 240)],
+        })
+    return actions, errors
 
 
 def strip_tool_blocks(text: str) -> str:
