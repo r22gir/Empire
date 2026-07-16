@@ -2183,6 +2183,9 @@ def _check_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 @tool("send_email")
 def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Send an email with optional file attachments."""
+    from app.services.max.email_recipient_whitelist import (
+        authorize_email_recipient, recipient_whitelist_status,
+    )
     to = params.get("to", "").strip()
     subject = params.get("subject", "").strip()
     body = params.get("body", "").strip()
@@ -2194,8 +2197,61 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     if not subject or not body:
         return ToolResult(tool="send_email", success=False, error="subject and body are required")
 
+    # ── HOTFIX 2026-07-16 (d): outbound recipient allowlist ─────────
+    # No MAX tool call may email a client/customer address under any
+    # circumstances. The allowlist only covers FOUNDER_EMAIL,
+    # WORKROOM_EMAIL, WOODCRAFT_EMAIL (env) and entries listed in
+    # MAX_EMAIL_ALLOWED_RECIPIENTS. Anything else is refused with a
+    # structured verdict (no address exposed in the error). The cc
+    # list is checked too — passing `to=okaddress, cc=client@x.com`
+    # is also rejected.
     attachments = params.get("attachments", [])
     cc = params.get("cc")
+    verdict_to = authorize_email_recipient(to)
+    if not verdict_to["recipient_authorized"]:
+        logger.warning(
+            f"send_email BLOCKED: recipient_authorized=False "
+            f"reason={verdict_to['blocked_reason']} "
+            f"(whitelist has {recipient_whitelist_status()['allowed_recipient_count']} entries)"
+        )
+        return ToolResult(
+            tool="send_email", success=False,
+            error=(
+                f"recipient_not_in_whitelist: {verdict_to['blocked_reason']} "
+                f"(ask the founder to add this address to MAX_EMAIL_ALLOWED_RECIPIENTS "
+                f"if it's a legitimate internal recipient)"
+            ),
+            result=verdict_to,
+        )
+    if cc:
+        cc_list = [a.strip() for a in str(cc).split(",") if a.strip()]
+        cc_authorized = [
+            (a, authorize_email_recipient(a))
+            for a in cc_list
+        ]
+        bad = [(a, v) for a, v in cc_authorized
+               if not v["recipient_authorized"]]
+        if bad:
+            bad_addrs = ", ".join(a for a, _ in bad)
+            logger.warning(
+                f"send_email BLOCKED: cc contains {len(bad)} non-allowlisted "
+                f"address(es) (whitelist has "
+                f"{recipient_whitelist_status()['allowed_recipient_count']} entries)"
+            )
+            return ToolResult(
+                tool="send_email", success=False,
+                error=(
+                    f"recipient_not_in_whitelist: cc contains "
+                    f"{len(bad)} non-allowlisted address(es): "
+                    f"{bad_addrs[:80]}..."
+                ),
+                result={
+                    "rejected_cc": [
+                        {"address": a, "reason": v["blocked_reason"]}
+                        for a, v in bad
+                    ],
+                },
+            )
 
     # Auto-convert SVG attachments to PDF via WeasyPrint
     converted_attachments = []
@@ -2238,12 +2294,37 @@ def _send_email(params: dict, desk: Optional[str] = None) -> ToolResult:
 @tool("send_quote_email")
 def _send_quote_email(params: dict, desk: Optional[str] = None) -> ToolResult:
     """Generate PDF for a quote and send it to a recipient via email."""
+    from app.services.max.email_recipient_whitelist import (
+        authorize_email_recipient, recipient_whitelist_status,
+    )
     quote_id = params.get("quote_id", "")
     to = params.get("to", "").strip()
     if not quote_id:
         return ToolResult(tool="send_quote_email", success=False, error="No quote_id provided")
     if not to:
         return ToolResult(tool="send_quote_email", success=False, error="No recipient email (to) provided")
+
+    # ── HOTFIX 2026-07-16 (d): outbound recipient allowlist ─────────
+    # Same allowlist as send_email — no client/customer sends. Per
+    # audit directive: NEVER email a client address from MAX tools;
+    # founder uses the portal approval flow to surface customer
+    # emails (the quote-accept link in /quote/[id]/page.tsx uses the
+    # canonical email field stored in quotes_v2.customer_email).
+    verdict_to = authorize_email_recipient(to)
+    if not verdict_to["recipient_authorized"]:
+        logger.warning(
+            f"send_quote_email BLOCKED: recipient_authorized=False "
+            f"reason={verdict_to['blocked_reason']} quote_id={quote_id}"
+        )
+        return ToolResult(
+            tool="send_quote_email", success=False,
+            error=(
+                f"recipient_not_in_whitelist: {verdict_to['blocked_reason']} "
+                f"(customer emails go through the portal accept flow — never "
+                f"via MAX email tools)"
+            ),
+            result=verdict_to,
+        )
 
     # Load quote
     quote_path = os.path.join(QUOTES_DIR, f"{quote_id}.json")

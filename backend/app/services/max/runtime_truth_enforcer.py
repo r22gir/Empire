@@ -40,6 +40,70 @@ from app.services.max.tool_result_normalizer import normalize_tool_results
 logger = logging.getLogger("max.runtime_truth_enforcer")
 
 
+# ── HOTFIX 2026-07-16 (a): post-generation quote-number guard ────────
+# Extract every `EST-YYYY-NNN` reference from a MAX chat reply. Each
+# MUST resolve to a canonical row in quotes_v2 (SQL) before the
+# message renders. If any claimed quote_number doesn't exist, we hard-
+# block (return failure) so the founder sees a truth-failure message
+# instead of the fabricated claim.
+#
+# This is the verification arm of the runtime truth gate. Phase A's
+# theater detector handles JSON-shape fabrication; this guard handles
+# *prose* fabrication — when the chat claims "I updated EST-2026-114"
+# but that quote doesn't exist.
+QUOTE_NUMBER_RE = re.compile(r"\bEST-\d{4}-\d{3}\b")
+
+
+# ── HOTFIX 2026-07-16 (c): PIN chat-channel guard ────────────────────
+# Hard rule from system_prompt: NEVER request or accept the founder PIN
+# in the chat channel. PIN entry happens only via the portal approval
+# flow (/api/v1/quotes-v2/{id}/approve with founder_pin body field).
+# If a MAX reply ASKS for a PIN, we hard-block the response — same
+# path as the quote-number guard. Restricted to common natural-
+# language prompts; explicit JSON-shape PIN entry (e.g. {"pin": ...})
+# in tool-call-shaped prose is the theater detector's territory.
+PIN_REQUEST_PATTERNS = (
+    # PIN-keyword patterns — covers "what's the pin", "give me the
+    # founder pin", "enter your pin", "tell me the pin", "what's the
+    # founder pin now", etc. The optional privilege noun (founder /
+    # admin / owner) slots between the determiner and the keyword.
+    re.compile(
+        r"\b(?:"
+        # Question forms: "what is the founder pin"
+        r"what(?:'s| is)\s+(?:the\s+|your\s+|that\s+)?(?:founder\s+|admin\s+|owner\s+|approval\s+)?pin\b"
+        r"|"
+        # Imperative forms: "give me the pin", "give me the founder pin",
+        # "enter your pin", "enter the founder pin", "tell me the
+        # pin", "tell me your pin", "need the pin", "need the
+        # founder pin"
+        r"(?:give|send|tell|enter|need|share|provide)\s+"
+        r"(?:me\s+|us\s+)?"
+        r"(?:the\s+|your\s+|that\s+|my\s+our\s+)?"
+        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
+        r"pin\b"
+        r")",
+        re.IGNORECASE,
+    ),
+    # OTP / verification-code patterns — covering same verbs + bare
+    # "what's the otp" form. The CODE suffix is optional; "otp" alone
+    # is enough.
+    re.compile(
+        r"\b(?:"
+        r"(?:send|share|provide|give|tell)\s+"
+        r"(?:me\s+|us\s+)?"
+        r"(?:the\s+|your\s+|that\s+)?"
+        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
+        r"(?:pin|otp|verification\s+code|verification\s+token)\b"
+        r"|"
+        r"what(?:'s| is)\s+(?:the\s+|your\s+|that\s+)?"
+        r"(?:founder\s+|admin\s+|owner\s+|approval\s+)?"
+        r"(?:otp|verification\s+code|verification\s+token)\b"
+        r")",
+        re.IGNORECASE,
+    ),
+)
+
+
 # Tools that require specific proof fields in their result.
 VERIFICATION_REQUIRED_TOOLS = {
     "send_email",
@@ -393,6 +457,98 @@ def _claim_failure_reason(claim_phrase: str) -> str:
     )
 
 
+# ── HOTFIX 2026-07-16 (a): helpers ───────────────────────────────────
+
+
+def _extract_quote_numbers(text: str) -> list[str]:
+    """Return every distinct EST-YYYY-NNN match, in source order."""
+    if not text:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for m in QUOTE_NUMBER_RE.finditer(text):
+        qn = m.group(0)
+        if qn not in seen:
+            seen.add(qn)
+            out.append(qn)
+    return out
+
+
+def _verify_quote_numbers(quote_numbers: list[str]) -> list[str]:
+    """Return the subset of `quote_numbers` that DO NOT resolve in
+    quotes_v2 (canonical SQL store). Hot path: this runs once per MAX
+    chat reply. The DB lookup is cheap (indexed by quote_number).
+    Imports are inside the function to avoid a circular dep with
+    quote_service on import time.
+    """
+    if not quote_numbers:
+        return []
+    try:
+        from app.services.quote_service import get_quote_by_number
+    except Exception as e:
+        logger.debug(f"quote_number guard unavailable: {e!r}")
+        # Fail-closed: if we cannot verify, treat every claim as a
+        # failure — better than letting an unverifiable claim through.
+        return list(quote_numbers)
+    missing: list[str] = []
+    for qn in quote_numbers:
+        try:
+            row = get_quote_by_number(qn)
+        except Exception as e:
+            logger.warning(f"quote_number lookup {qn!r} raised: {e!r}")
+            row = None
+        if not row:
+            missing.append(qn)
+    return missing
+
+
+def _quote_number_failure_reason(missing: list[str]) -> str:
+    """Human-readable failure reason for the quote-number guard."""
+    if len(missing) == 1:
+        qn = missing[0]
+        return (
+            f"MAX claimed quote {qn} but {qn} does not exist in the canonical "
+            f"quotes_v2 store. Quote references in chat replies MUST resolve "
+            f"via the live quotes table — never fabricated from memory. "
+            f"Verify the quote_number against quotes_v2 (or quote_service."
+            f"get_quote_by_number) before retrying."
+        )
+    return (
+        f"MAX claimed {len(missing)} quote_numbers that do not exist in "
+        f"the canonical quotes_v2 store: {', '.join(missing)}. Quote "
+        f"references in chat replies MUST resolve via the live quotes "
+        f"table — never fabricated from memory. Verify each quote_number "
+        f"against quotes_v2 (or quote_service.get_quote_by_number) before "
+        f"retrying."
+    )
+
+
+# ── HOTFIX 2026-07-16 (c): helpers ───────────────────────────────────
+
+
+def _find_pin_request(text: str) -> Optional[str]:
+    """Return the matched pattern string if MAX's reply asks the founder
+    for a PIN in chat. None when no match."""
+    if not text:
+        return None
+    for pat in PIN_REQUEST_PATTERNS:
+        m = pat.search(text)
+        if m:
+            return m.group(0)
+    return None
+
+
+def _pin_request_failure_reason(matched: str) -> str:
+    return (
+        f"MAX asked the founder for a PIN in chat ('{matched}'). "
+        f"PIN entry happens ONLY via the portal approval flow "
+        f"(/api/v1/quotes-v2/{{id}}/approve with founder_pin body field). "
+        f"MAX MUST NEVER request, accept, or echo PIN/OTP/verification-"
+        f"code values in the chat channel — this is a hard system prompt "
+        f"rule. Restate the request without asking for the PIN."
+    )
+
+
 def _tool_failure_reason(entry: dict[str, Any], user_message: str | None = None) -> str | None:
     tool = entry.get("tool") or "unknown_tool"
     if tool not in VERIFICATION_REQUIRED_TOOLS:
@@ -511,6 +667,35 @@ def runtime_truth_failures(
         if fabrication:
             warnings.append(fabrication)
             logger.warning(fabrication)
+
+    # Failure mode 4 (HOTFIX 2026-07-16 a): post-generation quote-number
+    # guard. Every EST-YYYY-NNN referenced in the response MUST resolve
+    # in quotes_v2. If any don't, HARD-BLOCK the response (failures
+    # path → truth-failure message). This catches fabricated claim
+    # transcripts like "I updated EST-2026-114" when that quote doesn't
+    # exist in the canonical store.
+    if response_text:
+        quote_numbers = _extract_quote_numbers(response_text)
+        missing_qns = _verify_quote_numbers(quote_numbers)
+        if missing_qns:
+            failures.append(_quote_number_failure_reason(missing_qns))
+            logger.warning(
+                f"runtime_truth_failures: blocking response with fabricated "
+                f"quote_numbers {missing_qns}"
+            )
+
+    # Failure mode 5 (HOTFIX 2026-07-16 c): PIN chat-channel guard.
+    # Hard system-prompt rule: NEVER request/accept the founder PIN in
+    # chat. If MAX's reply asks for one, HARD-BLOCK (same path as the
+    # quote-number guard).
+    if response_text:
+        pin_match = _find_pin_request(response_text)
+        if pin_match:
+            failures.append(_pin_request_failure_reason(pin_match))
+            logger.warning(
+                f"runtime_truth_failures: blocking response that asks for "
+                f"PIN in chat: {pin_match!r}"
+            )
 
     return failures, warnings
 
