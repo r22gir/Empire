@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API, API_BASE } from '../../lib/api';
 import { Quote } from '../../lib/types';
-import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2 } from 'lucide-react';
+import { Check, FileText, Send, Mail, Video, Printer, Image, ExternalLink, Upload, Search, Camera, Receipt, Loader2, Save, Plus, Trash2, ShieldCheck, X } from 'lucide-react';
 import QuoteVerificationPanel from '../business/quotes/QuoteVerificationPanel';
 
 interface UploadedPhoto {
@@ -52,6 +52,13 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
   const [editDiscountAmt, setEditDiscountAmt] = useState(0);
   const [editDiscountType, setEditDiscountType] = useState<'dollar' | 'percent'>('dollar');
   const [dirty, setDirty] = useState(false);
+  // HOTFIX 4.1 — Approve PIN gate. The "Confirm Selection" button now
+  // opens a PIN modal that calls POST /quotes-v2/{id}/approve with
+  // founder_pin instead of bypassing straight to status='accepted'.
+  const [approveModalOpen, setApproveModalOpen] = useState(false);
+  const [approvePin, setApprovePin] = useState('');
+  const [approveError, setApproveError] = useState<string | null>(null);
+  const [approving, setApproving] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -367,22 +374,72 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
     } else if (action === 'print') {
       window.print();
     } else if (action === 'confirm') {
-      showFeedback('Confirming selection...');
+      // HOTFIX 4.1 — "Confirm Selection" only saves the tier selection
+      // (selected_proposal + selected_tier). It MUST NOT set the quote
+      // status to 'accepted' — that's a customer-side transition and
+      // reaching it from this screen with no PIN was the bypass bug.
+      showFeedback('Saving tier selection...');
       try {
         const res = await fetch(API + `/quotes-v2/${quote.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            status: 'accepted',
             selected_proposal: selected,
             selected_tier: tiers[selected]?.key,
           }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          showFeedback(err.detail || err.error || 'Failed to update');
+          return;
+        }
         const data = await res.json();
         setQuote(data.quote || data);
-        showFeedback('Quote accepted!');
+        showFeedback('Tier selection saved.');
       } catch { showFeedback('Failed to update'); }
+    } else if (action === 'approve_send') {
+      // HOTFIX 4.1 — Founder approve-and-send flow. PIN-gated; calls
+      // POST /api/v1/quotes-v2/{id}/approve with founder_pin in the
+      // body. The server-side _require_founder_pin gates the actual
+      // founder_review -> sent transition; no client-side bypass is
+      // possible from this screen.
+      if (quote.status !== 'founder_review' && quote.status !== 'draft') {
+        showFeedback(`Cannot approve from '${quote.status}'.`);
+        return;
+      }
+      setApproveError(null);
+      setApprovePin('');
+      setApproveModalOpen(true);
+    } else if (action === 'approve_submit') {
+      // HOTFIX 4.1 — submit PIN and let the server validate.
+      if (approving) return;
+      setApproving(true);
+      setApproveError(null);
+      try {
+        const res = await fetch(API + `/quotes-v2/${quote.id}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            founder_pin: approvePin,
+            changed_by: 'founder',
+            reason: 'Approved from QuoteReviewScreen (HOTFIX 4.1)',
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+          setApproveError(err.detail || err.error || `HTTP ${res.status}`);
+          return;
+        }
+        const data = await res.json();
+        setQuote(data.quote || data);
+        setApproveModalOpen(false);
+        setApprovePin('');
+        showFeedback('Quote approved and marked sent.');
+      } catch (e) {
+        setApproveError(`Network error: ${(e as Error).message}`);
+      } finally {
+        setApproving(false);
+      }
     } else if (action === 'video') {
       showFeedback('Video call feature coming soon');
     }
@@ -886,9 +943,19 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
       <div className="flex gap-2.5 flex-wrap">
         <button onClick={() => handleAction('confirm')}
           className="flex-1 flex items-center justify-center gap-2 bg-[#b8960c] text-white border-2 border-[#a08509] text-[13px] font-bold cursor-pointer hover:bg-[#a08509] shadow-[0_2px_8px_rgba(184,150,12,0.25)] transition-all active:scale-[0.98]"
-          style={{ height: 44, padding: '0 20px', borderRadius: 12 }}>
-          <Check size={18} /> Confirm Selection
+          style={{ height: 44, padding: '0 20px', borderRadius: 12 }}
+          title="Save the selected tier/proposal. Does NOT change the quote status.">
+          <Check size={18} /> Save Tier
         </button>
+        {quote &&
+          ['draft', 'founder_review'].includes(quote.status) && (
+          <button onClick={() => handleAction('approve_send')}
+            className="flex items-center justify-center gap-2 bg-[#16a34a] text-white border-2 border-[#15803d] text-[13px] font-bold cursor-pointer hover:bg-[#15803d] shadow-[0_2px_8px_rgba(22,163,74,0.25)] transition-all active:scale-[0.98]"
+            style={{ height: 44, padding: '0 20px', borderRadius: 12 }}
+            title="Move draft/founder_review -> sent. Requires PIN via modal.">
+            <ShieldCheck size={18} /> Approve &amp; Send
+          </button>
+        )}
         <ActionBtn icon={<ExternalLink size={16} />} label="QuoteBuilder" onClick={() => {
           if (onOpenBuilder) { onOpenBuilder(); }
         }} />
@@ -898,6 +965,128 @@ export default function QuoteReviewScreen({ quoteId, onOpenBuilder }: Props) {
         <ActionBtn icon={<Video size={16} />} label="Call" onClick={() => handleAction('video')} />
         <ActionBtn icon={<Printer size={16} />} label="Print" onClick={() => handleAction('print')} />
       </div>
+
+      {/* HOTFIX 4.1 — PIN modal for founder approve-and-send.
+          Replaces the bypass 'Confirm Selection' button. Modal is
+          closed by default; opens via handleAction('approve_send').
+          The PIN is sent server-side as founder_pin in the approve
+          body; the server uses _require_founder_pin to validate. */}
+      {approveModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="approve-pin-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(20,20,20,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !approving) {
+              setApproveModalOpen(false);
+              setApprovePin('');
+              setApproveError(null);
+            }
+          }}>
+          <div style={{
+            background: '#fff', borderRadius: 14, padding: 24,
+            width: '90%', maxWidth: 420, boxShadow: '0 24px 48px rgba(0,0,0,0.22)',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              marginBottom: 12,
+            }}>
+              <h3 id="approve-pin-title" style={{
+                fontSize: 17, fontWeight: 700, color: '#1a1a1a',
+                display: 'flex', alignItems: 'center', gap: 8, margin: 0,
+              }}>
+                <ShieldCheck size={20} color="#16a34a" />
+                Approve &amp; Send
+              </h3>
+              <button
+                onClick={() => {
+                  if (!approving) {
+                    setApproveModalOpen(false);
+                    setApprovePin('');
+                    setApproveError(null);
+                  }
+                }}
+                aria-label="Close"
+                style={{
+                  background: 'none', border: 'none', cursor: approving ? 'wait' : 'pointer',
+                  color: '#888', padding: 4,
+                }}>
+                <X size={20} />
+              </button>
+            </div>
+            <p style={{ fontSize: 13, color: '#555', margin: '0 0 16px', lineHeight: 1.5 }}>
+              Move <strong>{quote?.quote_number || quote?.id}</strong> from
+              <strong> {quote?.status} </strong> to <strong>sent</strong>.
+              PIN entry happens only via this portal modal — never
+              typed in chat. Enter your founder PIN to confirm.
+            </p>
+            <input
+              type="password"
+              autoComplete="off"
+              autoFocus
+              value={approvePin}
+              onChange={(e) => setApprovePin(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAction('approve_submit');
+              }}
+              placeholder="Founder PIN"
+              disabled={approving}
+              style={{
+                width: '100%', padding: '10px 12px', fontSize: 14,
+                border: '1.5px solid #ece8e0', borderRadius: 8,
+                fontFamily: 'ui-monospace, monospace', letterSpacing: '0.15em',
+                background: approving ? '#f8f8f6' : '#fff',
+                marginBottom: 10,
+              }}
+            />
+            {approveError && (
+              <div style={{
+                background: '#fef2f2', border: '1px solid #fecaca',
+                color: '#991b1b', borderRadius: 6, padding: '8px 10px',
+                fontSize: 12, marginBottom: 10,
+              }}>
+                {approveError}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  if (approving) return;
+                  setApproveModalOpen(false);
+                  setApprovePin('');
+                  setApproveError(null);
+                }}
+                disabled={approving}
+                style={{
+                  padding: '8px 14px', borderRadius: 6,
+                  border: '1.5px solid #ece8e0', background: '#fff',
+                  color: '#555', fontSize: 13, fontWeight: 600,
+                  cursor: approving ? 'wait' : 'pointer',
+                }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => handleAction('approve_submit')}
+                disabled={approving || approvePin.length < 4}
+                style={{
+                  padding: '8px 14px', borderRadius: 6, border: 'none',
+                  background: approving || approvePin.length < 4 ? '#9ca3af' : '#16a34a',
+                  color: '#fff', fontSize: 13, fontWeight: 700,
+                  cursor: approving || approvePin.length < 4 ? 'wait' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                <ShieldCheck size={16} />
+                {approving ? 'Approving...' : 'Approve & Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

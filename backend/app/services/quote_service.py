@@ -495,7 +495,13 @@ def update_quote(quote_id: str, data: dict) -> dict:
 
         updatable = [
             'customer_name', 'customer_email', 'customer_phone', 'customer_address',
-            'business_unit', 'project_name', 'project_description', 'status',
+            'business_unit', 'project_name', 'project_description',
+            # HOTFIX 4.1 (2026-07-16): 'status' was REMOVED from this
+            # whitelist so PATCH can never silently set a customer-side
+            # status (e.g. status='accepted') and bypass the founder
+            # PIN gate. Status transitions route through the explicit
+            # /submit-for-review, /approve (PIN-gated), /reject
+            # routes — see approve_quote() in this module.
             'tax_rate', 'discount_amount', 'discount_type', 'deposit_percent',
             'valid_days', 'terms', 'notes', 'pricing_mode', 'location',
             'lining_preference', 'job_id', 'customer_id',
