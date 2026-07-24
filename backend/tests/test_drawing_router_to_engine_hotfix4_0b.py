@@ -40,7 +40,9 @@ TEST DOCTRINE (per HOTFIX 4.0b (d)):
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -318,4 +320,195 @@ class TestDoctrineGuard:
                 f"the real chat POST. (A test that mocks the layer it "
                 f"exists to verify is a defect class — the bug we just "
                 f"fixed.)"
+            )
+
+
+# ───────────────────────────────────────────────────────────────────
+# HOTFIX 4.0b2 — both /chat and /chat/stream must use the same body
+# ───────────────────────────────────────────────────────────────────
+
+
+class TestBothEndpointsRouteToEngine:
+    """HOTFIX 4.0b2 — parameterize the E2E over BOTH endpoints.
+
+    Pre-fix, only /chat was patched. /chat/stream still called
+    _execute_drawing_handoff → sketch_to_drawing → "Drawing
+    workflow failed: sketch_to_drawing: text-only requests with
+    explicit dimensions must use render_shop_drawing..." (the
+    live 8:42 AM Jul 24 repro). The whole class fails if the
+    stream endpoint regresses — the doctrine guard at the bottom
+    adds a static check that NO divergent second implementation
+    exists in router.py.
+    """
+
+    R1_MESSAGE = (
+        "create a shop drawing for a flat roman shade, 38 wide 64 long"
+    )
+
+    def _assert_pdf_exists(self, response_text: str) -> str:
+        """Shared assertion: response must surface a canonical-root PDF."""
+        from app.services.drawing.canonical_path import canonical_drawings_dir
+        # Stream path: response_text is the bare PDF path (e.g.
+        # "/tmp/.../drawings/flat_fold_23983be9.pdf").
+        # Non-stream path: response_text is "Drawn {type} (B1, ...) → PATH".
+        # The regex below accepts both shapes: a .pdf path anywhere
+        # in the string. We then verify it lives under the canonical
+        # root and is non-trivial in size.
+        m = re.search(r"(\S+\.pdf)", response_text)
+        assert m, (
+            f"response must include a .pdf path: {response_text[:300]!r}"
+        )
+        pdf_path = m.group(1)
+        assert "empire-repo/uploads" not in pdf_path, (
+            f"stale-fork leak: {pdf_path}"
+        )
+        canon = canonical_drawings_dir()
+        assert pdf_path.startswith(str(canon)), (
+            f"PDF must live under canonical root {canon}; got {pdf_path}"
+        )
+        from pathlib import Path as _P
+        size = _P(pdf_path).stat().st_size
+        assert size > 1024, (
+            f"PDF must be non-trivial (>1024 bytes); got {size}"
+        )
+        return pdf_path
+
+    def test_chat_non_stream_renders_b1_pdf(self):
+        """Post-fix /chat produces the B1 PDF + Drawn response."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+        client = TestClient(app)
+        r = client.post("/api/v1/max/chat", json={
+            "message": self.R1_MESSAGE,
+            "channel": "web",
+            "conversation_id": "hotfix_4_0b2_chat_test",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["model_used"] == "drawing-router"
+        assert body["metadata"]["skill_used"] == "render_shop_drawing"
+        self._assert_pdf_exists(body["response"])
+
+    def test_chat_stream_renders_b1_pdf(self):
+        """The Jul 24 8:42 AM repro. /chat/stream MUST also route
+        to render_shop_drawing — same body, different response
+        shape. Pre-fix this returned the dead-end
+        'Drawing workflow failed: sketch_to_drawing: text-only ...'
+        message. Post-fix the streamed response must include the
+        B1 pdf_path and a tool_result event."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+        client = TestClient(app)
+        r = client.post("/api/v1/max/chat/stream", json={
+            "message": self.R1_MESSAGE,
+            "channel": "web",
+            "conversation_id": "hotfix_4_0b2_stream_test",
+        })
+        assert r.status_code == 200
+        # Parse SSE events.
+        events: list[dict] = []
+        for chunk in r.text.strip().split("\n\n"):
+            chunk = chunk.strip()
+            if chunk.startswith("data: "):
+                try:
+                    events.append(json.loads(chunk[6:]))
+                except Exception:
+                    pass
+        assert events, "stream must emit at least one SSE event"
+        # Look for the rendered response in any text event.
+        text_chunks = [
+            e.get("content", "") for e in events if e.get("type") == "text"
+        ]
+        joined = "\n".join(text_chunks)
+        # The dead-end phrase MUST NOT appear.
+        assert "Drawing workflow failed" not in joined, (
+            f"stream still emits the dead-end failure; chunks={text_chunks!r}"
+        )
+        assert "sketch_to_drawing: text-only" not in joined, (
+            f"stream still hits the gate's refusal; chunks={text_chunks!r}"
+        )
+        # The Drawn response must surface.
+        assert "Drawn flat_fold" in joined, (
+            f"stream response missing Drawn flat_fold; chunks={text_chunks!r}"
+        )
+        assert "B1" in joined
+        # tool_result event must carry the PDF.
+        tool_events = [
+            e for e in events
+            if e.get("type") == "tool_result" and e.get("tool") == "render_shop_drawing"
+        ]
+        assert tool_events, (
+            f"stream must emit a render_shop_drawing tool_result event; "
+            f"events={[e.get('type') for e in events]}"
+        )
+        # The PDF must exist at the canonical root.
+        result = tool_events[0].get("result") or {}
+        pdf_path = result.get("pdf_path", "")
+        assert pdf_path, "tool_result.result.pdf_path must be populated"
+        self._assert_pdf_exists(pdf_path)
+        # done event carries the right model_used + skill.
+        done = next((e for e in events if e.get("type") == "done"), None)
+        assert done is not None
+        assert done.get("model_used") == "drawing-router"
+        skill = (done.get("metadata") or {}).get("skill_used")
+        assert skill == "render_shop_drawing", (
+            f"stream done event skill_used must be 'render_shop_drawing'; "
+            f"got {skill!r}"
+        )
+
+
+class TestQuarantine:
+    """HOTFIX 4.0b2 — _execute_drawing_handoff is quarantined.
+    Any code path that still calls it raises NotImplementedError, so
+    a future regression that re-introduces a divergent implementation
+    is caught at boot/test-time rather than silently dead-ending."""
+
+    def test_execute_drawing_handoff_raises(self):
+        from app.routers.max.router import _execute_drawing_handoff
+        with pytest.raises(NotImplementedError,
+                           match="quarantined"):
+            _execute_drawing_handoff(None)
+
+    def test_router_does_not_have_a_second_divergent_interceptor(self):
+        """Static guard: scan router.py for any drawing-intercept
+        block that does NOT use the shared _drawing_render helper.
+
+        Pre-fix, the /chat and /chat/stream handlers each had their
+        own drawing-intent interception block. The 4.0b2 fix puts
+        the body in _drawing_render() and both handlers call it.
+        This test fails if a divergent block creeps back in."""
+        router_path = _BACKEND / "app/routers/max/router.py"
+        src = router_path.read_text()
+        # 1) _drawing_render must exist (the shared helper)
+        assert "def _drawing_render(" in src, (
+            "shared _drawing_render() helper missing from router.py — "
+            "drawing-intent logic MUST be factored into a single function "
+            "and called by both /chat and /chat/stream"
+        )
+        # 2) _execute_drawing_handoff must be quarantined (raise)
+        assert "raise NotImplementedError" in src and (
+            "_execute_drawing_handoff quarantined" in src
+        ), (
+            "_execute_drawing_handoff is the dead-end path. Pre-fix it "
+            "called sketch_to_drawing via execute_tool. It MUST be "
+            "quarantined (NotImplementedError) until a future commit "
+            "removes it; any new code that calls it will fail loudly."
+        )
+        # 3) Both handlers must reference the shared helper.
+        # We slice the source around each "is_drawing_intent" check
+        # and assert that the next 1500 chars reference _drawing_render.
+        starts = [
+            m.start() for m in re.finditer(r"is_drawing_intent", src)
+        ]
+        assert len(starts) >= 2, (
+            f"router.py must have at least 2 is_drawing_intent blocks "
+            f"(/chat + /chat/stream); found {len(starts)}"
+        )
+        for start in starts:
+            window = src[start:start + 1500]
+            assert "_drawing_render(" in window, (
+                f"is_drawing_intent block at offset {start} does NOT "
+                f"call _drawing_render. The /chat and /chat/stream "
+                f"handlers MUST share the same body; duplicated logic is "
+                f"a recurring defect source (third occurrence in 8 days)."
             )

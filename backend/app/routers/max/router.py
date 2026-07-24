@@ -259,18 +259,136 @@ def _save_runtime_truth_exchange(request, response_text: str, result: ToolResult
 
 
 def _execute_drawing_handoff(handoff):
-    logger.info(
-        "[MAX] Drawing intent routed to sketch_to_drawing: item_type=%s views=%s dims=%s source_image=%s",
-        handoff.item_type,
-        ",".join(handoff.views),
-        sorted(handoff.dimensions.keys()),
-        bool(handoff.source_image),
+    """QUARANTINED HOTFIX 4.0b2 — DELETED IN NEXT COMMIT.
+
+    Pre-fix, this was the only place that called sketch_to_drawing
+    via execute_tool (the dead-end path that emitted the gate's
+    refusal message and never reached the B1 engine). The chat/stream
+    path kept calling it after /chat was rewritten in 4.0b — that's
+    the bug 8:42 AM Jul 24 surfaced. The shared
+    _resolve_drawing_render(handoff) helper now does this work for
+    BOTH endpoints; this function is kept only as a quarantine marker
+    so that if anything imports it, we'll see the import at boot.
+
+    DELETE-on-next-pass: remove once grep confirms no callers.
+    """
+    raise NotImplementedError(
+        "_execute_drawing_handoff quarantined — use _drawing_render "
+        "(HOTFIX 4.0b2 deduplication). If you reach this raise, an import "
+        "somewhere still references the dead-end path; find it and reroute "
+        "to _drawing_render."
     )
-    result = execute_tool({"tool": "sketch_to_drawing", **(handoff.tool_payload or {})})
-    return _quality_gate_drawing_result(handoff, result)
 
 
-def _quality_gate_drawing_result(handoff, result):
+def _drawing_render(handoff) -> dict:
+    """HOTFIX 4.0b2 — shared drawing-router body used by BOTH
+    /chat and /chat/stream.
+
+    Returns a dict the caller formats into either a ChatResponse
+    (non-stream) or a sequence of SSE events (stream):
+
+      {
+        "ready": bool,
+        "response_text": str,
+        "tool_result_dict": dict,         # to pass to ChatResponse.tool_results
+                                         #   or yield as {"type": "tool_result", ...}
+        "missing_template_keys": list[str],
+        "metadata_skill_used": str,        # "render_shop_drawing" on success,
+                                         #   "sketch_to_drawing" on missing-list path
+        "model_used": str,                 # always "drawing-router"
+        "status_event": str | None,        # optional SSE status-line text on success
+      }
+
+    Behavior:
+      - ready=True  → execute_tool("render_shop_drawing", ...) and
+        return its result. The response_text reads "Drawn {type} (B1, ...).
+      - ready=False → return the missing-field response, preferring
+        template-truth missing keys when b1_product_type is known.
+
+    Pre-fix, the body of this logic was duplicated in two handlers
+    (/chat and /chat/stream). The Jul 24 8:42 AM live repro surfaced
+    the exact defect class: the stream handler still called the
+    legacy _execute_drawing_handoff → sketch_to_drawing → dead-end.
+    One function. Both handlers. Test DoctrineGuard pins this so the
+    duplication doesn't re-grow.
+    """
+    import json as _json
+
+    logger.info(
+        "[MAX] Drawing intent intercepted: ready=%s b1_product_type=%r missing_template=%s mode=%s message=%r",
+        handoff.ready,
+        handoff.b1_product_type,
+        handoff.missing_template_keys,
+        handoff.intent_mode,
+        (handoff.subject or "")[:120],
+    )
+
+    # ── Incomplete: surface the template-truth missing list ──
+    if not handoff.ready:
+        if handoff.missing_template_keys and handoff.b1_product_type:
+            return {
+                "ready": False,
+                "response_text": (
+                    f"I have the {handoff.b1_product_type!r} "
+                    f"product_type but I'm still missing: "
+                    f"{', '.join(handoff.missing_template_keys)}. "
+                    f"Please supply those so I can render the B1 sheet."
+                ),
+                "tool_result_dict": {},
+                "missing_template_keys": list(handoff.missing_template_keys),
+                "metadata_skill_used": "render_shop_drawing",
+                "model_used": "drawing-router",
+                "status_event": None,
+            }
+        return {
+            "ready": False,
+            "response_text": _drawing_missing_response(handoff),
+            "tool_result_dict": {},
+            "missing_template_keys": list(handoff.missing_template_keys),
+            "metadata_skill_used": "sketch_to_drawing",
+            "model_used": "drawing-router",
+            "status_event": None,
+        }
+
+    # ── Complete: invoke render_shop_drawing (the B1 entry point) ──
+    from app.services.max.tool_executor import execute_tool
+    translated_dims = {
+        k: float(str(v).rstrip('"').rstrip("ft"))
+        for k, v in handoff.translated_dims.items()
+        if v is not None
+    }
+    result = execute_tool({
+        "tool":         "render_shop_drawing",
+        "product_type": handoff.b1_product_type,
+        "dims":         translated_dims,
+        "client_name":  handoff.subject or "",
+        "site_address": "",
+        "material":     "",
+        "date":         "",
+    })
+    if result.success:
+        pdf_path = result.result.get("pdf_path", "?")
+        body = (
+            f"Drawn {handoff.b1_product_type} (B1, "
+            f"{', '.join(f'{k}={v!r}' for k, v in handoff.translated_dims.items())}) "
+            f"→ {pdf_path}"
+        )
+        # SSE-streaming status line (kept short — non-stream callers
+        # ignore this and use response_text directly).
+        status = f"B1 template {handoff.b1_product_type} rendered ({len(translated_dims)} dims)."
+    else:
+        body = f"Drawing workflow failed: {result.error}"
+        status = None
+
+    return {
+        "ready": True,
+        "response_text": body,
+        "tool_result_dict": _drawing_tool_result_dict(result),
+        "missing_template_keys": [],
+        "metadata_skill_used": "render_shop_drawing",
+        "model_used": "drawing-router",
+        "status_event": status,
+    }
     if not result.success:
         return result
 
@@ -2194,98 +2312,43 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         )
     )
     if drawing_handoff.is_drawing_intent:
-        # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
-        # and the D1 Addendum). Default is "unknown" for backward compatibility.
-        logger.info(
-            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s intent_mode=%s b1_type=%s message=%r",
-            drawing_handoff.ready,
-            drawing_handoff.missing,
-            drawing_handoff.intent_mode,
-            drawing_handoff.b1_product_type,
-            request.message[:160],
-        )
-        # HOTFIX 4.0b — gate on the B1 template readiness, NOT on the
-        # legacy tool_payload check. Pre-fix, the handoff was marked
-        # ready whenever tool_payload was set; that left generic-bucket
-        # handoffs (where the LLM never emitted a proper tool block)
-        # producing a dead-end JSON response that no consumer read.
-        # Post-fix the gate fires when the B1 template would accept
-        # the handoff's translated dims — that's when we route to
-        # render_shop_drawing. When the gate is closed, surface the
-        # template-side missing keys instead of the legacy legacy
-        # missing list (which was misleading).
-        if not drawing_handoff.ready:
-            # If the founder explicitly named a B1 product_type but
-            # didn't supply the template-required dims, surface ONLY
-            # the template-side missing keys. When no B1 type is
-            # known, fall back to the legacy missing list so older
-            # UX wording still applies.
-            if (drawing_handoff.missing_template_keys
-                    and drawing_handoff.b1_product_type):
-                _surface_missing_response = (
-                    f"I have the {drawing_handoff.b1_product_type!r} "
-                    f"product_type but I'm still missing: "
-                    f"{', '.join(drawing_handoff.missing_template_keys)}. "
-                    f"Please supply those so I can render the B1 sheet."
-                )
-                return ChatResponse(
-                    response=_surface_missing_response,
-                    model_used="drawing-router",
-                    fallback_used=False,
-                    tool_results=None,
-                    metadata=_response_metadata(
-                        request.channel,
-                        skill_used="render_shop_drawing",
-                    ),
-                )
-            return ChatResponse(
-                response=_drawing_missing_response(drawing_handoff),
-                model_used="drawing-router",
-                fallback_used=False,
-                tool_results=None,
-                metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
-            )
+        # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through
+        # the same _drawing_render(handoff) helper. Pre-fix, the
+        # body of this block was duplicated in the stream handler
+        # (line ~3030) and only /chat was patched in 4.0b; the
+        # stream handler kept calling _execute_drawing_handoff and
+        # the LLM never saw a tool_result on the UI path. Both
+        # endpoints now share this helper, so the deduplication IS
+        # the fix.
+        render = _drawing_render(drawing_handoff)
 
-        # HOTFIX 4.0b — route to render_shop_drawing (the B1
-        # templates.render_spec entry point), NOT legacy sketch_to_drawing.
-        # The translated dims are what the B1 template expects;
-        # tool_payload's outer key is also the canonical rendered shape.
-        from app.services.max.tool_executor import execute_tool
-        rendering = execute_tool({
-            "tool":         "render_shop_drawing",
-            "product_type": drawing_handoff.b1_product_type,
-            "dims":         {
-                k: float(str(v).rstrip('"').rstrip("ft"))
-                for k, v in drawing_handoff.translated_dims.items()
-                if v is not None
-            },
-            "client_name":  drawing_handoff.subject or "",
-            "site_address": "",
-            "material":     "",
-            "date":         "",
-        })
-        drawing_result = rendering
-        response_text = (
-            f"Drawn {drawing_handoff.b1_product_type} (B1, "
-            f"{', '.join(f'{k}={v}' for k, v in drawing_handoff.translated_dims.items())}) "
-            f"→ {rendering.result.get('pdf_path', '?') if rendering.success else rendering.error}"
-        )
-        # Sprint 1d Phase A Fix #2 — persist the snapshot if there are
-        # still missing dims (so the next founder reply can resume).
-        try:
-            from app.services.max.drawing_pending import set_pending
-            if drawing_handoff.missing and drawing_handoff.tool_payload:
-                snap = dict(drawing_handoff.tool_payload)
-                snap["missing"] = list(drawing_handoff.missing)
-                set_pending(request.conversation_id, request.channel, snap)
-        except Exception:
-            pass
+        # Resume snapshot: only when the legacy `missing` list is
+        # non-empty AND a tool_payload was built (Phase A Fix #2).
+        # Post-fix, the gate fires on template-validity, so this
+        # only fires on the legacy missing-keys path.
+        if not render["ready"]:
+            try:
+                from app.services.max.drawing_pending import set_pending
+                if (drawing_handoff.missing
+                        and drawing_handoff.tool_payload):
+                    snap = dict(drawing_handoff.tool_payload)
+                    snap["missing"] = list(drawing_handoff.missing)
+                    set_pending(request.conversation_id, request.channel, snap)
+            except Exception:
+                pass
+
         return ChatResponse(
-            response=response_text,
-            model_used="drawing-router",
+            response=render["response_text"],
+            model_used=render["model_used"],
             fallback_used=False,
-            tool_results=[_drawing_tool_result_dict(drawing_result)],
-            metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
+            tool_results=(
+                [render["tool_result_dict"]]
+                if render["tool_result_dict"] else None
+            ),
+            metadata=_response_metadata(
+                request.channel,
+                skill_used=render["metadata_skill_used"],
+            ),
         )
 
     try:
@@ -3006,33 +3069,52 @@ async def chat_stream(request: ChatRequest):
         else type("NoDrawingHandoff", (), {"is_drawing_intent": False, "ready": False, "missing": [], "intent_mode": "unknown"})()
     )
     if drawing_handoff.is_drawing_intent:
-        # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
-        # and the D1 Addendum). Default is "unknown" for backward compatibility.
-        logger.info(
-            "[MAX] Drawing intent intercepted before stream model: ready=%s missing=%s intent_mode=%s message=%r",
-            drawing_handoff.ready,
-            drawing_handoff.missing,
-            drawing_handoff.intent_mode,
-            request.message[:160],
-        )
+        # HOTFIX 4.0b2 — both /chat and /chat/stream funnel through
+        # the same _drawing_render(handoff) helper. See comment at
+        # the /chat handler above for the duplication rationale.
 
         async def drawing_gen():
+            nonlocal drawing_handoff
             conv_id = request.conversation_id or str(uuid.uuid4())
-            if not drawing_handoff.ready:
-                yield f"data: {json.dumps({'type': 'text', 'content': _drawing_missing_response(drawing_handoff)})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'model_used': 'drawing-router', 'conversation_id': conv_id})}\n\n"
-                return
+            render = _drawing_render(drawing_handoff)
 
-            yield f"data: {json.dumps({'type': 'text', 'content': 'Starting the Drawing Studio workflow. '})}\n\n"
-            result = _execute_drawing_handoff(drawing_handoff)
-            yield f"data: {json.dumps({'type': 'tool_result', **_drawing_tool_result_dict(result)})}\n\n"
-            final_text = (
-                "Drawing generated through Drawing Studio."
-                if result.success
-                else f"Drawing workflow failed: {result.error}"
+            # Optional status line (B1 render status). The text stream
+            # is the visible "I'm rendering now…" line; absent for
+            # failure or missing-keys paths.
+            if render["status_event"]:
+                yield f"data: {json.dumps({'type': 'text', 'content': render['status_event']})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'text', 'content': render['response_text']})}\n\n"
+
+            # tool_result only on the rendered path (when tool_result_dict is non-empty)
+            if render["tool_result_dict"]:
+                yield f"data: {json.dumps({'type': 'tool_result', **render['tool_result_dict']})}\n\n"
+
+            # Resume snapshot — same wiring as /chat non-stream path.
+            if not render["ready"]:
+                try:
+                    from app.services.max.drawing_pending import set_pending
+                    if (drawing_handoff.missing
+                            and drawing_handoff.tool_payload):
+                        snap = dict(drawing_handoff.tool_payload)
+                        snap["missing"] = list(drawing_handoff.missing)
+                        set_pending(request.conversation_id, request.channel, snap)
+                except Exception:
+                    pass
+
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "done",
+                    "model_used": render["model_used"],
+                    "conversation_id": conv_id,
+                    "metadata": _response_metadata(
+                        request.channel,
+                        skill_used=render["metadata_skill_used"],
+                    ),
+                })
+                + "\n\n"
             )
-            yield f"data: {json.dumps({'type': 'text', 'content': final_text})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'model_used': 'drawing-router', 'conversation_id': conv_id})}\n\n"
 
         return StreamingResponse(drawing_gen(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
