@@ -2197,13 +2197,47 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
         # D3: log the 6-way intent_mode (per REPORT-d1-drawing-workflow-research.md
         # and the D1 Addendum). Default is "unknown" for backward compatibility.
         logger.info(
-            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s intent_mode=%s message=%r",
+            "[MAX] Drawing intent intercepted before chat model: ready=%s missing=%s intent_mode=%s b1_type=%s message=%r",
             drawing_handoff.ready,
             drawing_handoff.missing,
             drawing_handoff.intent_mode,
+            drawing_handoff.b1_product_type,
             request.message[:160],
         )
+        # HOTFIX 4.0b — gate on the B1 template readiness, NOT on the
+        # legacy tool_payload check. Pre-fix, the handoff was marked
+        # ready whenever tool_payload was set; that left generic-bucket
+        # handoffs (where the LLM never emitted a proper tool block)
+        # producing a dead-end JSON response that no consumer read.
+        # Post-fix the gate fires when the B1 template would accept
+        # the handoff's translated dims — that's when we route to
+        # render_shop_drawing. When the gate is closed, surface the
+        # template-side missing keys instead of the legacy legacy
+        # missing list (which was misleading).
         if not drawing_handoff.ready:
+            # If the founder explicitly named a B1 product_type but
+            # didn't supply the template-required dims, surface ONLY
+            # the template-side missing keys. When no B1 type is
+            # known, fall back to the legacy missing list so older
+            # UX wording still applies.
+            if (drawing_handoff.missing_template_keys
+                    and drawing_handoff.b1_product_type):
+                _surface_missing_response = (
+                    f"I have the {drawing_handoff.b1_product_type!r} "
+                    f"product_type but I'm still missing: "
+                    f"{', '.join(drawing_handoff.missing_template_keys)}. "
+                    f"Please supply those so I can render the B1 sheet."
+                )
+                return ChatResponse(
+                    response=_surface_missing_response,
+                    model_used="drawing-router",
+                    fallback_used=False,
+                    tool_results=None,
+                    metadata=_response_metadata(
+                        request.channel,
+                        skill_used="render_shop_drawing",
+                    ),
+                )
             return ChatResponse(
                 response=_drawing_missing_response(drawing_handoff),
                 model_used="drawing-router",
@@ -2211,11 +2245,30 @@ async def chat_with_max(request: ChatRequest, background_tasks: BackgroundTasks,
                 tool_results=None,
                 metadata=_response_metadata(request.channel, skill_used="sketch_to_drawing"),
             )
-        drawing_result = _execute_drawing_handoff(drawing_handoff)
+
+        # HOTFIX 4.0b — route to render_shop_drawing (the B1
+        # templates.render_spec entry point), NOT legacy sketch_to_drawing.
+        # The translated dims are what the B1 template expects;
+        # tool_payload's outer key is also the canonical rendered shape.
+        from app.services.max.tool_executor import execute_tool
+        rendering = execute_tool({
+            "tool":         "render_shop_drawing",
+            "product_type": drawing_handoff.b1_product_type,
+            "dims":         {
+                k: float(str(v).rstrip('"').rstrip("ft"))
+                for k, v in drawing_handoff.translated_dims.items()
+                if v is not None
+            },
+            "client_name":  drawing_handoff.subject or "",
+            "site_address": "",
+            "material":     "",
+            "date":         "",
+        })
+        drawing_result = rendering
         response_text = (
-            "Drawing generated through Drawing Studio."
-            if drawing_result.success
-            else f"Drawing workflow failed: {drawing_result.error}"
+            f"Drawn {drawing_handoff.b1_product_type} (B1, "
+            f"{', '.join(f'{k}={v}' for k, v in drawing_handoff.translated_dims.items())}) "
+            f"→ {rendering.result.get('pdf_path', '?') if rendering.success else rendering.error}"
         )
         # Sprint 1d Phase A Fix #2 — persist the snapshot if there are
         # still missing dims (so the next founder reply can resume).

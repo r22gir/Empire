@@ -278,13 +278,38 @@ class DrawingHandoff:
     is_drawing_intent: bool
     subject: str = ""
     item_type: str = "generic"
+    # HOTFIX 4.0b — explicit B1 product_type when detected. The
+    # interceptor used to only carry a coarse bucket (window/bench/etc.)
+    # which left render_spec unable to dispatch. We now carry:
+    #   b1_product_type — the actual product_type from the B1
+    #                     registry (e.g. 'flat_fold', 'pinch_pleat',
+    #                     'headboard_channel', 'banquette'). Default
+    #                     None until resolved via _try_resolve_b1_type.
+    #   translated_dims  — the dimensions dict after alias translation
+    #                     (length -> height for roman/drapery; length
+    #                     -> drop for valance/cornice). Pre-fill keys.
+    b1_product_type: str | None = None
     dimensions: dict[str, str] = field(default_factory=dict)
+    translated_dims: dict[str, str] = field(default_factory=dict)
     missing: list[str] = field(default_factory=list)
+    # missing_template_keys: template-side required keys that the
+    # translated_dims still don't cover. Surfaced to the founder as
+    # the structured-question set when the handoff is NOT ready.
+    missing_template_keys: list[str] = field(default_factory=list)
     views: list[str] = field(default_factory=list)
     output_format: str = "inline_svg_pdf"
     source_image: str | None = None
     tool_payload: dict[str, Any] | None = None
     response: str = ""
+
+    @property
+    def ready(self) -> bool:
+        """HOTFIX 4.0b — True iff translated dims cover every
+        template-required key (and the B1 product_type is known).
+        Replaces the legacy 'subject + enough dims' gate; the
+        interceptor used to consider itself ready with just any
+        bucket item_type, which led to dead-end output."""
+        return bool(self.b1_product_type and not self.missing_template_keys)
     # D3: 6-way intent classification (per D1 + D1-Addendum).
     # Default "unknown" preserves backward compatibility for any caller
     # that does not read the new field. Valid values: animated_diagram,
@@ -294,7 +319,17 @@ class DrawingHandoff:
 
     @property
     def ready(self) -> bool:
-        return self.tool_payload is not None and not self.missing
+        """HOTFIX 4.0b — True iff translated dims cover every
+        template-required key (and the B1 product_type is known).
+
+        Pre-fix, `ready` was defined as:
+            self.tool_payload is not None and not self.missing
+        which over-read `tool_payload` (set only at the very end of
+        build_drawing_handoff) and over-claimed ready=True for
+        generic-bucket handoffs whose dims were incomplete. The new
+        definition supersedes both: the B1 template validates the
+        translated dims; tool_payload is no longer required."""
+        return bool(self.b1_product_type and not self.missing_template_keys)
 
 
 def is_drawing_intent(text: str) -> bool:
@@ -395,7 +430,36 @@ def is_drawing_intent(text: str) -> bool:
 
 
 def _extract_item_type(text: str) -> tuple[str, str]:
+    """HOTFIX 4.0b (b) — fix the silent 'generic' bug from R3.
+
+    Pre-fix, this returned ('shade', 'window') for "flat roman shade"
+    (substring match) and ('', 'generic') for the explicit
+    "use the render_shop_drawing tool: product_type flat_fold, dims
+    width 38 height 64" prompt (no substring keyword). The
+    'generic' bucket then surfaced a misleading missing-field list.
+
+    Post-fix:
+      1. Detect an explicit "product_type <name>" mention FIRST and
+         return that B1 product_type as both subject AND item_type
+         (the router will later call render_shop_drawing with it).
+      2. Otherwise, fall back to the substring keyword table. The
+         match with the longest keyword wins so "flat roman shade"
+         doesn't accidentally collapse to "roman" → a higher-specificity
+         hint should win. (Today we keep the first-match behavior
+         because the B1 type resolution happens separately in
+         _try_resolve_b1_type.)
+    """
     lowered = text.lower()
+
+    # Path 1: explicit B1 product_type mention. The router's
+    # _try_resolve_b1_type picks up the same patterns; we just surface
+    # the b1 type as the subject here so the user-visible handoff
+    # carries an explicit name (no more "generic").
+    for pattern, b1_type in _EXPLICIT_B1_TYPE_PATTERNS:
+        if pattern in lowered and b1_type is not None:
+            return b1_type, b1_type
+
+    # Path 2: substring match against ITEM_KEYWORDS.
     for keyword, item_type in ITEM_KEYWORDS.items():
         if keyword in lowered:
             return keyword, item_type
@@ -416,6 +480,178 @@ def _extract_views(text: str) -> list[str]:
 def _normalize_dimension(label: str) -> str:
     label = label.lower().strip().replace("_", " ")
     return DIMENSION_ALIASES.get(label, label.replace(" ", "_"))
+
+
+# ── HOTFIX 4.0b (a) — router-to-engine wiring helpers ────────────────
+
+# Map (item_type, free-text style hint) → B1 product_type. The chat
+# most commonly names the style without using the precise registry
+# name ("flat roman shade" instead of "flat_fold"). Each entry is a
+# (style-hint-substring, B1 product_type). First match wins.
+_B1_TYPE_BY_STYLE_HINT = (
+    # ── Drapery (15 styles) — natural-language aliases ────────────
+    ("pinch pleat",       "pinch_pleat"),
+    ("french pleat",      "french_pleat"),
+    ("euro pleat",        "euro_pleat"),
+    ("cartridge pleat",   "cartridge_pleat"),
+    ("box pleat",         "box_pleat"),
+    ("inverted box",      "inverted_box_pleat"),
+    ("goblet pleat",      "goblet_pleat"),
+    ("butterfly pleat",   "butterfly_pleat"),
+    ("ripplefold",        "ripplefold"),
+    ("rod pocket",        "rod_pocket"),
+    ("tab top",           "tab_top"),
+    ("grommet",           "grommet"),
+    ("pencil pleat",      "pencil_pleat"),
+    ("smocked",           "smocked"),
+    ("fan pleat",         "fan_pleat"),
+    # ── Roman shades (9 styles) ─────────────────────────────────
+    ("flat roman",        "flat_fold"),
+    ("hobbled",           "hobbled_teardrop"),
+    ("hobbled teardrop",  "hobbled_teardrop"),
+    ("european relaxed",  "european_relaxed"),
+    ("balloon",           "balloon"),
+    ("austrian",          "austrian"),
+    ("london",            "london"),
+    ("cascade",           "cascade"),
+    ("waterfall",         "waterfall"),
+    ("tulip",             "tulip"),
+    # generic "roman shade" without "flat" → flat_fold (the most common)
+    ("roman shade",       "flat_fold"),
+    ("roman",             "flat_fold"),
+    # ── Valance (14 styles) ────────────────────────────────────
+    ("kingston",          "kingston"),
+    ("cambridge",         "cambridge"),
+    ("scalloped",         "scalloped"),
+    ("arched",            "arched"),
+    ("serpentine",        "serpentine"),
+    ("flat board mounted","flat_board_mounted"),
+    ("flat_board_mounted","flat_board_mounted"),
+    ("shaped",            "shaped"),
+    ("pleated valance",   "pleated"),
+    ("pleated",           "pleated"),
+    ("gathered",          "gathered"),
+    ("swag and jabot",    "swag_and_jabot"),
+    ("swag_and_jabot",    "swag_and_jabot"),
+    ("jabot",             "swag_and_jabot"),
+    ("cascades",          "cascades"),
+    ("empire valance",    "empire"),
+    ("empire",            "empire"),
+    ("tab valance",       "tab"),
+    ("cornice with fabric","cornice_with_fabric"),
+    ("cornice_with_fabric","cornice_with_fabric"),
+    ("valance",           "kingston"),   # generic fallback
+    # ── Cornice (5 styles) ─────────────────────────────────────
+    ("straight cornice",  "straight"),
+    ("cornice straight",  "straight"),
+    ("double serpentine", "double_serpentine"),
+    ("pagoda",            "pagoda"),
+    ("stepped",           "stepped"),
+    ("custom profile",    "custom_profile"),
+    ("cornice",           "straight"),
+    # ── Bench / Banquette (treated as furniture long-axis = width) ──
+    ("banquette",         "banquette"),
+    ("bench",             "bench"),
+    # ── Headboard ─────────────────────────────────────────────
+    ("headboard channel", "headboard_channel"),
+    ("channel headboard", "headboard_channel"),
+    ("upholstered headboard", "headboard_channel"),
+    ("headboard",         "headboard_channel"),
+)
+
+# Explicit "use the X tool: product_type Y, dims ..." patterns. The
+# R3 reproduction showed the interceptor ignoring explicit B1 type
+# mentions — this list catches them.
+_EXPLICIT_B1_TYPE_PATTERNS = (
+    ("render_shop_drawing tool", None),  # presence-only signal
+    ("product_type flat_fold", "flat_fold"),
+    ("product_type pinch_pleat", "pinch_pleat"),
+    ("product_type flat_roman", "flat_fold"),
+    ("product_type roman", "flat_fold"),
+    ("product_type headboard_channel", "headboard_channel"),
+    ("product_type banquette", "banquette"),
+    ("product_type bench", "bench"),
+    ("product_type double_serpentine", "double_serpentine"),
+    ("product_type scalloped", "scalloped"),
+)
+
+
+def _try_resolve_b1_type(message: str, item_type: str) -> str | None:
+    """HOTFIX 4.0b — resolve a B1 product_type from the message text.
+
+    Two paths:
+      1. Explicit "product_type <name>" patterns (R3 reproduction case)
+      2. Style-hint substring mapping ("flat roman shade" -> flat_fold)
+
+    Returns None when no B1 product_type can be resolved — the
+    handoff is then NOT ready (template-ready gate requires a B1
+    type) and the founder is asked for a precise B1 type.
+    """
+    lowered = message.lower()
+    # Path 1: explicit "product_type <name>" mentions.
+    for pattern, b1_type in _EXPLICIT_B1_TYPE_PATTERNS:
+        if pattern in lowered and b1_type is not None:
+            return b1_type
+    # Path 2: style-hint substring mapping. Longer hints win over
+    # shorter so "flat roman shade" beats "roman".
+    best_hit: tuple[int, str] | None = None
+    for hint, b1_type in _B1_TYPE_BY_STYLE_HINT:
+        if hint in lowered:
+            if best_hit is None or len(hint) > best_hit[0]:
+                best_hit = (len(hint), b1_type)
+    return best_hit[1] if best_hit else None
+
+
+def _translate_dims_for_b1_product(
+    dimensions: dict[str, str], b1_product_type: str | None,
+) -> dict[str, str]:
+    """HOTFIX 4.0b — alias-translate the parsed dims to the
+    template-required keys.
+
+    The user-parser stays surface-level (it captures 'length' for
+    'long'/'long' etc.). The translation layer maps the user's
+    intent onto the B1 template's required-dim keys:
+
+      length -> height   for roman shades, drapery, headboard
+      length -> drop     for valance, cornice
+      length stays length after furniture override (the parser
+                            already re-mapped furniture's 'long' to
+                            'width' so by the time we get here, the
+                            remaining keys are usually width/height/
+                            depth/...).
+    """
+    out = dict(dimensions)
+    if not b1_product_type:
+        return out
+    # Family is "Roman Shades", "Drapery", etc. — normalize to a
+    # spaces-removed lowercase key so we can match against compact
+    # sets without whitespace surprises.
+    family = b1_product_type_to_family(b1_product_type).replace(" ", "").lower()
+
+    # Window-treatments (roman shades + drapery + headboard_channel):
+    # the user-written "length" or "long" is actually the height axis.
+    roman_family = {"romanshades", "drapery", "channelheadboard"}
+    valance_family = {"valance"}
+    cornice_family = {"cornice"}
+
+    if family in roman_family:
+        if "length" in out and "height" not in out:
+            out["height"] = out.pop("length")
+    elif family in valance_family or family in cornice_family:
+        if "length" in out and "drop" not in out:
+            out["drop"] = out.pop("length")
+    return out
+
+
+def b1_product_type_to_family(b1_product_type: str) -> str:
+    """Map B1 product_type to its family name. Centralized so the
+    router and the drawing_intent module agree on which translation
+    rule applies."""
+    try:
+        from app.services.drawing.templates.registry import family_for
+        return family_for(b1_product_type) or ""
+    except Exception:
+        return ""
 
 
 # HOTFIX 4.0 (c) — for furniture (bench / banquette / sofa / chair /
@@ -497,7 +733,7 @@ def _extract_dimensions(
     # the label-first form as the canonical path.
     value_first = re.compile(
         r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>\"|in(?:ch(?:es)?)?|ft|feet|')?\s+"
-        r"(?P<label>overall height|seat height|seat h|back height|back h|wide|width|long|length|deep|depth|high|height)\b",
+        r"(?P<label>overall height|seat height|seat h|back height|back h|wide|width|long|length|deep|depth|high|height|drop)\b",
         re.IGNORECASE,
     )
     # HOTFIX 4.0 (c): label-first pattern grew 'drop' so the natural
@@ -551,6 +787,40 @@ def _shape_for_text(text: str) -> str:
     return "straight"
 
 
+def _compute_missing_template_keys(
+    translated_dims: dict[str, str], b1_product_type: str | None,
+) -> list[str]:
+    """HOTFIX 4.0b — compute the template-required keys that the
+    translated dims still don't cover. Calls templates.registry.
+    get_template(b1_product_type).validate_spec({dims}) — that
+    function is the canonical source of "what's missing for THIS
+    family" and is the same gate the render_shop_drawing tool runs
+    before invoking render_spec.
+
+    Returns an empty list when the translated dims satisfy the
+    template (handoff.ready). Imports the registry lazily to avoid
+    import-time cycles (the templates module imports back into
+    the data dir lazily via product_catalog).
+    """
+    if not b1_product_type:
+        return ["b1_product_type"]
+    try:
+        from app.services.drawing.templates import get_template
+        template = get_template(b1_product_type)
+    except KeyError:
+        # B1 product_type not in the B1 registry — surface it as the
+        # missing key so the founder can pick a real one.
+        return ["b1_product_type"]
+    except Exception:
+        return ["b1_product_type"]
+
+    missing = template.validate_spec({
+        "product_type": b1_product_type,
+        "dims": translated_dims,
+    }).missing_required
+    return list(missing)
+
+
 def build_drawing_handoff(message: str, *, image_filename: str | None = None) -> DrawingHandoff:
     if not is_drawing_intent(message):
         # Even when the message is not a drawing intent, classify it for
@@ -567,30 +837,73 @@ def build_drawing_handoff(message: str, *, image_filename: str | None = None) ->
     intent_mode = classify_intent_mode(message)
 
     subject, item_type = _extract_item_type(message)
-    dimensions = _extract_dimensions(message)
+    dimensions = _extract_dimensions(message, item_type=item_type)
     views = _extract_views(message)
-    enough, missing = _has_enough_dimensions(item_type, dimensions, image_filename)
 
+    # HOTFIX 4.0b — resolve B1 product_type, alias-translate dims,
+    # and validate the translated set against the template's required
+    # keys. Pre-fix, the handoff was "ready" with just enough
+    # generic-bucket dims to pass _has_enough_dimensions; that
+    # resulted in a dead-end response. Post-fix the ready gate is the
+    # template's REQUIRED set covered by translated dims AND a known
+    # B1 product_type.
+    b1_product_type = _try_resolve_b1_type(message, item_type)
+    translated_dims = _translate_dims_for_b1_product(
+        dimensions, b1_product_type
+    )
+    missing_template_keys = _compute_missing_template_keys(
+        translated_dims, b1_product_type
+    )
+
+    # legacy fields kept populated so the existing router code path
+    # still gets something to look at during the migration window.
+    enough, missing_legacy = _has_enough_dimensions(
+        item_type, translated_dims, image_filename
+    )
     handoff = DrawingHandoff(
         is_drawing_intent=True,
         subject=subject,
         item_type=item_type,
+        b1_product_type=b1_product_type,
         dimensions=dimensions,
-        missing=missing,
+        translated_dims=translated_dims,
+        missing=missing_legacy,
+        missing_template_keys=missing_template_keys,
         views=views,
         source_image=image_filename,
         intent_mode=intent_mode,
     )
 
-    if image_filename and not dimensions:
+    # Migration: while the router is being updated for HOTFIX 4.0b,
+    # surface BOTH the legacy missing list AND the template-key gap so
+    # any callers reading either field still get a useful answer.
+    #
+    # HOTFIX 4.0b priority order:
+    #   1. If b1_product_type resolved AND missing_template_keys
+    #      non-empty: ONLY surface the template's missing keys (those
+    #      are the truth). Drop the legacy bucket — it would be
+    #      misleading (e.g. asking for "height" when the valance
+    #      template wants "drop").
+    #   2. If b1_product_type resolved and template is satisfied:
+    #      ready=True, no missing.
+    #   3. Else, fall back to the legacy gate (image / subject /
+    #      enough).
+    if b1_product_type and missing_template_keys:
+        handoff.missing_template_keys = missing_template_keys
+        handoff.missing = missing_template_keys
+    elif image_filename and not dimensions:
         handoff.missing = [
             "real extracted dimensions",
             "confirmed item type" if not subject else "confirmed dimensions from source image",
         ]
+    elif b1_product_type:
+        # B1 product_type resolved and template satisfied — ready.
+        # No missing.
+        pass
     elif not subject:
         handoff.missing = ["subject/item", "dimensions or source image"]
     elif not enough:
-        handoff.missing = missing
+        handoff.missing = missing_legacy
 
     if handoff.missing:
         if image_filename:
