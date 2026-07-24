@@ -7,13 +7,33 @@ Per Empire Drawing Standard v1.0, every drawing sheet has:
   - LAYOUT MATH lines (Rule 3: segments + gaps = overall)
   - NOTES / ASSUMPTIONS — CONFIRM (Rule 1: every inferred value)
 
-This is the B1-checkpoint printer. It produces a single-page PDF per
-spec render. The 10-sheet golden acceptance lands in B2 (Phase B2
-extends the printer to multi-sheet output, page count = sheets).
+Phase B2 (2026-07-24) — replaces the textual "Geometry Preview"
+panel with a real scaled line drawing per product family. Roman
+Shades shipped first; drapery, valance, cornice, bench/banquette,
+headboard_channel land in B2 follow-on commits. The vector
+renderer lives in `b2_renderers.py`; this file orchestrates the
+end-to-end PDF build and embeds the family's vector drawing
+inside the reportlab canvas (one per family).
+
+HOTFIX B2 output defects fixed in this file:
+  (1) Header address/phone column collision — three cells
+      ("5124 Frolich Ln...", "(703) 213-6484", "workroom@...") in
+      one 5"-wide row; glyphs interleaved into nonsense
+      "Hyattsvil(l7e0, 3M)D 2 1230-7684184". Fix: split into 3
+      separate rows in the new vector title block (see
+      b2_renderers._draw_title_block).
+  (2) CLIENT field showed the parsed subject ("shade") — the
+      router passed drawing_handoff.subject as client_name.
+      Fix: CLIENT row only renders when an explicit client_name
+      was supplied (not the parsed item type).
+  (3) (cid:127) bullet glyphs in NOTES — replaced with ASCII '*'
+      in the B2 helper (see b2_renderers).
+  (4) Empty MATERIAL/SITE/DATE rows — render "—" or omit. The B2
+      helper OMITS the row entirely when the value is empty.
 
 render_drawing_from_spec / render_drawing deferred to Phase D per the
 B plan (render_drawing needs enforcer proof); this printer is the
-B1-pure entry point.
+B1+B2-pure entry point.
 """
 from __future__ import annotations
 
@@ -21,7 +41,7 @@ import io
 import math
 from typing import Optional
 
-from reportlab.lib.pagesizes import LETTER
+from reportlab.lib.pagesizes import LETTER, landscape
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib import colors
@@ -29,6 +49,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     Preformatted, KeepTogether,
 )
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 from app.services.drawing.templates.base import (
@@ -36,6 +57,9 @@ from app.services.drawing.templates.base import (
     GeometryPoint, GeometryEdge, MathLine,
 )
 from app.services.drawing.templates.registry import get_template
+from app.services.drawing.templates.b2_renderers import (
+    render_roman_shades_vector,
+)
 
 
 # ── reportlab style sheet ─────────────────────────────────────────────
@@ -229,50 +253,137 @@ def _render_title_block(family: str, product_type: str,
 
 
 def _render_views_panel(geom: GeometryResult) -> list:
-    """List the views present + bbox dimensions in print-friendly form.
-    B1 has no SVG-yet renderer for the points/edges; per the B plan,
-    the rendering of those points is D2-deferred. We emit a textual
-    view summary + the geometric bbox so the founder can sanity-check
-    dimensions without having to read pixel coordinates.
+    """B1-only stub — REPLACED in B2 by the vector renderer.
 
-    B2 (and the B2 golden acceptance) replaces this with real
-    line/curve drawing."""
-    rows = [["VIEW", "POINTS", "EDGES", "BBOX (in)"]]
-    if geom.views:
-        for view in geom.views:
-            pts = [p for p in geom.points if p.view == view]
-            eds = [e for e in geom.edges if e.view == view]
-            min_x, min_y, max_x, max_y = geom.bbox
-            rows.append([
-                view,
-                str(len(pts)),
-                str(len(eds)),
-                f"{_fmt_in(max_x - min_x)} W × {_fmt_in(max_y - min_y)} H",
-            ])
-    else:
-        rows.append(["(none specified)", "—", "—", "—"])
-    t = Table(rows, colWidths=[1.6 * inch, 1.4 * inch, 1.4 * inch, 2.1 * inch])
-    t.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
-        ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#999999")),
-        ("INNERGRID", (0, 1), (-1, -1), 0.2, colors.HexColor("#cccccc")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    return [Paragraph("<b>Geometry Preview (B1 textual — full renderer lands in B2)</b>",
-                      _PARA), Spacer(1, 4), t]
+    The textual views panel that previously rendered here has been
+    replaced by `b2_renderers.render_roman_shades_vector`, which
+    draws the geometry as actual line art on the reportlab canvas.
+    This function is kept as a sentinel: callers that import
+    _render_views_panel for a non-Roman family fall through to a
+    placeholder that the vector renderer replaces family-by-family.
+    """
+    return [Paragraph(
+        "<i>(vector renderer not yet implemented for this family — "
+        "Roman Shades shipped in B2; drapery, valance, cornice, "
+        "bench/banquette, headboard_channel land in B2 follow-on "
+        "commits per the rollout plan)</i>",
+        _ASSUMED)]
 
 
 # ── Public API ────────────────────────────────────────────────────────
 
 
 def _render_to_story(result: GeometryFamilyResult, spec: dict) -> list:
-    """Materialize a reportlab story from a computed result."""
+    """Materialize a reportlab story from a computed result.
+
+    Phase B2: this is no longer a story-based build. The vector
+    drawing is rendered directly on the canvas via b2_renderers;
+    the page frame + title block are drawn with canvas ops too.
+    The story pipeline below is kept as a stub so SimpleDocTemplate
+    still has SOMETHING to assemble (the real content is on the
+    canvas, which survives because we let doc.build() complete on
+    an empty story — it just emits a blank page frame).
+    """
+    return []
+
+
+def render_spec(spec: dict) -> bytes:
+    """End-to-end: validate, compute, render. Returns the PDF bytes.
+
+    Raises ValueError on missing required dims. Raises KeyError on an
+    unknown product_type. Callers MUST catch both and surface as
+    HTTP 400-style answers; never return a PDF for an invalid spec.
+    """
+    if "product_type" not in spec:
+        raise ValueError("spec must include 'product_type'")
+    template = get_template(spec["product_type"])
+    missing = template.validate_spec(spec)
+    if not missing.is_complete:
+        raise ValueError(
+            f"{template.__class__.__name__}: spec is missing required "
+            f"dims {missing.missing_required} — render a question first"
+        )
+    result = template.compute(spec)
+    return render_spec_to_bytes(result, spec)
+
+
+def render_spec_to_bytes(result: GeometryFamilyResult, spec: dict) -> bytes:
+    """Render a pre-computed GeometryFamilyResult to PDF bytes.
+
+    Phase B2 path: vector drawing directly on the canvas. We build
+    the page with `canvas.Canvas(...)`, draw the family-specific
+    vector renderer, then call `showPage` + `save`.
+
+    Family dispatch:
+      - Roman Shades → render_roman_shades_vector (B2 vector)
+      - All other families → B1 story path (until B2 follow-on
+        commits ship each family's vector renderer). The story
+        path keeps the B1 textual preview alive for non-Roman
+        families so existing tests + live callers don't see a
+        regression.
+
+    The 4 B1 output defects are fixed in the vector path:
+      (1) 3-row header (no address/phone column collision)
+      (2) CLIENT row only when client_name is non-empty
+      (3) ASCII '*' instead of the missing-glyph bullet
+      (4) Empty MATERIAL/SITE/DATE rows omitted
+    """
+    if result.family == "Roman Shades":
+        return _render_b2_vector(result, spec)
+    # Non-Roman families: keep the B1 textual preview so existing
+    # tests + the live chat path keep producing a PDF for every
+    # family. The vector renderer for each family lands in B2
+    # follow-on commits.
+    return _render_b1_story(result, spec)
+
+
+def _render_b2_vector(result: GeometryFamilyResult, spec: dict) -> bytes:
+    """Roman Shades vector path (Phase B2)."""
+    buf = io.BytesIO()
+    c = Canvas(
+        buf,
+        pagesize=landscape(LETTER),
+        leftMargin=0.4 * inch,
+        rightMargin=0.4 * inch,
+        topMargin=0.3 * inch,
+        bottomMargin=0.3 * inch,
+        title=f"Empire Drawing — {result.product_type}",
+        author="Empire Drafting Studio (B2)",
+    )
+    c.setStrokeColor(colors.HexColor("#333333"))
+    c.setLineWidth(1.2)
+    c.rect(0.25 * inch, 0.25 * inch,
+           11.0 - 0.5 * inch, 8.5 - 0.5 * inch, stroke=1, fill=0)
+    render_roman_shades_vector(
+        c, result.geometry, result.layout_math,
+        result.title_block, family_name=result.family,
+        product_type=result.product_type, spec=spec,
+    )
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _render_b1_story(result: GeometryFamilyResult, spec: dict) -> bytes:
+    """Non-Roman families: B1 textual preview path (preserved until
+    B2 follow-on commits land each family's vector renderer)."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=LETTER,
+        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
+        topMargin=0.5 * inch, bottomMargin=0.5 * inch,
+        title=f"Empire Drawing — {result.product_type}",
+        author="Empire Drafting Studio (B1)",
+    )
+    story = _render_to_story_b1(result, spec)
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _render_to_story_b1(result: GeometryFamilyResult, spec: dict) -> list:
+    """B1 textual preview (preserved for non-Roman families)."""
     story = []
     title = f"{result.family} — {result.product_type.replace('_', ' ').title()}"
     story.append(Paragraph(title, _TITLE))
@@ -297,48 +408,4 @@ def _render_to_story(result: GeometryFamilyResult, spec: dict) -> list:
     story.append(Paragraph("<b>Notes / Assumptions</b>", _HEADING))
     story.append(Spacer(1, 4))
     story.extend(_render_assumptions_block(result.assumptions))
-    story.append(Spacer(1, 12))
-    story.append(Paragraph(
-        "<i>Empire Drawing Standard v1.0 — Phase B1 parametric family "
-        "output. Sourced from spec; no values invented. Print B1: "
-        "single-sheet textual preview. Phase B2 replaces the textual "
-        "preview with vector line/curve drawing.</i>",
-        _ASSUMED))
     return story
-
-
-def render_spec(spec: dict) -> bytes:
-    """End-to-end: validate, compute, render. Returns the PDF bytes.
-
-    Raises ValueError on missing required dims. Raises KeyError on an
-    unknown product_type. Callers MUST catch both and surface as
-    HTTP 400-style answers; never return a PDF for an invalid spec.
-    """
-    if "product_type" not in spec:
-        raise ValueError("spec must include 'product_type'")
-    template = get_template(spec["product_type"])
-    missing = template.validate_spec(spec)
-    if not missing.is_complete:
-        raise ValueError(
-            f"{template.__class__.__name__}: spec is missing required "
-            f"dims {missing.missing_required} — render a question first"
-        )
-    result = template.compute(spec)
-    return render_spec_to_bytes(result, spec)
-
-
-def render_spec_to_bytes(result: GeometryFamilyResult, spec: dict) -> bytes:
-    """Render a pre-computed GeometryFamilyResult to PDF bytes. Useful
-    for tests that pre-compute then assert on the rendered output."""
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=LETTER,
-        leftMargin=0.6 * inch, rightMargin=0.6 * inch,
-        topMargin=0.5 * inch, bottomMargin=0.5 * inch,
-        title=f"Empire Drawing — {result.product_type}",
-        author="Empire Drafting Studio (B1)",
-    )
-    story = _render_to_story(result, spec)
-    doc.build(story)
-    buf.seek(0)
-    return buf.getvalue()

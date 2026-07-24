@@ -361,7 +361,13 @@ def _drawing_render(handoff) -> dict:
         "tool":         "render_shop_drawing",
         "product_type": handoff.b1_product_type,
         "dims":         translated_dims,
-        "client_name":  handoff.subject or "",
+        # HOTFIX B2 (2) — client_name MUST be empty when the founder
+        # didn't name a real client. handoff.subject is the parsed
+        # ITEM TYPE ("shade", "headboard", etc.), not a real client
+        # name. Passing it through would print "CLIENT: shade" in
+        # the title block, which is wrong. The B2 title block OMITS
+        # the CLIENT row entirely when this is empty.
+        "client_name":  "",
         "site_address": "",
         "material":     "",
         "date":         "",
