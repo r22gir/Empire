@@ -50,7 +50,46 @@ MAX_PER_BLOCK_ERRORS = 16
 
 # ── Dangerous Tool PIN Gate ───────────────────────────────────────
 DANGEROUS_TOOLS = {"shell_execute", "env_set", "db_query"}
-FOUNDER_PIN = os.getenv("FOUNDER_PIN", "7777")
+# HOTFIX 4.2 (2026-07-24) — FOUNDER_PIN fails CLOSED.
+#
+# Pre-fix: os.getenv("FOUNDER_PIN", "7777") meant that an unset env
+# var silently fell back to "7777" — meaning any chat caller (or a
+# prompt-injection attack on the chat layer) could invoke
+# shell_execute / env_set / db_query by typing the literal "7777"
+# PIN, even when the operator never configured one. That's a
+# privilege-escalation default.
+#
+# Post-fix: the default is "" (empty string). When FOUNDER_PIN is
+# unset, the dangerous-tools gate refuses ALL invocations with a
+# structured error and a CRITICAL log. Per-tool callers (MAX chat,
+# drawing-router, the founder portal approval flow) must continue
+# to work via the `_require_founder_pin` service-layer guard in
+# quote_service, which is the canonical access path. This module
+# only protects the dangerous-tools gate.
+#
+# A startup CRITICAL log fires when the env var is unset so the
+# operator notices at boot — not only when the gate fires.
+FOUNDER_PIN = os.getenv("FOUNDER_PIN", "")
+
+# HOTFIX 4.2 — startup CRITICAL log. Fires at import time. We use
+# the same logger (`max.tool_executor`) as the rest of the file
+# so the CRITICAL line shows up in the same journal as any
+# subsequent gate refusal. The `_already_warned_PIN_unset` flag
+# prevents a duplicate line on every re-import under test runners
+# that reload modules.
+_already_warned_PIN_unset = False
+if not FOUNDER_PIN:
+    if not _already_warned_PIN_unset:
+        logger.critical(
+            "FOUNDER_PIN env var is UNSET. The dangerous-tools gate "
+            "(shell_execute, env_set, db_query) will REFUSE every "
+            "invocation until FOUNDER_PIN is configured. Pre-fix this "
+            "silently defaulted to '7777' (a privilege-escalation "
+            "default). Set FOUNDER_PIN=<your-PIN> in the systemd "
+            "unit's Environment= to enable dangerous tools. See "
+            "HOTFIX 4.2 (2026-07-24)."
+        )
+        _already_warned_PIN_unset = True
 
 TOOL_BLOCK_RE = re.compile(r"```(?:tool|json|action|actions)?\s*\n(.*?)\n```", re.DOTALL | re.IGNORECASE)
 
@@ -439,8 +478,32 @@ def execute_tool(tool_call: dict, desk: Optional[str] = None, access_context: Op
                         access_controller.audit_log(user.get("id", ""), tool_name, level, "pending_pin", channel=user.get("channel", ""))
                         return ToolResult(tool=tool_name, success=False, error=f"__ACCESS_PENDING__pin__{session_id}__{summary}")
 
-            # Dangerous tool PIN gate (legacy — only for non-founder)
+            # Dangerous tool PIN gate (HOTFIX 4.2 fail-closed)
             if tool_name in DANGEROUS_TOOLS:
+                # Fail-closed gate (HOTFIX 4.2): when FOUNDER_PIN env
+                # var is unset, refuse with a structured error and a
+                # CRITICAL log. Pre-fix this branch silently accepted
+                # the empty-string "PIN" as a match against the
+                # default "7777" — see the audit log at the top of
+                # the module for the full context.
+                if not FOUNDER_PIN:
+                    logger.critical(
+                        "BLOCKED dangerous tool '%s' invocation: "
+                        "FOUNDER_PIN env var is unset. The dangerous-"
+                        "tools gate is fail-closed (HOTFIX 4.2).",
+                        tool_name,
+                    )
+                    return ToolResult(
+                        tool=tool_name, success=False,
+                        error=(
+                            f"Tool '{tool_name}' is disabled: FOUNDER_PIN "
+                            f"env var is unset on the server. The "
+                            f"dangerous-tools gate fails closed until "
+                            f"FOUNDER_PIN is configured in the systemd "
+                            f"unit's Environment=. Set FOUNDER_PIN=<your-PIN> "
+                            f"to enable. (HOTFIX 4.2)"
+                        ),
+                    )
                 pin = (access_context or {}).get("pin")
                 if not pin:
                     return ToolResult(
