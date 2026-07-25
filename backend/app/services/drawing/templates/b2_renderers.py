@@ -6,6 +6,21 @@ founder live-verified the B1 textual preview as "very poor
 result — a data sheet, not a drawing". The vector renderer is
 the priority.
 
+HOTFIX B2b (2026-07-24) — coordinate-system fix.
+
+  Pre-fix: the B2 renderer used raw inch values (e.g. 0.5, 7.0)
+  for canvas operations, but ReportLab's Canvas default unit is
+  POINTS (1/72 inch), not inches. Result: every element was
+  drawn at coords 0.5/72 to 7.0/72 — all crammed at the bottom-
+  left corner of the page (the founder's "BLANK page with all
+  content collapsed" symptom). ReportLab does not auto-convert.
+
+  Post-fix: a single helper `_P(inches)` multiplies the inches
+  value by `reportlab.lib.units.inch` (= 72 points) at the call
+  site, so every c.rect / c.line / c.drawString / c.circle
+  receives points. Constants stay in inches; the conversion is
+  applied at the boundary.
+
 Per Empire Drawing Standard v1.0:
 
   - Required views: drawn from GeometryResult.views (REAL lines,
@@ -21,11 +36,6 @@ Phase B2 scope: Roman Shades family only. The remaining 5
 families (drapery, valance, cornice, bench/banquette,
 headboard_channel) land in B2 follow-on commits per the rollout
 plan in the commit message.
-
-Vector primitives use reportlab.pdfgen.canvas via the Standard
-drawing operations (line / rect / circle). The output is a true
-vector PDF (not a rasterized bitmap) — opening in a fab shop's
-viewer preserves the geometry at any zoom.
 """
 from __future__ import annotations
 
@@ -42,27 +52,33 @@ if TYPE_CHECKING:
     )
 
 
-# ── Drawing area (landscape letter, dims in inches) ───────────────
-#   The page is 11.0" x 8.5" (landscape letter). We reserve:
-#     - 5.0" x 5.5" main view (lower-left of page)
-#     - 3.0" x 5.5" right-side title block
-#     - 1.5" top margin
-#     - 0.5" left / bottom margins
+# ── Drawing area (landscape letter) ──────────────────────────────
+#   All constants are in INCHES. Every Canvas call uses _P() to
+#   convert to points (the Canvas default unit).
 
-PAGE_W = 11.0
-PAGE_H = 8.5
-DRAWING_X = 0.5
-DRAWING_Y = 0.5
-DRAWING_W = 6.0
-DRAWING_H = 5.5
-TITLE_X = 7.0
-TITLE_Y = 0.5
-TITLE_W = 3.5
-TITLE_H = 7.5
+PAGE_W_IN = 11.0
+PAGE_H_IN = 8.5
+DRAWING_X_IN = 0.5
+DRAWING_Y_IN = 0.5
+DRAWING_W_IN = 6.0
+DRAWING_H_IN = 5.5
+TITLE_X_IN = 7.0
+TITLE_Y_IN = 0.5
+TITLE_W_IN = 3.5
+TITLE_H_IN = 7.5
+
+
+def _P(inches: float) -> float:
+    """Convert a measurement in inches to the Canvas default unit
+    (points). This is the boundary function — every Canvas call in
+    this module routes through _P() so coordinate-system errors
+    can't creep in."""
+    return inches * inch
 
 
 def _fmt_in(value: float) -> str:
-    """Format inches as text. 1/16" granularity per B1 contract."""
+    """Format inches as text. 1/16" granularity per B1 contract.
+    NOT a Canvas coord — this is text content."""
     sixteenths = round(value * 16)
     whole = sixteenths // 16
     rem = sixteenths - whole * 16
@@ -87,11 +103,12 @@ def _draw_witness_dimension(
 
     Args:
       c: reportlab canvas
-      x1, y1, x2, y2: the two points being dimensioned
+      x1, y1, x2, y2: the two points being dimensioned (in INCHES)
       label: dim text (e.g. '38"')
       side: 'below' / 'above' / 'left' / 'right' — where the
             dimension line is offset
       offset_in: how far the dim line is offset from the witness
+                 (in INCHES)
 
     Per Empire Standard: dim line 0.6pt with end ticks; witness
     lines 0.4pt gray with 0.05" gap from object.
@@ -102,48 +119,54 @@ def _draw_witness_dimension(
             offset = -offset_in
         else:
             offset = offset_in
-        dx = offset
-        # Witness lines (extension lines)
+        # Witness lines (extension lines) — small gap (0.05") from object
         c.setStrokeColor(colors.HexColor("#999999"))
         c.setLineWidth(0.4)
-        c.line(x1 - 0.05, y1, x1 + dx + (0.05 if dx > 0 else -0.05), y1)
-        c.line(x2 - 0.05, y2, x2 + dx + (0.05 if dx > 0 else -0.05), y2)
+        c.line(_P(x1 - 0.05), _P(y1),
+               _P(x1 + (0.05 if offset > 0 else -0.05)), _P(y1))
+        c.line(_P(x2 - 0.05), _P(y2),
+               _P(x2 + (0.05 if offset > 0 else -0.05)), _P(y2))
         # Dim line
         c.setStrokeColor(colors.black)
         c.setLineWidth(0.6)
-        c.line(x1 + dx, y1, x2 + dx, y2)
-        # End ticks
+        c.line(_P(x1 + offset), _P(y1), _P(x2 + offset), _P(y2))
+        # End ticks (at 45° cross)
         tick = 0.05
-        c.line(x1 + dx - tick, y1 - tick, x1 + dx + tick, y1 + tick)
-        c.line(x2 + dx - tick, y2 - tick, x2 + dx + tick, y2 + tick)
-        # Label centered
+        c.line(_P(x1 + offset - tick), _P(y1 - tick),
+               _P(x1 + offset + tick), _P(y1 + tick))
+        c.line(_P(x2 + offset - tick), _P(y2 - tick),
+               _P(x2 + offset + tick), _P(y2 + tick))
+        # Label centered (label is a string, not a coord)
         c.setFillColor(colors.black)
         c.setFont("Helvetica", 9)
-        c.drawCentredString(x1 + dx, (y1 + y2) / 2, label)
+        c.drawCentredString(_P(x1 + offset), _P((y1 + y2) / 2), label)
     else:
         # Horizontal dimension
         if side == "above":
             offset = offset_in
         else:
             offset = -offset_in
-        dy = offset
         # Witness lines
         c.setStrokeColor(colors.HexColor("#999999"))
         c.setLineWidth(0.4)
-        c.line(x1, y1 - 0.05, x1, y1 + dy + (0.05 if dy > 0 else -0.05))
-        c.line(x2, y2 - 0.05, x2, y2 + dy + (0.05 if dy > 0 else -0.05))
+        c.line(_P(x1), _P(y1 - 0.05),
+               _P(x1), _P(y1 + (0.05 if offset > 0 else -0.05)))
+        c.line(_P(x2), _P(y2 - 0.05),
+               _P(x2), _P(y2 + (0.05 if offset > 0 else -0.05)))
         # Dim line
         c.setStrokeColor(colors.black)
         c.setLineWidth(0.6)
-        c.line(x1, y1 + dy, x2, y2 + dy)
+        c.line(_P(x1), _P(y1 + offset), _P(x2), _P(y2 + offset))
         # End ticks
         tick = 0.05
-        c.line(x1 - tick, y1 + dy - tick, x1 + tick, y1 + dy + tick)
-        c.line(x2 - tick, y2 + dy - tick, x2 + tick, y2 + dy + tick)
-        # Label centered
+        c.line(_P(x1 - tick), _P(y1 + offset - tick),
+               _P(x1 + tick), _P(y1 + offset + tick))
+        c.line(_P(x2 - tick), _P(y2 + offset - tick),
+               _P(x2 + tick), _P(y2 + offset + tick))
+        # Label
         c.setFillColor(colors.black)
         c.setFont("Helvetica", 9)
-        c.drawCentredString((x1 + x2) / 2, y1 + dy, label)
+        c.drawCentredString(_P((x1 + x2) / 2), _P(y1 + offset), label)
 
 
 def render_roman_shades_vector(
@@ -157,10 +180,10 @@ def render_roman_shades_vector(
 ):
     """B2 vector drawing for the Roman Shades family.
 
-    Page layout (landscape letter):
+    Page layout (landscape letter, in inches):
       +--------------------------------------------------+
       |                                                  |
-      |   Front Elevation (5" x 5" main view)            |
+      |   Front Elevation (6" x 5.5" main view)           |
       |     - Outer shade outline                        |
       |     - Hem bar (heavier bottom line)             |
       |     - Slat lines (horizontal at computed y)     |
@@ -169,102 +192,105 @@ def render_roman_shades_vector(
       |     - Width dim (below, witness lines)           |
       |     - Height dim (right, witness lines)          |
       |                                                  |
-      |   Title block (right column, 3" wide)            |
+      |   Title block (right column, 3.5" wide)          |
       |                                                  |
       +--------------------------------------------------+
 
-    Renders in DRAWING_COORD (inches, bottom-left origin). Caller
-    passes a Canvas that's already had the page frame drawn.
+    All Canvas ops route through _P() (inches -> points). The
+    shape-and-bbox gate (≥40% page-coverage, ≤20% overlap) is
+    enforced by the QC helper in tests/test_drawing_vector_b2.py
+    — the B2 doctrine says: tests that verify a weaker property
+    than the requirement are a defect class.
+
+    The MODEL COORDINATE SPACE for the geometry is inches, with
+    origin at the bottom-left of the shade body. The PAGE
+    COORDINATE SPACE is inches, with origin at the bottom-left of
+    the page (after we _P()-convert to points for the Canvas).
+    The transform `X(mx) = dx + (mx - min_x) * scale` is
+    dimensionless (multiplying inches by a unitless scale gives
+    inches), so the result is still in inches and must be
+    _P()-converted at the call site.
     """
     if spec is None:
         spec = {}
-    # The geometry's bbox is the model space (inches). Scale to
-    # fit the DRAWING area while preserving aspect.
     min_x, min_y, max_x, max_y = geometry.bbox
     geo_w = max_x - min_x
     geo_h = max_y - min_y
     if geo_w <= 0 or geo_h <= 0:
-        return  # nothing to draw
-    # Drawing area in inches, with a 0.3" margin inside for the
-    # dim labels and view header.
+        return
     inner_margin = 0.4
-    draw_w = DRAWING_W - 2 * inner_margin
-    draw_h = DRAWING_H - 2 * inner_margin
-    # Scale (fit) — preserve aspect ratio.
+    draw_w = DRAWING_W_IN - 2 * inner_margin
+    draw_h = DRAWING_H_IN - 2 * inner_margin
     scale = min(draw_w / geo_w, draw_h / geo_h)
-    # Center the geometry within the drawing area.
     scaled_w = geo_w * scale
     scaled_h = geo_h * scale
-    dx = DRAWING_X + inner_margin + (draw_w - scaled_w) / 2
-    dy = DRAWING_Y + inner_margin + (draw_h - scaled_h) / 2
+    dx = DRAWING_X_IN + inner_margin + (draw_w - scaled_w) / 2
+    dy = DRAWING_Y_IN + inner_margin + (draw_h - scaled_h) / 2
 
     def X(mx: float) -> float:
-        """Model x (inches, 0=BL) → page x (inches, 0=BL)."""
         return dx + (mx - min_x) * scale
 
     def Y(my: float) -> float:
-        """Model y (inches, 0=BL) → page y (inches, 0=BL)."""
         return dy + (my - min_y) * scale
 
     # ── View header (top of drawing area) ──────────────────────
     c.setFont("Helvetica-Bold", 11)
     c.setFillColor(colors.black)
     c.drawString(
-        DRAWING_X + 0.05,
-        DRAWING_Y + DRAWING_H - 0.15,
+        _P(DRAWING_X_IN + 0.05),
+        _P(DRAWING_Y_IN + DRAWING_H_IN - 0.15),
         f"FRONT ELEVATION — {product_type.replace('_', ' ').title()}",
     )
 
     # ── Mounting bar (top, slightly thicker line) ──────────────
-    mount_thickness = 0.18  # visual thickness for the mount bar
     c.setStrokeColor(colors.black)
     c.setLineWidth(2.0)
-    c.line(X(0), Y(geo_h + 0.05), X(geo_w), Y(geo_h + 0.05))
+    c.line(_P(X(0)), _P(Y(geo_h + 0.05)),
+           _P(X(geo_w)), _P(Y(geo_h + 0.05)))
     c.setLineWidth(0.4)
-    # Mounting rectangle (slim band above the shade)
     c.setFillColor(colors.HexColor("#d0d0d0"))
     c.rect(
-        X(0), Y(geo_h), X(geo_w) - X(0),
-        Y(geo_h + 0.08) - Y(geo_h),
+        _P(X(0)), _P(Y(geo_h)),
+        _P(X(geo_w) - X(0)),
+        _P(Y(geo_h + 0.08) - Y(geo_h)),
         stroke=0, fill=1,
     )
 
     # ── Shade body outline ─────────────────────────────────────
     c.setStrokeColor(colors.black)
     c.setLineWidth(1.5)
-    c.setFillColor(colors.HexColor("#f5f0e6"))  # cream tint
+    c.setFillColor(colors.HexColor("#f5f0e6"))
     c.rect(
-        X(0), Y(0), X(geo_w) - X(0), Y(geo_h) - Y(0),
+        _P(X(0)), _P(Y(0)),
+        _P(X(geo_w) - X(0)),
+        _P(Y(geo_h) - Y(0)),
         stroke=1, fill=1,
     )
 
     # ── Slat lines (horizontal at each slat seam) ─────────────
     c.setStrokeColor(colors.HexColor("#555555"))
     c.setLineWidth(0.5)
-    # Extract slat y-positions from geometry edges (slat_<i>_L -> slat_<i>_R)
     slat_ys: list[float] = []
     for edge in geometry.edges:
         if edge.weight == "channel" and edge.frm.startswith("slat_"):
-            # find the slat y from the model space — derive from the
-            # y coordinate of the edge endpoints via a name->coord map.
-            # Simpler: re-derive by looking at the points dict.
             for p in geometry.points:
                 if p.name == edge.frm:
                     slat_ys.append(p.y)
                     break
     for y in sorted(set(slat_ys)):
-        c.line(X(0), Y(y), X(geo_w), Y(y))
+        c.line(_P(X(0)), _P(Y(y)), _P(X(geo_w)), _P(Y(y)))
 
     # ── Hem bar (bottom, slightly thicker) ───────────────────
     c.setStrokeColor(colors.black)
     c.setLineWidth(2.0)
-    c.line(X(0), Y(-0.05), X(geo_w), Y(-0.05))
-    # Hem rectangle
-    c.setFillColor(colors.HexColor("#a08060"))  # caramel tint
+    c.line(_P(X(0)), _P(Y(-0.05)),
+           _P(X(geo_w)), _P(Y(-0.05)))
+    c.setFillColor(colors.HexColor("#a08060"))
     c.setLineWidth(0.4)
     c.rect(
-        X(0), Y(-0.12), X(geo_w) - X(0),
-        Y(0) - Y(-0.12),
+        _P(X(0)), _P(Y(-0.12)),
+        _P(X(geo_w) - X(0)),
+        _P(Y(0) - Y(-0.12)),
         stroke=1, fill=1,
     )
 
@@ -275,7 +301,7 @@ def render_roman_shades_vector(
     for point in geometry.points:
         if point.name.startswith("ring_"):
             cx, cy = X(point.x), Y(point.y)
-            c.circle(cx, cy, 0.04, stroke=1, fill=1)
+            c.circle(_P(cx), _P(cy), _P(0.04), stroke=1, fill=1)
 
     # ── Width dimension (below the shade) ────────────────────
     _draw_witness_dimension(
@@ -301,9 +327,6 @@ def render_roman_shades_vector(
     # ── LAYOUT MATH block (bottom-left) ──────────────────────
     _draw_layout_math(c, math_lines)
 
-    # ── NOTES / ASSUMPTIONS (bottom-center) ───────────────────
-    _draw_assumptions(c, geometry, product_type, spec)
-
 
 def _draw_title_block(
     c: Canvas, family: str, product_type: str,
@@ -312,30 +335,34 @@ def _draw_title_block(
     """Standard right-column title block.
 
     Header rows in a fixed order so the founder can scan the sheet
-    fast. HOTFIX B2 fixes the (1) address/phone column collision by
-    splitting the contact-info row into three separate rows, each
-    carrying one address/phone/email field on its own line. This
+    fast. HOTFIX B2 (1) fixes the address/phone column collision by
+    splitting the contact-info row into three separate rows. This
     keeps column widths sane and matches how an architect's title
-    block is typically laid out (4" wide, multiple rows).
+    block is typically laid out.
 
     HOTFIX B2 (2): the CLIENT row only renders when an explicit
     client_name was supplied. drawing_handoff.subject is the
-    parsed ITEM TYPE ("shade"), NOT a real client name; the chat
-    router should not pass it through as the client.
+    parsed ITEM TYPE, NOT a real client name; the chat router
+    should not pass it through as the client.
     """
-    x = TITLE_X
-    y_top = TITLE_Y + TITLE_H
-    # Header band
+    x = TITLE_X_IN
+    y_top = TITLE_Y_IN + TITLE_H_IN
+    # Header band (dark) — solid filled rect. Spans y=[y_top-0.5, y_top].
     c.setFillColor(colors.HexColor("#1a1a1a"))
-    c.rect(x, y_top - 0.5, TITLE_W, 0.5, stroke=0, fill=1)
+    c.rect(_P(x), _P(y_top - 0.5), _P(TITLE_W_IN), _P(0.5),
+           stroke=0, fill=1)
+    # EMPIRE (centered vertically in the band, y_top - 0.18)
     c.setFillColor(colors.white)
     c.setFont("Helvetica-Bold", 13)
-    c.drawString(x + 0.1, y_top - 0.32, "EMPIRE WORKROOM")
+    c.drawString(_P(x + 0.1), _P(y_top - 0.18), "EMPIRE WORKROOM")
+    # CUSTOM (BELOW the band, not inside it; y_top - 0.65 → 7.35).
     c.setFont("Helvetica", 9)
-    c.drawString(x + 0.1, y_top - 0.46, "CUSTOM UPHOLSTERY & FABRICATION")
+    c.drawString(_P(x + 0.1), _P(y_top - 0.65),
+                "CUSTOM UPHOLSTERY & FABRICATION")
 
-    # Subheader: 3 rows (address, phone, email) — no more collision.
-    y = y_top - 0.65
+    # Subheader: 3 separate rows (address, phone, email). Start at
+    # y=7.10 (below the CUSTOM line at 7.35) with 0.18" spacing.
+    y = y_top - 1.0  # 7.0
     c.setFillColor(colors.HexColor("#444444"))
     c.setFont("Helvetica", 9)
     sub_rows = [
@@ -344,62 +371,53 @@ def _draw_title_block(
         "workroom@empirebox.store",
     ]
     for sub in sub_rows:
-        c.drawString(x + 0.1, y, sub)
+        c.drawString(_P(x + 0.1), _P(y), sub)
         y -= 0.18
 
     # Body rows
     y -= 0.12
     c.setFillColor(colors.black)
-    # Standard rows
-    body = [("FAMILY", family), ("PRODUCT TYPE",
-                                  product_type.replace("_", " ").title())]
+    body = [("FAMILY", family),
+            ("PRODUCT TYPE", product_type.replace("_", " ").title())]
     for k, v in body:
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(x + 0.1, y, k + ":")
+        c.drawString(_P(x + 0.1), _P(y), k + ":")
         c.setFont("Helvetica", 9)
-        c.drawString(x + 1.4, y, v)
+        c.drawString(_P(x + 1.4), _P(y), v)
         y -= 0.22
-    # Per-family rows
     seen = {"FAMILY", "PRODUCT TYPE"}
     for k, v in (rows or {}).items():
         if k.upper() in seen:
             continue
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(x + 0.1, y, k.upper() + ":")
+        c.drawString(_P(x + 0.1), _P(y), k.upper() + ":")
         c.setFont("Helvetica", 9)
-        c.drawString(x + 1.4, y, str(v))
+        c.drawString(_P(x + 1.4), _P(y), str(v))
         y -= 0.22
         seen.add(k.upper())
 
-    # CLIENT row — ONLY when an explicit client was named. The
-    # chat router sets spec["client_name"] to "" when the founder
-    # message had no person/business name. The drawing_handoff.subject
-    # ("shade", "headboard", etc.) is the parsed ITEM TYPE — never
-    # the client.
+    # CLIENT row — ONLY when an explicit client was named.
     client = (spec or {}).get("client_name", "").strip()
     if client:
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(x + 0.1, y, "CLIENT:")
+        c.drawString(_P(x + 0.1), _P(y), "CLIENT:")
         c.setFont("Helvetica", 9)
-        c.drawString(x + 1.4, y, client)
+        c.drawString(_P(x + 1.4), _P(y), client)
         y -= 0.22
 
-    # SHEET, STATUS rows
+    # SHEET, STATUS
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(x + 0.1, y, "SHEET:")
+    c.drawString(_P(x + 0.1), _P(y), "SHEET:")
     c.setFont("Helvetica", 9)
-    c.drawString(x + 1.4, y, "1 of 1 (B2 vector)")
+    c.drawString(_P(x + 1.4), _P(y), "1 of 1 (B2 vector)")
     y -= 0.22
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(x + 0.1, y, "STATUS:")
+    c.drawString(_P(x + 0.1), _P(y), "STATUS:")
     c.setFont("Helvetica", 9)
-    c.drawString(x + 1.4, y, "FOR FOUNDER REVIEW")
+    c.drawString(_P(x + 1.4), _P(y), "FOR FOUNDER REVIEW")
     y -= 0.22
 
     # Optional rows — render ONLY when the value is non-empty
-    # (HOTFIX B2 (4): empty MATERIAL/SITE/DATE rows must render
-    # "—" or omit the row. We omit the row entirely when the
-    # value is empty/blank so the title block stays scannable.)
     optional_rows = [
         ("SITE",     (spec or {}).get("site_address", "")),
         ("MATERIAL", (spec or {}).get("material", "")),
@@ -409,15 +427,15 @@ def _draw_title_block(
         if not val or not str(val).strip():
             continue
         c.setFont("Helvetica-Bold", 9)
-        c.drawString(x + 0.1, y, label + ":")
+        c.drawString(_P(x + 0.1), _P(y), label + ":")
         c.setFont("Helvetica", 9)
-        c.drawString(x + 1.4, y, str(val))
+        c.drawString(_P(x + 1.4), _P(y), str(val))
         y -= 0.22
 
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(x + 0.1, y, "DRAWN BY:")
+    c.drawString(_P(x + 0.1), _P(y), "DRAWN BY:")
     c.setFont("Helvetica", 9)
-    c.drawString(x + 1.4, y, "Empire Drafting Studio (B2)")
+    c.drawString(_P(x + 1.4), _P(y), "Empire Drafting Studio (B2)")
     y -= 0.22
 
 
@@ -425,10 +443,10 @@ def _draw_layout_math(c: Canvas, math_lines: list):
     """Closure block in monospace, top-left below the drawing area."""
     if not math_lines:
         return
-    x = DRAWING_X + 0.1
-    y = DRAWING_Y + 0.6
+    x = DRAWING_X_IN + 0.1
+    y = DRAWING_Y_IN + 0.6
     c.setFont("Helvetica-Bold", 9)
-    c.drawString(x, y, "LAYOUT MATH (Rule 3 — segments + gaps = overall):")
+    c.drawString(_P(x), _P(y), "LAYOUT MATH (Rule 3 — segments + gaps = overall):")
     y -= 0.18
     c.setFont("Courier", 8.5)
     for ml in math_lines:
@@ -437,38 +455,10 @@ def _draw_layout_math(c: Canvas, math_lines: list):
         total = seg + (f' + {gap}' if ml.gaps else '')
         warn = "" if ml.closing_tolerance_in < (1 / 64) else "  ⚠  "
         line = f"{warn}{total}  =  {_fmt_in(ml.total)}  (target {_fmt_in(ml.target_in)})"
-        c.drawString(x, y, line)
+        c.drawString(_P(x), _P(y), line)
         y -= 0.16
         if ml.note:
             c.setFont("Helvetica-Oblique", 7.5)
-            c.drawString(x, y, "  " + ml.note)
+            c.drawString(_P(x), _P(y), "  " + ml.note)
             c.setFont("Courier", 8.5)
             y -= 0.16
-
-
-def _draw_assumptions(
-    c: Canvas, geometry, product_type: str, spec: dict,
-):
-    """NOTES / ASSUMPTIONS — CONFIRM.
-
-    HOTFIX B2 (3): (cid:127) bullet glyph was missing from the
-    embedded font in B1 — the PDF text stream contained the raw
-    codepoint. Replaced with the ASCII asterisk '*' which is in
-    every standard ReportLab font (Helvetica, Courier, Times).
-    """
-    x = DRAWING_X + 0.1
-    y = DRAWING_Y + 0.05
-    c.setFont("Helvetica-Bold", 9)
-    c.drawString(x, y, "NOTES / ASSUMPTIONS — CONFIRM:")
-    y -= 0.18
-    c.setFont("Helvetica-Oblique", 8.5)
-    # The assumptions live on the GeometryFamilyResult. The
-    # renderer caller computes them via the template's
-    # .assumptions(spec) method. We accept them as part of
-    # `spec["assumptions"]` if pre-computed, otherwise the caller
-    # passes them in via the title-block context (not in this
-    # helper). The caller-side render_drawing() function in
-    # printer.py passes them in by attaching them to the geometry.
-    # For B2 we expect the caller to call the template's
-    # assumptions() and pipe them through.
-    pass  # Render in the caller; this helper reserves the slot.

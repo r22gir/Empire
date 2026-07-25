@@ -1,10 +1,28 @@
-"""HOTFIX B2 (2026-07-24) — vector drawing renderer regression tests.
+"""HOTFIX B2 + B2b (2026-07-24) — vector drawing renderer regression tests.
 
 Founder live-verified the B1 textual preview as "very poor result —
 a data sheet, not a drawing". B2 ships a real scaled line drawing
 via reportlab's Canvas API. Roman Shades is the first family;
 drapery, valance, cornice, bench/banquette, headboard_channel
 land in B2 follow-on commits per the rollout plan.
+
+HOTFIX B2b (2026-07-24) — MANDATORY test upgrade. The pre-B2b
+tests asserted COUNTS and STRING PRESENCE only — 20 lines all
+drawn at the same coordinates still counts as 20. The founder
+caught the broken output ("BLANK page with all content collapsed
+into an overlapping pile at the bottom-left corner") via live
+visual verification. This file now also runs the geometric QC
+gates (enforce_b2_qc from b2_qc.py):
+
+  (a) Element-spread gate: drawing spans ≥ 40% of page width
+      AND ≥ 40% of page height; no more than 20% of elements
+      may share near-identical coordinates (the pile sign).
+  (b) Zone gates: title-block text in the right column; drawing
+      elements in the left half; nothing below the page-margin
+      line.
+  (c) Text-collision gate: word-bbox overlap between different
+      lines > 30% intersection = FAIL. Catches the every-char-
+      at-the-same-coordinate pile output.
 
 B1 output defects folded into B2:
   (1) Header address/phone column collision — fixed in
@@ -14,17 +32,6 @@ B1 output defects folded into B2:
   (3) (cid:127) bullet glyphs — fixed: ASCII '*' instead.
   (4) Empty MATERIAL/SITE/DATE rows — fixed: omit when value is
       empty.
-
-TESTS:
-  - E2E via /api/v1/max/chat: R1 sentence produces a PDF with
-    20+ vector lines + 5+ vector rects (real line art, not text).
-  - Title block content: address, phone, email each in its own
-    row (no column collision).
-  - CLIENT/MATERIAL/SITE rows: rendered when set, omitted when
-    empty.
-  - No (cid:127) bullet glyph in the rendered PDF.
-  - LAYOUT MATH closure: 9 × 7-1/8" = 64" with FLUSH BOTH ENDS.
-  - Slat count from geometry matches LAYOUT MATH (9 slats).
 """
 from __future__ import annotations
 
@@ -59,6 +66,15 @@ def _pdf_text(pdf_bytes: bytes) -> str:
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as p:
         page = p.pages[0]
         return "".join(c["text"] for c in page.chars)
+
+
+def _pdf_page(pdf_bytes: bytes):
+    """Return the first pdfplumber page (used by the geometric gates
+    that read vector ops + char bboxes)."""
+    pytest.importorskip("pdfplumber")
+    import pdfplumber
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as p:
+        return p.pages[0]
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -391,3 +407,150 @@ class TestVectorLineArt:
             page = p.pages[0]
             n_lines = len(page.lines)
         assert n_lines >= 15
+
+
+# ───────────────────────────────────────────────────────────────────
+# HOTFIX B2b — GEOMETRIC QC GATES (mandatory for the B2 rollout)
+# ───────────────────────────────────────────────────────────────────
+
+
+class TestB2QCGates:
+    """Three gates the pre-B2b count-based tests missed:
+
+    (a) Element-spread gate — the bottom-left-pile detector.
+        Drawing must span ≥ 40% of page width AND ≥ 40% of
+        page height; no more than 20% of elements may share
+        near-identical coordinates (within 0.05").
+    (b) Zone gates — title block in right column, drawing in
+        left half, nothing below the margin line.
+    (c) Text-collision gate — word-bbox overlap between
+        different lines > 30% intersection = FAIL.
+
+    These gates are family-agnostic. Every B2 vector renderer
+    (Roman Shades this commit; the 5 follow-on commits) routes
+    through enforce_b2_qc(). A failure in any gate means the
+    rendered output is geometrically broken — even if it has
+    20+ lines and the right text labels.
+    """
+
+    def _render_R1(self):
+        from app.services.drawing.templates import render_spec
+        return render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+
+    def test_element_spread_gate(self):
+        """Drawing must span ≥ 40% of page width AND ≥ 40% of
+        page height. The pre-B2b bug had elements all at (0, 0)
+        in points (which became 0" after the *inch conversion
+        disappeared), so the bounding box was 0% of the page."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R1()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        # The R1 spec: shade is 38x64 in, the page is 11x8.5 in.
+        # After layout, the drawing must span >> 40% of both axes.
+        assert stats["page_coverage_x"] >= 0.40, (
+            f"X spread = {stats['page_coverage_x']*100:.1f}%, "
+            f"min 40%. bbox={stats['vector_bbox_in']}"
+        )
+        assert stats["page_coverage_y"] >= 0.40, (
+            f"Y spread = {stats['page_coverage_y']*100:.1f}%, "
+            f"min 40%. bbox={stats['vector_bbox_in']}"
+        )
+
+    def test_pile_gate(self):
+        """No more than 20% of elements may share near-identical
+        coordinates. The pre-B2b bug had all 20+ lines and 5
+        rects at the same (x0, y0) within points-precision → 100%
+        in the pile cluster → caught here."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R1()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["pile_frac"] <= 0.20, (
+            f"pile_frac = {stats['pile_frac']*100:.1f}%, "
+            f"{stats['elements_in_pile']}/{stats['elements_total']} "
+            f"elements clustered within 0.05\" — drawing is collapsed"
+        )
+
+    def test_zone_title_block_in_right_column(self):
+        """At least one text element must live in the right column
+        (x >= 6.5"). The title block sits there."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R1()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["title_block_chars"] > 0, (
+            f"no title-block chars in right column (x >= 6.5\") — "
+            f"the title block was not rendered at the canonical "
+            f"position"
+        )
+
+    def test_zone_drawing_in_left_half(self):
+        """At least one text element must live in the left half
+        (x < 6.5") for the drawing labels (FRONT ELEVATION, dim
+        labels, etc.)."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R1()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["drawing_zone_chars"] > 0, (
+            f"no drawing-zone chars in left half (x < 6.5\") — "
+            f"the drawing labels were not rendered"
+        )
+
+    def test_zone_nothing_below_margin(self):
+        """Nothing off-page. The pre-B2b bug had text rendered at
+        y=-9.5 to 18 (off-page), which pdfplumber reports as
+        y=-9.5 (below the page bottom)."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R1()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["off_page_chars"] == 0, (
+            f"{stats['off_page_chars']} chars off-page "
+            f"(y < 0.2\" or y > {8.5 - 0.2}\") — drawing "
+            f"spilled off-page (the B2b bug)"
+        )
+
+    def test_text_collision_gate(self):
+        """No word-bbox overlaps > 30% between different lines.
+        The pre-B2b bug had every char at the same (x0, y0)
+        point, which pdfplumber groups into overlapping words."""
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = self._render_R1()
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        # Pin: zero overlap pairs (the QC gate runs the check; this
+        # test is the verification that no overlap is detected on
+        # the R1 case).
+        assert stats["word_overlap_pairs"] == [], (
+            f"{len(stats['word_overlap_pairs'])} text-overlap pairs "
+            f"detected: {stats['word_overlap_pairs'][:3]}"
+        )
+
+    def test_qc_gate_catches_simulated_bottom_left_pile(self):
+        """The QC gates must catch the SPECIFIC defect class they
+        were written for. We construct a synthetic PDF that
+        simulates the pre-B2b bug (every vector element stacked
+        near (0, 0) in points) and verify enforce_b2_qc raises."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc, B2QCFailure
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Simulate the pre-B2b bug: 20 lines all stacked at (0, 0)
+        # (in points — exactly what the broken code produced because
+        # the * inch conversion was missing).
+        c.setLineWidth(0.5)
+        for _ in range(20):
+            c.line(0, 0, 5, 5)  # 20 lines at the same point
+        c.save()
+        broken_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(broken_pdf, "Roman Shades", "flat_fold")
+        # The error message must mention the B2b-style defect
+        msg = str(exc_info.value)
+        assert "spread" in msg.lower() or "pile" in msg.lower(), (
+            f"QC error should mention spread/pile (the defect "
+            f"class it catches); got: {msg}"
+        )
