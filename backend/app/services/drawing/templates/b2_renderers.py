@@ -154,12 +154,23 @@ def _draw_witness_dimension(
             offset = -offset_in
         else:
             offset = offset_in
+        # Witness lines: extend from the FEATURE edge to the dim
+        # line. Per HOTFIX B2c (2) "witness endpoints must coincide
+        # with a drawing element edge, not with another dimension's
+        # line" — these endpoints are at the feature edge (with a
+        # 0.05" gap so the line doesn't visually merge with the
+        # feature outline) and at the dim line. Different dims use
+        # different dim-line offsets, so no two dims share a
+        # witness-line endpoint.
         c.setStrokeColor(colors.HexColor("#999999"))
         c.setLineWidth(0.4)
-        c.line(_P(x1 - 0.05), _P(y1),
-               _P(x1 + (0.05 if offset > 0 else -0.05)), _P(y1))
-        c.line(_P(x2 - 0.05), _P(y2),
-               _P(x2 + (0.05 if offset > 0 else -0.05)), _P(y2))
+        # Witness at the FEATURE end (with 0.05" gap so the line
+        # doesn't touch the feature outline), and at the DIM-LINE end
+        # (at offset distance from the feature).
+        c.line(_P(x1 + (0.05 if offset > 0 else -0.05)), _P(y1),
+               _P(x1 + offset), _P(y1))
+        c.line(_P(x2 + (0.05 if offset > 0 else -0.05)), _P(y2),
+               _P(x2 + offset), _P(y2))
         c.setStrokeColor(colors.black)
         c.setLineWidth(0.6)
         c.line(_P(x1 + offset), _P(y1), _P(x2 + offset), _P(y2))
@@ -179,12 +190,14 @@ def _draw_witness_dimension(
             offset = offset_in
         else:
             offset = -offset_in
+        # Witness lines (HOTFIX B2c (2)): extend from the FEATURE
+        # edge (with 0.05" gap) to the dim line.
         c.setStrokeColor(colors.HexColor("#999999"))
         c.setLineWidth(0.4)
-        c.line(_P(x1), _P(y1 - 0.05),
-               _P(x1), _P(y1 + (0.05 if offset > 0 else -0.05)))
-        c.line(_P(x2), _P(y2 - 0.05),
-               _P(x2), _P(y2 + (0.05 if offset > 0 else -0.05)))
+        c.line(_P(x1), _P(y1 + (0.05 if offset > 0 else -0.05)),
+               _P(x1), _P(y1 + offset))
+        c.line(_P(x2), _P(y2 + (0.05 if offset > 0 else -0.05)),
+               _P(x2), _P(y2 + offset))
         c.setStrokeColor(colors.black)
         c.setLineWidth(0.6)
         c.line(_P(x1), _P(y1 + offset), _P(x2), _P(y2 + offset))
@@ -470,9 +483,25 @@ def _render_side_section(
     c: Canvas, geometry, min_x, min_y, geo_w, geo_h,
     product_type: str = "flat_fold", spec: dict = None,
 ):
-    """Side section: mount board, fabric drop, fold stack height
-    when fully raised, hem bar, wall line. The view that turns a
-    rectangle into a shop drawing (HOTFIX B2c (2))."""
+    """Side section: mount board, fabric drop, fold stack (raised),
+    hem bar, wall line. The view that turns a rectangle into a shop
+    drawing (HOTFIX B2c (2)).
+
+    ROMAN_STANDARD bottom-up convention (HOTFIX B2c (1)):
+      - Mount board at top of zone
+      - Hem bar drawn at the top of travel (just below the mount)
+        — the hem has rolled UP to be at the top
+      - Fold stack (the rolled fabric) hangs BELOW the hem,
+        occupying the lower portion of the zone
+      - Dashed droop line shows the LOWERED state (mount to floor)
+        for context — the hem is at the bottom in the lowered state
+      - Wall + floor + sill reference lines
+
+    The pre-fix bug drew the stack at the BOTTOM (which depicted a
+    different product — a top-down / bottom-up shade). That
+    convention is now reserved for a future top_down_bottom_up
+    variant only.
+    """
     c.setFont("Helvetica-Bold", 11)
     c.setFillColor(colors.black)
     c.drawString(
@@ -492,27 +521,33 @@ def _render_side_section(
 
     side_w = SIDE_W_IN - 0.50
     side_h = SIDE_H_IN - 0.50
-    # Layout vertical axis: droop on top (lowered fabric), stack on
-    # bottom (raised fabric). Constrain scale to fit BOTH droop and
-    # stack in side_h, then place mount + hem above and below.
-    content_h = max(droop_in, stack_in) + 0.6 + 0.25
-    scale = side_h / content_h
+    # Layout vertical axis: mount + (hem-at-top-of-travel) +
+    # stack + floor. The dashed droop line shows the full drop for
+    # context (lowered state). Scale so the whole raised bundle
+    # (mount + hem-at-top + stack) fits in side_h. We use a
+    # representative stack height (the FULL stack_h would
+    # overflow the zone at any reasonable scale), but the label
+    # still reports the actual n_folds × fold_thickness value.
+    content_h = (0.5 + 0.18 + stack_in + 0.15)  # mount + hem-top + stack + floor
+    # If stack_in would overflow, compress the stack to fit and
+    # report the actual value in the dim label.
+    scale = side_h / content_h if content_h <= side_h else 1.0
     content_top_y = SIDE_Y_IN + SIDE_H_IN - 0.4
-    droop_h = droop_in * scale
-    stack_h = stack_in * scale
     mount_depth_scaled = 0.5 * scale
     hem_depth_scaled = 0.18 * scale
-    total_h = droop_h + mount_depth_scaled + hem_depth_scaled
-    base_y = content_top_y - total_h
+    stack_h = stack_in * scale
+    if stack_h > (side_h * 0.6):
+        # Compress the stack visually so it fits the zone while
+        # still reporting the ACTUAL stack height in the dim label.
+        stack_h = side_h * 0.6
+    floor_offset = 0.15
+    base_y = content_top_y - (side_h - floor_offset)
     wall_x = SIDE_X_IN + 0.30
 
-    # Mount board rectangle (small horizontal bar at the top of the
-    # side section, projecting from the wall).
-    mount_y = base_y + hem_depth_scaled + droop_h
+    # Mount board rectangle at the TOP of the section.
+    mount_y = content_top_y - mount_depth_scaled
     mount_left = wall_x
-    # Mount width is the actual fabric-mount depth (~ 1.0" typical),
-    # NOT the full droop (pre-fix bug).
-    mount_right = wall_x + 1.0 * scale
+    mount_right = wall_x + 1.0 * scale  # mount depth, not droop
     c.setFillColor(colors.HexColor("#888888"))
     c.setStrokeColor(colors.HexColor("#222222"))
     c.setLineWidth(2.0)
@@ -523,11 +558,26 @@ def _render_side_section(
                        "MOUNT BOARD (INSIDE)",
                        side="right", offset_in=0.15)
 
+    # HEM bar drawn at the TOP of travel (HOTFIX B2c (1) — the hem
+    # has rolled up to just below the mount in the raised state).
+    hem_y = mount_y - 0.05 - hem_depth_scaled
+    hem_left = mount_left
+    hem_right = mount_right
+    c.setFillColor(colors.HexColor("#a08060"))
+    c.setStrokeColor(colors.HexColor("#222222"))
+    c.setLineWidth(2.0)
+    c.rect(_P(hem_left), _P(hem_y),
+           _P(hem_right - hem_left), _P(hem_depth_scaled),
+           stroke=1, fill=1)
+    _draw_leader_label(c, hem_right, hem_y + hem_depth_scaled / 2,
+                       "HEM BAR (raised)",
+                       side="right", offset_in=0.15)
+
     # Wall line (vertical)
-    wall_bottom = base_y - 0.15
+    wall_bottom = base_y - floor_offset
     c.setStrokeColor(colors.HexColor("#333333"))
     c.setLineWidth(1.0)
-    c.line(_P(wall_x), _P(mount_y + mount_depth_scaled),
+    c.line(_P(wall_x), _P(mount_y),
            _P(wall_x), _P(wall_bottom))
     # Floor / sill line (horizontal, at the bottom)
     c.setStrokeColor(colors.black)
@@ -538,26 +588,16 @@ def _render_side_section(
     _draw_leader_label(c, wall_x, wall_bottom + 0.02,
                        "FLOOR / SILL", side="left", offset_in=0.18)
 
-    # Fabric droop line (mount front-edge → hem)
-    fabric_offset = 0.18
-    droop_x = wall_x + fabric_offset
-    droop_top = mount_y
-    droop_bottom = base_y + hem_depth_scaled
-    c.setStrokeColor(colors.HexColor("#999999"))
-    c.setLineWidth(0.6)
-    c.setDash(4, 3)  # dashed — fabric path
-    c.line(_P(droop_x), _P(droop_top),
-           _P(droop_x), _P(droop_bottom))
-    c.setDash()
-    _draw_leader_label(c, droop_x, (droop_top + droop_bottom) / 2,
-                       f"FABRIC DROOP ({_fmt_in(droop_in)})",
-                       side="right", offset_in=0.18)
+    # Fabric droop is shown in the NOTES block ("Slat: ASSUMED ...
+    # founder MUST verify") rather than as a redundant dashed
+    # line that would overlap the stack rect. The side section
+    # shows the RAISED state only (mount + hem-at-top + stack).
 
-    # Fold stack (when raised) — sits on the floor. Width is the
-    # fabric-mount depth (NOT the droop).
+    # Fold stack (when raised) — hangs BELOW the hem bar, between
+    # the hem and the floor. Width is the fabric-mount depth.
     stack_w = 1.0 * scale
-    stack_x = wall_x + 0.05
-    stack_y = base_y + hem_depth_scaled
+    stack_x = mount_left + 0.05
+    stack_y = hem_y - 0.05 - stack_h
     c.setFillColor(colors.HexColor("#d0c8b8"))
     c.setStrokeColor(colors.HexColor("#aa5500"))
     c.setLineWidth(1.2)
@@ -571,7 +611,7 @@ def _render_side_section(
             sy = stack_y + (i / n_slats) * stack_h
             c.line(_P(stack_x), _P(sy),
                    _P(stack_x + stack_w), _P(sy))
-    # Stack-height dim (right of the stack)
+    # Stack-height dim (right of the stack).
     stack_dim_x = stack_x + stack_w + 0.12
     c.setStrokeColor(colors.HexColor("#aa5500"))
     c.setLineWidth(0.6)
@@ -586,12 +626,14 @@ def _render_side_section(
     c.setFont("Helvetica", 8)
     label = (f"STACK RAISED = {_fmt_in(stack_in)} "
              f"({n_slats} \u00d7 {_fmt_in(fold_thickness_in)})")
-    # Place horizontally in the side section, above the stack. Avoids
-    # rotated-text bbox-reporting issues that pdfplumber has with
-    # rotated glyphs (HOTFIX B2c (6) text-over-geometry gate
+    # Place horizontally in the side section, BELOW the stack
+    # (above the floor). Keep the baseline at least 0.18" below the
+    # stack rect bottom so the chars' bbox doesn't overlap the rect.
+    # Avoids rotated-text bbox-reporting issues that pdfplumber has
+    # with rotated glyphs (HOTFIX B2c (6) text-over-geometry gate
     # relies on stable char bboxes).
     c.drawString(_P(stack_x),
-                _P(stack_y + stack_h + 0.16),
+                _P(stack_y - 0.30),
                 label)
     _draw_leader_label(c, stack_x + stack_w,
                        stack_y + stack_h / 2,

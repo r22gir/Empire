@@ -311,6 +311,23 @@ def enforce_b2_qc(
                 f"{sample}"
             )
 
+        # HOTFIX B2c corrections (2): dimension-witness-endpoint gate.
+        # Every dimension's witness line endpoints must coincide (±2pt)
+        # with a DRAWING-ELEMENT edge (a feature corner or a rect
+        # edge), NOT with another dimension's line. This catches the
+        # defect where one dim's witness line terminates on another
+        # dim's line (the pre-fix B2c render had the height-dim's
+        # lower witness line sharing the width-dim's reference level).
+        dim_borrow = _check_dim_witness_borrow(page)
+        if dim_borrow:
+            sample = dim_borrow[:3]
+            raise B2QCFailure(
+                f"B2 QC (dim-witness-borrow) FAIL on "
+                f"{family}/{product_type}: {len(dim_borrow)} dim "
+                f"witness endpoint(s) borrow another dim's line. "
+                f"samples: {sample}"
+            )
+
         return {
             "vector_bbox_in": bbox,
             "page_coverage_x": cov_x,
@@ -322,6 +339,8 @@ def enforce_b2_qc(
             "drawing_zone_chars": len(left_elements),
             "off_page_chars": len(off_page),
             "word_overlap_pairs": overlap_pairs,
+            "text_overlap_geom": text_overlap_geom,
+            "dim_borrow": dim_borrow,
         }
     finally:
         pdfplumber_obj.close()
@@ -470,3 +489,56 @@ def _check_text_over_geometry(page) -> List[dict]:
                     ),
                 })
     return overlaps
+
+
+# ── Dim-witness-borrow gate (HOTFIX B2c corrections (2)) ───────
+
+
+def _check_dim_witness_borrow(page) -> list[dict]:
+    """Every dim's witness line endpoints must coincide with a
+    drawing-element edge (a rect or a line in the page), NOT with
+    another dim's line. This catches the B2c-side defect where the
+    height-dim's lower witness line shared the width-dim's level
+    instead of terminating at the hem bar (a feature edge).
+
+    The gate identifies pairs of LINES on the page. Both must be
+    ≥ 0.5" long (skip short tick marks). If their y-coords are
+    within 0.5pt AND their x-extents overlap by ≥ 0.5", the
+    witness is BORROWING the other line as a terminator — failure.
+    """
+    if not page.lines:
+        return []
+    borrows = []
+    lines = sorted(page.lines, key=lambda l: (round(l['y0'] / 2), l['x0']))
+    h_lines = [l for l in lines
+               if abs(l['y1'] - l['y0']) < abs(l['x1'] - l['x0'])]
+    for i, la in enumerate(h_lines):
+        for j, lb in enumerate(h_lines):
+            if i == j:
+                continue
+            # Skip short tick-mark lines (lines ≤ 0.5" long are
+            # usually witness tick marks, not borrow suspects).
+            if (la['x1'] - la['x0']) < 0.5 * 72:
+                continue
+            if (lb['x1'] - lb['x0']) < 0.5 * 72:
+                continue
+            # Lines at the same y (within 0.5pt) are a borrow
+            # suspect.
+            if abs(la['y0'] - lb['y0']) > 0.5:
+                continue
+            # Borrow if they overlap in x by ≥ 0.5".
+            x_overlap = max(0, min(la['x1'], lb['x1'])
+                            - max(la['x0'], lb['x0']))
+            if x_overlap >= 0.5 * 72:
+                borrows.append({
+                    "line_a": {
+                        "x0": la['x0'], "x1": la['x1'],
+                        "y0": la['y0'], "y1": la['y1'],
+                    },
+                    "line_b": {
+                        "x0": lb['x0'], "x1": lb['x1'],
+                        "y0": lb['y0'], "y1": lb['y1'],
+                    },
+                    "shared_y": la['y0'],
+                })
+    return borrows
