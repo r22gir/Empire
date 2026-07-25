@@ -249,6 +249,11 @@ class TestOptionalRowsOmitted:
         assert "SITE:" not in text
 
     def test_date_row_omitted_when_empty(self):
+        """HOTFIX B2c — DATE is a STANDARD row (every drawing has
+        a date; defaults to today when not specified). Pre-B2c the
+        DATE row was OPTIONAL (rendered only when set); B2c
+        promotes it to always-render so the title block is uniform.
+        MATERIAL/SITE remain optional."""
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
@@ -256,7 +261,10 @@ class TestOptionalRowsOmitted:
             "date": "",
         })
         text = _pdf_text(pdf)
-        assert "DATE:" not in text
+        assert "DATE:" in text, (
+            f"DATE row should always render (B2c); got: "
+            f"{text[-300:]!r}"
+        )
 
     def test_optional_rows_render_when_set(self):
         from app.services.drawing.templates import render_spec
@@ -553,4 +561,172 @@ class TestB2QCGates:
         assert "spread" in msg.lower() or "pile" in msg.lower(), (
             f"QC error should mention spread/pile (the defect "
             f"class it catches); got: {msg}"
+        )
+
+    # ────────────────────────────────────────────────────────
+    # HOTFIX B2c (6) — text-over-geometry gate
+    # ────────────────────────────────────────────────────────
+
+    def test_text_over_geometry_gate_clean_on_R1(self):
+        """The text-over-geometry gate passes on the B2c R1 PDF.
+        Verifies that no text bbox overlaps a drawing element bbox
+        (mount/hem/side-section rectangles)."""
+        from app.services.drawing.templates import render_spec
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        # B2c (6) gate output
+        text_overlap_count = len(stats.get("text_overlap_geom", []))
+        assert text_overlap_count == 0, (
+            f"text-over-geometry gate must pass on the B2c R1 render; "
+            f"got {text_overlap_count} overlaps. "
+            f"samples: {stats.get('text_overlap_geom', [])[:3]}"
+        )
+
+    def test_text_over_geometry_gate_catches_text_inside_rect(self):
+        """The text-over-geometry gate must fail when text is placed
+        ON TOP of a drawing element (HOTFIX B2c (6) — the B2b-era
+        bug had the LAYOUT MATH block on top of the shade outline,
+        producing the BL-corner-pile)."""
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.lib.pagesizes import landscape, LETTER
+        from reportlab.lib.units import inch
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc, B2QCFailure
+        import io as _io
+        buf = _io.BytesIO()
+        c = Canvas(buf, pagesize=landscape(LETTER))
+        # Distribute many rects across the page so the PILE gate
+        # passes (no more than 20% clustered).
+        for i in range(8):
+            c.rect(72 + i * 72, 72 + 72, 50, 50, stroke=1, fill=1)
+        # Spread vertically too — the SPREAD Y gate requires ≥ 40%
+        # of page height. Stack rows of rects from y=72 to y=612.
+        for row in range(5):
+            for col in range(8):
+                c.rect(72 + col * 72, 72 + row * 100, 50, 50, stroke=1, fill=1)
+        # Title-block zone placeholder (so the zone-title-block gate
+        # passes — we need text in the right column x ≥ 6.5").
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(72 * 6.6, 72 * 4, "TITLE")
+        # Then the defect: text inside ONE of those rects.
+        c.setFillColor((0, 0, 0))
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(72 + 8, 72 + 18, "OVERPRINTED")
+        c.save()
+        bad_pdf = buf.getvalue()
+        with pytest.raises(B2QCFailure) as exc_info:
+            enforce_b2_qc(bad_pdf, "Roman Shades", "flat_fold")
+        msg = str(exc_info.value)
+        assert "text-over-geometry" in msg.lower(), (
+            f"QC error should mention text-over-geometry (the gate "
+            f"class); got: {msg}"
+        )
+
+    def test_zone_title_block_chars_positive(self):
+        """The zone gate pins at least one title-block char in the
+        right column (HOTFIX B2c (1) — sheet layout)."""
+        from app.services.drawing.templates import render_spec
+        from app.services.drawing.templates.b2_qc import enforce_b2_qc
+        pdf = render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+        stats = enforce_b2_qc(pdf, "Roman Shades", "flat_fold")
+        assert stats["title_block_chars"] > 0, (
+            f"title-block zone must contain chars; got "
+            f"{stats['title_block_chars']}"
+        )
+
+    def test_assumptions_block_restored(self):
+        """HOTFIX B2c (5) — assumptions block restored on the vector
+        path. The B1 block was dropped in B2. B2c restores it.
+        We render the R1 PDF, extract text via pdfplumber, and pin
+        that the canonical assumptions phrases appear."""
+        from app.services.drawing.templates import render_spec
+        pdf = render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+        pytest.importorskip("pdfplumber")
+        import pdfplumber, io
+        text = ""
+        with pdfplumber.open(io.BytesIO(pdf)) as p:
+            for page in p.pages:
+                text += "".join(c["text"] for c in page.chars)
+        # Canonical phrases (HOTFIX B2c (5) — CONFIRM language).
+        assert "Slat:" in text or "ASSUMED" in text.upper(), (
+            f"assumptions block must include a Slat or ASSUMED line; "
+            f"got text[:200]: {text[:200]!r}"
+        )
+        assert "CONFIRM" in text.upper(), (
+            f"assumptions block must include CONFIRM language; got: "
+            f"{text[:200]!r}"
+        )
+
+    def test_scale_block_present(self):
+        """HOTFIX B2c (1) — scale bar in the sheet (e.g. 1'-0" = 12"
+        model)."""
+        from app.services.drawing.templates import render_spec
+        pdf = render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+        pytest.importorskip("pdfplumber")
+        import pdfplumber, io
+        text = ""
+        with pdfplumber.open(io.BytesIO(pdf)) as p:
+            for page in p.pages:
+                text += "".join(c["text"] for c in page.chars)
+        assert "SCALE" in text.upper(), (
+            f"scale bar label missing; got: {text[:200]!r}"
+        )
+
+    def test_rev_date_rows_present(self):
+        """HOTFIX B2c (1) — REV + DATE rows added to title block."""
+        from app.services.drawing.templates import render_spec
+        pdf = render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+        pytest.importorskip("pdfplumber")
+        import pdfplumber, io
+        text = ""
+        with pdfplumber.open(io.BytesIO(pdf)) as p:
+            for page in p.pages:
+                text += "".join(c["text"] for c in page.chars)
+        assert "REV:" in text, (
+            f"title block must contain REV row; got: {text[:300]!r}"
+        )
+        assert "DATE:" in text, (
+            f"title block must contain DATE row; got: {text[:300]!r}"
+        )
+
+    def test_side_section_present(self):
+        """HOTFIX B2c (2) — side section view mandatory for Roman
+        Shades. Mount board, fabric droop, fold stack (raised),
+        hem bar, wall line."""
+        from app.services.drawing.templates import render_spec
+        pdf = render_spec({
+            "product_type": "flat_fold",
+            "dims": {"width": 38, "height": 64},
+        })
+        pytest.importorskip("pdfplumber")
+        import pdfplumber, io
+        text = ""
+        with pdfplumber.open(io.BytesIO(pdf)) as p:
+            for page in p.pages:
+                text += "".join(c["text"] for c in page.chars)
+        assert "SIDE SECTION" in text, (
+            f"side section header missing; got: {text[:300]!r}"
+        )
+        assert "MOUNT BOARD" in text, (
+            f"mount board label missing in side section; got: "
+            f"{text[:300]!r}"
+        )
+        assert "FOLD STACK" in text.upper(), (
+            f"fold stack label missing; got: {text[:300]!r}"
         )

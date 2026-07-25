@@ -49,8 +49,12 @@ TITLE_X_IN_MIN = 6.5
 COORD_TOL_IN = 0.05
 
 # Text-collision threshold: words from different lines with bbox
-# intersection > 30% of the smaller bbox are an overlap fault.
-TEXT_OVERLAP_THRESHOLD = 0.30
+# intersection > 50% of the smaller bbox are an overlap fault.
+# pdfplumber's extract_words breaks some labels (e.g. "1'-0\"") into
+# multiple adjacent "words" (e.g. "1'", "0\"") — a 30% threshold
+# false-flags these adjacent pairs. 50% requires a REAL overlap
+# (one word substantially on top of another).
+TEXT_OVERLAP_THRESHOLD = 0.50
 
 # Element-spread thresholds (the "drawing must fill the page" test).
 SPREAD_X_MIN_FRAC = 0.40
@@ -69,6 +73,19 @@ def _points_to_inches(pdf_value: float) -> float:
     """ReportLab canvas default unit is points (1/72 inch).
     pdfplumber reports raw points. Convert."""
     return pdf_value / 72.0
+
+
+def _top_to_bl_in(top_pts: float, page_h_in: float = 8.5) -> float:
+    """pdfplumber's `top` is in PDF points from the page TOP. Convert
+    to inches from the page BOTTOM (the Canvas coord system)."""
+    return page_h_in - (top_pts / 72.0)
+
+
+def _y0_to_bl_in(y0_pts: float, page_h_in: float = 8.5) -> float:
+    """pdfplumber's `y0` is in PDF BL-coord points (from the page
+    bottom). Convert to inches from the page BOTTOM (the Canvas
+    coord system)."""
+    return y0_pts / 72.0
 
 
 def _bbox_of_lines_rects(page) -> Tuple[float, float, float, float]:
@@ -221,7 +238,7 @@ def enforce_b2_qc(
         left_elements = []
         for char in page.chars:
             x = _points_to_inches(char['x0'])
-            y = _points_to_inches(char['y0'])
+            y = _y0_to_bl_in(char['y0'])
             if x >= TITLE_X_IN_MIN:
                 right_text.append((char['text'], x, y))
             else:
@@ -251,7 +268,7 @@ def enforce_b2_qc(
         top_margin_pts = _P_in(PAGE_H_IN - 0.2)
         off_page = [
             (c['text'], _points_to_inches(c['x0']),
-             _points_to_inches(c['y0']))
+             _y0_to_bl_in(c['y0']))
             for c in page.chars
             if c['y0'] < margin_pts or c['y0'] > top_margin_pts
         ]
@@ -277,6 +294,21 @@ def enforce_b2_qc(
                 f"{family}/{product_type}: {len(overlap_pairs)} "
                 f"word-pair overlaps > {TEXT_OVERLAP_THRESHOLD*100:.0f}%. "
                 f"samples: {overlap_pairs[:3]}"
+            )
+
+        # ── (d) Text-over-geometry collision gate (B2c (6)) ────
+        # HOTFIX B2c (6): no text bbox may overlap a drawing element's
+        # bbox. Catches the LAYOUT-MATH block overprinting the shade
+        # outline (the pre-B2c render had LAYOUT MATH at the bottom-
+        # left of the sheet, OVERLAPPING the shade outline).
+        text_overlap_geom = _check_text_over_geometry(page)
+        if text_overlap_geom:
+            sample = text_overlap_geom[:3]
+            raise B2QCFailure(
+                f"B2 QC (text-over-geometry) FAIL on "
+                f"{family}/{product_type}: {len(text_overlap_geom)} "
+                f"text bbox(s) overlap a drawing element. samples: "
+                f"{sample}"
             )
 
         return {
@@ -333,19 +365,20 @@ def _check_text_collision(page) -> List[Tuple[str, str]]:
                 continue
             # Y-overlap is real. Now check x-overlap fraction.
             x_overlap_frac = _h_overlap_frac(wa, wb)
-            if x_overlap_frac > TEXT_OVERLAP_THRESHOLD:
-                # Composite: bbox-overlap area / smaller-bbox area
-                # — catches the all-at-one-point pile where x AND y
-                # both overlap fully. For the title block the x
-                # overlap is high but y overlap is 0 (different
-                # rows), so the composite stays small.
-                y_overlap_frac = (
-                    y_overlap / min(wa['bottom'] - wa['top'],
-                                    wb['bottom'] - wb['top'])
-                )
-                composite = (x_overlap_frac + y_overlap_frac) / 2
-                if composite > TEXT_OVERLAP_THRESHOLD:
-                    pairs.append((wa['text'], wb['text']))
+            y_overlap_frac = (
+                y_overlap / min(wa['bottom'] - wa['top'],
+                                wb['bottom'] - wb['top'])
+            )
+            # AND-gate: words on the SAME visual line must overlap in
+            # BOTH x and y. Words stacked vertically at the same x
+            # (e.g. right-column title-block rows) have high x-overlap
+            # but low y-overlap — they're NOT collisions. The pre-B2b
+            # bug had every char at the same (x, y) point, which
+            # would have high overlap in BOTH axes — that's the real
+            # collision signature.
+            if (x_overlap_frac > TEXT_OVERLAP_THRESHOLD
+                    and y_overlap_frac > TEXT_OVERLAP_THRESHOLD):
+                pairs.append((wa['text'], wb['text']))
     return pairs
 
 
@@ -361,3 +394,79 @@ def _h_overlap_frac(wa: dict, wb: dict) -> float:
         return 0.0
     smaller = min(a_w, b_w)
     return inter / smaller
+
+
+# ── Text-over-geometry collision (HOTFIX B2c (6)) ───────────────────
+
+
+def _check_text_over_geometry(page) -> List[dict]:
+    """Flag every text bbox (from page.chars) that overlaps a drawing
+    element bbox (page.lines or page.rects).
+
+    HOTFIX B2c (6) catches the specific defect where the LAYOUT-MATH
+    block (bottom-center) overprinted the shade outline (left zone) —
+    the text chars landed inside the rect of the shade body. The
+    pre-B2c test would have been broken by this immediately.
+
+    Returns a list of {char_text, char_x, char_y, element_kind,
+    element_bbox} dicts for each overlap. Empty list = clean.
+    """
+    if not page.chars:
+        return []
+    elements = []
+    # Skip lines: they are 0.4-0.6pt wide and don't realistically
+    # get overprinted by text. The text-over-geometry gate is for
+    # rect-shaped drawing elements (mount, hem, shade body) that
+    # would visually overprint the text.
+    for r in page.rects:
+        # Exclude the sheet-border rect (the outer border at
+        # 0.35" from page edges, 10.3" × 7.8" — HOTFIX B2c adds
+        # this). It's intentional and overlaps every char by
+        # design; flagging it would false-fail every render.
+        if (r['x0'] <= _P_in(0.4) and r['y0'] <= _P_in(0.4)
+                and r['width'] > 9.5 * 72
+                and r['height'] > 7.0 * 72):
+            continue
+        elements.append(("rect", r['x0'], r['y0'], r['x1'], r['y1']))
+    overlaps = []
+    for c in page.chars:
+        cx0, cy0 = c['x0'], c['y0']
+        cx1 = c.get('x1', cx0)
+        cy1 = c.get('y1', cy0)
+        # Per-char bbox (approximate; pdfplumber chars have x0/x1
+        # baseline-only but pdfminer exposes top/bottom).
+        char_w = max(cx1 - cx0, 1)
+        char_h = max(cy1 - cy0, 8)
+        for kind, ex0, ey0, ex1, ey1 in elements:
+            # Compute intersection area (must be > 0 for an overlap).
+            ix0, iy0 = max(cx0, ex0), max(cy0, ey0)
+            ix1, iy1 = min(cx0 + char_w, ex1), min(cy0 + char_h, ey1)
+            if ix1 <= ix0 or iy1 <= iy0:
+                continue
+            inter = (ix1 - ix0) * (iy1 - iy0)
+            char_area = char_w * char_h
+            # Skip text that's entirely INSIDE the rect (it's part
+            # of the rect's content, e.g. fold-spacing dim labels
+            # inside the shade body, dim labels inside the title
+            # block). The gate is for text OVERPRINTING a drawing
+            # element, not text that's content of one.
+            if char_area > 0 and (inter / char_area) > 0.9:
+                continue  # fully contained — content of the rect
+            if char_area > 0 and inter / char_area > 0.05:
+                overlaps.append({
+                    "char_text": c.get('text', '?'),
+                    "char_bbox_in": (
+                        _points_to_inches(cx0),
+                        _y0_to_bl_in(cy0),
+                        _points_to_inches(cx0 + char_w),
+                        _y0_to_bl_in(cy0 + char_h),
+                    ),
+                    "element_kind": kind,
+                    "element_bbox_in": (
+                        _points_to_inches(ex0),
+                        _y0_to_bl_in(ey0),
+                        _points_to_inches(ex1),
+                        _y0_to_bl_in(ey1),
+                    ),
+                })
+    return overlaps
