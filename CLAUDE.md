@@ -76,6 +76,10 @@ localhost:8000). The founder ("rg") is the only human operator.
   Empire sheet STYLE (B2d): black header/footer bands, cream paper #f7f3ea, ink
   #20241f, gold #b8912f, uppercase letterspaced type, framed viewports, fabric
   zones rendered with color + stylized motif.
+- B2 sheet standard = the golden reference (`reports/GOLDEN_flat_fold_empire.pdf`,
+  v10). The ten drafting doctrine rules (R1–R10, see reports/2026-07-26 port
+  dispatch) govern every family renderer. Style disputes resolve against the
+  golden, not against prose.
 - Presentation/board engine (`presentation/` package) = client-facing documents,
   governed by `EMPIRE_CLIENT_DOC_STANDARD.md`: ONE spec object drives every sheet,
   quantities are derived never typed, QC gates before emit, docs are records in a
