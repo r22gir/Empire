@@ -77,3 +77,5 @@ uploads/arch_drawings/*.svg
 /.empire/runtime/HERMES_HARRY_SYNC.json
 /.empire/runtime/HERMES_HARRY_SYNC.html
 /HERMES-HARRY-HANDOFF.md
+*.bak.*
+archive/
