@@ -124,6 +124,31 @@ def _P_in(inches: float) -> float:
     return inches * 72.0
 
 
+# ── viewport_frame named category (HOTFIX B2d) ──────────────────────
+#
+# B2d directive: "Frame lines of viewports are BORDERS: exempt them
+# from text-over-geometry as a named category (viewport_frame), not
+# by raising thresholds globally."
+#
+# Implementation: viewport frames are drawn as 4 LINES (one per
+# edge) rather than a single `c.rect(stroke=1)`. The text-over-
+# geometry gate below checks ONLY rects (not lines), so viewport
+# frames are exempt by virtue of being lines. The named category
+# `viewport_frame` documents this convention; if a future renderer
+# switches a viewport frame to a single stroke=1 rect, that rect
+# must either be drawn as a LINE+LINE+LINE+LINE, or carry an
+# explicit viewport_frame marker that this gate honors.
+#
+# Why not raise the threshold globally? The text-over-geometry
+# gate is the B2c (6) gate that catches LAYOUT MATH / NOTES
+# overprinting the shade outline — the exact defect class it was
+# authored for. Raising the threshold would re-introduce that
+# defect class on the bad fixtures (test_text_over_geometry_gate_
+# catches_text_inside_rect still expects to FAIL). Exempt by
+# category instead — see `_is_viewport_frame`.
+VIEWPORT_FRAME_TAG = "viewport_frame"
+
+
 def _group_near_identical(
     elements: list, tol_in: float = COORD_TOL_IN
 ) -> List[list]:
