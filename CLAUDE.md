@@ -56,6 +56,10 @@ localhost:8000). The founder ("rg") is the only human operator.
   commit hash.
 - **Stop-gates:** when the founder directive says 🛑 STOP, stop and await
   live-verify. Founder's eyeball is the final QC gate.
+- **Stop-gate reports persist:** every 🛑 stop-gate report is ALSO written to
+  `reports/<date>_<item>.md` in the repo — full text, commit hashes, test
+  results — with rendered PNGs saved alongside. The terminal display is a
+  courtesy; the file is the record.
 - **Single lane.** Do not launch parallel sub-agents or announce multi-lane plans;
   a prior session announce-looped doing this. One concrete action at a time; if
   you catch yourself describing intent twice without a tool call, make the tool
