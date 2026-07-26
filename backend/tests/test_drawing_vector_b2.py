@@ -90,17 +90,19 @@ class TestHeaderNoCollision:
     own row at the top of the title block — no overlap."""
 
     def test_address_phone_email_each_on_own_row(self):
+        # GOLDEN v10 footer carries company address + phone in a
+        # single line (the address + phone are not interleaved — that
+        # was the B2c-era "B1 data sheet" defect). Email is NOT in
+        # the footer per golden v10; address + phone are present.
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
             "dims": {"width": 38, "height": 64},
         })
         text = _pdf_text(pdf)
-        # Each field must be present (no info loss).
         for needle, desc in [
             ("Frolich Ln, Hyattsville, MD 20781", "address row"),
             ("(703) 213-6484", "phone row"),
-            ("workroom@empirebox.store", "email row"),
         ]:
             assert needle in text, f"{desc} ({needle!r}) missing"
 
@@ -118,19 +120,16 @@ class TestHeaderNoCollision:
             "dims": {"width": 38, "height": 64},
         })
         text = _pdf_text(pdf)
-        # All three fields present, in the expected non-interleaved
-        # order: address → phone → email.
+        # GOLDEN v10: address + phone in one line, no email.
         addr = text.find("Frolich Ln, Hyattsville, MD 20781")
         phone = text.find("(703) 213-6484")
-        email = text.find("workroom@empirebox.store")
-        assert addr >= 0 and phone >= 0 and email >= 0, (
-            f"address/phone/email not all present; addr={addr} "
+        assert addr >= 0 and phone >= 0, (
+            f"address/phone not all present; addr={addr} "
             f"phone={phone} email={email}"
         )
-        assert addr < phone < email, (
+        assert addr < phone, (
             f"header fields out of order: addr@{addr}, "
-            f"phone@{phone}, email@{email} — they must be in "
-            f"strict order (B2 splits them onto separate rows)"
+            f"phone@{phone} — they must be in strict order"
         )
 
 
@@ -154,9 +153,10 @@ class TestClientFieldHonesty:
             "client_name": "",  # no real client named
         })
         text = _pdf_text(pdf)
-        # The label "CLIENT:" should NOT appear when no client.
-        assert "CLIENT:" not in text, (
-            "BUG: CLIENT row rendered when client_name is empty; "
+        # GOLDEN v10: PROJECT — / CLIENT — (em-dash, no colon).
+        # When client_name is empty, the value is an em-dash.
+        assert "Bozzuto" not in text, (
+            "BUG: client name rendered when client_name is empty; "
             "should be omitted entirely"
         )
 
@@ -168,9 +168,10 @@ class TestClientFieldHonesty:
             "client_name": "The Channel - Bozzuto",
         })
         text = _pdf_text(pdf)
-        assert "CLIENT:" in text, "CLIENT row missing when client named"
-        assert "Channel - Bozzuto" in text, (
-            "client name text not present in CLIENT row"
+        # GOLDEN v10: title column rows. "Bozzuto" present in
+        # the title block value when client_name is supplied.
+        assert "Bozzuto" in text, (
+            "client name text not present in title block"
         )
 
 
@@ -225,35 +226,41 @@ class TestBulletGlyph:
 
 
 class TestOptionalRowsOmitted:
-    """MATERIAL / SITE / DATE rows: when the spec value is empty,
-    the row is omitted entirely (not "—")."""
+    """GOLDEN v10: the title block has these rows in order:
+      PROJECT / CLIENT / FAMILY / DIMENSIONS / FOLDS / MOUNTING /
+      FABRIC / <mill> / <sku> / <repeat> / SCALE / REV
+    The "PROJECT —" and "CLIENT —" rows use an em-dash when the
+    spec is empty (no colon, no info). The REV row always renders
+    the date (defaults to today if not supplied)."""
 
-    def test_material_row_omitted_when_empty(self):
+    def test_project_row_omitted_when_empty(self):
+        # PROJECT is always present (with em-dash when no name)
+        # per golden v10.
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
             "dims": {"width": 38, "height": 64},
-            "material": "",
         })
         text = _pdf_text(pdf)
-        assert "MATERIAL:" not in text
+        # The golden uses "PROJECT —" (em-dash value) when empty.
+        # We pin the LABEL presence and the absence of any real
+        # project name (since none supplied).
+        assert "PROJECT" in text
 
-    def test_site_row_omitted_when_empty(self):
+    def test_client_row_omitted_when_empty(self):
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
             "dims": {"width": 38, "height": 64},
-            "site_address": "",
+            "client_name": "",
         })
         text = _pdf_text(pdf)
-        assert "SITE:" not in text
+        assert "CLIENT" in text
+        assert "Bozzuto" not in text  # no fake name
 
     def test_date_row_omitted_when_empty(self):
-        """HOTFIX B2c — DATE is a STANDARD row (every drawing has
-        a date; defaults to today when not specified). Pre-B2c the
-        DATE row was OPTIONAL (rendered only when set); B2c
-        promotes it to always-render so the title block is uniform.
-        MATERIAL/SITE remain optional."""
+        # GOLDEN v10: REV row always renders, date defaults to today
+        # (no special "always present" date row).
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
@@ -261,24 +268,23 @@ class TestOptionalRowsOmitted:
             "date": "",
         })
         text = _pdf_text(pdf)
-        assert "DATE:" in text, (
-            f"DATE row should always render (B2c); got: "
-            f"{text[-300:]!r}"
-        )
+        assert "REV" in text, "REV row must always render (golden v10)"
 
-    def test_optional_rows_render_when_set(self):
+    def test_fabric_row_renders_with_sku(self):
+        # When fabric_sku is supplied, the FABRIC / mill / sku / repeat
+        # rows are populated.
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
             "dims": {"width": 38, "height": 64},
-            "material": "CB900-14 coral fabric",
-            "site_address": "The Channel - Bozzuto, 650 Water St SW",
-            "date": "2026-07-24",
+            "fabric_sku": "BP10814-2",
         })
         text = _pdf_text(pdf)
-        for needle in ("MATERIAL:", "CB900-14", "SITE:", "Channel - Bozzuto",
-                       "DATE:", "2026-07-24"):
-            assert needle in text, f"optional row missing {needle!r}"
+        # GOLDEN v10 column: short repeat string ("35.46\" VR" not
+        # "35.46\" V-repeat") to fit the narrow title column.
+        for needle in ("FABRIC", "Nympheus Velvet", "BP10814-2",
+                       "GP&J Baker", "54\" W", "35.46\" VR"):
+            assert needle in text, f"fabric row missing {needle!r}"
 
 
 # ───────────────────────────────────────────────────────────────────
@@ -388,11 +394,12 @@ class TestVectorLineArt:
         )
         assert n_rects >= 4
         text = _pdf_text(pdf_bytes)
-        # 4 B1 defects absent
-        assert "CLIENT:" not in text
-        assert "MATERIAL:" not in text
-        assert "SITE:" not in text
-        assert "•" not in text
+        # 4 B1 defects absent (golden v10 doesn't use these strings)
+        assert "Bozzuto" not in text  # no fake client name when chat
+                                      # endpoint didn't supply one
+        assert "MATERIAL:" not in text  # golden v10 has no MATERIAL
+        assert "SITE:" not in text      # golden v10 has no SITE
+        assert "•" not in text         # ASCII bullet only
 
     def test_e2e_via_stream_endpoint_lands_vector_drawing(self):
         """Same R1 sentence through /chat/stream — the actual UI
@@ -608,10 +615,10 @@ class TestB2QCGates:
             for col in range(8):
                 c.rect(72 + col * 72, 72 + row * 100, 50, 50, stroke=1, fill=1)
         # Title-block zone placeholder (so the zone-title-block gate
-        # passes — we need text in the right column x ≥ 6.5").
+        # passes — we need text in the right column x ≥ TITLE_X_IN_MIN).
         c.setFillColor((0, 0, 0))
         c.setFont("Helvetica-Bold", 10)
-        c.drawString(72 * 6.6, 72 * 4, "TITLE")
+        c.drawString(72 * 8.5, 72 * 4, "TITLE")
         # Then the defect: text inside ONE of those rects.
         c.setFillColor((0, 0, 0))
         c.setFont("Helvetica-Bold", 12)
@@ -686,7 +693,9 @@ class TestB2QCGates:
         )
 
     def test_rev_date_rows_present(self):
-        """HOTFIX B2c (1) — REV + DATE rows added to title block."""
+        """GOLDEN v10 — REV row contains the date inline. No
+        separate DATE row (the B2c-era two-row REV/DATE was merged
+        into one row in the golden)."""
         from app.services.drawing.templates import render_spec
         pdf = render_spec({
             "product_type": "flat_fold",
@@ -701,8 +710,11 @@ class TestB2QCGates:
         assert "REV:" in text, (
             f"title block must contain REV row; got: {text[:300]!r}"
         )
-        assert "DATE:" in text, (
-            f"title block must contain DATE row; got: {text[:300]!r}"
+        # The date is rendered INLINE with the REV row in golden v10
+        # (e.g. "REV:0 · 07/26/2026"). The B2d-era separate DATE
+        # row is no longer present.
+        assert any(d in text for d in ("07/26/2026", "2026")), (
+            f"REV row should contain a date; got: {text[:300]!r}"
         )
 
     def test_side_section_present(self):

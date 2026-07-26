@@ -38,28 +38,51 @@ import pdfplumber
 
 
 # ── Page geometry constants (landscape letter, in inches) ─────────
+# Re-mapped for B2d+ golden v10 layout. The golden v10 reference
+# is the binding sheet standard (per CLAUDE.md "B2 sheet standard =
+# the golden reference"); the B2d-era B2c layout assumptions (margin
+# 0.5", title-block x≥6.5") are SUPERSEDED.
 PAGE_W_IN = 11.0
 PAGE_H_IN = 8.5
-MARGIN_IN = 0.5  # canonical page-margin distance from the edge
-
-# Right-column title-block region (x in [TITLE_X_IN_MIN, INF))
-TITLE_X_IN_MIN = 6.5
+MARGIN_IN = 0.32                # golden v10: 0.32" (was B2d 0.5")
+HEADER_BAND_H_IN = 0.92         # golden v10: 0.92" (was B2d 1.4")
+FOOTER_BAND_H_IN = 0.42         # golden v10: 0.42" (was B2d 0.5")
+TITLE_X_IN_MIN = 7.90            # golden v10: title column starts at
+                                  # MARGIN + 0.18 + 4.55 + 0.14 + (col_r - v2x)
+                                  # ≈ 7.90. Title block now flanks the
+                                  # side section, not below it.
+TITLE_W_IN_MIN = 2.40            # title column must be wide enough
+                                  # to hold "DIMENSIONS" label + value
 
 # Tolerance for "near-identical coordinates" (the pile test).
 COORD_TOL_IN = 0.05
 
 # Text-collision threshold: words from different lines with bbox
 # intersection > 50% of the smaller bbox are an overlap fault.
-# pdfplumber's extract_words breaks some labels (e.g. "1'-0\"") into
-# multiple adjacent "words" (e.g. "1'", "0\"") — a 30% threshold
-# false-flags these adjacent pairs. 50% requires a REAL overlap
-# (one word substantially on top of another).
 TEXT_OVERLAP_THRESHOLD = 0.50
 
 # Element-spread thresholds (the "drawing must fill the page" test).
 SPREAD_X_MIN_FRAC = 0.40
 SPREAD_Y_MIN_FRAC = 0.40
 PILE_FRAC_MAX = 0.20  # at most 20% of elements may be in the pile
+
+# New B2d+ rule (learned building the golden v10 reference):
+# "same-baseline overlap" — two horizontal lines (or label baselines)
+# sharing the same y (within 2pt) with > 0.5" of x overlap, drawn by
+# different draw calls, indicates one label was meant to replace the
+# other and the second one was forgotten (or both fire on the same
+# element). Catches dim-line label collisions that the old
+# text-collision gate (per-word) couldn't see.
+SAME_BASELINE_Y_TOL_PT = 2.0    # 2pt tolerance for "same baseline"
+SAME_BASELINE_X_OVERLAP_MIN_IN = 0.50  # 0.5" of x overlap
+
+# New B2d+ rule: "column overflow" — no rendered text may extend
+# past the inner border of the column / viewport it belongs to.
+# Catches layout regressions where a long title row or assumption
+# bullet exceeds the column width (the B2d row-gap tuning
+# occasionally overran for long fabric-mill names like
+# "GP&J Baker BP10814-2 54" W · 35.46" V-repeat").
+COLUMN_OVERFLOW_TOL_PT = 1.0     # 1pt tolerance for "inside border"
 
 
 # Public exception
@@ -353,6 +376,30 @@ def enforce_b2_qc(
                 f"samples: {sample}"
             )
 
+        # B2d+ golden port: same-baseline overlap (new rule)
+        baseline_ov = _check_same_baseline_overlap(page)
+        if baseline_ov:
+            sample = baseline_ov[:3]
+            raise B2QCFailure(
+                f"B2 QC (same-baseline overlap) FAIL on "
+                f"{family}/{product_type}: {len(baseline_ov)} "
+                f"horizontal-line pair(s) at the same baseline with "
+                f"> {SAME_BASELINE_X_OVERLAP_MIN_IN}\" x overlap. "
+                f"samples: {sample}"
+            )
+
+        # B2d+ golden port: column overflow (new rule)
+        col_ov = _check_column_overflow(page)
+        if col_ov:
+            sample = col_ov[:3]
+            raise B2QCFailure(
+                f"B2 QC (column overflow) FAIL on "
+                f"{family}/{product_type}: {len(col_ov)} char(s) "
+                f"past the title column inner border (right edge at "
+                f"{(PAGE_W_IN - MARGIN_IN - 0.18):.2f}\"). "
+                f"samples: {sample}"
+            )
+
         return {
             "vector_bbox_in": bbox,
             "page_coverage_x": cov_x,
@@ -366,6 +413,8 @@ def enforce_b2_qc(
             "word_overlap_pairs": overlap_pairs,
             "text_overlap_geom": text_overlap_geom,
             "dim_borrow": dim_borrow,
+            "same_baseline_overlap": baseline_ov,
+            "column_overflow": col_ov,
         }
     finally:
         pdfplumber_obj.close()
@@ -567,3 +616,99 @@ def _check_dim_witness_borrow(page) -> list[dict]:
                     "shared_y": la['y0'],
                 })
     return borrows
+
+
+# ── B2d+ new rules: same-baseline overlap + column overflow ───
+
+
+def _check_same_baseline_overlap(page) -> list[dict]:
+    """B2d+ rule (learned building golden v10).
+
+    Two horizontal lines (or label baselines) sharing the same y
+    (within SAME_BASELINE_Y_TOL_PT) with > 0.5" of x overlap,
+    drawn by different ReportLab draw calls, indicates one label
+    was meant to replace the other and the second one was
+    forgotten (or both fire on the same element).
+
+    Catches dim-line label collisions that the old text-collision
+    gate (per-word) couldn't see: e.g. width-dim's "38\"" baseline
+    AND the front-elev "Slat: 7-1/8 (9 total)..." baseline
+    sitting at the same y for > 0.5" of x overlap.
+
+    Negative fixture: same as dim-borrow (any two long horizontal
+    lines at the same y with x overlap will trip either gate —
+    they catch overlapping defect classes).
+    """
+    if not page.lines:
+        return []
+    overlaps = []
+    h_lines = [l for l in page.lines
+               if abs(l['y1'] - l['y0']) < abs(l['x1'] - l['x0'])]
+    for i, la in enumerate(h_lines):
+        for j, lb in enumerate(h_lines):
+            if i == j:
+                continue
+            # Skip short lines (less than 0.5" — likely tick marks
+            # or annotation brackets, not suspect).
+            if (la['x1'] - la['x0']) < _P_in(0.5):
+                continue
+            if (lb['x1'] - lb['x0']) < _P_in(0.5):
+                continue
+            # Same baseline (B2d+ tolerance is 2pt, looser than
+            # the dim-borrow 0.5pt — the new rule is about same-Y
+            # visual collision, not exact-witness-borrow).
+            if abs(la['y0'] - lb['y0']) > SAME_BASELINE_Y_TOL_PT:
+                continue
+            # x overlap > 0.5"
+            x_overlap = max(0, min(la['x1'], lb['x1'])
+                            - max(la['x0'], lb['x0']))
+            if x_overlap >= _P_in(SAME_BASELINE_X_OVERLAP_MIN_IN):
+                overlaps.append({
+                    "line_a": {"x0": la['x0'], "x1": la['x1'],
+                                "y0": la['y0'], "y1": la['y1']},
+                    "line_b": {"x0": lb['x0'], "x1": lb['x1'],
+                                "y0": lb['y0'], "y1": lb['y1']},
+                    "shared_y": la['y0'],
+                })
+    return overlaps
+
+
+def _check_column_overflow(page) -> list[dict]:
+    """B2d+ rule: no rendered text in the TITLE COLUMN may extend
+    past the column's inner right border.
+
+    Catches layout regressions where a long title row or assumption
+    bullet exceeds the column width (the B2d row-gap tuning
+    occasionally overran for long fabric-mill names like
+    "GP&J Baker BP10814-2 54" W · 35.46\" V-repeat").
+
+    The "title column inner border" is at x = PAGE_W_IN - MARGIN_IN
+    - 0.18 (the column's right inner edge per golden v10). The check
+    is restricted to chars in the title column's y-range
+    (between the header and footer bands) so the footer's right
+    text ("SHEET B2 · 1 OF 1" at the right margin) doesn't
+    false-fire.
+    """
+    if not page.chars:
+        return []
+    overflow = []
+    title_inner_right = (PAGE_W_IN - MARGIN_IN - 0.18) * 72.0
+    # Y range for title column: below header band, above footer band
+    y_top = (PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN) * 72.0  # pt
+    y_bot = (MARGIN_IN + FOOTER_BAND_H_IN) * 72.0
+    for ch in page.chars:
+        if ch['x1'] <= title_inner_right + COLUMN_OVERFLOW_TOL_PT:
+            continue
+        # Restrict to title column y-range
+        ch_y_top = ch['y0']  # pdfplumber y0 is bbox TOP
+        ch_y_bot = ch['y1']  # bbox BOTTOM
+        # page height = 612 pt
+        if not (y_bot < ch_y_top < PAGE_H_IN * 72 and y_top < ch_y_bot):
+            continue
+        overflow.append({
+            "char_text": ch.get("text", "?"),
+            "char_x0_in": ch['x0'] / 72.0,
+            "char_x1_in": ch['x1'] / 72.0,
+            "column_right_in": title_inner_right / 72.0,
+        })
+    return overflow

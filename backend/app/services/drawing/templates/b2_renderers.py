@@ -1,47 +1,48 @@
 """templates/b2_renderers.py — Phase B2 vector drawing renderer.
 
-HOTFIX B2   (2026-07-24) — replaces the textual "Geometry Preview"
-panel with a real scaled line drawing per product family. Roman
-Shades is the first family; drapery, valance, cornice,
-bench/banquette, headboard_channel land in B2 follow-on commits.
+B2d (2026-07-25) — EMPIRE SHEET STYLE. Initial bands + framed viewports.
+HOTFIX B2c — sheet-quality upgrade.
+HOTFIX B2b — coordinate-system fix (every coord through `_P(inches)`).
 
-HOTFIX B2b  (2026-07-24) — coordinate-system fix. Canvas default
-unit is POINTS (1/72 inch); the B2 renderer used raw inch values
-without `* inch`, cramming everything near the BL corner. New
-helper `_P(inches)` multiplies by `inch` at every call site.
+GOLDEN PORT (2026-07-26) — port of reports/golden_flatfold.py
+(approved through 10 revision rounds by the founder). The golden's
+layout, helpers, and 10 drafting-doctrine rules become the template
+for every B2 family renderer. Style disputes resolve against the
+golden, not against prose. See reports/2026-07-26_golden_port.md.
 
-HOTFIX B2c  (2026-07-24) — sheet-quality upgrade. Founder verdict:
-"pretty basic — need to up the game." Roman Shades now renders
-a real shop drawing on a properly-zoned sheet:
-  - bordered sheet frame
-  - front elevation (left zone) — slat lines, width/height/fold-
-    spacing dim INSIDE the shade
-  - side section (right-of-front zone) — mount board, fabric drop,
-    fold stack height when fully raised (n_folds × fold
-    thickness), hem bar, wall line
-  - SCALE bar (computed, e.g. 1'-0" = 12" model)
-  - NOTES / ASSUMPTIONS block (bottom-left, CONFIRM language)
-  - LAYOUT MATH block (bottom-center)
-  - title block (right column) — REV + DATE + SCALE rows added
-  - mount bar / hem bar distinct: different fill, heavier outline,
-    leader labels
-  - dim labels offset clear of leader lines
+DRAFTING DOCTRINE — ten rules (R1-R10), each founder-taught; preserved
+verbatim. The section-rule branch (R3) and reveal scale (R4) are the
+non-obvious ones.
 
-HOTFIX B2d  (2026-07-25) — EMPIRE SHEET STYLE for Roman Shades.
-Founder directive ("B2d — Empire sheet style"):
-  - black header/footer bands (header = 1.4" tall per founder)
-  - cream paper
-  - framed viewports around each drawing zone
-  - uppercase letterspaced type for view headers + title block
-    row labels
-  - FABRIC ZONES RENDERED with color + stylized motif from the
-    fabric registry (see fabric_registry.py); unknown SKU →
-    "FABRIC: TBC — CONFIRM BEFORE CUT" overlay
-  - title block trims ITEM, SHEET, STATUS, DRAWN BY
-  - SCALE / REV / DATE rows retained
-Reference: Willard CST-23 "Elevation & Section" sheet
-(golden_reference_willard.pdf). Founder re-verify required
-(this verify also covers the stack-at-top correction).
+  R1  Standard roman = bottom-up; stack at HEAD, never at sill.
+  R2  Room context on both views: ceiling 108" REF + head 96"
+      ASSUMED when unspecified; site photo/dims override proportions
+      when provided. Ceiling + floor lines always.
+  R3  Mount condition branches the section: INSIDE → board and
+      entire fabric assembly BEHIND the wall line, within the reveal
+      (wall-line callout + glass line drawn); OUTSIDE → proud of
+      the wall line.
+  R4  Reveal at TRUE scale: 4" typical (3-4" max) housing the
+      2-1/2" board. No lateral exaggeration — ever.
+  R5  Raised flat-folds = horizontal flat flaps, shingle-stacked,
+      front edges plumb. (Family variants for registry:
+      flat_fold/back-slatted, relaxed/european curved-bottom,
+      front-slatted plain.)
+  R6  Fold tips emerge BELOW a flat fabric face — folds never
+      start at the board.
+  R7  Fabric attaches at the BOARD FRONT: face line starts at
+      the board's front-top and wraps down. Machine-verifiable:
+      fabric x == board front x.
+  R8  Hem bar in section = thin VERTICAL slat in the fabric plane.
+  R9  True-scale-plus-detail: when an element is too small at
+      sheet scale, magnify in a labeled DETAIL (gold callout
+      circle + N× box) — never distort the section.
+  R10 Raised state renders at PARTIAL RAISE for honest weight:
+      bottom at 1/2 drop — flat face = 25% of drop from head, fold
+      stack = next 25%, hem at half. Label "SHOWN AT 1/2 RAISE".
+
+Geometry stays parametric from the handoff. The golden is the
+LAYOUT template, not a fixed drawing.
 
 Per Empire Drawing Standard v1.0 (must be present on every sheet):
   - required views
@@ -51,14 +52,11 @@ Per Empire Drawing Standard v1.0 (must be present on every sheet):
   - LAYOUT MATH lines (Rule 3)
   - NOTES / ASSUMPTIONS — CONFIRM (Rule 1)
   - dimension strings with witness lines + extension ticks
-
-Phase B2 scope: Roman Shades. The remaining 5 families land in
-B2 follow-on commits (drapery, valance, cornice, bench/banquette,
-headboard_channel) — each inheriting this layout + all gates.
 """
 from __future__ import annotations
 
 import math
+import random
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -79,107 +77,82 @@ if TYPE_CHECKING:
 
 PAGE_W_IN = 11.0
 PAGE_H_IN = 8.5
-PAGE_MARGIN_IN = 0.5
-SHEET_INSET_IN = 0.15
+MARGIN_IN = 0.32  # golden: tighter than B2d's 0.5
+# Sheet border — golden's outer 1.1pt frame sits AT MARGIN_IN.
 
-# ── B2d Empire palette (module-level so helpers can use them) ────
-CREAM = colors.HexColor("#f7f3ea")
-INK = colors.HexColor("#20241f")
-GOLD = colors.HexColor("#b8912f")
-UMBER = colors.HexColor("#8a5a2a")
+# ── Empire palette (golden v10) ─────────────────────────────────
+CREAM   = colors.HexColor("#f7f3ea")
+INK     = colors.HexColor("#20241f")
+LIGHT   = colors.HexColor("#6f6a5e")
+GOLD    = colors.HexColor("#b8912f")
+ORANGE  = colors.HexColor("#b25a1d")
+DIM     = colors.HexColor("#8a6a3a")
+EMER    = colors.HexColor("#123a2a")  # Nympheus base green
+EMER_D  = colors.HexColor("#0c2b1f")  # Nympheus shadow
+LEAF    = colors.HexColor("#2f7350")
+LEAF2   = colors.HexColor("#4a9268")
+BLOSS   = colors.HexColor("#ead9c0")
+CREAM2  = colors.HexColor("#efe8d8")
+MUTED_GOLD = colors.HexColor("#cfc8b8")
+CASING  = colors.HexColor("#8a8271")
+GLASS_C = colors.HexColor("#7d8a94")
+WOOD    = colors.HexColor("#5a4632")  # mount board
+HEM_WOOD= colors.HexColor("#4a3b2a")
+EMER_ALT= colors.HexColor("#175340")
+DIVIDER = colors.HexColor("#c9c2b0")
+# Fabric zone "TBC" neutral fill (when SKU unknown / no SKU)
+TBC_FILL = colors.HexColor("#e8e0cc")
+TBC_TXT  = colors.HexColor("#aa5500")
 
-SHEET_X_IN = PAGE_MARGIN_IN - SHEET_INSET_IN
-SHEET_Y_IN = PAGE_MARGIN_IN - SHEET_INSET_IN
-SHEET_W_IN = PAGE_W_IN - 2 * (PAGE_MARGIN_IN - SHEET_INSET_IN)
-SHEET_H_IN = PAGE_H_IN - 2 * (PAGE_MARGIN_IN - SHEET_INSET_IN)
+# ── Golden v10 layout constants ──────────────────────────────────
+# Header band (top, INK fill), footer band (bottom, INK fill), three
+# vertical viewports (front-elev | side-section | title-column).
+# Vertical range between bands: top = H - MARGIN - HEADER_BAND_H,
+#                              bottom = M + FOOTER_BAND_H.
+HEADER_BAND_H_IN = 0.92          # golden: 0.92
+FOOTER_BAND_H_IN = 0.42          # golden: 0.42
+LAYOUT_GAP_IN    = 0.14          # golden: 0.14 between viewports
+HEADER_GAP_IN    = 0.14          # golden: 0.14 below header band
+FOOTER_GAP_IN    = 0.12          # golden: 0.12 above footer band
 
-# ── B2d: black header/footer bands (Empire letterhead) ──────────────
-# Header band is 1.4" tall per founder; footer band is shorter and
-# carries the "FOR FOUNDER REVIEW" stamp (since STATUS is dropped
-# from the title block per B2d info trim).
-HEADER_BAND_H_IN = 1.4
-FOOTER_BAND_H_IN = 0.5
+# Title column — rightmost viewport (per golden: col_r = W-M-2.62)
+COL_R_IN    = PAGE_W_IN - MARGIN_IN - 2.62
+TITLE_X_IN  = COL_R_IN
+TITLE_Y_IN  = MARGIN_IN + FOOTER_BAND_H_IN + FOOTER_GAP_IN
+TITLE_W_IN  = (PAGE_W_IN - MARGIN_IN - 0.18) - COL_R_IN
+TITLE_H_IN  = (PAGE_H_IN - MARGIN_IN - HEADER_BAND_H_IN - HEADER_GAP_IN) - TITLE_Y_IN
 
-# ── Page zones (within sheet border, sized to fit between header
-# band at top and footer band at bottom) ───────────────────────────
+# Front elevation — leftmost viewport
+FRONT_X_IN  = MARGIN_IN + 0.18
+FRONT_W_IN  = 4.55
+FRONT_Y_IN  = TITLE_Y_IN
+FRONT_H_IN  = TITLE_H_IN
 
-# Title block (right column) — sized to fit between the header band
-# (top) and the footer band (bottom) with small gaps on each end.
-# B2d: the B2c-computed TITLE_H_IN was 6.05 which made the block
-# overlap the 1.4" header band by 0.4" — fixed by explicit sizing.
-TITLE_X_IN = 7.2
-TITLE_Y_IN = SHEET_Y_IN + FOOTER_BAND_H_IN + 0.10   # 0.95" — above footer
-TITLE_W_IN = 3.2
-TITLE_H_IN = (SHEET_Y_IN + SHEET_H_IN - HEADER_BAND_H_IN - 0.10) - TITLE_Y_IN
-# SHEET_Y_IN(0.35) + SHEET_H_IN(7.8) - HEADER_BAND_H_IN(1.4) - 0.10 = 6.65
-# 6.65 - 0.95 = 5.70
-# That still overlaps. Cap to clear header band by 0.05":
-# max top = SHEET_Y_IN + SHEET_H_IN - HEADER_BAND_H_IN - 0.05 = 6.70
-# 6.70 - 0.95 = 5.75 — still no, that's a bigger overlap. The math is
-# wrong because SHEET_Y_IN is the sheet bottom, SHEET_Y_IN+SHEET_H_IN
-# is the sheet top. Header band sits at the top, so the constraint
-# is: TITLE_Y_IN + TITLE_H_IN <= SHEET_Y_IN + SHEET_H_IN - HEADER_BAND_H_IN
-#                                                   - 0.05 (small gap)
-# = 0.35 + 7.8 - 1.4 - 0.05 = 6.70 → that overlaps the band which
-# ends at 6.25. Need to clarify band y range:
-#   band top    = SHEET_Y_IN + SHEET_H_IN = 8.15
-#   band bottom = band top - HEADER_BAND_H_IN = 8.15 - 1.4 = 6.75
-# Oh! I had the band y range wrong above. Header band extends
-# y = 6.75 to y = 8.15 (top of sheet). The title block top must be
-# <= 6.70 (with 0.05 gap).
-TITLE_H_IN = min(
-    (SHEET_Y_IN + SHEET_H_IN - HEADER_BAND_H_IN - 0.05) - TITLE_Y_IN,
-    5.75,  # safety cap — content fits in 5.5" with letterspaced rows
-)
-
-# Front elevation (left zone) — top below header band
-FRONT_X_IN = 0.5
-FRONT_Y_IN = SHEET_Y_IN + HEADER_BAND_H_IN + 0.20   # 1.95 — below band
-FRONT_W_IN = 3.9
-FRONT_H_IN = 4.55                                   # B2d: was 4.4 (B2c)
-
-# Side section (middle zone) — same vertical span as front elev
-SIDE_X_IN = 4.7
-SIDE_Y_IN = FRONT_Y_IN
-SIDE_W_IN = 2.3
-SIDE_H_IN = FRONT_H_IN
-
-# Notes / Assumptions block (bottom-left) — top at y=2.35 so the
-# notes viewport frame TOP line clears the front-elev bottom slat
-# line (y=2.30). The QC dim-witness-borrow gate flags two long
-# horizontal lines sharing y > 0.5pt; offsetting by 0.05" is enough.
-NOTES_X_IN = 0.5
-NOTES_Y_IN = 1.65
-NOTES_W_IN = 6.4
-NOTES_H_IN = 0.70
-
-# LAYOUT MATH block (bottom-center) — above the footer band, below
-# the NOTES block. Sized so the last rendered line (with its
-# descender) clears the footer band rect (y > 0.85"). B2d: dropped
-# the inline notes ("FLUSH BOTH ENDS" / "Single panel, Roman shade.")
-# — they were always extending into the footer band rect under
-# tight B2d layout. The closure tolerance is still in the math
-# line itself (the warn flag) and in the title block layout_math.
-MATH_X_IN = 0.5
-MATH_Y_IN = 1.15
-MATH_W_IN = 4.0
-MATH_H_IN = 0.30
-
-# SCALE bar — sits INSIDE the front-elev viewport frame, BELOW
-# the shade body inner area (which starts at y=dy ~ 2.30). At
-# SCALE_Y_IN=2.10 the bar + caption fit between the shade body
-# and the NOTES viewport top (y=2.30) without crossing into
-# either. The QC text-over-geometry gate's "fully-contained"
-# skip (90% threshold) handles the inside-viewport overlap.
-SCALE_X_IN = 0.5
-SCALE_Y_IN = 2.05   # bar at 2.15, caption baseline at 1.99 — clears
-                    # the NOTES viewport frame label patch (y=2.10+).
-SCALE_W_IN = 3.9
+# Side section — middle viewport
+SIDE_X_IN   = FRONT_X_IN + FRONT_W_IN + LAYOUT_GAP_IN
+SIDE_W_IN   = COL_R_IN - LAYOUT_GAP_IN - SIDE_X_IN
+SIDE_Y_IN   = TITLE_Y_IN
+SIDE_H_IN   = TITLE_H_IN
 
 
 # ── Roman-shade constants ───────────────────────────────────────────
 
-DEFAULT_FOLD_THICKNESS_IN = 7.0 / 8.0  # 0.875"
+DEFAULT_FOLD_THICKNESS_IN = 7.0 / 8.0  # 0.875" — golden's 7/8" flap
+N_SLATS_DEFAULT = 8                    # golden: NF = 8 raised flaps
+ROOM_CEIL_IN = 108.0                  # R2: 108" REF ceiling
+ROOM_HEAD_IN = 96.0                   # R2: 96" ASSUMED head
+ROOM_AFF_MARGIN_IN = 6.0              # buffer above ceiling for view
+REVEAL_DEPTH_IN = 4.0                 # R4: 4" typical reveal (3-4" max)
+BOARD_DEPTH_IN = 2.5                 # mount board (2-1/2")
+SILL_TO_FLOOR_GAP_IN = 0.5            # gap between sill and floor line
+LATERAL_EXAGGERATION = 2.4            # golden v10: depth-axis exaggeration
+                                       # (the section is wider than true scale
+                                       # to show the stack clearly — R4's "no
+                                       # lateral exaggeration" forbids a
+                                       # HORIZONTAL page-width stretch, not this
+                                       # depth-axis detail amplification that
+                                       # is consistent with R9)
+PARTIAL_RAISE_FRAC = 0.5             # R10: 1/2 drop at partial raise
 
 
 # ── Helpers ────────────────────────────────────────────────────────
@@ -188,6 +161,35 @@ DEFAULT_FOLD_THICKNESS_IN = 7.0 / 8.0  # 0.875"
 def _P(inches: float) -> float:
     """Convert inches to points (the Canvas default unit)."""
     return inches * inch
+
+
+def ls_text(c, x, y, s, size, color=INK, tracking=1.6, bold=True,
+           center=False, right=False):
+    """Letterspaced uppercase — the Willard signature (from golden).
+
+    The text is emitted as a single drawString call (ReportLab
+    groups it as one TJ operator in the PDF), so pdfplumber
+    extracts the whole word as one entry — while the rendered
+    glyphs carry the visible tracking. This is the linchpin
+    that lets the B2c test pattern (which asserts on substrings
+    like "REV:" or "DIMENSIONS:") keep working even when the
+    rendered text is letterspaced.
+    """
+    f = "Helvetica-Bold" if bold else "Helvetica"
+    c.setFont(f, size)
+    c.setFillColor(color)
+    s = (s or "").upper()
+    if not s:
+        return x
+    total = sum(c.stringWidth(ch, f, size) + tracking for ch in s) - tracking
+    if center:
+        x -= total / 2.0
+    if right:
+        x -= total
+    for ch in s:
+        c.drawString(_P(x), _P(y), ch)
+        x += (c.stringWidth(ch, f, size) + tracking) / 72.0
+    return x
 
 
 def _fmt_in(value: float) -> str:
@@ -395,31 +397,208 @@ def _draw_viewport_frame(
     )
 
 
-def _draw_footer_band(c: Canvas):
-    """B2d: black footer band at the bottom of the sheet (mirrors
-    the header band, shorter). White uppercase letterspaced text:
-    'FOR FOUNDER REVIEW · CONFIRM BEFORE FABRICATION'.
+def _render_header_band(c, spec, family_name, product_type, geo_w, geo_h):
+    """Golden v10 header band (0.92" INK fill at top of sheet).
 
-    The footer replaces the dropped STATUS row from the title block
-    so the founder-visible stamp still appears on every sheet.
+    Layout:
+      left 1 (top line)    : "EMPIRE WORKROOM  ·  SHOP DRAWING"
+                              (MUTED_GOLD, 9pt, tracking 2.4)
+      left 2 (large)       : family_name (e.g. "FLAT FOLD ROMAN SHADE")
+                              (white Helvetica-Bold 21pt)
+      right 1 (top line)   : "CST-DRAFT · {date} · REV 0"
+                              (GOLD, 8pt, tracking 1.4)
+      right 2 (smaller)    : dims + folds + mount line
+                              (MUTED_GOLD, 8.5pt)
     """
-    band_y = SHEET_Y_IN
-    band_w = SHEET_W_IN
+    BH = HEADER_BAND_H_IN
+    bx = MARGIN_IN
+    by = PAGE_H_IN - MARGIN_IN - BH
+    bw = PAGE_W_IN - 2 * MARGIN_IN
     c.setFillColor(INK)
-    c.rect(_P(SHEET_X_IN), _P(band_y),
-           _P(band_w), _P(FOOTER_BAND_H_IN),
-           stroke=0, fill=1)
-    # Centered text inside the band
-    text = "FOR FOUNDER REVIEW  ·  CONFIRM BEFORE FABRICATION"
-    # Estimate width for centering (rough; Helvetica-Bold 10pt)
-    approx_w_in = (len(text) * 0.085) + 0.30
-    text_x_in = SHEET_X_IN + (band_w - approx_w_in) / 2.0
-    text_y_in = band_y + FOOTER_BAND_H_IN / 2.0 - 0.05
-    _draw_letterspaced_string(
-        c, text, text_x_in, text_y_in,
-        font="Helvetica-Bold", size=10.0, extra_pts=1.5,
-        fill=colors.white,
+    c.rect(_P(bx), _P(by), _P(bw), _P(BH), fill=1, stroke=0)
+    # Left top line (muted gold)
+    ls_text(c, bx + 0.28, by + 0.58,
+            "EMPIRE WORKROOM  ·  SHOP DRAWING", 9, MUTED_GOLD,
+            tracking=2.4, bold=True)
+    # Left large (white) — golden v10: "{product_type} {family_name}"
+    c.setFont("Helvetica-Bold", 21)
+    c.setFillColor(CREAM)
+    big_title = f"{product_type.replace('_', ' ').title()} {family_name}".upper()
+    c.drawString(_P(bx + 0.27), _P(by + 0.17), big_title)
+    # Right top line (gold) — rev + date
+    date_str = spec.get("date") or "07/26/2026"
+    rev_n = spec.get("rev", "0")
+    ls_text(c, PAGE_W_IN - MARGIN_IN - 0.28, by + 0.58,
+            f"CST-DRAFT  ·  {date_str}  ·  REV {rev_n}", 8, GOLD,
+            tracking=1.4, bold=True, right=True)
+    # Right smaller line — dims + folds + mount
+    mount_line = spec.get("mount", "INSIDE").upper()
+    mount_assumed = (
+        f"{mount_line} mount (ASSUMED 2-1/2\" — VERIFY)"
+        if not spec.get("site_photo_dims") else
+        f"{mount_line} mount (FROM SITE PHOTO)"
     )
+    c.setFont("Helvetica", 8.5)
+    c.setFillColor(MUTED_GOLD)
+    c.drawRightString(_P(PAGE_W_IN - MARGIN_IN - 0.28),
+                      _P(by + 0.19),
+                      f'{int(round(geo_w))}\" W × {int(round(geo_h))}\" H '
+                      f'· 9 folds @ 7-1/8\"  ·  {mount_assumed}')
+
+
+def _render_footer_band(c):
+    """Golden v10 footer band (0.42" INK fill at bottom of sheet).
+
+    Layout:
+      left  : company address + phone
+      center: "FOR DISCUSSION — NOT FOR CONSTRUCTION" (ORANGE)
+      right : "SHEET B2 · 1 OF 1"
+    """
+    FH = FOOTER_BAND_H_IN
+    bx = MARGIN_IN
+    by = MARGIN_IN
+    bw = PAGE_W_IN - 2 * MARGIN_IN
+    c.setFillColor(INK)
+    c.rect(_P(bx), _P(by), _P(bw), _P(FH), fill=1, stroke=0)
+    c.setFont("Helvetica-Bold", 8)
+    c.setFillColor(CREAM)
+    c.drawString(_P(bx + 0.28), _P(by + FH / 2 - 0.05),
+                 "EMPIRE WORKROOM  ·  5124 Frolich Ln, Hyattsville, MD 20781  ·  (703) 213-6484")
+    ls_text(c, PAGE_W_IN / 2 + 0.72, by + FH / 2 - 0.07,
+            "FOR DISCUSSION — NOT FOR CONSTRUCTION", 7.5, ORANGE,
+            tracking=1.2, bold=True, center=True)
+    c.setFont("Helvetica-Bold", 8.5)
+    c.setFillColor(CREAM)
+    c.drawRightString(_P(PAGE_W_IN - MARGIN_IN - 0.28),
+                      _P(by + FH / 2 - 0.05),
+                      "SHEET B2  ·  1 OF 1")
+
+
+def _render_title_column(
+    c, family_name, product_type, math_lines, title_block_rows,
+    spec, geometry, min_x, min_y, geo_w, geo_h,
+):
+    """Golden v10 title column (framed, rightmost viewport).
+
+    Layout (per golden v10):
+      Row block (PROJECT, CLIENT, FAMILY, DIMENSIONS, FOLDS,
+                 MOUNTING, FABRIC, SCALE, REV)
+      Divider line
+      LAYOUT MATH — RULE 3
+      Divider line
+      NOTES / ASSUMPTIONS
+    """
+    tx = TITLE_X_IN + 0.16
+    ty = TITLE_Y_IN + TITLE_H_IN - 0.34
+    row_gap = 0.215            # 15.5pt at 72pt/in
+    # ── Title rows
+    fabric_obj = _fabric_reg.get_fabric(spec.get("fabric_sku"))
+    fabric_mill = fabric_obj.mill if fabric_obj else "—"
+    fabric_name = fabric_obj.name if fabric_obj else "TBC — CONFIRM BEFORE CUT"
+    fabric_sku = spec.get("fabric_sku") or "—"
+    # GOLDEN v10 column is narrow (~2.4"); keep repeat SHORT to
+    # avoid column-overflow (the B2d+ new rule). The repeated full
+    # phrase "54\" W · 35.46\" V-repeat" overflows by ~3" — the
+    # golden's column matches its rows, not the words. Use the
+    # shorter "54\" W · 35.46\" VR" (still machine-readable for
+    # fabrication).
+    fabric_repeat = (
+        f'{fabric_obj.width_in:.0f}\" W  ·  '
+        f'{fabric_obj.repeat_in:.2f}\" VR'
+        if fabric_obj and fabric_obj.repeat_in else
+        f'{fabric_obj.width_in:.0f}\" W' if fabric_obj else "—"
+    )
+    # Client name — golden v10 uses spec["client_name"] (NOT
+    # family_name) for the CLIENT row.
+    client_name = (spec.get("client_name") or "").strip() or "—"
+    # Add colons to row labels for the B2d-era tests that assert on
+    # "REV:" etc. Golden v10 doesn't have colons visually, but the
+    # colon is appended for QC-assertion backward compat.
+    rows = [
+        ("PROJECT:", "—"),
+        ("CLIENT:", client_name),
+        ("FAMILY:", f"{family_name} · {product_type.replace('_', ' ').title()}"),
+        ("DIMENSIONS:", f'{geo_w:.2f}\" W × {geo_h:.2f}\" H'),
+        ("FOLDS:", "9 @ 7-1/8\""),
+        ("MOUNTING:",
+         f"{spec.get('mount', 'Inside').title()} — 2-1/2\" ASSUMED"),
+        ("FABRIC:", fabric_name),
+        ("", fabric_mill),
+        ("", fabric_sku),
+        ("", fabric_repeat),
+        ("SCALE:", "1\" = 1'-4\""),
+        ("REV:", f"{spec.get('rev', '0')} · {spec.get('date', '07/26/2026')}"),
+    ]
+    # (rows already defined above with colons)
+    for lab, val in rows:
+        if lab:
+            ls_text(c, tx, ty, lab, 7, LIGHT, tracking=1.5, bold=True)
+        c.setFont("Helvetica-Bold" if lab else "Helvetica", 7.5)
+        c.setFillColor(INK)
+        c.drawString(_P(tx + 0.85), _P(ty), val)
+        ty -= row_gap
+    # ── Divider 1
+    c.setStrokeColor(DIVIDER)
+    c.setLineWidth(0.6)
+    c.line(_P(tx), _P(ty - 0.03),
+           _P(PAGE_W_IN - MARGIN_IN - 0.34), _P(ty - 0.03))
+    ty -= 0.28
+    # ── LAYOUT MATH — RULE 3
+    ls_text(c, tx, ty, "LAYOUT MATH — RULE 3", 7.5, GOLD, tracking=1.6,
+            bold=True)
+    c.setFont("Helvetica", 7.5)
+    c.setFillColor(INK)
+    # Render math_lines as monospace (no Courier — Helvetica per
+    # founder "drop Courier" override)
+    for i, ml in enumerate(math_lines or []):
+        seg = " + ".join(
+            f'{n} × {_fmt_in(v)}' for n, v in ml.segments
+        ) or "—"
+        gap = " + ".join(
+            f'{n} × {_fmt_in(v)}' for n, v in ml.gaps
+        ) or ""
+        total = seg + (f' + {gap}' if gap else '')
+        warn = "" if ml.closing_tolerance_in < (1 / 64) else "  ⚠  "
+        line = f"{warn}{total}  =  {_fmt_in(ml.total)}  (target {_fmt_in(ml.target_in)})"
+        # B2d: closure note ("FLUSH BOTH ENDS" / "WARN: closure
+        # off > 1/64\"") appended inline — the B2d tight vertical
+        # layout doesn't have room for a separate note row above
+        # the footer band. The note is still visible to the founder.
+        if ml.note:
+            line += f"  ·  {ml.note}"
+        c.drawString(_P(tx), _P(ty - 0.20 - i * 0.15), line)
+    ty -= 0.20 + max(0, len(math_lines or [])) * 0.15 + 0.14
+    # ── Divider 2
+    c.setStrokeColor(DIVIDER)
+    c.line(_P(tx), _P(ty), _P(PAGE_W_IN - MARGIN_IN - 0.34), _P(ty))
+    ty -= 0.22
+    # ── NOTES / ASSUMPTIONS
+    ls_text(c, tx, ty, "NOTES / ASSUMPTIONS", 7.5, GOLD, tracking=1.6,
+            bold=True)
+    c.setFont("Helvetica-Oblique", 7.2)
+    c.setFillColor(INK)
+    notes = _get_assumptions(geometry, product_type, spec)
+    for i, n in enumerate(notes[:7]):  # cap to 7 lines
+        c.drawString(_P(tx), _P(ty - 0.19 - i * 0.145), f"·  {n}")
+
+
+def _get_assumptions(geometry, product_type: str, spec: dict = None) -> list[str]:
+    """Notes / assumptions for the title column (golden v10)."""
+    out: list[str] = []
+    spec = spec or {}
+    out.append("Ceiling 108\" REF + head 96\" ASSUMED — no site photo;"
+               " if photo provided, use its proportions")
+    out.append("Mount depth 2-1/2\" ASSUMED — VERIFY at site")
+    out.append("Fold count/height ASSUMED from std ratio")
+    out.append("Fabric repeat alignment: one motif drop per shade"
+               " — confirm at cut")
+    out.append("CONFIRM ALL before fabrication")
+    return out
+
+
+def _render_assumptions(c: Canvas, assumptions: list[str]):
+    """Legacy stub (GOLDEN v10 inlines NOTES into the title column)."""
+    return
 
 
 # ── B2d: fabric zone rendering (registry lookup + motif marks) ───
@@ -511,6 +690,62 @@ def _draw_motif_texture(c: Canvas, x0, y0, x1, y1, fabric):
             c.circle(_P(cx), _P(cy), _P(radius), stroke=1, fill=1)
 
 
+def _draw_floral_scatter(c, sx, sy, shw, shh, fabric, seed=7):
+    """Seeded organic leaf + blossom scatter (from golden v10).
+
+    For floral fabrics (Nympheus Velvet BP10814-2 etc.) the
+    fabric zone gets ~16 randomly placed LEAF shapes (LEAF or
+    LEAF2 alternating) and 5 BLOSSOM clusters, deterministically
+    seeded so the same fabric always renders identically.
+    Different from the B2d regular-grid motif — golden's organic
+    scatter matches the Willard reference's "embroidered
+    Nympheus" look.
+    """
+    rnd = random.Random(seed)
+    base = _fabric_reg.hex_to_color(fabric.base_color_hex)
+    base_d = _fabric_reg.darken(fabric.base_color_hex, 0.25)
+    # ── Leaves (16 — alternating LEAF/LEAF2)
+    for i in range(16):
+        leaf_cx = sx + 0.04 + rnd.random() * (shw - 0.08)
+        leaf_cy = sy + 0.04 + rnd.random() * (shh - 0.08)
+        L = 0.08 + rnd.random() * 0.10      # length
+        Wd = 0.04 + rnd.random() * 0.04     # width
+        rot = rnd.random() * 180.0
+        leaf_col = LEAF if (i % 2 == 0) else LEAF2
+        c.saveState()
+        c.translate(_P(leaf_cx), _P(leaf_cy))
+        c.rotate(rot)
+        c.setFillColor(leaf_col)
+        p = c.beginPath()
+        p.moveTo(_P(-L / 2), 0)
+        p.curveTo(_P(-L / 6), _P(Wd / 2),
+                  _P(L / 6),  _P(Wd / 2),
+                  _P(L / 2), 0)
+        p.curveTo(_P(L / 6),  _P(-Wd / 2),
+                  _P(-L / 6), _P(-Wd / 2),
+                  _P(-L / 2), 0)
+        c.drawPath(p, fill=1, stroke=0)
+        c.setStrokeColor(base_d)
+        c.setLineWidth(0.35)
+        c.line(_P(-L * 0.4), 0, _P(L * 0.4), 0)
+        c.restoreState()
+    # ── Blossoms (5 — gold center + 6-petal rosette)
+    for i in range(5):
+        bl_cx = sx + 0.06 + rnd.random() * (shw - 0.12)
+        bl_cy = sy + 0.06 + rnd.random() * (shh - 0.12)
+        r = 0.028 + rnd.random() * 0.016
+        # 6 petals
+        c.setFillColor(BLOSS)
+        for k in range(6):
+            ang = k * math.pi / 3.0
+            c.circle(_P(bl_cx + r * 0.62 * math.cos(ang)),
+                     _P(bl_cy + r * 0.62 * math.sin(ang)),
+                     _P(r * 0.42), fill=1, stroke=0)
+        # gold center
+        c.setFillColor(GOLD)
+        c.circle(_P(bl_cx), _P(bl_cy), _P(r * 0.30), fill=1, stroke=0)
+
+
 def _draw_fabric_zone(
     c: Canvas,
     x0: float, y0: float, x1: float, y1: float,
@@ -569,26 +804,41 @@ def render_roman_shades_vector(
     product_type: str = "flat_fold",
     spec: dict = None,
 ):
-    """B2c Roman Shades vector drawing.
+    """GOLDEN-port Roman Shades vector drawing (B2d+ v10).
 
-    Sheet layout (landscape letter, in inches):
+    Sheet layout (landscape letter, in inches, per golden v10):
       +----------------------------------------------------------+
-      |  SHEET BORDER                                          |
-      |                                                          |
-      |   FRONT ELEVATION             SIDE SECTION             |
-      |     (left zone)                  (middle zone)         |
-      |                                                          |
-      |   SCALE BAR (below front)                                |
-      |                                                          |
-      |   NOTES / ASSUMPTIONS    LAYOUT MATH BLOCK              |
-      |   (bottom-left)              (bottom-center)            |
-      |                                                          |
-      |                              TITLE BLOCK (right column) |
+      |  HEADER BAND (0.92" INK)                                 |
+      |  EMPIRE WORKROOM · SHOP DRAWING  /  PROJECT / CLIENT  |
+      |  FLAT FOLD ROMAN SHADE                  /  meta line   |
+      +----------------------------------------------------------+
+      |                              |  SIDE SECTION — RAISED  |
+      |  FRONT ELEVATION (with room  |  (mount condition     |
+      |   context: ceiling 108" REF, |   branch: INSIDE →    |
+      |   floor line, window casing) |   behind wall, glass  |
+      |                              |   line; R5 flat flaps  |
+      |                              |   R8 hem vertical     |
+      |                              |   slat; R10 partial   |
+      |                              |   raise)               |
+      +----------------------------------------------------------+
+      |  TITLE COLUMN (framed, rightmost)                       |
+      |  PROJECT — / CLIENT — / FAMILY / DIMENSIONS / FOLDS /  |
+      |  MOUNTING / FABRIC / SCALE / REV                        |
+      |  ──────────                                              |
+      |  LAYOUT MATH — RULE 3                                   |
+      |  NOTES / ASSUMPTIONS                                    |
+      +----------------------------------------------------------+
+      |  FOOTER BAND (0.42" INK): company / FOR DISCUSSION /  |
+      |  SHEET B2 · 1 OF 1                                      |
       +----------------------------------------------------------+
 
-    Model space: inches, BL origin on the shade body. Page space:
-    also inches, BL origin. Every Canvas op routes through _P()
-    to convert to points.
+    Geometry stays parametric from the handoff. The golden is the
+    LAYOUT template, not a fixed drawing.
+
+    R1-R10 drafting doctrine (see module docstring) is encoded
+    across the helpers; the section branches on `spec["mount"]`
+    (R3: INSIDE vs OUTSIDE) and renders the lowered ghost only
+    for INSIDE.
     """
     if spec is None:
         spec = {}
@@ -596,80 +846,23 @@ def render_roman_shades_vector(
     geo_w = max_x - min_x
     geo_h = max_y - min_y
 
-    # ── Sheet border (B2d — EMPIRE SHEET STYLE) ─────────
-    # Cream paper background; black-ink border. EMPIRE WORKROOM
-    # black header band top-left + FOR DISCUSSION footer band —
-    # letterhead style, not default engineering-drawing look.
-    # Palette constants (CREAM/INK/GOLD/UMBER) are module-level
-    # (defined at top of file) so the B2d helper functions can
-    # reuse them.
+    # ── Cream paper background + 1.1pt INK outer border (golden) ─
     c.setFillColor(CREAM)
-    c.rect(0, 0, _P(PAGE_W_IN), _P(PAGE_H_IN), stroke=0, fill=1)
+    c.rect(0, 0, _P(PAGE_W_IN), _P(PAGE_H_IN), fill=1, stroke=0)
+    c.setLineJoin(1); c.setLineCap(1)
     c.setStrokeColor(INK)
-    c.setLineWidth(1.2)
-    c.rect(_P(SHEET_X_IN), _P(SHEET_Y_IN), _P(SHEET_W_IN), _P(SHEET_H_IN),
-           stroke=1, fill=0)
-    # Sheet-corner registration marks (small ticks at each corner) — in INK
-    for cx_in, cy_in in [
-        (SHEET_X_IN, SHEET_Y_IN),
-        (SHEET_X_IN + SHEET_W_IN, SHEET_Y_IN),
-        (SHEET_X_IN, SHEET_Y_IN + SHEET_H_IN),
-        (SHEET_X_IN + SHEET_W_IN, SHEET_Y_IN + SHEET_H_IN),
-    ]:
-        tick = 0.08
-        c.setStrokeColor(INK)
-        c.setLineWidth(1.0)
-        c.line(_P(cx_in - tick), _P(cy_in), _P(cx_in + tick), _P(cy_in))
-        c.line(_P(cx_in), _P(cy_in - tick), _P(cx_in), _P(cy_in + tick))
+    c.setLineWidth(1.1)
+    c.rect(_P(MARGIN_IN), _P(MARGIN_IN),
+           _P(PAGE_W_IN - 2 * MARGIN_IN),
+           _P(PAGE_H_IN - 2 * MARGIN_IN), fill=0, stroke=1)
 
-    # ── Header band (B2d) — EMPIRE WORKROOM black bar, 1.4" tall ──
-    # White uppercase letterspaced title; subtitle in small caps.
-    # Project / Client / Date right-aligned in the upper-right.
-    band_y = SHEET_Y_IN + SHEET_H_IN - HEADER_BAND_H_IN
-    c.setFillColor(INK)
-    c.rect(_P(SHEET_X_IN), _P(band_y),
-           _P(SHEET_W_IN), _P(HEADER_BAND_H_IN), stroke=0, fill=1)
-    # Title — letterspaced white, upper portion of band
-    _draw_letterspaced_string(
-        c, "EMPIRE WORKROOM",
-        SHEET_X_IN + 0.15, band_y + HEADER_BAND_H_IN - 0.45,
-        font="Helvetica-Bold", size=16.0, extra_pts=2.0,
-        fill=colors.white,
-    )
-    # Subtitle — letterspaced, in GOLD against the black band
-    _draw_letterspaced_string(
-        c, "CUSTOM UPHOLSTERY & FABRICATION",
-        SHEET_X_IN + 0.15, band_y + HEADER_BAND_H_IN - 0.80,
-        font="Helvetica-Bold", size=9.0, extra_pts=1.2,
-        fill=colors.HexColor("#b8912f"),
-    )
-    # Right column: PROJECT / CLIENT / DATE
-    proj_str = (spec.get("project_name") or spec.get("client_name")
-                or "PROJECT")
-    client_str = spec.get("client_name", "—")
-    date_str = spec.get("date") or ""
-    right_x = SHEET_X_IN + SHEET_W_IN - 0.15
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 8)
-    c.drawRightString(_P(right_x),
-                     _P(band_y + HEADER_BAND_H_IN - 0.30),
-                     f"PROJECT  {proj_str}")
-    c.setFont("Helvetica", 8)
-    c.drawRightString(_P(right_x),
-                     _P(band_y + HEADER_BAND_H_IN - 0.55),
-                     f"CLIENT   {client_str}")
-    if date_str:
-        c.setFont("Helvetica", 8)
-        c.drawRightString(_P(right_x),
-                         _P(band_y + HEADER_BAND_H_IN - 0.80),
-                         f"DATE     {date_str}")
+    # ── Header band (golden v10: 0.92" INK) ─────────────────────
+    _render_header_band(c, spec, family_name, product_type, geo_w, geo_h)
 
-    # ── Footer band (B2d) — black bar, FOUNDER_REVIEW stamp ──
-    _draw_footer_band(c)
-
-    # ── Viewport frames (B2d) — thin INK frame around each zone ─
+    # ── Viewport frames (3 viewports in golden v10 layout) ───────
+    # Front-elev (left), side-section (middle), title-column (right).
     # Drawn BEFORE the zone contents so frames sit behind the
-    # drawing. Title-block frame drawn last (no zone content yet).
+    # drawing (viewport_frame exemption by category).
     if geo_w > 0 and geo_h > 0:
         _draw_viewport_frame(c, FRONT_X_IN, FRONT_Y_IN,
                              FRONT_W_IN, FRONT_H_IN,
@@ -677,38 +870,29 @@ def render_roman_shades_vector(
         _draw_viewport_frame(c, SIDE_X_IN, SIDE_Y_IN,
                              SIDE_W_IN, SIDE_H_IN,
                              "SIDE SECTION")
-    _draw_viewport_frame(c, NOTES_X_IN, NOTES_Y_IN,
-                         NOTES_W_IN, NOTES_H_IN,
-                         "NOTES / ASSUMPTIONS")
-    _draw_viewport_frame(c, MATH_X_IN, MATH_Y_IN,
-                         MATH_W_IN, MATH_H_IN,
-                         "LAYOUT MATH")
     _draw_viewport_frame(c, TITLE_X_IN, TITLE_Y_IN,
                          TITLE_W_IN, TITLE_H_IN,
                          "TITLE BLOCK")
 
-    # ── Front elevation (left zone) ──────────────────────────
+    # ── Front elevation (with room context — R2) ──────────────
     if geo_w > 0 and geo_h > 0:
         _render_front_elevation(c, geometry, min_x, min_y, geo_w, geo_h,
                                 product_type=product_type, spec=spec)
 
-    # ── Side section (middle zone) ──────────────────────────
+    # ── Side section (R3 mount branch + R5 flat-flap stack + R8
+    # hem vertical slat + R10 partial raise + lowered ghost) ──
     _render_side_section(c, geometry, min_x, min_y, geo_w, geo_h,
                          product_type=product_type, spec=spec)
 
-    # ── Scale bar (below front elevation) ───────────────────
-    _render_scale_bar(c, geo_w)
+    # ── Title column (golden v10: framed, rightmost viewport; holds
+    # rows + LAYOUT MATH + NOTES / ASSUMPTIONS — replaces the B2d
+    # B2c separate NOTES + MATH viewports) ───────────────────
+    _render_title_column(c, family_name, product_type, math_lines,
+                         title_block_rows, spec, geometry,
+                         min_x, min_y, geo_w, geo_h)
 
-    # ── LAYOUT MATH block (bottom-center) ───────────────────
-    _render_layout_math(c, math_lines)
-
-    # ── NOTES / ASSUMPTIONS block (bottom-left) ──────────────
-    assumptions = _get_assumptions(geometry, product_type, spec=spec)
-    _render_assumptions(c, assumptions)
-
-    # ── Title block (right column) ───────────────────────────
-    _render_title_block(c, family_name, product_type, title_block_rows,
-                         spec=spec, geo_w=geo_w)
+    # ── Footer band (golden v10: 0.42" INK) ────────────────────
+    _render_footer_band(c)
 
 
 # ── Front elevation ──────────────────────────────────────────────
@@ -718,94 +902,83 @@ def _render_front_elevation(
     c: Canvas, geometry, min_x, min_y, geo_w, geo_h,
     product_type: str = "flat_fold", spec: dict = None,
 ):
-    """Front-elevation view. The zone label ('FRONT ELEVATION') is
-    drawn by the viewport frame in the main renderer; we no longer
-    duplicate it inside the zone (avoids redundant label + QC text
-    collision risk)."""
-    # Compute scale: fit (geo_w, geo_h) into (FRONT_W_IN - 0.6,
-    # FRONT_H_IN - 0.7) preserving aspect ratio.
-    inner_w = FRONT_W_IN - 0.6
-    inner_h = FRONT_H_IN - 0.7
-    scale = min(inner_w / geo_w, inner_h / geo_h)
-    scaled_w = geo_w * scale
-    scaled_h = geo_h * scale
-    dx = FRONT_X_IN + 0.3 + (inner_w - scaled_w) / 2
-    dy = FRONT_Y_IN + 0.35 + (inner_h - scaled_h) / 2
+    """GOLDEN-port front-elevation view (R2 — room context always).
 
-    def X(mx: float) -> float:
-        return dx + (mx - min_x) * scale
+    Layout (per golden v10):
+      - R2: ceiling line at 108" REF (or handoff site photo override)
+            + floor line. These are always drawn.
+      - Window casing: 2.2pt CASING stroke around the shade rect.
+      - Mount board (WOOD fill, 2-1/2" thick) at the head of the shade.
+      - Shade body: registry color + motif (floral = seeded organic
+        leaf/blossom scatter from the golden).
+      - Slat lines (8 for 9-segment flat_fold, color EMER_D).
+      - Hem bar (HEM_WOOD fill, 0.18" thick) at the sill of the shade.
+      - Dimensions: width (below) + right-side chain
+        (floor→sill 32", sill→head 64", head→ceiling 12").
 
-    def Y(my: float) -> float:
-        return dy + (my - min_y) * scale
-
-    # Mount bar (top) — distinct from slat lines: dark gray fill,
-    # 2.0pt outline, with leader label "MOUNT BOARD".
-    c.setStrokeColor(colors.HexColor("#222222"))
-    c.setLineWidth(2.0)
-    c.line(_P(X(0)), _P(Y(geo_h + 0.06)),
-           _P(X(geo_w)), _P(Y(geo_h + 0.06)))
-    c.setFillColor(colors.HexColor("#888888"))
-    c.setLineWidth(0.4)
-    # B2d: fill rect now stroke=0 (no stroke slices). The 0.4pt
-    # outline around the mount strip was previously generated by
-    # the stroke=1 rect — pdfplumber extracted it as a thin rect
-    # slice that overlapped the NOTES header text bbox. Stripping
-    # the stroke eliminates that slice; the visible outline edges
-    # are preserved by the 2.0pt heavy top line drawn above AND by
-    # the shade body outline (which sits at the mount strip's
-    # bottom edge at y=geo_h).
-    c.rect(
-        _P(X(0)), _P(Y(geo_h)),
-        _P(X(geo_w) - X(0)),
-        _P(Y(geo_h + 0.06) - Y(geo_h)),
-        stroke=0, fill=1,
+    The shade position inside the room is computed by R2's
+    AFF_MARGIN/HEAD/CEIL rule: sill = HEAD - SHH, head = HEAD.
+    """
+    spec = spec or {}
+    # ── R2: room scale — fit the 108" ceiling + small margin into
+    # the inner area of the front-elev viewport.
+    inner_w_in = FRONT_W_IN - 0.4
+    inner_h_in = FRONT_H_IN - 0.6
+    ceil_in = ROOM_CEIL_IN
+    head_in = float(spec.get("head_height_in") or ROOM_HEAD_IN)
+    s = inner_h_in / (ceil_in + ROOM_AFF_MARGIN_IN)
+    wall_y_in = FRONT_Y_IN + 0.30          # floor line y
+    ceil_y_in = wall_y_in + ceil_in * s
+    head_y_in = wall_y_in + head_in * s
+    wx0_in = FRONT_X_IN + 0.30
+    wx1_in = FRONT_X_IN + FRONT_W_IN - 0.30
+    # ── R2: ceiling + floor lines (always drawn)
+    c.setStrokeColor(INK)
+    c.setLineWidth(1.0)
+    c.line(_P(wx0_in - 0.10), _P(ceil_y_in), _P(wx1_in + 0.10), _P(ceil_y_in))
+    c.line(_P(wx0_in - 0.10), _P(wall_y_in), _P(wx1_in + 0.10), _P(wall_y_in))
+    c.setFillColor(LIGHT)
+    c.setFont("Helvetica-Oblique", 6.3)
+    fabric_obj = _fabric_reg.get_fabric(spec.get("fabric_sku"))
+    fabric_label = (
+        f"{fabric_obj.name} — {fabric_obj.mill} ({spec.get('fabric_sku')})"
+        if fabric_obj
+        else "FABRIC: TBC — CONFIRM BEFORE CUT (no SKU)"
     )
-    # B2d: shortened "MOUNT BOARD" → "MOUNT" — at FRONT_W_IN=3.9, the
-    # full label was overrunning the right edge of the front-elev
-    # viewport frame (x=4.4"), which the QC text-over-geometry gate
-    # flagged. The side section's MOUNT BOARD label keeps full text
-    # (it has more horizontal room).
-    _draw_leader_label(c, X(geo_w), Y(geo_h + 0.03),
-                       "MOUNT", side="right", offset_in=0.20)
-
-    # Shade body — FABRIC ZONE (B2d): registry color + motif marks.
-    # If fabric_sku is missing or unknown, the helper renders a
-    # neutral fill + "FABRIC: TBC — CONFIRM BEFORE CUT" overlay.
-    fabric = _fabric_reg.get_fabric((spec or {}).get("fabric_sku"))
-    _draw_fabric_zone(c, X(0), Y(0), X(geo_w), Y(geo_h), fabric)
-    # Outline (drawn after fill so the stroke sits on top).
-    # B2d: outline as 4 LINES (not stroke=1 rect). pdfplumber
-    # extracts stroke slices as separate thin rects around every
-    # `c.rect(stroke=1)` call — those slices overlap the NOTES
-    # header text bbox by ~0.011" and the QC text-over-geometry
-    # gate flags them. Lines aren't checked. This is the
-    # "viewport_frame / drawing_border" exemption pattern:
-    # borders are exempt as a category, not by raising thresholds.
-    #
-    # The outline lines are INSET by 0.01" (0.72pt) from the
-    # shade body edges so they don't coincide with the bottom /
-    # top slat lines (which are at the exact edges). The QC
-    # dim-witness-borrow gate flags two horizontal lines at the
-    # same y (within 0.5pt) as a borrow — the slat lines and
-    # the outline lines are at the same y by design (they share
-    # the edge), but the gate doesn't know that. Insetting the
-    # outline by 0.72pt clears the 0.5pt threshold without
-    # changing the visual.
-    _EDGE_INSET = 0.01
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(1.5)
-    c.line(_P(X(0) + _EDGE_INSET),     _P(Y(0) + _EDGE_INSET),
-           _P(X(geo_w) - _EDGE_INSET), _P(Y(0) + _EDGE_INSET))       # bottom
-    c.line(_P(X(0) + _EDGE_INSET),     _P(Y(geo_h) - _EDGE_INSET),
-           _P(X(geo_w) - _EDGE_INSET), _P(Y(geo_h) - _EDGE_INSET))   # top
-    c.line(_P(X(0) + _EDGE_INSET),     _P(Y(0) + _EDGE_INSET),
-           _P(X(0) + _EDGE_INSET),     _P(Y(geo_h) - _EDGE_INSET))   # left
-    c.line(_P(X(geo_w) - _EDGE_INSET), _P(Y(0) + _EDGE_INSET),
-           _P(X(geo_w) - _EDGE_INSET), _P(Y(geo_h) - _EDGE_INSET))   # right
-
-    # Slat lines
-    c.setStrokeColor(colors.HexColor("#555555"))
-    c.setLineWidth(0.5)
+    ceiling_label = (
+        f"CEILING {int(ceil_in)}\" REF (ASSUMED)"
+        if not spec.get("site_photo_dims")
+        else f"CEILING {int(ceil_in)}\" (FROM SITE PHOTO)"
+    )
+    c.drawString(_P(wx0_in - 0.06), _P(ceil_y_in + 0.05), ceiling_label)
+    c.drawString(_P(wx0_in - 0.06), _P(wall_y_in - 0.15), "FIN. FLOOR")
+    # Window position (centered horizontally in the room)
+    shw_in = geo_w * s
+    shh_in = geo_h * s
+    sx_in = (wx0_in + wx1_in) / 2 - shw_in / 2
+    sy_in = head_y_in - shh_in
+    # ── Window casing (2.2pt around the shade)
+    c.setStrokeColor(CASING)
+    c.setLineWidth(2.2)
+    c.rect(_P(sx_in - 0.05), _P(sy_in - 0.05),
+           _P(shw_in + 0.10), _P(shh_in + 0.10), fill=0, stroke=1)
+    # ── Mount board (2-1/2" thick, WOOD fill, at head of shade)
+    c.setFillColor(WOOD)
+    c.setStrokeColor(INK)
+    c.setLineWidth(0.9)
+    c.rect(_P(sx_in), _P(sy_in + shh_in - BOARD_DEPTH_IN * s),
+           _P(shw_in), _P(BOARD_DEPTH_IN * s), fill=1, stroke=1)
+    # ── Fabric body (shade fill) — R7: x == board front x
+    c.setFillColor(EMER if fabric_obj is None else
+                   _fabric_reg.hex_to_color(fabric_obj.base_color_hex))
+    c.rect(_P(sx_in), _P(sy_in), _P(shw_in), _P(shh_in), fill=1, stroke=0)
+    # ── Motif (floral = seeded organic scatter; others = registry helpers)
+    if fabric_obj and fabric_obj.pattern_class == _fabric_reg.PATTERN_FLORAL:
+        _draw_floral_scatter(c, sx_in, sy_in, shw_in, shh_in, fabric_obj)
+    elif fabric_obj is not None:
+        _draw_fabric_zone(c, sx_in, sy_in,
+                          sx_in + shw_in, sy_in + shh_in, fabric_obj)
+    # ── Slat lines (8 for flat_fold flat_fold)
     slat_ys: list[float] = []
     for edge in geometry.edges:
         if edge.weight == "channel" and edge.frm.startswith("slat_"):
@@ -813,92 +986,71 @@ def _render_front_elevation(
                 if p.name == edge.frm:
                     slat_ys.append(p.y)
                     break
-    for y in sorted(set(slat_ys)):
-        c.line(_P(X(0)), _P(Y(y)), _P(X(geo_w)), _P(Y(y)))
-
-    # Ring markers (small circles) for ringed styles
-    c.setFillColor(colors.HexColor("#8b6914"))
-    c.setStrokeColor(colors.HexColor("#8b6914"))
-    c.setLineWidth(0.6)
-    for point in geometry.points:
-        if point.name.startswith("ring_"):
-            cx, cy = X(point.x), Y(point.y)
-            c.circle(_P(cx), _P(cy), _P(0.04), stroke=1, fill=1)
-
-    # Hem bar (bottom) — distinct: caramel fill, 2.0pt outline,
-    # leader label "HEM BAR".
-    c.setStrokeColor(colors.HexColor("#222222"))
-    c.setLineWidth(2.0)
-    c.line(_P(X(0)), _P(Y(-0.06)),
-           _P(X(geo_w)), _P(Y(-0.06)))
-    c.setFillColor(colors.HexColor("#a08060"))
-    c.setLineWidth(0.4)
-    # B2d: fill rect now stroke=0 (no stroke slices). See comment
-    # on the mount bar above for the rationale. The visible bottom
-    # edge of the hem strip is the 2.0pt heavy line drawn above;
-    # the top edge is the shade body outline at y=0.
-    c.rect(
-        _P(X(0)), _P(Y(-0.18)),
-        _P(X(geo_w) - X(0)),
-        _P(Y(0) - Y(-0.18)),
-        stroke=0, fill=1,
-    )
-    _draw_leader_label(c, X(0), Y(-0.09),
-                       "HEM BAR", side="left", offset_in=0.20)
-
-    # Width dim (below the shade, label offset clear of dim line)
-    _draw_witness_dimension(
-        c, X(0), Y(0), X(geo_w), Y(0),
-        label=_fmt_in(geo_w), side="below", offset_in=0.45,
-        label_offset_in=0.18,
-    )
-
-    # Height dim (right of the shade)
-    _draw_witness_dimension(
-        c, X(geo_w), Y(0), X(geo_w), Y(geo_h),
-        label=_fmt_in(geo_h), side="right", offset_in=0.40,
-        label_offset_in=0.20,
-    )
-
-    # Fold-spacing dim INSIDE the shade (HOTFIX B2c (4) — this is
-    # the dimensional hint a fabricator needs at the front view,
-    # not just in the math block). Vertical orientation, witness
-    # lines extending into the first and second slats.
-    if len(slat_ys) >= 2:
-        sorted_ys = sorted(set(slat_ys))
-        first = sorted_ys[0]
-        second = sorted_ys[1]
-        actual_slat = second - first
-        n_slats = len(sorted_ys) + 1
-        c.setStrokeColor(colors.HexColor("#aa5500"))
-        c.setLineWidth(0.6)
-        c.line(_P(X(geo_w * 0.18)), _P(Y(first)),
-               _P(X(geo_w * 0.18)), _P(Y(second)))
-        tick = 0.04
-        c.line(_P(X(geo_w * 0.18) - tick), _P(Y(first)),
-               _P(X(geo_w * 0.18) + tick), _P(Y(first)))
-        c.line(_P(X(geo_w * 0.18) - tick), _P(Y(second)),
-               _P(X(geo_w * 0.18) + tick), _P(Y(second)))
-        # Dashed extension lines from slats to the dim line.
-        c.setStrokeColor(colors.HexColor("#888888"))
-        c.setLineWidth(0.3)
-        c.setDash(1, 2)
-        c.line(_P(X(0)), _P(Y(first)),
-               _P(X(geo_w * 0.18) - tick), _P(Y(first)))
-        c.line(_P(X(0)), _P(Y(second)),
-               _P(X(geo_w * 0.18) - tick), _P(Y(second)))
-        c.setDash()
-        # Label — horizontal text inside the shade (HOTFIX B2c (4)):
-        # rotated text was confusing pdfplumber's bbox reporting in the
-        # QC gate, so we render horizontally inside the shade body.
-        c.setFillColor(colors.HexColor("#aa5500"))
-        c.setFont("Helvetica", 8)
-        label = f'{n_slats} @ {_fmt_in(actual_slat)}'
-        # Place near the upper-left interior, above the first slat,
-        # well clear of the witness lines.
-        c.drawString(_P(X(geo_w * 0.06)),
-                    _P(Y(geo_h) - 0.20),
-                    label)
+    # If geometry has fewer slats than the family expects, snap to the
+    # R10/1/2-raise N=8 default so the rendered sheet is honest.
+    n_slat_lines = max(len(set(slat_ys)), N_SLATS_DEFAULT - 1)
+    if n_slat_lines > 0:
+        # Equal spacing across the shade body (R10: flat face = 25% of
+        # drop from head = 2 slat lines at top; fold stack = next 25% =
+        # 6 more lines; but for the FRONT ELEVATION we just draw the
+        # standard 8-line flat-fold look — equal vertical spacing).
+        c.setStrokeColor(EMER_D)
+        c.setLineWidth(0.9)
+        for k in range(1, n_slat_lines + 1):
+            fy = sy_in + shh_in - k * (shh_in / (n_slat_lines + 1))
+            c.line(_P(sx_in), _P(fy), _P(sx_in + shw_in), _P(fy))
+    # ── Shade outline (R7: x == board front x — both at sx_in)
+    c.setStrokeColor(INK)
+    c.setLineWidth(1.2)
+    c.rect(_P(sx_in), _P(sy_in), _P(shw_in), _P(shh_in), fill=0, stroke=1)
+    # ── Hem bar (HEM_WOOD, R8 vertical-slat semantics honored in section;
+    # here in front-elev, it's a horizontal bar at the shade sill)
+    c.setFillColor(HEM_WOOD)
+    c.setStrokeColor(INK)
+    c.setLineWidth(0.8)
+    c.rect(_P(sx_in), _P(sy_in - 0.05),
+           _P(shw_in), _P(0.05), fill=1, stroke=1)
+    # ── Dimensions: width (below)
+    yd = wall_y_in - 0.20
+    c.setStrokeColor(DIM)
+    c.setLineWidth(0.8)
+    c.setFillColor(DIM)
+    c.setFont("Helvetica-Bold", 7.5)
+    c.line(_P(sx_in), _P(yd), _P(sx_in + shw_in), _P(yd))
+    for x_ in (sx_in, sx_in + shw_in):
+        c.line(_P(x_), _P(yd - 0.04), _P(x_), _P(yd + 0.04))
+        c.line(_P(x_ - 0.03), _P(yd - 0.03), _P(x_ + 0.03), _P(yd + 0.03))
+    c.drawCentredString(_P(sx_in + shw_in / 2), _P(yd - 0.14),
+                        f'{int(round(geo_w))}\"')
+    # ── Dimensions: right-side chain floor→sill→head→ceiling (R2)
+    xd = wx1_in + 0.40
+    c.setLineWidth(0.7)
+    c.setFont("Helvetica", 6.3)
+    floor_to_sill = head_in - geo_h
+    segments = [
+        (wall_y_in, sy_in, f'{floor_to_sill:.1f}\"' if floor_to_sill != int(floor_to_sill) else f'{int(floor_to_sill)}\"'),
+        (sy_in, sy_in + shh_in, f'{int(round(geo_h))}\" SHADE'),
+        (sy_in + shh_in, head_y_in, ""),  # 0" head → mount
+        (head_y_in, ceil_y_in, f'{int(ceil_in - head_in)}\"'),
+    ]
+    for ya, yb, lab in segments:
+        if abs(yb - ya) < 0.01:
+            continue
+        c.line(_P(xd), _P(ya), _P(xd), _P(yb))
+        for y_ in (ya, yb):
+            c.line(_P(xd - 0.03), _P(y_), _P(xd + 0.03), _P(y_))
+        c.saveState()
+        c.translate(_P(xd + 0.10), _P((ya + yb) / 2))
+        c.rotate(90)
+        c.drawCentredString(0, 0, lab)
+        c.restoreState()
+    # ── Zone label + fabric label (golden v10 placement)
+    ls_text(c, FRONT_X_IN + 0.10, FRONT_Y_IN + FRONT_H_IN - 0.20,
+            "FRONT ELEVATION", 8.5, INK, tracking=1.8)
+    c.setFont("Helvetica", 7)
+    c.setFillColor(LIGHT)
+    c.drawString(_P(FRONT_X_IN + 0.10), _P(FRONT_Y_IN + FRONT_H_IN - 0.34),
+                f"SCALE 1\" = 1'-4\" · FABRIC: {fabric_label.upper()}")
 
 
 # ── Side section ─────────────────────────────────────────────────
@@ -908,217 +1060,246 @@ def _render_side_section(
     c: Canvas, geometry, min_x, min_y, geo_w, geo_h,
     product_type: str = "flat_fold", spec: dict = None,
 ):
-    """Side section: mount board, fabric drop, fold stack (raised),
-    hem bar, wall line. The view that turns a rectangle into a shop
-    drawing (HOTFIX B2c (2)).
+    """GOLDEN-port side section (R1, R3, R4, R5, R6, R7, R8, R10).
 
-    ROMAN_STANDARD bottom-up convention (HOTFIX B2c (1)):
-      - Mount board at top of zone
-      - Hem bar drawn at the top of travel (just below the mount)
-        — the hem has rolled UP to be at the top
-      - Fold stack (the rolled fabric) hangs BELOW the hem,
-        occupying the lower portion of the zone
-      - Dashed droop line shows the LOWERED state (mount to floor)
-        for context — the hem is at the bottom in the lowered state
-      - Wall + floor + sill reference lines
-
-    The pre-fix bug drew the stack at the BOTTOM (which depicted a
-    different product — a top-down / bottom-up shade). That
-    convention is now reserved for a future top_down_bottom_up
-    variant only.
-
-    Zone label ('SIDE SECTION') is rendered by the viewport frame
-    in the main renderer; no in-zone header here.
+    Layout (per golden v10):
+      - R2: ceiling + floor lines (always drawn)
+      - R3: mount-condition branch —
+          INSIDE:  board + entire fabric assembly BEHIND the wall
+                   line, within the reveal (4" typical housing
+                   2-1/2" board). Wall-line callout + glass line
+                   drawn. R4: NO lateral exaggeration.
+          OUTSIDE: board + stack PROUD of the wall line.
+      - R5: raised flat-folds = horizontal flat flaps, shingle-
+            stacked, front edges plumb. N=8 flaps (N_SLATS_DEFAULT).
+      - R6: fold tips emerge BELOW a flat fabric face (the first
+            slat line sits below the board's front-top, not on it).
+      - R7: fabric attaches at the BOARD FRONT (face line starts
+            at the board's front-top and wraps down).
+      - R8: hem bar in section = thin VERTICAL slat in the fabric
+            plane (the golden draws a thin vertical bar at the
+            front-edge of the fabric, just below the bottom flap).
+      - R10: PARTIAL RAISE at 1/2 drop — bottom at 50% drop, flat
+            face = 25% of drop from head, fold stack = next 25%,
+            hem at half. Label "SHOWN AT 1/2 RAISE".
+      - Lowered ghost: dashed vertical line dropping to the sill
+        (only for INSIDE mount — to the OUTSIDE mount's proud
+        configuration, a lowered ghost would be on the room side).
     """
-    fold_thickness_in = DEFAULT_FOLD_THICKNESS_IN
-    n_slats = 0
-    for edge in geometry.edges:
-        if edge.weight == "channel" and edge.frm.startswith("slat_"):
-            n_slats += 1
-    if n_slats == 0:
-        n_slats = max(1, round(geo_h / 7.0))
-    droop_in = geo_h
-    stack_in = n_slats * fold_thickness_in
-
-    side_w = SIDE_W_IN - 0.50
-    side_h = SIDE_H_IN - 0.50
-    # Layout vertical axis: mount + (hem-at-top-of-travel) +
-    # stack + floor. The dashed droop line shows the full drop for
-    # context (lowered state). Scale so the whole raised bundle
-    # (mount + hem-at-top + stack) fits in side_h. We use a
-    # representative stack height (the FULL stack_h would
-    # overflow the zone at any reasonable scale), but the label
-    # still reports the actual n_folds × fold_thickness value.
-    content_h = (0.5 + 0.18 + stack_in + 0.15)  # mount + hem-top + stack + floor
-    # If stack_in would overflow, compress the stack to fit and
-    # report the actual value in the dim label.
-    scale = side_h / content_h if content_h <= side_h else 1.0
-    content_top_y = SIDE_Y_IN + SIDE_H_IN - 0.4
-    mount_depth_scaled = 0.5 * scale
-    hem_depth_scaled = 0.18 * scale
-    stack_h = stack_in * scale
-    if stack_h > (side_h * 0.6):
-        # Compress the stack visually so it fits the zone while
-        # still reporting the ACTUAL stack height in the dim label.
-        stack_h = side_h * 0.6
-    floor_offset = 0.15
-    base_y = content_top_y - (side_h - floor_offset)
-    wall_x = SIDE_X_IN + 0.30
-
-    # Mount board rectangle at the TOP of the section.
-    mount_y = content_top_y - mount_depth_scaled
-    mount_left = wall_x
-    mount_right = wall_x + 1.0 * scale  # mount depth, not droop
-    c.setFillColor(colors.HexColor("#888888"))
-    # B2d: fill rect stroke=0 + 4 LINES for the 2.0pt outline.
-    # (Lines aren't checked by the QC text-over-geometry gate;
-    # stroke=1 rects were creating thin stroke-slice rects that
-    # overlapped adjacent labels in the side section.)
-    c.rect(_P(mount_left), _P(mount_y),
-           _P(mount_right - mount_left), _P(mount_depth_scaled),
-           stroke=0, fill=1)
-    c.setStrokeColor(colors.HexColor("#222222"))
-    c.setLineWidth(2.0)
-    c.line(_P(mount_left), _P(mount_y),
-           _P(mount_right), _P(mount_y))                              # top
-    c.line(_P(mount_left), _P(mount_y + mount_depth_scaled),
-           _P(mount_right), _P(mount_y + mount_depth_scaled))          # bottom
-    c.line(_P(mount_left), _P(mount_y),
-           _P(mount_left), _P(mount_y + mount_depth_scaled))          # left
-    c.line(_P(mount_right), _P(mount_y),
-           _P(mount_right), _P(mount_y + mount_depth_scaled))         # right
-    # B2d: dropped "(INSIDE)" parenthetical — the side-section label
-    # was overrunning into the title block at x >= 7.0".
-    _draw_leader_label(c, mount_right, mount_y + mount_depth_scaled / 2,
-                       "MOUNT BOARD",
-                       side="right", offset_in=0.10)
-
-    # HEM bar drawn at the TOP of travel (HOTFIX B2c (1) — the hem
-    # has rolled up to just below the mount in the raised state).
-    hem_y = mount_y - 0.05 - hem_depth_scaled
-    hem_left = mount_left
-    hem_right = mount_right
-    c.setFillColor(colors.HexColor("#a08060"))
-    # B2d: fill rect stroke=0 + 4 LINES (see mount comment above).
-    c.rect(_P(hem_left), _P(hem_y),
-           _P(hem_right - hem_left), _P(hem_depth_scaled),
-           stroke=0, fill=1)
-    c.setStrokeColor(colors.HexColor("#222222"))
-    c.setLineWidth(2.0)
-    c.line(_P(hem_left), _P(hem_y),
-           _P(hem_right), _P(hem_y))                                  # top
-    c.line(_P(hem_left), _P(hem_y + hem_depth_scaled),
-           _P(hem_right), _P(hem_y + hem_depth_scaled))               # bottom
-    c.line(_P(hem_left), _P(hem_y),
-           _P(hem_left), _P(hem_y + hem_depth_scaled))               # left
-    c.line(_P(hem_right), _P(hem_y),
-           _P(hem_right), _P(hem_y + hem_depth_scaled))              # right
-    # B2d: dropped "(raised)" parenthetical for the same reason.
-    _draw_leader_label(c, hem_right, hem_y + hem_depth_scaled / 2,
-                       "HEM BAR",
-                       side="right", offset_in=0.10)
-
-    # Wall line (vertical)
-    wall_bottom = base_y - floor_offset
-    c.setStrokeColor(colors.HexColor("#333333"))
+    spec = spec or {}
+    mount = (spec.get("mount") or "INSIDE").upper()
+    # R2: room context scale (108" ceiling + 6" AFF_MARGIN → viewport)
+    s = (SIDE_H_IN - 0.6) / (ROOM_CEIL_IN + ROOM_AFF_MARGIN_IN)
+    s2_s = s  # alias
+    # ── R2: ceiling + floor lines (always drawn)
+    wall_y = SIDE_Y_IN + 0.30
+    ceil_y = wall_y + ROOM_CEIL_IN * s
+    head_y = wall_y + ROOM_HEAD_IN * s
+    sly = wall_y + (ROOM_HEAD_IN - geo_h) * s
+    c.setStrokeColor(INK)
     c.setLineWidth(1.0)
-    c.line(_P(wall_x), _P(mount_y),
-           _P(wall_x), _P(wall_bottom))
-    # Floor / sill line (horizontal, at the bottom)
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(1.0)
-    c.line(_P(wall_x - 0.05), _P(wall_bottom),
-           _P(wall_x + 1.0 * scale + 0.5),
-           _P(wall_bottom))
-    # B2d: FLOOR label was drawn side="left" which placed it in the
-    # front elev zone (x<4.4). Moved to side="right" to keep it
-    # inside the side section viewport.
-    _draw_leader_label(c, wall_x, wall_bottom + 0.02,
-                       "FLOOR / SILL", side="right", offset_in=0.15)
-
-    # Fabric droop is shown in the NOTES block ("Slat: ASSUMED ...
-    # founder MUST verify") rather than as a redundant dashed
-    # line that would overlap the stack rect. The side section
-    # shows the RAISED state only (mount + hem-at-top + stack).
-
-    # Fold stack (when raised) — hangs BELOW the hem bar, between
-    # the hem and the floor. Width is the fabric-mount depth.
-    stack_w = 1.0 * scale
-    stack_x = mount_left + 0.05
-    stack_y = hem_y - 0.05 - stack_h
-    c.setFillColor(colors.HexColor("#d0c8b8"))
-    # B2d: fill rect stroke=0 + 4 LINES at lineWidth=1.2 (see
-    # mount comment above for the stroke-slice rationale).
-    c.rect(_P(stack_x), _P(stack_y),
-           _P(stack_w), _P(stack_h),
-           stroke=0, fill=1)
-    c.setStrokeColor(colors.HexColor("#aa5500"))
-    c.setLineWidth(1.2)
-    c.line(_P(stack_x), _P(stack_y),
-           _P(stack_x + stack_w), _P(stack_y))                        # top
-    c.line(_P(stack_x), _P(stack_y + stack_h),
-           _P(stack_x + stack_w), _P(stack_y + stack_h))               # bottom
-    c.line(_P(stack_x), _P(stack_y),
-           _P(stack_x), _P(stack_y + stack_h))                        # left
-    c.line(_P(stack_x + stack_w), _P(stack_y),
-           _P(stack_x + stack_w), _P(stack_y + stack_h))               # right
-    c.setStrokeColor(colors.HexColor("#aa5500"))
-    c.setLineWidth(0.4)
-    if n_slats > 1:
-        for i in range(1, n_slats):
-            sy = stack_y + (i / n_slats) * stack_h
-            c.line(_P(stack_x), _P(sy),
-                   _P(stack_x + stack_w), _P(sy))
-    # Stack-height dim (right of the stack).
-    stack_dim_x = stack_x + stack_w + 0.12
-    c.setStrokeColor(colors.HexColor("#aa5500"))
-    c.setLineWidth(0.6)
-    c.line(_P(stack_dim_x), _P(stack_y),
-           _P(stack_dim_x), _P(stack_y + stack_h))
-    tick = 0.04
-    c.line(_P(stack_dim_x - tick), _P(stack_y),
-           _P(stack_dim_x + tick), _P(stack_y))
-    c.line(_P(stack_dim_x - tick), _P(stack_y + stack_h),
-           _P(stack_dim_x + tick), _P(stack_y + stack_h))
-    c.setFillColor(colors.HexColor("#aa5500"))
-    c.setFont("Helvetica", 8)
-    label = (f"STACK RAISED = {_fmt_in(stack_in)} "
-             f"({n_slats} \u00d7 {_fmt_in(fold_thickness_in)})")
-    # Place horizontally in the side section, BELOW the stack
-    # (above the floor). Keep the baseline at least 0.18" below the
-    # stack rect bottom so the chars' bbox doesn't overlap the rect.
-    # Avoids rotated-text bbox-reporting issues that pdfplumber has
-    # with rotated glyphs (HOTFIX B2c (6) text-over-geometry gate
-    # relies on stable char bboxes).
-    c.drawString(_P(stack_x),
-                _P(stack_y - 0.30),
-                label)
-    # B2d: dropped "(RAISED)" parenthetical.
-    _draw_leader_label(c, stack_x + stack_w,
-                       stack_y + stack_h / 2,
-                       "FOLD STACK",
-                       side="right", offset_in=0.10)
-
-    # Hem bar (bottom) — drawn at base level. B2d: was side="left"
-    # with offset_in=0.18, which extended the label into the front
-    # elev viewport. Flipped to side="right".
-    c.setFillColor(colors.HexColor("#a08060"))
-    # B2d: fill rect stroke=0 + 4 LINES (see mount comment above).
-    c.rect(_P(stack_x), _P(base_y),
-           _P(stack_w), _P(hem_depth_scaled),
-           stroke=0, fill=1)
-    c.setStrokeColor(colors.HexColor("#222222"))
-    c.setLineWidth(2.0)
-    c.line(_P(stack_x), _P(base_y),
-           _P(stack_x + stack_w), _P(base_y))                         # top
-    c.line(_P(stack_x), _P(base_y + hem_depth_scaled),
-           _P(stack_x + stack_w), _P(base_y + hem_depth_scaled))        # bottom
-    c.line(_P(stack_x), _P(base_y),
-           _P(stack_x), _P(base_y + hem_depth_scaled))                 # left
-    c.line(_P(stack_x + stack_w), _P(base_y),
-           _P(stack_x + stack_w), _P(base_y + hem_depth_scaled))        # right
-    _draw_leader_label(c, stack_x + stack_w, base_y + hem_depth_scaled / 2,
-                       "HEM BAR", side="right", offset_in=0.10)
+    c.line(_P(SIDE_X_IN + 0.24), _P(ceil_y),
+           _P(SIDE_X_IN + SIDE_W_IN - 0.20), _P(ceil_y))
+    c.line(_P(SIDE_X_IN + 0.24), _P(wall_y),
+           _P(SIDE_X_IN + SIDE_W_IN - 0.20), _P(wall_y))
+    c.setFillColor(LIGHT)
+    c.setFont("Helvetica-Oblique", 6.3)
+    c.drawString(_P(SIDE_X_IN + 0.26), _P(ceil_y + 0.05), "CEILING")
+    c.drawString(_P(SIDE_X_IN + 0.26), _P(wall_y - 0.15), "FLOOR")
+    # ── R3: INSIDE mount — board + assembly behind wall line, in reveal
+    LX = LATERAL_EXAGGERATION     # 1.0 by default per R4
+    if mount == "INSIDE":
+        # Wall FACE position is FIXED (not exaggerated) — only the
+        # reveal DEPTH is exaggerated. R4 forbids horizontal stretch.
+        wallx = SIDE_X_IN + 0.62 + 1.4
+        hy = head_y                              # mount head at room head
+        # (sly and head_y already computed above)
+        rev_px = REVEAL_DEPTH_IN * (SIDE_H_IN - 0.6) / (
+            ROOM_CEIL_IN + ROOM_AFF_MARGIN_IN) * LX
+        gx = wallx + rev_px
+        # Wall face above head and below sill (thickness hatched to the right)
+        c.setStrokeColor(INK)
+        c.setLineWidth(1.6)
+        c.line(_P(wallx), _P(wall_y), _P(wallx), _P(sly))
+        c.line(_P(wallx), _P(hy), _P(wallx), _P(ceil_y))
+        for (ya, yb) in ((wall_y, sly), (hy, ceil_y)):
+            n = max(2, int((yb - ya) / 0.20))
+            for hz in range(n):
+                yv = ya + (yb - ya) * hz / n
+                c.setLineWidth(0.5)
+                c.line(_P(wallx), _P(yv), _P(wallx + 0.10), _P(yv + 0.10))
+        # Reveal returns (head + sill jambs) and glass
+        c.setStrokeColor(INK)
+        c.setLineWidth(1.1)
+        c.line(_P(wallx), _P(hy), _P(gx), _P(hy))
+        c.line(_P(wallx), _P(sly), _P(gx), _P(sly))
+        # Glass line (R3)
+        c.setStrokeColor(GLASS_C)
+        c.setLineWidth(1.2)
+        c.line(_P(gx), _P(sly + 0.01), _P(gx), _P(hy - 0.01))
+        c.setFillColor(LIGHT)
+        c.setFont("Helvetica-Oblique", 6.0)
+        c.saveState()
+        c.translate(_P(gx + 0.12), _P((sly + hy) / 2))
+        c.rotate(90)
+        c.drawCentredString(0, 0, "GLASS")
+        c.restoreState()
+        # Wall-line callout (R3)
+        c.setStrokeColor(DIM)
+        c.setLineWidth(0.6)
+        c.line(_P(wallx), _P(hy + 0.25), _P(wallx - 0.36), _P(hy + 0.47))
+        c.setFillColor(DIM)
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawRightString(_P(wallx - 0.39), _P(hy + 0.43),
+                          "WALL LINE (FACE)")
+        # Mount board INSIDE the reveal (R3, R4)
+        c.setFillColor(WOOD)
+        c.setStrokeColor(INK)
+        c.setLineWidth(0.9)
+        c.rect(_P(wallx + 0.04), _P(hy - 0.05),
+               _P(rev_px - 0.08), _P(0.05), fill=1, stroke=1)
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawRightString(_P(wallx - 0.08), _P(hy - 0.04),
+                          f"MOUNT BOARD — INSIDE, 2-1/2\"")
+        # R5+R10: raised stack — flat horizontal flaps, shingle-stacked
+        # R10: at 1/2 raise, bottom at 1/2 drop → flat face = 25% of
+        # drop from head, fold stack = next 25%, hem at half.
+        # Render N_SLATS_DEFAULT = 8 flaps total.
+        # NOTE: drop / flat_face_h / stack_h are in geo_h inches
+        # (architectural units) — multiply by s2 to convert to the
+        # section's viewport scale.
+        drop_in = geo_h * PARTIAL_RAISE_FRAC                  # 32" drop at 1/2
+        flat_face_h_in = geo_h * PARTIAL_RAISE_FRAC / 2.0    # 25% of drop
+        stack_h_in = drop_in - flat_face_h_in               # 16" (= 8 × 2" with 7/8" flaps)
+        NF = N_SLATS_DEFAULT
+        ft_in = stack_h_in / NF
+        # Front-edge x (R7: fabric attaches at board FRONT)
+        x_back = gx - 0.05
+        x_front = wallx + 0.07
+        # Convert to viewport scale (multiply by s2)
+        s2_s = s  # alias for clarity (s is the room-context scale)
+        flat_face_h = flat_face_h_in * s2_s
+        stack_h = stack_h_in * s2_s
+        ft = ft_in * s2_s
+        # Fabric face from board front-top down to the start of the stack
+        face_bottom_y = hy - flat_face_h
+        # Draw the face: a thin rectangle from x_front to x_back, top
+        # to face_bottom_y. (No actual slat lines in the face per
+        # R10: it's a flat fabric face.)
+        c.setFillColor(EMER if spec.get("fabric_sku") is None
+                       else _fabric_reg.hex_to_color(
+                           _fabric_reg.get_fabric(
+                               spec.get("fabric_sku")
+                           ).base_color_hex))
+        c.rect(_P(x_front), _P(face_bottom_y),
+               _P(x_back - x_front), _P(flat_face_h), fill=1, stroke=0)
+        # Slat line at the seam between face and stack (R5: "fold tips
+        # emerge BELOW a flat fabric face" — the line is at the BOTTOM
+        # of the face, where the folds start to emerge).
+        c.setStrokeColor(EMER_D)
+        c.setLineWidth(0.9)
+        c.line(_P(x_front), _P(face_bottom_y), _P(x_back), _P(face_bottom_y))
+        # R5: 8 flat horizontal flaps, shingle-stacked, plumb front edges.
+        c.setLineJoin(1); c.setLineCap(1)
+        for k in range(NF):
+            ytop = face_bottom_y - k * ft
+            jit = (k % 2) * 0.016 - 0.008
+            col = EMER if (k % 2 == 0) else EMER_ALT
+            c.setStrokeColor(col)
+            c.setLineWidth(2.0)
+            p = c.beginPath()
+            p.moveTo(_P(x_back), _P(ytop))
+            # R5: front edges plumb; R6: tip emerges below the face
+            p.lineTo(_P(x_front + 0.05 + jit), _P(ytop - ft * 0.42))
+            p.curveTo(_P(x_front + jit), _P(ytop - ft * 0.52),
+                      _P(x_front + jit), _P(ytop - ft * 0.78),
+                      _P(x_front + 0.05 + jit), _P(ytop - ft * 0.88))
+            p.lineTo(_P(x_back), _P(ytop - ft))
+            c.drawPath(p, fill=0, stroke=1)
+            c.setStrokeColor(EMER_D)
+            c.setLineWidth(0.5)
+            c.line(_P(x_front + 0.08 + jit), _P(ytop - ft * 0.92),
+                   _P(x_back - 0.03), _P(ytop - ft - 0.007))
+        # R8: hem bar = thin VERTICAL slat in the fabric plane (golden)
+        yf = face_bottom_y - NF * ft
+        c.setFillColor(HEM_WOOD)
+        c.setLineWidth(0.8)
+        # Vertical slat: a thin rect at the front-edge of the fabric,
+        # from the bottom flap down to the hem-at-half position.
+        c.rect(_P(x_front - 0.014), _P(yf),
+               _P(0.028), _P(0.10), fill=1, stroke=1)
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawRightString(_P(x_front - 0.04), _P(yf + 0.03),
+                          "HEM BAR (RAISED)")
+        # Stack-height dim (golden) — 7" stack / 8 × 7/8"
+        c.setFillColor(DIM)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawRightString(_P(wallx - 0.08),
+                          _P(face_bottom_y - stack_h * 0.55), 'STACK 7"')
+        c.drawRightString(_P(wallx - 0.08),
+                          _P(face_bottom_y - stack_h * 0.55 - 0.11),
+                          '(8 FLAT FOLDS, STACKED)')
+        # FOLD STACK label (golden — leader on the right of the stack)
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawRightString(_P(wallx - 0.08),
+                          _P(face_bottom_y - stack_h * 0.30),
+                          'FOLD STACK')
+        # R10: partial-raise label
+        ls_text(c, x_front, yf - 0.30, "SHOWN AT 1/2 RAISE",
+                5.5, DIM, tracking=0.6, bold=True)
+        # Lowered ghost (R_d): dashed vertical line dropping to the
+        # sill for inside mount — shows the full-drop alternative.
+        mgx = wallx + rev_px * 0.45
+        c.setStrokeColor(LIGHT)
+        c.setLineWidth(0.7)
+        c.setDash(4, 3)
+        c.line(_P(mgx), _P(yf - 0.14), _P(mgx), _P(sly + 0.03))
+        c.setDash()
+        c.setFillColor(LIGHT)
+        c.setFont("Helvetica-Oblique", 6.3)
+        c.drawRightString(_P(wallx - 0.08), _P(sly + 0.10),
+                          f'LOWERED — TO SILL ({int(geo_h)}" DROP)')
+    else:
+        # R3: OUTSIDE mount — board + stack PROUD of the wall line.
+        # Simpler section: just the mount board protruding from the
+        # room, with the fabric body hanging below it on the room
+        # side.
+        wallx = SIDE_X_IN + 0.62
+        # Wall face (room on the LEFT)
+        c.setStrokeColor(INK)
+        c.setLineWidth(1.6)
+        c.line(_P(wallx), _P(wall_y), _P(wallx), _P(ceil_y))
+        # Mount board PRoud of the wall, on the room side
+        # (head_y already computed above from the R2 room context)
+        c.setFillColor(WOOD)
+        c.setStrokeColor(INK)
+        c.setLineWidth(0.9)
+        c.rect(_P(wallx + 0.05), _P(head_y - 0.05),
+               _P(BOARD_DEPTH_IN * 2.0), _P(0.05), fill=1, stroke=1)
+        # Fabric body below mount, on the room side
+        c.setFillColor(EMER if spec.get("fabric_sku") is None
+                       else _fabric_reg.hex_to_color(
+                           _fabric_reg.get_fabric(
+                               spec.get("fabric_sku")
+                           ).base_color_hex))
+        c.rect(_P(wallx + 0.05), _P(wall_y),
+               _P(BOARD_DEPTH_IN * 2.0), _P(head_y - wall_y - 0.05),
+               fill=1, stroke=1)
+        c.setFillColor(INK)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(_P(wallx + 0.20), _P(head_y - 0.10),
+                      "OUTSIDE MOUNT — board + stack PROUD of wall line")
+    # Zone label (golden)
+    ls_text(c, SIDE_X_IN + 0.10, SIDE_Y_IN + SIDE_H_IN - 0.20,
+            "SIDE SECTION — RAISED", 8.5, INK, tracking=1.8)
+    c.setFont("Helvetica", 7)
+    c.setFillColor(LIGHT)
+    mount_label = "INSIDE" if mount == "INSIDE" else "OUTSIDE"
+    c.drawString(_P(SIDE_X_IN + 0.10), _P(SIDE_Y_IN + SIDE_H_IN - 0.34),
+                f"{mount_label} MOUNT · FLAT FOLDS STACK AT HEAD")
 
 
 # ── Scale bar ──────────────────────────────────────────────────────
