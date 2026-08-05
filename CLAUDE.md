@@ -94,7 +94,13 @@ localhost:8000). The founder ("rg") is the only human operator.
   founder uses .odt files or screenshots; write reports accordingly (self-contained,
   PNG-embedded).
 - OpenClaw (localhost:7878) exists but has a 7k+ item queue backlog — do not
-  depend on it. OpenCode daemon should stay dead.
+  depend on it.
+- opencode-remote.service (user unit, opencode serve :8787 over Tailscale) is
+  HERMES — the founder's remote-desktop access path from Harry. KEEP ALIVE;
+  never stop it from a dispatch. HARD RULE for any session running inside it:
+  never hand-start uvicorn or bind :8000 — an opencode-spawned uvicorn squatted
+  the port and crash-looped empire-backend 85k+ times (Jul–Aug 2026). To restart
+  the backend, use systemctl --user restart empire-backend only.
 
 ## WHEN IN DOUBT
 Map before fixing (break-map deliverables). Refuse loudly rather than guess
