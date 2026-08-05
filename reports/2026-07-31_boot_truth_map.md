@@ -1,4 +1,4 @@
-# I1 Boot Truth Map — 2026-07-31
+# I1 Boot Truth Map — 2026-07-31 (re-run 2026-08-05)
 
 **Question:** "If EmpireDell reboots right now, what actually comes up, and is the Label Station reachable afterward?"
 
@@ -11,7 +11,7 @@
 
 ```bash
 $ ss -ltnp | grep -E ':8000|:8100'
-LISTEN 0  2048  0.0.0.0:8000  0.0.0.0:*  users:(("python3",pid=381138,fd=15))
+LISTEN 0  2048  0.0.0.0:8000  0.0.0.0:*  users:(("python3",pid=381138,fd=15))      (2026-08-05: same PID, still alive)
 
 $ ps -eo pid,ppid,user,lstart,cmd | grep -E 'uvicorn|cloudflared' | grep -v grep
    1771  1521 rg  Fri Jul 24 22:22:30 2026  /usr/bin/cloudflared --no-autoupdate --config /home/rg/.cloudflared/apex-public.yml ...
