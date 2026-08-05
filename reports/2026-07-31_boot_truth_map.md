@@ -256,6 +256,21 @@ HTTP 200
 
 ---
 
+## DELTA FROM 2026-07-31 RUN (re-run 2026-08-05)
+
+The state is essentially identical. The only changes are timestamp drift + a single restart counter increment.
+
+- **Date:** 2026-07-31 → **2026-08-05**
+- **Restart counter (empire-backend.service user):** 40297 → **85366** — still in crash loop, same cause: PID 381138 holds port 8000
+- **Main PID of user unit:** 2180632 (gone) → **26955** (gone) — the unit keeps spawning and dying in 5–10s cycles
+- **4 cloudflared instances unchanged** — 3 orphans (1771, 1772, 384400) + 1 systemd-managed (393465). I3 still NOT closed.
+- **Linger:** still yes
+- **Live baseline unchanged:** `{"ok":true,"module":"label_station","max_products":10}` at HTTP 200
+- **Verdict on (a)/(b)/(c):** **unchanged** — post-reboot world is (c) User unit starts cleanly. The pre-reboot world is a (a)-(c) hybrid: user unit correctly configured but stuck in a crash loop because the orphan holds port 8000; killing the orphan (manual) or rebooting resolves it.
+- **New findings in this re-run:** **NONE.** All command output is identical (modulo timestamps). The Dispatch B remediation order proposed in the original report (reboot + mask system unit + verify) is still the right answer.
+
+---
+
 ## BOOT-TRUTH CONCLUSION
 
 ### Question answered with evidence
